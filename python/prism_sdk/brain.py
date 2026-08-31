@@ -21,6 +21,7 @@ import uuid
 from typing import TYPE_CHECKING, Any, Callable, Mapping, Protocol, Sequence
 
 from .llm_runtime import (
+    AutonomousCostReservationCallback,
     CredentialError,
     CredentialHandle,
     CompositeProviderInvocationObserver,
@@ -36,12 +37,24 @@ from .llm_runtime import (
     ProviderToolResult,
     normalize_provider_content_parts,
 )
+from .autonomous_authorization import AutonomousAuthorizationContext
+from .authoring import content_digest
 from .errors import ArgumentError
 from .mission import MissionPolicy, MissionRequest
 from .memory import BrainEpisodicMemory, BrainMemoryError, MemoryQuery, task_facet_digests
 from .tooling import ToolCatalogue, ToolSchemaError
 from .autonomy_persistence import AutonomousExecutionController
 from .autonomy_provider import AutonomousProviderInvocationSession
+from .autonomous_context_budget import (
+    AutonomousContextBudgetError,
+    AutonomousContextBudgetOptions,
+    compact_autonomous_provider_request,
+    normalize_autonomous_context_budget,
+)
+from .autonomous_selection_lab import (
+    normalize_autonomous_model_observations,
+    normalize_autonomous_selection_weights,
+)
 
 if TYPE_CHECKING:
     from .jobs import BrainJobStore
@@ -113,6 +126,10 @@ MAX_MODEL_SELECTION_AUDIT_RANKING = 64
 MAX_MODEL_SELECTION_AUDIT_INPUT_RANKING = 512
 MAX_MODEL_SELECTION_AUDIT_REASON_BYTES = 512
 MODEL_SELECTION_AUDIT_SCHEMA = "bioprism-brain-selection-audit/0.1"
+MODEL_CONTINUATION_SCHEMA = "bioprism-autonomous-model-continuation/0.1"
+MODEL_CONTINUATION_STATE_SCHEMA = "bioprism-autonomous-model-continuation-state/0.1"
+MAX_MODEL_CONTINUATION_FAILOVERS = 8
+MAX_MODEL_CONTINUATION_STEPS = MAX_MODEL_CONTINUATION_FAILOVERS + 1
 BRAIN_EVALUATOR_REPLAY_SCHEMA = "bioprism-brain-evaluator-replay/0.1"
 BRAIN_EVALUATOR_MESH_SCHEMA = "bioprism-python-autonomous-evaluator-mesh/0.1"
 AUTONOMOUS_EVALUATOR_MESH_SCHEMA = BRAIN_EVALUATOR_MESH_SCHEMA
@@ -1414,6 +1431,135 @@ def _ensure_bandit_arm(
 
 
 @dataclass(frozen=True, slots=True)
+class BrainPlanSchedule:
+    """Validated scheduling metadata returned by the provider-neutral brain planner.
+
+    The planner remains non-executing.  This value is a small, safe projection containing only
+    step identities, dependency waves, and cost estimates, so a Python executor can apply its
+    own approval, capacity, lease, retry, and reconciliation policy without reimplementing graph
+    validation.  ``from_plan`` intentionally validates the modern fields only when a caller has
+    received them; older persisted planner projections remain usable by the surrounding runtime.
+    """
+
+    ordered_step_ids: tuple[str, ...]
+    execution_waves: tuple[tuple[str, ...], ...]
+    critical_path_cost: int
+    max_parallelism: int
+    estimated_parallel_rounds: int
+    peak_parallelism: int
+
+    @classmethod
+    def from_plan(cls, plan: Mapping[str, Any]) -> "BrainPlanSchedule":
+        if not isinstance(plan, Mapping):
+            raise BrainRunError("brain plan schedule requires a mapping")
+        if plan.get("schema") != "bioprism-brain-plan/0.1":
+            raise BrainRunError("brain plan schedule has an unsupported schema")
+        if plan.get("execution") != "not_started":
+            raise BrainRunError("brain plan schedule requires a not_started plan")
+
+        raw_steps = plan.get("steps")
+        if not isinstance(raw_steps, Sequence) or isinstance(raw_steps, (str, bytes)) or not raw_steps:
+            raise BrainRunError("brain plan schedule steps must be a non-empty sequence")
+        step_ids: list[str] = []
+        step_by_id: dict[str, Mapping[str, Any]] = {}
+        for step in raw_steps:
+            if not isinstance(step, Mapping) or not isinstance(step.get("id"), str) or not step["id"].strip():
+                raise BrainRunError("brain plan schedule steps must contain non-empty ids")
+            step_id = step["id"]
+            if step_id in step_by_id:
+                raise BrainRunError("brain plan schedule contains duplicate step ids")
+            step_ids.append(step_id)
+            step_by_id[step_id] = step
+
+        ordered = plan.get("ordered_step_ids")
+        if not isinstance(ordered, Sequence) or isinstance(ordered, (str, bytes)) or tuple(ordered) != tuple(step_ids):
+            raise BrainRunError("brain plan schedule ordered_step_ids do not match steps")
+
+        raw_waves = plan.get("execution_waves")
+        if not isinstance(raw_waves, Sequence) or isinstance(raw_waves, (str, bytes)) or not raw_waves:
+            raise BrainRunError("brain plan schedule execution_waves must be non-empty")
+        waves: list[tuple[str, ...]] = []
+        flattened: list[str] = []
+        wave_by_id: dict[str, int] = {}
+        for wave_index, raw_wave in enumerate(raw_waves):
+            if not isinstance(raw_wave, Sequence) or isinstance(raw_wave, (str, bytes)) or not raw_wave:
+                raise BrainRunError("brain plan schedule waves must contain non-empty sequences")
+            wave: list[str] = []
+            for step_id in raw_wave:
+                if not isinstance(step_id, str) or step_id not in step_by_id or step_id in wave_by_id:
+                    raise BrainRunError("brain plan schedule waves contain an unknown or repeated step")
+                wave.append(step_id)
+                flattened.append(step_id)
+                wave_by_id[step_id] = wave_index
+            waves.append(tuple(wave))
+        if tuple(flattened) != tuple(step_ids):
+            raise BrainRunError("brain plan schedule waves do not preserve the ordered plan")
+
+        max_parallelism = plan.get("max_parallelism")
+        if not isinstance(max_parallelism, int) or isinstance(max_parallelism, bool) or not 1 <= max_parallelism <= 64:
+            raise BrainRunError("brain plan schedule max_parallelism must be between 1 and 64")
+        if any(len(wave) > max_parallelism for wave in waves):
+            raise BrainRunError("brain plan schedule exceeds max_parallelism")
+        for step_id, step in step_by_id.items():
+            dependencies = step.get("depends_on", ())
+            if not isinstance(dependencies, Sequence) or isinstance(dependencies, (str, bytes)):
+                raise BrainRunError("brain plan schedule dependencies must be sequences")
+            if any(not isinstance(dependency, str) for dependency in dependencies):
+                raise BrainRunError("brain plan schedule dependencies must contain strings")
+            if len(set(dependencies)) != len(dependencies):
+                raise BrainRunError("brain plan schedule contains duplicate dependencies")
+            for dependency in dependencies:
+                if dependency not in wave_by_id or wave_by_id[dependency] >= wave_by_id[step_id]:
+                    raise BrainRunError("brain plan schedule dependency waves are not closed")
+
+        costs: dict[str, int] = {}
+        for step_id in step_ids:
+            cost = step_by_id[step_id].get("estimated_cost", 0)
+            if not isinstance(cost, int) or isinstance(cost, bool) or cost < 0:
+                raise BrainRunError("brain plan schedule estimated costs must be non-negative integers")
+            dependencies = step_by_id[step_id].get("depends_on", ())
+            costs[step_id] = cost + max((costs[dependency] for dependency in dependencies), default=0)
+        estimated_cost = plan.get("estimated_cost")
+        if not isinstance(estimated_cost, int) or isinstance(estimated_cost, bool) or estimated_cost < 0:
+            raise BrainRunError("brain plan schedule estimated_cost must be a non-negative integer")
+        if estimated_cost != sum(step_by_id[step_id].get("estimated_cost", 0) for step_id in step_ids):
+            raise BrainRunError("brain plan schedule estimated_cost does not match steps")
+        critical_path_cost = plan.get("critical_path_cost")
+        if not isinstance(critical_path_cost, int) or isinstance(critical_path_cost, bool) or critical_path_cost != max(costs.values(), default=0):
+            raise BrainRunError("brain plan schedule critical_path_cost does not match dependencies")
+        estimated_rounds = plan.get("estimated_parallel_rounds")
+        if not isinstance(estimated_rounds, int) or isinstance(estimated_rounds, bool) or estimated_rounds != len(waves):
+            raise BrainRunError("brain plan schedule estimated_parallel_rounds does not match waves")
+        peak_parallelism = plan.get("peak_parallelism")
+        if not isinstance(peak_parallelism, int) or isinstance(peak_parallelism, bool) or peak_parallelism != max(map(len, waves), default=0):
+            raise BrainRunError("brain plan schedule peak_parallelism does not match waves")
+        return cls(
+            ordered_step_ids=tuple(step_ids),
+            execution_waves=tuple(waves),
+            critical_path_cost=critical_path_cost,
+            max_parallelism=max_parallelism,
+            estimated_parallel_rounds=estimated_rounds,
+            peak_parallelism=peak_parallelism,
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "ordered_step_ids": list(self.ordered_step_ids),
+            "execution_waves": [list(wave) for wave in self.execution_waves],
+            "critical_path_cost": self.critical_path_cost,
+            "max_parallelism": self.max_parallelism,
+            "estimated_parallel_rounds": self.estimated_parallel_rounds,
+            "peak_parallelism": self.peak_parallelism,
+        }
+
+
+def validate_brain_plan_schedule(plan: Mapping[str, Any]) -> BrainPlanSchedule:
+    """Validate and return caller-safe execution scheduling metadata from a brain plan."""
+
+    return BrainPlanSchedule.from_plan(plan)
+
+
+@dataclass(frozen=True, slots=True)
 class BrainRunResult:
     run_id: str
     status: str
@@ -1424,28 +1570,61 @@ class BrainRunResult:
     outcome_digest: str
     provider_failover: Mapping[str, Any] | None = None
     provider_invocations: tuple[Mapping[str, Any], ...] = ()
+    continuation_plan: Mapping[str, Any] | None = None
     # Optional structural feedback for the opt-in autonomous domain response contract.  The
     # provider response remains caller-owned; this field contains only value-only evaluation
     # metadata and is omitted from legacy projections when unused.
     response_evaluation: Mapping[str, Any] | None = None
+    # A redacted provider-boundary failure projection used when a parent fan-out contains a
+    # failed child.  The exception message, request, credential, response, and wire payload are
+    # deliberately never retained here.
+    failure: Mapping[str, Any] | None = None
+    # Metadata-only receipt for explicit provider prompt-history compaction.
+    context_budget: Mapping[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
+        custom_prompt = self.prompt.get("autonomous_prompt") is not None
+        prompt_projection = (
+            {
+                key: value
+                for key, value in self.prompt.items()
+                if key not in {"messages", "_provider_messages_override"}
+            }
+            if custom_prompt
+            else dict(self.prompt)
+        )
+        if custom_prompt and "messages" in self.prompt:
+            raw_messages = self.prompt.get("messages")
+            prompt_projection["message_count"] = (
+                len(raw_messages)
+                if isinstance(raw_messages, Sequence) and not isinstance(raw_messages, (str, bytes))
+                else None
+            )
+            prompt_projection.setdefault(
+                "retention",
+                "provider_messages_transient;digest_only_projection",
+            )
         result = {
             "run_id": self.run_id,
             "status": self.status,
             "selection": dict(self.selection),
-            "prompt": dict(self.prompt),
+            "prompt": prompt_projection,
             "plan": dict(self.plan),
             "response": None if self.response is None else self.response.to_dict(),
             "outcome_digest": self.outcome_digest,
             "provider_failover": None if self.provider_failover is None else dict(self.provider_failover),
             "provider_invocations": [dict(receipt) for receipt in self.provider_invocations],
+            "continuation_plan": None if self.continuation_plan is None else dict(self.continuation_plan),
             "credential_posture": "handle_only_not_serialized",
             "execution": "provider_call_only",
             "tool_execution": "not_started",
         }
         if self.response_evaluation is not None:
             result["response_evaluation"] = dict(self.response_evaluation)
+        if self.failure is not None:
+            result["failure"] = dict(self.failure)
+        if self.context_budget is not None:
+            result["context_budget"] = dict(self.context_budget)
         return result
 
 
@@ -1556,6 +1735,7 @@ class BrainJobRunResult:
     cycle: BrainLearningCycleResult | None
     error_class: str | None = None
     workflow: Any | None = None
+    effect_reconciliation: Mapping[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -1565,6 +1745,7 @@ class BrainJobRunResult:
             "cycle": None if self.cycle is None else self.cycle.to_dict(),
             "workflow": None if self.workflow is None else self.workflow.to_dict(),
             "error_class": self.error_class,
+            **({"effect_reconciliation": dict(self.effect_reconciliation)} if self.effect_reconciliation is not None else {}),
             "retention": "job_metadata_and_learning_digests_only; workflow_checkpoint_caller_owned",
         }
 
@@ -1820,6 +2001,31 @@ def _json_digest(value: Any) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+def _prompt_bound_idempotency_key(
+    caller_key: str | None,
+    *,
+    prompt_digest: str,
+    metadata: Mapping[str, Any] | None,
+) -> str:
+    """Bind provider request identity to the reviewed prompt implementation.
+
+    A caller key alone is not sufficient once a versioned prompt can change the provider
+    request. The digest keeps retries deterministic while ensuring a prompt rollout cannot
+    accidentally reuse a prior request identity. Only prompt metadata and digests cross this
+    boundary; rendered messages remain process-local.
+    """
+
+    return _json_digest(
+        {
+            "schema": "bioprism-python-autonomous-prompt-request/0.1",
+            "caller_key": caller_key,
+            "prompt_digest": prompt_digest,
+            "manifest_digest": None if metadata is None else metadata.get("manifest_digest"),
+            "selection_plan_digest": None if metadata is None else metadata.get("selection_plan_digest"),
+        }
+    )
+
+
 def _learning_outcome_digest(
     result: BrainRunResult | BrainToolLoopResult | BrainMissionResult,
 ) -> str:
@@ -2037,6 +2243,541 @@ def _selection_attempt_metadata(audit: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def _continuation_identifier(value: Any, *, field: str, maximum: int) -> str:
+    if (
+        not isinstance(value, str)
+        or not value.strip()
+        or len(value) > maximum
+        or any(ord(character) < 32 for character in value)
+    ):
+        raise BrainRunError(f"{field} is outside its continuation bounds")
+    return value
+
+
+def _continuation_status_code(value: Any) -> int | None:
+    if value is None:
+        return None
+    if not isinstance(value, int) or isinstance(value, bool) or not 0 <= value <= 599:
+        raise BrainRunError("model continuation status code is invalid")
+    return value
+
+
+def _continuation_candidate_digest(candidate: Mapping[str, Any]) -> str:
+    return _json_digest(
+        {
+            "provider": candidate.get("provider"),
+            "model": candidate.get("model"),
+            "capabilities": sorted(candidate.get("capabilities", [])),
+            "context_window_tokens": candidate.get("context_window_tokens"),
+            "max_output_tokens": candidate.get("max_output_tokens"),
+            "quality": candidate.get("quality"),
+            "latency_ms": candidate.get("latency_ms"),
+            "cost_per_million_tokens": candidate.get("cost_per_million_tokens"),
+            "reliability": candidate.get("reliability"),
+            "requires_credential": candidate.get("requires_credential"),
+            "enabled": candidate.get("enabled", True),
+        }
+    )
+
+
+def build_model_continuation_plan(
+    selection: Mapping[str, Any],
+    model_candidates: Sequence[Mapping[str, Any]],
+    *,
+    max_failovers: int = 0,
+) -> dict[str, Any]:
+    """Compile a fixed, metadata-only model fallback ladder from one selection decision.
+
+    Adaptive execution may still update transport health after a failure, but it must not let
+    that update silently reorder the current run. The returned plan and its cursor are safe to
+    persist across a worker restart; task text, prompts, credentials, and provider responses are
+    deliberately excluded.
+    """
+
+    if not isinstance(selection, Mapping):
+        raise BrainRunError("model continuation selection must be a mapping")
+    if (
+        not isinstance(max_failovers, int)
+        or isinstance(max_failovers, bool)
+        or not 0 <= max_failovers <= MAX_MODEL_CONTINUATION_FAILOVERS
+    ):
+        raise BrainRunError(
+            f"model continuation max_failovers must be within [0, {MAX_MODEL_CONTINUATION_FAILOVERS}]"
+        )
+    selected_model = selection.get("selected_model")
+    if not isinstance(selected_model, Mapping):
+        raise BrainRunError("model continuation requires a selected model")
+    selected_provider = _continuation_identifier(
+        selected_model.get("provider"), field="selected provider", maximum=256
+    )
+    selected_name = _continuation_identifier(
+        selected_model.get("model"), field="selected model", maximum=512
+    )
+    selected_id = f"{selected_provider}/{selected_name}"
+    if not isinstance(model_candidates, Sequence) or isinstance(model_candidates, (str, bytes)):
+        raise BrainRunError("model continuation candidates must be a sequence")
+    candidates: dict[str, Mapping[str, Any]] = {}
+    for candidate in model_candidates:
+        if not isinstance(candidate, Mapping):
+            raise BrainRunError("model continuation candidates must contain mappings")
+        provider = _continuation_identifier(
+            candidate.get("provider"), field="continuation candidate provider", maximum=256
+        )
+        model = _continuation_identifier(
+            candidate.get("model"), field="continuation candidate model", maximum=512
+        )
+        arm_id = f"{provider}/{model}"
+        if arm_id in candidates:
+            raise BrainRunError(f"model continuation contains duplicate model {arm_id}")
+        candidates[arm_id] = candidate
+    if selected_id not in candidates:
+        raise BrainRunError("selected model is absent from model continuation candidates")
+
+    ranking = selection.get("ranking", [])
+    if not isinstance(ranking, Sequence) or isinstance(ranking, (str, bytes)):
+        raise BrainRunError("model continuation selection ranking must be a sequence")
+    eligible: list[tuple[str, int]] = []
+    seen: set[str] = set()
+    selected_ranked = False
+    if len(ranking) == 0:
+        # Older caller-owned workspaces may return a selected_model without a ranking. Preserve
+        # compatibility while making the fallback order explicit and deterministic from the
+        # already-admitted candidate sequence.
+        ranking = [
+            {
+                "model_id": f"{candidate.get('provider')}/{candidate.get('model')}",
+                "eligible": candidate.get("enabled", True) is True,
+            }
+            for candidate in model_candidates
+            if isinstance(candidate, Mapping)
+        ]
+        # Some older workspace adapters return an authoritative selected_model but mark their
+        # catalogue row disabled because readiness was evaluated outside the adapter. Preserve
+        # that explicit selection as the first step; it is still bounded by the supplied model
+        # candidate identity and never grants a new provider or credential.
+        if not any(row.get("model_id") == selected_id and row.get("eligible") is True for row in ranking):
+            ranking.insert(0, {"model_id": selected_id, "eligible": True})
+    for ranking_index, row in enumerate(ranking):
+        if not isinstance(row, Mapping) or row.get("eligible") is not True:
+            continue
+        model_id = row.get("model_id")
+        if not isinstance(model_id, str) or "/" not in model_id:
+            provider = row.get("provider")
+            model = row.get("model")
+            if isinstance(provider, str) and isinstance(model, str):
+                model_id = f"{provider}/{model}"
+        if not isinstance(model_id, str) or model_id in seen or model_id not in candidates:
+            continue
+        seen.add(model_id)
+        eligible.append((model_id, ranking_index))
+        selected_ranked = selected_ranked or model_id == selected_id
+    if not selected_ranked:
+        raise BrainRunError("selected model is not eligible in the continuation ranking")
+
+    ordered_ids = [selected_id] + [model_id for model_id, _ in eligible]
+    ranking_indices = {model_id: index for model_id, index in eligible}
+    steps: list[dict[str, Any]] = []
+    for model_id in ordered_ids:
+        if model_id not in candidates or model_id in {step["model_id"] for step in steps}:
+            continue
+        # Retain the whole bounded ladder: a provider-scoped outage may skip several sibling
+        # arms while consuming only one failover transition.
+        if len(steps) >= MAX_MODEL_CONTINUATION_STEPS:
+            break
+        provider, model = model_id.split("/", 1)
+        steps.append(
+            {
+                "order": len(steps),
+                "provider": provider,
+                "model": model,
+                "model_id": model_id,
+                "candidate_digest": _continuation_candidate_digest(candidates[model_id]),
+                "ranking_index": ranking_indices[model_id],
+                "failure_policy": {
+                    "timeout_with_closed_circuit": "exclude_model",
+                    "retryable_provider_error": "exclude_provider",
+                },
+            }
+        )
+    if not steps or steps[0]["model_id"] != selected_id:
+        raise BrainRunError("model continuation could not place the selected model first")
+    body = {
+        "schema": MODEL_CONTINUATION_SCHEMA,
+        "selection_digest": _json_digest(selection),
+        "strategy": "fixed_selection_snapshot",
+        "max_failovers": max_failovers,
+        "steps": steps,
+        "omitted_eligible_candidates": max(0, len(eligible) - len(steps)),
+        "retention": "selection_metadata_only_no_task_prompt_provider_payloads",
+        "secret_material": "never_returned",
+    }
+    return {**body, "plan_digest": _json_digest(body)}
+
+
+def _seal_model_continuation_state(body: Mapping[str, Any]) -> dict[str, Any]:
+    result = dict(body)
+    result["state_digest"] = _json_digest(body)
+    return result
+
+
+def create_model_continuation_state(plan: Mapping[str, Any]) -> dict[str, Any]:
+    validate_model_continuation_plan(plan)
+    return _seal_model_continuation_state(
+        {
+            "schema": MODEL_CONTINUATION_STATE_SCHEMA,
+            "plan_digest": plan["plan_digest"],
+            "next_step_index": 0,
+            "failovers_used": 0,
+            "excluded_providers": [],
+            "excluded_models": [],
+            "attempts": [],
+            "status": "ready",
+            "retention": "selection_metadata_only_no_task_prompt_provider_payloads",
+            "secret_material": "never_returned",
+        }
+    )
+
+
+def validate_model_continuation_plan(plan: Mapping[str, Any]) -> None:
+    if not isinstance(plan, Mapping) or plan.get("schema") != MODEL_CONTINUATION_SCHEMA:
+        raise BrainRunError("model continuation plan has an invalid schema")
+    if set(plan.keys()) != {
+        "schema",
+        "selection_digest",
+        "strategy",
+        "max_failovers",
+        "steps",
+        "omitted_eligible_candidates",
+        "retention",
+        "secret_material",
+        "plan_digest",
+    }:
+        raise BrainRunError("model continuation plan contains unsupported fields")
+    plan_digest = plan.get("plan_digest")
+    if not _valid_digest(plan_digest):
+        raise BrainRunError("model continuation plan digest is malformed")
+    body = {key: value for key, value in plan.items() if key != "plan_digest"}
+    if _json_digest(body) != plan_digest:
+        raise BrainRunError("model continuation plan digest mismatch")
+    steps = plan.get("steps")
+    if not isinstance(steps, list) or not 0 < len(steps) <= MAX_MODEL_CONTINUATION_STEPS:
+        raise BrainRunError("model continuation plan steps are outside their bounds")
+    if plan.get("strategy") != "fixed_selection_snapshot":
+        raise BrainRunError("model continuation plan strategy is invalid")
+    if not _valid_digest(plan.get("selection_digest")):
+        raise BrainRunError("model continuation selection digest is malformed")
+    if (
+        not isinstance(plan.get("max_failovers"), int)
+        or isinstance(plan.get("max_failovers"), bool)
+        or not 0 <= plan["max_failovers"] <= MAX_MODEL_CONTINUATION_FAILOVERS
+    ):
+        raise BrainRunError("model continuation plan failover budget is invalid")
+    if (
+        not isinstance(plan.get("omitted_eligible_candidates"), int)
+        or isinstance(plan.get("omitted_eligible_candidates"), bool)
+        or plan["omitted_eligible_candidates"] < 0
+    ):
+        raise BrainRunError("model continuation omitted candidate count is invalid")
+    if plan.get("retention") != "selection_metadata_only_no_task_prompt_provider_payloads":
+        raise BrainRunError("model continuation plan retention contract is invalid")
+    if plan.get("secret_material") != "never_returned":
+        raise BrainRunError("model continuation plan secret-material contract is invalid")
+    seen_model_ids: set[str] = set()
+    for index, step in enumerate(steps):
+        if not isinstance(step, Mapping):
+            raise BrainRunError("model continuation plan step is malformed")
+        if set(step.keys()) != {
+            "order",
+            "provider",
+            "model",
+            "model_id",
+            "candidate_digest",
+            "ranking_index",
+            "failure_policy",
+        } or step.get("order") != index:
+            raise BrainRunError("model continuation plan step ordering is invalid")
+        provider = _continuation_identifier(
+            step.get("provider"), field="continuation step provider", maximum=256
+        )
+        model = _continuation_identifier(
+            step.get("model"), field="continuation step model", maximum=512
+        )
+        model_id = f"{provider}/{model}"
+        if step.get("model_id") != model_id or model_id in seen_model_ids:
+            raise BrainRunError("model continuation plan step identity is invalid")
+        seen_model_ids.add(model_id)
+        if (
+            not isinstance(step.get("ranking_index"), int)
+            or isinstance(step.get("ranking_index"), bool)
+            or step["ranking_index"] < 0
+            or not _valid_digest(step.get("candidate_digest"))
+        ):
+            raise BrainRunError("model continuation plan step metadata is invalid")
+        if step.get("failure_policy") != {
+            "timeout_with_closed_circuit": "exclude_model",
+            "retryable_provider_error": "exclude_provider",
+        }:
+            raise BrainRunError("model continuation plan failure policy is invalid")
+
+
+def _validate_model_continuation_state(
+    plan: Mapping[str, Any], state: Mapping[str, Any]
+) -> None:
+    validate_model_continuation_plan(plan)
+    if (
+        not isinstance(state, Mapping)
+        or state.get("schema") != MODEL_CONTINUATION_STATE_SCHEMA
+        or state.get("plan_digest") != plan.get("plan_digest")
+    ):
+        raise BrainRunError("model continuation state is not bound to the supplied plan")
+    if set(state.keys()) != {
+        "schema",
+        "plan_digest",
+        "next_step_index",
+        "failovers_used",
+        "excluded_providers",
+        "excluded_models",
+        "attempts",
+        "status",
+        "retention",
+        "secret_material",
+        "state_digest",
+    }:
+        raise BrainRunError("model continuation state contains unsupported fields")
+    state_digest = state.get("state_digest")
+    if not _valid_digest(state_digest):
+        raise BrainRunError("model continuation state digest is malformed")
+    body = {key: value for key, value in state.items() if key != "state_digest"}
+    if _json_digest(body) != state_digest:
+        raise BrainRunError("model continuation state digest mismatch")
+    failovers = state.get("failovers_used")
+    if not isinstance(failovers, int) or isinstance(failovers, bool) or not 0 <= failovers <= plan["max_failovers"]:
+        raise BrainRunError("model continuation state failover count is invalid")
+    if not isinstance(state.get("attempts"), list) or len(state["attempts"]) > len(plan["steps"]):
+        raise BrainRunError("model continuation state attempts are outside their bounds")
+    if state.get("status") not in {"ready", "completed", "exhausted"}:
+        raise BrainRunError("model continuation state status is invalid")
+    next_index = state.get("next_step_index")
+    if next_index is not None and (
+        not isinstance(next_index, int)
+        or isinstance(next_index, bool)
+        or not 0 <= next_index < len(plan["steps"])
+    ):
+        raise BrainRunError("model continuation state next step is invalid")
+    if state.get("retention") != "selection_metadata_only_no_task_prompt_provider_payloads":
+        raise BrainRunError("model continuation state retention contract is invalid")
+    if state.get("secret_material") != "never_returned":
+        raise BrainRunError("model continuation state secret-material contract is invalid")
+    if not isinstance(state.get("excluded_providers"), list) or not isinstance(state.get("excluded_models"), list):
+        raise BrainRunError("model continuation state exclusions are invalid")
+
+    plan_steps = plan["steps"]
+    allowed_providers = {step["provider"] for step in plan_steps}
+    allowed_models = {step["model_id"] for step in plan_steps}
+    for field, values, allowed in (
+        ("excluded_providers", state["excluded_providers"], allowed_providers),
+        ("excluded_models", state["excluded_models"], allowed_models),
+    ):
+        if len(values) > len(plan_steps):
+            raise BrainRunError(f"model continuation {field} exceed their bounds")
+        normalized = [
+            _continuation_identifier(value, field=f"model continuation {field}", maximum=768)
+            for value in values
+        ]
+        if len(set(normalized)) != len(normalized) or normalized != sorted(normalized):
+            raise BrainRunError(f"model continuation {field} must be sorted and unique")
+        if not set(normalized).issubset(allowed):
+            raise BrainRunError(f"model continuation {field} references an unknown arm")
+
+    attempts = state["attempts"]
+    expected_attempt_keys = {
+        "order",
+        "provider",
+        "model",
+        "outcome",
+        "failure_scope",
+        "failure_code",
+        "status_code",
+    }
+    previous_order = -1
+    expected_excluded_providers: set[str] = set()
+    expected_excluded_models: set[str] = set()
+    failure_count = 0
+    success_count = 0
+    for attempt in attempts:
+        if not isinstance(attempt, Mapping) or set(attempt.keys()) != expected_attempt_keys:
+            raise BrainRunError("model continuation state attempt is malformed")
+        order = attempt.get("order")
+        if (
+            not isinstance(order, int)
+            or isinstance(order, bool)
+            or not 0 <= order < len(plan_steps)
+            or order <= previous_order
+        ):
+            raise BrainRunError("model continuation state attempt ordering is invalid")
+        previous_order = order
+        step = plan_steps[order]
+        if attempt.get("provider") != step["provider"] or attempt.get("model") != step["model"]:
+            raise BrainRunError("model continuation state attempt identity is invalid")
+        outcome = attempt.get("outcome")
+        failure_scope = attempt.get("failure_scope")
+        if outcome == "failure":
+            if failure_scope not in {"model", "provider"}:
+                raise BrainRunError("model continuation state failure scope is invalid")
+            failure_count += 1
+            if failure_scope == "provider":
+                expected_excluded_providers.add(step["provider"])
+            else:
+                expected_excluded_models.add(step["model_id"])
+        elif outcome == "success":
+            success_count += 1
+            if failure_scope is not None or attempt.get("failure_code") is not None:
+                raise BrainRunError("model continuation successful attempt contains failure metadata")
+        else:
+            raise BrainRunError("model continuation state attempt outcome is invalid")
+        failure_code = attempt.get("failure_code")
+        if failure_code is not None:
+            _continuation_identifier(
+                failure_code, field="continuation failure code", maximum=128
+            )
+        _continuation_status_code(attempt.get("status_code"))
+    if failure_count != failovers:
+        raise BrainRunError("model continuation state failover count does not match attempts")
+    if success_count > 1 or (success_count and attempts[-1]["outcome"] != "success"):
+        raise BrainRunError("model continuation state has an invalid terminal attempt")
+    if set(state["excluded_providers"]) != expected_excluded_providers or set(state["excluded_models"]) != expected_excluded_models:
+        raise BrainRunError("model continuation state exclusions do not match attempts")
+    if attempts and attempts[0]["order"] != 0:
+        raise BrainRunError("model continuation state must begin with the selected model")
+    expected_next_index = next(
+        (
+            index
+            for index, step in enumerate(plan_steps)
+            if index > previous_order
+            and step["provider"] not in expected_excluded_providers
+            and step["model_id"] not in expected_excluded_models
+        ),
+        None,
+    )
+    if state["status"] == "ready":
+        if success_count or state["next_step_index"] != expected_next_index or expected_next_index is None:
+            raise BrainRunError("model continuation ready cursor is inconsistent")
+    elif state["status"] == "completed":
+        if state["next_step_index"] is not None or success_count != 1:
+            raise BrainRunError("model continuation completed cursor is inconsistent")
+    elif state["next_step_index"] is not None or expected_next_index is not None or not attempts:
+        raise BrainRunError("model continuation exhausted cursor is inconsistent")
+
+
+def validate_model_continuation_state(
+    plan: Mapping[str, Any], state: Mapping[str, Any]
+) -> None:
+    """Validate a restored continuation cursor before accepting worker progress."""
+
+    _validate_model_continuation_state(plan, state)
+
+
+def advance_model_continuation_state(
+    plan: Mapping[str, Any],
+    state: Mapping[str, Any],
+    *,
+    provider: str,
+    model: str,
+    failure_scope: str,
+    failure_code: str | None = None,
+    status_code: int | None = None,
+) -> dict[str, Any]:
+    _validate_model_continuation_state(plan, state)
+    if state.get("status") != "ready" or not isinstance(state.get("next_step_index"), int):
+        raise BrainRunError("model continuation is not ready for another failure")
+    if state["failovers_used"] >= plan["max_failovers"]:
+        raise BrainRunError("model continuation failover budget is exhausted")
+    if failure_scope not in {"model", "provider"}:
+        raise BrainRunError("model continuation failure scope is invalid")
+    current = plan["steps"][state["next_step_index"]]
+    if current["provider"] != provider or current["model"] != model:
+        raise BrainRunError("model continuation failure does not match the current step")
+    excluded_providers = set(state.get("excluded_providers", []))
+    excluded_models = set(state.get("excluded_models", []))
+    if failure_scope == "provider":
+        excluded_providers.add(provider)
+    else:
+        excluded_models.add(current["model_id"])
+    if failure_code is not None:
+        _continuation_identifier(failure_code, field="continuation failure code", maximum=128)
+    _continuation_status_code(status_code)
+    attempts = [*state["attempts"], {
+        "order": current["order"],
+        "provider": provider,
+        "model": model,
+        "outcome": "failure",
+        "failure_scope": failure_scope,
+        "failure_code": failure_code,
+        "status_code": status_code,
+    }]
+    next_index = next(
+        (
+            index
+            for index, step in enumerate(plan["steps"])
+            if index > current["order"]
+            and step["provider"] not in excluded_providers
+            and step["model_id"] not in excluded_models
+        ),
+        None,
+    )
+    return _seal_model_continuation_state(
+        {
+            "schema": MODEL_CONTINUATION_STATE_SCHEMA,
+            "plan_digest": plan["plan_digest"],
+            "next_step_index": next_index,
+            "failovers_used": state["failovers_used"] + 1,
+            "excluded_providers": sorted(excluded_providers),
+            "excluded_models": sorted(excluded_models),
+            "attempts": attempts,
+            "status": "exhausted" if next_index is None else "ready",
+            "retention": "selection_metadata_only_no_task_prompt_provider_payloads",
+            "secret_material": "never_returned",
+        }
+    )
+
+
+def complete_model_continuation_state(
+    plan: Mapping[str, Any],
+    state: Mapping[str, Any],
+    *,
+    provider: str,
+    model: str,
+    status_code: int | None = None,
+) -> dict[str, Any]:
+    _validate_model_continuation_state(plan, state)
+    if state.get("status") != "ready" or not isinstance(state.get("next_step_index"), int):
+        raise BrainRunError("model continuation is not ready for completion")
+    current = plan["steps"][state["next_step_index"]]
+    if current["provider"] != provider or current["model"] != model:
+        raise BrainRunError("model continuation success does not match the current step")
+    _continuation_status_code(status_code)
+    body = {key: value for key, value in state.items() if key != "state_digest"}
+    body.update(
+        {
+            "next_step_index": None,
+            "attempts": [
+                *state["attempts"],
+                {
+                    "order": current["order"],
+                    "provider": provider,
+                    "model": model,
+                    "outcome": "success",
+                    "failure_scope": None,
+                    "failure_code": None,
+                    "status_code": status_code,
+                },
+            ],
+            "status": "completed",
+        }
+    )
+    return _seal_model_continuation_state(body)
+
+
 def _emit_model_selection_trace(
     callback: Callable[..., Any] | None,
     *,
@@ -2088,6 +2829,72 @@ def _emit_model_selection_trace(
     )
 
 
+def _prepare_fixed_selection_attempt(
+    selection: Mapping[str, Any],
+    continuation_plan: Mapping[str, Any] | None,
+    continuation_state: Mapping[str, Any] | None,
+    *,
+    attempt: int,
+    trace_event_callback: Callable[..., Any] | None,
+    scope: str,
+) -> tuple[dict[str, Any], Mapping[str, Any], dict[str, Any]]:
+    """Project one fixed continuation step without invoking the selector again.
+
+    The first selection is already authoritative for this run.  A fallback is a cursor move
+    over the sealed ladder, not a new optimization problem: provider health may be refreshed for
+    future runs, but it must not reorder or silently replace the current run's reviewed choice.
+    ``selection_override`` is consumed by the low-level provider bridge below and therefore
+    keeps the selector tool out of the fallback path entirely.
+    """
+
+    if continuation_plan is None:
+        projected = dict(selection)
+    else:
+        if not isinstance(continuation_state, Mapping):
+            raise BrainRunError(f"adaptive {scope} continuation state is missing")
+        next_index = continuation_state.get("next_step_index")
+        steps = continuation_plan.get("steps")
+        if not isinstance(next_index, int) or isinstance(next_index, bool) or not isinstance(steps, list):
+            raise BrainRunError(f"adaptive {scope} continuation cursor is malformed")
+        if not 0 <= next_index < len(steps) or not isinstance(steps[next_index], Mapping):
+            raise BrainRunError(f"adaptive {scope} continuation cursor points outside its plan")
+        step = steps[next_index]
+        provider = step.get("provider")
+        model = step.get("model")
+        if not isinstance(provider, str) or not isinstance(model, str):
+            raise BrainRunError(f"adaptive {scope} continuation step identity is malformed")
+        projected = dict(selection)
+        projected["selected_model"] = {"provider": provider, "model": model}
+        projected["selection_status"] = "selected"
+
+    selected = projected.get("selected_model")
+    if not isinstance(selected, Mapping):
+        raise BrainRunError(f"adaptive {scope} selection has no eligible provider")
+    provider = selected.get("provider")
+    model = selected.get("model")
+    if not isinstance(provider, str) or not provider or not isinstance(model, str) or not model:
+        raise BrainRunError(f"adaptive {scope} selection returned malformed provider metadata")
+    audit = build_model_selection_audit(projected)
+    projected["selection_audit"] = audit
+    _emit_model_selection_trace(
+        trace_event_callback,
+        phase="model_selection_started",
+        status="running",
+        attempt=attempt,
+        selection=projected,
+    )
+    _emit_model_selection_trace(
+        trace_event_callback,
+        phase="model_selection_finished",
+        status="completed",
+        attempt=attempt,
+        selection=projected,
+        audit=audit,
+        selected=selected,
+    )
+    return projected, selected, audit
+
+
 def _routing_health_evidence(subject: str, health: Mapping[str, Any]) -> dict[str, Any] | None:
     """Validate and project bounded transport evidence for one routing subject.
 
@@ -2131,6 +2938,14 @@ def _provider_health_evidence(provider: str, health: Mapping[str, Any]) -> dict[
     """Compatibility wrapper for provider-level routing evidence."""
 
     return _routing_health_evidence(provider, health)
+
+
+def _provider_failure_code(error: ProviderError) -> str:
+    """Preserve stable transport categories in adaptive metadata without exposing messages."""
+
+    if getattr(error, "code", None) == "quota_exceeded":
+        return "quota_exceeded"
+    return "circuit_open" if error.circuit_open else "provider_error"
 
 
 def _refresh_failover_provider_health(
@@ -2696,6 +3511,19 @@ class AutonomousBrain:
             raise BrainRunError("memory must be a BrainEpisodicMemory or None")
         self.memory = memory
 
+    def open_stream(self, request: ProviderRequest, **options: Any) -> Any:
+        """Open a live stream after the brain has admitted a caller-ranked model arm.
+
+        ``options`` are forwarded to :class:`AutonomousStreamRuntime.open`; in particular,
+        ``provider``, ``model``, and optional ``fallbacks`` must come from the caller's reviewed
+        selection snapshot. The returned handle exposes transient ``events`` and a metadata-only
+        ``completion`` receipt, so this convenience method never serializes provider output.
+        """
+
+        from .autonomous_stream import AutonomousStreamRuntime
+
+        return AutonomousStreamRuntime(self.runtime).open(request, **options)
+
     def prepare_autonomous(self, **kwargs: Any) -> Any:
         """Build a domain-aware task blueprint without contacting a provider.
 
@@ -2714,6 +3542,97 @@ class AutonomousBrain:
         from .autonomy import AutonomousTaskOrchestrator
 
         return AutonomousTaskOrchestrator(self).prepare_cross_domain(**kwargs)
+
+    def domain_operating_kit(self, domain: str) -> Any:
+        """Return one provider-free, digest-bound operating contract for a built-in domain."""
+
+        from .autonomous_domain_operating_kit import build_autonomous_domain_operating_kit
+
+        return build_autonomous_domain_operating_kit(domain)
+
+    def domain_operating_kits(self, domains: Sequence[str] | None = None) -> tuple[Any, ...]:
+        """Return deterministic operating contracts for the requested built-in domains."""
+
+        from .autonomous_domain_operating_kit import build_autonomous_domain_operating_kits
+
+        return build_autonomous_domain_operating_kits(domains)
+
+    def validate_domain_operating_kit(self, value: Mapping[str, Any] | Any) -> Any:
+        """Rebuild and validate caller-held domain metadata against current reviewed contracts."""
+
+        from .autonomous_domain_operating_kit import validate_autonomous_domain_operating_kit
+
+        return validate_autonomous_domain_operating_kit(value)
+
+    def select_execution_policy(
+        self,
+        *,
+        task: str,
+        candidates: Sequence[Mapping[str, Any] | Any],
+        domain: str | None = None,
+        hints: Sequence[str] = (),
+        allow_cross_domain: bool = True,
+        policy: Any | None = None,
+        required_capabilities: Sequence[str] = (),
+        preferred_capabilities: Sequence[str] = (),
+        required_path: str | None = None,
+        evidence_required: bool | None = None,
+        structured_output_required: bool | None = None,
+        effects_requested: bool = False,
+        effects_approved: bool = False,
+        approval_granted: bool = False,
+        max_cost_units: float | None = None,
+        max_latency_ms: float | None = None,
+        max_risk: float | None = None,
+        min_score: float | None = None,
+    ) -> dict[str, Any]:
+        """Choose a joint execution arm after route admission, without dispatching anything.
+
+        The returned route and policy decision contain only digests and bounded candidate
+        metadata. The caller keeps the policy instance, executes the selected arm through its
+        existing approval boundary, and later settles explicit evaluator credit with that same
+        policy instance. Provider success is never inferred as reward.
+        """
+
+        from .autonomous_execution_policy import AutonomousExecutionPolicy
+        from .autonomy import AutonomousTaskOrchestrator
+
+        orchestrator = AutonomousTaskOrchestrator(self)
+        route = orchestrator.route_task(task=task, hints=tuple(hints) + ((domain,) if domain is not None else ()), allow_cross_domain=False if domain is not None else allow_cross_domain)
+        if route.abstained or not route.selected_domains:
+            raise BrainRunError("execution policy selection requires an admitted route")
+        if domain is not None and route.primary_domain != domain:
+            raise BrainRunError("execution policy explicit domain did not win deterministic route admission")
+        selected_policy = policy if isinstance(policy, AutonomousExecutionPolicy) else AutonomousExecutionPolicy()
+        domain_policy = orchestrator.domain_policy(route.primary_domain or route.selected_domains[0])
+        decision = selected_policy.select(
+            {
+                "context_digest": route.task_digest,
+                "requested_domains": list(route.selected_domains),
+                "required_capabilities": list(required_capabilities),
+                "preferred_capabilities": list(preferred_capabilities),
+                "required_path": required_path,
+                "evidence_required": domain_policy.evidence_mode == "required_before_provider" if evidence_required is None else evidence_required,
+                "structured_output_required": domain_policy.response_mode == "structured_required" if structured_output_required is None else structured_output_required,
+                "effects_requested": effects_requested,
+                "effects_approved": effects_approved,
+                "approval_granted": approval_granted,
+                "max_cost_units": domain_policy.max_total_cost_units if max_cost_units is None else max_cost_units,
+                "max_latency_ms": 86_400_000 if max_latency_ms is None else max_latency_ms,
+                "max_risk": 1.0 if max_risk is None else max_risk,
+                "min_score": 0.0 if min_score is None else min_score,
+            },
+            candidates,
+        )
+        descriptor = {"schema": "bioprism-python-autonomous-brain-execution-policy/0.1", "route_digest": route.route_digest, "decision_digest": decision.decision_digest}
+        return {
+            "schema": "bioprism-python-autonomous-brain-execution-policy/0.1",
+            "route": route.to_dict(),
+            "decision": decision.to_dict(),
+            "policy_plan_digest": _json_digest(descriptor),
+            "retention": "route_and_policy_metadata_only;task_prompt_response_tool_and_credential_values_not_retained",
+            "secret_material": "never_returned",
+        }
 
     def run_autonomous(self, **kwargs: Any) -> Any:
         """Run a domain-aware task through adaptive selection and bounded provider execution.
@@ -2793,6 +3712,10 @@ class AutonomousBrain:
         *,
         limit: int | None = None,
         memory: BrainEpisodicMemory | None = None,
+        authorization_context: AutonomousAuthorizationContext | None = None,
+        authorization_domain: str | None = None,
+        authorization_capability: str | None = None,
+        authorization_risk_class: str | None = None,
     ) -> list[dict[str, Any]]:
         """Recall bounded metadata/lessons from the configured episodic memory."""
 
@@ -2801,8 +3724,26 @@ class AutonomousBrain:
             raise BrainRunError("episodic memory is not configured")
         if not isinstance(store, BrainEpisodicMemory):
             raise BrainRunError("memory must be a BrainEpisodicMemory")
+        normalized_query = query if isinstance(query, MemoryQuery) else MemoryQuery.from_mapping(query)
+        if authorization_context is not None:
+            query_domain = normalized_query.domain or authorization_domain
+            authorization_kwargs: dict[str, Any] = {
+                "operation": "memory_retrieval",
+                "resource_digest": content_digest({
+                    "schema": "bioprism-autonomous-memory-authorization-resource/0.1",
+                    "query_digest": content_digest(normalized_query.to_dict()),
+                    "limit": limit,
+                }),
+            }
+            if query_domain is not None:
+                authorization_kwargs["domain"] = query_domain
+            if authorization_capability is not None:
+                authorization_kwargs["capability"] = authorization_capability
+            if authorization_risk_class is not None:
+                authorization_kwargs["risk_class"] = authorization_risk_class
+            authorization_context.authorize_operation(**authorization_kwargs)
         try:
-            return store.retrieve(query, limit=limit)
+            return store.retrieve(normalized_query, limit=limit)
         except BrainMemoryError as error:
             raise BrainRunError("episodic memory retrieval failed") from error
 
@@ -2829,6 +3770,10 @@ class AutonomousBrain:
         lesson: str | None = None,
         provenance: Mapping[str, Any] | None = None,
         memory: BrainEpisodicMemory | None = None,
+        authorization_context: AutonomousAuthorizationContext | None = None,
+        authorization_domain: str | None = None,
+        authorization_capability: str | None = None,
+        authorization_risk_class: str | None = None,
     ) -> dict[str, Any]:
         """Persist one run as metadata-only episodic memory.
 
@@ -2889,6 +3834,27 @@ class AutonomousBrain:
             "lesson": lesson,
             "provenance": {} if provenance is None else dict(provenance),
         }
+        if authorization_context is not None:
+            memory_domain = authorization_domain
+            if memory_domain is None and isinstance(context_copy.get("domain"), str):
+                memory_domain = context_copy["domain"]
+            authorization_kwargs: dict[str, Any] = {
+                "operation": "memory_write",
+                "resource_digest": content_digest({
+                    "schema": "bioprism-autonomous-memory-authorization-resource/0.1",
+                    "episode_id": packet["episode_id"],
+                    "run_id": packet["run_id"],
+                    "task_digest": packet["task_digest"],
+                    "outcome_digest": digests["outcome_digest"],
+                }),
+            }
+            if memory_domain is not None:
+                authorization_kwargs["domain"] = memory_domain
+            if authorization_capability is not None:
+                authorization_kwargs["capability"] = authorization_capability
+            if authorization_risk_class is not None:
+                authorization_kwargs["risk_class"] = authorization_risk_class
+            authorization_context.authorize_operation(**authorization_kwargs)
         try:
             return store.record_episode(packet).to_dict()
         except BrainMemoryError as error:
@@ -3001,12 +3967,15 @@ class AutonomousBrain:
         contextual_observations: Sequence[Mapping[str, Any]] = (),
         required_capabilities: Sequence[str] = (),
         input_tokens: int = 4_096,
+        context_budget: AutonomousContextBudgetOptions | Mapping[str, Any] | None = None,
         requested_output_tokens: int = 2_048,
         max_cost_per_million_tokens: int | None = None,
         max_latency_ms: int | None = None,
         min_quality: float | None = None,
         min_selection_confidence: float | None = None,
         selection_overrides: Mapping[str, Any] | None = None,
+        selection_weights: Mapping[str, Any] | None = None,
+        selection_observations: Sequence[Mapping[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """Build a live model-selection request from registered transports and learned state.
 
@@ -3016,6 +3985,13 @@ class AutonomousBrain:
         bandit state into the Rust selector, and scopes observations to an optional domain /
         capability / risk context. No provider secret enters this request.
         """
+
+        normalized_context_budget = None
+        if context_budget is not None:
+            try:
+                normalized_context_budget = normalize_autonomous_context_budget(context_budget)
+            except AutonomousContextBudgetError as error:
+                raise BrainRunError("autonomous context budget is invalid") from error
 
         if not isinstance(task, str) or not task.strip():
             raise BrainRunError("task must be a non-empty string")
@@ -3033,6 +4009,8 @@ class AutonomousBrain:
             raise BrainRunError("required_capabilities must contain non-empty strings")
         if not isinstance(input_tokens, int) or isinstance(input_tokens, bool) or input_tokens < 1:
             raise BrainRunError("input_tokens must be a positive integer")
+        if normalized_context_budget is not None:
+            input_tokens = min(input_tokens, normalized_context_budget.max_input_tokens)
         if not isinstance(requested_output_tokens, int) or isinstance(requested_output_tokens, bool) or requested_output_tokens < 1:
             raise BrainRunError("requested_output_tokens must be a positive integer")
         for name, value in (("max_cost_per_million_tokens", max_cost_per_million_tokens), ("max_latency_ms", max_latency_ms)):
@@ -3069,6 +4047,56 @@ class AutonomousBrain:
             raise BrainRunError("selection_overrides must be a mapping or None")
         if selection_overrides is not None:
             BrainLearningLedger._assert_safe(selection_overrides)
+        # Make the multi-objective policy first-class while retaining the older override escape
+        # hatch for callers that persist complete selector requests.  Both paths normalize to the
+        # same bounded value-only contract before health and bandit state are joined below.
+        try:
+            override_weights = (
+                None if selection_overrides is None else selection_overrides.get("weights")
+            )
+            normalized_weights = normalize_autonomous_selection_weights(
+                selection_weights if selection_weights is not None else override_weights
+            )
+            if selection_weights is not None and override_weights is not None:
+                normalized_override_weights = normalize_autonomous_selection_weights(override_weights)
+                if normalized_override_weights != normalized_weights:
+                    raise BrainRunError(
+                        "selection_weights conflicts with selection_overrides.weights"
+                    )
+        except ArgumentError as error:
+            raise BrainRunError(str(error)) from error
+        try:
+            normalized_selection_observations = (
+                None
+                if selection_observations is None
+                else normalize_autonomous_model_observations(selection_observations)
+            )
+            override_observations = (
+                None
+                if selection_overrides is None
+                else selection_overrides.get("observations")
+            )
+            normalized_override_observations = (
+                None
+                if override_observations is None
+                else normalize_autonomous_model_observations(override_observations)
+            )
+        except ArgumentError as error:
+            raise BrainRunError(str(error)) from error
+        if (
+            normalized_selection_observations is not None
+            and normalized_override_observations is not None
+            and normalized_selection_observations != normalized_override_observations
+        ):
+            raise BrainRunError(
+                "selection_observations conflicts with selection_overrides.observations"
+            )
+        effective_selection_observations = (
+            normalized_selection_observations
+            if normalized_selection_observations is not None
+            else normalized_override_observations
+            or []
+        )
         health_overrides: Mapping[str, Any] = {}
         if selection_overrides is not None and selection_overrides.get("provider_health") is not None:
             raw_health_overrides = selection_overrides.get("provider_health")
@@ -3306,6 +4334,18 @@ class AutonomousBrain:
             else None if ledger is None else ledger.latest_state()
         )
         observations = _bandit_observations(global_state)
+        explicit_by_arm = {
+            observation["arm_id"]: observation
+            for observation in effective_selection_observations
+        }
+        merged_global_observations = {
+            observation["arm_id"]: observation for observation in observations
+        }
+        merged_global_observations.update(explicit_by_arm)
+        observations = [
+            merged_global_observations[arm_id]
+            for arm_id in sorted(merged_global_observations)
+        ]
         scoped_observations: list[dict[str, Any]] = []
         if context is not None:
             context_digest = _context_identity_digest(context)
@@ -3318,6 +4358,7 @@ class AutonomousBrain:
                 observation["arm_id"]: observation
                 for observation in _bandit_observations(scoped_state, context_digest=context_digest)
             }
+            scoped_by_arm.update(explicit_by_arm)
             supplied = _bandit_observations({"arms": list(contextual_observations)})
             scoped_by_arm.update({observation["arm_id"]: observation for observation in supplied})
             scoped_observations = [
@@ -3338,6 +4379,7 @@ class AutonomousBrain:
                 "observations": observations,
                 "provider_health": provider_health,
                 "model_health": model_health,
+                "weights": normalized_weights,
             }
         )
         if max_cost_per_million_tokens is not None:
@@ -3439,6 +4481,19 @@ class AutonomousBrain:
                 if not isinstance(nested, Mapping):
                     raise BrainRunError("adaptive contextual selection preview omitted selection")
                 result = dict(nested)
+                normalized_context = _normalize_learning_context(context)
+                context_digest = report.get("context_digest")
+                expected_context_digest = _context_identity_digest(normalized_context)
+                if not _valid_digest(context_digest) or context_digest != expected_context_digest:
+                    raise BrainRunError(
+                        "adaptive contextual selection returned a context digest that does not match its identity"
+                    )
+                # Preserve the exact contextual binding that the low-level run path would have
+                # attached. Fallbacks consume this snapshot directly and must not lose the
+                # learning-domain identity merely because they skip selector re-entry.
+                result["context_digest"] = context_digest
+                result["context"] = normalized_context
+                result["contextual_selection_status"] = report.get("selection_status")
             if trace_event_callback is not None:
                 audit = build_model_selection_audit(result)
                 selected = result.get("selected_model")
@@ -3476,6 +4531,7 @@ class AutonomousBrain:
         bandit_state: Mapping[str, Any] | None = None,
         context: Mapping[str, Any] | None = None,
         content_parts: Sequence[ProviderContentPart | Mapping[str, Any]] | None = None,
+        context_budget: AutonomousContextBudgetOptions | Mapping[str, Any] | None = None,
         contextual_observations: Sequence[Mapping[str, Any]] = (),
         required_capabilities: Sequence[str] = (),
         input_tokens: int = 4_096,
@@ -3497,13 +4553,23 @@ class AutonomousBrain:
         max_provider_failovers: int = 2,
         execution_controller: AutonomousExecutionController | None = None,
         invocation_observer: ProviderInvocationObserver | None = None,
+        reserve_cost: AutonomousCostReservationCallback | None = None,
         trace_event_callback: Callable[..., Any] | None = None,
+        authorization_context: AutonomousAuthorizationContext | None = None,
+        authorization_domain: str | None = None,
     ) -> BrainRunResult:
         """Select, plan, and invoke from live providers using caller-persisted learning state."""
 
         if not isinstance(max_provider_failovers, int) or isinstance(max_provider_failovers, bool) or not 0 <= max_provider_failovers <= 8:
             raise BrainRunError("max_provider_failovers must be within [0, 8]")
 
+        normalized_context_budget = None
+        if context_budget is not None:
+            try:
+                normalized_context_budget = normalize_autonomous_context_budget(context_budget)
+            except AutonomousContextBudgetError as error:
+                raise BrainRunError("autonomous context budget is invalid") from error
+        effective_input_tokens = input_tokens if normalized_context_budget is None else min(input_tokens, normalized_context_budget.max_input_tokens)
         selection = self.build_adaptive_model_selection(
             task=task,
             model_candidates=model_candidates,
@@ -3513,7 +4579,7 @@ class AutonomousBrain:
             context=context,
             contextual_observations=contextual_observations,
             required_capabilities=required_capabilities,
-            input_tokens=input_tokens,
+            input_tokens=effective_input_tokens,
             requested_output_tokens=requested_output_tokens,
             max_cost_per_million_tokens=max_cost_per_million_tokens,
             max_latency_ms=max_latency_ms,
@@ -3527,40 +4593,47 @@ class AutonomousBrain:
             else contextual_observations
         )
         attempt_selection = dict(selection)
-        failed_ids: set[str] = set()
         failed_providers: set[str] = set()
         failover_attempts: list[dict[str, Any]] = []
         invocation_receipts: list[Mapping[str, Any]] = []
+        continuation_plan: dict[str, Any] | None = None
+        continuation_state: dict[str, Any] | None = None
+        selection_snapshot: dict[str, Any] | None = None
         for attempt in range(max_provider_failovers + 1):
-            if attempt:
-                attempt_selection["models"] = [
-                    {
-                        **dict(candidate),
-                        "enabled": False
-                        if (
-                            f"{candidate.get('provider')}/{candidate.get('model')}" in failed_ids
-                            or candidate.get("provider") in failed_providers
-                        )
-                        else candidate.get("enabled", True),
-                    }
-                    for candidate in selection.get("models", [])
-                    if isinstance(candidate, Mapping)
-                ]
-            preview = self._preview_adaptive_selection(
-                task=task,
-                selection=attempt_selection,
-                context=context,
-                trace_event_callback=trace_event_callback,
-                attempt=attempt + 1,
-            )
-            selected = preview.get("selected_model")
-            if not isinstance(selected, Mapping):
-                raise BrainRunError("adaptive selection has no eligible provider after failover")
-            attempt_audit = build_model_selection_audit(preview)
+            if continuation_plan is None:
+                preview = self._preview_adaptive_selection(
+                    task=task,
+                    selection=selection,
+                    context=context,
+                    trace_event_callback=trace_event_callback,
+                    attempt=attempt + 1,
+                )
+                attempt_selection = {**selection, **preview}
+                selected = attempt_selection.get("selected_model")
+                if not isinstance(selected, Mapping):
+                    raise BrainRunError("adaptive model selection has no eligible provider")
+                attempt_audit = build_model_selection_audit(attempt_selection)
+                selection_snapshot = dict(attempt_selection)
+            else:
+                attempt_selection, selected, attempt_audit = _prepare_fixed_selection_attempt(
+                    selection_snapshot if selection_snapshot is not None else selection,
+                    continuation_plan,
+                    continuation_state,
+                    attempt=attempt + 1,
+                    trace_event_callback=trace_event_callback,
+                    scope="model",
+                )
             provider = selected.get("provider")
             model = selected.get("model")
             if not isinstance(provider, str) or not isinstance(model, str):
                 raise BrainRunError("adaptive selection returned malformed provider metadata")
+            if continuation_plan is None:
+                continuation_plan = build_model_continuation_plan(
+                    attempt_selection,
+                    [candidate for candidate in selection.get("models", []) if isinstance(candidate, Mapping)],
+                    max_failovers=max_provider_failovers,
+                )
+                continuation_state = create_model_continuation_state(continuation_plan)
             selected_id = f"{provider}/{model}"
             policy_observer = None
             if execution_controller is not None:
@@ -3578,6 +4651,7 @@ class AutonomousBrain:
                 result = self.run(
                     task=task,
                     model_selection=attempt_selection,
+                    selection_override=attempt_selection,
                     prompt=prompt,
                     plan=plan,
                     credentials=credentials,
@@ -3593,12 +4667,24 @@ class AutonomousBrain:
                     contextual_observations=effective_contextual_observations,
                     tools=tools,
                     tool_choice=tool_choice,
+                    context_budget=normalized_context_budget,
+                    reserve_cost=reserve_cost,
                     invocation_observer=effective_observer,
+                    authorization_context=authorization_context,
+                    authorization_domain=authorization_domain,
                 )
                 if policy_observer is not None:
                     result = replace(result, provider_invocations=policy_observer.evidence())
+                if continuation_plan is None or continuation_state is None:
+                    raise BrainRunError("adaptive model continuation was not initialized")
+                continuation_state = complete_model_continuation_state(
+                    continuation_plan,
+                    continuation_state,
+                    provider=provider,
+                    model=model,
+                )
                 if not failover_attempts:
-                    return result
+                    return replace(result, continuation_plan=continuation_plan)
                 invocation_receipts.extend(result.provider_invocations)
                 failover_attempts.append(
                     {
@@ -3616,14 +4702,17 @@ class AutonomousBrain:
                         "strategy": "deterministic_model_selector_with_provider_health_gating",
                         "attempts": list(failover_attempts),
                         "fallback_count": len(failover_attempts) - 1,
+                        "continuation_plan_digest": continuation_plan["plan_digest"],
+                        "continuation_plan": dict(continuation_plan),
+                        "continuation_state_digest": continuation_state["state_digest"],
                         "retention": "metadata_only",
                     },
                     provider_invocations=tuple(invocation_receipts),
+                    continuation_plan=continuation_plan,
                 )
             except ProviderError as error:
                 if policy_observer is not None:
                     invocation_receipts.extend(policy_observer.evidence())
-                failed_ids.add(selected_id)
                 health_after_failure = _refresh_failover_provider_health(
                     self.runtime,
                     attempt_selection,
@@ -3638,13 +4727,30 @@ class AutonomousBrain:
                         "model": model,
                         "arm_id": selected_id,
                         "status": "provider_refused",
-                        "reason": "circuit_open" if error.circuit_open else "provider_error",
+                        "reason": _provider_failure_code(error),
                         "status_code": error.status_code,
                         **health_after_failure,
                         **_selection_attempt_metadata(attempt_audit),
                     }
                 )
                 if attempt >= max_provider_failovers:
+                    raise
+                if continuation_plan is None or continuation_state is None:
+                    raise BrainRunError("adaptive model continuation was not initialized")
+                continuation_state = advance_model_continuation_state(
+                    continuation_plan,
+                    continuation_state,
+                    provider=provider,
+                    model=model,
+                    failure_scope=(
+                        "model"
+                        if error.status_code == 408 and not error.circuit_open
+                        else "provider"
+                    ),
+                    failure_code=_provider_failure_code(error),
+                    status_code=error.status_code,
+                )
+                if continuation_state["status"] != "ready":
                     raise
         raise BrainRunError("adaptive provider failover exhausted")
 
@@ -3660,6 +4766,7 @@ class AutonomousBrain:
         bandit_state: Mapping[str, Any] | None = None,
         context: Mapping[str, Any] | None = None,
         content_parts: Sequence[ProviderContentPart | Mapping[str, Any]] | None = None,
+        context_budget: AutonomousContextBudgetOptions | Mapping[str, Any] | None = None,
         contextual_observations: Sequence[Mapping[str, Any]] = (),
         required_capabilities: Sequence[str] = (),
         input_tokens: int = 4_096,
@@ -3672,7 +4779,10 @@ class AutonomousBrain:
         max_provider_failovers: int = 2,
         execution_controller: AutonomousExecutionController | None = None,
         invocation_observer: ProviderInvocationObserver | None = None,
+        reserve_cost: AutonomousCostReservationCallback | None = None,
         trace_event_callback: Callable[..., Any] | None = None,
+        authorization_context: AutonomousAuthorizationContext | None = None,
+        authorization_domain: str | None = None,
     ) -> BrainToolLoopResult:
         """Select adaptively, then enter the bounded route-aware native tool loop.
 
@@ -3718,6 +4828,8 @@ class AutonomousBrain:
         unknown = sorted(set(options).difference(allowed_options))
         if unknown:
             raise BrainRunError(f"tool_loop_options contains unsupported fields: {', '.join(unknown)}")
+        if reserve_cost is not None:
+            options["reserve_cost"] = reserve_cost
         effective_context = context
         route_report: dict[str, Any] | None = None
         if "route_request" in options:
@@ -3728,6 +4840,13 @@ class AutonomousBrain:
             if effective_context is None:
                 effective_context = route_context
             options["route_report"] = route_report
+        normalized_context_budget = None
+        if context_budget is not None:
+            try:
+                normalized_context_budget = normalize_autonomous_context_budget(context_budget)
+            except AutonomousContextBudgetError as error:
+                raise BrainRunError("autonomous context budget is invalid") from error
+        effective_input_tokens = input_tokens if normalized_context_budget is None else min(input_tokens, normalized_context_budget.max_input_tokens)
         selection = self.build_adaptive_model_selection(
             task=task,
             model_candidates=model_candidates,
@@ -3737,7 +4856,7 @@ class AutonomousBrain:
             context=effective_context,
             contextual_observations=contextual_observations,
             required_capabilities=required_capabilities,
-            input_tokens=input_tokens,
+            input_tokens=effective_input_tokens,
             requested_output_tokens=requested_output_tokens,
             max_cost_per_million_tokens=max_cost_per_million_tokens,
             max_latency_ms=max_latency_ms,
@@ -3750,44 +4869,52 @@ class AutonomousBrain:
             else contextual_observations
         )
         attempt_selection = dict(selection)
-        failed_ids: set[str] = set()
         failed_providers: set[str] = set()
         failover_attempts: list[dict[str, Any]] = []
         invocation_receipts: list[Mapping[str, Any]] = []
+        continuation_plan: dict[str, Any] | None = None
+        continuation_state: dict[str, Any] | None = None
+        selection_snapshot: dict[str, Any] | None = None
         for attempt in range(max_provider_failovers + 1):
-            if attempt:
-                attempt_selection["models"] = [
-                    {
-                        **dict(candidate),
-                        "enabled": False
-                        if (
-                            f"{candidate.get('provider')}/{candidate.get('model')}" in failed_ids
-                            or candidate.get("provider") in failed_providers
-                        )
-                        else candidate.get("enabled", True),
-                    }
-                    for candidate in selection.get("models", [])
-                    if isinstance(candidate, Mapping)
-                ]
-            preview = self._preview_adaptive_selection(
-                task=task,
-                selection=attempt_selection,
-                context=effective_context,
-                trace_event_callback=trace_event_callback,
-                attempt=attempt + 1,
-            )
-            selected = preview.get("selected_model")
-            if not isinstance(selected, Mapping):
-                raise BrainRunError("adaptive tool-loop selection has no eligible provider after failover")
-            attempt_audit = build_model_selection_audit(preview)
+            if continuation_plan is None:
+                preview = self._preview_adaptive_selection(
+                    task=task,
+                    selection=selection,
+                    context=effective_context,
+                    trace_event_callback=trace_event_callback,
+                    attempt=attempt + 1,
+                )
+                attempt_selection = {**selection, **preview}
+                selected = attempt_selection.get("selected_model")
+                if not isinstance(selected, Mapping):
+                    raise BrainRunError("adaptive tool-loop selection has no eligible provider")
+                attempt_audit = build_model_selection_audit(attempt_selection)
+                selection_snapshot = dict(attempt_selection)
+            else:
+                attempt_selection, selected, attempt_audit = _prepare_fixed_selection_attempt(
+                    selection_snapshot if selection_snapshot is not None else selection,
+                    continuation_plan,
+                    continuation_state,
+                    attempt=attempt + 1,
+                    trace_event_callback=trace_event_callback,
+                    scope="tool-loop",
+                )
             provider = selected.get("provider")
             model = selected.get("model")
             if not isinstance(provider, str) or not isinstance(model, str):
                 raise BrainRunError("adaptive tool-loop selection returned malformed provider metadata")
+            if continuation_plan is None:
+                continuation_plan = build_model_continuation_plan(
+                    attempt_selection,
+                    [candidate for candidate in selection.get("models", []) if isinstance(candidate, Mapping)],
+                    max_failovers=max_provider_failovers,
+                )
+                continuation_state = create_model_continuation_state(continuation_plan)
             selected_id = f"{provider}/{model}"
             attempt_state: dict[str, Any] = {}
             attempt_options = dict(options)
             attempt_options["attempt_state"] = attempt_state
+            attempt_options["context_budget"] = normalized_context_budget
             policy_observer = None
             if execution_controller is not None:
                 policy_observer = AutonomousProviderInvocationSession(
@@ -3804,6 +4931,7 @@ class AutonomousBrain:
                 result = self.run_tool_loop(
                     task=task,
                     model_selection=attempt_selection,
+                    selection_override=attempt_selection,
                     prompt=prompt,
                     plan=plan,
                     credentials=credentials,
@@ -3811,6 +4939,8 @@ class AutonomousBrain:
                     content_parts=content_parts,
                     contextual_observations=effective_contextual_observations,
                     invocation_observer=effective_observer,
+                    authorization_context=authorization_context,
+                    authorization_domain=authorization_domain,
                     **attempt_options,
                 )
                 if policy_observer is not None:
@@ -3821,8 +4951,19 @@ class AutonomousBrain:
                             provider_invocations=policy_observer.evidence(),
                         ),
                     )
+                if continuation_plan is None or continuation_state is None:
+                    raise BrainRunError("adaptive tool-loop continuation was not initialized")
+                continuation_state = complete_model_continuation_state(
+                    continuation_plan,
+                    continuation_state,
+                    provider=provider,
+                    model=model,
+                )
                 if not failover_attempts:
-                    return result
+                    return replace(
+                        result,
+                        brain_run=replace(result.brain_run, continuation_plan=continuation_plan),
+                    )
                 invocation_receipts.extend(result.brain_run.provider_invocations)
                 failover_attempts.append(
                     {
@@ -3842,9 +4983,13 @@ class AutonomousBrain:
                             "strategy": "deterministic_tool_loop_selector_before_side_effects",
                             "attempts": list(failover_attempts),
                             "fallback_count": len(failover_attempts) - 1,
+                            "continuation_plan_digest": continuation_plan["plan_digest"],
+                            "continuation_plan": dict(continuation_plan),
+                            "continuation_state_digest": continuation_state["state_digest"],
                             "retention": "metadata_only",
                         },
                         provider_invocations=tuple(invocation_receipts),
+                        continuation_plan=continuation_plan,
                     ),
                 )
             except ProviderError as error:
@@ -3852,7 +4997,6 @@ class AutonomousBrain:
                     raise
                 if policy_observer is not None:
                     invocation_receipts.extend(policy_observer.evidence())
-                failed_ids.add(selected_id)
                 health_after_failure = _refresh_failover_provider_health(
                     self.runtime,
                     attempt_selection,
@@ -3867,13 +5011,30 @@ class AutonomousBrain:
                         "model": model,
                         "arm_id": selected_id,
                         "status": "provider_refused",
-                        "reason": "circuit_open" if error.circuit_open else "provider_error",
+                        "reason": _provider_failure_code(error),
                         "status_code": error.status_code,
                         **health_after_failure,
                         **_selection_attempt_metadata(attempt_audit),
                     }
                 )
                 if attempt >= max_provider_failovers:
+                    raise
+                if continuation_plan is None or continuation_state is None:
+                    raise BrainRunError("adaptive tool-loop continuation was not initialized")
+                continuation_state = advance_model_continuation_state(
+                    continuation_plan,
+                    continuation_state,
+                    provider=provider,
+                    model=model,
+                    failure_scope=(
+                        "model"
+                        if error.status_code == 408 and not error.circuit_open
+                        else "provider"
+                    ),
+                    failure_code=_provider_failure_code(error),
+                    status_code=error.status_code,
+                )
+                if continuation_state["status"] != "ready":
                     raise
         raise BrainRunError("adaptive tool-loop provider failover exhausted")
 
@@ -3890,6 +5051,7 @@ class AutonomousBrain:
         bandit_state: Mapping[str, Any] | None = None,
         context: Mapping[str, Any] | None = None,
         content_parts: Sequence[ProviderContentPart | Mapping[str, Any]] | None = None,
+        context_budget: AutonomousContextBudgetOptions | Mapping[str, Any] | None = None,
         contextual_observations: Sequence[Mapping[str, Any]] = (),
         required_capabilities: Sequence[str] = (),
         input_tokens: int = 4_096,
@@ -3918,7 +5080,10 @@ class AutonomousBrain:
         max_provider_failovers: int = 2,
         execution_controller: AutonomousExecutionController | None = None,
         invocation_observer: ProviderInvocationObserver | None = None,
+        reserve_cost: AutonomousCostReservationCallback | None = None,
         trace_event_callback: Callable[..., Any] | None = None,
+        authorization_context: AutonomousAuthorizationContext | None = None,
+        authorization_domain: str | None = None,
     ) -> BrainMissionResult:
         """Select, route, plan, and execute one bounded cross-domain mission.
 
@@ -3936,6 +5101,13 @@ class AutonomousBrain:
             raise BrainRunError("max_provider_failovers must be within [0, 8]")
         if route_request is not None and not isinstance(route_request, Mapping):
             raise BrainRunError("route_request must be a mapping or None")
+
+        normalized_context_budget = None
+        if context_budget is not None:
+            try:
+                normalized_context_budget = normalize_autonomous_context_budget(context_budget)
+            except AutonomousContextBudgetError as error:
+                raise BrainRunError("autonomous context budget is invalid") from error
 
         effective_context = context
         route_report: dict[str, Any] | None = None
@@ -3956,7 +5128,11 @@ class AutonomousBrain:
             context=effective_context,
             contextual_observations=contextual_observations,
             required_capabilities=required_capabilities,
-            input_tokens=input_tokens,
+            input_tokens=(
+                input_tokens
+                if normalized_context_budget is None
+                else min(input_tokens, normalized_context_budget.max_input_tokens)
+            ),
             requested_output_tokens=requested_output_tokens,
             max_cost_per_million_tokens=max_cost_per_million_tokens,
             max_latency_ms=max_latency_ms,
@@ -3969,40 +5145,47 @@ class AutonomousBrain:
             else contextual_observations
         )
         attempt_selection = dict(selection)
-        failed_ids: set[str] = set()
         failed_providers: set[str] = set()
         failover_attempts: list[dict[str, Any]] = []
         invocation_receipts: list[Mapping[str, Any]] = []
+        continuation_plan: dict[str, Any] | None = None
+        continuation_state: dict[str, Any] | None = None
+        selection_snapshot: dict[str, Any] | None = None
         for attempt in range(max_provider_failovers + 1):
-            if attempt:
-                attempt_selection["models"] = [
-                    {
-                        **dict(candidate),
-                        "enabled": False
-                        if (
-                            f"{candidate.get('provider')}/{candidate.get('model')}" in failed_ids
-                            or candidate.get("provider") in failed_providers
-                        )
-                        else candidate.get("enabled", True),
-                    }
-                    for candidate in selection.get("models", [])
-                    if isinstance(candidate, Mapping)
-                ]
-            preview = self._preview_adaptive_selection(
-                task=task,
-                selection=attempt_selection,
-                context=effective_context,
-                trace_event_callback=trace_event_callback,
-                attempt=attempt + 1,
-            )
-            selected = preview.get("selected_model")
-            if not isinstance(selected, Mapping):
-                raise BrainRunError("adaptive mission selection has no eligible provider after failover")
-            attempt_audit = build_model_selection_audit(preview)
+            if continuation_plan is None:
+                preview = self._preview_adaptive_selection(
+                    task=task,
+                    selection=selection,
+                    context=effective_context,
+                    trace_event_callback=trace_event_callback,
+                    attempt=attempt + 1,
+                )
+                attempt_selection = {**selection, **preview}
+                selected = attempt_selection.get("selected_model")
+                if not isinstance(selected, Mapping):
+                    raise BrainRunError("adaptive mission selection has no eligible provider")
+                attempt_audit = build_model_selection_audit(attempt_selection)
+                selection_snapshot = dict(attempt_selection)
+            else:
+                attempt_selection, selected, attempt_audit = _prepare_fixed_selection_attempt(
+                    selection_snapshot if selection_snapshot is not None else selection,
+                    continuation_plan,
+                    continuation_state,
+                    attempt=attempt + 1,
+                    trace_event_callback=trace_event_callback,
+                    scope="mission",
+                )
             provider = selected.get("provider")
             model = selected.get("model")
             if not isinstance(provider, str) or not isinstance(model, str):
                 raise BrainRunError("adaptive mission selection returned malformed provider metadata")
+            if continuation_plan is None:
+                continuation_plan = build_model_continuation_plan(
+                    attempt_selection,
+                    [candidate for candidate in selection.get("models", []) if isinstance(candidate, Mapping)],
+                    max_failovers=max_provider_failovers,
+                )
+                continuation_state = create_model_continuation_state(continuation_plan)
             selected_id = f"{provider}/{model}"
             attempt_state: dict[str, Any] = {}
             policy_observer = None
@@ -4021,6 +5204,7 @@ class AutonomousBrain:
                 result = self.run_mission(
                     task=task,
                     model_selection=attempt_selection,
+                    selection_override=attempt_selection,
                     prompt=prompt,
                     plan=plan,
                     credentials=credentials,
@@ -4035,6 +5219,7 @@ class AutonomousBrain:
                     claim_requests=claim_requests,
                     context=effective_context,
                     content_parts=content_parts,
+                    context_budget=normalized_context_budget,
                     contextual_observations=effective_contextual_observations,
                     evaluator_review=evaluator_review,
                     workflow_binding=workflow_binding,
@@ -4048,6 +5233,9 @@ class AutonomousBrain:
                     tool_choice=tool_choice,
                     attempt_state=attempt_state,
                     invocation_observer=effective_observer,
+                    reserve_cost=reserve_cost,
+                    authorization_context=authorization_context,
+                    authorization_domain=authorization_domain,
                 )
                 if policy_observer is not None:
                     result = replace(
@@ -4057,8 +5245,19 @@ class AutonomousBrain:
                             provider_invocations=policy_observer.evidence(),
                         ),
                     )
+                if continuation_plan is None or continuation_state is None:
+                    raise BrainRunError("adaptive mission continuation was not initialized")
+                continuation_state = complete_model_continuation_state(
+                    continuation_plan,
+                    continuation_state,
+                    provider=provider,
+                    model=model,
+                )
                 if not failover_attempts:
-                    return result
+                    return replace(
+                        result,
+                        brain_run=replace(result.brain_run, continuation_plan=continuation_plan),
+                    )
                 invocation_receipts.extend(result.brain_run.provider_invocations)
                 failover_attempts.append(
                     {
@@ -4078,9 +5277,13 @@ class AutonomousBrain:
                             "strategy": "deterministic_mission_selector_before_dispatch",
                             "attempts": list(failover_attempts),
                             "fallback_count": len(failover_attempts) - 1,
+                            "continuation_plan_digest": continuation_plan["plan_digest"],
+                            "continuation_plan": dict(continuation_plan),
+                            "continuation_state_digest": continuation_state["state_digest"],
                             "retention": "metadata_only",
                         },
                         provider_invocations=tuple(invocation_receipts),
+                        continuation_plan=continuation_plan,
                     ),
                 )
             except ProviderError as error:
@@ -4088,7 +5291,6 @@ class AutonomousBrain:
                     raise
                 if policy_observer is not None:
                     invocation_receipts.extend(policy_observer.evidence())
-                failed_ids.add(selected_id)
                 health_after_failure = _refresh_failover_provider_health(
                     self.runtime,
                     attempt_selection,
@@ -4103,13 +5305,30 @@ class AutonomousBrain:
                         "model": model,
                         "arm_id": selected_id,
                         "status": "provider_refused",
-                        "reason": "circuit_open" if error.circuit_open else "provider_error",
+                        "reason": _provider_failure_code(error),
                         "status_code": error.status_code,
                         **health_after_failure,
                         **_selection_attempt_metadata(attempt_audit),
                     }
                 )
                 if attempt >= max_provider_failovers:
+                    raise
+                if continuation_plan is None or continuation_state is None:
+                    raise BrainRunError("adaptive mission continuation was not initialized")
+                continuation_state = advance_model_continuation_state(
+                    continuation_plan,
+                    continuation_state,
+                    provider=provider,
+                    model=model,
+                    failure_scope=(
+                        "model"
+                        if error.status_code == 408 and not error.circuit_open
+                        else "provider"
+                    ),
+                    failure_code=_provider_failure_code(error),
+                    status_code=error.status_code,
+                )
+                if continuation_state["status"] != "ready":
                     raise
         raise BrainRunError("adaptive mission provider failover exhausted")
 
@@ -4135,10 +5354,14 @@ class AutonomousBrain:
         max_replans: int = 1,
         trajectory_discount: float | None = None,
         trajectory_terminal_reward: float | None = None,
+        context_budget: AutonomousContextBudgetOptions | Mapping[str, Any] | None = None,
+        reserve_cost: AutonomousCostReservationCallback | None = None,
         mission_options: Mapping[str, Any] | None = None,
         execution_controller: AutonomousExecutionController | None = None,
         invocation_observer: ProviderInvocationObserver | None = None,
         trace_event_callback: Callable[..., Any] | None = None,
+        authorization_context: AutonomousAuthorizationContext | None = None,
+        authorization_domain: str | None = None,
     ) -> BrainLearningCycleResult:
         """Run, evaluate, remember, and boundedly replan a cross-domain mission.
 
@@ -4200,7 +5423,31 @@ class AutonomousBrain:
             raise BrainRunError("memory must be a BrainEpisodicMemory")
         if mission_options is not None and not isinstance(mission_options, Mapping):
             raise BrainRunError("mission_options must be a mapping or None")
+        normalized_context_budget = None
+        if context_budget is not None:
+            try:
+                normalized_context_budget = normalize_autonomous_context_budget(context_budget)
+            except AutonomousContextBudgetError as error:
+                raise BrainRunError("autonomous context budget is invalid") from error
         options = {} if mission_options is None else dict(mission_options)
+        if normalized_context_budget is not None:
+            options["context_budget"] = normalized_context_budget
+        if reserve_cost is not None:
+            options["reserve_cost"] = reserve_cost
+        if authorization_context is not None:
+            options["authorization_context"] = authorization_context
+        if authorization_domain is not None:
+            if not isinstance(authorization_domain, str) or not authorization_domain.strip():
+                raise BrainRunError("authorization_domain must be a non-empty string or None")
+            options["authorization_domain"] = authorization_domain
+        authorization_context = options.get("authorization_context")
+        if authorization_context is not None and not isinstance(
+            authorization_context, AutonomousAuthorizationContext
+        ):
+            raise BrainRunError("mission_options.authorization_context must be an AutonomousAuthorizationContext or None")
+        authorization_domain = options.get("authorization_domain")
+        if authorization_domain is not None and not isinstance(authorization_domain, str):
+            raise BrainRunError("mission_options.authorization_domain must be a string or None")
         if provider_health is not None:
             overrides = options.get("selection_overrides", {})
             if not isinstance(overrides, Mapping):
@@ -4237,6 +5484,7 @@ class AutonomousBrain:
             "contextual_observations",
             "required_capabilities",
             "input_tokens",
+            "context_budget",
             "requested_output_tokens",
             "max_cost_per_million_tokens",
             "max_latency_ms",
@@ -4260,6 +5508,9 @@ class AutonomousBrain:
             "provider_tools",
             "tool_choice",
             "max_provider_failovers",
+            "reserve_cost",
+            "authorization_context",
+            "authorization_domain",
         }
         unknown = sorted(set(options).difference(allowed_options))
         if unknown:
@@ -4277,7 +5528,15 @@ class AutonomousBrain:
         else:
             resolved_query = memory_query
         try:
-            recalled = tuple(store.retrieve(resolved_query, limit=memory_limit))
+            recalled = tuple(
+                self.recall_memory(
+                    resolved_query,
+                    limit=memory_limit,
+                    memory=store,
+                    authorization_context=authorization_context,
+                    authorization_domain=authorization_domain,
+                )
+            )
         except BrainMemoryError as error:
             raise BrainRunError("episodic memory retrieval failed") from error
         base_prompt = self._append_memory_prompt(prompt, recalled)
@@ -4354,11 +5613,45 @@ class AutonomousBrain:
                     "replan_requested": decision.replan_requested,
                 },
                 memory=store,
+                authorization_context=authorization_context,
+                authorization_domain=authorization_domain,
             )
             if trajectory_mode:
                 memory_receipts.append(episode_receipt)
             else:
                 try:
+                    if authorization_context is not None:
+                        memory_domain = authorization_domain
+                        if memory_domain is None and isinstance(context, Mapping):
+                            candidate_domain = context.get("domain")
+                            if isinstance(candidate_domain, str) and candidate_domain.strip():
+                                memory_domain = candidate_domain
+                        if memory_domain is None and isinstance(result.route, Mapping):
+                            selected_domains = result.route.get("selected_domains")
+                            if isinstance(selected_domains, Sequence) and not isinstance(selected_domains, (str, bytes)):
+                                normalized_domains = [item for item in selected_domains if isinstance(item, str)]
+                                if len(normalized_domains) == 1:
+                                    memory_domain = normalized_domains[0]
+                                elif len(normalized_domains) > 1:
+                                    memory_domain = "cross_domain"
+                            if memory_domain is None:
+                                primary_domain = result.route.get("primary_domain")
+                                if isinstance(primary_domain, str) and primary_domain.strip():
+                                    memory_domain = primary_domain
+                        authorization_kwargs: dict[str, Any] = {
+                            "operation": "memory_write",
+                            "resource_digest": content_digest({
+                                "schema": "bioprism-autonomous-memory-authorization-resource/0.1",
+                                "episode_id": episode_id,
+                                "evaluation_digest": content_digest({
+                                    "decision": decision.to_dict(),
+                                    "kind": "evaluation",
+                                }),
+                            }),
+                        }
+                        if memory_domain is not None:
+                            authorization_kwargs["domain"] = memory_domain
+                        authorization_context.authorize_operation(**authorization_kwargs)
                     evaluation_receipt = store.record_evaluation(
                         episode_id,
                         {
@@ -4431,6 +5724,40 @@ class AutonomousBrain:
                     },
                 }
                 try:
+                    if authorization_context is not None:
+                        memory_domain = authorization_domain
+                        if memory_domain is None and isinstance(context, Mapping):
+                            candidate_domain = context.get("domain")
+                            if isinstance(candidate_domain, str) and candidate_domain.strip():
+                                memory_domain = candidate_domain
+                        if memory_domain is None and isinstance(attempts[index].route, Mapping):
+                            selected_domains = attempts[index].route.get("selected_domains")
+                            if isinstance(selected_domains, Sequence) and not isinstance(selected_domains, (str, bytes)):
+                                normalized_domains = [item for item in selected_domains if isinstance(item, str)]
+                                if len(normalized_domains) == 1:
+                                    memory_domain = normalized_domains[0]
+                                elif len(normalized_domains) > 1:
+                                    memory_domain = "cross_domain"
+                            if memory_domain is None:
+                                primary_domain = attempts[index].route.get("primary_domain")
+                                if isinstance(primary_domain, str) and primary_domain.strip():
+                                    memory_domain = primary_domain
+                        authorization_kwargs: dict[str, Any] = {
+                            "operation": "memory_write",
+                            "resource_digest": content_digest({
+                                "schema": "bioprism-autonomous-memory-authorization-resource/0.1",
+                                "episode_id": trajectory.episodes[index].episode_id,
+                                "evaluation_digest": content_digest({
+                                    "decision": decision.to_dict(),
+                                    "kind": "trajectory_evaluation",
+                                    "trajectory_id": trajectory.trajectory_id,
+                                    "trajectory_step": index,
+                                }),
+                            }),
+                        }
+                        if memory_domain is not None:
+                            authorization_kwargs["domain"] = memory_domain
+                        authorization_context.authorize_operation(**authorization_kwargs)
                     evaluation_receipt = store.record_evaluation(
                         trajectory.episodes[index].episode_id,
                         {
@@ -5309,7 +6636,10 @@ class AutonomousBrain:
                 "idempotency_key", "mission_policy", "mission_options", "route_request", "auto_route",
                 "enforce_route_tools", "require_resolved_route", "provider_tools", "tool_choice",
                 "max_provider_failovers", "tool_loop_options", "bandit_state",
-                "accepted_plan_refinement",
+                "accepted_plan_refinement", "response_alignments", "require_response_alignment",
+                "minimum_response_reward", "minimum_response_alignment_confidence",
+                "response_contradiction_confidence_threshold", "retry_synthesis_after_response_review",
+                "completed_synthesis_result",
             }
             unknown_options = sorted(set(options).difference(allowed_options))
             if unknown_options:
@@ -5374,12 +6704,37 @@ class AutonomousBrain:
                     raise BrainRunError(
                         f"rehydrated child result digest does not match the checkpoint for {child_id}"
                     )
+            retry_synthesis_after_review = options.get("retry_synthesis_after_response_review", False)
+            if not isinstance(retry_synthesis_after_review, bool):
+                raise BrainRunError("cross_domain_options.retry_synthesis_after_response_review must be a boolean")
+            raw_synthesis_result = options.get("completed_synthesis_result")
+            if retry_synthesis_after_review:
+                if current.status != "synthesis_response_review_required":
+                    raise BrainRunError("retry_synthesis_after_response_review requires a post-synthesis review checkpoint")
+                if raw_synthesis_result is not None:
+                    raise BrainRunError("retry_synthesis_after_response_review cannot combine with a rehydrated synthesis result")
+                completed_synthesis_result = None
+            elif raw_synthesis_result is not None:
+                if current.status != "synthesis_response_review_required":
+                    raise BrainRunError("completed_synthesis_result is only valid for post-synthesis response review")
+                if not isinstance(raw_synthesis_result, (BrainRunResult, BrainToolLoopResult, BrainMissionResult)):
+                    raise BrainRunError("completed_synthesis_result contains an unsupported result")
+                if not raw_synthesis_result.status.startswith("completed"):
+                    raise BrainRunError("completed_synthesis_result contains an incomplete result")
+                if current.synthesis_result_digest != _autonomous_result_digest(raw_synthesis_result):
+                    raise BrainRunError("rehydrated synthesis result digest does not match the checkpoint")
+                completed_synthesis_result = raw_synthesis_result
+            elif current.status == "synthesis_response_review_required":
+                raise BrainRunError("post-synthesis response review requires completed_synthesis_result or explicit retry")
+            else:
+                completed_synthesis_result = None
             options["accepted_plan_refinement"] = accepted_plan
             options["run_id"] = current.run_id
             options["bandit_state"] = bandit_state
             options["ledger"] = ledger
             options["memory"] = memory if memory is not None else self.memory
             options["completed_child_results"] = completed_results
+            options["completed_synthesis_result"] = completed_synthesis_result
             if approval_released:
                 options["approve_provider_call"] = True
             if provider_health is not None:
@@ -5419,6 +6774,30 @@ class AutonomousBrain:
                     merged_model_health[arm_id] = dict(snapshot)
                 merged_overrides["model_health"] = merged_model_health
                 options["selection_overrides"] = merged_overrides
+            if current.status == "synthesis_response_review_required" and retry_synthesis_after_review:
+                retry_checkpoint = AutonomousCrossDomainCheckpoint(
+                    run_id=current.run_id,
+                    task_digest=current.task_digest,
+                    base_plan_digest=current.base_plan_digest,
+                    execution_child_ids=current.execution_child_ids,
+                    completed_child_ids=current.completed_child_ids,
+                    child_result_digests=current.child_result_digests,
+                    next_child_id=None,
+                    plan_refinement_digest=current.plan_refinement_digest,
+                    synthesis_result_digest=None,
+                    response_assessment_digest=None,
+                    status="synthesis_pending",
+                    generation=current.generation + 1,
+                    previous_checkpoint_digest=current.checkpoint_digest,
+                )
+                store.checkpoint(
+                    job.job_id,
+                    worker_id,
+                    phase="cross_domain_synthesis_response_retry_authorized",
+                    checkpoint=checkpoint_metadata(retry_checkpoint, phase="cross_domain_synthesis_response_retry_authorized"),
+                    side_effect_boundary="preflight",
+                )
+                current = retry_checkpoint
             store.checkpoint(
                 job.job_id,
                 worker_id,
@@ -5436,6 +6815,74 @@ class AutonomousBrain:
             )
             if not isinstance(step_result, AutonomousCrossDomainStepResult):
                 raise BrainRunError("cross-domain durable execution returned an unsupported step")
+            if step_result.status == "response_review_required":
+                assessment = step_result.response_assessment
+                if assessment is None:
+                    raise BrainRunError("cross-domain response review did not return an assessment")
+                if current.status == "response_review_required" and current.response_assessment_digest == assessment.assessment_digest:
+                    review_checkpoint = current
+                else:
+                    review_checkpoint = AutonomousCrossDomainCheckpoint(
+                        run_id=current.run_id,
+                        task_digest=current.task_digest,
+                        base_plan_digest=current.base_plan_digest,
+                        execution_child_ids=current.execution_child_ids,
+                        completed_child_ids=step_result.completed_child_ids,
+                        child_result_digests=step_result.child_result_digests,
+                        next_child_id=None,
+                        plan_refinement_digest=current.plan_refinement_digest,
+                        response_assessment_digest=assessment.assessment_digest,
+                        status="response_review_required",
+                        generation=current.generation + 1,
+                        previous_checkpoint_digest=current.checkpoint_digest,
+                    )
+                    store.checkpoint(
+                        job.job_id,
+                        worker_id,
+                        phase="cross_domain_response_review_required",
+                        checkpoint=checkpoint_metadata(review_checkpoint, phase="cross_domain_response_review_required", step=step_result),
+                        side_effect_boundary="preflight",
+                    )
+                released = store.release(job.job_id, worker_id, reason="response admission requires explicit review before synthesis")
+                return BrainJobRunResult(status="queued", job=released.to_dict(), cycle=None, workflow=step_result)
+            if step_result.status == "synthesis_response_review_required":
+                assessment = step_result.response_assessment
+                synthesis_result = step_result.result
+                if assessment is None or not isinstance(synthesis_result, (BrainRunResult, BrainToolLoopResult, BrainMissionResult)):
+                    raise BrainRunError("post-synthesis response review did not return an assessment and synthesis result")
+                if not synthesis_result.status.startswith("completed"):
+                    raise BrainRunError("post-synthesis response review returned an incomplete synthesis result")
+                synthesis_digest = _autonomous_result_digest(synthesis_result)
+                if current.status == "synthesis_response_review_required" and (
+                    current.synthesis_result_digest == synthesis_digest
+                    and current.response_assessment_digest == assessment.assessment_digest
+                ):
+                    review_checkpoint = current
+                else:
+                    review_checkpoint = AutonomousCrossDomainCheckpoint(
+                        run_id=current.run_id,
+                        task_digest=current.task_digest,
+                        base_plan_digest=current.base_plan_digest,
+                        execution_child_ids=current.execution_child_ids,
+                        completed_child_ids=step_result.completed_child_ids,
+                        child_result_digests=step_result.child_result_digests,
+                        next_child_id=None,
+                        plan_refinement_digest=current.plan_refinement_digest,
+                        synthesis_result_digest=synthesis_digest,
+                        response_assessment_digest=assessment.assessment_digest,
+                        status="synthesis_response_review_required",
+                        generation=current.generation + 1,
+                        previous_checkpoint_digest=current.checkpoint_digest,
+                    )
+                    store.checkpoint(
+                        job.job_id,
+                        worker_id,
+                        phase="cross_domain_synthesis_response_review_required",
+                        checkpoint=checkpoint_metadata(review_checkpoint, phase="cross_domain_synthesis_response_review_required", step=step_result),
+                        side_effect_boundary="preflight",
+                    )
+                released = store.release(job.job_id, worker_id, reason="post-synthesis response review requires explicit resolution or retry")
+                return BrainJobRunResult(status="queued", job=released.to_dict(), cycle=None, workflow=step_result)
             if step_result.status in {"approval_required", "mission_approval_required"}:
                 approval_checkpoint = AutonomousCrossDomainCheckpoint(
                     run_id=current.run_id,
@@ -5549,6 +6996,7 @@ class AutonomousBrain:
                     child_result_digests=step_result.child_result_digests,
                     next_child_id=next_child,
                     plan_refinement_digest=current.plan_refinement_digest,
+                    response_assessment_digest=None,
                     status="synthesis_pending" if is_last_child else "children_pending",
                     generation=current.generation + 1,
                     previous_checkpoint_digest=current.checkpoint_digest,
@@ -5577,6 +7025,7 @@ class AutonomousBrain:
                 next_child_id=None,
                 plan_refinement_digest=current.plan_refinement_digest,
                 synthesis_result_digest=_autonomous_result_digest(step_result.result),
+                response_assessment_digest=None if step_result.response_assessment is None else step_result.response_assessment.assessment_digest,
                 status="completed",
                 generation=current.generation + 1,
                 previous_checkpoint_digest=current.checkpoint_digest,
@@ -5664,6 +7113,7 @@ class AutonomousBrain:
         *,
         task: str,
         model_selection: Mapping[str, Any],
+        selection_override: Mapping[str, Any] | None = None,
         prompt: Mapping[str, Any],
         plan: Mapping[str, Any],
         credentials: Mapping[str, CredentialHandle],
@@ -5679,7 +7129,11 @@ class AutonomousBrain:
         contextual_observations: Sequence[Mapping[str, Any]] = (),
         tools: Sequence[ProviderTool] = (),
         tool_choice: str | None = None,
+        context_budget: AutonomousContextBudgetOptions | Mapping[str, Any] | None = None,
+        reserve_cost: AutonomousCostReservationCallback | None = None,
         invocation_observer: ProviderInvocationObserver | None = None,
+        authorization_context: AutonomousAuthorizationContext | None = None,
+        authorization_domain: str | None = None,
     ) -> BrainRunResult:
         if not isinstance(task, str) or not task.strip():
             raise BrainRunError("task must be a non-empty string")
@@ -5695,7 +7149,29 @@ class AutonomousBrain:
             raise BrainRunError("run_id must be a bounded non-empty string")
         selection_args = dict(model_selection)
         selection_args["task"] = task
-        if context is None:
+        if selection_override is not None:
+            if not isinstance(selection_override, Mapping):
+                raise BrainRunError("selection_override must be a mapping")
+            selection = dict(selection_override)
+            BrainLearningLedger._assert_safe(selection)
+            override_selected = selection.get("selected_model")
+            if not isinstance(override_selected, Mapping):
+                raise BrainRunError("selection_override must contain selected_model metadata")
+            override_provider = override_selected.get("provider")
+            override_model = override_selected.get("model")
+            if not isinstance(override_provider, str) or not override_provider.strip() or not isinstance(override_model, str) or not override_model.strip():
+                raise BrainRunError("selection_override selected_model metadata is malformed")
+            override_models = selection.get("models")
+            if not isinstance(override_models, Sequence) or isinstance(override_models, (str, bytes)):
+                raise BrainRunError("selection_override must contain a model catalogue")
+            if not any(
+                isinstance(candidate, Mapping)
+                and candidate.get("provider") == override_provider
+                and candidate.get("model") == override_model
+                for candidate in override_models
+            ):
+                raise BrainRunError("selection_override selected model is absent from its catalogue")
+        elif context is None:
             if contextual_observations:
                 raise BrainRunError("contextual_observations require a context mapping")
             selection = self.workspace.tool("brain_model_select", selection_args)
@@ -5751,10 +7227,38 @@ class AutonomousBrain:
 
         prompt_args = dict(prompt)
         prompt_args["task"] = task
-        prompt_report = self.workspace.tool("brain_prompt_assemble", prompt_args)
-        messages = prompt_report.get("messages")
-        if not isinstance(messages, list) or not messages:
-            raise BrainRunError("prompt assembly did not produce messages")
+        prompt_override = prompt_args.pop("_provider_messages_override", None)
+        override_metadata: Mapping[str, Any] | None = None
+        if prompt_override is not None:
+            if not isinstance(prompt_override, Mapping):
+                raise BrainRunError("provider prompt override must be a mapping")
+            raw_messages = prompt_override.get("messages")
+            if not isinstance(raw_messages, Sequence) or isinstance(raw_messages, (str, bytes)) or not raw_messages:
+                raise BrainRunError("provider prompt override must contain a non-empty message sequence")
+            if any(not isinstance(message, Mapping) for message in raw_messages):
+                raise BrainRunError("provider prompt override messages must contain mappings")
+            override_metadata_value = prompt_override.get("metadata", {})
+            if not isinstance(override_metadata_value, Mapping):
+                raise BrainRunError("provider prompt override metadata must be a mapping")
+            try:
+                messages = [dict(message) for message in raw_messages]
+                prompt_digest = _json_digest(messages)
+            except (TypeError, ValueError) as error:
+                raise BrainRunError("provider prompt override must be JSON-safe") from error
+            override_metadata = dict(override_metadata_value)
+            prompt_report = {
+                "schema": "bioprism-python-autonomous-prompt-override/0.1",
+                "messages": messages,
+                "prompt_digest": prompt_digest,
+                "autonomous_prompt": override_metadata,
+                "retention": "prompt_messages_transient;digest_only_projection",
+                "secret_material": "never_returned",
+            }
+        else:
+            prompt_report = self.workspace.tool("brain_prompt_assemble", prompt_args)
+            messages = prompt_report.get("messages")
+            if not isinstance(messages, list) or not messages:
+                raise BrainRunError("prompt assembly did not produce messages")
 
         plan_args = dict(plan)
         plan_args.setdefault("objective", task)
@@ -5764,6 +7268,15 @@ class AutonomousBrain:
         planned = plan_report.get("plan")
         if not isinstance(planned, Mapping):
             raise BrainRunError("brain plan reported success without a plan")
+        schedule_fields = {
+            "execution_waves",
+            "critical_path_cost",
+            "max_parallelism",
+            "estimated_parallel_rounds",
+            "peak_parallelism",
+        }
+        if schedule_fields.intersection(planned):
+            validate_brain_plan_schedule(planned)
         if planned.get("requires_approval", False) and not approve_provider_call:
             return self._result(resolved_run_id, "approval_required", selection, prompt_report, plan_report, None)
         if not approve_provider_call and any(
@@ -5774,10 +7287,21 @@ class AutonomousBrain:
 
         handle = credentials.get(provider)
         if self.runtime.provider_requires_credential(provider) and handle is None:
-            raise BrainRunError(f"no user credential handle was supplied for provider {provider!r}")
+            raise CredentialError(f"no user credential handle was supplied for provider {provider!r}")
         if handle is not None and handle.provider != provider:
-            raise BrainRunError(f"credential handle does not belong to provider {provider!r}")
+            raise CredentialError(f"credential handle does not belong to provider {provider!r}")
         provider_messages = _provider_messages_with_content_parts(messages, normalized_content_parts)
+        effective_idempotency_key = idempotency_key
+        if prompt_override is not None:
+            prompt_report = {
+                **prompt_report,
+                "prompt_digest": _json_digest(provider_messages),
+            }
+            effective_idempotency_key = _prompt_bound_idempotency_key(
+                idempotency_key,
+                prompt_digest=prompt_report["prompt_digest"],
+                metadata=override_metadata,
+            )
         request = ProviderRequest(
             model=model,
             messages=provider_messages,
@@ -5785,16 +7309,33 @@ class AutonomousBrain:
             temperature=temperature,
             require_json=require_json,
             response_schema=response_schema,
-            idempotency_key=idempotency_key,
+            idempotency_key=effective_idempotency_key,
             tools=tuple(tools),
             tool_choice=tool_choice,
         )
+        context_budget_projection: Mapping[str, Any] | None = None
+        if context_budget is not None:
+            try:
+                compacted = compact_autonomous_provider_request(request, context_budget)
+            except AutonomousContextBudgetError as error:
+                raise BrainRunError("autonomous provider context budget could not be satisfied") from error
+            request = compacted.request
+            context_budget_projection = compacted.plan.to_dict()
+            prompt_report = {
+                **prompt_report,
+                "messages": [dict(message) for message in request.messages],
+                "context_budget": dict(context_budget_projection),
+                "retention": "provider_messages_transient;context_budget_metadata_only_projection",
+            }
         response = self.runtime.invoke(
             provider,
             request,
             credential=handle,
             invocation_observer=invocation_observer,
             invocation_kind="provider_call",
+            reserve_cost=reserve_cost,
+            authorization_context=authorization_context,
+            authorization_domain=authorization_domain,
         )
         invocations = ()
         if isinstance(invocation_observer, AutonomousProviderInvocationSession):
@@ -5807,6 +7348,7 @@ class AutonomousBrain:
             plan_report,
             response,
             provider_invocations=invocations,
+            context_budget=context_budget_projection,
         )
 
     def run_tool_loop(
@@ -5814,6 +7356,7 @@ class AutonomousBrain:
         *,
         task: str,
         model_selection: Mapping[str, Any],
+        selection_override: Mapping[str, Any] | None = None,
         prompt: Mapping[str, Any],
         plan: Mapping[str, Any],
         credentials: Mapping[str, CredentialHandle],
@@ -5830,6 +7373,8 @@ class AutonomousBrain:
         contextual_observations: Sequence[Mapping[str, Any]] = (),
         provider_tools: Sequence[ProviderTool] = (),
         tool_choice: str | None = None,
+        context_budget: AutonomousContextBudgetOptions | Mapping[str, Any] | None = None,
+        reserve_cost: AutonomousCostReservationCallback | None = None,
         max_turns: int = 4,
         max_tool_calls: int = 128,
         stream: bool = False,
@@ -5845,6 +7390,8 @@ class AutonomousBrain:
         route_report: Mapping[str, Any] | None = None,
         attempt_state: dict[str, Any] | None = None,
         invocation_observer: ProviderInvocationObserver | None = None,
+        authorization_context: AutonomousAuthorizationContext | None = None,
+        authorization_domain: str | None = None,
     ) -> BrainToolLoopResult:
         """Run the planned provider call and continue only through caller-approved tool results.
 
@@ -6011,6 +7558,7 @@ class AutonomousBrain:
         first = self.run(
             task=task,
             model_selection=model_selection,
+            selection_override=selection_override,
             prompt=prompt_request,
             plan=plan,
             credentials=credentials,
@@ -6026,6 +7574,8 @@ class AutonomousBrain:
             contextual_observations=contextual_observations,
             tools=provider_tools,
             tool_choice=tool_choice,
+            context_budget=context_budget,
+            reserve_cost=reserve_cost,
             invocation_observer=invocation_observer,
         )
         if first.status != "completed_provider_call" or first.response is None:
@@ -6043,9 +7593,17 @@ class AutonomousBrain:
         provider_messages = _provider_messages_with_content_parts(prompt_messages, normalized_content_parts)
         handle = credentials.get(provider)
         if self.runtime.provider_requires_credential(provider) and handle is None:
-            raise BrainRunError(f"no user credential handle was supplied for provider {provider!r}")
+            raise CredentialError(f"no user credential handle was supplied for provider {provider!r}")
         if handle is not None and handle.provider != provider:
-            raise BrainRunError(f"credential handle does not belong to provider {provider!r}")
+            raise CredentialError(f"credential handle does not belong to provider {provider!r}")
+        continuation_idempotency_key = idempotency_key
+        if prompt_request.get("_provider_messages_override") is not None:
+            prompt_metadata = first.prompt.get("autonomous_prompt")
+            continuation_idempotency_key = _prompt_bound_idempotency_key(
+                idempotency_key,
+                prompt_digest=first.prompt.get("prompt_digest"),
+                metadata=prompt_metadata if isinstance(prompt_metadata, Mapping) else None,
+            )
         request = ProviderRequest(
             model=model,
             messages=provider_messages,
@@ -6053,7 +7611,7 @@ class AutonomousBrain:
             temperature=temperature,
             require_json=require_json,
             response_schema=response_schema,
-            idempotency_key=idempotency_key,
+            idempotency_key=continuation_idempotency_key,
             tools=tuple(provider_tools),
             tool_choice=tool_choice,
         )
@@ -6068,6 +7626,10 @@ class AutonomousBrain:
             initial_response=first.response,
             invocation_observer=invocation_observer,
             invocation_kind="tool_loop_turn",
+            context_budget=context_budget,
+            reserve_cost=reserve_cost,
+            authorization_context=authorization_context,
+            authorization_domain=authorization_domain,
         )
         if isinstance(invocation_observer, AutonomousProviderInvocationSession):
             first = replace(first, provider_invocations=tuple(invocation_observer.evidence()))
@@ -6473,6 +8035,7 @@ class AutonomousBrain:
         *,
         task: str,
         model_selection: Mapping[str, Any],
+        selection_override: Mapping[str, Any] | None = None,
         prompt: Mapping[str, Any],
         plan: Mapping[str, Any],
         credentials: Mapping[str, CredentialHandle],
@@ -6487,6 +8050,8 @@ class AutonomousBrain:
         claim_requests: Sequence[Mapping[str, Any]] = (),
         context: Mapping[str, Any] | None = None,
         content_parts: Sequence[ProviderContentPart | Mapping[str, Any]] | None = None,
+        context_budget: AutonomousContextBudgetOptions | Mapping[str, Any] | None = None,
+        reserve_cost: AutonomousCostReservationCallback | None = None,
         contextual_observations: Sequence[Mapping[str, Any]] = (),
         evaluator_review: Mapping[str, Any] | None = None,
         workflow_binding: Mapping[str, Any] | None = None,
@@ -6500,6 +8065,8 @@ class AutonomousBrain:
         provider_tools: Sequence[ProviderTool] = (),
         tool_choice: str | None = None,
         invocation_observer: ProviderInvocationObserver | None = None,
+        authorization_context: AutonomousAuthorizationContext | None = None,
+        authorization_domain: str | None = None,
     ) -> BrainMissionResult:
         """Run a model decision through the existing bounded mission executor.
 
@@ -6649,6 +8216,7 @@ class AutonomousBrain:
         brain_run = self.run(
             task=task,
             model_selection=model_selection,
+            selection_override=selection_override,
             prompt=prompt_request,
             plan=plan,
             credentials=credentials,
@@ -6661,10 +8229,14 @@ class AutonomousBrain:
             idempotency_key=idempotency_key,
             context=context,
             content_parts=content_parts,
+            context_budget=context_budget,
+            reserve_cost=reserve_cost,
             contextual_observations=contextual_observations,
             tools=provider_tools,
             tool_choice=tool_choice,
             invocation_observer=invocation_observer,
+            authorization_context=authorization_context,
+            authorization_domain=authorization_domain,
         )
         if brain_run.status != "completed_provider_call" or brain_run.response is None:
             return BrainMissionResult(
@@ -6779,6 +8351,9 @@ class AutonomousBrain:
         response: ProviderResponse | None,
         *,
         provider_invocations: Sequence[Mapping[str, Any]] = (),
+        continuation_plan: Mapping[str, Any] | None = None,
+        provider_failover: Mapping[str, Any] | None = None,
+        context_budget: Mapping[str, Any] | None = None,
     ) -> BrainRunResult:
         digest_input = {
             "status": status,
@@ -6806,7 +8381,10 @@ class AutonomousBrain:
             plan=plan,
             response=response,
             outcome_digest=hashlib.sha256(encoded).hexdigest(),
+            provider_failover=None if provider_failover is None else dict(provider_failover),
             provider_invocations=tuple(dict(receipt) for receipt in provider_invocations),
+            continuation_plan=None if continuation_plan is None else dict(continuation_plan),
+            context_budget=None if context_budget is None else dict(context_budget),
         )
 
 
@@ -7177,18 +8755,44 @@ class BrainOutcomeEvaluator:
         *,
         evaluator_id: str,
         evaluator_version: str,
+        authorization_context: AutonomousAuthorizationContext | None = None,
     ) -> None:
         if not callable(evaluator):
             raise BrainRunError("evaluator must be callable")
         self.evaluator = evaluator
         self.evaluator_id = evaluator_id
         self.evaluator_version = evaluator_version
+        self.authorization_context = authorization_context
         BrainEvaluatorDecision(
             evaluator_id=evaluator_id,
             evaluator_version=evaluator_version,
             reward=0.0,
             passed=False,
         )
+
+    def _authorize(self, *, operation: str, evaluation_input: Mapping[str, Any], decision_digest: str | None = None) -> None:
+        if self.authorization_context is None:
+            return
+        context = evaluation_input.get("context")
+        kwargs: dict[str, Any] = {
+            "operation": operation,
+            "resource_digest": _json_digest({
+                "schema": "bioprism-autonomous-evaluation-authorization-resource/0.1"
+                if operation == "evaluation"
+                else "bioprism-autonomous-learning-authorization-resource/0.1",
+                "run_id": evaluation_input.get("run_id"),
+                "result_kind": evaluation_input.get("result_kind"),
+                "outcome_digest": evaluation_input.get(
+                    "learning_outcome_digest", evaluation_input.get("outcome_digest")
+                ),
+                "context_digest": evaluation_input.get("context_digest"),
+                "evidence_digest": evaluation_input.get("evidence_digest"),
+                "decision_digest": decision_digest,
+            }),
+        }
+        if isinstance(context, Mapping) and isinstance(context.get("domain"), str):
+            kwargs["domain"] = context["domain"]
+        self.authorization_context.authorize_operation(**kwargs)
 
     def assess(
         self,
@@ -7200,6 +8804,7 @@ class BrainOutcomeEvaluator:
         return self._assess_input(evaluation_input)
 
     def _assess_input(self, evaluation_input: Mapping[str, Any]) -> BrainEvaluatorDecision:
+        self._authorize(operation="evaluation", evaluation_input=evaluation_input)
         try:
             raw_decision = self.evaluator(evaluation_input)
         except Exception as error:
@@ -7295,6 +8900,11 @@ class BrainOutcomeEvaluator:
             evidence=evidence,
         )
         decision = self._assess_input(evaluation_input)
+        self._authorize(
+            operation="learning",
+            evaluation_input=evaluation_input,
+            decision_digest=_json_digest(decision.to_dict()),
+        )
         replay = {
             "schema": BRAIN_EVALUATOR_REPLAY_SCHEMA,
             "episode_id": normalized_episode.episode_id,
@@ -7366,6 +8976,11 @@ class BrainOutcomeEvaluator:
             decision.evidence_digest is None and expected_evidence_digest is None
         ):
             raise BrainRunError("learning decision evidence_digest does not match the episode")
+        self._authorize(
+            operation="learning",
+            evaluation_input=evaluation_input,
+            decision_digest=_json_digest(decision.to_dict()),
+        )
         replay = {
             "schema": BRAIN_EVALUATOR_REPLAY_SCHEMA,
             "episode_id": normalized_episode.episode_id,
@@ -7528,6 +9143,14 @@ class BrainOutcomeEvaluator:
         for index, (episode, decision, evaluation_input, credited_reward) in enumerate(
             zip(normalized.episodes, decisions, evaluation_inputs, credited_rewards)
         ):
+            self._authorize(
+                operation="learning",
+                evaluation_input=evaluation_input,
+                decision_digest=_json_digest({
+                    "decision": decision.to_dict(),
+                    "credited_reward": credited_reward,
+                }),
+            )
             replay = {
                 "schema": BRAIN_EVALUATOR_REPLAY_SCHEMA,
                 "episode_id": episode.episode_id,
@@ -7615,6 +9238,11 @@ class BrainOutcomeEvaluator:
             raise BrainRunError("brain must be an AutonomousBrain")
         evaluation_input = build_brain_evaluation_input(result, evidence=evidence)
         decision = self._assess_input(evaluation_input)
+        self._authorize(
+            operation="learning",
+            evaluation_input=evaluation_input,
+            decision_digest=_json_digest(decision.to_dict()),
+        )
         replay = {
             "schema": BRAIN_EVALUATOR_REPLAY_SCHEMA,
             "result_kind": evaluation_input["result_kind"],
@@ -7797,6 +9425,7 @@ class AutonomousEvaluatorMesh(BrainOutcomeEvaluator):
         evaluator_id: str = "python-evaluator-mesh",
         evaluator_version: str = "0.1",
         max_reward_spread: float = 0.1,
+        authorization_context: AutonomousAuthorizationContext | None = None,
     ) -> None:
         if not isinstance(members, Sequence) or isinstance(members, (str, bytes)) or not 2 <= len(members) <= 8:
             raise BrainRunError("evaluator mesh requires between 2 and 8 independent members")
@@ -7814,6 +9443,7 @@ class AutonomousEvaluatorMesh(BrainOutcomeEvaluator):
             lambda _input: {"reward": 0.0, "passed": False},
             evaluator_id=evaluator_id,
             evaluator_version=evaluator_version,
+            authorization_context=authorization_context,
         )
 
     @staticmethod
@@ -7835,6 +9465,7 @@ class AutonomousEvaluatorMesh(BrainOutcomeEvaluator):
     def _evaluate_input(self, evaluation_input: Mapping[str, Any]) -> AutonomousEvaluatorMeshResult:
         if not isinstance(evaluation_input, Mapping):
             raise BrainRunError("evaluator mesh input must be a mapping")
+        self._authorize(operation="evaluation", evaluation_input=evaluation_input)
         expected_evidence_digest = evaluation_input.get("evidence_digest")
         if expected_evidence_digest is not None and not _valid_digest(expected_evidence_digest):
             raise BrainRunError("evaluator mesh input evidence_digest is malformed")

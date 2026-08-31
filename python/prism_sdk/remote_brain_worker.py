@@ -15,10 +15,16 @@ import hashlib
 import inspect
 import json
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Awaitable, Callable, Mapping, Protocol, Sequence
 
 from .brain import BrainRunError
 from .brain_api import AsyncBrainControlClient, BrainControlClient
+from .autonomous_action_execution import AutonomousActionAdmission
+from .autonomous_action_plan import AutonomousActionPlan
+from .autonomous_action_admission_controller import validate_autonomous_action_dispatch_handoff
+from .autonomous_protected_rehydration import AutonomousProtectedRehydrationAdapter
+from .autonomous_effects import AutonomousProviderEffectReconciliationCoordinator
 
 
 AUTONOMOUS_REMOTE_BRAIN_WORKER_SCHEMA = "bioprism-python-autonomous-remote-brain-worker/0.1"
@@ -86,6 +92,9 @@ class RemoteBrainJobSubmission:
     mode: str
     plan_digest: str | None = None
     route_digest: str | None = None
+    action_plan_digest: str | None = None
+    action_admission_digest: str | None = None
+    action_handoff_digest: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -96,6 +105,9 @@ class RemoteBrainJobSubmission:
             "mode": self.mode,
             "plan_digest": self.plan_digest,
             "route_digest": self.route_digest,
+            "action_plan_digest": self.action_plan_digest,
+            "action_admission_digest": self.action_admission_digest,
+            "action_handoff_digest": self.action_handoff_digest,
             "private_spec": "caller_owned;request_and_execution_kwargs_not_sent_to_control_plane",
             "secret_material": "never_returned",
         }
@@ -113,6 +125,7 @@ class RemoteBrainJobRun:
     failure_code: str | None = None
     error_retryable: bool | None = None
     result_digest: str | None = None
+    effect_reconciliation: Mapping[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -127,6 +140,7 @@ class RemoteBrainJobRun:
             "error_class": self.error_class,
             "failure_code": self.failure_code,
             "error_retryable": self.error_retryable,
+            **({"effect_reconciliation": dict(self.effect_reconciliation)} if self.effect_reconciliation is not None else {}),
             "retention": "remote_job_metadata_only;brain_result_transient_to_caller",
             "secret_material": "never_returned",
         }
@@ -144,6 +158,9 @@ class RemoteBrainJobBatch:
     retry_scheduled_count: int
     reconciliation_count: int
     failed_count: int
+    requested_count: int = 0
+    max_parallelism: int = 1
+    stopped_on_non_terminal: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -156,6 +173,9 @@ class RemoteBrainJobBatch:
             "retry_scheduled_count": self.retry_scheduled_count,
             "reconciliation_count": self.reconciliation_count,
             "failed_count": self.failed_count,
+            "requested_count": self.requested_count,
+            "max_parallelism": self.max_parallelism,
+            "stopped_on_non_terminal": self.stopped_on_non_terminal,
             "batch_digest": _digest_json([
                 {
                     "job_id": run.job.get("job_id"),
@@ -181,6 +201,9 @@ class RemoteBrainJobResolution:
     policy_digest: str | None = None
     plan_digest: str | None = None
     route_digest: str | None = None
+    action_plan: AutonomousActionPlan | Mapping[str, Any] | None = None
+    action_admission: AutonomousActionAdmission | Mapping[str, Any] | None = None
+    action_handoff: Mapping[str, Any] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -353,6 +376,131 @@ RemoteBrainJobResolver = Callable[[Mapping[str, Any]], RemoteBrainJobResolution 
 AsyncRemoteBrainJobResolver = Callable[[Mapping[str, Any]], Any]
 
 
+@dataclass(frozen=True, slots=True)
+class RemoteBrainProtectedRehydrationContext:
+    """Metadata-only identity presented to a protected remote-job receipt resolver."""
+
+    job_id: str
+    spec_digest: str
+    domain: str
+    capability: str
+    attempt: int
+    approval_released: bool
+
+    def __post_init__(self) -> None:
+        _validate_identifier("protected remote brain job_id", self.job_id)
+        _validate_digest("protected remote brain spec_digest", self.spec_digest)
+        _validate_identifier("protected remote brain domain", self.domain)
+        _validate_identifier("protected remote brain capability", self.capability)
+        if not isinstance(self.attempt, int) or isinstance(self.attempt, bool) or self.attempt < 1:
+            raise RemoteBrainWorkerError("protected remote brain attempt must be a positive integer")
+        if not isinstance(self.approval_released, bool):
+            raise RemoteBrainWorkerError("protected remote brain approval_released must be boolean")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "job_id": self.job_id,
+            "spec_digest": self.spec_digest,
+            "domain": self.domain,
+            "capability": self.capability,
+            "attempt": self.attempt,
+            "approval_released": self.approval_released,
+        }
+
+
+RemoteBrainProtectedReceiptResolver = Callable[
+    [RemoteBrainProtectedRehydrationContext],
+    Mapping[str, Any] | Awaitable[Mapping[str, Any]],
+]
+
+
+@dataclass(frozen=True, slots=True)
+class RemoteBrainProtectedRehydration:
+    """Rehydrate a private job resolution from a caller-owned protected receipt.
+
+    The worker stores neither the receipt nor the returned resolution.  The receipt resolver is
+    given only durable metadata and must return a short-lived receipt whose identity exactly
+    matches that metadata before the shared protected boundary releases the value.
+    """
+
+    adapter: AutonomousProtectedRehydrationAdapter
+    receipt_resolver: RemoteBrainProtectedReceiptResolver
+    value_decoder: Callable[[Any], Any] | None = None
+    domain: str | None = None
+    purpose: str = "remote_brain_job_resolution"
+    value_kind: str = "remote_brain_job_resolution"
+    one_time: bool = False
+    digest_scheme: str = "canonical_json"
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.adapter, AutonomousProtectedRehydrationAdapter):
+            raise RemoteBrainWorkerError("protected remote brain rehydration requires a protected receipt adapter")
+        if not callable(self.receipt_resolver):
+            raise RemoteBrainWorkerError("protected remote brain receipt_resolver must be callable")
+        if self.value_decoder is not None and not callable(self.value_decoder):
+            raise RemoteBrainWorkerError("protected remote brain value_decoder must be callable")
+        if self.domain is not None:
+            _validate_identifier("protected remote brain domain", self.domain)
+        _validate_identifier("protected remote brain purpose", self.purpose)
+        _validate_identifier("protected remote brain value_kind", self.value_kind)
+        if self.digest_scheme not in {"canonical_json", "utf8_sha256"}:
+            raise RemoteBrainWorkerError("protected remote brain digest_scheme is unsupported")
+        if not isinstance(self.one_time, bool):
+            raise RemoteBrainWorkerError("protected remote brain one_time must be boolean")
+
+    @staticmethod
+    def _assert_receipt_identity(receipt: Mapping[str, Any], context: RemoteBrainProtectedRehydrationContext) -> None:
+        if not isinstance(receipt, Mapping):
+            raise RemoteBrainWorkerError("protected remote brain receipt_resolver must return a mapping", code="protocol")
+        expected = context.to_dict()
+        for key, value in expected.items():
+            if receipt.get(key) != value:
+                raise RemoteBrainWorkerError(
+                    f"protected remote brain receipt {key} does not match the durable job",
+                    code="protocol",
+                )
+
+    def _resolve_receipt(self, receipt: Mapping[str, Any], context: RemoteBrainProtectedRehydrationContext) -> Any:
+        self._assert_receipt_identity(receipt, context)
+        if self.domain is not None and self.domain != context.domain:
+            raise RemoteBrainWorkerError("protected remote brain configured domain does not match the durable job", code="protocol")
+        try:
+            value = self.adapter.resolve_receipt(
+                receipt,
+                domain=self.domain or context.domain,
+                purpose=self.purpose,
+                value_kind=self.value_kind,
+                one_time=self.one_time,
+                digest_scheme=self.digest_scheme,
+            )
+            return self.value_decoder(value) if self.value_decoder is not None else value
+        except RemoteBrainWorkerError:
+            raise
+        except Exception as error:
+            raise RemoteBrainWorkerError("protected remote brain receipt could not be resolved", code="rehydration") from error
+
+    def resolve(self, context: RemoteBrainProtectedRehydrationContext) -> Any:
+        if not isinstance(context, RemoteBrainProtectedRehydrationContext):
+            raise RemoteBrainWorkerError("protected remote brain rehydration context is malformed")
+        receipt = self.receipt_resolver(context)
+        if inspect.isawaitable(receipt):
+            raise RemoteBrainWorkerError("async protected remote brain receipt resolver requires the async worker", code="configuration")
+        return self._resolve_receipt(receipt, context)
+
+    async def resolve_async(self, context: RemoteBrainProtectedRehydrationContext) -> Any:
+        if not isinstance(context, RemoteBrainProtectedRehydrationContext):
+            raise RemoteBrainWorkerError("protected remote brain rehydration context is malformed")
+        try:
+            receipt = self.receipt_resolver(context)
+            if inspect.isawaitable(receipt):
+                receipt = await receipt
+            return self._resolve_receipt(receipt, context)
+        except RemoteBrainWorkerError:
+            raise
+        except Exception as error:
+            raise RemoteBrainWorkerError("protected remote brain receipt could not be resolved", code="rehydration") from error
+
+
 def _digest_json(value: Any) -> str:
     try:
         encoded = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
@@ -395,6 +543,9 @@ def autonomous_remote_brain_job_spec_digest(
     policy_digest: str | None = None,
     plan_digest: str | None = None,
     route_digest: str | None = None,
+    action_plan_digest: str | None = None,
+    action_admission_digest: str | None = None,
+    action_handoff_digest: str | None = None,
 ) -> str:
     """Bind request/mode/policy and optional reviewed identities without retaining private values.
 
@@ -409,6 +560,13 @@ def autonomous_remote_brain_job_spec_digest(
     policy_digest = _validate_optional_digest("policy_digest", policy_digest)
     plan_digest = _validate_optional_digest("plan_digest", plan_digest)
     route_digest = _validate_optional_digest("route_digest", route_digest)
+    action_plan_digest = _validate_optional_digest("action_plan_digest", action_plan_digest)
+    action_admission_digest = _validate_optional_digest("action_admission_digest", action_admission_digest)
+    action_handoff_digest = _validate_optional_digest("action_handoff_digest", action_handoff_digest)
+    if action_admission_digest is not None and action_plan_digest is None:
+        raise RemoteBrainWorkerError("action_admission_digest requires action_plan_digest")
+    if action_handoff_digest is not None and (action_plan_digest is None or action_admission_digest is None):
+        raise RemoteBrainWorkerError("action_handoff_digest requires action plan and admission digests")
     payload: dict[str, Any] = {
         "schema": AUTONOMOUS_REMOTE_BRAIN_JOB_SPEC_SCHEMA,
         "mode": mode,
@@ -419,7 +577,35 @@ def autonomous_remote_brain_job_spec_digest(
         payload["plan_digest"] = plan_digest
     if route_digest is not None:
         payload["route_digest"] = route_digest
+    if action_plan_digest is not None:
+        payload["action_plan_digest"] = action_plan_digest
+    if action_admission_digest is not None:
+        payload["action_admission_digest"] = action_admission_digest
+    if action_handoff_digest is not None:
+        payload["action_handoff_digest"] = action_handoff_digest
     return _digest_json(payload)
+
+
+def autonomous_remote_brain_job_spec_digest_for_handoff(
+    *,
+    request: Mapping[str, Any],
+    mode: str,
+    action_handoff: Mapping[str, Any],
+    policy_digest: str | None = None,
+) -> str:
+    """Compute a durable job identity from a validated dispatch handoff."""
+
+    handoff = _action_handoff_value(action_handoff)
+    if handoff is None:
+        raise RemoteBrainWorkerError("action_handoff must be a metadata mapping", code="protocol")
+    return autonomous_remote_brain_job_spec_digest(
+        request=request,
+        mode=mode,
+        policy_digest=policy_digest,
+        action_plan_digest=handoff["plan_digest"],
+        action_admission_digest=handoff["admission_digest"],
+        action_handoff_digest=handoff["handoff_digest"],
+    )
 
 
 def _bounded_json(name: str, value: Any, maximum: int) -> Any:
@@ -455,6 +641,24 @@ def _validate_mode(value: Any) -> str:
     if value not in REMOTE_BRAIN_MODES:
         raise RemoteBrainWorkerError("remote brain job mode is unsupported")
     return str(value)
+
+
+def _validate_batch_options(
+    *,
+    limit: Any,
+    max_parallelism: Any,
+    continue_on_non_terminal: Any,
+    label: str,
+) -> tuple[int, int, bool]:
+    """Validate finite worker draining controls shared by sync and async implementations."""
+
+    if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= MAX_AUTONOMOUS_REMOTE_BRAIN_WORKER_BATCH:
+        raise RemoteBrainWorkerError(f"{label} limit must be within [1, {MAX_AUTONOMOUS_REMOTE_BRAIN_WORKER_BATCH}]")
+    if not isinstance(max_parallelism, int) or isinstance(max_parallelism, bool) or not 1 <= max_parallelism <= min(limit, MAX_AUTONOMOUS_REMOTE_BRAIN_WORKER_BATCH):
+        raise RemoteBrainWorkerError(f"{label} max_parallelism must be within [1, {min(limit, MAX_AUTONOMOUS_REMOTE_BRAIN_WORKER_BATCH)}]")
+    if not isinstance(continue_on_non_terminal, bool):
+        raise RemoteBrainWorkerError(f"{label} continue_on_non_terminal must be boolean")
+    return limit, max_parallelism, continue_on_non_terminal
 
 
 def _assert_no_private_fields(value: Any, depth: int = 0) -> None:
@@ -522,6 +726,46 @@ def _mapping_value(value: Any, key: str) -> Any:
     return getattr(value, key, None)
 
 
+def _action_plan_value(value: Any) -> AutonomousActionPlan | None:
+    if value is None:
+        return None
+    if isinstance(value, AutonomousActionPlan):
+        return value
+    if not isinstance(value, Mapping):
+        raise RemoteBrainWorkerError("remote brain action_plan must be metadata mapping", code="protocol")
+    _assert_no_private_fields(value)
+    try:
+        return AutonomousActionPlan.from_dict(value)
+    except Exception as error:
+        raise RemoteBrainWorkerError("remote brain action_plan metadata is invalid", code="protocol") from error
+
+
+def _action_admission_value(value: Any) -> AutonomousActionAdmission | None:
+    if value is None:
+        return None
+    if isinstance(value, AutonomousActionAdmission):
+        return value
+    if not isinstance(value, Mapping):
+        raise RemoteBrainWorkerError("remote brain action_admission must be metadata mapping", code="protocol")
+    _assert_no_private_fields(value)
+    try:
+        return AutonomousActionAdmission.from_dict(value)
+    except Exception as error:
+        raise RemoteBrainWorkerError("remote brain action_admission metadata is invalid", code="protocol") from error
+
+
+def _action_handoff_value(value: Any) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    if not isinstance(value, Mapping):
+        raise RemoteBrainWorkerError("remote brain action_handoff must be metadata mapping", code="protocol")
+    _assert_no_private_fields(value)
+    try:
+        return validate_autonomous_action_dispatch_handoff(value)
+    except Exception as error:
+        raise RemoteBrainWorkerError("remote brain action_handoff metadata is invalid", code="protocol") from error
+
+
 class RemoteBrainJobWorker:
     """Pull and execute private Python brain requests through a remote job control plane.
 
@@ -549,11 +793,13 @@ class RemoteBrainJobWorker:
         control: BrainControlClient,
         *,
         worker_id: str,
-        resolver: RemoteBrainJobResolver,
+        resolver: RemoteBrainJobResolver | None = None,
+        protected_rehydration: RemoteBrainProtectedRehydration | None = None,
         lease_ms: int = 300_000,
         heartbeat_ms: int | None = None,
         retry_preflight_failures: bool = True,
         credential_scope: RemoteBrainCredentialScope | None = None,
+        effect_reconciliation: AutonomousProviderEffectReconciliationCoordinator | None = None,
     ) -> None:
         if brain is None:
             raise RemoteBrainWorkerError("remote brain worker requires a brain facade")
@@ -561,11 +807,16 @@ class RemoteBrainJobWorker:
             raise RemoteBrainWorkerError("remote brain facade does not expose every supported execution mode")
         if not isinstance(control, BrainControlClient):
             raise RemoteBrainWorkerError("remote brain worker requires a BrainControlClient")
-        if not callable(resolver):
+        if resolver is not None and not callable(resolver):
             raise RemoteBrainWorkerError("remote brain resolver must be callable")
+        if protected_rehydration is not None and not isinstance(protected_rehydration, RemoteBrainProtectedRehydration):
+            raise RemoteBrainWorkerError("remote brain protected_rehydration is malformed")
+        if resolver is None and protected_rehydration is None:
+            raise RemoteBrainWorkerError("remote brain worker requires resolver or protected_rehydration")
         self.brain = brain
         self.control = control
         self.resolver = resolver
+        self.protected_rehydration = protected_rehydration
         self.worker_id = _validate_identifier("remote brain worker_id", worker_id)
         if not isinstance(lease_ms, int) or isinstance(lease_ms, bool) or not 100 <= lease_ms <= MAX_AUTONOMOUS_REMOTE_BRAIN_WORKER_LEASE_MS:
             raise RemoteBrainWorkerError("remote brain lease_ms is outside its bounds")
@@ -578,8 +829,22 @@ class RemoteBrainJobWorker:
             raise RemoteBrainWorkerError("remote brain retry_preflight_failures must be boolean")
         if credential_scope is not None and not callable(getattr(credential_scope, "open", None)):
             raise RemoteBrainWorkerError("remote brain credential_scope must expose open(context)")
+        if effect_reconciliation is not None and not isinstance(effect_reconciliation, AutonomousProviderEffectReconciliationCoordinator):
+            raise RemoteBrainWorkerError("remote brain effect_reconciliation is malformed")
         self.retry_preflight_failures = retry_preflight_failures
         self.credential_scope = credential_scope
+        self.effect_reconciliation = effect_reconciliation
+
+    def reconcile_effects(self) -> Mapping[str, Any] | None:
+        """Run or return the cached restart reconciliation admission for this worker lifecycle."""
+
+        return None if self.effect_reconciliation is None else self.effect_reconciliation.admit()
+
+    def reset_effect_reconciliation(self) -> None:
+        """Re-open the caller-owned reconciliation cycle after resolving external state."""
+
+        if self.effect_reconciliation is not None:
+            self.effect_reconciliation.reset()
 
     def submit(
         self,
@@ -593,6 +858,9 @@ class RemoteBrainJobWorker:
         policy_digest: str | None = None,
         plan_digest: str | None = None,
         route_digest: str | None = None,
+        action_plan_digest: str | None = None,
+        action_admission_digest: str | None = None,
+        action_handoff_digest: str | None = None,
         priority: int = 0,
         max_attempts: int = 3,
         checkpoint_digest: str | None = None,
@@ -609,6 +877,9 @@ class RemoteBrainJobWorker:
         policy_digest = _validate_optional_digest("policy_digest", policy_digest)
         plan_digest = _validate_optional_digest("plan_digest", plan_digest)
         route_digest = _validate_optional_digest("route_digest", route_digest)
+        action_plan_digest = _validate_optional_digest("action_plan_digest", action_plan_digest)
+        action_admission_digest = _validate_optional_digest("action_admission_digest", action_admission_digest)
+        action_handoff_digest = _validate_optional_digest("action_handoff_digest", action_handoff_digest)
         checkpoint_digest = _validate_optional_digest("checkpoint_digest", checkpoint_digest)
         spec_digest = autonomous_remote_brain_job_spec_digest(
             request=request,
@@ -616,6 +887,9 @@ class RemoteBrainJobWorker:
             policy_digest=policy_digest,
             plan_digest=plan_digest,
             route_digest=route_digest,
+            action_plan_digest=action_plan_digest,
+            action_admission_digest=action_admission_digest,
+            action_handoff_digest=action_handoff_digest,
         )
         payload = self.control.submit_job({
             "idempotency_key": idempotency_key,
@@ -634,6 +908,51 @@ class RemoteBrainJobWorker:
             mode=mode,
             plan_digest=plan_digest,
             route_digest=route_digest,
+            action_plan_digest=action_plan_digest,
+            action_admission_digest=action_admission_digest,
+            action_handoff_digest=action_handoff_digest,
+        )
+
+    def submit_handoff(
+        self,
+        *,
+        idempotency_key: str,
+        request: Mapping[str, Any],
+        mode: str,
+        domain: str,
+        capability: str,
+        risk_class: str,
+        action_handoff: Mapping[str, Any],
+        policy_digest: str | None = None,
+        plan_digest: str | None = None,
+        route_digest: str | None = None,
+        priority: int = 0,
+        max_attempts: int = 3,
+        checkpoint_digest: str | None = None,
+    ) -> RemoteBrainJobSubmission:
+        """Submit a job whose action identity is derived from one verified handoff."""
+
+        handoff = _action_handoff_value(action_handoff)
+        if handoff is None:
+            raise RemoteBrainWorkerError("action_handoff must be a metadata mapping", code="protocol")
+        if plan_digest is not None and plan_digest != handoff["plan_digest"]:
+            raise RemoteBrainWorkerError("plan_digest does not match the verified action handoff", code="protocol")
+        return self.submit(
+            idempotency_key=idempotency_key,
+            request=request,
+            mode=mode,
+            domain=domain,
+            capability=capability,
+            risk_class=risk_class,
+            policy_digest=policy_digest,
+            plan_digest=plan_digest,
+            route_digest=route_digest,
+            action_plan_digest=handoff["plan_digest"],
+            action_admission_digest=handoff["admission_digest"],
+            action_handoff_digest=handoff["handoff_digest"],
+            priority=priority,
+            max_attempts=max_attempts,
+            checkpoint_digest=checkpoint_digest,
         )
 
     def status(self, job_id: str) -> Mapping[str, Any]:
@@ -681,6 +1000,9 @@ class RemoteBrainJobWorker:
         return dict(payload)
 
     def run_once(self, job_id: str | None = None) -> RemoteBrainJobRun | None:
+        effect_reconciliation = self.reconcile_effects()
+        if effect_reconciliation is not None and effect_reconciliation.get("status") == "blocked":
+            raise RemoteBrainWorkerError("remote brain worker effect reconciliation admission is blocked")
         if job_id is None:
             claimed_payload = self.control.claim_next_job({"worker_id": self.worker_id, "lease_ms": self.lease_ms})
             _assert_no_private_fields(claimed_payload)
@@ -727,7 +1049,7 @@ class RemoteBrainJobWorker:
                 # lease needed to attach that request.
                 self._checkpoint(job["job_id"], "provider_approval_required", "preflight", {"spec_digest": job["spec_digest"], "mode": resolution.mode})
                 parked = self._request_approval(job["job_id"], reason="provider approval is required before dispatch")
-                return RemoteBrainJobRun(status="waiting_approval", job=parked, mode=resolution.mode)
+                return RemoteBrainJobRun(status="waiting_approval", job=parked, mode=resolution.mode, effect_reconciliation=effect_reconciliation)
             if self.credential_scope is not None:
                 _assert_scope_resolution_clean(resolution)
                 opened = self.credential_scope.open({
@@ -753,17 +1075,17 @@ class RemoteBrainJobWorker:
             if status in _APPROVAL_STATUSES:
                 self._checkpoint(job["job_id"], status, "unknown", {"result_digest": result_digest})
                 parked = self._request_approval(job["job_id"], reason="brain execution requires caller approval before continuing")
-                return RemoteBrainJobRun(status="waiting_approval", job=parked, mode=resolution.mode, result=result, result_digest=result_digest)
+                return RemoteBrainJobRun(status="waiting_approval", job=parked, mode=resolution.mode, result=result, result_digest=result_digest, effect_reconciliation=effect_reconciliation)
             if status == "reconciliation_required":
                 self._checkpoint(job["job_id"], status, "unknown", {"result_digest": result_digest})
                 failed = self._fail(job["job_id"], "remote brain execution requires caller reconciliation", retryable=False)
-                return RemoteBrainJobRun(status="reconciliation_required", job=failed, mode=resolution.mode, result=result, result_digest=result_digest)
+                return RemoteBrainJobRun(status="reconciliation_required", job=failed, mode=resolution.mode, result=result, result_digest=result_digest, effect_reconciliation=effect_reconciliation)
             if _is_success_status(status):
                 completed = self._complete(job["job_id"], result_digest)
-                return RemoteBrainJobRun(status="succeeded", job=completed, mode=resolution.mode, result=result, result_digest=result_digest)
+                return RemoteBrainJobRun(status="succeeded", job=completed, mode=resolution.mode, result=result, result_digest=result_digest, effect_reconciliation=effect_reconciliation)
             self._checkpoint(job["job_id"], f"terminal_{status}", "unknown", {"result_digest": result_digest})
             failed = self._fail(job["job_id"], f"remote brain execution ended with {status}", retryable=False)
-            return RemoteBrainJobRun(status="reconciliation_required" if failed.get("state") == "reconciliation_required" else "failed", job=failed, mode=resolution.mode, result=result, result_digest=result_digest)
+            return RemoteBrainJobRun(status="reconciliation_required" if failed.get("state") == "reconciliation_required" else "failed", job=failed, mode=resolution.mode, result=result, result_digest=result_digest, effect_reconciliation=effect_reconciliation)
         except Exception as error:
             error_class, failure_code, error_retryable = _error_projection(error)
             try:
@@ -771,7 +1093,7 @@ class RemoteBrainJobWorker:
                 self._checkpoint(job["job_id"], "worker_execution_error", "unknown" if started else "preflight", {"error_class": error_class, "failure_code": failure_code})
                 failed = self._fail(job["job_id"], "remote brain execution outcome is uncertain; reconciliation required" if started else "remote brain execution failed before dispatch", retryable=retryable)
                 status = "reconciliation_required" if failed.get("state") == "reconciliation_required" else "retry_scheduled" if failed.get("state") == "queued" else "failed"
-                return RemoteBrainJobRun(status=status, job=failed, mode=None if resolution is None else resolution.mode, error_class=error_class, failure_code=failure_code, error_retryable=error_retryable, result_digest=None)
+                return RemoteBrainJobRun(status=status, job=failed, mode=None if resolution is None else resolution.mode, error_class=error_class, failure_code=failure_code, error_retryable=error_retryable, result_digest=None, effect_reconciliation=effect_reconciliation)
             except Exception as settlement_error:
                 raise RemoteBrainWorkerError("remote brain worker failure could not be settled", code="configuration") from settlement_error
         finally:
@@ -780,32 +1102,87 @@ class RemoteBrainJobWorker:
             if credential_binding is not None:
                 credential_binding.close()
 
-    def run(self, *, limit: int = 1) -> RemoteBrainJobBatch:
-        if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= MAX_AUTONOMOUS_REMOTE_BRAIN_WORKER_BATCH:
-            raise RemoteBrainWorkerError(f"remote brain worker limit must be within [1, {MAX_AUTONOMOUS_REMOTE_BRAIN_WORKER_BATCH}]")
-        runs: list[RemoteBrainJobRun] = []
-        for _ in range(limit):
-            result = self.run_once()
-            if result is None:
-                break
-            runs.append(result)
-            if result.status in {"waiting_approval", "retry_scheduled", "reconciliation_required"}:
-                break
+    def run(
+        self,
+        *,
+        limit: int = 1,
+        max_parallelism: int = 1,
+        continue_on_non_terminal: bool = False,
+    ) -> RemoteBrainJobBatch:
+        limit, max_parallelism, continue_on_non_terminal = _validate_batch_options(
+            limit=limit,
+            max_parallelism=max_parallelism,
+            continue_on_non_terminal=continue_on_non_terminal,
+            label="remote brain worker",
+        )
+        indexed_runs: list[tuple[int, RemoteBrainJobRun]] = []
+        next_index = 0
+        lock = threading.Lock()
+        stop_claiming = threading.Event()
+        stopped_on_non_terminal = False
+
+        def drain() -> None:
+            nonlocal next_index, stopped_on_non_terminal
+            while not stop_claiming.is_set():
+                with lock:
+                    if stop_claiming.is_set() or next_index >= limit:
+                        return
+                    index = next_index
+                    next_index += 1
+                result = self.run_once()
+                if result is None:
+                    stop_claiming.set()
+                    return
+                with lock:
+                    indexed_runs.append((index, result))
+                    if not continue_on_non_terminal and result.status in {"waiting_approval", "retry_scheduled", "reconciliation_required"}:
+                        stopped_on_non_terminal = True
+                        stop_claiming.set()
+
+        with ThreadPoolExecutor(max_workers=max_parallelism, thread_name_prefix=f"aurora-remote-brain-{self.worker_id}") as executor:
+            futures = [executor.submit(drain) for _ in range(max_parallelism)]
+            for future in futures:
+                future.result()
+        runs = [result for _index, result in sorted(indexed_runs, key=lambda item: item[0])]
         succeeded = sum(run.status == "succeeded" for run in runs)
         waiting = sum(run.status == "waiting_approval" for run in runs)
         retryable = sum(run.status == "retry_scheduled" for run in runs)
         reconciliation = sum(run.status == "reconciliation_required" for run in runs)
         failed = sum(run.status == "failed" for run in runs)
         status = "empty" if not runs else "failed" if failed and not succeeded and not waiting and not retryable and not reconciliation else "partial" if failed or waiting or retryable or reconciliation else "completed"
-        return RemoteBrainJobBatch(status, tuple(runs), len(runs), succeeded, waiting, retryable, reconciliation, failed)
+        return RemoteBrainJobBatch(
+            status,
+            tuple(runs),
+            len(runs),
+            succeeded,
+            waiting,
+            retryable,
+            reconciliation,
+            failed,
+            limit,
+            max_parallelism,
+            stopped_on_non_terminal,
+        )
 
     def _resolve(self, job: Mapping[str, Any], approval_released: bool) -> RemoteBrainJobResolution:
-        raw = self.resolver({"job": dict(job), "approval_released": approval_released, "attempt": job["attempts"]})
+        context = {"job": dict(job), "approval_released": approval_released, "attempt": job["attempts"]}
+        if self.resolver is not None:
+            raw = self.resolver(context)
+        else:
+            assert self.protected_rehydration is not None
+            raw = self.protected_rehydration.resolve(RemoteBrainProtectedRehydrationContext(
+                job_id=job["job_id"],
+                spec_digest=job["spec_digest"],
+                domain=job["domain"],
+                capability=job["capability"],
+                attempt=job["attempts"],
+                approval_released=approval_released,
+            ))
         if isinstance(raw, RemoteBrainJobResolution):
             return raw
         if not isinstance(raw, Mapping):
             raise RemoteBrainWorkerError("remote brain resolver must return a mapping")
-        allowed = {"spec_digest", "policy_digest", "plan_digest", "route_digest", "mode", "request", "kwargs"}
+        allowed = {"spec_digest", "policy_digest", "plan_digest", "route_digest", "action_plan", "action_admission", "action_handoff", "mode", "request", "kwargs"}
         unknown = sorted(set(raw).difference(allowed))
         if unknown:
             raise RemoteBrainWorkerError("remote brain resolver returned unsupported fields")
@@ -817,6 +1194,9 @@ class RemoteBrainJobWorker:
             kwargs=raw.get("kwargs"),
             plan_digest=raw.get("plan_digest"),
             route_digest=raw.get("route_digest"),
+            action_plan=raw.get("action_plan"),
+            action_admission=raw.get("action_admission"),
+            action_handoff=raw.get("action_handoff"),
         )
 
     @staticmethod
@@ -826,6 +1206,35 @@ class RemoteBrainJobWorker:
         policy_digest = _validate_optional_digest("resolver policy_digest", resolution.policy_digest)
         plan_digest = _validate_optional_digest("resolver plan_digest", resolution.plan_digest)
         route_digest = _validate_optional_digest("resolver route_digest", resolution.route_digest)
+        action_handoff = _action_handoff_value(resolution.action_handoff)
+        handoff_plan = _action_plan_value(None if action_handoff is None else action_handoff["plan"])
+        handoff_admission = _action_admission_value(None if action_handoff is None else action_handoff["admission"])
+        explicit_action_plan = _action_plan_value(resolution.action_plan)
+        explicit_action_admission = _action_admission_value(resolution.action_admission)
+        if action_handoff is not None and explicit_action_plan is not None and explicit_action_plan.plan_digest != handoff_plan.plan_digest:
+            raise RemoteBrainWorkerError("remote brain action plan does not match the verified handoff", code="protocol")
+        if action_handoff is not None and explicit_action_admission is not None and explicit_action_admission.admission_digest != handoff_admission.admission_digest:
+            raise RemoteBrainWorkerError("remote brain action admission does not match the verified handoff", code="protocol")
+        action_plan = explicit_action_plan or handoff_plan
+        action_admission = explicit_action_admission or handoff_admission
+        if (action_plan is None) != (action_admission is None):
+            raise RemoteBrainWorkerError("remote brain action_plan and action_admission must be supplied together", code="protocol")
+        action_plan_digest = action_plan.plan_digest if action_plan is not None else None
+        action_admission_digest = action_admission.admission_digest if action_admission is not None else None
+        if action_plan is not None and action_admission is not None:
+            if action_admission.plan_digest != action_plan.plan_digest:
+                raise RemoteBrainWorkerError("remote brain action admission is bound to a different action plan", code="protocol")
+            if action_admission.status != "admitted":
+                raise RemoteBrainWorkerError("remote brain action admission must be admitted before worker dispatch", code="protocol")
+        if action_handoff is not None:
+            selected_domains = action_handoff["selected_domains"]
+            request_domain = resolution.request.get("domain") if isinstance(resolution.request, Mapping) else None
+            if job["domain"] == "cross_domain" and action_handoff["cross_domain"] is not True and "cross_domain" not in selected_domains:
+                raise RemoteBrainWorkerError("cross-domain job requires a cross-domain action handoff", code="protocol")
+            if job["domain"] != "cross_domain" and job["domain"] not in selected_domains:
+                raise RemoteBrainWorkerError("action handoff does not cover the durable job domain", code="protocol")
+            if isinstance(request_domain, str) and request_domain != "cross_domain" and request_domain not in selected_domains:
+                raise RemoteBrainWorkerError("action handoff does not cover the request domain", code="protocol")
         if spec_digest != job["spec_digest"]:
             raise RemoteBrainWorkerError("remote brain resolver spec_digest does not match the durable job")
         if not isinstance(resolution.request, Mapping) or not isinstance(resolution.kwargs, Mapping):
@@ -836,9 +1245,12 @@ class RemoteBrainJobWorker:
             policy_digest=policy_digest,
             plan_digest=plan_digest,
             route_digest=route_digest,
+            action_plan_digest=action_plan_digest,
+            action_admission_digest=action_admission_digest,
+            action_handoff_digest=None if action_handoff is None else action_handoff["handoff_digest"],
         )
         if expected != job["spec_digest"]:
-            raise RemoteBrainWorkerError("remote brain request, mode, policy, and reviewed identities do not match the durable job")
+            raise RemoteBrainWorkerError("remote brain request, mode, policy, reviewed identities, and action handoff do not match the durable job")
         task = resolution.request.get("task")
         if not isinstance(task, str) or not task.strip():
             raise RemoteBrainWorkerError("remote brain resolver request must contain a bounded task")
@@ -920,11 +1332,13 @@ class AsyncRemoteBrainJobWorker:
         control: AsyncBrainControlClient,
         *,
         worker_id: str,
-        resolver: AsyncRemoteBrainJobResolver,
+        resolver: AsyncRemoteBrainJobResolver | None = None,
+        protected_rehydration: RemoteBrainProtectedRehydration | None = None,
         lease_ms: int = 300_000,
         heartbeat_ms: int | None = None,
         retry_preflight_failures: bool = True,
         credential_scope: RemoteBrainCredentialScope | None = None,
+        effect_reconciliation: AutonomousProviderEffectReconciliationCoordinator | None = None,
     ) -> None:
         if brain is None:
             raise RemoteBrainWorkerError("async remote brain worker requires a brain facade")
@@ -932,11 +1346,16 @@ class AsyncRemoteBrainJobWorker:
             raise RemoteBrainWorkerError("async remote brain facade does not expose every supported execution mode")
         if not isinstance(control, AsyncBrainControlClient):
             raise RemoteBrainWorkerError("async remote brain worker requires an AsyncBrainControlClient")
-        if not callable(resolver):
+        if resolver is not None and not callable(resolver):
             raise RemoteBrainWorkerError("async remote brain resolver must be callable")
+        if protected_rehydration is not None and not isinstance(protected_rehydration, RemoteBrainProtectedRehydration):
+            raise RemoteBrainWorkerError("async remote brain protected_rehydration is malformed")
+        if resolver is None and protected_rehydration is None:
+            raise RemoteBrainWorkerError("async remote brain worker requires resolver or protected_rehydration")
         self.brain = brain
         self.control = control
         self.resolver = resolver
+        self.protected_rehydration = protected_rehydration
         self.worker_id = _validate_identifier("async remote brain worker_id", worker_id)
         if not isinstance(lease_ms, int) or isinstance(lease_ms, bool) or not 100 <= lease_ms <= MAX_AUTONOMOUS_REMOTE_BRAIN_WORKER_LEASE_MS:
             raise RemoteBrainWorkerError("async remote brain lease_ms is outside its bounds")
@@ -949,8 +1368,22 @@ class AsyncRemoteBrainJobWorker:
             raise RemoteBrainWorkerError("async remote brain retry_preflight_failures must be boolean")
         if credential_scope is not None and not callable(getattr(credential_scope, "open", None)):
             raise RemoteBrainWorkerError("async remote brain credential_scope must expose open(context)")
+        if effect_reconciliation is not None and not isinstance(effect_reconciliation, AutonomousProviderEffectReconciliationCoordinator):
+            raise RemoteBrainWorkerError("async remote brain effect_reconciliation is malformed")
         self.retry_preflight_failures = retry_preflight_failures
         self.credential_scope = credential_scope
+        self.effect_reconciliation = effect_reconciliation
+
+    async def reconcile_effects(self) -> Mapping[str, Any] | None:
+        """Run or return the cached restart reconciliation admission without blocking the loop."""
+
+        return None if self.effect_reconciliation is None else await asyncio.to_thread(self.effect_reconciliation.admit)
+
+    def reset_effect_reconciliation(self) -> None:
+        """Re-open the caller-owned reconciliation cycle after resolving external state."""
+
+        if self.effect_reconciliation is not None:
+            self.effect_reconciliation.reset()
 
     async def submit(
         self,
@@ -964,6 +1397,9 @@ class AsyncRemoteBrainJobWorker:
         policy_digest: str | None = None,
         plan_digest: str | None = None,
         route_digest: str | None = None,
+        action_plan_digest: str | None = None,
+        action_admission_digest: str | None = None,
+        action_handoff_digest: str | None = None,
         priority: int = 0,
         max_attempts: int = 3,
         checkpoint_digest: str | None = None,
@@ -980,6 +1416,9 @@ class AsyncRemoteBrainJobWorker:
         policy_digest = _validate_optional_digest("policy_digest", policy_digest)
         plan_digest = _validate_optional_digest("plan_digest", plan_digest)
         route_digest = _validate_optional_digest("route_digest", route_digest)
+        action_plan_digest = _validate_optional_digest("action_plan_digest", action_plan_digest)
+        action_admission_digest = _validate_optional_digest("action_admission_digest", action_admission_digest)
+        action_handoff_digest = _validate_optional_digest("action_handoff_digest", action_handoff_digest)
         checkpoint_digest = _validate_optional_digest("checkpoint_digest", checkpoint_digest)
         spec_digest = autonomous_remote_brain_job_spec_digest(
             request=request,
@@ -987,6 +1426,9 @@ class AsyncRemoteBrainJobWorker:
             policy_digest=policy_digest,
             plan_digest=plan_digest,
             route_digest=route_digest,
+            action_plan_digest=action_plan_digest,
+            action_admission_digest=action_admission_digest,
+            action_handoff_digest=action_handoff_digest,
         )
         payload = await self.control.submit_job({
             "idempotency_key": idempotency_key,
@@ -1005,6 +1447,51 @@ class AsyncRemoteBrainJobWorker:
             mode=mode,
             plan_digest=plan_digest,
             route_digest=route_digest,
+            action_plan_digest=action_plan_digest,
+            action_admission_digest=action_admission_digest,
+            action_handoff_digest=action_handoff_digest,
+        )
+
+    async def submit_handoff(
+        self,
+        *,
+        idempotency_key: str,
+        request: Mapping[str, Any],
+        mode: str,
+        domain: str,
+        capability: str,
+        risk_class: str,
+        action_handoff: Mapping[str, Any],
+        policy_digest: str | None = None,
+        plan_digest: str | None = None,
+        route_digest: str | None = None,
+        priority: int = 0,
+        max_attempts: int = 3,
+        checkpoint_digest: str | None = None,
+    ) -> RemoteBrainJobSubmission:
+        """Submit a job whose action identity is derived from one verified handoff."""
+
+        handoff = _action_handoff_value(action_handoff)
+        if handoff is None:
+            raise RemoteBrainWorkerError("action_handoff must be a metadata mapping", code="protocol")
+        if plan_digest is not None and plan_digest != handoff["plan_digest"]:
+            raise RemoteBrainWorkerError("plan_digest does not match the verified action handoff", code="protocol")
+        return await self.submit(
+            idempotency_key=idempotency_key,
+            request=request,
+            mode=mode,
+            domain=domain,
+            capability=capability,
+            risk_class=risk_class,
+            policy_digest=policy_digest,
+            plan_digest=plan_digest,
+            route_digest=route_digest,
+            action_plan_digest=handoff["plan_digest"],
+            action_admission_digest=handoff["admission_digest"],
+            action_handoff_digest=handoff["handoff_digest"],
+            priority=priority,
+            max_attempts=max_attempts,
+            checkpoint_digest=checkpoint_digest,
         )
 
     async def status(self, job_id: str) -> Mapping[str, Any]:
@@ -1069,6 +1556,9 @@ class AsyncRemoteBrainJobWorker:
         return dict(payload)
 
     async def run_once(self, job_id: str | None = None) -> RemoteBrainJobRun | None:
+        effect_reconciliation = await self.reconcile_effects()
+        if effect_reconciliation is not None and effect_reconciliation.get("status") == "blocked":
+            raise RemoteBrainWorkerError("async remote brain worker effect reconciliation admission is blocked")
         if job_id is None:
             claimed_payload = await self.control.claim_next_job({"worker_id": self.worker_id, "lease_ms": self.lease_ms})
             _assert_no_private_fields(claimed_payload)
@@ -1129,7 +1619,7 @@ class AsyncRemoteBrainJobWorker:
                     {"spec_digest": job["spec_digest"], "mode": resolution.mode},
                 )
                 parked = await self._request_approval(job["job_id"], reason="provider approval is required before dispatch")
-                return RemoteBrainJobRun(status="waiting_approval", job=parked, mode=resolution.mode)
+                return RemoteBrainJobRun(status="waiting_approval", job=parked, mode=resolution.mode, effect_reconciliation=effect_reconciliation)
             if self.credential_scope is not None:
                 _assert_scope_resolution_clean(resolution)
                 credential_binding = await _open_async_credential_scope(
@@ -1154,26 +1644,26 @@ class AsyncRemoteBrainJobWorker:
             if status in _APPROVAL_STATUSES:
                 await self._checkpoint(job["job_id"], status, "unknown", {"result_digest": result_digest})
                 parked = await self._request_approval(job["job_id"], reason="brain execution requires caller approval before continuing")
-                return RemoteBrainJobRun(status="waiting_approval", job=parked, mode=resolution.mode, result=result, result_digest=result_digest)
+                return RemoteBrainJobRun(status="waiting_approval", job=parked, mode=resolution.mode, result=result, result_digest=result_digest, effect_reconciliation=effect_reconciliation)
             if status == "reconciliation_required":
                 await self._checkpoint(job["job_id"], status, "unknown", {"result_digest": result_digest})
                 failed = await self._fail(job["job_id"], "remote brain execution requires caller reconciliation", retryable=False)
-                return RemoteBrainJobRun(status="reconciliation_required", job=failed, mode=resolution.mode, result=result, result_digest=result_digest)
+                return RemoteBrainJobRun(status="reconciliation_required", job=failed, mode=resolution.mode, result=result, result_digest=result_digest, effect_reconciliation=effect_reconciliation)
             if _is_success_status(status):
                 completed = await self._complete(job["job_id"], result_digest)
-                return RemoteBrainJobRun(status="succeeded", job=completed, mode=resolution.mode, result=result, result_digest=result_digest)
+                return RemoteBrainJobRun(status="succeeded", job=completed, mode=resolution.mode, result=result, result_digest=result_digest, effect_reconciliation=effect_reconciliation)
             await self._checkpoint(job["job_id"], f"terminal_{status}", "unknown", {"result_digest": result_digest})
             failed = await self._fail(job["job_id"], f"remote brain execution ended with {status}", retryable=False)
-            return RemoteBrainJobRun(status="reconciliation_required" if failed.get("state") == "reconciliation_required" else "failed", job=failed, mode=resolution.mode, result=result, result_digest=result_digest)
+            return RemoteBrainJobRun(status="reconciliation_required" if failed.get("state") == "reconciliation_required" else "failed", job=failed, mode=resolution.mode, result=result, result_digest=result_digest, effect_reconciliation=effect_reconciliation)
         except asyncio.CancelledError as error:
             # Cancellation is not evidence that a provider call did not start.  Persist the
             # same conservative boundary before propagating cancellation to the host.
             try:
-                await self._settle_error(job, started, resolution, error)
+                await self._settle_error(job, started, resolution, error, effect_reconciliation)
             finally:
                 raise
         except Exception as error:
-            return await self._settle_error(job, started, resolution, error)
+            return await self._settle_error(job, started, resolution, error, effect_reconciliation)
         finally:
             stop.set()
             heartbeat_task.cancel()
@@ -1181,38 +1671,88 @@ class AsyncRemoteBrainJobWorker:
             if credential_binding is not None:
                 await _close_async_credential_binding(credential_binding)
 
-    async def run(self, *, limit: int = 1) -> RemoteBrainJobBatch:
-        if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= MAX_AUTONOMOUS_REMOTE_BRAIN_WORKER_BATCH:
-            raise RemoteBrainWorkerError(f"async remote brain worker limit must be within [1, {MAX_AUTONOMOUS_REMOTE_BRAIN_WORKER_BATCH}]")
-        runs: list[RemoteBrainJobRun] = []
-        for _ in range(limit):
-            result = await self.run_once()
-            if result is None:
-                break
-            runs.append(result)
-            if result.status in {"waiting_approval", "retry_scheduled", "reconciliation_required"}:
-                break
+    async def run(
+        self,
+        *,
+        limit: int = 1,
+        max_parallelism: int = 1,
+        continue_on_non_terminal: bool = False,
+    ) -> RemoteBrainJobBatch:
+        limit, max_parallelism, continue_on_non_terminal = _validate_batch_options(
+            limit=limit,
+            max_parallelism=max_parallelism,
+            continue_on_non_terminal=continue_on_non_terminal,
+            label="async remote brain worker",
+        )
+        indexed_runs: list[tuple[int, RemoteBrainJobRun]] = []
+        next_index = 0
+        lock = asyncio.Lock()
+        stop_claiming = asyncio.Event()
+        stopped_on_non_terminal = False
+
+        async def drain() -> None:
+            nonlocal next_index, stopped_on_non_terminal
+            while not stop_claiming.is_set():
+                async with lock:
+                    if stop_claiming.is_set() or next_index >= limit:
+                        return
+                    index = next_index
+                    next_index += 1
+                result = await self.run_once()
+                if result is None:
+                    stop_claiming.set()
+                    return
+                async with lock:
+                    indexed_runs.append((index, result))
+                    if not continue_on_non_terminal and result.status in {"waiting_approval", "retry_scheduled", "reconciliation_required"}:
+                        stopped_on_non_terminal = True
+                        stop_claiming.set()
+
+        await asyncio.gather(*(drain() for _ in range(max_parallelism)))
+        runs = [result for _index, result in sorted(indexed_runs, key=lambda item: item[0])]
         succeeded = sum(run.status == "succeeded" for run in runs)
         waiting = sum(run.status == "waiting_approval" for run in runs)
         retryable = sum(run.status == "retry_scheduled" for run in runs)
         reconciliation = sum(run.status == "reconciliation_required" for run in runs)
         failed = sum(run.status == "failed" for run in runs)
         status = "empty" if not runs else "failed" if failed and not succeeded and not waiting and not retryable and not reconciliation else "partial" if failed or waiting or retryable or reconciliation else "completed"
-        return RemoteBrainJobBatch(status, tuple(runs), len(runs), succeeded, waiting, retryable, reconciliation, failed)
+        return RemoteBrainJobBatch(
+            status,
+            tuple(runs),
+            len(runs),
+            succeeded,
+            waiting,
+            retryable,
+            reconciliation,
+            failed,
+            limit,
+            max_parallelism,
+            stopped_on_non_terminal,
+        )
 
     async def _resolve(self, job: Mapping[str, Any], approval_released: bool) -> RemoteBrainJobResolution:
         context = {"job": dict(job), "approval_released": approval_released, "attempt": job["attempts"]}
-        if inspect.iscoroutinefunction(self.resolver):
+        if self.resolver is not None and inspect.iscoroutinefunction(self.resolver):
             raw = await self.resolver(context)
-        else:
+        elif self.resolver is not None:
             raw = await asyncio.to_thread(self.resolver, context)
+        else:
+            assert self.protected_rehydration is not None
+            raw = await self.protected_rehydration.resolve_async(RemoteBrainProtectedRehydrationContext(
+                job_id=job["job_id"],
+                spec_digest=job["spec_digest"],
+                domain=job["domain"],
+                capability=job["capability"],
+                attempt=job["attempts"],
+                approval_released=approval_released,
+            ))
         if inspect.isawaitable(raw):
             raw = await raw
         if isinstance(raw, RemoteBrainJobResolution):
             return raw
         if not isinstance(raw, Mapping):
             raise RemoteBrainWorkerError("async remote brain resolver must return a mapping")
-        allowed = {"spec_digest", "policy_digest", "plan_digest", "route_digest", "mode", "request", "kwargs"}
+        allowed = {"spec_digest", "policy_digest", "plan_digest", "route_digest", "action_plan", "action_admission", "action_handoff", "mode", "request", "kwargs"}
         unknown = sorted(set(raw).difference(allowed))
         if unknown:
             raise RemoteBrainWorkerError("async remote brain resolver returned unsupported fields")
@@ -1224,6 +1764,9 @@ class AsyncRemoteBrainJobWorker:
             kwargs=raw.get("kwargs"),
             plan_digest=raw.get("plan_digest"),
             route_digest=raw.get("route_digest"),
+            action_plan=raw.get("action_plan"),
+            action_admission=raw.get("action_admission"),
+            action_handoff=raw.get("action_handoff"),
         )
 
     @staticmethod
@@ -1297,6 +1840,7 @@ class AsyncRemoteBrainJobWorker:
         started: bool,
         resolution: RemoteBrainJobResolution | None,
         error: BaseException,
+        effect_reconciliation: Mapping[str, Any] | None,
     ) -> RemoteBrainJobRun:
         error_class, failure_code, error_retryable = _error_projection(error)
         try:
@@ -1317,6 +1861,7 @@ class AsyncRemoteBrainJobWorker:
                 failure_code=failure_code,
                 error_retryable=error_retryable,
                 result_digest=None,
+                effect_reconciliation=effect_reconciliation,
             )
         except Exception as settlement_error:
             raise RemoteBrainWorkerError("async remote brain worker failure could not be settled", code="configuration") from settlement_error
@@ -1341,6 +1886,9 @@ __all__ = [
     "RemoteBrainJobRun",
     "RemoteBrainJobBatch",
     "RemoteBrainJobResolution",
+    "RemoteBrainProtectedRehydrationContext",
+    "RemoteBrainProtectedReceiptResolver",
+    "RemoteBrainProtectedRehydration",
     "RemoteBrainCredentialBinding",
     "RemoteBrainCredentialScope",
     "ProvisionedRemoteBrainCredentialScope",

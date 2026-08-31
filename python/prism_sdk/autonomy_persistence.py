@@ -13,15 +13,18 @@ the caller must rehydrate the task and prompt and explicitly resume with the sam
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
+from functools import wraps
 import hashlib
 import json
 import math
 import os
 from pathlib import Path
+import sqlite3
 import threading
 import time
-from typing import Any, Callable, Mapping, Protocol, Sequence
+from typing import Any, Callable, Iterator, Mapping, Protocol, Sequence
 import uuid
 
 from .authoring import canonical_bytes, content_digest
@@ -33,15 +36,19 @@ AUTONOMY_STATE_SCHEMA = "bioprism-python-autonomous-execution-state/0.1"
 AUTONOMY_EVENT_SCHEMA = "bioprism-python-autonomous-execution-event/0.1"
 AUTONOMY_JOURNAL_SCHEMA = "bioprism-python-autonomous-execution-journal/0.1"
 AUTONOMY_EXECUTION_SNAPSHOT_SCHEMA = "bioprism-python-autonomous-execution-snapshot/0.1"
+SQLITE_AUTONOMY_EXECUTION_SCHEMA = "bioprism-python-autonomous-execution-sqlite/0.1"
+SQLITE_AUTONOMY_EXECUTION_JOURNAL_SCHEMA = "bioprism-python-autonomous-execution-journal-sqlite/0.1"
 AUTONOMY_EVENT_KINDS = (
     "started",
     "resumed",
     "provider_call",
     "tool_intent",
     "tool_outcome",
+    "effect_reconciliation",
     "checkpoint",
     "approval_required",
     "evaluation",
+    "replan",
     "paused",
     "completed",
     "failed",
@@ -92,6 +99,17 @@ class AutonomyPersistenceError(ArgumentError):
 
 class AutonomyPolicyError(AutonomyPersistenceError):
     """A proposed autonomous action exceeded its caller-owned execution policy."""
+
+
+def _serialized_transition(method: Callable[..., Any]) -> Callable[..., Any]:
+    """Serialize one controller transition while allowing safe nested helper calls."""
+
+    @wraps(method)
+    def transition(self: Any, *args: Any, **kwargs: Any) -> Any:
+        with self._lock:
+            return method(self, *args, **kwargs)
+
+    return transition
 
 
 class AutonomousExecutionSnapshotTextStore(Protocol):
@@ -261,6 +279,7 @@ class AutonomousExecutionState:
     policy_digest: str
     step_index: int = 0
     provider_calls: int = 0
+    provider_failovers: int = 0
     tool_calls: int = 0
     effectful_calls: int = 0
     cost_units: float = 0.0
@@ -282,6 +301,7 @@ class AutonomousExecutionState:
         for name, value, maximum in (
             ("step_index", self.step_index, MAX_AUTONOMY_STEPS),
             ("provider_calls", self.provider_calls, MAX_AUTONOMY_PROVIDER_CALLS),
+            ("provider_failovers", self.provider_failovers, MAX_AUTONOMY_PROVIDER_FAILOVERS),
             ("tool_calls", self.tool_calls, MAX_AUTONOMY_TOOL_CALLS),
             ("effectful_calls", self.effectful_calls, MAX_AUTONOMY_EFFECTFUL_CALLS),
             ("replans", self.replans, MAX_AUTONOMY_REPLANS),
@@ -311,6 +331,7 @@ class AutonomousExecutionState:
             "policy_digest": self.policy_digest,
             "step_index": self.step_index,
             "provider_calls": self.provider_calls,
+            "provider_failovers": self.provider_failovers,
             "tool_calls": self.tool_calls,
             "effectful_calls": self.effectful_calls,
             "cost_units": float(self.cost_units),
@@ -340,6 +361,7 @@ class AutonomousExecutionState:
             policy_digest=value.get("policy_digest"),
             step_index=value.get("step_index", 0),
             provider_calls=value.get("provider_calls", 0),
+            provider_failovers=value.get("provider_failovers", 0),
             tool_calls=value.get("tool_calls", 0),
             effectful_calls=value.get("effectful_calls", 0),
             cost_units=value.get("cost_units", 0.0),
@@ -472,11 +494,11 @@ class AutonomousExecutionJournal:
                 raise AutonomyPersistenceError("execution id already exists; resume must be explicit")
             if previous.policy_digest != policy.digest:
                 raise AutonomyPersistenceError("resume policy digest does not match the persisted execution")
-            if previous.status in AUTONOMY_TERMINAL_STATUSES:
+            if previous.status in AUTONOMY_TERMINAL_STATUSES and previous.status != "reconciliation_required":
                 raise AutonomyPersistenceError("terminal execution cannot be resumed")
             resumed = replace(previous, status="resumed", last_event_kind="resumed")
-            self.append({"execution_id": execution_id, "kind": "resumed", "domain": domain, "capability": capability, "risk_class": risk_class, "status": "resumed", "policy_digest": policy.digest, "state": resumed.to_dict()})
-            return replace(resumed, journal_sequence=len(self._read_rows()), checkpoint_digest=content_digest(resumed.to_dict()))
+            receipt = self.append({"execution_id": execution_id, "kind": "resumed", "domain": domain, "capability": capability, "risk_class": risk_class, "status": "resumed", "policy_digest": policy.digest, "state": resumed.to_dict()})
+            return replace(resumed, journal_sequence=receipt["sequence"], checkpoint_digest=receipt["event_digest"])
         initial = AutonomousExecutionState(
             execution_id=execution_id,
             domain=domain,
@@ -612,13 +634,14 @@ class AutonomousExecutionJournal:
             raise AutonomyPersistenceError("execution event must be a mapping")
         allowed = {
             "execution_id", "kind", "domain", "capability", "risk_class", "status", "policy_digest", "state",
-            "step_index", "provider_calls", "tool_calls", "effectful_calls", "cost_units", "replans",
+            "step_index", "provider_calls", "provider_failovers", "tool_calls", "effectful_calls", "cost_units", "replans",
             "tool", "call_id", "read_only", "approval_required", "schema_digest", "arguments_digest",
             "output_digest", "outcome_digest", "evaluation_digest", "evaluator_id", "evaluator_version",
             "reward", "passed", "failure_class", "reason", "metadata", "provider", "model",
             "invocation_kind", "attempt", "turn", "selection_digest", "provider_outcome",
             "latency_ms", "input_tokens", "output_tokens", "estimated_cost_units", "actual_cost_units",
-            "request_id_digest", "status_code",
+            "request_id_digest", "status_code", "effect_id", "effect_status", "dispatch_attempt",
+            "reconciliation_digest", "instruction_digest", "failover", "retryable",
         }
         if set(event).difference(allowed):
             raise AutonomyPersistenceError("execution event contains unsupported fields")
@@ -635,7 +658,7 @@ class AutonomousExecutionJournal:
             "status": _identifier("event status", event.get("status")),
             "policy_digest": _digest("event policy_digest", event.get("policy_digest")),
         }
-        for name, maximum in (("step_index", MAX_AUTONOMY_STEPS), ("provider_calls", MAX_AUTONOMY_PROVIDER_CALLS), ("tool_calls", MAX_AUTONOMY_TOOL_CALLS), ("effectful_calls", MAX_AUTONOMY_EFFECTFUL_CALLS), ("replans", MAX_AUTONOMY_REPLANS)):
+        for name, maximum in (("step_index", MAX_AUTONOMY_STEPS), ("provider_calls", MAX_AUTONOMY_PROVIDER_CALLS), ("provider_failovers", MAX_AUTONOMY_PROVIDER_FAILOVERS), ("tool_calls", MAX_AUTONOMY_TOOL_CALLS), ("effectful_calls", MAX_AUTONOMY_EFFECTFUL_CALLS), ("replans", MAX_AUTONOMY_REPLANS)):
             if name in event:
                 value = event[name]
                 if not isinstance(value, int) or isinstance(value, bool) or not 0 <= value <= maximum:
@@ -649,16 +672,23 @@ class AutonomousExecutionJournal:
         for name in ("tool", "call_id", "evaluator_id", "evaluator_version", "failure_class", "reason"):
             if name in event and event[name] is not None:
                 normalized[name] = _identifier(f"event {name}", event[name], maximum=2048 if name == "reason" else 512)
-        for name in ("schema_digest", "arguments_digest", "output_digest", "outcome_digest", "evaluation_digest"):
+        for name in ("schema_digest", "arguments_digest", "output_digest", "outcome_digest", "evaluation_digest", "instruction_digest"):
             if name in event and event[name] is not None:
                 normalized[name] = _digest(f"event {name}", event[name])
         for name in ("selection_digest", "request_id_digest"):
             if name in event and event[name] is not None:
                 normalized[name] = _digest(f"event {name}", event[name])
+        for name in ("effect_id", "effect_status"):
+            if name in event and event[name] is not None:
+                normalized[name] = _identifier(f"event {name}", event[name], maximum=512)
+        if "reconciliation_digest" in event and event["reconciliation_digest"] is not None:
+            normalized["reconciliation_digest"] = _digest(
+                "event reconciliation_digest", event["reconciliation_digest"]
+            )
         for name in ("provider", "model", "invocation_kind", "provider_outcome"):
             if name in event and event[name] is not None:
                 normalized[name] = _text(f"event {name}", event[name], maximum=512)
-        for name, maximum in (("attempt", 8), ("turn", 32), ("input_tokens", 100_000_000), ("output_tokens", 100_000_000), ("status_code", 999)):
+        for name, maximum in (("attempt", 8), ("turn", 32), ("input_tokens", 100_000_000), ("output_tokens", 100_000_000), ("status_code", 999), ("dispatch_attempt", 64)):
             if name in event and event[name] is not None:
                 value = event[name]
                 if not isinstance(value, int) or isinstance(value, bool) or not 0 <= value <= maximum:
@@ -670,7 +700,7 @@ class AutonomousExecutionJournal:
                 if not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(float(value)) or value < 0:
                     raise AutonomyPersistenceError(f"event {name} is outside its bound")
                 normalized[name] = float(value)
-        for name in ("read_only", "approval_required", "passed"):
+        for name in ("read_only", "approval_required", "passed", "failover", "retryable"):
             if name in event and event[name] is not None:
                 if not isinstance(event[name], bool):
                     raise AutonomyPersistenceError(f"event {name} must be a boolean")
@@ -776,6 +806,264 @@ def validate_autonomous_execution_snapshot(value: Mapping[str, Any]) -> dict[str
     return _normalize_execution_snapshot(value)
 
 
+class SQLiteAutonomousExecutionJournal(AutonomousExecutionJournal):
+    """Transactional SQLite implementation of the metadata-only execution journal.
+
+    The public journal contract is preserved, but append, restore, and integrity reads operate on
+    a SQLite event table instead of a JSONL file.  ``BEGIN IMMEDIATE`` makes sequence allocation,
+    predecessor selection, capacity checks, and insertion one atomic operation across processes.
+    The controller still owns policy decisions; this journal only makes their metadata durable and
+    hash-chained.
+    """
+
+    _META_TABLE = "autonomy_execution_journal_meta"
+    _EVENT_TABLE = "autonomy_execution_journal_events"
+
+    def __init__(
+        self,
+        path: str | os.PathLike[str],
+        *,
+        max_events: int = MAX_AUTONOMY_JOURNAL_EVENTS,
+        max_bytes: int = MAX_AUTONOMY_JOURNAL_BYTES,
+        clock: Callable[[], float] = time.time,
+        timeout: float = 5.0,
+    ) -> None:
+        super().__init__(path, max_events=max_events, max_bytes=max_bytes, clock=clock)
+        if "\x00" in str(path):
+            raise AutonomyPersistenceError("SQLite execution journal path must be non-empty")
+        if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not math.isfinite(float(timeout)) or not 0.1 <= float(timeout) <= 60.0:
+            raise AutonomyPersistenceError("SQLite execution journal timeout is outside its bound")
+        self.timeout = float(timeout)
+        self._connection: sqlite3.Connection | None = None
+        # The base journal's inherited readers/snapshot methods use ``_lock``. Reuse the same
+        # re-entrant lock for SQLite mutations so one connection is never read while another
+        # thread is allocating a sequence or committing a restore.
+        self._sqlite_lock = self._lock
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            connection = sqlite3.connect(
+                str(self.path),
+                isolation_level=None,
+                check_same_thread=False,
+                timeout=self.timeout,
+            )
+            connection.row_factory = sqlite3.Row
+            self._connection = connection
+            self._configure_sqlite()
+        except AutonomyPersistenceError:
+            self.close()
+            raise
+        except (OSError, sqlite3.Error) as error:
+            self.close()
+            raise AutonomyPersistenceError("SQLite execution journal could not be opened") from error
+
+    def _configure_sqlite(self) -> None:
+        connection = self._require_sqlite_connection()
+        connection.execute("PRAGMA journal_mode=WAL")
+        connection.execute("PRAGMA synchronous=FULL")
+        connection.execute("PRAGMA foreign_keys=ON")
+        connection.execute(f"PRAGMA busy_timeout = {int(self.timeout * 1000)}")
+        connection.execute(
+            f"CREATE TABLE IF NOT EXISTS {self._META_TABLE} ("
+            "key TEXT PRIMARY KEY, value TEXT NOT NULL)"
+        )
+        connection.execute(
+            f"CREATE TABLE IF NOT EXISTS {self._EVENT_TABLE} ("
+            "sequence INTEGER PRIMARY KEY, event_digest TEXT NOT NULL, "
+            "previous_digest TEXT NOT NULL, created_ns INTEGER NOT NULL, "
+            "event_json TEXT NOT NULL, envelope_bytes INTEGER NOT NULL)"
+        )
+        existing = connection.execute(
+            f"SELECT value FROM {self._META_TABLE} WHERE key = 'schema'"
+        ).fetchone()
+        if existing is None:
+            connection.execute(
+                f"INSERT INTO {self._META_TABLE}(key, value) VALUES('schema', ?)",
+                (SQLITE_AUTONOMY_EXECUTION_JOURNAL_SCHEMA,),
+            )
+        elif existing["value"] != SQLITE_AUTONOMY_EXECUTION_JOURNAL_SCHEMA:
+            raise AutonomyPersistenceError("SQLite execution journal has an incompatible schema")
+
+    def _require_sqlite_connection(self) -> sqlite3.Connection:
+        connection = self._connection
+        if connection is None:
+            raise AutonomyPersistenceError("SQLite execution journal is closed")
+        return connection
+
+    @contextmanager
+    def _sqlite_transaction(self) -> Iterator[sqlite3.Connection]:
+        with self._sqlite_lock:
+            connection = self._require_sqlite_connection()
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                yield connection
+                connection.execute("COMMIT")
+            except Exception as error:
+                try:
+                    connection.execute("ROLLBACK")
+                except sqlite3.Error:
+                    pass
+                if isinstance(error, sqlite3.Error):
+                    raise AutonomyPersistenceError("SQLite execution journal transaction failed") from error
+                raise
+
+    @staticmethod
+    def _decode_sqlite_event(row: sqlite3.Row, expected_sequence: int, previous_digest: str) -> dict[str, Any]:
+        sequence = row["sequence"]
+        if not isinstance(sequence, int) or isinstance(sequence, bool) or sequence != expected_sequence:
+            raise AutonomyPersistenceError("SQLite execution journal sequence is invalid")
+        stored_previous = row["previous_digest"]
+        if stored_previous != previous_digest:
+            raise AutonomyPersistenceError("SQLite execution journal predecessor is invalid")
+        created_ns = row["created_ns"]
+        if not isinstance(created_ns, int) or isinstance(created_ns, bool) or created_ns < 0:
+            raise AutonomyPersistenceError("SQLite execution journal timestamp is invalid")
+        event_digest = row["event_digest"]
+        _digest("SQLite execution journal event_digest", event_digest)
+        event_text = row["event_json"]
+        if not isinstance(event_text, str):
+            raise AutonomyPersistenceError("SQLite execution journal event is malformed")
+        try:
+            raw_event = json.loads(event_text)
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise AutonomyPersistenceError("SQLite execution journal event is invalid") from error
+        event = AutonomousExecutionJournal._normalize_event(raw_event)
+        if event_text != canonical_bytes(event).decode("utf-8"):
+            raise AutonomyPersistenceError("SQLite execution journal event is not canonical")
+        descriptor = {
+            "schema": AUTONOMY_EVENT_SCHEMA,
+            "sequence": sequence,
+            "event": event,
+            "previous_digest": previous_digest,
+            "created_ns": created_ns,
+        }
+        if content_digest(descriptor) != event_digest:
+            raise AutonomyPersistenceError("SQLite execution journal event digest is invalid")
+        envelope = {**descriptor, "event_digest": event_digest}
+        envelope_bytes = row["envelope_bytes"]
+        if not isinstance(envelope_bytes, int) or isinstance(envelope_bytes, bool) or envelope_bytes != len(canonical_bytes(envelope)) + 1:
+            raise AutonomyPersistenceError("SQLite execution journal envelope size is invalid")
+        return envelope
+
+    def _read_rows_locked(self) -> list[dict[str, Any]]:
+        connection = self._require_sqlite_connection()
+        try:
+            rows = connection.execute(
+                f"SELECT sequence, event_digest, previous_digest, created_ns, event_json, envelope_bytes "
+                f"FROM {self._EVENT_TABLE} ORDER BY sequence ASC"
+            ).fetchall()
+        except sqlite3.Error as error:
+            raise AutonomyPersistenceError("SQLite execution journal could not be read") from error
+        if len(rows) > self.max_events:
+            raise AutonomyPersistenceError("SQLite execution journal exceeds max_events")
+        normalized: list[dict[str, Any]] = []
+        previous_digest = ""
+        total_bytes = 0
+        for expected_sequence, row in enumerate(rows, start=1):
+            envelope = self._decode_sqlite_event(row, expected_sequence, previous_digest)
+            total_bytes += int(row["envelope_bytes"])
+            if total_bytes > self.max_bytes:
+                raise AutonomyPersistenceError("SQLite execution journal exceeds max_bytes")
+            normalized.append(envelope)
+            previous_digest = envelope["event_digest"]
+        return normalized
+
+    def append(self, event: Mapping[str, Any]) -> dict[str, Any]:
+        normalized = self._normalize_event(event)
+        event_json = canonical_bytes(normalized).decode("utf-8")
+        with self._sqlite_transaction() as connection:
+            try:
+                latest = connection.execute(
+                    f"SELECT sequence, event_digest FROM {self._EVENT_TABLE} ORDER BY sequence DESC LIMIT 1"
+                ).fetchone()
+                sequence = 1 if latest is None else int(latest["sequence"]) + 1
+                if sequence > self.max_events:
+                    raise AutonomyPersistenceError("execution journal event capacity is exhausted")
+                previous_digest = "" if latest is None else latest["event_digest"]
+                created_ns = _now_ns(self._clock)
+                descriptor = {
+                    "schema": AUTONOMY_EVENT_SCHEMA,
+                    "sequence": sequence,
+                    "event": normalized,
+                    "previous_digest": previous_digest,
+                    "created_ns": created_ns,
+                }
+                envelope = {**descriptor, "event_digest": content_digest(descriptor)}
+                envelope_bytes = len(canonical_bytes(envelope)) + 1
+                current = connection.execute(
+                    f"SELECT COALESCE(SUM(envelope_bytes), 0) AS bytes FROM {self._EVENT_TABLE}"
+                ).fetchone()
+                if int(current["bytes"]) + envelope_bytes > self.max_bytes:
+                    raise AutonomyPersistenceError("execution journal byte capacity is exhausted")
+                connection.execute(
+                    f"INSERT INTO {self._EVENT_TABLE} "
+                    "(sequence, event_digest, previous_digest, created_ns, event_json, envelope_bytes) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (sequence, envelope["event_digest"], previous_digest, created_ns, event_json, envelope_bytes),
+                )
+            except sqlite3.Error as error:
+                raise AutonomyPersistenceError("SQLite execution journal event could not be appended") from error
+        return {
+            "schema": AUTONOMY_EVENT_SCHEMA,
+            "sequence": envelope["sequence"],
+            "event_digest": envelope["event_digest"],
+            "head_digest": envelope["event_digest"],
+            "execution_id": normalized["execution_id"],
+            "kind": normalized["kind"],
+            "retention": "metadata_only_hash_chained",
+        }
+
+    def restore(self, snapshot: Mapping[str, Any]) -> None:
+        normalized = _normalize_execution_snapshot(
+            snapshot,
+            max_events=self.max_events,
+            max_bytes=self.max_bytes,
+        )
+        rows: list[tuple[int, str, str, int, str, int]] = []
+        for row in normalized["rows"]:
+            envelope = dict(row)
+            event_json = canonical_bytes(envelope["event"]).decode("utf-8")
+            envelope_bytes = len(canonical_bytes(envelope)) + 1
+            rows.append(
+                (
+                    envelope["sequence"],
+                    envelope["event_digest"],
+                    envelope["previous_digest"],
+                    envelope["created_ns"],
+                    event_json,
+                    envelope_bytes,
+                )
+            )
+        with self._sqlite_transaction() as connection:
+            try:
+                connection.execute(f"DELETE FROM {self._EVENT_TABLE}")
+                for row in rows:
+                    connection.execute(
+                        f"INSERT INTO {self._EVENT_TABLE} "
+                        "(sequence, event_digest, previous_digest, created_ns, event_json, envelope_bytes) "
+                        "VALUES (?, ?, ?, ?, ?, ?)",
+                        row,
+                    )
+            except sqlite3.Error as error:
+                raise AutonomyPersistenceError("SQLite execution journal snapshot could not be restored") from error
+
+    def close(self) -> None:
+        with self._sqlite_lock:
+            connection, self._connection = self._connection, None
+            if connection is not None:
+                try:
+                    connection.close()
+                except sqlite3.Error as error:
+                    raise AutonomyPersistenceError("SQLite execution journal could not be closed") from error
+
+    def __enter__(self) -> "SQLiteAutonomousExecutionJournal":
+        self._require_sqlite_connection()
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        self.close()
+
+
 class JsonAutonomousExecutionSnapshotPersistence:
     """Canonical JSON persistence over any caller-owned text store."""
 
@@ -835,6 +1123,217 @@ class TransactionalJsonAutonomousExecutionSnapshotPersistence(JsonAutonomousExec
         return self.store.write_if_unchanged(expected_snapshot_digest, encoded)
 
 
+class _SQLiteAutonomousExecutionSnapshotStore:
+    """SQLite text store used by the public execution persistence adapter.
+
+    The JSON validator remains above this store.  SQLite is responsible only for durable
+    serialization and compare-and-swap; it never interprets or broadens the metadata contract.
+    One row is intentionally used so a snapshot replacement is one transaction and stale
+    workers cannot overwrite a newer snapshot after reading it.
+    """
+
+    _META_TABLE = "autonomy_execution_snapshot_meta"
+    _SNAPSHOT_TABLE = "autonomy_execution_snapshots"
+
+    def __init__(
+        self,
+        path: str | os.PathLike[str],
+        *,
+        max_bytes: int,
+        timeout: float,
+        clock: Callable[[], float],
+    ) -> None:
+        if not isinstance(path, (str, os.PathLike)) or not str(path) or "\x00" in str(path):
+            raise AutonomyPersistenceError("SQLite execution persistence path must be non-empty")
+        if isinstance(max_bytes, bool) or not isinstance(max_bytes, int) or not 1 <= max_bytes <= MAX_AUTONOMY_JOURNAL_SNAPSHOT_BYTES:
+            raise AutonomyPersistenceError("SQLite execution persistence max_bytes is outside its bound")
+        if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not math.isfinite(float(timeout)) or not 0.1 <= float(timeout) <= 60.0:
+            raise AutonomyPersistenceError("SQLite execution persistence timeout is outside its bound")
+        if not callable(clock):
+            raise AutonomyPersistenceError("SQLite execution persistence clock must be callable")
+        self.path = Path(path)
+        self.max_bytes = max_bytes
+        self.timeout = float(timeout)
+        self._clock = clock
+        self._lock = threading.RLock()
+        self._connection: sqlite3.Connection | None = None
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            connection = sqlite3.connect(
+                str(self.path),
+                isolation_level=None,
+                check_same_thread=False,
+                timeout=self.timeout,
+            )
+            connection.row_factory = sqlite3.Row
+            self._connection = connection
+            self._configure()
+        except AutonomyPersistenceError:
+            self.close()
+            raise
+        except (OSError, sqlite3.Error) as error:
+            self.close()
+            raise AutonomyPersistenceError("SQLite execution persistence could not be opened") from error
+
+    def _configure(self) -> None:
+        connection = self._require_connection()
+        connection.execute("PRAGMA journal_mode=WAL")
+        connection.execute("PRAGMA synchronous=FULL")
+        connection.execute("PRAGMA foreign_keys=ON")
+        connection.execute(f"PRAGMA busy_timeout = {int(self.timeout * 1000)}")
+        connection.execute(
+            f"CREATE TABLE IF NOT EXISTS {self._META_TABLE} ("
+            "key TEXT PRIMARY KEY, value TEXT NOT NULL)"
+        )
+        connection.execute(
+            f"CREATE TABLE IF NOT EXISTS {self._SNAPSHOT_TABLE} ("
+            "slot INTEGER PRIMARY KEY CHECK(slot = 1), "
+            "snapshot_digest TEXT NOT NULL, snapshot_text TEXT NOT NULL, updated_ns INTEGER NOT NULL)"
+        )
+        existing = connection.execute(
+            f"SELECT value FROM {self._META_TABLE} WHERE key = 'schema'"
+        ).fetchone()
+        if existing is None:
+            connection.execute(
+                f"INSERT INTO {self._META_TABLE}(key, value) VALUES('schema', ?)",
+                (SQLITE_AUTONOMY_EXECUTION_SCHEMA,),
+            )
+        elif existing["value"] != SQLITE_AUTONOMY_EXECUTION_SCHEMA:
+            raise AutonomyPersistenceError("SQLite execution persistence has an incompatible schema")
+
+    def _require_connection(self) -> sqlite3.Connection:
+        connection = self._connection
+        if connection is None:
+            raise AutonomyPersistenceError("SQLite execution persistence is closed")
+        return connection
+
+    @contextmanager
+    def _transaction(self) -> Any:
+        with self._lock:
+            connection = self._require_connection()
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                yield connection
+                connection.execute("COMMIT")
+            except Exception as error:
+                try:
+                    connection.execute("ROLLBACK")
+                except sqlite3.Error:
+                    pass
+                if isinstance(error, sqlite3.Error):
+                    raise AutonomyPersistenceError("SQLite execution persistence transaction failed") from error
+                raise
+
+    def _snapshot_text_digest(self, value: Any) -> tuple[str, str]:
+        if not isinstance(value, str) or not value or len(value.encode("utf-8")) > self.max_bytes:
+            raise AutonomyPersistenceError("SQLite execution snapshot exceeds its byte bound")
+        try:
+            parsed = json.loads(value)
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise AutonomyPersistenceError("SQLite execution snapshot is invalid") from error
+        if not isinstance(parsed, Mapping):
+            raise AutonomyPersistenceError("SQLite execution snapshot must be an object")
+        snapshot_digest = parsed.get("snapshot_digest")
+        _digest("SQLite execution snapshot_digest", snapshot_digest)
+        return value, snapshot_digest
+
+    def _read_locked(self, connection: sqlite3.Connection) -> str | None:
+        row = connection.execute(
+            f"SELECT snapshot_digest, snapshot_text FROM {self._SNAPSHOT_TABLE} WHERE slot = 1"
+        ).fetchone()
+        if row is None:
+            return None
+        value, snapshot_digest = self._snapshot_text_digest(row["snapshot_text"])
+        if row["snapshot_digest"] != snapshot_digest:
+            raise AutonomyPersistenceError("SQLite execution snapshot digest is corrupted")
+        return value
+
+    def _upsert_locked(self, connection: sqlite3.Connection, value: str, snapshot_digest: str) -> None:
+        connection.execute(
+            f"INSERT INTO {self._SNAPSHOT_TABLE}(slot, snapshot_digest, snapshot_text, updated_ns) "
+            "VALUES(1, ?, ?, ?) "
+            "ON CONFLICT(slot) DO UPDATE SET snapshot_digest = excluded.snapshot_digest, "
+            "snapshot_text = excluded.snapshot_text, updated_ns = excluded.updated_ns",
+            (snapshot_digest, value, _now_ns(self._clock)),
+        )
+
+    def read(self) -> str | None:
+        with self._lock:
+            return self._read_locked(self._require_connection())
+
+    def write(self, value: str) -> None:
+        normalized, snapshot_digest = self._snapshot_text_digest(value)
+        with self._transaction() as connection:
+            self._upsert_locked(connection, normalized, snapshot_digest)
+
+    def write_if_unchanged(self, expected_snapshot_digest: str | None, value: str) -> bool:
+        if expected_snapshot_digest is not None:
+            _digest("SQLite execution expected snapshot_digest", expected_snapshot_digest)
+        normalized, snapshot_digest = self._snapshot_text_digest(value)
+        with self._transaction() as connection:
+            current = self._read_locked(connection)
+            current_digest = None if current is None else json.loads(current)["snapshot_digest"]
+            if current_digest != expected_snapshot_digest:
+                return False
+            self._upsert_locked(connection, normalized, snapshot_digest)
+            return True
+
+    def close(self) -> None:
+        with self._lock:
+            connection, self._connection = self._connection, None
+            if connection is not None:
+                try:
+                    connection.close()
+                except sqlite3.Error as error:
+                    raise AutonomyPersistenceError("SQLite execution persistence could not be closed") from error
+
+
+class SQLiteAutonomousExecutionSnapshotPersistence(TransactionalJsonAutonomousExecutionSnapshotPersistence):
+    """Restart-safe SQLite persistence for metadata-only execution snapshots.
+
+    Each instance owns one SQLite connection for its lifecycle, while every read/write uses a
+    re-entrant process lock and every mutation uses ``BEGIN IMMEDIATE`` plus ``synchronous=FULL``.
+    Multiple instances or worker processes may therefore share a database file: a stale
+    coordinator receives a compare-and-swap conflict instead of overwriting a newer snapshot.
+    SQLite stores only the canonical snapshot text and its digest; the parent JSON layer still
+    rejects task, prompt, provider, credential, tool, effect, and raw evaluator fields.
+    """
+
+    def __init__(
+        self,
+        path: str | os.PathLike[str],
+        *,
+        max_bytes: int = MAX_AUTONOMY_JOURNAL_SNAPSHOT_BYTES,
+        timeout: float = 5.0,
+        clock: Callable[[], float] = time.time,
+    ) -> None:
+        store = _SQLiteAutonomousExecutionSnapshotStore(
+            path,
+            max_bytes=max_bytes,
+            timeout=timeout,
+            clock=clock,
+        )
+        try:
+            super().__init__(store, max_bytes=max_bytes)
+        except Exception:
+            store.close()
+            raise
+        self.path = store.path
+
+    def close(self) -> None:
+        store = self.store
+        close = getattr(store, "close", None)
+        if callable(close):
+            close()
+
+    def __enter__(self) -> "SQLiteAutonomousExecutionSnapshotPersistence":
+        self.store._require_connection()  # type: ignore[attr-defined]
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        self.close()
+
+
 class AutonomousExecutionPersistenceCoordinator:
     """Flush and restore a hash-checked execution journal through caller-owned storage."""
 
@@ -846,27 +1345,30 @@ class AutonomousExecutionPersistenceCoordinator:
         self.journal = journal
         self.persistence = persistence
         self._expected_snapshot_digest: str | None = None
+        self._lock = threading.RLock()
 
     def restore(self) -> dict[str, Any] | None:
-        raw = self.persistence.read()
-        if raw is None:
-            self._expected_snapshot_digest = None
-            return None
-        snapshot = _normalize_execution_snapshot(raw, max_events=self.journal.max_events, max_bytes=self.journal.max_bytes)
-        self.journal.restore(snapshot)
-        self._expected_snapshot_digest = snapshot["snapshot_digest"]
-        return snapshot
+        with self._lock:
+            raw = self.persistence.read()
+            if raw is None:
+                self._expected_snapshot_digest = None
+                return None
+            snapshot = _normalize_execution_snapshot(raw, max_events=self.journal.max_events, max_bytes=self.journal.max_bytes)
+            self.journal.restore(snapshot)
+            self._expected_snapshot_digest = snapshot["snapshot_digest"]
+            return snapshot
 
     def flush(self) -> dict[str, Any]:
-        snapshot = self.journal.snapshot()
-        write_if_unchanged = getattr(self.persistence, "write_if_unchanged", None)
-        if callable(write_if_unchanged):
-            if not write_if_unchanged(self._expected_snapshot_digest, snapshot):
-                raise AutonomyPersistenceError("execution persistence compare-and-swap conflict")
-        else:
-            self.persistence.write(snapshot)
-        self._expected_snapshot_digest = snapshot["snapshot_digest"]
-        return snapshot
+        with self._lock:
+            snapshot = self.journal.snapshot()
+            write_if_unchanged = getattr(self.persistence, "write_if_unchanged", None)
+            if callable(write_if_unchanged):
+                if not write_if_unchanged(self._expected_snapshot_digest, snapshot):
+                    raise AutonomyPersistenceError("execution persistence compare-and-swap conflict")
+            else:
+                self.persistence.write(snapshot)
+            self._expected_snapshot_digest = snapshot["snapshot_digest"]
+            return snapshot
 
 
 class AutonomousExecutionController:
@@ -883,6 +1385,7 @@ class AutonomousExecutionController:
         journal: AutonomousExecutionJournal | None = None,
         resume: bool = False,
     ) -> None:
+        self._lock = threading.RLock()
         self.policy = policy if isinstance(policy, AutonomousExecutionPolicy) else AutonomousExecutionPolicy.from_mapping(policy or {})
         if journal is not None and not isinstance(journal, AutonomousExecutionJournal):
             raise AutonomyPersistenceError("controller journal must be an AutonomousExecutionJournal or None")
@@ -907,6 +1410,7 @@ class AutonomousExecutionController:
         )
         self._terminal = False
 
+    @_serialized_transition
     def admit_provider_call(
         self,
         *,
@@ -918,14 +1422,34 @@ class AutonomousExecutionController:
         turn: int | None = None,
         selection_digest: str | None = None,
         estimated_cost_units: float | None = None,
+        failover: bool = False,
     ) -> AutonomousExecutionState:
         self._ensure_active()
         self._ensure_step()
         if self.state.provider_calls >= self.policy.max_provider_calls:
             raise AutonomyPolicyError("max_provider_calls exceeded")
+        if not isinstance(failover, bool):
+            raise AutonomyPersistenceError("failover must be a boolean")
+        if failover and self.state.provider_failovers >= self.policy.max_provider_failovers:
+            raise AutonomyPolicyError("max_provider_failovers exceeded")
+        if provider is not None:
+            provider = _text("provider", provider)
+        if model is not None:
+            model = _text("model", model)
+        if invocation_kind is not None:
+            invocation_kind = _identifier("invocation_kind", invocation_kind, maximum=128)
+        if attempt is not None and (not isinstance(attempt, int) or isinstance(attempt, bool) or not 0 <= attempt <= 8):
+            raise AutonomyPersistenceError("attempt is outside its bound")
+        if turn is not None and (not isinstance(turn, int) or isinstance(turn, bool) or not 0 <= turn <= 32):
+            raise AutonomyPersistenceError("turn is outside its bound")
+        if selection_digest is not None:
+            selection_digest = _digest("selection_digest", selection_digest)
         self._ensure_cost(cost_units)
-        self.state = replace(self.state, step_index=self.state.step_index + 1, provider_calls=self.state.provider_calls + 1, cost_units=self.state.cost_units + float(cost_units), last_event_kind="provider_call", status="running")
-        fields: dict[str, Any] = {"cost_units": cost_units}
+        estimated_cost = None if estimated_cost_units is None else float(estimated_cost_units)
+        if estimated_cost_units is not None:
+            self._ensure_cost(estimated_cost_units)
+        self.state = replace(self.state, step_index=self.state.step_index + 1, provider_calls=self.state.provider_calls + 1, provider_failovers=self.state.provider_failovers + int(failover), cost_units=self.state.cost_units + float(cost_units), last_event_kind="provider_call", status="running")
+        fields: dict[str, Any] = {"cost_units": float(cost_units), "failover": failover}
         for name, value in (
             ("provider", provider),
             ("model", model),
@@ -933,12 +1457,13 @@ class AutonomousExecutionController:
             ("attempt", attempt),
             ("turn", turn),
             ("selection_digest", selection_digest),
-            ("estimated_cost_units", estimated_cost_units),
+            ("estimated_cost_units", estimated_cost),
         ):
             if value is not None:
                 fields[name] = value
         return self._persist("provider_call", "running", **fields)
 
+    @_serialized_transition
     def record_provider_outcome(
         self,
         *,
@@ -959,26 +1484,53 @@ class AutonomousExecutionController:
         request_id_digest: str | None = None,
         failure_class: str | None = None,
         status_code: int | None = None,
+        retryable: bool = False,
     ) -> AutonomousExecutionState:
         """Persist one bounded provider result without changing call-count admission."""
 
         self._ensure_active()
+        provider = _text("provider", provider)
+        model = _text("model", model)
+        invocation_kind = _identifier("invocation_kind", invocation_kind, maximum=128)
+        if not isinstance(attempt, int) or isinstance(attempt, bool) or not 0 <= attempt <= 8:
+            raise AutonomyPersistenceError("attempt is outside its bound")
+        if not isinstance(turn, int) or isinstance(turn, bool) or not 0 <= turn <= 32:
+            raise AutonomyPersistenceError("turn is outside its bound")
         if outcome not in {"success", "failure"}:
             raise AutonomyPersistenceError("provider outcome must be success or failure")
         if status not in {"completed", "provider_refused"}:
             raise AutonomyPersistenceError("provider outcome status is unsupported")
+        if not isinstance(retryable, bool):
+            raise AutonomyPersistenceError("retryable must be a boolean")
+        if not isinstance(input_tokens, int) or isinstance(input_tokens, bool) or not 0 <= input_tokens <= 100_000_000:
+            raise AutonomyPersistenceError("input_tokens is outside its bound")
+        if not isinstance(output_tokens, int) or isinstance(output_tokens, bool) or not 0 <= output_tokens <= 100_000_000:
+            raise AutonomyPersistenceError("output_tokens is outside its bound")
+        for name, value in (("latency_ms", latency_ms), ("estimated_cost_units", estimated_cost_units), ("actual_cost_units", actual_cost_units)):
+            if not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(float(value)) or value < 0:
+                raise AutonomyPersistenceError(f"{name} must be finite and non-negative")
+        if selection_digest is not None:
+            selection_digest = _digest("selection_digest", selection_digest)
+        outcome_digest = _digest("outcome_digest", outcome_digest)
+        if request_id_digest is not None:
+            request_id_digest = _digest("request_id_digest", request_id_digest)
+        if failure_class is not None:
+            failure_class = _identifier("failure_class", failure_class, maximum=512)
+        if status_code is not None and (not isinstance(status_code, int) or isinstance(status_code, bool) or not 0 <= status_code <= 999):
+            raise AutonomyPersistenceError("status_code is outside its bound")
+        lifecycle_status = "error" if outcome == "failure" and not retryable and self.policy.stop_on_error else "running"
         self.state = replace(
             self.state,
             last_event_kind="provider_call",
-            last_outcome_digest=_digest("outcome_digest", outcome_digest),
-            status="running",
+            last_outcome_digest=outcome_digest,
+            status=lifecycle_status,
         )
         return self._persist(
             "provider_call",
             status,
-            provider=_text("provider", provider),
-            model=_text("model", model),
-            invocation_kind=_text("invocation_kind", invocation_kind, maximum=128),
+            provider=provider,
+            model=model,
+            invocation_kind=invocation_kind,
             attempt=attempt,
             turn=turn,
             provider_outcome=outcome,
@@ -992,8 +1544,10 @@ class AutonomousExecutionController:
             request_id_digest=request_id_digest,
             failure_class=failure_class,
             status_code=status_code,
+            retryable=retryable,
         )
 
+    @_serialized_transition
     def admit_tool_call(
         self,
         *,
@@ -1005,6 +1559,10 @@ class AutonomousExecutionController:
     ) -> AutonomousExecutionState:
         self._ensure_active()
         self._ensure_step()
+        if not isinstance(read_only, bool):
+            raise AutonomyPersistenceError("read_only must be a boolean")
+        if not isinstance(approval_required, bool):
+            raise AutonomyPersistenceError("approval_required must be a boolean")
         tool = _identifier("tool", tool)
         call_id = _identifier("call_id", call_id, maximum=512)
         if self.state.tool_calls >= self.policy.max_tool_calls:
@@ -1024,7 +1582,7 @@ class AutonomousExecutionController:
             last_tool=tool,
             last_call_id=call_id,
             last_event_kind="tool_intent",
-            status="approval_required" if approval_required else "running",
+            status="approval_required" if approval_required and self.policy.pause_on_approval else "running",
         )
         return self._persist(
             "tool_intent",
@@ -1036,6 +1594,7 @@ class AutonomousExecutionController:
             cost_units=cost_units,
         )
 
+    @_serialized_transition
     def record_tool_outcome(
         self,
         *,
@@ -1046,9 +1605,103 @@ class AutonomousExecutionController:
         reason: str | None = None,
     ) -> AutonomousExecutionState:
         self._ensure_active()
-        self.state = replace(self.state, last_tool=_identifier("tool", tool), last_call_id=_identifier("call_id", call_id, maximum=512), last_outcome_digest=None if outcome_digest is None else _digest("outcome_digest", outcome_digest), last_event_kind="tool_outcome", status=_identifier("tool outcome status", status))
-        return self._persist("tool_outcome", self.state.status, tool=tool, call_id=call_id, outcome_digest=outcome_digest, reason=reason)
+        tool = _identifier("tool", tool)
+        call_id = _identifier("call_id", call_id, maximum=512)
+        outcome_status = _identifier("tool outcome status", status)
+        outcome_digest = None if outcome_digest is None else _digest("outcome_digest", outcome_digest)
+        reason = None if reason is None else _identifier("tool reason", reason, maximum=2_048)
+        lifecycle_status = (
+            "reconciliation_required"
+            if outcome_status == "reconciliation_required"
+            else "approval_required"
+            if outcome_status == "authorization_required" and self.policy.pause_on_approval
+            else "error"
+            if outcome_status == "failed" and self.policy.stop_on_error
+            else "running"
+        )
+        self.state = replace(self.state, last_tool=tool, last_call_id=call_id, last_outcome_digest=outcome_digest, last_event_kind="tool_outcome", status=lifecycle_status)
+        return self._persist("tool_outcome", outcome_status, tool=tool, call_id=call_id, outcome_digest=outcome_digest, reason=reason)
 
+    @_serialized_transition
+    def record_effect_reconciliation(
+        self,
+        *,
+        effect_id: str,
+        tool: str,
+        call_id: str,
+        status: str,
+        dispatch_attempt: int,
+        result_digest: str | None = None,
+        failure_class: str | None = None,
+        reason: str | None = None,
+    ) -> AutonomousExecutionState:
+        """Persist effect uncertainty without retaining arguments or external results.
+
+        ``uncertain`` is a recoverable execution boundary, not ordinary tool failure.  The
+        controller therefore moves to ``reconciliation_required`` and remains resumable until a
+        caller-owned resolver records ``reconciled`` or a definite ``failed`` outcome.
+        """
+
+        if (
+            (self._terminal or self.state.status in AUTONOMY_TERMINAL_STATUSES)
+            and self.state.status != "reconciliation_required"
+        ):
+            raise AutonomyPolicyError("execution cannot record an effect after terminal completion")
+        effect_id = _identifier("effect_id", effect_id, maximum=128)
+        tool = _identifier("effect tool", tool)
+        call_id = _identifier("effect call_id", call_id, maximum=512)
+        if status not in {"prepared", "dispatching", "dispatched", "completed", "uncertain", "reconciled", "failed"}:
+            raise AutonomyPersistenceError("effect reconciliation status is unsupported")
+        if not isinstance(dispatch_attempt, int) or isinstance(dispatch_attempt, bool) or not 0 <= dispatch_attempt <= 64:
+            raise AutonomyPersistenceError("effect dispatch_attempt is outside its bound")
+        if result_digest is not None:
+            result_digest = _digest("effect result_digest", result_digest)
+        if failure_class is not None:
+            failure_class = _identifier("effect failure_class", failure_class, maximum=256)
+        if reason is not None:
+            reason = _identifier("effect reason", reason, maximum=2_048)
+        lifecycle_status = (
+            "reconciliation_required"
+            if status == "uncertain"
+            else "error"
+            if status == "failed" and self.policy.stop_on_error
+            else "running"
+        )
+        reconciliation_digest = content_digest(
+            {
+                "effect_id": effect_id,
+                "status": status,
+                "dispatch_attempt": dispatch_attempt,
+                "result_digest": result_digest,
+                "failure_class": failure_class,
+                "reason": reason,
+            }
+        )
+        self.state = replace(
+            self.state,
+            last_tool=tool,
+            last_call_id=call_id,
+            last_outcome_digest=result_digest,
+            last_event_kind="effect_reconciliation",
+            status=lifecycle_status,
+        )
+        if status in {"reconciled", "completed", "failed"}:
+            self._terminal = False
+        return self._persist(
+            "effect_reconciliation",
+            status,
+            effect_id=effect_id,
+            effect_status=status,
+            tool=tool,
+            call_id=call_id,
+            dispatch_attempt=dispatch_attempt,
+            reconciliation_digest=reconciliation_digest,
+            outcome_digest=result_digest,
+            failure_class=failure_class,
+            reason=reason,
+        )
+
+    @_serialized_transition
     def record_evaluation(
         self,
         *,
@@ -1068,11 +1721,50 @@ class AutonomousExecutionController:
         self.state = replace(self.state, last_evaluation_digest=evaluation_digest, last_event_kind="evaluation", status="evaluated")
         return self._persist("evaluation", "evaluated", evaluator_id=evaluator_id, evaluator_version=evaluator_version, reward=reward, passed=passed, evaluation_digest=evaluation_digest, failure_class=failure_class)
 
+    @_serialized_transition
+    def replan(
+        self,
+        *,
+        instruction_digest: str | None = None,
+        reason: str | None = None,
+        attempt: int | None = None,
+    ) -> AutonomousExecutionState:
+        """Record an evaluator-approved planning transition without persisting its instruction."""
+
+        self._ensure_active()
+        if self.state.replans >= self.policy.max_replans:
+            raise AutonomyPolicyError("max_replans exceeded")
+        if instruction_digest is not None:
+            instruction_digest = _digest("replan instruction_digest", instruction_digest)
+        if reason is not None:
+            reason = _identifier("replan reason", reason, maximum=2_048)
+        if attempt is not None and (not isinstance(attempt, int) or isinstance(attempt, bool) or not 0 <= attempt <= 64):
+            raise AutonomyPersistenceError("replan attempt is outside its bound")
+        self.state = replace(
+            self.state,
+            replans=self.state.replans + 1,
+            last_event_kind="replan",
+            status="replanning",
+        )
+        return self._persist(
+            "replan",
+            "replanning",
+            instruction_digest=instruction_digest,
+            reason=reason,
+            attempt=attempt,
+        )
+
+    @_serialized_transition
     def checkpoint(self, *, status: str = "paused", reason: str | None = None) -> AutonomousExecutionState:
         self._ensure_active()
-        self.state = replace(self.state, status=_identifier("checkpoint status", status), last_event_kind="checkpoint")
+        status = _identifier("checkpoint status", status)
+        if status in AUTONOMY_TERMINAL_STATUSES:
+            raise AutonomyPolicyError("checkpoint status cannot be terminal")
+        reason = None if reason is None else _identifier("checkpoint reason", reason, maximum=2_048)
+        self.state = replace(self.state, status=status, last_event_kind="checkpoint")
         return self._persist("checkpoint", self.state.status, reason=reason)
 
+    @_serialized_transition
     def complete(self, *, status: str = "completed") -> AutonomousExecutionState:
         self._ensure_active()
         self.state = replace(self.state, status=_identifier("completion status", status), last_event_kind="completed")
@@ -1080,8 +1772,11 @@ class AutonomousExecutionController:
         self._terminal = True
         return self.state
 
+    @_serialized_transition
     def fail(self, *, reason: str, status: str = "failed") -> AutonomousExecutionState:
-        self._ensure_active()
+        if self._terminal or self.state.status in AUTONOMY_TERMINAL_STATUSES:
+            raise AutonomyPolicyError("execution is terminal")
+        reason = _identifier("failure reason", reason, maximum=2_048)
         self.state = replace(self.state, status=_identifier("failure status", status), last_event_kind="failed")
         self._persist("failed", self.state.status, reason=reason)
         self._terminal = True
@@ -1105,8 +1800,8 @@ class AutonomousExecutionController:
         return self.state
 
     def _ensure_active(self) -> None:
-        if self._terminal or self.state.status in AUTONOMY_TERMINAL_STATUSES:
-            raise AutonomyPolicyError("execution is terminal")
+        if self._terminal or self.state.status in AUTONOMY_TERMINAL_STATUSES or (self.policy.stop_on_error and self.state.status == "error"):
+            raise AutonomyPolicyError("execution is terminal or halted")
 
     def _ensure_step(self) -> None:
         if self.state.step_index >= self.policy.max_steps:
@@ -1135,10 +1830,13 @@ __all__ = [
     "AUTONOMY_JOURNAL_SCHEMA",
     "AUTONOMY_POLICY_SCHEMA",
     "AUTONOMY_STATE_SCHEMA",
+    "SQLITE_AUTONOMY_EXECUTION_JOURNAL_SCHEMA",
+    "SQLITE_AUTONOMY_EXECUTION_SCHEMA",
     "MAX_AUTONOMY_PROVIDER_FAILOVERS",
     "MAX_AUTONOMY_JOURNAL_SNAPSHOT_BYTES",
     "AutonomousExecutionController",
     "AutonomousExecutionJournal",
+    "SQLiteAutonomousExecutionJournal",
     "AutonomousExecutionPersistenceCoordinator",
     "AutonomousExecutionPolicy",
     "AutonomousExecutionSnapshotTextStore",
@@ -1147,6 +1845,7 @@ __all__ = [
     "AutonomyPersistenceError",
     "AutonomyPolicyError",
     "JsonAutonomousExecutionSnapshotPersistence",
+    "SQLiteAutonomousExecutionSnapshotPersistence",
     "TransactionalJsonAutonomousExecutionSnapshotPersistence",
     "validate_autonomous_execution_snapshot",
 ]

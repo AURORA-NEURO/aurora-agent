@@ -102,11 +102,6 @@ impl LabReport {
         self
     }
 
-    pub fn with_separation(mut self, separation: SeparationVerdict) -> Self {
-        self.separation = Some(separation);
-        self
-    }
-
     /// Whether anything in the report should stop a release.
     ///
     /// True on a contaminated attempt, on a retired certification surface, and on branching that

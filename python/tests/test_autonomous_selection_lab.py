@@ -5,7 +5,10 @@ import pytest
 from prism_sdk import (
     AUTONOMOUS_DOMAINS,
     ArgumentError,
+    DEFAULT_AUTONOMOUS_SELECTION_WEIGHTS,
     evaluate_autonomous_selection_policy,
+    normalize_autonomous_model_observations,
+    normalize_autonomous_selection_weights,
     rank_autonomous_models,
     validate_autonomous_selection_lab_report,
 )
@@ -150,3 +153,63 @@ def test_default_ranker_applies_health_and_structured_output_gates() -> None:
     ranking = rank_autonomous_models(request)
     assert ranking[0]["eligible"] is False
     assert "provider structured output is disabled" in ranking[0]["reasons"]
+
+
+def test_weighted_ranker_matches_policy_contract_and_respects_learning_disable() -> None:
+    request = _request("evaluation")
+    request["weights"] = {"quality": 1, "reliability": 0, "cost": 0, "latency": 0, "exploration": 0}
+    assert normalize_autonomous_selection_weights() == DEFAULT_AUTONOMOUS_SELECTION_WEIGHTS
+    assert normalize_autonomous_selection_weights({"cost": 2})["cost"] == 2
+    with pytest.raises(ArgumentError, match="at least one positive"):
+        normalize_autonomous_selection_weights({name: 0 for name in DEFAULT_AUTONOMOUS_SELECTION_WEIGHTS})
+    assert rank_autonomous_models(request)[0]["model"] == "evaluation-quality"
+
+    request["weights"] = {"quality": 0.1, "reliability": 0, "cost": 10, "latency": 0, "exploration": 0}
+    assert rank_autonomous_models(request)[0]["model"] == "evaluation-cheap"
+
+    request["observations"] = [
+        {
+            "arm_id": "lab/evaluation-cheap",
+            "pulls": 12,
+            "reward_sum": 10,
+            "failures": 0,
+            "disabled": True,
+        }
+    ]
+    ranking = rank_autonomous_models(request)
+    cheap = next(row for row in ranking if row["model"] == "evaluation-cheap")
+    assert cheap["eligible"] is False
+    assert "disabled by learning policy" in cheap["reasons"]
+    assert cheap["observed_pulls"] == 12
+
+
+def test_model_observation_normalizer_is_bounded_and_deterministic() -> None:
+    observations = normalize_autonomous_model_observations(
+        [
+            {
+                "arm_id": "lab/evaluation-cheap",
+                "pulls": 2,
+                "reward_sum": 1.23456789012345,
+                "failures": 1,
+            }
+        ]
+    )
+    assert observations == [
+        {
+            "arm_id": "lab/evaluation-cheap",
+            "pulls": 2,
+            "reward_sum": 1.234567890123,
+            "failures": 1,
+        }
+    ]
+    with pytest.raises(ArgumentError, match="duplicate arm"):
+        normalize_autonomous_model_observations(
+            [
+                {"arm_id": "lab/a", "pulls": 0, "reward_sum": 0, "failures": 0},
+                {"arm_id": "lab/a", "pulls": 0, "reward_sum": 0, "failures": 0},
+            ]
+        )
+    with pytest.raises(ArgumentError, match="failures"):
+        normalize_autonomous_model_observations(
+            [{"arm_id": "lab/a", "pulls": 1, "reward_sum": 0, "failures": 2}]
+        )

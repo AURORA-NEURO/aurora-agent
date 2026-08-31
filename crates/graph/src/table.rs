@@ -72,10 +72,6 @@ pub struct TableBody {
 }
 
 impl TableBody {
-    pub fn rows_of(&self, kind: NodeKind) -> impl Iterator<Item = &TableRow> {
-        self.rows.iter().filter(move |row| row.kind == kind)
-    }
-
     pub fn row(&self, id: &str) -> Option<&TableRow> {
         self.rows.iter().find(|row| row.id == id)
     }

@@ -1,0 +1,101 @@
+{
+  "description": "A world whose factor graph contains a multi-output factor. factor.joint_readout emits risk_score and calibration_drift together; only risk_score is reached backwards from the target, and factor.drift_model produces calibration_drift alone. A backward slice selects two factors, because calibration_drift is produced rather than consumed and so never becomes a needed variable. Used by crates/fiber and crates/backends to pin that the compiler's slice and the region's slice agree on the selected-factor set when a factor has more than one output.",
+  "events": [],
+  "factors": [
+    {
+      "id": "factor.claim_support",
+      "inputs": [
+        "risk_score",
+        "cohort_id"
+      ],
+      "kind": "rule",
+      "outputs": [
+        "split_integrity_status"
+      ],
+      "scope": {
+        "cohort": "MULTI-001"
+      }
+    },
+    {
+      "id": "factor.drift_model",
+      "inputs": [
+        "scanner_id"
+      ],
+      "kind": "rule",
+      "outputs": [
+        "calibration_drift"
+      ],
+      "scope": {
+        "cohort": "MULTI-001"
+      }
+    },
+    {
+      "id": "factor.joint_readout",
+      "inputs": [
+        "assay_batch"
+      ],
+      "kind": "rule",
+      "outputs": [
+        "risk_score",
+        "calibration_drift"
+      ],
+      "scope": {
+        "cohort": "MULTI-001"
+      }
+    }
+  ],
+  "facts": [
+    {
+      "id": "fact.assay_batch",
+      "provenance": [
+        "assay/batch.json"
+      ],
+      "provides": "assay_batch",
+      "scope": {
+        "cohort": "MULTI-001"
+      },
+      "tags": [
+        "measurement"
+      ],
+      "value": [
+        "batch-a",
+        "batch-b"
+      ]
+    },
+    {
+      "id": "fact.cohort",
+      "provenance": [
+        "registry/cohort.json"
+      ],
+      "provides": "cohort_id",
+      "scope": {
+        "cohort": "MULTI-001"
+      },
+      "tags": [
+        "identity",
+        "protected"
+      ],
+      "value": "MULTI-001"
+    },
+    {
+      "id": "fact.scanner",
+      "provenance": [
+        "registry/scanner.json"
+      ],
+      "provides": "scanner_id",
+      "scope": {
+        "cohort": "MULTI-001"
+      },
+      "tags": [
+        "measurement"
+      ],
+      "value": [
+        "scanner-1",
+        "scanner-2",
+        "scanner-3"
+      ]
+    }
+  ],
+  "schema_version": "fiber-world/0.1",
+  "world_id": "multi-output-factor-demo-v1"
+}

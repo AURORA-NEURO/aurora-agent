@@ -105,7 +105,10 @@ impl BoundMethod {
 
     /// Whether this method's number is the true influence rather than an upper bound on it.
     pub fn is_exact(self) -> bool {
-        matches!(self, BoundMethod::ExactRemoval | BoundMethod::StructuralZero)
+        matches!(
+            self,
+            BoundMethod::ExactRemoval | BoundMethod::StructuralZero
+        )
     }
 }
 
@@ -218,24 +221,19 @@ impl InfluenceEstimate {
         }
     }
 
-    pub fn unknown_reason(&self) -> Option<&UnknownReason> {
-        match self {
-            InfluenceEstimate::Bounded(_) => None,
-            InfluenceEstimate::Unknown(reason) => Some(reason),
-        }
-    }
-
     pub fn is_bounded(&self) -> bool {
         matches!(self, InfluenceEstimate::Bounded(_))
     }
 
-    /// Whether a group carrying this estimate may contribute to a sufficiency claim.
+    /// Whether an estimate of this shape is the *kind* of thing that can support a sufficiency
+    /// claim.
     ///
-    /// Mirrors [`bioprism_section::InfluenceClass::supports_sufficiency`] exactly. A vacuous bound
-    /// still supports sufficiency *formally* — the class is `Bounded` and the manifest is not
-    /// voided — which is correct and is also why `is_vacuous` is public: a bound of one on an
-    /// answer that lives in `[0, 1]` constrains nothing, and a consumer that treats every
-    /// `Bounded` group as reassuring will be reassured by nothing.
+    /// A property of the variant, not of the number: `Bounded(1.0)` answers `true` here and still
+    /// produces an [`bioprism_section::InfluenceClass::Unknown`] group, because
+    /// [`crate::manifest::omission_group`] refuses a vacuous value at the boundary where the class
+    /// is chosen. The two answers are not in conflict — this one says a bound was computed, the
+    /// classification says what the bound was worth — and [`InfluenceBound::is_vacuous`] is the
+    /// reason a caller can tell which it has before ever building a group.
     pub fn supports_sufficiency(&self) -> bool {
         self.is_bounded()
     }

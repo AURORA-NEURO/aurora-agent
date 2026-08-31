@@ -78,14 +78,6 @@ impl RatioInterval {
         RatioInterval::Range { lo: 1.0, hi: 1.0 }
     }
 
-    /// Lifts the crate's existing value type into the lattice.
-    pub fn of_ratio_range(range: RatioRange) -> Self {
-        RatioInterval::Range {
-            lo: range.lo(),
-            hi: range.hi(),
-        }
-    }
-
     pub fn endpoints(self) -> Option<(f64, f64)> {
         match self {
             RatioInterval::Bottom => None,

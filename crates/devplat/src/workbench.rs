@@ -24,6 +24,14 @@
 //!
 //! The generated CI plan can be handed to a consumer-repository adapter, committed by a human, or
 //! reviewed in an authoring UI. It is never mistaken for a green run merely because it rendered.
+//!
+//! Every type inside a [`WorkbenchReport`] — the audit and its findings, the dashboard projection
+//! and its rows, the CI plan — refuses a field it does not declare, because [`verify_workbench`]
+//! recomputes the report's digest by re-serialising the *parsed* report: a key the reader dropped
+//! would be outside the seal by construction, the claimed digest would still agree, and a report
+//! carrying content nobody hashed would read as verified. The request types stay open, because a
+//! caller sending a field a newer schema added is forward compatibility rather than tampering, and
+//! no digest covers them.
 
 use bioprism_ids::ContentHash;
 use serde::{Deserialize, Serialize};
@@ -500,6 +508,7 @@ impl StudioSession {
 
 /// One conservative finding produced by a structural audit.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct WorkbenchFinding {
     pub code: String,
     pub severity: String,
@@ -509,6 +518,7 @@ pub struct WorkbenchFinding {
 
 /// Structural session audit.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SessionAudit {
     pub valid: bool,
     pub session_digest: String,
@@ -581,6 +591,7 @@ impl DashboardQuery {
 
 /// A row returned by a dashboard query. Holes have no manufactured score.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DashboardRow {
     pub artifact: String,
     pub title: String,
@@ -596,6 +607,7 @@ pub struct DashboardRow {
 
 /// Bounded dashboard result.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DashboardReport {
     pub query: DashboardQuery,
     pub matched: usize,
@@ -697,6 +709,7 @@ impl CiRequest {
 
 /// Generated CI artifact and its non-execution posture.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CiPlan {
     pub workflow: String,
     pub workflow_yaml: String,

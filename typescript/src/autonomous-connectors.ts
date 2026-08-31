@@ -1,4 +1,5 @@
 import { ArgumentError, isObject } from "./errors.js";
+import type { AutonomousAuthorizationContext } from "./autonomous-authorization.js";
 import type { ApiClient } from "./client.js";
 import { canonicalJson, digestJsonSync } from "./tooling.js";
 import type {
@@ -839,9 +840,10 @@ export class AutonomousConnectorRuntime {
     this.receiptSink = options.receiptSink;
   }
 
-  async dispatch(request: AutonomousConnectorDispatchRequest, options: { traceEventCallback?: AutonomousConnectorTraceEventCallback } = {}): Promise<AutonomousConnectorDispatchResult> {
+  async dispatch(request: AutonomousConnectorDispatchRequest, options: { traceEventCallback?: AutonomousConnectorTraceEventCallback; authorizationContext?: AutonomousAuthorizationContext; authorizationDomain?: string; authorizationCapability?: string | null; authorizationRiskClass?: string | null } = {}): Promise<AutonomousConnectorDispatchResult> {
     if (!(request instanceof AutonomousConnectorDispatchRequest)) throw new ArgumentError("autonomous connector dispatch requires a typed request");
     if (options.traceEventCallback !== undefined && typeof options.traceEventCallback !== "function") throw new ArgumentError("autonomous connector traceEventCallback must be callable");
+    if (options.authorizationContext !== undefined && typeof options.authorizationContext.authorizeOperation !== "function") throw new ArgumentError("autonomous connector authorizationContext must expose authorizeOperation");
     const registration = this.registry.resolve(request.connector_id);
     const replay = await this.findReplay(request, registration);
     if (replay) {
@@ -857,7 +859,7 @@ export class AutonomousConnectorRuntime {
       await this.emitTrace(options.traceEventCallback, request, registration, "connector_finished", traceStatus(outcome.receipt.status), outcome.receipt);
       return { ...outcome, replay: "replayed", value: null };
     }
-    const work = this.dispatchFresh(request, registration, options.traceEventCallback);
+    const work = this.dispatchFresh(request, registration, options);
     this.inFlight.set(identity, work);
     try {
       return await work;
@@ -866,7 +868,7 @@ export class AutonomousConnectorRuntime {
     }
   }
 
-  async dispatchFromPlan(plan: AutonomousConnectorSelectionPlan | unknown, request: AutonomousConnectorDispatchRequest, options: { traceEventCallback?: AutonomousConnectorTraceEventCallback } = {}): Promise<AutonomousConnectorDispatchResult> {
+  async dispatchFromPlan(plan: AutonomousConnectorSelectionPlan | unknown, request: AutonomousConnectorDispatchRequest, options: { traceEventCallback?: AutonomousConnectorTraceEventCallback; authorizationContext?: AutonomousAuthorizationContext; authorizationDomain?: string; authorizationCapability?: string | null; authorizationRiskClass?: string | null } = {}): Promise<AutonomousConnectorDispatchResult> {
     const typedPlan = plan instanceof AutonomousConnectorSelectionPlan ? plan : AutonomousConnectorSelectionPlan.fromJSON(plan);
     if (!(request instanceof AutonomousConnectorDispatchRequest)) throw new ArgumentError("autonomous connector planned dispatch requires a typed request");
     typedPlan.verify(this.registry);
@@ -888,19 +890,29 @@ export class AutonomousConnectorRuntime {
     return { schema: AUTONOMOUS_CONNECTOR_DISPATCH_SCHEMA, receipt: stored, value: null, replay: "replayed", retention: "receipt_metadata_only;value_transient", secret_material: "never_returned" };
   }
 
-  private async dispatchFresh(request: AutonomousConnectorDispatchRequest, registration: AutonomousConnectorRegistration, traceEventCallback?: AutonomousConnectorTraceEventCallback): Promise<AutonomousConnectorDispatchResult> {
-    await this.emitTrace(traceEventCallback, request, registration, "connector_started", "running");
+  private async dispatchFresh(request: AutonomousConnectorDispatchRequest, registration: AutonomousConnectorRegistration, options: { traceEventCallback?: AutonomousConnectorTraceEventCallback; authorizationContext?: AutonomousAuthorizationContext; authorizationDomain?: string; authorizationCapability?: string | null; authorizationRiskClass?: string | null }): Promise<AutonomousConnectorDispatchResult> {
+    await this.emitTrace(options.traceEventCallback, request, registration, "connector_started", "running");
     const missingDomains = request.domains.filter((domain) => !registration.manifest.domains.includes(domain));
-    if (missingDomains.length) return this.finish(request, registration, "refused", "domain_scope", null, null, traceEventCallback);
-    if (!registration.manifest.capabilities.includes(request.capability)) return this.finish(request, registration, "refused", "capability_scope", null, null, traceEventCallback);
-    if (registration.approval_required && !request.approved) return this.finish(request, registration, "refused", "approval_required", null, null, traceEventCallback);
+    if (missingDomains.length) return this.finish(request, registration, "refused", "domain_scope", null, null, options.traceEventCallback);
+    if (!registration.manifest.capabilities.includes(request.capability)) return this.finish(request, registration, "refused", "capability_scope", null, null, options.traceEventCallback);
+    if (registration.approval_required && !request.approved) return this.finish(request, registration, "refused", "approval_required", null, null, options.traceEventCallback);
+    if (options.authorizationContext) {
+      options.authorizationContext.authorizeOperation({
+        operation: "connector_dispatch",
+        domains: options.authorizationDomain === undefined ? request.domains : undefined,
+        domain: options.authorizationDomain,
+        capability: options.authorizationCapability === undefined ? request.capability : options.authorizationCapability,
+        riskClass: options.authorizationRiskClass,
+        resourceDigest: request.request_digest,
+      });
+    }
     try {
       const raw = await registration.executor(registration.manifest, request.request);
       const observation = raw instanceof AutonomousConnectorObservation ? raw : new AutonomousConnectorObservation(raw);
       const payloadDigest = observation.value === null ? null : digestJsonSync(observation.value);
-      return this.finish(request, registration, observation.status, observation.failure_class, payloadDigest, observation.value, traceEventCallback);
+      return this.finish(request, registration, observation.status, observation.failure_class, payloadDigest, observation.value, options.traceEventCallback);
     } catch {
-      return this.finish(request, registration, "error", "executor_error", null, null, traceEventCallback);
+      return this.finish(request, registration, "error", "executor_error", null, null, options.traceEventCallback);
     }
   }
 

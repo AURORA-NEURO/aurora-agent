@@ -34,6 +34,7 @@ import {
   AutonomousEvidenceProviderContractRegistry,
 } from "./autonomous-evidence-provider-contract.js";
 import { AutonomousEvidenceSourcePolicy } from "./autonomous-evidence-source.js";
+import type { AutonomousAuthorizationContext } from "./autonomous-authorization.js";
 import {
   AutonomousEvidenceFailoverPolicy,
   createAutonomousEvidenceAdapterFailoverAcquirer,
@@ -112,6 +113,10 @@ export interface AutonomousEvidenceExecutionOptions {
   clock?: AutonomousEvidenceFailoverAcquirerOptions["clock"];
   sleep?: AutonomousEvidenceFailoverAcquirerOptions["sleep"];
   sourceBoundary?: AutonomousEvidenceFailoverAcquirerOptions["sourceBoundary"];
+  authorizationContext?: AutonomousAuthorizationContext;
+  authorizationDomain?: string;
+  authorizationCapability?: string | null;
+  authorizationRiskClass?: string | null;
 }
 
 export interface AutonomousEvidenceExecutionResultJSON extends JsonObject {
@@ -464,6 +469,10 @@ export class AutonomousEvidenceExecutionController {
       ...(options.parentEvidenceDigests === undefined ? {} : { parentEvidenceDigests: options.parentEvidenceDigests }),
       ...(options.stopOnFailure === undefined ? {} : { stopOnFailure: options.stopOnFailure }),
       ...(options.reevaluatePending === undefined ? {} : { reevaluatePending: options.reevaluatePending }),
+      ...(options.authorizationContext === undefined ? {} : { authorizationContext: options.authorizationContext }),
+      ...(options.authorizationDomain === undefined ? {} : { authorizationDomain: options.authorizationDomain }),
+      ...(options.authorizationCapability === undefined ? {} : { authorizationCapability: options.authorizationCapability }),
+      ...(options.authorizationRiskClass === undefined ? {} : { authorizationRiskClass: options.authorizationRiskClass }),
     });
     return new AutonomousEvidenceExecutionResult(executionPlan, currentReadiness, result);
   }

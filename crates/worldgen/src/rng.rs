@@ -33,3 +33,24 @@ impl SplitMix64 {
         &items[self.below(items.len())]
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The generator is hand-copied into this crate, so its determinism is pinned per copy.
+    ///
+    /// Generated worlds are compared byte for byte against golden fixtures, so a drifted stream
+    /// would fail those comparisons far away from its cause. This is where it fails first.
+    #[test]
+    fn the_same_seed_produces_the_same_stream() {
+        let mut a = SplitMix64::new(42);
+        let mut b = SplitMix64::new(42);
+        let mut c = SplitMix64::new(43);
+        let from_a: Vec<u64> = (0..8).map(|_| a.next_u64()).collect();
+        let from_b: Vec<u64> = (0..8).map(|_| b.next_u64()).collect();
+        let from_c: Vec<u64> = (0..8).map(|_| c.next_u64()).collect();
+        assert_eq!(from_a, from_b);
+        assert_ne!(from_a, from_c);
+    }
+}

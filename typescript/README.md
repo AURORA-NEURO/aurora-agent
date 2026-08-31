@@ -98,6 +98,16 @@ partial or failed discovery throws before the task executes, so stale inventory 
 treated as current. The wrapper preserves the normal routing, approval, workflow, cross-domain,
 learning, evaluator, budget, and checkpoint options of `AutonomousAgent.run()`.
 
+When deployment approval must happen before any key is opened, use the matching
+`...WithLaunchAdmission()` methods. `runWithProvisionedCredentialsWithLaunchAdmission()` checks
+the requested domain synchronously against the validated admission; the automatic variant first
+recompiles the provider-free deterministic route and checks every selected domain. Both checks
+run before source resolution, session creation, or inventory discovery. Provider-assisted
+semantic routing is refused by the automatic pre-admission helper because its classifier would
+otherwise be a provider call before the launch gate. The brain-facade variants apply the same
+pre-session check to direct, closed-loop, and adaptive execution and then invoke the facade's
+second admission check immediately before connector/provider dispatch.
+
 Applications using the higher-level `AutonomousBrainFacade` can keep the same credential
 boundary across planning, connector observation, direct invocation, closed-loop evaluation, and
 bounded adaptive replanning:
@@ -160,6 +170,35 @@ SDK's 60-second ceiling, and an external abort interrupts the delay immediately.
 observers receive the matching `failureClass`, `failureCode`, `requestId`, and `retryable`
 projection without prompt, response, tool, or credential data.
 
+Autonomous calls may also opt into deterministic context budgeting with `contextBudget`. The
+budget is enforced before selection and after every approved tool result. Protected system/
+developer instructions, the latest user task, recent turns, and the newest assistant/tool
+continuation remain intact; older tool turns are dropped only as complete atomic units. The
+returned `context_budget` receipt
+contains only counts, dropped indexes, structural digests, and retention metadata. A protected
+overflow fails closed with `invalid_request`; no summarization model is called and no prompt text
+is copied into the receipt.
+
+For live UI or worker consumption, `AutonomousRuntime.invokeStream()` returns a single-consumer
+provider-neutral event handle with pre-event-only failover, required terminal `done` events,
+explicit abandonment, and a metadata-only completion receipt. The application-facing
+`AutonomousAgent.runStream()` and `runAutoStream()` wrappers perform the normal route, task
+decision, blueprint, prompt, policy, and approval preflight before opening that stream.
+`runCrossDomainStream()` multiplexes bounded specialist streams and then streams synthesis over
+transient bounded child text; lifecycle events identify `child` and `synthesis` stages while
+completion receipts remain digest-only. See
+[`docs/AUTONOMOUS_STREAMING.md`](../docs/AUTONOMOUS_STREAMING.md) for the cross-language contract.
+
+```typescript
+await agent.run(task, {
+  domain: "research",
+  modelCandidates,
+  credentials,
+  approveProviderCall: true,
+  contextBudget: { maxInputTokens: 12_000, preserveRecentMessages: 10, maxMessages: 96 },
+});
+```
+
 Model ids can be refreshed from the provider instead of being copied from stale configuration:
 
 ```typescript
@@ -215,6 +254,18 @@ its own stage objectives, evidence outputs, evaluator signals, dependencies, and
 Workflow digests are identical across the two SDKs, which binds checkpoints and learning
 trajectories to the same reviewed domain contract.
 
+### Provider receipt evaluation and model learning
+
+`AutonomousProviderOutcomeEvaluator` is the explicit bridge from a completed
+`provider_invocations` receipt to model-arm learning. It passes an independent evaluator only
+bounded provider metadata, digests, and caller-supplied safe evidence. Prompt/response content,
+messages, request bodies, headers, credentials, and raw provider errors are rejected and never
+enter the learning report. Provider success alone never earns reward. The returned
+`provider/model` arms, evaluator decision digests, idempotent replay markers, and next contextual
+state are value-only metadata; persist `report.next_learning_state` through the deployment's own
+CAS/snapshot boundary. Python has the same evaluator, projection, and default model-state updater
+under snake_case names.
+
 ## Autonomous orchestration across all domains
 
 The evidence integration surface also includes `builtinAutonomousDomainHttpSourcePresets()` and
@@ -254,12 +305,58 @@ exception. A model is eligible only when its provider is registered, its declare
 and token limits satisfy the domain, its provider circuit is not open, and its credential gate is
 ready. `ready_for_caller_approval` still does not authorize a provider call or an effect.
 
+The same report now embeds `model_inventory_readiness`, the canonical digest-bound inventory
+projection used by the readiness audit. Its twelve rows preserve the exact compatible and
+eligible `provider/model` IDs plus provider registration, credential, and circuit posture. This
+keeps a readiness screen from having to reconcile two independently generated model gates; the
+nested projection is still operational metadata only and does not claim evaluator quality.
+
 Tool names are compared against the caller-owned `ToolCatalogue` as metadata only. Missing tools
 are reported per domain, while catalogue registration remains separate from tool authorization and
 effect approval. Learning is likewise reported as configuration (`AutonomousOnlineLearner`) and
 context identity; provider transport success is never converted into evaluator reward. The report
 is digest-addressed under `bioprism-autonomous-agent-readiness/0.1`, contains no task text or
 provider payload, and can be rendered directly by a setup or operations screen.
+
+### Unified all-domain launch preflight
+
+`AutonomousBrainFacade.launchPreflight()` composes the structural domain audit, keyless model and
+provider readiness, and deployment-owned capability gates into one digest-bound handoff. It emits
+one `blocked`, `partial`, or `ready_for_review` row for each of the twelve domains, source-report
+digests, bounded remediation, and an explicit zero-dispatch ledger. Caller-owned tool and evidence
+inventories can be supplied to move the contract gate from `unassessed` to a reviewed state:
+
+```typescript
+const preflight = await brain.launchPreflight({
+  availableToolNames: reviewedToolNames,
+  availableEvidence: callerEvidenceIds,
+  deploymentCapabilities: {
+    persistence: { configured: true, operational: true, restart_safe: true, integrity_fenced: true, caller_owned: true },
+    approval_authority: { configured: true, operational: true, restart_safe: true, integrity_fenced: true, caller_owned: true },
+  },
+});
+validateAutonomousLaunchPreflightReport(preflight);
+```
+
+This is a review artifact rather than an authorization oracle: it never resolves a key, invokes a
+provider or source, executes a tool, mutates learning, or creates effect authority. `ready_for_review`
+means only that the represented local gates are complete; live evidence truth, approval, scheduling,
+and execution remain separate caller-owned boundaries.
+
+After review, `brain.admitLaunchPreflight(preflight, { decision: "approve", authorizationDigest })`
+creates the matching value-only admission handoff. It carries one row for every domain, supports
+explicit subsets and holds, stores only authorization/reason digests, and refuses approval when a
+selected domain is still blocked or partial. Validate it with `validateAutonomousLaunchAdmission()`
+before binding it to a deployment-owned scheduler; the record remains separate from provider,
+source, tool, credential, learner, queue, and effect authority.
+
+For execution-bound enforcement, use `executeWithLaunchAdmission(...)`,
+`executeCycleWithLaunchAdmission(...)`, or `executeAdaptiveCycleWithLaunchAdmission(...)`. These
+methods validate the record after provider-free route planning and before connector/provider
+dispatch, requiring every final route domain to be approved while preserving the independent
+provider, tool, learner, and effect controls.
+Admission-aware execution intentionally requires provider-free routing; provider-assisted semantic
+routing must be admitted as a separate classifier boundary first.
 
 ### Keyless capability activation and restart-safe tool admission
 
@@ -347,6 +444,18 @@ instead of being silently treated as an available capability. The plan is sealed
 `bioprism-typescript-autonomous-capability-plan/0.1` and explicitly states that it made no
 provider or tool calls.
 
+Selection is now an explainable risk-bounded decision, not just a list of names. Pass
+`maxRiskClass: "read_only" | "reversible_effect" | "external_effect" | "high_impact_effect"`
+to make the caller's risk ceiling an eligibility gate; `readOnlyOnly` and `allowedTools` remain
+independent narrowing constraints. Every coverage row includes `selection_rationale`, the
+effective `selection_constraints`, and a bounded `candidate_ranking` containing the best eligible
+choice plus the highest-priority rejected alternative. Candidates expose only reviewed identity,
+risk/read-only/approval posture, task-relevance score, value-only pull/failure counters, and a
+typed reason such as `risk_budget_exceeded`, `approval_required`, or `learning_disabled`. The
+ranking is metadata-only and bounded to two candidates per workflow stage so all-domain plans
+remain within the existing size ceiling. The same ceiling is propagated through single-domain,
+automatic, cross-domain child, and synthesis blueprints; it never authorizes a tool or effect.
+
 ### Stage-bound adapter execution and evidence
 
 The live adapter path is stricter than portfolio selection. A workflow executor constructs an
@@ -384,6 +493,14 @@ must validate the stage's declared evidence and signals. `autonomousWorkflowStag
 is available when a caller-owned adapter or audit store needs to reproduce the exact stage identity.
 Legacy domain-only `authorizeAndExecute()` calls remain available for direct integrations, but
 durable workflow execution always uses the stricter stage-bound path.
+
+After review, `AutonomousToolOutcomeEvaluator` and `agent.evaluateToolReceipts()` connect these
+receipts to adaptive tool selection. The evaluator sees only bounded identity/status metadata,
+digests, duration, and explicitly supplied safe evidence; it must return the reward and pass/fail
+decision. `executed` transport status never becomes reward. Execution/call identity fencing,
+bounded evidence checks, and idempotent replay prevent duplicate or unsafe credit, and the report
+contains no raw tool payloads, prompts, provider messages, credentials, or evaluator evidence
+bodies.
 
 For an evaluator-ready adapter result, use `executeCapability()` or
 `AutonomousCapabilityRuntime` above the same runtime. The capability envelope requires an
@@ -483,6 +600,55 @@ policies, applies explicit failure-rate penalties, and records exploration metad
 replay an adaptive decision without hidden randomness. Thompson rankings include bounded
 Beta-posterior alpha, beta, and sample evidence. All three policies consume only explicit
 evaluator rewards; provider transport success is never silently converted into learning credit.
+The learner warm-starts each eligible arm from the canonical quality/reliability/cost/latency
+utility as a bounded four-pull evaluator-equivalent prior, then lets contextual, global, or
+request-supplied evaluator observations override that prior over time. This prevents cold-start
+lexical ties from selecting an arbitrary model while preserving fast adaptation, and exposes
+`static_base_score`, `static_prior_reward`, `adapted_mean`, `exploration_bonus`, and history-source
+reasons in the metadata-only ranking. A confidence floor is evaluated against the final selector
+decision, so a learned promotion can resolve a tied cold-start prior while an actually ambiguous
+post-learning decision still abstains.
+
+When `AutonomousRuntime` uses the Rust/Python contextual selector bridge, the request's global
+`selectionObservations` are forwarded into the base value-only selection request as fallback
+history; contextual callback observations remain a higher-precedence overlay. The bridge validates
+the returned ranking against the exact locally registered `provider/model` candidates, rejects
+unknown or duplicate rows and malformed score components before invocation, and preserves the
+remote base score, exploration bonus, and observed-pulls evidence in the local decision receipt.
+This keeps the control plane advisory: local capability, health, capacity, credential, approval,
+and exact-arm gates still decide whether a provider can run, and no prompt, response, credential,
+or API key is retained or sent through the learning bridge.
+
+The primary `AutonomousBrainFacade` also exposes the provider-free clarification lifecycle for
+ambiguous or review-heavy intake. `clarificationPlan({ task, domain })` derives bounded questions
+from the exact task lens, policy, intent, and decision that would shape execution; if `domain` is
+omitted, only an unambiguous deterministic single-domain route is accepted. Call
+`resolveClarification(plan, task, answers)` to produce an answer-digest-only receipt, validate it
+after restart with `validateClarification()`, and call `recompileClarification()` after the receipt
+is resolved to obtain a fresh transient blueprint. The facade refuses connector-bearing
+clarification requests, cross-domain/abstained routes, stale tasks, and tampered receipts before
+any provider, source, tool, evaluator, learner, credential, or effect boundary. Recompilation is
+still planning metadata: normal route, model, evidence, approval, provider, tool, evaluator, and
+effect gates must be passed before execution.
+
+The same facade exposes the evaluator-calibration control plane used by online learning. Register
+an aggregate `AutonomousEvaluatorCalibrationReport`, query it by digest or readiness metadata,
+derive the explicit per-domain `admit_learning`/`hold_learning` decision, and flush or restore the
+caller-owned registry through a compare-and-swap persistence coordinator. Calibration reports retain
+digests, bounded metrics, evaluator versions, and domain coverage only; raw cases, labels, evidence,
+signals, prompts, responses, credentials, and provider payloads remain caller-owned. Missing
+registry or persistence configuration fails closed, duplicate imports are idempotent, and restoring
+the same snapshot after restart does not invoke a provider or silently grant evaluator reward.
+
+Adaptive state can also be managed directly through the facade: `recordEvaluatorReward()` applies
+only explicit evaluator credit to model arms, `promptLearningSelections()` and
+`settlePromptLearning()` close the prompt-choice feedback loop, and `toolSelectionState()` plus
+`recordToolSelectionReward()` expose the corresponding tool-bandit boundary. Separate restore and
+flush methods cover model learning, prompt learning, tool selection, and decision-cycle
+checkpoints, allowing an application to coordinate each CAS-fenced store with its own transaction.
+Every method preserves the lower-level binding checks, so a missing learner, unconfigured
+coordinator, foreign persistence object, stale snapshot, or malformed feedback fails closed before
+any provider or tool dispatch.
 
 For ambiguous or novel intake, `semanticRouteAutonomousTask()` adds an explicit provider-assisted
 classification pass. It sends the private task only through the caller's approved local provider,
@@ -492,6 +658,196 @@ deterministic route remains the safety baseline: provider/deterministic disagree
 `provider_disagreement` and preserves the deterministic route, while provider abstention and
 malformed output remain explicit refusals. Routing still requires `approveProviderCall: true` and
 never authorizes a tool, effect, or domain claim.
+
+The same classifier can be composed directly into the high-level TypeScript execution paths by
+passing `semanticRouting: true` (or a bounded `AutonomousRunSemanticRoutingOptions` object) to
+`run()`, `runCrossDomain()`, or `planAndRun()`. The façade performs one provider-assisted route
+proposal, binds its digest into the blueprint, and exposes the value-only proposal as
+`semantic_route` on the returned envelope. A successful classifier still does not authorize the
+execution call: the enclosing `approveProviderCall`, policy, execution controller, credential,
+abort, failover, and aggregate `AutonomousCostBudget` boundaries remain in force. Classifier
+approval can be controlled independently with `semanticRouting: { approveProviderCall: true }`.
+Provider abstention, disagreement with deterministic routing, malformed output, and policy
+holds return a typed route-review result before blueprint/provider execution. When a semantic
+route selects multiple domains, the outer run hands the already-resolved `routeOverride` to
+cross-domain fan-out so child calls do not reclassify the task or consume a second routing budget.
+
+```typescript
+const result = await agent.run(task, {
+  candidates,
+  credential,
+  semanticRouting: { approveProviderCall: true, minSemanticConfidence: 0.55 },
+  approveProviderCall: true, // separate execution approval
+  costBudget,
+});
+if (result.semantic_route?.status !== "completed") {
+  await reviewQueue.enqueue(result); // caller-owned review; no execution was authorized
+}
+```
+
+`AutonomousBrainFacade` exposes the same boundary for application code that uses the composed
+plan/connector/provider surface. Pass `semanticRouting` to `execute()` or `executeWithTrace()`;
+for durable feedback loops, pass it at the top level of `executeCycle()` or
+`executeAdaptiveCycle()`. The classifier approval is independent from the enclosing execution
+approval, and the returned metadata-only `plan.semantic_route` is route-digest bound. A planned
+replay reuses that route and does not invoke the classifier again:
+
+```typescript
+const held = await brain.execute(
+  { task: "route this unfamiliar request to the reviewed specialist catalogue" },
+  { semanticRouting: { enabled: true, approveProviderCall: true } },
+);
+const resumed = await brain.executePlanned(
+  AutonomousBrainPlan.fromJSON(held.plan),
+  { task: "route this unfamiliar request to the reviewed specialist catalogue" },
+  { approveProviderCall: true },
+);
+```
+
+The classifier, provider failovers, fan-out, and cycle attempts can share one caller-owned
+`AutonomousCostBudget`; no route proposal authorizes tools, effects, evaluator credit, or
+execution. Abstention, disagreement, malformed output, policy holds, and missing approval remain
+typed review states. Cycle/adaptive facade callers configure semantic routing only at the
+top-level boundary so the exact reviewed route is handed into the durable loop.
+
+For applications that want the agent to own the complete route-to-invocation decision, use
+`AutonomousBrainFacade.executeAuto()`. It compiles the request-free facade plan, resolves the
+provider-free route, builds the domain or cross-domain blueprint, selects the capability portfolio,
+and delegates to `AutonomousAgent.runAuto()`. The returned `automatic` envelope distinguishes
+deterministic execution from provider-assisted planning, exposes `next_action`, and keeps the
+final single-domain or fan-out/fan-in result caller-owned:
+
+```typescript
+const automatic = await brain.executeAuto(
+  { task: "compare experiment evidence and report reproducibility gaps" },
+  {
+    approveProviderCall: true,
+    planningMode: "deterministic", // use "provider" for a separately approved plan proposal
+    maxProviderFailovers: 1,
+    maxTotalCostUnits: 12,
+  },
+);
+
+if (automatic.status !== "completed") {
+  console.log(automatic.automatic?.next_action, automatic.plan.route.route_digest);
+}
+```
+
+`executeAuto()` accepts every built-in domain and automatically chooses cross-domain fan-out when
+the reviewed route selects multiple domains. A connector in the request is executed first when
+`connectorFirst` is enabled (the default), and its bounded observation is included in the
+transient provider context when `includeConnectorObservation` is enabled. Connector approval,
+provider approval, model credentials, tool authorization, evaluator settlement, and effect
+approval remain independent gates. `executeAutoWithTrace()` adds the same metadata-only trace
+boundary used by direct and adaptive execution. For deployments with a completed launch review,
+`executeAutoWithLaunchAdmission()` validates the exact route against the admission immediately
+before connector/provider dispatch; semantic routing is intentionally a separate approval
+boundary for that method.
+
+For independent work items, `executeAutoBatch()` applies the same automatic boundary with a
+maximum of 64 requests, bounded parallelism, deterministic output order, per-item policy
+factories, and explicit `succeeded`/`refused`/`failed`/`omitted` accounting. Its
+`executeAutoBatchWithLaunchAdmission()` variant first unions the provider-free route domains for
+all items and refuses the batch unless one reviewed admission covers that complete set.
+
+The automatic facade is deliberately additive: `execute()` remains the lower-level direct
+provider/cross-domain path, while `executeAuto()` is the explicit route -> blueprint -> automatic
+planning path. This makes the chosen autonomy level visible in application code instead of
+silently changing the behavior of existing callers.
+
+For long-running workers, `executeAutoBatchResumable()` extends automatic execution with a
+restart-safe, metadata-only checkpoint. The checkpoint binds the automatic mode, every request
+digest, bounded concurrency controls, and a digest of the complete automatic execution policy,
+including planning, model-selection, approval, connector-observation, tool, structured-output,
+and domain-policy controls. It never stores task text, prompts, connector payloads, provider
+responses, credentials, or callbacks. A restart must provide `rehydrateExecution(context)` for
+each completed item; the facade verifies the automatic envelope, task digest, and result digest
+before it schedules any unfinished item, and it never falls back to direct execution.
+
+`AutonomousBrainBatchJobController.runAutomatic()` owns that lifecycle for a process: restore and
+validate the checkpoint at startup, serialize one active run, atomically write each checkpoint
+through the caller-owned store, and keep the controller projection metadata-only. Protected
+stores can use `AutonomousBrainAutoBatchProtectedRehydrator` with the existing
+`AutonomousProtectedRehydrationBoundary`; its receipt must include the automatic mode and exact
+job/index/request/task/result identity, while tenant scope, authorization, replay fencing, and
+value-digest verification remain enforced by the protected boundary. Direct batch rehydrators
+are rejected for automatic contexts, automatic checkpoints are rejected by direct resumable
+execution, and any policy, control, request, mode, or checkpoint-digest drift fails closed before
+rehydration.
+
+For `executeBatchResumable()`, the checkpoint adds a non-secret digest of the semantic-routing
+thresholds, inherited selection gates, and candidate metadata. A changed policy—or adding
+semantic routing to a legacy deterministic checkpoint—is rejected before rehydration or a new
+provider dispatch.
+The admission-aware `executeBatchWithLaunchAdmission()` and
+`executeBatchResumableWithLaunchAdmission()` variants preview every route and require one approved
+launch record to cover the selected-domain union before connector/provider dispatch or checkpoint
+rehydration. `executeCycleBatchWithLaunchAdmission()` and
+`executeAdaptiveCycleBatchWithLaunchAdmission()` extend the same gate to feedback batches;
+provider-assisted semantic routing is refused until its classifier boundary is reviewed separately.
+
+For evaluator-driven automatic work, `executeAutoCycleBatch()` and
+`executeAutoReplanCycleBatch()` provide the same bounded fan-out at the cycle boundary. Each item
+gets its own request-owned route, evaluator/learning policy, result status, and task digest while
+the returned array stays in input order. `maxParallelism` is capped by the facade, and
+`stopOnError` converts work not yet started into explicit `omitted` items rather than silently
+claiming completion. The admission-aware variants union every provider-free selected domain before
+the first execution and reject semantic routing until its classifier call is separately admitted.
+Batch digests cover only item status, task/result digests, route identity, mode, and cycle status;
+nested cycle execution values remain caller-owned and transient.
+
+The cycle boundary also has `WithTrace()` and `Resumable()` variants. Traced cycle/replan batches
+compose provider and model-selection lifecycle events into one hash-chained, metadata-only trace;
+the returned cycle values are non-enumerable caller-owned properties so logging the envelope cannot
+accidentally persist responses, prompts, evaluator evidence, or tool payloads. Resumable variants
+persist only request/result digests, bounded controls, the explicit automatic-cycle mode, and a
+policy-set digest. Restart callers must rehydrate each settled cycle through `rehydrateCycle()` or
+`rehydrateReplan()`; the facade verifies the route task identity and cycle result digest before
+skipping that item, and a checkpoint from direct or ordinary automatic execution cannot cross the
+cycle/replan mode boundary. `policyDigest` is available for deployments that need an additional
+caller-owned identity for opaque evaluator or learning callback implementations. Launch-admitted
+trace/resume variants re-check the full provider-free route union before rehydration or dispatch.
+Protected stores can use `AutonomousBrainAutoCycleBatchProtectedRehydrator` or
+`AutonomousBrainAutoReplanBatchProtectedRehydrator`; each requires the matching checkpoint mode
+and verifies the complete job/index/request/task/result identity before asking the caller-owned
+protected boundary to release a transient value. The adapters are deliberately not interchangeable
+with direct or ordinary automatic batch rehydrators. `AutonomousBrainBatchJobController` exposes
+the same lifecycle as `runAutomaticCycle()` and `runAutomaticReplan()`, plus
+`runAutomaticCycleWithTrace()` and `runAutomaticReplanWithTrace()` when the worker needs the
+metadata-only lifecycle envelope. A worker can restore once, serialize one active run, persist
+every checkpoint through its own store, and select either the explicit callback or the matching
+protected rehydrator for settled items.
+
+For application-level operations, `brain.createTraceRegistryController()` binds an
+`AutonomousRunTraceRegistry` to JSON/CAS persistence and requires `restore()` before reads or
+publication. The controller exposes `publish()`, `importSnapshot()`, `compact()`, `query()`,
+`events()`, `get()`, `snapshot()`, and `verifyIntegrity()`; publication/import/compaction report
+in-memory success separately from persistence success, so a failed observability flush cannot be
+mistaken for a provider or task failure. Its projection contains only run counts, sequence/digest
+metadata, retention policy, and bounded lifecycle fields.
+
+For longitudinal operator analytics, `brain.createRunAnalyticsController()` binds an
+`AutonomousRunAnalyticsLedger` to JSON/CAS persistence and requires `restore()` before reads or
+ingestion. `analyzeAndIngest()` validates a trace snapshot, creates a digest-bound report, and
+retains only the report; `ingest()` accepts an already-verified report and returns explicit
+`accepted`, `duplicate`, or `conflict` outcomes. Accepted reports are flushed through the
+caller-owned persistence adapter, while a failed flush is returned as `persistence_failed`
+without pretending the provider or task failed. `summary()`, `history()`, `snapshot()`, and
+`verifyIntegrity()` expose bounded all-domain, provider, and `provider/model` rollups with
+terminal coverage, failure and latency observations, alert counts, retention, authority, and
+secret-material markers. Task text, prompts, responses, evidence, tool payloads, credentials,
+and cost claims remain outside this ledger.
+
+```typescript
+const batch = await brain.executeAutoReplanCycleBatch(requests, {
+  maxParallelism: 4,
+  replan: (request) => ({
+    approveProviderCall: true,
+    maxReplans: 1,
+    evaluate: (run) => evaluateWithCallerOwnedEvidence(request, run),
+  }),
+});
+```
 
 Model selection accepts caller-owned hard gates through `maxCostPerMillionTokens`, `maxLatencyMs`,
 `minQuality`, and the optional `minSelectionConfidence` rank-separation floor. The same gates are
@@ -509,10 +865,11 @@ workers; provider attempts that reach dispatch remain charged, while pre-dispatc
 failures release their reservation. This aggregate ceiling complements, rather than replaces, the
 optional `AutonomousExecutionController` cost policy.
 
-The provider-assisted semantic classifier used by `semanticRouting.enabled` is also a model
-invocation, so decision cycles forward the caller's cost, latency, and quality gates to it before
-transport. A successful classifier result does not authorize execution: the cycle still requires
-the separate execution approval and applies the same gates again to the routed domain run.
+The provider-assisted semantic classifier used by `semanticRouting` and decision-cycle semantic
+routing is also a model invocation, so those callers forward cost, latency, and quality gates to
+it before transport. A successful classifier result does not authorize execution: the cycle still
+requires the separate execution approval and applies the same gates again to the routed domain
+run.
 
 Contextual model selections resolve exact `provider/model` IDs. A model-only ID is accepted only
 when it matches one registered candidate; duplicate matches abstain before provider dispatch.
@@ -548,7 +905,10 @@ owned accounting boundary. The returned `cost_budget` is a numeric value-only sn
 exhausted budget fails before provider dispatch. Provider output is checked for strict JSON shape, exact
 permutations, dependency safety, abstention, and confidence bounds. A malformed structured
 response is converted into a typed `provider_invalid` result with a digest-only failure receipt;
-credential and transport failures remain typed runtime errors for the caller's retry policy.
+credential and operational provider failures become a typed `provider_failed` result with a
+redacted failure projection containing only error class/code, retryability, safe status code, and
+circuit state. Provider messages, payloads, prompts, tasks, credentials, and secret material are
+never retained; malformed input and programming/configuration errors still propagate.
 
 For applications that want the whole bounded sequence in one explicit call, use
 `agent.planAndRun()`. It routes and builds the blueprint, requests a provider proposal, pauses with
@@ -657,6 +1017,40 @@ correctness, source truth, or proof of an external effect. `evaluateAndSettleRun
 `runLearning()` settle both streams when both are prepared and return the response receipt
 separately.
 
+Direct structured execution defaults to admission control: a structurally valid response whose
+value-only composition score is below the reviewed threshold returns
+`status: "response_review_required"` rather than `"completed"`. The provider response and
+evaluation remain caller-owned for review, while transport success is kept separate from answer
+admission. Set `requireStructuredResponseReview: false` only when a caller explicitly wants the
+legacy completed projection; the failed evaluation is still exposed and never becomes task-quality
+reward. Cross-domain children and synthesis defer to the parent fan-in assessment.
+
+Cross-domain structured execution adds an automatic response-admission gate before fan-in. With
+`structuredDomainResponse: true`, each specialist is revalidated against its digest-bound domain
+contract and the result exposes a metadata-only `response_assessment`. The assessment keeps
+response/evaluation digests, structural scores, stage counts, bounded gate reasons, and next
+actions; provider text, prompts, credentials, evidence values, and structured response objects
+remain caller-owned and are never serialized into the result or execution receipt. Structural
+admission is not semantic truth evaluation and never infers agreement from provider output.
+
+Set `requireResponseAlignment: true` when synthesis must wait for explicit reviewer-owned
+`responseAlignments` for every specialist pair. Each alignment binds the two response digests and
+uses a bounded stance (`support`, `contradict`, `neutral`, or `unresolved`). Missing pairs,
+high-confidence contradictions, unresolved or low-confidence alignments, weak contract
+evaluations, and incomplete domain coverage return `status: "response_review_required"` before
+synthesis dispatch, with `execution_receipt.next_action: "review_response_gate"` and
+`safe_to_synthesize: false`. The optional controls `minimumResponseReward`,
+`minimumResponseAlignmentConfidence`, and `responseContradictionConfidenceThreshold` tighten
+the same deterministic gate. When pairwise alignment is not required, structurally admissible
+specialists may proceed and the post-synthesis assessment includes the synthesis row. Python
+`require_response_alignment` and threshold options implement the same contract.
+
+The restart-safe `AutonomousCrossDomainExecutor` preserves this boundary as well: specialist and
+synthesis calls explicitly defer the single-run `response_review_required` projection, so weak
+structured output reaches the parent digest-bound fan-in assessment instead of being misclassified
+as a child execution failure. The checkpoint stores only the assessment/result digests and can
+resume the same review decision without replaying completed specialists.
+
 The composed execution wrappers preserve these options instead of rebuilding a weaker request:
 decision-cycle attempts and replans forward the cost, latency, quality, JSON, and schema policy;
 cross-domain cycles apply it to every specialist and synthesis call; and workflow stages apply it
@@ -710,6 +1104,37 @@ selection. Planning-quality settlement verifies that digest and credits the embe
 legacy proposals without the metadata use the caller-supplied settlement context. This keeps
 single-domain, cross-domain, workflow, portfolio, and mission wrappers from silently moving
 planner feedback to a different contextual bandit arm.
+
+`runAutoCycle()` is the closed-loop automatic counterpart when the caller wants one entrypoint
+that chooses between the single-domain and fan-out/fan-in decision-cycle kernels. It resolves the
+route once, optionally through an explicitly approved semantic classifier, and hands that exact
+route to the matching cycle as a digest-verified override. The cycle can therefore settle an
+evaluator reward, update the online learner, persist a restart cursor, and preserve provider
+planning review without making callers guess the route shape:
+
+```typescript
+const cycle = await agent.runAutoCycle("review biomedical evidence and EEG confounds", {
+  approveProviderCall: true,
+  learning: {
+    controller: learning,
+    episodeId: "review-001",
+    evaluate: (run) => ({
+      evaluator_id: "application-reviewer",
+      evaluator_version: "1",
+      reward: scoreWithCallerOwnedEvidence(run),
+      passed: true,
+    }),
+  },
+});
+```
+
+The typed result reports `mode: "single_domain"` or `"cross_domain"`, the exact route, the
+nested decision-cycle projection, and a bounded `next_action`. A semantic classifier that lacks
+approval, disagrees with deterministic routing, or fails policy returns before the cycle and never
+dispatches the execution provider. The same shared `AutonomousCostBudget` covers semantic routing,
+planning, specialist calls, synthesis, and evaluator settlement; provider success still cannot
+become reward without the evaluator callback. `runAutoCycle()` is exported alongside
+`runAutonomousAutoDecisionCycle()` for applications that prefer a functional entrypoint.
 
 `runAutonomousReplanCycle()` adds the bounded adaptive control loop for callers that want the
 evaluator to decide whether one answer deserves another attempt. Each completed attempt is sent
@@ -765,6 +1190,99 @@ raw learning payload. A terminal state is idempotent: a duplicate worker returns
 projection without invoking a provider again. The journal is an orchestration cursor, not an
 exactly-once provider or database transaction; production rehydrators and learning/effect stores
 must use stable idempotency keys and reconcile side effects at their own boundary.
+
+`runAutoReplanCycle()` is the one-entrypoint version of the bounded adaptive loop. It resolves a
+deterministic or explicitly approved semantic route once, selects the matching single-domain or
+cross-domain replan kernel, and supplies the route as a digest-verified override to every attempt:
+
+```typescript
+const adaptive = await agent.runAutoReplanCycle("investigate an EEG preprocessing regression", {
+  allowCrossDomain: true,
+  approveProviderCall: true,
+  maxReplans: 2,
+  evaluate: (run) => evaluateWithCallerOwnedEvidence(run),
+  learning: { controller: learning, episodePrefix: "eeg-review" },
+});
+```
+
+`runAutonomousAutoReplanCycle()` is the equivalent functional export. The result identifies the
+selected mode, route, semantic classifier result, nested attempt/settlement projection, and
+bounded next action. Replan feedback can add only a screened transient context chunk; it cannot
+change domains, capabilities, tools, approvals, credentials, or budgets. Semantic routing and
+provider execution approval remain separate, and the same `AutonomousCostBudget` spans
+classification, planning, fan-out, synthesis, and every retry. The facade also passes `cycleId`,
+the metadata-only `AutonomousCycleReplanStateStore`, and all explicit rehydrators through
+unchanged, so a terminal restart replay returns its projection without rerouting or replaying the
+provider.
+
+The application-facing `AutonomousBrainFacade` exposes the same kernels as
+`executeAutoCycle()`, `executeAutoCycleWithLaunchAdmission()`,
+`executeAutoReplanCycle()`, and `executeAutoReplanCycleWithLaunchAdmission()`. These methods bind
+the request's validated `domain`, `capability`, `context`, `hints`, and `allow_cross_domain` fields
+into the lower-level cycle, so callers cannot accidentally route one task and execute another.
+Connector-bearing requests remain on the connector-aware `executeCycle()` or
+`executeAdaptiveCycle()` boundary, and launch-admitted variants reject semantic routing until its
+classifier call has its own admission. The methods return the route, selected kernel, evaluator
+projection, settlement metadata, and next action without retaining task text, prompts, provider
+responses, credentials, or evaluator evidence in the route/result metadata boundary; any nested
+execution values are caller-owned and transient, just like the lower-level cycle result.
+
+```typescript
+const cycle = await brain.executeAutoCycle(
+  { task: "review this biomedical evidence and its EEG confounds", domain: "biomedical" },
+  { approveProviderCall: true },
+);
+const admitted = await brain.executeAutoReplanCycleWithLaunchAdmission(
+  { task: "verify this reproducible experiment", domain: "science" },
+  launchAdmission,
+  {
+    approveProviderCall: true,
+    maxReplans: 1,
+    evaluate: (run) => evaluateWithCallerOwnedEvidence(run),
+  },
+);
+```
+
+For applications using the reviewed built-in value evaluators, `createAutonomousCycleEvaluatorBridge()`
+removes repetitive callback plumbing without making provider success authoritative:
+
+```typescript
+const evaluators = createAutonomousCycleEvaluatorBridge({
+  evidenceFor: async (context) => ({ evidence: await callerOwnedValueEvidence(context) }),
+});
+const adaptive = await agent.runAutoReplanCycle(task, {
+  domain: "science",
+  approveProviderCall: true,
+  evaluate: evaluators.evaluateReplan,
+  learning: { controller: learning, episodePrefix: "science-review" },
+});
+```
+
+The bridge exposes separate single-domain, ordinary cross-domain, single-replan, and
+cross-domain-replan callbacks. Cross-domain replanning uses the `cross_domain` rubric for the
+aggregate decision and the exact routed rubric for each pending specialist/synthesis episode;
+the callback receives only route/status/episode metadata and the required signal contract. The
+registry must cover all twelve built-in domains, and missing or malformed caller evidence fails
+closed before settlement.
+
+For deployments that already have source and evaluator governance, the same bridge can enforce
+those decisions at the exact learning boundary:
+
+```typescript
+const gated = createAutonomousCycleEvaluatorBridge({
+  evidenceFor: callerOwnedValueEvidence,
+  sourceReceiptFor: (context) => sourceLedgerReceiptFor(context),
+  evaluatorCalibrationFor: (context) => calibrationReportFor(context.domain),
+});
+```
+
+`sourceReceiptFor` must return a validated source receipt with an accepted observation, a source
+digest, and non-`caller_declared` authority. `evaluatorCalibrationFor` must return a validated
+holdout report whose routed evaluator identity is ready. Both gates run before the evidence
+callback and before reward settlement; missing, stale, refused, tampered, or mismatched metadata
+fails closed. The context exposes only receipt/report digests and bounded source labels. The SDK
+still does not decide external truth, provision credentials, or treat provider completion as
+reward.
 
 Use `AutonomousCycleReplanPersistenceCoordinator` with a caller `read()`/`write()` adapter to
 flush and restore bounded, hash-bound snapshots. The in-memory store is intended for tests and
@@ -915,16 +1433,53 @@ execution in `reconciliation_required`, which can be resolved without replaying 
 Tool-loop results preserve that status rather than misreporting an uncertain write as a normal
 approval pause or successful model turn.
 
+### Tenant-scoped authorization across adapters
+
+`AutonomousAuthorizationLedger` and `AutonomousAuthorizationContext` provide one caller-issued
+grant contract for provider, connector, tool, and effect boundaries. Connector dispatch checks
+`connector_dispatch` after the selection plan, manifest scope, capability, and approval gates but
+before the registered connector executor. `AutonomousDomainToolRuntime` checks read-only calls
+as `tool_execution` and effectful calls as `effect_dispatch`; `AutonomousEffectBoundary` applies
+the latter before durable effect transitions and before user code, including stream producers.
+Connector replay does not re-dispatch or charge another grant use. Refused tool calls are returned
+as `authorization_required` receipts, not misreported as executor failures, and no executor is
+entered.
+
+Each operation request contains only exact domain/capability/risk metadata, call identity, and a
+SHA-256 resource digest. Task text, prompts, arguments, credentials, provider payloads, and
+results are excluded. Use `authorizationContext.forDomain("coding")` for a narrowed worker;
+parent and child contexts share a monotonic request sequence so a fan-out child cannot reset its
+request IDs and create an audit collision. The context is optional for legacy local adapters, but
+grant-controlled deployments must forward it through connector, tool, and effect paths as well as
+the provider path. Registration, activation, selection, and caller approval do not replace the
+authorization grant.
+
+```typescript
+const dispatch = await agent.dispatchConnectorFromPlan(selectionPlan, request, {
+  authorizationContext,
+});
+const toolResults = await agent.executeToolCalls(
+  [{ id: "tool-call-1", name: "repository_catalog", arguments: {} }],
+  { domains: ["coding"], authorizationContext },
+);
+```
+
 `AutonomousRuntime.invoke()` performs bounded provider failover when a selected provider returns a
 retryable `ProviderRuntimeError`: transport, circuit, and provider HTTP failures remove that
-provider from the next ranking, while an isolated timeout removes only the timed-out model so a
-healthy sibling model on the same provider can be selected. Every retry is re-ranked against the
-remaining eligible arms and marked as a failover admission. The default
+provider from the compiled continuation ladder, while an isolated timeout removes only the timed-
+out model so a healthy sibling model on the same provider can be selected. The first selection
+compiles an immutable `continuation_plan` with the exact eligible order, per-candidate metadata
+digests, and failure scope. Later attempts consume that plan directly instead of silently
+re-running a selector after health changes. The default
 limit comes from `execution.policy.max_provider_failovers`; without an execution controller the
 default is zero, while callers can opt into a bounded standalone limit with
 `maxProviderFailovers`. Tool loops may fail over only before the first provider-issued tool call;
 after a tool request is observed, the runtime fails closed instead of replaying a potentially
-effectful loop.
+effectful loop. `createAutonomousModelContinuationState()`,
+`advanceAutonomousModelContinuationState()`, and
+`completeAutonomousModelContinuationState()` provide the content-addressed cursor for a worker
+that needs to persist and resume this metadata-only decision without reselecting. The plan and
+cursor contain no task text, prompts, credentials, arguments, or provider responses.
 
 `runAutonomousCrossDomainDecisionCycle()` composes the corresponding fan-out/fan-in path. It can
 semantically review an ambiguous task, requires a cross-domain route with at least two reviewed
@@ -1014,6 +1569,159 @@ only evaluator, learning-settlement, and progress digests. Supply a stable `cycl
 caller-owned cycle `stateStore` for restart rehydration. Provider responses, task text, evaluator
 instructions, credentials, and evidence remain transient, and provider approval is still
 required.
+For the lower-level worker boundary, `AutonomousGoalWorker` accepts an
+`AutonomousGoalWorkerJournal` and a bounded `batch_id`:
+
+```typescript
+const journal = new AutonomousGoalWorkerJournal();
+const worker = new AutonomousGoalWorker({ ledger, resolver, executor, journal });
+await worker.run({ batch_id: "goal-batch-42", schedule_options: { max_selected: 8 } });
+```
+
+The journal hash-chains `prepared`, `claimed`, `dispatch_started`, `settled`, `failed`, and
+`reconciled` metadata without retaining tasks, prompts, parameters, credentials, or results. After
+restart, call `journal.restore(snapshot)` before `journal.recover(ledger)`: pre-dispatch claims are
+paused for safe retry, while post-dispatch claims are blocked for explicit reconciliation so an
+uncertain provider effect is never replayed. Use `JsonAutonomousGoalWorkerJournalPersistence`
+and `AutonomousGoalWorkerJournalPersistenceCoordinator` for canonical caller-owned storage and
+optional compare-and-swap fencing.
+The worker verifies `goalTaskDigest(resolvedTask)` against the immutable goal identity before
+claiming, preventing a stale protected rehydrator from executing a different task. Journal events
+carry only optional `task_digest` and `execution_binding_digest` fields; the latter binds transient
+action-handoff parameters across the worker boundary without retaining the handoff, credentials,
+or provider values. `activeFor(goalId)` and `assertNoActive(goalId)` provide a fail-closed restart
+fence until the caller recovers or explicitly reconciles an in-flight boundary.
+`AutonomousGoalControlLoop` continues worker passes with bounded `max_cycles` and
+`max_total_runs`; its optional `options_factory(context)` receives only prior cycle metadata and
+ledger counts, allowing fresh priority/urgency/retry/domain signals without exposing task text or
+provider payloads. It stops explicitly with `all_terminal`, `no_admissible_work`,
+`cycle_budget_exhausted`, or `run_budget_exhausted`. Paused goals can be re-admitted when the
+schedule policy permits them, while failed, blocked, or concurrently running goals remain visible
+as held work rather than being mislabeled as completed.
+Pass `evaluator(cycle)` to require one explicit reward packet per worker run. The loop validates the
+goal, attempt, outcome digest, evaluator identity/version, finite reward in `[-1, 1]`, and optional
+evidence/failure digests before revision-fenced settlement. It never derives reward from transport
+success or executor status. When no learner is supplied, `AutonomousGoalBanditLearner` applies a
+bounded UCB-style value update by domain and feeds validated priority/urgency signals into the next
+admission cycle; custom learners return only the same bounded signal projection and a learning-state
+digest. Public cycles expose counts and digests only, while evaluator values, evidence, tasks,
+prompts, credentials, and live executor results remain transient.
+`AutonomousGoalAgentRuntime` is the high-level bridge to `AutonomousAgent`: the caller rehydrates
+task text with `task_resolver`, while `run_options_factory` supplies transient candidates, opaque
+credential handles, approval/tool callbacks, memory, and policy only after the worker claims the
+goal. Single-domain and `cross_domain` goals then use the same routing, prompt, model-selection,
+provider, evaluator, and online-learning paths as direct runs. The callbacks and all live values
+remain outside goal, worker, control-loop, and evaluator projections.
+
+Use `runtime.runWithTrace({ traceStore, runId, ... })` when the whole long-horizon batch needs one
+restart-safe observability record. It traces the outer goal plan, each rehydrated execution,
+model-selection/provider lifecycle, evaluation settlement, learning metadata, and terminal loop
+status across all twelve domains. `traced.result` remains live for the initiating caller, while
+`traced.trace`, `JSON.stringify(traced)`, and the trace snapshot contain only digests, counters,
+bounded identifiers, and failure metadata; task text, prompts, parameters, credentials, provider
+responses, and live results never enter the trace. Caller-supplied observers and selection
+callbacks are composed with the trace hooks rather than replaced.
+
+```typescript
+const traced = await runtime.runWithTrace({
+  traceStore,
+  runId: "goal-batch-001",
+  schedule_options: { max_selected: 12, max_concurrent: 4 },
+  max_cycles: 128,
+});
+console.log(traced.trace.status, traced.trace.provider_invocations);
+```
+
+Pass `traceRegistry` when the same run should be indexed immediately for operators. Publication is
+idempotent and best-effort; `traced.traceRegistry` reports its run state, source/registry digests,
+evictions, or a sanitized failure without changing provider settlement or retry behavior.
+
+For restart safety, `AutonomousProviderEffectReconciliationCoordinator` turns the bounded provider
+effect reconciliation pass into a cached admission. Supply it as `effectReconciliation` to a local
+or durable brain worker; unresolved or errored external effects block fresh dispatch until the
+caller resolves them and calls `resetEffectReconciliation()`. The projection is metadata-only.
+
+For a bounded operator index over many trace runs, import each validated trace snapshot into
+`AutonomousRunTraceRegistry`. It supports deterministic cursor pagination and filters for run,
+domain, status, provider, and model. `retain_events: false` keeps only summary/provider/model
+metadata; otherwise retained event rows remain individually inspectable. `max_runs`,
+`max_events`, and `max_bytes` are enforced together, with oldest-terminal eviction and protected
+incomplete runs. `JsonAutonomousRunTraceRegistryPersistence` plus its transactional CAS variant
+provide restart-safe canonical storage; restoring the registry never resumes work or authorizes a
+provider/tool/effect.
+
+```typescript
+const registry = new AutonomousRunTraceRegistry({ max_runs: 2_000, max_events: 100_000, max_bytes: 20_000_000 });
+registry.importSnapshot(traceStore.snapshot());
+const page = registry.query({ domain: "biomedical", status: "completed", limit: 100 });
+const events = registry.events({ run_id: page.records[0]?.run_id, phase: "provider_invocation_finished" });
+```
+
+Long-running loops can add `run_id`, `checkpoint`, and `resume_snapshot` to make the outer
+decision process restart-safe:
+
+```typescript
+const coordinator = new AutonomousGoalControlLoopPersistenceCoordinator(
+  new TransactionalJsonAutonomousGoalControlLoopSnapshotPersistence(store),
+);
+await loop.run({ run_id: "research-mission-001", checkpoint: (snapshot) => coordinator.flush(snapshot), max_cycles: 128 });
+
+// In a new process, restore before creating fresh task/model/credential callbacks.
+const snapshot = await coordinator.restore();
+await freshLoop.run({ run_id: "research-mission-001", resume_snapshot: snapshot, checkpoint: (next) => coordinator.flush(next), max_cycles: 128 });
+```
+The sealed checkpoint contains contiguous cycle metadata, aggregate counts, evaluator digests,
+learned scheduling signals, and value-only bandit arms. It excludes task text, prompts,
+parameters, credentials, callbacks, provider output, and evaluator evidence. Restore continues at
+the next cycle and rehydrates the built-in bandit without replaying prior worker batches. Canonical
+JSON persistence, digest chaining, strict bounds, and optional `write_if_unchanged` fencing reject
+tampering, stale writers, identity drift, and non-contiguous recovery before another provider or
+executor call is admitted.
+
+For direct agent embeddings, bind the same persistence coordinator to the `AutonomousAgent` so
+restart-safe learning is part of the model-selection façade:
+
+```typescript
+const learner = new AutonomousOnlineLearner({
+  policy: { strategy: "ucb1", exploration: 0.4, seed: 19 },
+});
+const learnerPersistence = new AutonomousOnlineLearnerPersistenceCoordinator(
+  learner,
+  new TransactionalJsonAutonomousOnlineLearnerSnapshotPersistence(learnerStore),
+);
+const agent = new AutonomousAgent(runtime, { learner, learnerPersistence });
+
+await agent.restoreOnlineLearning(); // before accepting evaluator feedback
+// Run any built-in domain or cross-domain route through the agent.
+await agent.flushOnlineLearning(); // explicit CAS-fenced metadata-only checkpoint
+```
+
+The coordinator must reference the exact learner instance supplied to the agent. Restore and
+flush are explicit lifecycle operations: a missing binding never silently resets adaptation, and
+no prompt, task, provider response, credential, or tool value can enter the learner snapshot.
+
+The same lifecycle is available for the agent's episodic memory. Bind the existing
+`AutonomousMemoryPersistenceCoordinator` to the exact `memoryStore` used for retrieval and
+recording, then restore it before accepting new work:
+
+```typescript
+const memoryPersistence = new AutonomousMemoryPersistenceCoordinator(
+  memoryStore,
+  new TransactionalJsonAutonomousMemoryPersistence(memoryStoreAdapter),
+);
+const agent = new AutonomousAgent(runtime, { memoryStore, memoryPersistence });
+
+await agent.restoreMemory(); // validates the complete hash chain before retrieval
+// Run direct, adaptive, goal, mission, workflow, or cross-domain work.
+await agent.flushMemory(); // explicit CAS-fenced value-only checkpoint
+```
+
+`restoreMemory()` and `flushMemory()` are also exposed by `AutonomousBrainFacade`. The agent
+rejects a coordinator bound to another store, and it never silently creates or restores a fresh
+memory image. Snapshots retain only bounded episode metadata, route/context digests, evaluations,
+and the hash chain; task text, prompts, provider responses, tool payloads, credentials, and raw
+evidence remain transient. This gives all twelve domains one restart-safe memory path without
+turning retrieval into authorization or evaluator credit.
 
 `InMemoryAutonomousModelHealthStore` adds the restart-safe selection feedback plane. It records
 separate value-only invocation and evaluator-quality observations, aggregates success/failure,
@@ -1029,6 +1737,16 @@ records invocation observations for single- and cross-domain runs. When `learner
 well, persisted health is merged into the learner's selection request: circuits, credential and
 availability gates remain authoritative, while contextual evaluator rewards still adapt the chosen
 model. Health therefore constrains the bandit rather than silently replacing it.
+
+The high-level facade also owns the restart boundary when `modelHealthPersistence` is supplied.
+Bind an `AutonomousModelHealthPersistenceCoordinator` to the exact store, call
+`agent.restoreHealth()` before admitting work, and call `agent.flushHealth()` at the deployment's
+chosen observation boundary. A restart can pass only the coordinator and infer its bound store;
+supplying a different store is rejected. `restoreModelHealth()` and `flushModelHealth()` are
+scoped aliases. The coordinator validates the complete event and snapshot chains and fences stale
+writes with CAS when the underlying adapter supports it. The lifecycle coordinator reports this
+component as `health`, after runtime transport health and before evaluator/learning state, so
+provider availability and quality priors are restored before any domain selects a model.
 
 The live tool boundary is opt-in and catalogue-backed. Create a `ToolCatalogue` from the gateway's
 tool definitions, pass it with a caller-owned executor, and inspect
@@ -1211,6 +1929,17 @@ integrity-checked snapshots and a caller-owned persistence adapter through
 `AutonomousCrossDomainPersistenceCoordinator`; production workers can implement the same store
 interface over their durable database or queue.
 
+Structured durable fan-out has two explicit admission boundaries. Before synthesis,
+`response_review_required` binds the specialist assessment digest and blocks fan-in when the
+review policy is not satisfied. After a synthesis provider call, the executor independently
+reassesses the synthesis row; a weak, blocked, incomplete, or otherwise non-complete structured
+response creates `synthesis_response_review_required` and binds both the caller-owned synthesis
+result digest and the post-synthesis assessment digest. The checkpoint never stores that result.
+The caller must either provide `resolveSynthesisResult` and updated reviewer-owned alignment data
+that passes the same contract, or explicitly set `retrySynthesisAfterResponseReview: true` after
+inspecting the result. The latter records `synthesis_response_retry_authorized` before a fresh
+synthesis call; neither path silently replays or upgrades a reviewed failure into completion.
+
 When durable execution receives `structuredDomainResponse: true` and a learning controller, every
 completed specialist and synthesis receives two independently addressable episode identities. The
 checkpoint ledger carries both `learning_episode_ids` and `response_learning_episode_ids`, while
@@ -1241,6 +1970,129 @@ still a routing hypothesis: disagreement, abstention, malformed output, or cross
 returns `route_review_required` before a stage is dispatched. This same path is available for all
 reviewed single-domain profiles, including coding, browser, data, science, biomedical,
 neuroscience, operations, enterprise, multi-agent, multimodal, and evaluation.
+
+Applications that already use `AutonomousBrainFacade` can reach this durable path without
+constructing a lower-level executor. `runWorkflow()` and `resumeWorkflow()` create a fresh
+executor bound to the facade's exact agent, while the caller supplies the checkpoint store,
+private task/credential rehydration, model candidates, and provider approval. This keeps the
+high-level entry point useful for ordinary task-driven applications without hiding the durable
+authority boundary:
+
+```typescript
+const first = await brain.runWorkflow(task, {
+  checkpointStore,
+  domain: "science",
+  candidates: agent.models(),
+  approveProviderCall: true,
+  maxStages: 2,
+  jobId: "experiment-42",
+});
+
+// Store only first.checkpoint and first.events in the caller's durable system.
+const resumed = await brain.resumeWorkflow(first.job_id!, task, {
+  checkpointStore,
+  domain: "science",
+  candidates: agent.models(),
+  approveProviderCall: true,
+});
+```
+
+`runWorkflowWithLaunchAdmission()` and `resumeWorkflowWithLaunchAdmission()` add the same
+provider-free deployment admission used by the other facade boundaries. They resolve or validate
+the route, require every selected domain to be approved, and perform that check before the
+workflow can dispatch a stage. A held, blocked, or domain-mismatched admission produces no
+provider call. Provider-assisted semantic routing is intentionally refused on these methods;
+admit that classifier as a separate provider boundary first, then pass its reviewed
+`routeOverride` to the workflow. All four methods preserve the executor's metadata-only
+checkpoint contract and are covered across every built-in domain.
+
+For closed-loop quality and online adaptation, `runWorkflowCycle()` adds the durable workflow
+executor to the evaluator/replan kernel while preserving the same caller-owned checkpoint store.
+The required `evaluate` callback supplies stage-level evidence; `maxReplans` bounds retries;
+`learning.controller` or `executorOptions.learning` can prepare and settle value-only bandit
+episodes; and `stateStore` makes evaluator/settlement/replan handoffs restart-safe. The facade
+also exposes `runWorkflowCycleWithLaunchAdmission()`, which performs the provider-free domain
+admission before the first stage or planner call. The evaluator decides task quality and retry
+guidance; provider completion alone never becomes reward, and retries cannot add stages, tools,
+permissions, or effects.
+
+```typescript
+const cycle = await brain.runWorkflowCycle(task, {
+  checkpointStore,
+  domain: "neuroscience",
+  candidates: agent.models(),
+  approveProviderCall: true,
+  maxReplans: 1,
+  learning: { controller: learning, trajectoryIdPrefix: "signal-review" },
+  evaluate: (execution) => ({
+    evidence: {
+      stages: execution.blueprint.workflow.stages.map((stage) => ({
+        stage_id: stage.id,
+        signals: Object.fromEntries(stage.evaluator_signals.map((signal) => [signal, 1])),
+      })),
+    },
+  }),
+});
+```
+
+For operational visibility, `runWorkflowWithTrace()` and `resumeWorkflowWithTrace()` attach the
+existing `AutonomousRunTraceSession` to the workflow's provider observer and model-selection
+callback. The launch-admitted traced variants perform domain admission before creating a trace
+or opening a provider boundary. Trace events retain only bounded route/plan/selection digests,
+provider metadata, timing, token counts, failure classes, and terminal status; the task, prompt,
+structured stage response, tool payload, credential, and evaluator values remain outside the trace.
+
+```typescript
+const traced = await brain.runWorkflowWithTrace(task, {
+  checkpointStore,
+  traceStore,
+  runId: "workflow-trace-42",
+  domain: "data",
+  candidates: agent.models(),
+  approveProviderCall: true,
+  maxStages: 2,
+});
+// traced.trace is safe for the caller's trace store; traced.execution remains local.
+```
+
+Evaluator-guided cycles can use the same trace boundary through
+`runWorkflowCycleWithTrace()` and `runWorkflowCycleWithLaunchAdmissionAndTrace()`. The trace
+reports the current cycle's provider/selection lifecycle and final route/plan/checkpoint
+identity; evaluator evidence, retry instructions, learning values, and stage responses stay
+caller-owned. A new trace `runId` should be used for each restart attempt so the append-only
+trace does not merge separate process lifecycles implicitly.
+
+The facade now exposes the complete dependency-aware portfolio surface as well. Use
+`planWorkflowPortfolio()` for provider-free composition across coding, browser, data, science,
+biomedical, neuroscience, operations, enterprise, multi-agent, multimodal, cross-domain, and
+evaluation items; `verifyWorkflowPortfolio()` replays a caller-rehydrated request list and
+returns per-item digest mismatches. `executeWorkflowPortfolio()` runs ready items in bounded
+dependency waves, while `executeWorkflowPortfolioResumable()` adds checkpointed settled-item
+rehydration. Every provider invocation remains per-item approved and all transient task,
+prompt, provider-output, credential, and evidence values remain caller-owned.
+
+The portfolio evidence continuation is available through
+`executeWorkflowPortfolioEvidence()` and `executeWorkflowPortfolioEvidenceResumable()`. It
+reuses the provider execution without replaying it, scopes each evidence runtime to its item
+domain, propagates only bounded predecessor evidence digests, and leaves acquisition values,
+projectors, evaluators, journals, and source credentials outside the metadata result. The
+`WithLaunchAdmission()` variants for portfolio execution and evidence first verify the exact
+portfolio plan or execution domains against the provider-free launch admission. They reject
+held, blocked, stale, or incomplete admission before dispatch, including when a plan is compiled
+inside the wrapper.
+
+```typescript
+const portfolio = await brain.planWorkflowPortfolio(requests, { requireAllDomains: true });
+const reviewed = await brain.verifyWorkflowPortfolio(portfolio, requests, { requireAllDomains: true });
+if (reviewed.status !== "verified") throw new Error("portfolio requires re-review");
+
+const execution = await brain.executeWorkflowPortfolioWithLaunchAdmission(requests, admission, {
+  plan: portfolio,
+  approveProviderCall: true,
+  maxParallelism: 4,
+});
+// Use execution.items' transient values only inside the caller's process.
+```
 
 ```typescript
 const first = await executor.start(task, {
@@ -1480,6 +2332,28 @@ const submission = await brainWorker.submit({
 });
 const batch = await brainWorker.run({ limit: 4 });
 ```
+
+Both high-level workers support bounded parallel draining when the deployment has enough provider,
+credential, evaluator, and effect capacity. `maxParallelism` controls the number of independent
+leases in flight; it is bounded by the requested limit and the worker's hard batch cap, and the
+default remains `1` for a conservative migration path. Results are returned in drain-assignment
+order and the batch includes `requested_count`, `max_parallelism`, and `stopped_on_non_terminal`
+metadata. Approval, retry, and reconciliation backpressure stops new claims by default after
+already-started leases settle. Set `continueOnNonTerminal: true` only when the caller explicitly
+wants the bounded drain to keep processing independent queued jobs:
+
+```typescript
+const batch = await brainWorker.run({
+  limit: 32,
+  maxParallelism: 8,
+  continueOnNonTerminal: false,
+});
+```
+
+Parallelism is only a scheduling optimization: every claim still has its own lease heartbeat,
+protected credential session, approval check, trace publication, result digest, and conservative
+post-dispatch reconciliation boundary. The worker never shares private requests or provider
+responses between jobs, and the control-plane projection remains metadata-only.
 
 The resolver must reproduce the exact digest-bound request, mode, and policy from caller-owned
 storage. Drift fails before facade/provider dispatch; a typed retryable resolver failure is
@@ -1812,6 +2686,36 @@ is the orchestration cursor, while the executor store and caller result cache ow
 and private values. `AutonomousMissionReplanPersistenceCoordinator` flushes/restores bounded,
 hash-bound multi-root snapshots through a caller-owned `read()`/`write()` adapter.
 
+Applications using `AutonomousBrainFacade` can enter this same mission boundary through
+`runMissionReplanCycle()`, without constructing an executor or adapter themselves. The facade
+validates every declared step domain and exact tool identity, and its launch-admitted variants
+require a caller-approved admission for every mission domain before any provider-backed step is
+started. `runMissionReplanCycleWithTrace()` composes the trace provider observer and model-
+selection callbacks into each step while returning the raw mission result only through the
+caller-owned direct property; ordinary JSON serialization of the traced envelope contains the
+trace and digest-only metadata, not task text, arguments, prompts, provider responses, or tool
+outputs:
+
+```typescript
+const traced = await brain.runMissionReplanCycleWithTrace(reviewedMission, {
+  runId: "mission-run-2026-08-27",
+  traceStore: durableTraceStore,
+  evaluate: heldOutMissionEvaluator,
+  stepRun: {
+    candidates: agent.models(),
+    credentialFor: provider => credentialSession.handle(provider),
+  },
+  approveEffects: false,
+});
+const privateExecution = traced.result;
+const auditMetadata = traced.trace;
+```
+
+`authorizeMissionLaunchAdmission()` is available as a provider-free pre-dispatch check. The
+launch-admitted methods intentionally reject semantic mission routing unless that classifier
+boundary is admitted separately. Provider planning, evaluator settlement, learning, result
+rehydration, and external effect reconciliation remain independent caller-owned gates.
+
 To connect provider-backed steps to delayed-credit learning, give the adapter the same
 `AutonomousLearningController` used by direct runs. Successful steps receive stable episode IDs;
 approval, refusal, failed, and uncertain-effect steps do not create episodes. The mission
@@ -1866,3 +2770,75 @@ consumers receive ESM plus declarations in `dist/`.
 
 See [`docs/TYPESCRIPT_SDK.md`](../docs/TYPESCRIPT_SDK.md) for the complete route, error, safety,
 and browser/Node integration contract.
+
+## Integrity-aware acquisition facade
+
+`AutonomousBrainFacade` exposes provider-free information planning and claim-integrity review in
+addition to provider execution. Use `planInformationAcquisition()` and
+`replanInformationAcquisition()` to select bounded caller-declared candidates across the twelve
+built-in domains; use `assessClaimIntegrity()`/`reassessClaimIntegrity()` to identify temporal,
+support, independence, conflict, modality, and reproducibility gaps. Plans and assessments retain
+digests and bounded metadata only, while task, claim, evidence, and source values remain
+caller-transient.
+
+Unresolved integrity actions can be translated into a reviewed bridge, bound to exact source
+requests, and executed through the existing adapter/readiness/evaluator boundary:
+
+```typescript
+const assessment = brain.assessClaimIntegrity(task, { claims, evidence, referenceTime });
+const bridge = brain.planClaimIntegrityAcquisition(assessment, { candidates, policy });
+const binding = brain.bindClaimIntegrityAcquisition(bridge, requests);
+brain.validateClaimIntegrityAcquisitionBinding(binding);
+
+const result = await brain.executeClaimIntegrityAcquisitionWithLaunchAdmission(
+  bridge, registry, requests, approvedAdmission, {
+    prepare: { readinessPolicy, allowDegradedDispatch: true },
+    execute: { projector, evaluator, approveSourceDispatch: true },
+  },
+);
+```
+
+`...WithLaunchAdmission()` authorizes every selected domain before source dispatch. For process
+restarts, use `executeClaimIntegrityAcquisitionResumableWithLaunchAdmission()` with a
+caller-owned checkpoint store; the first call remains approval-gated and the resumed call
+revalidates the exact plan, registry, readiness report, and request digest. `awaiting_evaluation`
+is a valid conservative result when selected acquisition is accepted but other available
+requirements have not received evaluator decisions. Neither the facade nor the SDK stores keys,
+raw source values, prompts, claim text, or evaluator payloads in serialized projections.
+
+For the final reliance decision, the facade also exposes `projectOutcomeIntegrityRun()`,
+`bindOutcomeIntegrityClaims()`, and `assessOutcomeIntegrity()`. These bind caller claims to one
+exact direct or cross-domain output through digests, then return a conservative reliance status.
+Use `validateOutcomeIntegrity()` after rehydration. For fan-out responses, call
+`assessCrossDomainResponses()`, then persist and replay the returned alignment gate with
+`validateCrossDomainResponseAssessment()` and `replayCrossDomainResponseAssessment()` before
+synthesis. These methods retain metadata only and never infer truth from provider success.
+
+The facade also exposes reviewed capability/tool dispatch and learning: use
+`executeCapability()`/`executeCapabilityBatch()` or `executeToolCalls()`, their launch-admitted
+variants, then `capabilityExecutionEvidence()` or `toolExecutionEvidence()` for metadata-only
+receipts. Settle quality explicitly with `evaluateCapabilityExecution(s)`,
+`evaluateToolReceipts()`, or `evaluateProviderReceipts()`; no transport result becomes a reward
+without evaluator evidence. Capability journal restore/flush methods preserve the same
+caller-owned restart boundary.
+
+The same application boundary exposes coordinated lifecycle calls:
+`restorePersistedState()` and `flushPersistedState()`. They forward the exact agent's
+caller-owned stores through deterministic restore/flush ordering and return a redacted
+component report; strict failures retain the typed lifecycle error and report. TypeScript
+consumers can import the lifecycle option/report aliases from the package barrel, so startup and
+shutdown code does not need to reach into internal agent types.
+
+For user-key onboarding, `discoverModels(session, provider)`, `modelCandidates(discovery,
+defaults)`, and `refreshModelInventory(session, specs)` keep the raw credential inside the
+protected session while producing sanitized discovery and all-domain inventory projections.
+Close the session after the request-scoped refresh; inventory registration does not authorize
+provider execution.
+
+For a credential-free live inventory gate, call `agent.modelInventoryReadiness()` or
+`brain.modelInventoryReadiness()`. The result is a digest-bound readiness artifact for every
+built-in domain. It separates models that are compatible by declared capability/capacity from
+models that are eligible after provider registration, opaque credential readiness, and circuit
+checks. It performs no discovery or provider invocation and never promotes compatibility into
+quality, evaluator approval, or execution authority. `validateAutonomousModelInventoryReadiness`
+can replay the metadata-only artifact after persistence or process restart.

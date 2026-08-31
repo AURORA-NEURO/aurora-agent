@@ -42,6 +42,20 @@ pub trait WorldSource {
     /// the reference runtime's dict-comprehension semantics.
     fn fact_providing(&self, variable: &str) -> Option<Fact>;
 
+    /// Ids of the facts providing `variable` that [`Self::fact_providing`] did *not* return.
+    ///
+    /// Empty for all but a handful of variables in any well-formed world, which is why it belongs
+    /// on this deliberately narrow trait: it is asked once per variable the slice needs, so it
+    /// stays proportional to the compiled region rather than to the corpus (43.34).
+    ///
+    /// The compiler needs it to tell two omissions apart that a count cannot. A fact whose variable
+    /// no factor path reaches has no backward dependency path and its omission provably cannot move
+    /// the decision. A shadowed fact provides a variable the slice may need, so a path to the target
+    /// exists and it was dropped by a document-order tiebreak; nobody bounded what the *other*
+    /// value would have done to the decision. Counting the second as the first is the precise error
+    /// `AGENTS.md` forbids — "provably cannot matter" and "nobody checked" sharing a representation.
+    fn shadowed_provider_ids(&self, variable: &str) -> Vec<String>;
+
     fn factor(&self, id: &str) -> Option<Factor>;
 
     /// Ids of factors that output `variable`, in document order.
@@ -69,14 +83,13 @@ impl WorldSource for World {
     }
 
     fn count_with_tag(&self, tag: &str) -> usize {
-        self.facts.iter().filter(|fact| fact.has_tag(tag)).count()
+        self.index().tagged(tag).len()
     }
 
     fn fact_ids_with_any_tag(&self, tags: &BTreeSet<String>) -> BTreeSet<String> {
-        self.facts
-            .iter()
-            .filter(|fact| fact.has_any_tag(tags))
-            .map(|fact| fact.id.as_str().to_string())
+        tags.iter()
+            .flat_map(|tag| self.index().tagged(tag))
+            .map(|&position| self.facts[position].id.as_str().to_string())
             .collect()
     }
 
@@ -86,6 +99,14 @@ impl WorldSource for World {
 
     fn fact_providing(&self, variable: &str) -> Option<Fact> {
         World::fact_providing(self, variable).cloned()
+    }
+
+    fn shadowed_provider_ids(&self, variable: &str) -> Vec<String> {
+        self.index()
+            .shadowed_providers(variable)
+            .iter()
+            .map(|&position| self.facts[position].id.as_str().to_string())
+            .collect()
     }
 
     fn factor(&self, id: &str) -> Option<Factor> {

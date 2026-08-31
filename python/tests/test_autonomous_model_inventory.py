@@ -7,10 +7,13 @@ import pytest
 from prism_sdk import (
     AUTONOMOUS_DOMAINS,
     AutonomousAgent,
+    BrainRunError,
     AutonomousModelInventoryError,
+    AutonomousModelInventoryReadiness,
     AutonomousModelInventoryStore,
     LLMRuntime,
     ModelCatalogue,
+    ProviderRequest,
     ProviderError,
 )
 
@@ -88,6 +91,153 @@ def test_inventory_refreshes_models_and_reports_all_domain_coverage(tmp_path):
     assert "offline response" not in json.dumps(snapshot)
 
 
+def test_model_inventory_readiness_joins_capacity_credentials_registration_and_circuit_gates():
+    runtime = _runtime([])
+    seed_agent = AutonomousAgent(object(), runtime, model_catalogue=ModelCatalogue())
+    all_capabilities = sorted(
+        {
+            capability
+            for pack in seed_agent.domain_packs()
+            for capability in pack["model_capabilities"]
+        }
+        | {"structured_output", "tool_calling"}
+    )
+    catalogue = ModelCatalogue(
+        [
+            {
+                "provider": "offline",
+                "model": "versatile",
+                "context_window_tokens": 16_000,
+                "max_output_tokens": 2_000,
+                "quality": 0.9,
+                "latency_ms": 100,
+                "cost_per_million_tokens": 2,
+                "reliability": 0.9,
+                "capabilities": all_capabilities,
+            },
+            {
+                "provider": "offline",
+                "model": "too-small",
+                "context_window_tokens": 4_096,
+                "max_output_tokens": 512,
+                "quality": 0.8,
+                "latency_ms": 100,
+                "cost_per_million_tokens": 2,
+                "reliability": 0.8,
+                "capabilities": all_capabilities,
+            },
+            {
+                "provider": "unconfigured",
+                "model": "unconfigured-model",
+                "context_window_tokens": 16_000,
+                "max_output_tokens": 2_000,
+                "quality": 0.7,
+                "latency_ms": 100,
+                "cost_per_million_tokens": 2,
+                "reliability": 0.7,
+                "capabilities": all_capabilities,
+            },
+        ]
+    )
+    agent = AutonomousAgent(object(), runtime, model_catalogue=catalogue)
+
+    report = agent.model_inventory_readiness(
+        estimated_input_tokens=4_096,
+        requested_output_tokens=1_024,
+    )
+
+    assert report["readiness"] == "ready"
+    assert {row["domain"] for row in report["domains"]} == set(AUTONOMOUS_DOMAINS)
+    for row in report["domains"]:
+        assert row["compatible_model_ids"] == [
+            "offline/versatile",
+            "unconfigured/unconfigured-model",
+        ]
+        assert row["eligible_model_ids"] == ["offline/versatile"]
+        assert row["coverage_state"] == "complete"
+        assert row["provider_readiness"]["offline"] == {
+            "registered": True,
+            "credential_ready": True,
+            "circuit": "closed",
+        }
+        assert row["provider_readiness"]["unconfigured"] == {
+            "registered": False,
+            "credential_ready": False,
+            "circuit": "unconfigured",
+        }
+    assert all(
+        "offline/too-small" not in row["compatible_model_ids"]
+        and "offline/too-small" not in row["eligible_model_ids"]
+        for row in report["domains"]
+    )
+    assert AutonomousModelInventoryReadiness.from_mapping(report).digest == report["readiness_digest"]
+    assert "api_key" not in json.dumps(report).lower()
+    tampered = dict(report)
+    tampered["catalogue_digest"] = "0" * 64
+    with pytest.raises(AutonomousModelInventoryError, match="catalogue digest"):
+        AutonomousModelInventoryReadiness.from_mapping(tampered)
+
+    readiness = agent.readiness()
+    assert readiness["model_inventory_readiness"]["readiness"] == "ready"
+
+
+def test_model_inventory_readiness_excludes_models_behind_an_open_runtime_circuit():
+    runtime = LLMRuntime()
+
+    def fail(_request):
+        raise ProviderError("fixture transport failure", retryable=True)
+
+    runtime.register_in_memory_provider(
+        "tripped",
+        fail,
+        circuit_breaker_failure_threshold=1,
+    )
+    with pytest.raises(ProviderError):
+        runtime.invoke(
+            "tripped",
+            ProviderRequest(
+                model="tripped-model",
+                messages=({"role": "user", "content": "fixture"},),
+            ),
+        )
+    seed_agent = AutonomousAgent(object(), runtime, model_catalogue=ModelCatalogue())
+    all_capabilities = sorted(
+        {
+            capability
+            for pack in seed_agent.domain_packs()
+            for capability in pack["model_capabilities"]
+        }
+        | {"structured_output", "tool_calling"}
+    )
+    agent = AutonomousAgent(
+        object(),
+        runtime,
+        model_catalogue=ModelCatalogue(
+            [
+                {
+                    "provider": "tripped",
+                    "model": "tripped-model",
+                    "context_window_tokens": 16_000,
+                    "max_output_tokens": 2_000,
+                    "quality": 0.8,
+                    "latency_ms": 100,
+                    "cost_per_million_tokens": 2,
+                    "reliability": 0.8,
+                    "capabilities": all_capabilities,
+                }
+            ]
+        ),
+    )
+
+    report = agent.model_inventory_readiness()
+
+    assert report["readiness"] == "partial"
+    assert all(row["compatible_model_count"] == 1 for row in report["domains"])
+    assert all(row["eligible_model_count"] == 0 for row in report["domains"])
+    assert all(row["coverage_state"] == "partial" for row in report["domains"])
+    assert report["domains"][0]["provider_readiness"]["tripped"]["circuit"] == "open"
+
+
 def test_inventory_retires_stale_models_only_after_successful_authoritative_refresh():
     rows = [{"id": "old-model", "context_length": 16_000, "max_output_tokens": 1_000, "capabilities": ["reasoning"]}]
     runtime = _runtime(rows)
@@ -109,6 +259,62 @@ def test_inventory_retires_stale_models_only_after_successful_authoritative_refr
     )
     assert second["providers"][0]["removed_model_ids"] == ["offline/old-model"]
     assert [row["model"] for row in agent.models()] == ["new-model"]
+
+
+def test_agent_inventory_restore_retains_cas_fence_and_rolls_back_stale_refresh(tmp_path):
+    rows = [{"id": "old-model", "context_length": 16_000, "max_output_tokens": 1_000, "capabilities": ["reasoning"]}]
+    runtime = _runtime(rows)
+    store = AutonomousModelInventoryStore(tmp_path / "inventory-agent-cas.json")
+    primary = AutonomousAgent(object(), runtime, model_catalogue=ModelCatalogue())
+    first = primary.refresh_model_inventory(
+        providers=("offline",),
+        priors=_prior("offline/old-model"),
+        domain_requirements={"coding": ("reasoning",)},
+        snapshot_store=store,
+        refresh_id="inventory-agent-old",
+    )
+
+    restarted = AutonomousAgent(object(), runtime, model_catalogue=ModelCatalogue())
+    restored = restarted.restore_model_inventory(store)
+    assert restored is not None
+    assert restored["snapshot_digest"] == first["snapshot_digest"]
+    assert [row["model"] for row in restarted.models()] == ["old-model"]
+
+    rows[:] = [{"id": "new-model", "context_length": 16_000, "max_output_tokens": 1_000, "capabilities": ["reasoning"]}]
+    second = primary.refresh_model_inventory(
+        providers=("offline",),
+        priors=_prior("offline/new-model"),
+        domain_requirements={"coding": ("reasoning",)},
+        snapshot_store=store,
+        refresh_id="inventory-agent-new",
+    )
+    assert second["snapshot_digest"] != first["snapshot_digest"]
+
+    with pytest.raises(BrainRunError, match="model inventory refresh failed"):
+        restarted.refresh_model_inventory(
+            providers=("offline",),
+            priors=_prior("offline/new-model"),
+            domain_requirements={"coding": ("reasoning",)},
+            snapshot_store=store,
+            refresh_id="inventory-agent-stale",
+        )
+    assert [row["model"] for row in restarted.models()] == ["old-model"]
+
+
+def test_agent_inventory_restore_rejects_snapshot_without_bound_catalogue(tmp_path):
+    runtime = _runtime([{"id": "offline-model", "context_length": 16_000, "max_output_tokens": 1_000, "capabilities": ["reasoning"]}])
+    source = AutonomousAgent(object(), runtime, model_catalogue=ModelCatalogue())
+    snapshot = source.model_inventory.refresh(
+        providers=("offline",),
+        priors=_prior("offline/offline-model"),
+        domain_requirements={"coding": ("reasoning",)},
+        refresh_id="inventory-unbound-catalogue",
+    )
+    store = AutonomousModelInventoryStore(tmp_path / "inventory-unbound-catalogue.json")
+    store.save(snapshot)
+
+    with pytest.raises(BrainRunError, match="model inventory restore failed"):
+        AutonomousAgent(object(), runtime, model_catalogue=ModelCatalogue()).restore_model_inventory(store)
 
 
 def test_inventory_prior_factory_derives_explicit_metadata_without_second_discovery():

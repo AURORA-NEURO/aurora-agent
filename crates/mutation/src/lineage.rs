@@ -61,12 +61,8 @@ pub fn verdict_of(world: &Value) -> Result<OracleVerdict, MutationError> {
         world_id: world_id.clone(),
         source,
     })?;
-    let values: BTreeMap<String, Value> = parsed
-        .facts
-        .iter()
-        .map(|fact| (fact.provides.as_str().to_string(), fact.value.clone()))
-        .collect();
-    oracle::evaluate(&values).map_err(|source| MutationError::NotEvaluable { world_id, source })
+    oracle::evaluate_facts(parsed.facts.iter())
+        .map_err(|source| MutationError::NotEvaluable { world_id, source })
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

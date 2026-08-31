@@ -30,6 +30,12 @@ impl OracleStatus {
     }
 }
 
+/// A concrete, checkable violation found by an oracle.
+///
+/// The name predates the open variant: the four reference mechanisms are all *leakage*
+/// witnesses, and their wire bytes are pinned by the CPython parity contract, so the enum keeps
+/// the name they gave it. [`LeakageWitness::DomainCheck`] carries any other domain's declared
+/// mechanism; it is additive, so the four reference variants serialise exactly as before.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum LeakageWitness {
@@ -51,6 +57,17 @@ pub enum LeakageWitness {
     },
     /// Preprocessing was fit across subjects before the split was drawn.
     PreprocessingLeakage { detail: String },
+    /// A domain-declared check fired.
+    ///
+    /// `check` names the declared rule, `observed` carries the variable bindings the rule read,
+    /// each rendered as a canonical JSON string so a human can re-run the check by hand, and
+    /// `detail` is the declared sentence naming the mechanism. This is still a witness in the
+    /// 43.41 sense — a checkable object, never a score.
+    DomainCheck {
+        check: String,
+        observed: BTreeMap<String, String>,
+        detail: String,
+    },
 }
 
 impl LeakageWitness {
@@ -60,6 +77,7 @@ impl LeakageWitness {
             LeakageWitness::SiteLeakage { .. } => "site_leakage",
             LeakageWitness::TemporalLeakage { .. } => "temporal_leakage",
             LeakageWitness::PreprocessingLeakage { .. } => "preprocessing_leakage",
+            LeakageWitness::DomainCheck { .. } => "domain_check",
         }
     }
 }

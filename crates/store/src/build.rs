@@ -8,13 +8,19 @@
 use crate::error::StoreError;
 use crate::sorted_index::SortedIndexWriter;
 use bioprism_ids::ContentHash;
-use bioprism_world::World;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::path::Path;
 
-pub const STORE_SCHEMA_VERSION: &str = "bioprism-store/0.1";
+/// `0.2` adds the `shadowed` index.
+///
+/// The version is checked at [`crate::LazyWorld::open`], so a `0.1` directory is refused rather
+/// than opened with the new index missing. That refusal is the point: an absent `shadowed` index
+/// is indistinguishable at read time from a world in which nothing is shadowed, and answering
+/// "nothing is shadowed" from a file that was never written is exactly the silent-wrong-answer the
+/// influence classification depends on not happening.
+pub const STORE_SCHEMA_VERSION: &str = "bioprism-store/0.2";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StoreManifest {
@@ -34,14 +40,15 @@ pub struct StoreManifest {
 pub fn build(world: &Value, directory: &Path) -> Result<StoreManifest, StoreError> {
     std::fs::create_dir_all(directory)?;
 
-    // The indexed backend must not accept a world that the eager backend would reject. In
-    // particular, validating first closes duplicate-id, shadowed-input, and dangling-factor
-    // mismatches that would otherwise produce a store with different lookup semantics.
-    let parsed_world = World::from_json(world.clone()).map_err(|_| StoreError::MalformedWorld)?;
-
     let object = world.as_object().ok_or(StoreError::MalformedWorld)?;
-    let facts = &parsed_world.facts;
-    let factors = &parsed_world.factors;
+    let facts = object
+        .get("facts")
+        .and_then(Value::as_array)
+        .ok_or(StoreError::MalformedWorld)?;
+    let factors = object
+        .get("factors")
+        .and_then(Value::as_array)
+        .ok_or(StoreError::MalformedWorld)?;
     let events = object
         .get("events")
         .and_then(Value::as_array)
@@ -52,20 +59,33 @@ pub fn build(world: &Value, directory: &Path) -> Result<StoreManifest, StoreErro
     let mut variable_records = SortedIndexWriter::new();
     let mut tag_members: BTreeMap<String, Vec<String>> = BTreeMap::new();
     let mut tag_counts: BTreeMap<String, usize> = BTreeMap::new();
+    let mut providers_by_variable: BTreeMap<String, Vec<String>> = BTreeMap::new();
 
     for fact in facts {
-        let id = fact.id.as_str();
-        let provides = fact.provides.as_str();
+        let id = fact
+            .get("id")
+            .and_then(Value::as_str)
+            .ok_or(StoreError::MalformedWorld)?;
+        let provides = fact
+            .get("provides")
+            .and_then(Value::as_str)
+            .ok_or(StoreError::MalformedWorld)?;
 
-        fact_records.insert(id, serde_json::to_string(fact.raw())?);
+        fact_records.insert(id, serde_json::to_string(fact)?);
         variable_records.insert(provides, id);
+        providers_by_variable
+            .entry(provides.to_string())
+            .or_default()
+            .push(id.to_string());
 
-        for tag in &fact.tags {
-            *tag_counts.entry(tag.clone()).or_default() += 1;
-            tag_members
-                .entry(tag.clone())
-                .or_default()
-                .push(id.to_string());
+        if let Some(tags) = fact.get("tags").and_then(Value::as_array) {
+            for tag in tags.iter().filter_map(Value::as_str) {
+                *tag_counts.entry(tag.to_string()).or_default() += 1;
+                tag_members
+                    .entry(tag.to_string())
+                    .or_default()
+                    .push(id.to_string());
+            }
         }
     }
 
@@ -73,14 +93,19 @@ pub fn build(world: &Value, directory: &Path) -> Result<StoreManifest, StoreErro
     let mut producers: BTreeMap<String, Vec<String>> = BTreeMap::new();
 
     for factor in factors {
-        let id = factor.id.as_str();
-        factor_records.insert(id, serde_json::to_string(factor.raw())?);
+        let id = factor
+            .get("id")
+            .and_then(Value::as_str)
+            .ok_or(StoreError::MalformedWorld)?;
+        factor_records.insert(id, serde_json::to_string(factor)?);
 
-        for output in &factor.outputs {
-            producers
-                .entry(output.as_str().to_string())
-                .or_default()
-                .push(id.to_string());
+        if let Some(outputs) = factor.get("outputs").and_then(Value::as_array) {
+            for output in outputs.iter().filter_map(Value::as_str) {
+                producers
+                    .entry(output.to_string())
+                    .or_default()
+                    .push(id.to_string());
+            }
         }
     }
 
@@ -94,11 +119,23 @@ pub fn build(world: &Value, directory: &Path) -> Result<StoreManifest, StoreErro
         tag_records.insert(tag, serde_json::to_string(&ids)?);
     }
 
+    // The `variables` index keeps only the winner of a shadowing race, matching the reference
+    // runtime's dict semantics. The losers are written here instead of being discarded, because a
+    // compiler that cannot see them cannot tell a shadowed omission from an unreachable one.
+    let mut shadowed_records = SortedIndexWriter::new();
+    for (variable, ids) in &providers_by_variable {
+        if ids.len() > 1 {
+            let shadowed = &ids[..ids.len() - 1];
+            shadowed_records.insert(variable, serde_json::to_string(shadowed)?);
+        }
+    }
+
     fact_records.finish(directory, "facts")?;
     variable_records.finish(directory, "variables")?;
     factor_records.finish(directory, "factors")?;
     producer_records.finish(directory, "producers")?;
     tag_records.finish(directory, "tags")?;
+    shadowed_records.finish(directory, "shadowed")?;
 
     let manifest = StoreManifest {
         schema_version: STORE_SCHEMA_VERSION.to_string(),

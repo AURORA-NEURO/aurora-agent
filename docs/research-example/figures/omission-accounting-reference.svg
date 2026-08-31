@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 263.00" role="img" aria-label="Reference omission accounting">
+<defs><pattern id="hatch-accent" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="6" stroke="#d97036" stroke-width="2.4"/></pattern><pattern id="hatch-muted" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="6" stroke="#8a8a8a" stroke-width="2.4"/></pattern></defs>
+<text x="16.00" y="26.00" font-family="system-ui, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="16" font-weight="600" fill="#1a1a1a">Reference omission accounting</text>
+<text x="16.00" y="46.00" font-family="system-ui, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" fill="#8a8a8a">world radiogenomic-integrity-demo-v1 · query audit-split-integrity-v1</text>
+<g transform="translate(0,60)">
+<text x="16.00" y="10.00" font-family="system-ui, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="600" fill="#1a1a1a">omitted facts: 750</text>
+<rect x="16.00" y="18.00" width="560.00" height="22.00" fill="none" stroke="#8a8a8a" stroke-width="1"/>
+<rect x="16.00" y="18.00" width="560.00" height="22.00" fill="#8a8a8a"/>
+<rect x="16.00" y="50.00" width="12.00" height="12.00" fill="#8a8a8a"/>
+<text x="34.00" y="60.00" font-family="system-ui, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10.5" fill="#1a1a1a">exploratory: 750</text>
+<rect x="250.00" y="50.00" width="12.00" height="12.00" fill="#d97036"/>
+<text x="268.00" y="60.00" font-family="system-ui, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10.5" fill="#1a1a1a">non-exploratory: 0</text>
+<text x="16.00" y="86.00" font-family="system-ui, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10" fill="#8a8a8a">classification (verbatim):</text>
+<text x="16.00" y="101.00" font-family="ui-monospace, Consolas, 'Courier New', monospace" font-size="10.5" fill="#1a1a1a">no_backward_dependency_path_or_temporally_inaccessible</text>
+<text x="16.00" y="123.00" font-family="system-ui, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10.5" fill="#1a1a1a">inaccessible-but-selected before the cut: none</text>
+<text x="16.00" y="145.00" font-family="system-ui, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10" fill="#8a8a8a">A v0.1 omission summary is a count and a classification string; it cannot distinguish &apos;provably cannot matter&apos; from</text>
+<text x="16.00" y="158.00" font-family="system-ui, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10" fill="#8a8a8a">&apos;nobody checked&apos; — the distinction 43.26 requires and the extended certificate profile exists to add.</text>
+</g>
+<text x="16.00" y="251.00" font-family="ui-monospace, Consolas, 'Courier New', monospace" font-size="10" fill="#8a8a8a">source sha256: 3ea822496a0c98cc6d1ec37633f4076f7a425dccf8f90b739eee5dc4c12de030</text>
+</svg>

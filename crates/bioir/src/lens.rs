@@ -333,11 +333,6 @@ impl Measurement {
         self
     }
 
-    pub fn at_site(mut self, site: impl Into<String>) -> Self {
-        self.site = Some(site.into());
-        self
-    }
-
     pub fn with_qc(mut self, qc: QcOutcome) -> Self {
         self.qc = qc;
         self
@@ -421,11 +416,7 @@ impl AssayLens {
     ///
     /// Uses remaining quantity rather than collected quantity: a tube that has already been
     /// aliquoted three times does not still hold what the collection record says it held.
-    pub fn admits(
-        &self,
-        lineage: &LineageGraph,
-        specimen: &SpecimenId,
-    ) -> Result<(), LensError> {
+    pub fn admits(&self, lineage: &LineageGraph, specimen: &SpecimenId) -> Result<(), LensError> {
         let material = lineage.get(specimen)?;
         if material.material != self.material.material {
             return Err(LensError::WrongMaterial {
@@ -515,7 +506,8 @@ impl AssayLens {
         {
             let mine = self.protocol.step_versions();
             let theirs = other.protocol.step_versions();
-            let names: BTreeSet<&str> = mine.keys().copied().chain(theirs.keys().copied()).collect();
+            let names: BTreeSet<&str> =
+                mine.keys().copied().chain(theirs.keys().copied()).collect();
             for name in names {
                 let left = mine.get(name).copied().unwrap_or("absent");
                 let right = theirs.get(name).copied().unwrap_or("absent");
@@ -664,8 +656,8 @@ impl LensCatalog {
                 right: describe(&right.batch),
             });
         }
-        let controls_site =
-            left_lens.comparability.requires_same_site || right_lens.comparability.requires_same_site;
+        let controls_site = left_lens.comparability.requires_same_site
+            || right_lens.comparability.requires_same_site;
         if controls_site && left.site != right.site {
             return Err(Incomparability::UncontrolledSite {
                 left: describe(&left.site),

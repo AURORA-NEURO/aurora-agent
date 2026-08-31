@@ -1,0 +1,1347 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Certificate Explorer — AURORA Agent</title>
+<meta name="description" content="One real compile of the reference world, embedded verbatim: the typed query, the 11-of-761 selection, the Context Certificate, and the verify result.">
+<link rel="canonical" href="https://aurora-neuro.github.io/aurora-agent/explore.html">
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<link rel="stylesheet" href="style.css">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Certificate Explorer — AURORA Agent">
+<meta property="og:description" content="One real compile of the reference world, embedded verbatim: the typed query, the 11-of-761 selection, the Context Certificate, and the verify result.">
+<meta property="og:url" content="https://aurora-neuro.github.io/aurora-agent/explore.html">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="Certificate Explorer — AURORA Agent">
+<meta name="twitter:description" content="One real compile of the reference world, embedded verbatim: the typed query, the 11-of-761 selection, the Context Certificate, and the verify result.">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "WebPage",
+  "name": "Certificate Explorer — AURORA Agent",
+  "url": "https://aurora-neuro.github.io/aurora-agent/explore.html",
+  "description": "One real compile of the reference world, embedded verbatim: the typed query, the 11-of-761 selection, the Context Certificate, and the verify result.",
+  "isPartOf": {
+    "@type": "WebSite",
+    "name": "AURORA Agent",
+    "url": "https://aurora-neuro.github.io/aurora-agent/"
+  },
+  "about": {
+    "@type": "Dataset",
+    "name": "AURORA Agent reference compilation artifacts",
+    "description": "Verbatim output of bioprism context compile on the shipped reference world radiogenomic-integrity-demo-v1 (761 facts): compile envelope, Context Certificate, Decision Section, explain plan, and verify result.",
+    "license": "https://www.apache.org/licenses/LICENSE-2.0"
+  }
+}
+</script>
+</head>
+<body>
+
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="./">
+      <svg viewBox="0 0 64 64" aria-hidden="true"><rect x="4" y="4" width="56" height="56" rx="10" fill="var(--accent)"/><path d="M32 14 L50 50 L42 50 L32 28 L22 50 L14 50 Z" fill="var(--bg)"/><rect x="27" y="41" width="10" height="5" rx="1.5" fill="var(--bg)"/></svg>
+      AURORA Agent
+    </a>
+    <nav class="site-nav" aria-label="Site">
+      <a href="./">Overview</a>
+      <a href="install.html">Install</a>
+      <a href="benchmarks.html">Benchmarks</a>
+      <a href="research.html">Research</a>
+      <a href="explore.html" aria-current="page">Explorer</a>
+      <a href="docs.html">Docs</a>
+      <a href="faq.html">FAQ</a>
+      <a href="https://github.com/AURORA-NEURO/aurora-agent">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <div class="wrap">
+
+    <h1>One real compile, receipts included.</h1>
+
+    <p class="lede">Everything on this page is the actual output of
+    <code>bioprism context compile</code> on the shipped reference world
+    (<code>radiogenomic-integrity-demo-v1</code>, 761 facts) — the compile envelope, the
+    <strong>Context Certificate</strong>, the Decision Section, and the verify result, embedded
+    verbatim in this page's source. Not a mockup: the certificate digest below is the same
+    <code>c0da17ff…</code> digest pinned byte-for-byte by the three-implementation parity tests.</p>
+
+    <p>Every number and field rendered here comes from that embedded data block. The page works
+    without JavaScript; with it, each card also shows the raw JSON it was rendered from.</p>
+
+    <section class="explorer-step" id="query">
+      <h2>1 · The query</h2>
+
+      <p>Compilation starts from a typed decision query, not a prose prompt. This one asks a single
+      question of the world — <code>split_integrity_status</code> — under a declared role, policy,
+      decision time, and a mandatory set of protected tags.</p>
+
+      <dl class="facts">
+        <dt>query_id</dt>
+        <dd><code>audit-split-integrity-v1</code> · schema <code>fiber-query/0.1</code></dd>
+        <dt>role</dt>
+        <dd><code>research-auditor</code></dd>
+        <dt>targets</dt>
+        <dd><code>split_integrity_status</code></dd>
+        <dt>decision_time</dt>
+        <dd><code>2025-01-01T00:00:00Z</code> — facts sourced after this cut are inaccessible</dd>
+        <dt>policy</dt>
+        <dd><code>research-only</code></dd>
+        <dt>distortion_tolerance</dt>
+        <dd><code>0.0</code></dd>
+        <dt>budgets</dt>
+        <dd>max_facts <code>64</code> · max_tokens <code>6000</code></dd>
+        <dt>protected_tags (10)</dt>
+        <dd><span class="explorer-tag">identity</span> <span class="explorer-tag">split</span>
+        <span class="explorer-tag">site</span> <span class="explorer-tag">scanner</span>
+        <span class="explorer-tag">time</span> <span class="explorer-tag">specimen</span>
+        <span class="explorer-tag">preprocessing</span> <span class="explorer-tag">policy</span>
+        <span class="explorer-tag">negative_evidence</span> <span class="explorer-tag">protected</span>
+        — facts carrying these tags must survive selection; a budget smaller than their closure
+        fails rather than truncates</dd>
+      </dl>
+
+      <details class="explorer-card">
+        <summary>Raw query JSON</summary>
+        <div class="explorer-card-body">
+          <pre class="explorer-json" data-json="query">(JavaScript renders the raw query here. Without it, the same JSON sits verbatim in this page's embedded data block — view source.)</pre>
+        </div>
+      </details>
+    </section>
+
+    <section class="explorer-step" id="selection">
+      <h2>2 · The selection — 761 in, 11 out</h2>
+
+      <p>The compiler selected <strong>11 of 761 facts (1.45%)</strong> and
+      <strong>6 of 756 factors (0.79%)</strong>. The other 750 facts were omitted — and accounted
+      for, in the receipt below.</p>
+
+      <div class="explorer-bar" role="img" aria-label="761 facts in the world, 11 selected — 1.45 percent">
+        <div class="explorer-bar-track"><div class="explorer-bar-fill"></div></div>
+        <div class="explorer-bar-legend"><span>world: 761 facts</span><span>selected: 11 (1.45%)</span></div>
+      </div>
+
+      <div class="callout">
+        <p><strong>What this world does and does not show.</strong> On this exact reference world, a
+        5-hop graph walk and a BM25 retriever at k=11 select <em>the identical eleven facts</em> —
+        the headline benchmark is a deliberate tie. This page is about what ships <em>with</em> the
+        selection (the receipts), not about beating baselines; the
+        <a href="benchmarks.html">benchmarks page</a> carries that story.</p>
+      </div>
+
+      <h3>The eleven facts</h3>
+
+      <details class="explorer-card explorer-fact">
+        <summary><code>fact.cohort</code> <span class="explorer-tag">identity</span></summary>
+        <div class="explorer-card-body">
+          <p>provides <code>cohort_id</code> = <code>RG-DEMO-001</code><br>
+          provenance <code>manifest/cohort.json</code></p>
+          <div class="explorer-fact-json" data-fact-id="fact.cohort"></div>
+        </div>
+      </details>
+
+      <details class="explorer-card explorer-fact">
+        <summary><code>fact.subject_aliases</code> <span class="explorer-tag">identity</span> <span class="explorer-tag">protected</span></summary>
+        <div class="explorer-card-body">
+          <p>provides <code>subject_aliases</code>: S001 → S001, <strong>ALT-77</strong> · S002 → S002 ·
+          S003 → S003, <strong>ALT-77</strong><br>
+          provenance <code>manifest/subjects.csv</code></p>
+          <div class="explorer-fact-json" data-fact-id="fact.subject_aliases"></div>
+        </div>
+      </details>
+
+      <details class="explorer-card explorer-fact">
+        <summary><code>fact.split</code> <span class="explorer-tag">split</span> <span class="explorer-tag">protected</span></summary>
+        <div class="explorer-card-body">
+          <p>provides <code>split_assignment</code>: S001 train · S002 train · S003 test · S004 test<br>
+          provenance <code>analysis/split.json</code></p>
+          <div class="explorer-fact-json" data-fact-id="fact.split"></div>
+        </div>
+      </details>
+
+      <details class="explorer-card explorer-fact">
+        <summary><code>fact.site</code> <span class="explorer-tag">site</span> <span class="explorer-tag">protected</span></summary>
+        <div class="explorer-card-body">
+          <p>provides <code>site_assignment</code>: S001 A · S002 A · S003 B · S004 B<br>
+          provenance <code>manifest/site.csv</code></p>
+          <div class="explorer-fact-json" data-fact-id="fact.site"></div>
+        </div>
+      </details>
+
+      <details class="explorer-card explorer-fact">
+        <summary><code>fact.label_source</code> <span class="explorer-tag">time</span> <span class="explorer-tag">label_lineage</span> <span class="explorer-tag">protected</span></summary>
+        <div class="explorer-card-body">
+          <p>provides <code>label_source_time</code>: S001 2024-01-01 · S002 2024-02-01 ·
+          S003 <strong>2025-06-01</strong> · S004 2024-02-15<br>
+          provenance <code>labels/lineage.json</code></p>
+          <div class="explorer-fact-json" data-fact-id="fact.label_source"></div>
+        </div>
+      </details>
+
+      <details class="explorer-card explorer-fact">
+        <summary><code>fact.decision_cut</code> <span class="explorer-tag">time</span> <span class="explorer-tag">protected</span></summary>
+        <div class="explorer-card-body">
+          <p>provides <code>training_decision_time</code> = <code>2025-01-01</code><br>
+          provenance <code>run/config.json</code></p>
+          <div class="explorer-fact-json" data-fact-id="fact.decision_cut"></div>
+        </div>
+      </details>
+
+      <details class="explorer-card explorer-fact">
+        <summary><code>fact.preprocess_fit</code> <span class="explorer-tag">preprocessing</span> <span class="explorer-tag">protected</span></summary>
+        <div class="explorer-card-body">
+          <p>provides <code>preprocess_fit_scope</code> = <code>all_subjects_before_split</code><br>
+          provenance <code>pipeline/preprocess.yaml</code></p>
+          <div class="explorer-fact-json" data-fact-id="fact.preprocess_fit"></div>
+        </div>
+      </details>
+
+      <details class="explorer-card explorer-fact">
+        <summary><code>fact.specimen_dates</code> <span class="explorer-tag">specimen</span> <span class="explorer-tag">time</span> <span class="explorer-tag">protected</span></summary>
+        <div class="explorer-card-body">
+          <p>provides <code>specimen_dates</code>: S001 2023-12-01 · S002 2024-01-15 ·
+          S003 2025-05-20 · S004 2024-01-20<br>
+          provenance <code>specimens/manifest.csv</code></p>
+          <div class="explorer-fact-json" data-fact-id="fact.specimen_dates"></div>
+        </div>
+      </details>
+
+      <details class="explorer-card explorer-fact">
+        <summary><code>fact.scanner</code> <span class="explorer-tag">site</span> <span class="explorer-tag">scanner</span></summary>
+        <div class="explorer-card-body">
+          <p>provides <code>scanner_assignment</code>: S001 X1 · S002 X1 · S003 Y9 · S004 Y9<br>
+          provenance <code>imaging/dicom_manifest.csv</code></p>
+          <div class="explorer-fact-json" data-fact-id="fact.scanner"></div>
+        </div>
+      </details>
+
+      <details class="explorer-card explorer-fact">
+        <summary><code>fact.policy</code> <span class="explorer-tag">policy</span> <span class="explorer-tag">protected</span></summary>
+        <div class="explorer-card-body">
+          <p>provides <code>data_policy</code> = <code>research-only</code>,
+          <code>no-identifiable-export</code><br>
+          provenance <code>governance/policy.json</code></p>
+          <div class="explorer-fact-json" data-fact-id="fact.policy"></div>
+        </div>
+      </details>
+
+      <details class="explorer-card explorer-fact">
+        <summary><code>fact.negative_duplicates</code> <span class="explorer-tag">negative_evidence</span> <span class="explorer-tag">identity</span> <span class="explorer-tag">protected</span></summary>
+        <div class="explorer-card-body">
+          <p>provides <code>declared_duplicate_screen</code> = <code>passed_by_filename_only</code> —
+          negative evidence: the screen that <em>claimed</em> to pass<br>
+          provenance <code>qc/duplicate_screen.txt</code></p>
+          <div class="explorer-fact-json" data-fact-id="fact.negative_duplicates"></div>
+        </div>
+      </details>
+
+      <details class="explorer-card">
+        <summary>The 6 selected factors (of 756)</summary>
+        <div class="explorer-card-body">
+          <ul>
+            <li><code>factor.identity_check</code> (deterministic_rule) → <code>identity_leakage</code></li>
+            <li><code>factor.site_check</code> (deterministic_rule) → <code>site_leakage</code></li>
+            <li><code>factor.temporal_check</code> (deterministic_rule) → <code>temporal_leakage</code></li>
+            <li><code>factor.preprocessing_check</code> (deterministic_rule) → <code>preprocessing_leakage</code></li>
+            <li><code>factor.policy_check</code> (deterministic_rule) → <code>policy_validity</code></li>
+            <li><code>factor.claim_support</code> (decision_rule) → <code>split_integrity_status</code></li>
+          </ul>
+          <pre class="explorer-json" data-json-path="section.selected_factors">(JavaScript renders the full factor records here; they are verbatim in the embedded data block.)</pre>
+        </div>
+      </details>
+
+      <details class="explorer-card">
+        <summary>How the compiler got there — the pass ledger</summary>
+        <div class="explorer-card-body">
+          <p>From <code>bioprism context explain</code>, backend
+          <code>backward_factor_slice_reference</code>:</p>
+          <ol>
+            <li><strong>protected_closure</strong> — retained 11 · “10 protected tags requested”</li>
+            <li><strong>backward_slice</strong> — retained 6 · “17 variables reachable from targets”</li>
+            <li><strong>policy</strong> — retained 11 · “1 clause(s) in force, 0 candidate(s) declared a requirement, 0 withheld”</li>
+            <li><strong>temporal_cut</strong> — retained 11 · “0 facts withheld at the decision cut”</li>
+            <li><strong>oracle</strong> — retained 4 · “status invalid”</li>
+            <li><strong>plan_selection</strong> — retained 11 · “backend backward_factor_slice_reference retained
+            0.0145 of facts; portfolio costed 3 candidate(s), argmin faq_inside_out at 2.1439e3 against a
+            baseline of 3.7240e6 (1737.0x); no costed plan is runnable: faq_inside_out declined: factor
+            &quot;factor.claim_support&quot; carries no table; a world-derived region must be given a valuation
+            before it can be executed”</li>
+            <li><strong>influence_bounds</strong> — retained 0 · “0 of 0 withheld fact(s) bounded, 0 group(s)
+            informative, worst informative bound none”</li>
+          </ol>
+          <p>Seven passes were <em>deferred</em>, each with a stated reason (obstruction tests,
+          abstract interpretation, role-and-purpose filter, information-flow export, decision
+          quotient, rate-distortion, adaptive acquisition) — the reference schemas do not yet carry
+          the bindings they require. The reasons are verbatim in the embedded data block:</p>
+          <pre class="explorer-json" data-json-path="explain.deferred_passes">(JavaScript renders the deferred-pass reasons here; they are verbatim in the embedded data block.)</pre>
+        </div>
+      </details>
+    </section>
+
+    <section class="explorer-step" id="receipt">
+      <h2>3 · The receipt — the Context Certificate</h2>
+
+      <p>The certificate (<code>fiber-context-certificate/0.1</code>) is the machine-readable
+      receipt: what was kept, what was omitted, why, and under which oracle verdict — hashed over
+      canonical bytes so anyone can recheck it.</p>
+
+      <h3>Omission accounting</h3>
+
+      <div class="table-scroll">
+      <table>
+        <tr><th>Field</th><th>Value</th></tr>
+        <tr><td>omissions.total_facts</td><td class="num">750</td></tr>
+        <tr><td>omissions.exploratory_facts</td><td class="num">750</td></tr>
+        <tr><td>omissions.classification</td><td><code>no_backward_dependency_path_or_temporally_inaccessible</code></td></tr>
+        <tr><td>omissions.inaccessible_selected_before_cut</td><td><code>[]</code> — empty: nothing selected was time-inaccessible</td></tr>
+      </table>
+      </div>
+
+      <p>The explain plan groups all 750 omissions under one manifest entry: reason “no backward
+      dependency path to any target under the declared factor graph”, influence
+      <code>zero</code>, bound <code>0.0</code>. The envelope's sufficiency flag —
+      <code>supports_sufficiency_claim: true</code> — rests on that accounting.</p>
+
+      <h3>Compile plan</h3>
+
+      <div class="table-scroll">
+      <table>
+        <tr><th>Field</th><th>Value</th></tr>
+        <tr><td>plan.backend</td><td><code>backward_factor_slice_reference</code></td></tr>
+        <tr><td>plan.compiled_fact_count / total_fact_count</td><td class="num">11 / 761</td></tr>
+        <tr><td>plan.compiled_factor_count / total_factor_count</td><td class="num">6 / 756</td></tr>
+        <tr><td>plan.max_selected_factor_arity</td><td class="num">5</td></tr>
+        <tr><td>plan.fallback</td><td><code>null</code></td></tr>
+      </table>
+      </div>
+
+      <details class="explorer-card">
+        <summary>Protected closure — 11 facts, satisfied</summary>
+        <div class="explorer-card-body">
+          <p>Every fact reachable from the 10 protected tags survived selection
+          (<code>protected_closure_satisfied: true</code>). The closure is the full selected set:</p>
+          <p><code>fact.cohort</code> · <code>fact.decision_cut</code> · <code>fact.label_source</code> ·
+          <code>fact.negative_duplicates</code> · <code>fact.policy</code> ·
+          <code>fact.preprocess_fit</code> · <code>fact.scanner</code> · <code>fact.site</code> ·
+          <code>fact.specimen_dates</code> · <code>fact.split</code> ·
+          <code>fact.subject_aliases</code></p>
+        </div>
+      </details>
+
+      <h3>Oracle verdict</h3>
+
+      <div class="explorer-verdict">
+        <p><span class="explorer-status-bad">status: invalid</span> ·
+        oracle <code>deterministic_split_integrity_v1</code> — the proposed radiogenomic split does
+        <em>not</em> support a valid external-generalization analysis. Four witnesses:</p>
+        <div class="explorer-witness">
+          <strong>identity_leakage</strong> — alias <code>ALT-77</code> is shared by subjects
+          <code>S001</code> and <code>S003</code>, which sit in different splits
+          (<code>train</code>, <code>test</code>): the same person is on both sides.
+        </div>
+        <div class="explorer-witness">
+          <strong>site_leakage</strong> — site_by_split: train = <code>A</code>,
+          test = <code>B</code>: split is confounded with site.
+        </div>
+        <div class="explorer-witness">
+          <strong>temporal_leakage</strong> — decision_time <code>2025-01-01</code>, but
+          <code>S003</code>'s label source is dated <code>2025-06-01</code>: a label from the future.
+        </div>
+        <div class="explorer-witness">
+          <strong>preprocessing_leakage</strong> — “preprocessing fit used all subjects before
+          split”.
+        </div>
+      </div>
+
+      <h3>Limitations — verbatim, never hidden</h3>
+
+      <div class="callout explorer-limitations">
+        <p>The certificate carries its own limitations, quoted exactly:</p>
+        <blockquote>“Reference slicer uses dependency reachability and protected tags; it does not
+        yet implement sheaf cohomology, FAQ-width optimization, abstract interpretation, or formal
+        influence bounds.”</blockquote>
+      </div>
+
+      <h3>Hashes</h3>
+
+      <dl class="facts">
+        <dt>world_sha256</dt>
+        <dd><span class="explorer-hash">b3809731cf93040fcd8aef43deb2a552492064b49154e07ea58caa724c10cbb5</span></dd>
+        <dt>query_sha256</dt>
+        <dd><span class="explorer-hash">d06368c62dd878f483d30ebfd56f38426b1234d37e46ca77d4536db81f59c684</span></dd>
+        <dt>decision_section_sha256</dt>
+        <dd><span class="explorer-hash">7439b2262c52c1c794b59be86d922b723a2ea5646362d529f57fb11b5f7e93ce</span></dd>
+        <dt>certificate_sha256</dt>
+        <dd><span class="explorer-hash explorer-hash-headline">c0da17ffc80465258345c8a538171bfd868100cd883e9a20780a0dc5477e7ea4</span></dd>
+      </dl>
+
+      <details class="explorer-card">
+        <summary>Raw certificate JSON</summary>
+        <div class="explorer-card-body">
+          <pre class="explorer-json" data-json="certificate">(JavaScript renders the full certificate here. Without it, the same JSON sits verbatim in this page's embedded data block — view source.)</pre>
+        </div>
+      </details>
+    </section>
+
+    <section class="explorer-step" id="check">
+      <h2>4 · The check</h2>
+
+      <p>The receipt is only worth something if a third party can recheck it.
+      <code>bioprism context verify</code> recomputes the digest from canonical bytes — without
+      linking the engine that produced the certificate — and exits non-zero if it does not verify.
+      The verbatim result for this certificate:</p>
+
+      <div class="explorer-verify">
+        <p><span class="explorer-status-good">ok: true</span> ·
+        verification: <code>digest verifies</code> ·
+        schema <code>fiber-context-certificate/0.1</code></p>
+      </div>
+
+      <details class="explorer-card">
+        <summary>Raw verify JSON · raw compile envelope</summary>
+        <div class="explorer-card-body">
+          <pre class="explorer-json" data-json="verify">(JavaScript renders the verify result here; it is verbatim in the embedded data block.)</pre>
+          <pre class="explorer-json" data-json="compile">(JavaScript renders the compile envelope here; it is verbatim in the embedded data block.)</pre>
+        </div>
+      </details>
+
+      <p>To reproduce from a checkout of the repository (the world and query on this page ship as
+      fixtures):</p>
+
+      <pre><code>bioprism context compile --world fixtures/fiber-v0.1/radiogenomic_world.json --query fixtures/fiber-v0.1/leakage_query.json --certificate-out cert.json --section-out section.json
+bioprism context verify --certificate cert.json</code></pre>
+    </section>
+
+    <div class="callout">
+      <p><strong>Run it yourself.</strong> Every artifact above regenerates from the shipped
+      fixtures with the two commands just shown — <a href="install.html">install AURORA Agent</a>
+      (Claude Desktop bundle, Claude Code plugin, or <code>cargo build</code> from source), then
+      compile and verify. The certificate digest you get should be
+      <code>c0da17ffc80465258345c8a538171bfd868100cd883e9a20780a0dc5477e7ea4</code>.</p>
+    </div>
+
+    <div class="boundary">Research and developer infrastructure: it does not diagnose an individual,
+    recommend treatment, triage care, enroll participants, or claim medical-device functionality.</div>
+
+  </div>
+</main>
+
+<footer class="site">
+  <div class="wrap">
+    <p>AURORA Agent — Apache-2.0 ·
+      <a href="https://github.com/AURORA-NEURO/aurora-agent">Source</a> ·
+      <a href="https://github.com/AURORA-NEURO/aurora-agent/blob/main/PRIVACY.md">Privacy</a> ·
+      MCP registry: <code>io.github.MurariAmbati/aurora-agent</code></p>
+    <p>Research and developer infrastructure: it does not diagnose an individual, recommend treatment,
+    triage care, enroll participants, or claim medical-device functionality.</p>
+  </div>
+</footer>
+
+<script type="application/json" id="explorer-data">{
+ "query": {
+  "budgets": {
+   "max_facts": 64,
+   "max_tokens": 6000
+  },
+  "decision_time": "2025-01-01T00:00:00Z",
+  "distortion_tolerance": 0.0,
+  "policy": [
+   "research-only"
+  ],
+  "protected_tags": [
+   "identity",
+   "split",
+   "site",
+   "scanner",
+   "time",
+   "specimen",
+   "preprocessing",
+   "policy",
+   "negative_evidence",
+   "protected"
+  ],
+  "query_id": "audit-split-integrity-v1",
+  "role": "research-auditor",
+  "schema_version": "fiber-query/0.1",
+  "targets": [
+   "split_integrity_status"
+  ]
+ },
+ "compile": {
+  "ok": true,
+  "world_id": "radiogenomic-integrity-demo-v1",
+  "query_id": "audit-split-integrity-v1",
+  "oracle": {
+   "kind": "deterministic_split_integrity_v1",
+   "status": "invalid",
+   "witnesses": [
+    "identity_leakage",
+    "site_leakage",
+    "temporal_leakage",
+    "preprocessing_leakage"
+   ]
+  },
+  "selected_facts": 11,
+  "selected_factors": 6,
+  "omitted_facts": 750,
+  "protected_closure": 11,
+  "protected_closure_satisfied": true,
+  "supports_sufficiency_claim": true,
+  "certificate_sha256": "c0da17ffc80465258345c8a538171bfd868100cd883e9a20780a0dc5477e7ea4",
+  "profile": "reference",
+  "dry_run": false,
+  "artifacts": [
+   {
+    "path": "artifacts/explorer_cert.json",
+    "bytes": 2785,
+    "written": true
+   },
+   {
+    "path": "artifacts/explorer_section.json",
+    "bytes": 7537,
+    "written": true
+   }
+  ]
+ },
+ "certificate": {
+  "schema_version": "fiber-context-certificate/0.1",
+  "world_id": "radiogenomic-integrity-demo-v1",
+  "query_id": "audit-split-integrity-v1",
+  "selected_facts": [
+   "fact.cohort",
+   "fact.decision_cut",
+   "fact.label_source",
+   "fact.negative_duplicates",
+   "fact.policy",
+   "fact.preprocess_fit",
+   "fact.scanner",
+   "fact.site",
+   "fact.specimen_dates",
+   "fact.split",
+   "fact.subject_aliases"
+  ],
+  "selected_factors": [
+   "factor.claim_support",
+   "factor.identity_check",
+   "factor.policy_check",
+   "factor.preprocessing_check",
+   "factor.site_check",
+   "factor.temporal_check"
+  ],
+  "protected_closure": [
+   "fact.cohort",
+   "fact.decision_cut",
+   "fact.label_source",
+   "fact.negative_duplicates",
+   "fact.policy",
+   "fact.preprocess_fit",
+   "fact.scanner",
+   "fact.site",
+   "fact.specimen_dates",
+   "fact.split",
+   "fact.subject_aliases"
+  ],
+  "omissions": {
+   "total_facts": 750,
+   "exploratory_facts": 750,
+   "classification": "no_backward_dependency_path_or_temporally_inaccessible",
+   "inaccessible_selected_before_cut": []
+  },
+  "plan": {
+   "backend": "backward_factor_slice_reference",
+   "compiled_factor_count": 6,
+   "compiled_fact_count": 11,
+   "total_factor_count": 756,
+   "total_fact_count": 761,
+   "max_selected_factor_arity": 5,
+   "fallback": null
+  },
+  "oracle": {
+   "status": "invalid",
+   "witnesses": [
+    {
+     "type": "identity_leakage",
+     "alias": "ALT-77",
+     "subjects": [
+      "S001",
+      "S003"
+     ],
+     "splits": [
+      "test",
+      "train"
+     ]
+    },
+    {
+     "type": "site_leakage",
+     "site_by_split": {
+      "test": [
+       "B"
+      ],
+      "train": [
+       "A"
+      ]
+     }
+    },
+    {
+     "type": "temporal_leakage",
+     "decision_time": "2025-01-01",
+     "future_label_sources": {
+      "S003": "2025-06-01"
+     }
+    },
+    {
+     "type": "preprocessing_leakage",
+     "detail": "preprocessing fit used all subjects before split"
+    }
+   ],
+   "oracle_kind": "deterministic_split_integrity_v1"
+  },
+  "source_hashes": {
+   "world_sha256": "b3809731cf93040fcd8aef43deb2a552492064b49154e07ea58caa724c10cbb5",
+   "query_sha256": "d06368c62dd878f483d30ebfd56f38426b1234d37e46ca77d4536db81f59c684",
+   "decision_section_sha256": "7439b2262c52c1c794b59be86d922b723a2ea5646362d529f57fb11b5f7e93ce"
+  },
+  "limitations": [
+   "Reference slicer uses dependency reachability and protected tags; it does not yet implement sheaf cohomology, FAQ-width optimization, abstract interpretation, or formal influence bounds."
+  ],
+  "certificate_sha256": "c0da17ffc80465258345c8a538171bfd868100cd883e9a20780a0dc5477e7ea4"
+ },
+ "section": {
+  "schema_version": "fiber-decision-section/0.1",
+  "world_id": "radiogenomic-integrity-demo-v1",
+  "query_id": "audit-split-integrity-v1",
+  "decision_time": "2025-01-01T00:00:00Z",
+  "goal": "Determine whether the proposed radiogenomic split supports a valid external-generalization analysis.",
+  "selected_evidence": [
+   {
+    "id": "fact.cohort",
+    "provides": "cohort_id",
+    "value": "RG-DEMO-001",
+    "scope": {
+     "cohort": "RG-DEMO-001"
+    },
+    "tags": [
+     "identity"
+    ],
+    "provenance": [
+     "manifest/cohort.json"
+    ]
+   },
+   {
+    "id": "fact.decision_cut",
+    "provides": "training_decision_time",
+    "value": "2025-01-01",
+    "scope": {
+     "cohort": "RG-DEMO-001"
+    },
+    "tags": [
+     "time",
+     "protected"
+    ],
+    "provenance": [
+     "run/config.json"
+    ]
+   },
+   {
+    "id": "fact.label_source",
+    "provides": "label_source_time",
+    "value": {
+     "S001": "2024-01-01",
+     "S002": "2024-02-01",
+     "S003": "2025-06-01",
+     "S004": "2024-02-15"
+    },
+    "scope": {
+     "cohort": "RG-DEMO-001"
+    },
+    "tags": [
+     "time",
+     "label_lineage",
+     "protected"
+    ],
+    "provenance": [
+     "labels/lineage.json"
+    ]
+   },
+   {
+    "id": "fact.negative_duplicates",
+    "provides": "declared_duplicate_screen",
+    "value": "passed_by_filename_only",
+    "scope": {
+     "cohort": "RG-DEMO-001"
+    },
+    "tags": [
+     "negative_evidence",
+     "identity",
+     "protected"
+    ],
+    "provenance": [
+     "qc/duplicate_screen.txt"
+    ]
+   },
+   {
+    "id": "fact.policy",
+    "provides": "data_policy",
+    "value": [
+     "research-only",
+     "no-identifiable-export"
+    ],
+    "scope": {
+     "cohort": "RG-DEMO-001"
+    },
+    "tags": [
+     "policy",
+     "protected"
+    ],
+    "provenance": [
+     "governance/policy.json"
+    ]
+   },
+   {
+    "id": "fact.preprocess_fit",
+    "provides": "preprocess_fit_scope",
+    "value": "all_subjects_before_split",
+    "scope": {
+     "cohort": "RG-DEMO-001"
+    },
+    "tags": [
+     "preprocessing",
+     "protected"
+    ],
+    "provenance": [
+     "pipeline/preprocess.yaml"
+    ]
+   },
+   {
+    "id": "fact.scanner",
+    "provides": "scanner_assignment",
+    "value": {
+     "S001": "X1",
+     "S002": "X1",
+     "S003": "Y9",
+     "S004": "Y9"
+    },
+    "scope": {
+     "cohort": "RG-DEMO-001"
+    },
+    "tags": [
+     "site",
+     "scanner"
+    ],
+    "provenance": [
+     "imaging/dicom_manifest.csv"
+    ]
+   },
+   {
+    "id": "fact.site",
+    "provides": "site_assignment",
+    "value": {
+     "S001": "A",
+     "S002": "A",
+     "S003": "B",
+     "S004": "B"
+    },
+    "scope": {
+     "cohort": "RG-DEMO-001"
+    },
+    "tags": [
+     "site",
+     "protected"
+    ],
+    "provenance": [
+     "manifest/site.csv"
+    ]
+   },
+   {
+    "id": "fact.specimen_dates",
+    "provides": "specimen_dates",
+    "value": {
+     "S001": "2023-12-01",
+     "S002": "2024-01-15",
+     "S003": "2025-05-20",
+     "S004": "2024-01-20"
+    },
+    "scope": {
+     "cohort": "RG-DEMO-001"
+    },
+    "tags": [
+     "specimen",
+     "time",
+     "protected"
+    ],
+    "provenance": [
+     "specimens/manifest.csv"
+    ]
+   },
+   {
+    "id": "fact.split",
+    "provides": "split_assignment",
+    "value": {
+     "S001": "train",
+     "S002": "train",
+     "S003": "test",
+     "S004": "test"
+    },
+    "scope": {
+     "cohort": "RG-DEMO-001"
+    },
+    "tags": [
+     "split",
+     "protected"
+    ],
+    "provenance": [
+     "analysis/split.json"
+    ]
+   },
+   {
+    "id": "fact.subject_aliases",
+    "provides": "subject_aliases",
+    "value": {
+     "S001": [
+      "S001",
+      "ALT-77"
+     ],
+     "S002": [
+      "S002"
+     ],
+     "S003": [
+      "S003",
+      "ALT-77"
+     ]
+    },
+    "scope": {
+     "cohort": "RG-DEMO-001"
+    },
+    "tags": [
+     "identity",
+     "protected"
+    ],
+    "provenance": [
+     "manifest/subjects.csv"
+    ]
+   }
+  ],
+  "selected_factors": [
+   {
+    "cost": 0.2,
+    "id": "factor.claim_support",
+    "inputs": [
+     "identity_leakage",
+     "site_leakage",
+     "temporal_leakage",
+     "preprocessing_leakage",
+     "policy_validity"
+    ],
+    "kind": "decision_rule",
+    "outputs": [
+     "split_integrity_status"
+    ],
+    "scope": {
+     "cohort": "RG-DEMO-001"
+    },
+    "tags": [
+     "target"
+    ]
+   },
+   {
+    "cost": 1.0,
+    "id": "factor.identity_check",
+    "inputs": [
+     "cohort_id",
+     "subject_aliases",
+     "split_assignment",
+     "declared_duplicate_screen"
+    ],
+    "kind": "deterministic_rule",
+    "outputs": [
+     "identity_leakage"
+    ],
+    "scope": {
+     "cohort": "RG-DEMO-001"
+    },
+    "tags": [
+     "protected"
+    ]
+   },
+   {
+    "cost": 0.2,
+    "id": "factor.policy_check",
+    "inputs": [
+     "data_policy"
+    ],
+    "kind": "deterministic_rule",
+    "outputs": [
+     "policy_validity"
+    ],
+    "scope": {
+     "cohort": "RG-DEMO-001"
+    },
+    "tags": [
+     "protected"
+    ]
+   },
+   {
+    "cost": 1.0,
+    "id": "factor.preprocessing_check",
+    "inputs": [
+     "preprocess_fit_scope",
+     "split_assignment"
+    ],
+    "kind": "deterministic_rule",
+    "outputs": [
+     "preprocessing_leakage"
+    ],
+    "scope": {
+     "cohort": "RG-DEMO-001"
+    },
+    "tags": [
+     "protected"
+    ]
+   },
+   {
+    "cost": 1.0,
+    "id": "factor.site_check",
+    "inputs": [
+     "site_assignment",
+     "scanner_assignment",
+     "split_assignment"
+    ],
+    "kind": "deterministic_rule",
+    "outputs": [
+     "site_leakage"
+    ],
+    "scope": {
+     "cohort": "RG-DEMO-001"
+    },
+    "tags": [
+     "protected"
+    ]
+   },
+   {
+    "cost": 1.0,
+    "id": "factor.temporal_check",
+    "inputs": [
+     "label_source_time",
+     "training_decision_time",
+     "specimen_dates",
+     "split_assignment"
+    ],
+    "kind": "deterministic_rule",
+    "outputs": [
+     "temporal_leakage"
+    ],
+    "scope": {
+     "cohort": "RG-DEMO-001"
+    },
+    "tags": [
+     "protected"
+    ]
+   }
+  ],
+  "oracle": {
+   "status": "invalid",
+   "witnesses": [
+    {
+     "type": "identity_leakage",
+     "alias": "ALT-77",
+     "subjects": [
+      "S001",
+      "S003"
+     ],
+     "splits": [
+      "test",
+      "train"
+     ]
+    },
+    {
+     "type": "site_leakage",
+     "site_by_split": {
+      "test": [
+       "B"
+      ],
+      "train": [
+       "A"
+      ]
+     }
+    },
+    {
+     "type": "temporal_leakage",
+     "decision_time": "2025-01-01",
+     "future_label_sources": {
+      "S003": "2025-06-01"
+     }
+    },
+    {
+     "type": "preprocessing_leakage",
+     "detail": "preprocessing fit used all subjects before split"
+    }
+   ],
+   "oracle_kind": "deterministic_split_integrity_v1"
+  },
+  "unresolved_obligations": [],
+  "refinement_frontier": []
+ },
+ "explain": {
+  "ok": true,
+  "world_id": "radiogenomic-integrity-demo-v1",
+  "query_id": "audit-split-integrity-v1",
+  "backend": "backward_factor_slice_reference",
+  "passes": [
+   {
+    "name": "protected_closure",
+    "retained": 11,
+    "note": "10 protected tags requested"
+   },
+   {
+    "name": "backward_slice",
+    "retained": 6,
+    "note": "17 variables reachable from targets"
+   },
+   {
+    "name": "policy",
+    "retained": 11,
+    "note": "1 clause(s) in force, 0 candidate(s) declared a requirement, 0 withheld"
+   },
+   {
+    "name": "temporal_cut",
+    "retained": 11,
+    "note": "0 facts withheld at the decision cut"
+   },
+   {
+    "name": "oracle",
+    "retained": 4,
+    "note": "status invalid"
+   },
+   {
+    "name": "plan_selection",
+    "retained": 11,
+    "note": "backend backward_factor_slice_reference retained 0.0145 of facts; portfolio costed 3 candidate(s), argmin faq_inside_out at 2.1439e3 against a baseline of 3.7240e6 (1737.0x); no costed plan is runnable: faq_inside_out declined: factor \"factor.claim_support\" carries no table; a world-derived region must be given a valuation before it can be executed"
+   },
+   {
+    "name": "influence_bounds",
+    "retained": 0,
+    "note": "0 of 0 withheld fact(s) bounded, 0 group(s) informative, worst informative bound none"
+   }
+  ],
+  "deferred_passes": [
+   {
+    "name": "obstruction_tests",
+    "reason": "43.06 gluing requires a declared cover; fiber-world/0.1 carries no cover"
+   },
+   {
+    "name": "abstract_interpretation",
+    "reason": "43.11 requires an abstract-domain registry absent from fiber-world/0.1"
+   },
+   {
+    "name": "role_and_purpose_filter",
+    "reason": "43.33 binds role and purpose to the query before selection; fiber-query/0.2 carries a role string and no purpose, and no pass reads either"
+   },
+   {
+    "name": "information_flow_export",
+    "reason": "43.33 orders outputs by policy label; fiber-world/0.1 declares no labels and no rules attached at scopes, so only read access is decided"
+   },
+   {
+    "name": "decision_quotient",
+    "reason": "43.10 is defined relative to permitted actions and decision loss; fiber-query/0.1 and fiber-query/0.2 do not carry the executable contract"
+   },
+   {
+    "name": "rate_distortion",
+    "reason": "43.12 requires a normalized model prior, an ordered observed evidence-pool likelihood binding, a compatible-model floor and a distortion tolerance; fiber-query/0.1 through fiber-query/0.3 carry no complete binding"
+   },
+   {
+    "name": "adaptive_acquisition",
+    "reason": "43.15 requires an explicit model prior, outcome likelihood partitions, scalarized budget and finite horizon; fiber-query/0.1 through fiber-query/0.4 carry no complete binding"
+   }
+  ],
+  "selection": {
+   "fact_ratio": 0.01445466491458607,
+   "factor_ratio": 0.007936507936507936,
+   "max_selected_factor_arity": 5
+  },
+  "omission_manifest": {
+   "groups": [
+    {
+     "reason": "no backward dependency path to any target under the declared factor graph",
+     "influence": "zero",
+     "count": 750,
+     "bound": 0.0
+    }
+   ]
+  },
+  "supports_sufficiency_claim": true,
+  "unmatched_protected_tags": [],
+  "dropped_protected": []
+ },
+ "verify": {
+  "ok": true,
+  "certificate": "artifacts/explorer_cert.json",
+  "verification": "digest verifies",
+  "schema_version": "fiber-context-certificate/0.1"
+ },
+ "selected_fact_details": [
+  {
+   "id": "fact.cohort",
+   "provenance": [
+    "manifest/cohort.json"
+   ],
+   "provides": "cohort_id",
+   "scope": {
+    "cohort": "RG-DEMO-001"
+   },
+   "tags": [
+    "identity"
+   ],
+   "value": "RG-DEMO-001"
+  },
+  {
+   "id": "fact.subject_aliases",
+   "provenance": [
+    "manifest/subjects.csv"
+   ],
+   "provides": "subject_aliases",
+   "scope": {
+    "cohort": "RG-DEMO-001"
+   },
+   "tags": [
+    "identity",
+    "protected"
+   ],
+   "value": {
+    "S001": [
+     "S001",
+     "ALT-77"
+    ],
+    "S002": [
+     "S002"
+    ],
+    "S003": [
+     "S003",
+     "ALT-77"
+    ]
+   }
+  },
+  {
+   "id": "fact.split",
+   "provenance": [
+    "analysis/split.json"
+   ],
+   "provides": "split_assignment",
+   "scope": {
+    "cohort": "RG-DEMO-001"
+   },
+   "tags": [
+    "split",
+    "protected"
+   ],
+   "value": {
+    "S001": "train",
+    "S002": "train",
+    "S003": "test",
+    "S004": "test"
+   }
+  },
+  {
+   "id": "fact.site",
+   "provenance": [
+    "manifest/site.csv"
+   ],
+   "provides": "site_assignment",
+   "scope": {
+    "cohort": "RG-DEMO-001"
+   },
+   "tags": [
+    "site",
+    "protected"
+   ],
+   "value": {
+    "S001": "A",
+    "S002": "A",
+    "S003": "B",
+    "S004": "B"
+   }
+  },
+  {
+   "id": "fact.label_source",
+   "provenance": [
+    "labels/lineage.json"
+   ],
+   "provides": "label_source_time",
+   "scope": {
+    "cohort": "RG-DEMO-001"
+   },
+   "tags": [
+    "time",
+    "label_lineage",
+    "protected"
+   ],
+   "value": {
+    "S001": "2024-01-01",
+    "S002": "2024-02-01",
+    "S003": "2025-06-01",
+    "S004": "2024-02-15"
+   }
+  },
+  {
+   "id": "fact.decision_cut",
+   "provenance": [
+    "run/config.json"
+   ],
+   "provides": "training_decision_time",
+   "scope": {
+    "cohort": "RG-DEMO-001"
+   },
+   "tags": [
+    "time",
+    "protected"
+   ],
+   "value": "2025-01-01"
+  },
+  {
+   "id": "fact.preprocess_fit",
+   "provenance": [
+    "pipeline/preprocess.yaml"
+   ],
+   "provides": "preprocess_fit_scope",
+   "scope": {
+    "cohort": "RG-DEMO-001"
+   },
+   "tags": [
+    "preprocessing",
+    "protected"
+   ],
+   "value": "all_subjects_before_split"
+  },
+  {
+   "id": "fact.specimen_dates",
+   "provenance": [
+    "specimens/manifest.csv"
+   ],
+   "provides": "specimen_dates",
+   "scope": {
+    "cohort": "RG-DEMO-001"
+   },
+   "tags": [
+    "specimen",
+    "time",
+    "protected"
+   ],
+   "value": {
+    "S001": "2023-12-01",
+    "S002": "2024-01-15",
+    "S003": "2025-05-20",
+    "S004": "2024-01-20"
+   }
+  },
+  {
+   "id": "fact.scanner",
+   "provenance": [
+    "imaging/dicom_manifest.csv"
+   ],
+   "provides": "scanner_assignment",
+   "scope": {
+    "cohort": "RG-DEMO-001"
+   },
+   "tags": [
+    "site",
+    "scanner"
+   ],
+   "value": {
+    "S001": "X1",
+    "S002": "X1",
+    "S003": "Y9",
+    "S004": "Y9"
+   }
+  },
+  {
+   "id": "fact.policy",
+   "provenance": [
+    "governance/policy.json"
+   ],
+   "provides": "data_policy",
+   "scope": {
+    "cohort": "RG-DEMO-001"
+   },
+   "tags": [
+    "policy",
+    "protected"
+   ],
+   "value": [
+    "research-only",
+    "no-identifiable-export"
+   ]
+  },
+  {
+   "id": "fact.negative_duplicates",
+   "provenance": [
+    "qc/duplicate_screen.txt"
+   ],
+   "provides": "declared_duplicate_screen",
+   "scope": {
+    "cohort": "RG-DEMO-001"
+   },
+   "tags": [
+    "negative_evidence",
+    "identity",
+    "protected"
+   ],
+   "value": "passed_by_filename_only"
+  }
+ ],
+ "world_stats": {
+  "total_facts": 761,
+  "selected": 11,
+  "world_id": "radiogenomic-integrity-demo-v1"
+ }
+}</script>
+
+<script>
+(function () {
+  "use strict";
+  var block = document.getElementById("explorer-data");
+  if (!block) { return; }
+  var data;
+  try { data = JSON.parse(block.textContent); } catch (err) { return; }
+
+  function pretty(value) { return JSON.stringify(value, null, 2); }
+
+  function lookup(path) {
+    var node = data;
+    var parts = path.split(".");
+    for (var i = 0; i < parts.length; i += 1) {
+      if (node === null || typeof node !== "object" || !(parts[i] in node)) { return undefined; }
+      node = node[parts[i]];
+    }
+    return node;
+  }
+
+  var facts = {};
+  (data.selected_fact_details || []).forEach(function (fact) { facts[fact.id] = fact; });
+
+  Array.prototype.forEach.call(document.querySelectorAll("[data-fact-id]"), function (node) {
+    var fact = facts[node.getAttribute("data-fact-id")];
+    if (!fact) { return; }
+    var pre = document.createElement("pre");
+    pre.className = "explorer-json";
+    pre.textContent = pretty(fact);
+    node.appendChild(pre);
+  });
+
+  Array.prototype.forEach.call(document.querySelectorAll("pre[data-json]"), function (node) {
+    var key = node.getAttribute("data-json");
+    if (data && Object.prototype.hasOwnProperty.call(data, key)) {
+      node.textContent = pretty(data[key]);
+    }
+  });
+
+  Array.prototype.forEach.call(document.querySelectorAll("pre[data-json-path]"), function (node) {
+    var value = lookup(node.getAttribute("data-json-path"));
+    if (value !== undefined) { node.textContent = pretty(value); }
+  });
+})();
+</script>
+
+</body>
+</html>

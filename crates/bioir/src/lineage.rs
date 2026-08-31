@@ -302,7 +302,9 @@ pub enum LineageIssue {
         parent_unit: String,
     },
 
-    #[error("specimen {specimen} asserts subject {asserted} but its lineage root collected {inherited}")]
+    #[error(
+        "specimen {specimen} asserts subject {asserted} but its lineage root collected {inherited}"
+    )]
     IdentityConflict {
         specimen: SpecimenId,
         asserted: SubjectId,
@@ -381,13 +383,11 @@ impl LineageGraph {
     }
 
     pub fn get(&self, id: &SpecimenId) -> Result<&Specimen, LineageError> {
-        self.specimens.get(id).ok_or_else(|| LineageError::UnknownSpecimen {
-            specimen: id.to_string(),
-        })
-    }
-
-    pub fn parent_of(&self, id: &SpecimenId) -> Result<Option<&SpecimenId>, LineageError> {
-        Ok(self.get(id)?.origin.parent())
+        self.specimens
+            .get(id)
+            .ok_or_else(|| LineageError::UnknownSpecimen {
+                specimen: id.to_string(),
+            })
     }
 
     /// Ancestors nearest first, excluding `id` itself.
@@ -483,14 +483,6 @@ impl LineageGraph {
         Ok(found)
     }
 
-    pub fn is_ancestor_of(
-        &self,
-        ancestor: &SpecimenId,
-        descendant: &SpecimenId,
-    ) -> Result<bool, LineageError> {
-        Ok(self.ancestors(descendant)?.contains(ancestor))
-    }
-
     /// The nearest piece of material both specimens descend from, if any.
     ///
     /// A specimen is its own ancestor for this purpose: an aliquot and the block it was cut
@@ -500,7 +492,8 @@ impl LineageGraph {
         left: &SpecimenId,
         right: &SpecimenId,
     ) -> Result<Option<SpecimenId>, LineageError> {
-        let right_chain: BTreeSet<SpecimenId> = self.self_and_ancestors(right)?.into_iter().collect();
+        let right_chain: BTreeSet<SpecimenId> =
+            self.self_and_ancestors(right)?.into_iter().collect();
         Ok(self
             .self_and_ancestors(left)?
             .into_iter()
@@ -721,7 +714,10 @@ impl LineageGraph {
         let Some(parent_specimen) = self.specimens.get(parent) else {
             return;
         };
-        for label in specimen.consent_labels.difference(&parent_specimen.consent_labels) {
+        for label in specimen
+            .consent_labels
+            .difference(&parent_specimen.consent_labels)
+        {
             issues.push(LineageIssue::ConsentExpanded {
                 child: specimen.id.clone(),
                 parent: parent.clone(),

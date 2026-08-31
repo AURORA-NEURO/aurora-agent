@@ -8,6 +8,7 @@ import {
   autonomousTaskIntentPromptContract,
   digestJsonSync,
   inferAutonomousTaskIntent,
+  validateAutonomousTaskIntent,
 } from "../dist/index.js";
 
 test("task intent is bounded, domain-aware, and digest-parity compatible", () => {
@@ -82,4 +83,23 @@ test("task intent rejects malformed or duplicate input items", () => {
   };
   assert.throws(() => inferAutonomousTaskIntent({ ...base, constraints: ["schema", "schema"] }));
   assert.throws(() => inferAutonomousTaskIntent({ ...base, desiredOutputs: [""] }));
+});
+
+test("task intent replay validation binds task and lens", () => {
+  const task = "analyze the dataset lineage";
+  const lens = autonomousDomainTaskLens("data");
+  const intent = inferAutonomousTaskIntent({
+    task,
+    taskDigest: digestJsonSync({ task }),
+    domain: "data",
+    capability: "data_analysis",
+    riskClass: "read_only",
+    workflowId: "data_analysis",
+    lens,
+    desiredOutputs: ["lineage findings"],
+  });
+  assert.deepEqual(validateAutonomousTaskIntent(intent, { lens, taskDigest: digestJsonSync({ task }) }), intent);
+  assert.throws(() => validateAutonomousTaskIntent({ ...intent, action_mode: "modify" }));
+  assert.throws(() => validateAutonomousTaskIntent(intent, { lens: autonomousDomainTaskLens("science") }));
+  assert.throws(() => validateAutonomousTaskIntent(intent, { taskDigest: digestJsonSync({ task: "a different task" }) }));
 });

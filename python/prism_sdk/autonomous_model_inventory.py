@@ -12,6 +12,8 @@ without collapsing those facts together:
 * stale arms are retired only after a successful authoritative inventory response;
 * domain coverage is calculated from the reviewed domain requirements, but never treated as
   runtime readiness or semantic quality; and
+* a separate readiness projection joins catalogue capability/capacity with live provider
+  registration, credential, and circuit gates without changing the persisted discovery contract;
 * optional persistence stores only bounded metadata and a digest-bound snapshot.
 
 Credentials, raw inventory rows, authorization headers, prompts, and provider response bodies
@@ -38,6 +40,7 @@ from .llm_runtime import (
     CredentialSession,
     LLMRuntime,
     ModelCatalogue,
+    ModelCandidate,
     ProviderError,
     ProviderModelDescriptor,
 )
@@ -46,6 +49,7 @@ from .llm_runtime import (
 AUTONOMOUS_MODEL_INVENTORY_SCHEMA = "bioprism-python-autonomous-model-inventory/0.1"
 AUTONOMOUS_MODEL_INVENTORY_PROVIDER_SCHEMA = "bioprism-python-autonomous-model-inventory-provider/0.1"
 AUTONOMOUS_MODEL_INVENTORY_COVERAGE_SCHEMA = "bioprism-python-autonomous-model-inventory-coverage/0.1"
+AUTONOMOUS_MODEL_INVENTORY_READINESS_SCHEMA = "bioprism-python-autonomous-model-inventory-readiness/0.1"
 AUTONOMOUS_MODEL_INVENTORY_STORE_SCHEMA = "bioprism-python-autonomous-model-inventory-store/0.1"
 AUTONOMOUS_MODEL_INVENTORY_STATUSES = ("completed", "partial", "failed")
 AUTONOMOUS_MODEL_INVENTORY_PROVIDER_STATUSES = (
@@ -62,6 +66,7 @@ MAX_AUTONOMOUS_MODEL_INVENTORY_IDS = 512
 MAX_AUTONOMOUS_MODEL_INVENTORY_SNAPSHOT_BYTES = 8_000_000
 MAX_AUTONOMOUS_MODEL_INVENTORY_ERROR_BYTES = 256
 MAX_AUTONOMOUS_MODEL_INVENTORY_IDENTIFIER_BYTES = 512
+MAX_AUTONOMOUS_MODEL_INVENTORY_TOKENS = 10_000_000
 
 
 class AutonomousModelInventoryError(RuntimeError):
@@ -343,6 +348,346 @@ class AutonomousModelInventoryCoverage:
             raise AutonomousModelInventoryError("inventory coverage value does not match its counts")
         if value.get("evidence_posture") != "static_caller_declared_capabilities_only" or value.get("runtime_gates") != "not_projected; credentials_health_cost_latency_and_circuit_are_live_gates":
             raise AutonomousModelInventoryError("inventory coverage markers are invalid")
+        return result
+
+
+@dataclass(frozen=True, slots=True)
+class AutonomousModelInventoryReadinessDomain:
+    """Live model eligibility for one domain, independent from task correctness evidence."""
+
+    domain: str
+    required_model_capabilities: tuple[str, ...]
+    compatible_model_ids: tuple[str, ...]
+    eligible_model_ids: tuple[str, ...]
+    compatible_model_count: int
+    eligible_model_count: int
+    coverage_state: str
+    provider_readiness: Mapping[str, Mapping[str, Any]]
+
+    def __post_init__(self) -> None:
+        domain = _identifier("inventory readiness domain", self.domain)
+        required = _string_tuple(
+            "inventory readiness required_model_capabilities",
+            self.required_model_capabilities,
+            maximum=MAX_AUTONOMOUS_MODEL_INVENTORY_CAPABILITIES,
+        )
+        compatible = _string_tuple(
+            "inventory readiness compatible_model_ids",
+            self.compatible_model_ids,
+            maximum=MAX_AUTONOMOUS_MODEL_INVENTORY_IDS,
+        )
+        eligible = _string_tuple(
+            "inventory readiness eligible_model_ids",
+            self.eligible_model_ids,
+            maximum=MAX_AUTONOMOUS_MODEL_INVENTORY_IDS,
+        )
+        compatible_count = _bounded_count(
+            "inventory readiness compatible_model_count",
+            self.compatible_model_count,
+            MAX_AUTONOMOUS_MODEL_INVENTORY_IDS,
+        )
+        eligible_count = _bounded_count(
+            "inventory readiness eligible_model_count",
+            self.eligible_model_count,
+            compatible_count,
+        )
+        if compatible_count != len(compatible) or eligible_count != len(eligible):
+            raise AutonomousModelInventoryError(
+                "inventory readiness model counts do not match model ids"
+            )
+        if any(model_id not in compatible for model_id in eligible):
+            raise AutonomousModelInventoryError(
+                "inventory readiness eligible models must be compatible"
+            )
+        if self.coverage_state not in ("complete", "partial", "missing"):
+            raise AutonomousModelInventoryError(
+                "inventory readiness coverage state is unsupported"
+            )
+        expected_state = (
+            "complete" if eligible else "partial" if compatible else "missing"
+        )
+        if self.coverage_state != expected_state:
+            raise AutonomousModelInventoryError(
+                "inventory readiness coverage state does not match model ids"
+            )
+        if not isinstance(self.provider_readiness, Mapping):
+            raise AutonomousModelInventoryError(
+                "inventory readiness provider_readiness must be an object"
+            )
+        providers: dict[str, dict[str, Any]] = {}
+        for provider, state in sorted(self.provider_readiness.items()):
+            normalized_provider = _identifier("inventory readiness provider", provider)
+            if not isinstance(state, Mapping):
+                raise AutonomousModelInventoryError(
+                    "inventory readiness provider state must be an object"
+                )
+            if set(state).difference({"registered", "credential_ready", "circuit"}):
+                raise AutonomousModelInventoryError(
+                    "inventory readiness provider state contains unsupported fields"
+                )
+            if not isinstance(state.get("registered"), bool) or not isinstance(
+                state.get("credential_ready"), bool
+            ):
+                raise AutonomousModelInventoryError(
+                    "inventory readiness provider flags must be boolean"
+                )
+            circuit = _text(
+                "inventory readiness provider circuit",
+                state.get("circuit"),
+                maximum=64,
+            )
+            providers[normalized_provider] = {
+                "registered": state["registered"],
+                "credential_ready": state["credential_ready"],
+                "circuit": circuit,
+            }
+        if len(providers) > MAX_AUTONOMOUS_MODEL_INVENTORY_PROVIDERS:
+            raise AutonomousModelInventoryError(
+                "inventory readiness provider state exceeds its bound"
+            )
+        object.__setattr__(self, "domain", domain)
+        object.__setattr__(self, "required_model_capabilities", required)
+        object.__setattr__(self, "compatible_model_ids", compatible)
+        object.__setattr__(self, "eligible_model_ids", eligible)
+        object.__setattr__(self, "provider_readiness", providers)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema": AUTONOMOUS_MODEL_INVENTORY_READINESS_SCHEMA,
+            "domain": self.domain,
+            "required_model_capabilities": list(self.required_model_capabilities),
+            "compatible_model_ids": list(self.compatible_model_ids),
+            "eligible_model_ids": list(self.eligible_model_ids),
+            "compatible_model_count": self.compatible_model_count,
+            "eligible_model_count": self.eligible_model_count,
+            "coverage_state": self.coverage_state,
+            "provider_readiness": {
+                provider: dict(state)
+                for provider, state in self.provider_readiness.items()
+            },
+        }
+
+    @classmethod
+    def from_mapping(cls, value: Mapping[str, Any]) -> "AutonomousModelInventoryReadinessDomain":
+        if not isinstance(value, Mapping):
+            raise AutonomousModelInventoryError(
+                "inventory readiness domain row must be an object"
+            )
+        allowed = {
+            "schema",
+            "domain",
+            "required_model_capabilities",
+            "compatible_model_ids",
+            "eligible_model_ids",
+            "compatible_model_count",
+            "eligible_model_count",
+            "coverage_state",
+            "provider_readiness",
+        }
+        if set(value).difference(allowed):
+            raise AutonomousModelInventoryError(
+                "inventory readiness domain row contains unsupported fields"
+            )
+        if value.get("schema") != AUTONOMOUS_MODEL_INVENTORY_READINESS_SCHEMA:
+            raise AutonomousModelInventoryError(
+                "inventory readiness domain row schema is invalid"
+            )
+        return cls(
+            domain=value.get("domain"),
+            required_model_capabilities=tuple(
+                value.get("required_model_capabilities", ())
+            ),
+            compatible_model_ids=tuple(value.get("compatible_model_ids", ())),
+            eligible_model_ids=tuple(value.get("eligible_model_ids", ())),
+            compatible_model_count=value.get("compatible_model_count"),
+            eligible_model_count=value.get("eligible_model_count"),
+            coverage_state=value.get("coverage_state"),
+            provider_readiness=value.get("provider_readiness"),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class AutonomousModelInventoryReadiness:
+    """Digest-bound live eligibility projection consumed by readiness and routing UIs."""
+
+    models: tuple[Mapping[str, Any], ...]
+    domains: tuple[AutonomousModelInventoryReadinessDomain, ...]
+    catalogue_digest: str
+    domain_coverage_digest: str
+    readiness: str
+    estimated_input_tokens: int = 4_096
+    requested_output_tokens: int = 1_024
+    readiness_digest: str | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.models, Sequence) or isinstance(self.models, (str, bytes)):
+            raise AutonomousModelInventoryError("inventory readiness models must be a sequence")
+        if len(self.models) > MAX_AUTONOMOUS_MODEL_INVENTORY_IDS:
+            raise AutonomousModelInventoryError("inventory readiness models exceed their bound")
+        normalized_models: list[dict[str, Any]] = []
+        for raw in self.models:
+            try:
+                candidate = raw if isinstance(raw, ModelCandidate) else ModelCandidate.from_mapping(raw)
+            except (ProviderError, TypeError, ValueError) as error:
+                raise AutonomousModelInventoryError(
+                    "inventory readiness model metadata is malformed"
+                ) from error
+            normalized_models.append(candidate.to_dict())
+        if not isinstance(self.domains, Sequence) or isinstance(self.domains, (str, bytes)):
+            raise AutonomousModelInventoryError("inventory readiness domains must be a sequence")
+        if len(self.domains) > MAX_AUTONOMOUS_MODEL_INVENTORY_DOMAINS or any(
+            not isinstance(item, AutonomousModelInventoryReadinessDomain)
+            for item in self.domains
+        ):
+            raise AutonomousModelInventoryError("inventory readiness domain rows are invalid")
+        if len({item.domain for item in self.domains}) != len(self.domains):
+            raise AutonomousModelInventoryError("inventory readiness domains must be unique")
+        if not self.domains:
+            raise AutonomousModelInventoryError("inventory readiness requires at least one domain")
+        estimated_input_tokens = _bounded_count(
+            "inventory readiness estimated_input_tokens",
+            self.estimated_input_tokens,
+            MAX_AUTONOMOUS_MODEL_INVENTORY_TOKENS,
+        )
+        requested_output_tokens = _bounded_count(
+            "inventory readiness requested_output_tokens",
+            self.requested_output_tokens,
+            MAX_AUTONOMOUS_MODEL_INVENTORY_TOKENS,
+        )
+        if estimated_input_tokens < 1 or requested_output_tokens < 1:
+            raise AutonomousModelInventoryError(
+                "inventory readiness token budgets must be positive"
+            )
+        catalogue_digest = _digest(
+            "inventory readiness catalogue_digest", self.catalogue_digest
+        )
+        domain_coverage_digest = _digest(
+            "inventory readiness domain_coverage_digest", self.domain_coverage_digest
+        )
+        if content_digest(normalized_models) != catalogue_digest:
+            raise AutonomousModelInventoryError(
+                "inventory readiness catalogue digest does not match its models"
+            )
+        normalized_domains = [domain.to_dict() for domain in self.domains]
+        if content_digest(normalized_domains) != domain_coverage_digest:
+            raise AutonomousModelInventoryError(
+                "inventory readiness domain coverage digest does not match its domains"
+            )
+        catalogue_ids = {
+            f"{model['provider']}/{model['model']}" for model in normalized_models
+        }
+        for domain in self.domains:
+            if any(
+                model_id not in catalogue_ids
+                for model_id in (*domain.compatible_model_ids, *domain.eligible_model_ids)
+            ):
+                raise AutonomousModelInventoryError(
+                    "inventory readiness domain references an unknown model"
+                )
+        if self.readiness not in ("ready", "partial", "missing"):
+            raise AutonomousModelInventoryError("inventory readiness state is unsupported")
+        expected_readiness = (
+            "ready"
+            if all(item.coverage_state == "complete" for item in self.domains)
+            else "partial"
+            if any(item.coverage_state != "missing" for item in self.domains)
+            else "missing"
+        )
+        if self.readiness != expected_readiness:
+            raise AutonomousModelInventoryError(
+                "inventory readiness state does not match domain coverage"
+            )
+        object.__setattr__(self, "models", tuple(normalized_models))
+        object.__setattr__(self, "estimated_input_tokens", estimated_input_tokens)
+        object.__setattr__(self, "requested_output_tokens", requested_output_tokens)
+        object.__setattr__(self, "catalogue_digest", catalogue_digest)
+        object.__setattr__(self, "domain_coverage_digest", domain_coverage_digest)
+        if self.readiness_digest is not None:
+            _digest("inventory readiness readiness_digest", self.readiness_digest)
+        if self.readiness_digest is not None and self.readiness_digest != content_digest(self._payload()):
+            raise AutonomousModelInventoryError(
+                "inventory readiness digest does not match its contents"
+            )
+
+    def _payload(self) -> dict[str, Any]:
+        return {
+            "schema": AUTONOMOUS_MODEL_INVENTORY_READINESS_SCHEMA,
+            "models": [dict(model) for model in self.models],
+            "domains": [domain.to_dict() for domain in self.domains],
+            "catalogue_digest": self.catalogue_digest,
+            "domain_coverage_digest": self.domain_coverage_digest,
+            "readiness": self.readiness,
+            "estimated_input_tokens": self.estimated_input_tokens,
+            "requested_output_tokens": self.requested_output_tokens,
+        }
+
+    @property
+    def digest(self) -> str:
+        return content_digest(self._payload())
+
+    def to_dict(self) -> dict[str, Any]:
+        result = self._payload()
+        result.update(
+            {
+                "readiness_digest": self.digest,
+                "execution": "provider_readiness_projection_only;no_discovery_or_invocation",
+                "selection_posture": "capability_and_live_provider_gates_only;evaluator_evidence_still_required",
+                "retention": "model_metadata_and_coverage_only;credentials_prompts_responses_not_retained",
+                "secret_material": "never_returned",
+            }
+        )
+        return result
+
+    @classmethod
+    def from_mapping(cls, value: Mapping[str, Any]) -> "AutonomousModelInventoryReadiness":
+        if not isinstance(value, Mapping):
+            raise AutonomousModelInventoryError("inventory readiness must be an object")
+        allowed = {
+            "schema",
+            "models",
+            "domains",
+            "catalogue_digest",
+            "domain_coverage_digest",
+            "readiness",
+            "estimated_input_tokens",
+            "requested_output_tokens",
+            "readiness_digest",
+            "execution",
+            "selection_posture",
+            "retention",
+            "secret_material",
+        }
+        if set(value).difference(allowed):
+            raise AutonomousModelInventoryError(
+                "inventory readiness contains unsupported fields"
+            )
+        if (
+            value.get("schema") != AUTONOMOUS_MODEL_INVENTORY_READINESS_SCHEMA
+            or value.get("execution")
+            != "provider_readiness_projection_only;no_discovery_or_invocation"
+            or value.get("selection_posture")
+            != "capability_and_live_provider_gates_only;evaluator_evidence_still_required"
+            or value.get("retention")
+            != "model_metadata_and_coverage_only;credentials_prompts_responses_not_retained"
+            or value.get("secret_material") != "never_returned"
+        ):
+            raise AutonomousModelInventoryError("inventory readiness markers are invalid")
+        models = value.get("models")
+        domains = value.get("domains")
+        if not isinstance(models, Sequence) or isinstance(models, (str, bytes)) or not isinstance(domains, Sequence) or isinstance(domains, (str, bytes)):
+            raise AutonomousModelInventoryError("inventory readiness models/domains are malformed")
+        result = cls(
+            models=tuple(models),
+            domains=tuple(AutonomousModelInventoryReadinessDomain.from_mapping(item) for item in domains),
+            catalogue_digest=value.get("catalogue_digest"),
+            domain_coverage_digest=value.get("domain_coverage_digest"),
+            readiness=value.get("readiness"),
+            estimated_input_tokens=value.get("estimated_input_tokens"),
+            requested_output_tokens=value.get("requested_output_tokens"),
+            readiness_digest=value.get("readiness_digest"),
+        )
+        if result.readiness_digest != result.digest:
+            raise AutonomousModelInventoryError("inventory readiness digest is invalid")
         return result
 
 
@@ -727,6 +1072,74 @@ class AutonomousModelInventoryCoordinator:
             snapshot_store.save(snapshot, catalogue=self.catalogue)
         return snapshot
 
+    def readiness(
+        self,
+        *,
+        domain_requirements: Mapping[str, Sequence[str]],
+        estimated_input_tokens: int = 4_096,
+        requested_output_tokens: int = 1_024,
+    ) -> AutonomousModelInventoryReadiness:
+        """Project live model eligibility without discovery, invocation, or catalogue mutation.
+
+        Compatibility is deliberately stricter than the legacy inventory coverage rows: a model
+        must be enabled, declare every reviewed capability, and have enough context/output
+        capacity. Eligibility then adds the independent runtime gates for provider registration,
+        user credential readiness, and an open provider circuit. The result is an operator-facing
+        projection, not evidence that a model will answer correctly or that an external effect is
+        authorized.
+        """
+
+        normalized_requirements = self._normalize_requirements(domain_requirements)
+        if not normalized_requirements:
+            raise AutonomousModelInventoryError(
+                "inventory readiness requires at least one domain requirement"
+            )
+        estimated_input_tokens = _bounded_count(
+            "inventory readiness estimated_input_tokens",
+            estimated_input_tokens,
+            MAX_AUTONOMOUS_MODEL_INVENTORY_TOKENS,
+        )
+        requested_output_tokens = _bounded_count(
+            "inventory readiness requested_output_tokens",
+            requested_output_tokens,
+            MAX_AUTONOMOUS_MODEL_INVENTORY_TOKENS,
+        )
+        if estimated_input_tokens < 1 or requested_output_tokens < 1:
+            raise AutonomousModelInventoryError(
+                "inventory readiness token budgets must be positive"
+            )
+        models = tuple(self.catalogue.candidates())
+        provider_state = self._provider_readiness(models)
+        domains = tuple(
+            self._readiness_domain(
+                domain,
+                required,
+                models,
+                provider_state,
+                estimated_input_tokens=estimated_input_tokens,
+                requested_output_tokens=requested_output_tokens,
+            )
+            for domain, required in sorted(normalized_requirements.items())
+        )
+        readiness = (
+            "ready"
+            if all(row.coverage_state == "complete" for row in domains)
+            else "partial"
+            if any(row.coverage_state != "missing" for row in domains)
+            else "missing"
+        )
+        normalized_models = tuple(ModelCandidate.from_mapping(model).to_dict() for model in models)
+        normalized_domains = tuple(row.to_dict() for row in domains)
+        return AutonomousModelInventoryReadiness(
+            models=normalized_models,
+            domains=domains,
+            catalogue_digest=content_digest(normalized_models),
+            domain_coverage_digest=content_digest(normalized_domains),
+            readiness=readiness,
+            estimated_input_tokens=estimated_input_tokens,
+            requested_output_tokens=requested_output_tokens,
+        )
+
     @staticmethod
     def _credentials(credentials: Mapping[str, CredentialHandle] | CredentialSession | None) -> dict[str, CredentialHandle]:
         if credentials is None:
@@ -774,6 +1187,106 @@ class AutonomousModelInventoryCoordinator:
             compatible_count=len(compatible),
         )
 
+    def _provider_readiness(
+        self,
+        models: Sequence[Mapping[str, Any]],
+    ) -> dict[str, dict[str, Any]]:
+        metadata_by_provider = {
+            row["provider"]: row
+            for row in self.runtime.provider_metadata()
+            if isinstance(row, Mapping) and isinstance(row.get("provider"), str)
+        }
+        provider_names = sorted(
+            set(metadata_by_provider).union(
+                model.get("provider")
+                for model in models
+                if isinstance(model, Mapping) and isinstance(model.get("provider"), str)
+            )
+        )
+        result: dict[str, dict[str, Any]] = {}
+        for provider in provider_names:
+            metadata = metadata_by_provider.get(provider)
+            registered = metadata is not None
+            requires_credential = (
+                metadata.get("requires_credential")
+                if isinstance(metadata, Mapping)
+                and isinstance(metadata.get("requires_credential"), bool)
+                else True
+            )
+            try:
+                credential_ready = not requires_credential or bool(
+                    self.runtime.credentials.status(provider).configured
+                )
+            except Exception:
+                credential_ready = False
+            circuit = "unconfigured"
+            if registered:
+                try:
+                    status = self.runtime.provider_status(provider)
+                    circuit = status.get("circuit", "unknown") if isinstance(status, Mapping) else "unknown"
+                    if not isinstance(circuit, str) or not circuit.strip():
+                        circuit = "unknown"
+                except Exception:
+                    circuit = "unknown"
+            result[provider] = {
+                "registered": registered,
+                "credential_ready": credential_ready,
+                "circuit": circuit,
+            }
+        return result
+
+    @staticmethod
+    def _readiness_domain(
+        domain: str,
+        required: tuple[str, ...],
+        models: Sequence[Mapping[str, Any]],
+        provider_state: Mapping[str, Mapping[str, Any]],
+        *,
+        estimated_input_tokens: int,
+        requested_output_tokens: int,
+    ) -> AutonomousModelInventoryReadinessDomain:
+        compatible: list[str] = []
+        eligible: list[str] = []
+        readiness_providers: dict[str, Mapping[str, Any]] = {}
+        for raw_model in models:
+            candidate = ModelCandidate.from_mapping(raw_model)
+            if (
+                not candidate.enabled
+                or candidate.context_window_tokens < estimated_input_tokens + requested_output_tokens
+                or candidate.max_output_tokens < requested_output_tokens
+                or not set(required).issubset(candidate.capabilities)
+            ):
+                continue
+            arm_id = candidate.arm_id
+            compatible.append(arm_id)
+            state = provider_state.get(candidate.provider, {
+                "registered": False,
+                "credential_ready": False,
+                "circuit": "unconfigured",
+            })
+            readiness_providers[candidate.provider] = dict(state)
+            if (
+                state.get("registered") is True
+                and state.get("credential_ready") is True
+                and state.get("circuit") != "open"
+            ):
+                eligible.append(arm_id)
+        compatible.sort()
+        eligible.sort()
+        return AutonomousModelInventoryReadinessDomain(
+            domain=domain,
+            required_model_capabilities=required,
+            compatible_model_ids=tuple(compatible),
+            eligible_model_ids=tuple(eligible),
+            compatible_model_count=len(compatible),
+            eligible_model_count=len(eligible),
+            coverage_state="complete" if eligible else "partial" if compatible else "missing",
+            provider_readiness={
+                provider: readiness_providers[provider]
+                for provider in sorted(readiness_providers)
+            },
+        )
+
     def _runtime_status(self, provider: str) -> Mapping[str, Any] | None:
         try:
             raw = self.runtime.provider_status(provider)
@@ -808,10 +1321,122 @@ class AutonomousModelInventoryCoordinator:
         )
 
 
+class AutonomousModelInventoryPersistenceCoordinator:
+    """Serialize inventory refresh/restore operations with a retained CAS fence.
+
+    The discovery coordinator owns live runtime/catalogue mutation; this companion owns the
+    caller-provided metadata store. A successful restore establishes the expected snapshot digest
+    for the next refresh. If a refresh loses a compare-and-swap race, the in-memory catalogue is
+    rolled back to its pre-refresh image so a failed durable write cannot leave routing metadata
+    claiming a state that was not committed.
+    """
+
+    def __init__(
+        self,
+        inventory: AutonomousModelInventoryCoordinator,
+        store: AutonomousModelInventoryStore,
+    ) -> None:
+        if not isinstance(inventory, AutonomousModelInventoryCoordinator):
+            raise AutonomousModelInventoryError("inventory persistence coordinator requires an inventory coordinator")
+        if not isinstance(store, AutonomousModelInventoryStore):
+            raise AutonomousModelInventoryError("inventory persistence coordinator requires an inventory store")
+        self.inventory = inventory
+        self.store = store
+        self._expected_snapshot_digest: str | None = None
+        self._last_snapshot: AutonomousModelInventorySnapshot | None = None
+        self._lock = threading.RLock()
+
+    def refresh(
+        self,
+        *,
+        credentials: Mapping[str, CredentialHandle] | CredentialSession | None = None,
+        providers: Sequence[str] | None = None,
+        priors: Mapping[str, Mapping[str, Any]] | None = None,
+        prior_factory: Callable[[ProviderModelDescriptor], Mapping[str, Any]] | None = None,
+        domain_requirements: Mapping[str, Sequence[str]] = {},
+        limit: int = MAX_AUTONOMOUS_MODEL_INVENTORY_MODELS_PER_PROVIDER,
+        refresh_id: str | None = None,
+        raise_on_error: bool = False,
+    ) -> AutonomousModelInventorySnapshot:
+        with self._lock:
+            before = self.inventory.catalogue.to_dict()
+            try:
+                snapshot = self.inventory.refresh(
+                    credentials=credentials,
+                    providers=providers,
+                    priors=priors,
+                    prior_factory=prior_factory,
+                    domain_requirements=domain_requirements,
+                    limit=limit,
+                    refresh_id=refresh_id,
+                    raise_on_error=raise_on_error,
+                )
+                committed = self.store.save_if_unchanged(
+                    snapshot,
+                    self._expected_snapshot_digest,
+                    catalogue=self.inventory.catalogue,
+                )
+            except Exception:
+                self.inventory.catalogue.restore(before)
+                raise
+            if not committed:
+                self.inventory.catalogue.restore(before)
+                raise AutonomousModelInventoryError("inventory persistence compare-and-swap conflict")
+            self._expected_snapshot_digest = snapshot.digest
+            self._last_snapshot = snapshot
+            return snapshot
+
+    def restore(self) -> AutonomousModelInventorySnapshot | None:
+        """Restore the validated catalogue image and establish its next-write CAS expectation."""
+
+        with self._lock:
+            snapshot = self.store.load()
+            if snapshot is None:
+                self._expected_snapshot_digest = None
+                self._last_snapshot = None
+                return None
+            catalogue = self.store.load_catalogue()
+            if catalogue is None:
+                raise AutonomousModelInventoryError(
+                    "inventory persistence snapshot does not contain a bound model catalogue"
+                )
+            self.inventory.catalogue.restore(catalogue)
+            self._expected_snapshot_digest = snapshot.digest
+            self._last_snapshot = snapshot
+            return snapshot
+
+    def flush(self) -> AutonomousModelInventorySnapshot | None:
+        """Rewrite the last validated inventory image without rediscovering providers.
+
+        Inventory discovery is an explicit provider operation and therefore remains separate from
+        lifecycle shutdown.  This method only re-commits the last snapshot after proving that the
+        live catalogue still has the digest that snapshot advertised; an out-of-band catalogue
+        mutation fails closed instead of persisting a misleading inventory image.
+        """
+
+        with self._lock:
+            snapshot = self._last_snapshot
+            if snapshot is None:
+                return None
+            if content_digest(self.inventory.catalogue.to_dict()) != snapshot.catalogue_digest:
+                raise AutonomousModelInventoryError(
+                    "inventory catalogue changed outside the persistence coordinator"
+                )
+            if not self.store.save_if_unchanged(
+                snapshot,
+                self._expected_snapshot_digest,
+                catalogue=self.inventory.catalogue,
+            ):
+                raise AutonomousModelInventoryError("inventory persistence compare-and-swap conflict")
+            self._expected_snapshot_digest = snapshot.digest
+            return snapshot
+
+
 __all__ = [
     "AUTONOMOUS_MODEL_INVENTORY_SCHEMA",
     "AUTONOMOUS_MODEL_INVENTORY_PROVIDER_SCHEMA",
     "AUTONOMOUS_MODEL_INVENTORY_COVERAGE_SCHEMA",
+    "AUTONOMOUS_MODEL_INVENTORY_READINESS_SCHEMA",
     "AUTONOMOUS_MODEL_INVENTORY_STORE_SCHEMA",
     "AUTONOMOUS_MODEL_INVENTORY_STATUSES",
     "AUTONOMOUS_MODEL_INVENTORY_PROVIDER_STATUSES",
@@ -821,10 +1446,14 @@ __all__ = [
     "MAX_AUTONOMOUS_MODEL_INVENTORY_CAPABILITIES",
     "MAX_AUTONOMOUS_MODEL_INVENTORY_IDS",
     "MAX_AUTONOMOUS_MODEL_INVENTORY_SNAPSHOT_BYTES",
+    "MAX_AUTONOMOUS_MODEL_INVENTORY_TOKENS",
     "AutonomousModelInventoryError",
     "AutonomousModelInventoryProviderResult",
     "AutonomousModelInventoryCoverage",
+    "AutonomousModelInventoryReadinessDomain",
+    "AutonomousModelInventoryReadiness",
     "AutonomousModelInventorySnapshot",
     "AutonomousModelInventoryStore",
     "AutonomousModelInventoryCoordinator",
+    "AutonomousModelInventoryPersistenceCoordinator",
 ]

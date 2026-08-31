@@ -321,6 +321,41 @@ fn abstention_is_graded_as_abstention_not_as_a_wrong_answer() {
     );
 }
 
+/// The threshold builder is the only writer of the bar `grade_abstention` reads.
+///
+/// One abstention against one reference, graded twice. Nothing about the prediction or the
+/// reference changes between the two grades, so a flipped `warranted` can only have come from the
+/// grader's own threshold — which is the property that would be lost if the builder were removed
+/// and every grader shared the one-bit default.
+#[test]
+fn the_same_abstention_is_warranted_or_not_according_to_the_graders_threshold() {
+    let abstention = Prediction::Abstained {
+        reason: "conflicting perfusion and diffusion signal".to_string(),
+    };
+    let reference = progression_reference(Dispersion::Aleatoric);
+
+    let grade_at_default = grader()
+        .grade(&witness(), "case-1", &abstention, &reference)
+        .expect("abstention is gradeable");
+    let grade_at_two_bits = grader()
+        .with_abstention_threshold(2.0)
+        .grade(&witness(), "case-1", &abstention, &reference)
+        .expect("abstention is gradeable");
+
+    assert!(
+        grade_at_default
+            .abstention()
+            .expect("an abstention record exists")
+            .warranted
+    );
+    assert!(
+        !grade_at_two_bits
+            .abstention()
+            .expect("an abstention record exists")
+            .warranted
+    );
+}
+
 #[test]
 fn abstention_against_a_reference_that_decided_is_recorded_as_unwarranted() {
     let grade = grader()

@@ -1,0 +1,28 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "AURORA Agent (bioprism)"
+type: software
+authors:
+  - name: "AURORA-NEURO"
+repository-code: "https://github.com/AURORA-NEURO/aurora-agent"
+url: "https://aurora-neuro.github.io/aurora-agent/"
+license: Apache-2.0
+version: 0.1.1
+date-released: 2026-08-23
+abstract: >-
+  AURORA Agent is a Rust workspace (79 crates) implementing the FIBER
+  decision-context compiler: a typed decision query is compiled into the
+  smallest decision-sufficient evidence region, delivered as a Decision
+  Section together with a Context Certificate stating exactly what was
+  omitted and whether the omission could have changed the decision. On the
+  shipped reference world of 761 facts, FIBER compiles the query to 11 facts
+  (1.45%) and the deterministic oracle returns the correct verdict with all
+  four leakage witnesses; on the same world a 5-hop graph walk and BM25
+  select the identical eleven facts, and FIBER is distinguished only on a
+  generated discriminating world. Certificate bytes are reproduced exactly
+  by three implementations (a CPython reference, an eager Rust path, and an
+  indexed store). The compiler is exposed as a command-line interface, a
+  Model Context Protocol stdio server with 259 tools, and a local HTTP
+  gateway. Research and developer infrastructure: it does not diagnose an
+  individual, recommend treatment, triage care, enroll participants, or
+  claim medical-device functionality.

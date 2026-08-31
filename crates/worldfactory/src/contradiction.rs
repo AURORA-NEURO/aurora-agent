@@ -1207,10 +1207,6 @@ impl ValidatedProgram {
         &self.program
     }
 
-    pub fn into_program(self) -> ContradictionProgram {
-        self.program
-    }
-
     /// The accounts that survived the admissibility check, with the reason each is possible left
     /// implicit in its own variant's documented condition.
     pub fn admissible(&self) -> &BTreeMap<HypothesisId, Discordance> {

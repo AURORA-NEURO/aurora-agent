@@ -2,8 +2,29 @@ import { ArgumentError, AutonomousCostBudgetError, CredentialError, ProviderRunt
 import type { ProviderErrorCode, ProviderFailureClass } from "./errors.js";
 import { AUTONOMOUS_EXECUTION_MAX_PROVIDER_FAILOVERS } from "./autonomous-execution.js";
 import type { AutonomousExecutionController } from "./autonomous-execution.js";
+import { AutonomousEffectReconciliationRequiredError } from "./autonomous-effects.js";
+import type { AutonomousEffectBoundary } from "./autonomous-effects.js";
 import { canonicalJson, digestJson } from "./tooling.js";
 import type { JsonObject, JsonValue } from "./types.js";
+import { ProviderQuotaController, type ProviderQuotaReservation } from "./provider-quota.js";
+import {
+  advanceAutonomousModelContinuationState,
+  compileAutonomousModelContinuationPlan,
+  completeAutonomousModelContinuationState,
+  continuationSelectionDecision,
+  createAutonomousModelContinuationState,
+} from "./autonomous-continuation.js";
+import type {
+  AutonomousContinuationFailureScope,
+  AutonomousModelContinuationPlan,
+  AutonomousModelContinuationState,
+} from "./autonomous-continuation.js";
+import {
+  compactAutonomousProviderRequest,
+  type AutonomousContextBudgetOptions,
+  type AutonomousContextBudgetPlan,
+} from "./autonomous-context-budget.js";
+import type { AutonomousAuthorizationContext } from "./autonomous-authorization.js";
 
 /** Public schema for the cross-language, application-owned provider runtime. */
 export const LLM_RUNTIME_SCHEMA = "bioprism-typescript-llm-runtime/0.1" as const;
@@ -534,6 +555,172 @@ export interface ProviderInvocationObserver {
   after?(metadata: ProviderInvocationMetadata, outcome: ProviderInvocationOutcome): void | Promise<void>;
 }
 
+/**
+ * Stable, value-only evidence for one provider invocation made by the autonomous runtime.
+ *
+ * This intentionally mirrors the Python SDK receipt contract while keeping the schema
+ * language-qualified. It records transport facts useful for replay, cost accounting, health
+ * learning, and evaluator settlement; prompts, provider payloads, credentials, and response
+ * text never cross this boundary.
+ */
+export const AUTONOMOUS_PROVIDER_INVOCATION_SCHEMA = "bioprism-typescript-autonomous-provider-invocation/0.1" as const;
+export const AUTONOMOUS_PROVIDER_FAILOVER_SCHEMA = "bioprism-typescript-autonomous-provider-failover/0.1" as const;
+
+export interface AutonomousProviderInvocationReceipt extends JsonObject {
+  schema: typeof AUTONOMOUS_PROVIDER_INVOCATION_SCHEMA;
+  execution_id: string | null;
+  provider: string;
+  model: string;
+  kind: string;
+  /** Zero-based autonomous selection attempt; a retry/failover increments this value. */
+  attempt: number;
+  /** Zero-based provider turn; tool loops can produce several turns per selection attempt. */
+  turn: number;
+  status: ProviderInvocationOutcome["status"];
+  outcome: "success" | "failure";
+  input_tokens: number;
+  output_tokens: number;
+  estimated_cost_units: number;
+  actual_cost_units: number;
+  latency_ms: number;
+  selection_digest: string;
+  outcome_digest: string;
+  request_id_digest: string | null;
+  failure_class: ProviderFailureClass | null;
+  status_code: number | null;
+  retention: "metadata_only_no_provider_payloads_or_credentials";
+  secret_material: "never_returned";
+}
+
+export interface AutonomousProviderFailoverAttempt extends JsonObject {
+  attempt: number;
+  provider: string;
+  model: string;
+  status: ProviderInvocationOutcome["status"];
+  outcome: "success" | "failure";
+  reason: ProviderFailureClass | null;
+  status_code: number | null;
+  selection_digest: string;
+  outcome_digest: string;
+}
+
+export interface AutonomousProviderFailoverProjection extends JsonObject {
+  schema: typeof AUTONOMOUS_PROVIDER_FAILOVER_SCHEMA;
+  strategy: "deterministic_model_selector_with_provider_health_gating";
+  attempts: AutonomousProviderFailoverAttempt[];
+  fallback_count: number;
+  failover_digest: string;
+  /** Digest of the immutable fallback ladder used by this invocation. */
+  continuation_plan_digest?: string;
+  /** Bounded ladder metadata; never includes task, prompt, credentials, or response values. */
+  continuation_plan?: AutonomousModelContinuationPlan;
+  retention: "metadata_only";
+  secret_material: "never_returned";
+}
+
+interface AutonomousProviderInvocationSample {
+  executionId: string | null;
+  metadata: ProviderInvocationMetadata;
+  outcome: ProviderInvocationOutcome;
+  attempt: number;
+  turn: number;
+  selectionDigest: string;
+  estimatedCostUnits: number;
+  costPerMillionTokens: number;
+}
+
+function boundedReceiptInteger(value: number): number {
+  return Number.isSafeInteger(value) && value >= 0 ? value : 0;
+}
+
+function boundedReceiptMetric(value: number): number {
+  return Number.isFinite(value) && value >= 0 ? value : 0;
+}
+
+async function autonomousProviderInvocationProjection(
+  samples: readonly AutonomousProviderInvocationSample[],
+  continuationPlan?: AutonomousModelContinuationPlan,
+): Promise<{ providerInvocations: AutonomousProviderInvocationReceipt[]; providerFailover: AutonomousProviderFailoverProjection | null }> {
+  const providerInvocations: AutonomousProviderInvocationReceipt[] = [];
+  for (const sample of samples) {
+    const inputTokens = boundedReceiptInteger(sample.outcome.inputTokens);
+    const outputTokens = boundedReceiptInteger(sample.outcome.outputTokens);
+    const latencyMs = boundedReceiptMetric(sample.outcome.latencyMs);
+    const estimatedCostUnits = boundedReceiptMetric(sample.estimatedCostUnits);
+    const costPerMillionTokens = boundedReceiptMetric(sample.costPerMillionTokens);
+    const actualCostUnits = boundedReceiptMetric(((inputTokens + outputTokens) / 1_000_000) * costPerMillionTokens);
+    const outcomeDigest = await digestJson({
+      provider: sample.metadata.provider,
+      model: sample.metadata.model,
+      kind: sample.metadata.kind,
+      status: sample.outcome.status,
+      success: sample.outcome.success,
+      latency_ms: latencyMs,
+      input_tokens: inputTokens,
+      output_tokens: outputTokens,
+      status_code: sample.outcome.statusCode ?? null,
+      failure_class: sample.outcome.failureClass ?? null,
+      failure_code: sample.outcome.failureCode ?? null,
+      retryable: sample.outcome.retryable ?? false,
+      request_id_present: typeof sample.outcome.requestId === "string" && sample.outcome.requestId.length > 0,
+    });
+    providerInvocations.push({
+      schema: AUTONOMOUS_PROVIDER_INVOCATION_SCHEMA,
+      execution_id: sample.executionId,
+      provider: sample.metadata.provider,
+      model: sample.metadata.model,
+      kind: sample.metadata.kind,
+      attempt: boundedReceiptInteger(sample.attempt),
+      turn: boundedReceiptInteger(sample.turn),
+      status: sample.outcome.status,
+      outcome: sample.outcome.success ? "success" : "failure",
+      input_tokens: inputTokens,
+      output_tokens: outputTokens,
+      estimated_cost_units: estimatedCostUnits,
+      actual_cost_units: actualCostUnits,
+      latency_ms: latencyMs,
+      selection_digest: sample.selectionDigest,
+      outcome_digest: outcomeDigest,
+      request_id_digest: typeof sample.outcome.requestId === "string" && sample.outcome.requestId.length > 0 ? await digestJson(sample.outcome.requestId) : null,
+      failure_class: sample.outcome.failureClass ?? null,
+      status_code: sample.outcome.statusCode ?? null,
+      retention: "metadata_only_no_provider_payloads_or_credentials",
+      secret_material: "never_returned",
+    });
+  }
+  const fallbackCount = providerInvocations.length === 0 ? 0 : Math.max(...providerInvocations.map((receipt) => receipt.attempt));
+  if (fallbackCount === 0) return { providerInvocations, providerFailover: null };
+  const attempts = providerInvocations.map((receipt): AutonomousProviderFailoverAttempt => ({
+    attempt: receipt.attempt,
+    provider: receipt.provider,
+    model: receipt.model,
+    status: receipt.status,
+    outcome: receipt.outcome,
+    reason: receipt.failure_class,
+    status_code: receipt.status_code,
+    selection_digest: receipt.selection_digest,
+    outcome_digest: receipt.outcome_digest,
+  }));
+  return {
+    providerInvocations,
+    providerFailover: {
+      schema: AUTONOMOUS_PROVIDER_FAILOVER_SCHEMA,
+      strategy: "deterministic_model_selector_with_provider_health_gating",
+      attempts,
+      fallback_count: fallbackCount,
+      failover_digest: await digestJson({
+        strategy: "deterministic_model_selector_with_provider_health_gating",
+        attempts,
+        fallback_count: fallbackCount,
+        continuation_plan_digest: continuationPlan?.plan_digest ?? null,
+      }),
+      ...(continuationPlan ? { continuation_plan_digest: continuationPlan.plan_digest, continuation_plan: continuationPlan } : {}),
+      retention: "metadata_only",
+      secret_material: "never_returned",
+    },
+  };
+}
+
 /** A synchronous reservation released only when a provider call fails before dispatch. */
 export type AutonomousCostReservation = () => void;
 
@@ -553,6 +740,10 @@ export interface ProviderInvocationOptions {
   credential?: CredentialHandle;
   signal?: AbortSignal;
   observer?: ProviderInvocationObserver;
+  /** Optional metadata-only crash-safe boundary for the actual provider dispatch. */
+  effectBoundary?: AutonomousEffectBoundary;
+  /** Observe the exact metadata-only effect identity used for a live provider dispatch. */
+  effectIdObserver?: (effectId: string) => void;
   invocationKind?: string;
   execution?: AutonomousExecutionController;
   executionAttempt?: number;
@@ -561,6 +752,18 @@ export interface ProviderInvocationOptions {
   selectionDigest?: string | null;
   estimatedCostUnits?: number;
   reserveCost?: AutonomousCostReservationCallback;
+  /** Optional process-local provider/model quota; the runtime quota is used by default. */
+  providerQuota?: ProviderQuotaController;
+  /** Optional explicit history compaction applied before each tool-loop turn. */
+  contextBudget?: AutonomousContextBudgetOptions;
+  /** Optional caller-issued grant enforced immediately before provider dispatch. */
+  authorizationContext?: AutonomousAuthorizationContext;
+  /** Exact domain bound into the authorization request; required for multi-domain contexts. */
+  authorizationDomain?: string;
+  /** Metadata-only attempt identity used by the authorization resource digest. */
+  authorizationAttempt?: number;
+  /** Metadata-only provider turn identity used by the authorization resource digest. */
+  authorizationTurn?: number;
 }
 
 /**
@@ -683,6 +886,87 @@ export interface AutonomousModelCandidateDefaults extends JsonObject {
   capabilities?: string[];
 }
 
+/**
+ * Explicit multi-objective policy for model selection.
+ *
+ * The values are non-negative utility weights, not probabilities.  They intentionally mirror
+ * the Rust brain kernel's `SelectionWeights` contract so a selection preview, an autonomous
+ * provider call, and an offline replay can make the same decision from the same metadata.  A
+ * policy with all weights set to zero is refused because it would make the decision entirely
+ * dependent on tie-breaking.
+ */
+export interface AutonomousSelectionWeights extends JsonObject {
+  quality: number;
+  reliability: number;
+  cost: number;
+  latency: number;
+  exploration: number;
+}
+
+export const AUTONOMOUS_SELECTION_WEIGHTS_SCHEMA = "bioprism-autonomous-selection-weights/0.1" as const;
+
+/** Defaults shared with the executable Rust selection kernel. */
+export const DEFAULT_AUTONOMOUS_SELECTION_WEIGHTS: Readonly<AutonomousSelectionWeights> = Object.freeze({
+  quality: 0.55,
+  reliability: 0.25,
+  cost: 0.10,
+  latency: 0.10,
+  exploration: 0.15,
+});
+
+const AUTONOMOUS_SELECTION_WEIGHT_NAMES = ["quality", "reliability", "cost", "latency", "exploration"] as const;
+
+/** Validate and fill a partial policy without mutating caller-owned state. */
+export function normalizeAutonomousSelectionWeights(value: unknown = undefined): AutonomousSelectionWeights {
+  if (value === undefined || value === null) return { ...DEFAULT_AUTONOMOUS_SELECTION_WEIGHTS };
+  if (!isObject(value)) throw new ProviderRuntimeError("autonomous selection weights must be an object");
+  const unsupported = Object.keys(value).filter((key) => !(AUTONOMOUS_SELECTION_WEIGHT_NAMES as readonly string[]).includes(key));
+  if (unsupported.length) throw new ProviderRuntimeError(`autonomous selection weights contain unsupported fields: ${unsupported.sort().join(", ")}`);
+  const normalized = { ...DEFAULT_AUTONOMOUS_SELECTION_WEIGHTS } as AutonomousSelectionWeights;
+  for (const name of AUTONOMOUS_SELECTION_WEIGHT_NAMES) {
+    const supplied = value[name];
+    if (supplied === undefined) continue;
+    if (typeof supplied !== "number" || !Number.isFinite(supplied) || supplied < 0 || supplied > 100) {
+      throw new ProviderRuntimeError(`autonomous selection weight ${name} is outside [0, 100]`);
+    }
+    normalized[name] = Number(supplied.toFixed(12));
+  }
+  if (AUTONOMOUS_SELECTION_WEIGHT_NAMES.every((name) => normalized[name] === 0)) {
+    throw new ProviderRuntimeError("autonomous selection weights must contain at least one positive value");
+  }
+  return normalized;
+}
+
+/** One caller-owned value-only global observation for an online selection arm. */
+export interface AutonomousModelObservation extends JsonObject {
+  arm_id: string;
+  pulls: number;
+  reward_sum: number;
+  failures: number;
+  disabled?: boolean;
+}
+
+/** Validate and canonicalize observations before they influence ranking. */
+export function normalizeAutonomousModelObservations(value: unknown = undefined): AutonomousModelObservation[] {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value) || value.length > MAX_PROVIDER_MODELS) throw new ProviderRuntimeError("autonomous model observations are outside their bounds");
+  const seen = new Set<string>();
+  return value.map((raw, index) => {
+    if (!isObject(raw)) throw new ProviderRuntimeError(`autonomous model observation ${index} must be an object`);
+    const armId = boundedText(`autonomous model observation ${index} arm_id`, raw.arm_id, 768);
+    if (seen.has(armId)) throw new ProviderRuntimeError(`autonomous model observations contain duplicate arm ${armId}`);
+    seen.add(armId);
+    const pulls = raw.pulls;
+    const rewardSum = raw.reward_sum;
+    const failures = raw.failures;
+    if (!Number.isSafeInteger(pulls) || (pulls as number) < 0 || (pulls as number) > 1_000_000_000) throw new ProviderRuntimeError(`autonomous model observation ${armId} pulls are outside their bounds`);
+    if (typeof rewardSum !== "number" || !Number.isFinite(rewardSum) || rewardSum < -1e12 || rewardSum > 1e12) throw new ProviderRuntimeError(`autonomous model observation ${armId} reward_sum is outside its bounds`);
+    if (!Number.isSafeInteger(failures) || (failures as number) < 0 || (failures as number) > (pulls as number)) throw new ProviderRuntimeError(`autonomous model observation ${armId} failures are outside their bounds`);
+    if (raw.disabled !== undefined && typeof raw.disabled !== "boolean") throw new ProviderRuntimeError(`autonomous model observation ${armId} disabled must be boolean`);
+    return { arm_id: armId, pulls: pulls as number, reward_sum: Number(rewardSum.toFixed(12)), failures: failures as number, ...(raw.disabled === undefined ? {} : { disabled: raw.disabled as boolean }) };
+  });
+}
+
 export interface AutonomousSelectionRequest extends JsonObject {
   task: string;
   domain: string;
@@ -704,6 +988,10 @@ export interface AutonomousSelectionRequest extends JsonObject {
   min_selection_confidence?: number | null;
   /** Whether the provider response must be valid JSON at the transport boundary. */
   require_json?: boolean;
+  /** Explicit multi-objective utility policy; defaults to the Rust kernel's policy. */
+  weights?: AutonomousSelectionWeights;
+  /** Optional global online-learning observations used by the deterministic ranker. */
+  observations?: AutonomousModelObservation[];
   candidates: AutonomousModelCandidate[];
   provider_health: Record<string, ProviderHealth>;
   model_health: Record<string, ProviderHealth>;
@@ -715,6 +1003,12 @@ export interface AutonomousModelRanking extends JsonObject {
   score: number;
   eligible: boolean;
   reasons: string[];
+  /** Utility before exploration; retained for decision audits and replay diagnostics. */
+  base_score?: number;
+  /** Exploration contribution for this model arm. */
+  exploration_bonus?: number;
+  /** Number of caller-supplied observations used for the arm. */
+  observed_pulls?: number;
 }
 
 export interface AutonomousSelectionDecision extends JsonObject {
@@ -760,6 +1054,10 @@ export interface AutonomousExecutionPlan {
   maxLatencyMs?: number;
   minQuality?: number;
   minSelectionConfidence?: number;
+  selectionWeights?: Partial<AutonomousSelectionWeights>;
+  selectionObservations?: readonly AutonomousModelObservation[];
+  /** Optional explicit lossy history budget; omitted requests retain legacy behavior. */
+  contextBudget?: AutonomousContextBudgetOptions;
   candidates: readonly AutonomousModelCandidate[];
   request: ProviderRequest;
 }
@@ -767,6 +1065,69 @@ export interface AutonomousExecutionPlan {
 export interface AutonomousExecutionResult {
   selection: AutonomousSelectionDecision;
   response: ProviderResponse;
+  /** Exact bounded fallback ladder compiled from the first selection. */
+  continuation_plan: AutonomousModelContinuationPlan;
+  /** Metadata-only receipt for every provider turn performed by this autonomous invocation. */
+  provider_invocations: AutonomousProviderInvocationReceipt[];
+  /** Present only when bounded provider/model failover was actually used. */
+  provider_failover: AutonomousProviderFailoverProjection | null;
+  /** Metadata-only record of any deterministic prompt-history compaction. */
+  context_budget?: AutonomousContextBudgetPlan | null;
+}
+
+/** Public schema for the live autonomous provider-neutral stream envelope. */
+export const AUTONOMOUS_STREAM_COMPLETION_SCHEMA = "bioprism-typescript-autonomous-stream-completion/0.1" as const;
+
+/**
+ * Metadata-only completion state for an autonomous stream.
+ *
+ * Stream deltas are deliberately absent. Consumers can render the transient events, while this
+ * value-only receipt can be persisted, replayed, and sent to an evaluator without retaining task
+ * text, provider payloads, credentials, or model output.
+ */
+export interface AutonomousStreamCompletion extends JsonObject {
+  schema: typeof AUTONOMOUS_STREAM_COMPLETION_SCHEMA;
+  status: "completed" | "failed" | "abandoned";
+  event_count: number;
+  text_delta_bytes: number;
+  done_seen: boolean;
+  provider_invocations: AutonomousProviderInvocationReceipt[];
+  provider_failover: AutonomousProviderFailoverProjection | null;
+  error_code: ProviderErrorCode | null;
+  error_class: string | null;
+  /** Effect identities for provider attempts; payloads and credentials are never retained. */
+  effect_ids: string[];
+  retention: "metadata_only_no_stream_payloads_or_credentials";
+  secret_material: "never_returned";
+}
+
+/** Handle returned after autonomous selection, before the transient stream is consumed. */
+export interface AutonomousStreamHandle {
+  selection: AutonomousSelectionDecision;
+  continuation_plan: AutonomousModelContinuationPlan;
+  context_budget: AutonomousContextBudgetPlan | null;
+  events: AsyncIterable<ProviderStreamEvent>;
+  /** Resolves after normal exhaustion, terminal failure, or consumer cancellation. */
+  completion: Promise<AutonomousStreamCompletion>;
+}
+
+export interface AutonomousStreamInvocationOptions {
+  credential?: CredentialHandle;
+  credentialFor?: (provider: string) => CredentialHandle | undefined;
+  signal?: AbortSignal;
+  observer?: ProviderInvocationObserver;
+  feedback?: (decision: AutonomousSelectionDecision, outcome: ProviderInvocationOutcome) => void | Promise<void>;
+  selectionEventCallback?: AutonomousModelSelectionTraceEventCallback;
+  execution?: AutonomousExecutionController;
+  executionAttempt?: number;
+  maxProviderFailovers?: number;
+  reserveCost?: AutonomousCostReservationCallback;
+  effectBoundary?: AutonomousEffectBoundary;
+  effectIdObserver?: (effectId: string) => void;
+  authorizationContext?: AutonomousAuthorizationContext;
+  authorizationDomain?: string;
+  authorizationAttempt?: number;
+  authorizationTurn?: number;
 }
 
 export type AutonomousModelSelector = (request: AutonomousSelectionRequest) => AutonomousSelectionDecision | Promise<AutonomousSelectionDecision>;
@@ -774,6 +1135,10 @@ export type AutonomousModelSelector = (request: AutonomousSelectionRequest) => A
 export interface ProviderHealth extends JsonObject {
   provider: string;
   circuit: "closed" | "open";
+  /** Optional registration projection used by cross-runtime selection adapters. */
+  registered?: boolean;
+  /** Optional aggregate eligibility projection; false can only narrow a live decision. */
+  eligible?: boolean;
   consecutive_failures: number;
   attempts: number;
   successes: number;
@@ -1170,6 +1535,34 @@ function requestMetadata(provider: string, request: ProviderRequest, kind: strin
     requestedOutputTokens: request.maxOutputTokens,
     toolCount: request.tools?.length ?? 0,
   };
+}
+
+async function providerEffectProjection(response: ProviderResponse): Promise<JsonObject> {
+  if (!response || typeof response !== "object") throw new ProviderRuntimeError("provider effect returned a malformed response");
+  const usage = response.usage ?? {};
+  return {
+    provider: response.provider,
+    model: response.model,
+    status_code: response.statusCode,
+    input_tokens: usage.input_tokens ?? 0,
+    output_tokens: usage.output_tokens ?? 0,
+    tool_call_count: response.toolCalls.length,
+    structured_output_present: response.structured !== null,
+    request_id_digest: response.requestId ? await digestJson(response.requestId) : null,
+  };
+}
+
+function providerEffectFailureIsDefinite(error: unknown): boolean {
+  if (!(error instanceof ProviderRuntimeError)) return false;
+  if (error.circuitOpen) return true;
+  const status = error.statusCode;
+  return typeof status === "number" && status >= 400 && status < 500 && ![408, 409, 425, 429].includes(status);
+}
+
+function generatedProviderIdempotencyKey(prefix: string): string {
+  const cryptoObject = globalThis.crypto as { randomUUID?: () => string } | undefined;
+  const uuid = typeof cryptoObject?.randomUUID === "function" ? cryptoObject.randomUUID() : `${Date.now().toString(16)}-${Math.random().toString(16).slice(2)}`;
+  return `${prefix}-${uuid}`;
 }
 
 function normalizedContentPart(value: unknown): ProviderContentPart {
@@ -2045,6 +2438,7 @@ function parseSseFrame(frame: string): { event: string; data: string } | null {
 export class LLMRuntime {
   readonly credentials: CredentialStore;
   readonly onboarding: ProviderOnboarding;
+  readonly providerQuota?: ProviderQuotaController;
   private readonly providers = new Map<string, NormalizedProviderConfig>();
   private readonly circuits = new Map<string, CircuitState>();
   private readonly providerHealthState = new Map<string, HealthState>();
@@ -2055,14 +2449,43 @@ export class LLMRuntime {
   private cachedHealthSignature: string | null = null;
   private readonly fetchImplementation: FetchImplementation;
   private readonly clock: () => number;
+  private effectBoundaryValue?: AutonomousEffectBoundary;
 
-  constructor(options: { credentials?: CredentialStore; fetch?: FetchImplementation; clock?: () => number } = {}) {
+  constructor(options: { credentials?: CredentialStore; fetch?: FetchImplementation; clock?: () => number; effectBoundary?: AutonomousEffectBoundary; providerQuota?: ProviderQuotaController } = {}) {
     this.credentials = options.credentials ?? new CredentialStore();
     const implementation = options.fetch ?? globalThis.fetch;
     if (typeof implementation !== "function") throw new ProviderRuntimeError("a fetch implementation is required");
     this.fetchImplementation = implementation;
     this.clock = options.clock ?? (() => Date.now());
+    if (options.providerQuota !== undefined && !(options.providerQuota instanceof ProviderQuotaController)) throw new ProviderRuntimeError("providerQuota must be a ProviderQuotaController");
+    this.providerQuota = options.providerQuota;
+    this.effectBoundaryValue = options.effectBoundary;
+    if (this.effectBoundaryValue !== undefined && (typeof this.effectBoundaryValue.execute !== "function" || typeof this.effectBoundaryValue.executeStream !== "function")) throw new ProviderRuntimeError("effectBoundary must expose execute and executeStream methods");
     this.onboarding = new ProviderOnboarding(this);
+  }
+
+  get effectBoundary(): AutonomousEffectBoundary | undefined {
+    return this.effectBoundaryValue;
+  }
+
+  bindEffectBoundary(effectBoundary: AutonomousEffectBoundary | undefined): void {
+    if (effectBoundary !== undefined && (!effectBoundary || typeof effectBoundary.execute !== "function" || typeof effectBoundary.executeStream !== "function")) throw new ProviderRuntimeError("effectBoundary must expose execute and executeStream methods");
+    if (this.effectBoundaryValue !== undefined && this.effectBoundaryValue !== effectBoundary) throw new ProviderRuntimeError("a different effectBoundary is already bound to this runtime");
+    this.effectBoundaryValue = effectBoundary;
+  }
+
+  private authorizeProvider(options: ProviderInvocationOptions, provider: string, request: ProviderRequest, invocationKind: string): void {
+    const context = options.authorizationContext;
+    if (context === undefined) return;
+    if (!context || typeof context.authorizeProvider !== "function") throw new ProviderRuntimeError("authorizationContext must expose authorizeProvider");
+    context.authorizeProvider({
+      provider,
+      model: request.model,
+      invocationKind,
+      domain: options.authorizationDomain,
+      attempt: options.authorizationAttempt ?? 0,
+      turn: options.authorizationTurn ?? 0,
+    });
   }
 
   registerProvider(config: ProviderConfig): void {
@@ -2295,11 +2718,15 @@ export class LLMRuntime {
     validateRequest(request);
     validateStructuredOutputSupport(config, request);
     const metadata = requestMetadata(provider, request, options.invocationKind ?? "provider_call");
+    this.authorizeProvider(options, provider, request, metadata.kind);
+    const quota = options.providerQuota ?? this.providerQuota;
+    const quotaReservation = quota?.reserve({ provider, model: request.model, inputTokens: metadata.inputTokens, outputTokens: request.maxOutputTokens, costUnits: options.estimatedCostUnits ?? 0 });
     const releaseCost = options.reserveCost?.(options.estimatedCostUnits ?? 0);
     try {
       await options.execution?.admitProviderCall({ provider, model: request.model, invocationKind: metadata.kind, attempt: options.executionAttempt, turn: options.executionTurn, selectionDigest: options.selectionDigest, estimatedCostUnits: options.estimatedCostUnits, costUnits: options.estimatedCostUnits, failover: options.executionFailover });
       await options.observer?.before?.(metadata);
     } catch (error) {
+      quotaReservation?.release();
       releaseCost?.();
       throw error;
     }
@@ -2312,12 +2739,62 @@ export class LLMRuntime {
       await recordExecutionProviderOutcome(options.execution, metadata, outcome, { attempt: options.executionAttempt, turn: options.executionTurn, selectionDigest: options.selectionDigest, estimatedCostUnits: options.estimatedCostUnits });
     };
     try {
-      const response = await this.request(config, request, options.credential, options.signal, false);
+      const selectedBoundary = options.effectBoundary ?? this.effectBoundaryValue;
+      let response: ProviderResponse;
+      if (!selectedBoundary) {
+        quotaReservation?.markDispatched();
+        response = await this.request(config, request, options.credential, options.signal, false);
+      } else {
+        const requestDigest = await digestJson({
+          provider,
+          model: request.model,
+          kind: metadata.kind,
+          messages: request.messages,
+          max_output_tokens: request.maxOutputTokens,
+          temperature: request.temperature ?? null,
+          require_json: request.requireJson ?? false,
+          response_schema: request.responseSchema ?? null,
+          tools: request.tools ?? [],
+          tool_choice: request.toolChoice ?? null,
+        });
+        const providerKey = request.idempotencyKey ?? generatedProviderIdempotencyKey("aurora-provider");
+        const callId = `provider-call-${(await digestJson(providerKey)).slice(0, 48)}`;
+        const executionId = options.execution?.state.execution_id ?? null;
+        response = await selectedBoundary.execute(
+          {
+            execution_id: executionId,
+            tool: `provider.${provider}.invoke`,
+            call_id: callId,
+            risk_class: "provider_invocation",
+            arguments: {
+              provider,
+              model: request.model,
+              kind: metadata.kind,
+              request_digest: requestDigest,
+              requested_output_tokens: request.maxOutputTokens,
+              tool_count: request.tools?.length ?? 0,
+              idempotency_key_present: request.idempotencyKey !== undefined,
+            },
+          },
+          async (context) => {
+            quotaReservation?.markDispatched();
+            return this.request(config, request.idempotencyKey ? request : { ...request, idempotencyKey: context.idempotency_key }, options.credential, options.signal, false);
+          },
+          { execution: options.execution, resultProjector: providerEffectProjection, cacheResult: false, definiteFailure: providerEffectFailureIsDefinite },
+        );
+      }
       const latencyMs = Math.max(0, nowMs() - started);
       this.record(provider, request.model, true, latencyMs, response.statusCode, response);
       await recordOutcome({ success: true, status: "completed", latencyMs, inputTokens: response.usage.input_tokens ?? metadata.inputTokens, outputTokens: response.usage.output_tokens ?? 0, statusCode: response.statusCode });
+      quotaReservation?.settle({ inputTokens: response.usage.input_tokens ?? metadata.inputTokens, outputTokens: response.usage.output_tokens ?? 0, costUnits: options.estimatedCostUnits ?? 0 });
       return response;
     } catch (unknownError) {
+      if (unknownError instanceof AutonomousEffectReconciliationRequiredError) {
+        const latencyMs = Math.max(0, nowMs() - started);
+        this.record(provider, request.model, false, latencyMs, null);
+        await recordOutcome({ success: false, status: "provider_refused", latencyMs, inputTokens: metadata.inputTokens, outputTokens: 0, failureClass: "provider_error", failureCode: "provider_error", retryable: false });
+        throw unknownError;
+      }
       const error = contextProviderFailure(errorFromUnknown(unknownError), provider, "invoke");
       const latencyMs = Math.max(0, nowMs() - started);
       this.record(provider, request.model, false, latencyMs, error instanceof ProviderRuntimeError ? error.statusCode ?? null : null);
@@ -2333,6 +2810,10 @@ export class LLMRuntime {
         requestId: error instanceof ProviderRuntimeError ? error.requestId ?? null : null,
         retryable: error instanceof ProviderRuntimeError ? error.retryable : false,
       });
+      if (quotaReservation) {
+        if (quotaReservation.isDispatched) quotaReservation.settle();
+        else quotaReservation.release();
+      }
       throw error;
     }
   }
@@ -2342,20 +2823,106 @@ export class LLMRuntime {
     request: ProviderRequest,
     options: ProviderInvocationOptions = {},
   ): AsyncIterable<ProviderStreamEvent> {
+    this.authorizeProvider(options, provider, request, options.invocationKind ?? "provider_stream");
+    const selectedBoundary = options.effectBoundary ?? this.effectBoundaryValue;
+    if (!selectedBoundary) {
+      for await (const event of this.invokeStreamUnbounded(provider, request, options)) yield event;
+      return;
+    }
+    if (typeof selectedBoundary.executeStream !== "function") throw new ProviderRuntimeError("effectBoundary must expose executeStream for live provider streams");
+    const requestDigest = await digestJson({
+      provider,
+      model: request.model,
+      kind: options.invocationKind ?? "provider_stream",
+      messages: request.messages,
+      max_output_tokens: request.maxOutputTokens,
+      temperature: request.temperature ?? null,
+      require_json: request.requireJson ?? false,
+      response_schema: request.responseSchema ?? null,
+      tools: request.tools ?? [],
+      tool_choice: request.toolChoice ?? null,
+    });
+    const generatedKey = request.idempotencyKey ?? generatedProviderIdempotencyKey("aurora-provider-stream");
+    const callId = `provider-stream-${(await digestJson(generatedKey)).slice(0, 48)}`;
+    const executionId = options.execution?.state.execution_id ?? null;
+    const summary: JsonObject = {
+      provider,
+      model: request.model,
+      event_count: 0,
+      text_delta_bytes: 0,
+      tool_call_count: 0,
+      done_seen: false,
+    };
+    const observe = async (event: ProviderStreamEvent, eventCount: number): Promise<void> => {
+      summary.event_count = eventCount;
+      summary.text_delta_bytes = (summary.text_delta_bytes as number) + bytes(event.textDelta);
+      if (event.toolCall) summary.tool_call_count = (summary.tool_call_count as number) + 1;
+      summary.done_seen = Boolean(summary.done_seen || event.done);
+      for (const key of ["input_tokens", "output_tokens", "total_tokens"] as const) {
+        const value = event.usage[key];
+        if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0) summary[key] = value;
+      }
+      if (event.requestId) summary.request_id_digest = await digestJson(event.requestId);
+    };
+    const project = (base: JsonObject): JsonObject => ({ ...summary, event_count: base.event_count, completed: true });
+    const effectRequest = {
+        execution_id: executionId,
+        tool: `provider.${provider}.stream`,
+        call_id: callId,
+        risk_class: "provider_invocation",
+        arguments: {
+          provider,
+          model: request.model,
+          kind: options.invocationKind ?? "provider_stream",
+          request_digest: requestDigest,
+          requested_output_tokens: request.maxOutputTokens,
+          tool_count: request.tools?.length ?? 0,
+          idempotency_key_present: request.idempotencyKey !== undefined,
+        },
+    };
+    try {
+      options.effectIdObserver?.(await selectedBoundary.effectId(effectRequest));
+    } catch {
+      // Effect identity is diagnostic metadata. A faulty observer must never alter dispatch.
+    }
+    const stream = selectedBoundary.executeStream(
+      effectRequest,
+      async (context) => this.invokeStreamUnbounded(provider, request.idempotencyKey ? request : { ...request, idempotencyKey: context.idempotency_key }, options),
+      { execution: options.execution, summaryProjector: project, observe, definiteFailure: providerEffectFailureIsDefinite },
+    );
+    for await (const event of stream) yield event;
+  }
+
+  private async *invokeStreamUnbounded(
+    provider: string,
+    request: ProviderRequest,
+    options: ProviderInvocationOptions = {},
+  ): AsyncIterable<ProviderStreamEvent> {
     const config = this.requireProvider(provider);
     validateRequest(request);
     validateStructuredOutputSupport(config, request);
     const metadata = requestMetadata(provider, request, options.invocationKind ?? "provider_stream");
+    const quota = options.providerQuota ?? this.providerQuota;
+    const quotaReservation = quota?.reserve({ provider, model: request.model, inputTokens: metadata.inputTokens, outputTokens: request.maxOutputTokens, costUnits: options.estimatedCostUnits ?? 0 });
     const releaseCost = options.reserveCost?.(options.estimatedCostUnits ?? 0);
     try {
       await options.execution?.admitProviderCall({ provider, model: request.model, invocationKind: metadata.kind, attempt: options.executionAttempt, turn: options.executionTurn, selectionDigest: options.selectionDigest, estimatedCostUnits: options.estimatedCostUnits, costUnits: options.estimatedCostUnits, failover: options.executionFailover });
       await options.observer?.before?.(metadata);
     } catch (error) {
+      quotaReservation?.release();
       releaseCost?.();
       throw error;
     }
     const started = nowMs();
     let outcome: ProviderInvocationOutcome | null = null;
+    let doneSeen = false;
+    let emittedEventCount = 0;
+    const validateEvent = (event: ProviderStreamEvent): ProviderStreamEvent => {
+      if (doneSeen) throw new ProviderRuntimeError("provider stream emitted an event after its terminal done event", { code: "invalid_response" });
+      emittedEventCount += 1;
+      if (event.done) doneSeen = true;
+      return event;
+    };
     try {
       if (config.transport) {
         const circuit = this.circuits.get(provider) ?? { consecutiveFailures: 0, openedUntil: null };
@@ -2363,7 +2930,9 @@ export class LLMRuntime {
         if (circuit.openedUntil !== null && circuit.openedUntil > this.clock()) throw new ProviderRuntimeError("provider circuit is open; invocation is temporarily refused", { circuitOpen: true, code: "circuit_open" });
         if (circuit.openedUntil !== null) { circuit.openedUntil = null; circuit.consecutiveFailures = 0; }
         try {
-          for await (const event of streamLocalTransport(config, request)) yield event;
+          quotaReservation?.markDispatched();
+          for await (const event of streamLocalTransport(config, request)) yield validateEvent(event);
+          if (!doneSeen) throw new ProviderRuntimeError("provider stream ended without a done event", { retryable: emittedEventCount === 0, code: "invalid_response" });
           circuit.consecutiveFailures = 0;
           circuit.openedUntil = null;
           this.record(provider, request.model, true, Math.max(0, nowMs() - started), 200);
@@ -2378,6 +2947,7 @@ export class LLMRuntime {
           throw normalized;
         }
       }
+      quotaReservation?.markDispatched();
       const response = await this.fetchWithRetries(config, request, options.credential, options.signal, true);
       if (isProviderResponseValue(response)) throw new ProviderRuntimeError("provider stream returned a non-stream response");
       if (response.status >= 400) throw providerHttpError(response.status, response.headers);
@@ -2399,10 +2969,16 @@ export class LLMRuntime {
             const parsed = parseSseFrame(frame);
             if (!parsed) continue;
             if (parsed.data === "[DONE]") {
+              // Chat Completions commonly emits a finish_reason terminal event followed by
+              // the [DONE] framing sentinel. The sentinel is not a second provider event.
+              if (doneSeen) continue;
               const calls = finalizeCalls(config.protocol === "anthropic_messages" ? state.anthropicCalls : state.calls);
+              for (const call of calls) {
+                state.sequence += 1;
+                yield validateEvent(streamEvent(provider, state.model, state.sequence, "tool_call", state.requestId, "", state.usage, false, call));
+              }
               state.sequence += 1;
-              yield streamEvent(provider, state.model, state.sequence, "stream.done", state.requestId, "", state.usage, true, undefined);
-              for (const call of calls) { state.sequence += 1; yield streamEvent(provider, state.model, state.sequence, "tool_call", state.requestId, "", state.usage, false, call); }
+              yield validateEvent(streamEvent(provider, state.model, state.sequence, "stream.done", state.requestId, "", state.usage, true, undefined));
               continue;
             }
             let payload: JsonObject;
@@ -2415,10 +2991,16 @@ export class LLMRuntime {
               state.sequence += 1;
               if (state.sequence > MAX_PROVIDER_STREAM_EVENTS) throw new ProviderRuntimeError("provider stream exceeded its event bound");
               if (projected.calls?.length) {
-                yield streamEvent(provider, state.model, state.sequence, "tool_call", state.requestId, "", projected.usage ?? state.usage, false, projected.calls[0]);
-                for (const call of projected.calls.slice(1)) { state.sequence += 1; yield streamEvent(provider, state.model, state.sequence, "tool_call", state.requestId, "", projected.usage ?? state.usage, false, call); }
+                for (const [index, call] of projected.calls.entries()) {
+                  if (index > 0) state.sequence += 1;
+                  yield validateEvent(streamEvent(provider, state.model, state.sequence, "tool_call", state.requestId, "", projected.usage ?? state.usage, false, call));
+                }
+                if (projected.done) {
+                  state.sequence += 1;
+                  yield validateEvent(streamEvent(provider, state.model, state.sequence, projected.type, state.requestId, "", projected.usage ?? state.usage, true, undefined));
+                }
               } else {
-                yield streamEvent(provider, state.model, state.sequence, projected.type, state.requestId, projected.text ?? "", projected.usage ?? state.usage, projected.done ?? false);
+                yield validateEvent(streamEvent(provider, state.model, state.sequence, projected.type, state.requestId, projected.text ?? "", projected.usage ?? state.usage, projected.done ?? false));
               }
             }
           }
@@ -2426,18 +3008,38 @@ export class LLMRuntime {
             const final = decoder.decode();
             if (final) buffer += final;
             const parsed = parseSseFrame(buffer);
-            if (parsed && parsed.data !== "[DONE]") {
+            if (parsed?.data === "[DONE]" && !doneSeen) {
+              const calls = finalizeCalls(config.protocol === "anthropic_messages" ? state.anthropicCalls : state.calls);
+              for (const call of calls) {
+                state.sequence += 1;
+                yield validateEvent(streamEvent(provider, state.model, state.sequence, "tool_call", state.requestId, "", state.usage, false, call));
+              }
+              state.sequence += 1;
+              yield validateEvent(streamEvent(provider, state.model, state.sequence, "stream.done", state.requestId, "", state.usage, true, undefined));
+            } else if (parsed && parsed.data !== "[DONE]") {
               let payload: JsonObject;
               try { const decodedPayload: unknown = JSON.parse(parsed.data); if (!isObject(decodedPayload)) throw new Error(); payload = decodedPayload as JsonObject; } catch { throw new ProviderRuntimeError("provider stream contained invalid JSON"); }
               for (const projected of projectStreamPayload(config.protocol, parsed.event, payload, state, request)) {
                 state.sequence += 1;
-                yield streamEvent(provider, state.model, state.sequence, projected.type, state.requestId, projected.text ?? "", projected.usage ?? state.usage, projected.done ?? false, projected.calls?.[0]);
+                if (projected.calls?.length) {
+                  for (const [index, call] of projected.calls.entries()) {
+                    if (index > 0) state.sequence += 1;
+                    yield validateEvent(streamEvent(provider, state.model, state.sequence, "tool_call", state.requestId, "", projected.usage ?? state.usage, false, call));
+                  }
+                  if (projected.done) {
+                    state.sequence += 1;
+                    yield validateEvent(streamEvent(provider, state.model, state.sequence, projected.type, state.requestId, "", projected.usage ?? state.usage, true, undefined));
+                  }
+                } else {
+                  yield validateEvent(streamEvent(provider, state.model, state.sequence, projected.type, state.requestId, projected.text ?? "", projected.usage ?? state.usage, projected.done ?? false));
+                }
               }
             }
             break;
           }
         }
       } finally { reader.releaseLock(); }
+      if (!doneSeen) throw new ProviderRuntimeError("provider stream ended without a done event", { retryable: emittedEventCount === 0, code: "invalid_response" });
       this.record(provider, request.model, true, Math.max(0, nowMs() - started), 200);
       outcome = { success: true, status: "completed", latencyMs: Math.max(0, nowMs() - started), inputTokens: metadata.inputTokens, outputTokens: 0, statusCode: 200 };
     } catch (unknownError) {
@@ -2461,33 +3063,77 @@ export class LLMRuntime {
       if (outcome) {
         await options.observer?.after?.(metadata, outcome);
         await recordExecutionProviderOutcome(options.execution, metadata, outcome, { attempt: options.executionAttempt, turn: options.executionTurn, selectionDigest: options.selectionDigest, estimatedCostUnits: options.estimatedCostUnits });
+        if (quotaReservation?.isDispatched) quotaReservation.settle({ inputTokens: metadata.inputTokens, outputTokens: request.maxOutputTokens, costUnits: options.estimatedCostUnits ?? 0 });
+        else quotaReservation?.release();
       }
     }
   }
 
   async collectStream(provider: string, request: ProviderRequest, options: ProviderInvocationOptions = {}): Promise<ProviderResponse> {
-    const text: string[] = [];
-    const calls: ProviderToolCall[] = [];
-    let usage: ProviderUsage = {};
-    let model = request.model;
-    let requestId: string | null = null;
-    let done = false;
-    for await (const event of this.invokeStream(provider, request, options)) {
-      text.push(event.textDelta);
-      if (event.toolCall) calls.push(event.toolCall);
-      usage = { ...usage, ...event.usage };
-      model = event.model || model;
-      requestId = event.requestId ?? requestId;
-      done = done || event.done;
-    }
-    if (!done && text.join("").length === 0 && calls.length === 0) throw new ProviderRuntimeError("provider stream contained no assistant output");
-    const outputText = text.join("");
-    let structured: JsonValue | null = null;
-    if (!calls.length && request.requireJson) {
-      try { structured = JSON.parse(outputText) as JsonValue; } catch { throw new ProviderRuntimeError("provider stream returned invalid JSON", { code: "invalid_response" }); }
-      validateStructuredResponseOrThrow(structured, request.responseSchema);
-    }
-    return { provider, model, text: outputText, statusCode: 200, requestId, usage, structured, toolCalls: calls, stopReason: null };
+    this.authorizeProvider(options, provider, request, options.invocationKind ?? "provider_stream");
+    const collect = async (dispatchedRequest: ProviderRequest): Promise<ProviderResponse> => {
+      const text: string[] = [];
+      const calls: ProviderToolCall[] = [];
+      let usage: ProviderUsage = {};
+      let model = dispatchedRequest.model;
+      let requestId: string | null = null;
+      let done = false;
+      // collectStream owns the response-level effect boundary below; do not nest a second
+      // stream boundary around the same provider dispatch.
+      for await (const event of this.invokeStreamUnbounded(provider, dispatchedRequest, options)) {
+        text.push(event.textDelta);
+        if (event.toolCall) calls.push(event.toolCall);
+        usage = { ...usage, ...event.usage };
+        model = event.model || model;
+        requestId = event.requestId ?? requestId;
+        done = done || event.done;
+      }
+      if (!done) throw new ProviderRuntimeError("provider stream ended without a done event", { retryable: text.length === 0 && calls.length === 0, code: "invalid_response" });
+      if (text.join("").length === 0 && calls.length === 0) throw new ProviderRuntimeError("provider stream contained no assistant output");
+      const outputText = text.join("");
+      let structured: JsonValue | null = null;
+      if (!calls.length && dispatchedRequest.requireJson) {
+        try { structured = JSON.parse(outputText) as JsonValue; } catch { throw new ProviderRuntimeError("provider stream returned invalid JSON", { code: "invalid_response" }); }
+        validateStructuredResponseOrThrow(structured, dispatchedRequest.responseSchema);
+      }
+      return { provider, model, text: outputText, statusCode: 200, requestId, usage, structured, toolCalls: calls, stopReason: null };
+    };
+    const selectedBoundary = options.effectBoundary ?? this.effectBoundaryValue;
+    if (!selectedBoundary) return collect(request);
+    const requestDigest = await digestJson({
+      provider,
+      model: request.model,
+      kind: options.invocationKind ?? "provider_stream",
+      messages: request.messages,
+      max_output_tokens: request.maxOutputTokens,
+      temperature: request.temperature ?? null,
+      require_json: request.requireJson ?? false,
+      response_schema: request.responseSchema ?? null,
+      tools: request.tools ?? [],
+      tool_choice: request.toolChoice ?? null,
+    });
+    const providerKey = request.idempotencyKey ?? generatedProviderIdempotencyKey("aurora-provider-stream");
+    const callId = `provider-stream-${(await digestJson(providerKey)).slice(0, 48)}`;
+    const executionId = options.execution?.state.execution_id ?? null;
+    return selectedBoundary.execute(
+      {
+        execution_id: executionId,
+        tool: `provider.${provider}.stream`,
+        call_id: callId,
+        risk_class: "provider_invocation",
+        arguments: {
+          provider,
+          model: request.model,
+          kind: options.invocationKind ?? "provider_stream",
+          request_digest: requestDigest,
+          requested_output_tokens: request.maxOutputTokens,
+          tool_count: request.tools?.length ?? 0,
+          idempotency_key_present: request.idempotencyKey !== undefined,
+        },
+      },
+      async (context) => collect(request.idempotencyKey ? request : { ...request, idempotencyKey: context.idempotency_key }),
+      { execution: options.execution, resultProjector: providerEffectProjection, cacheResult: false, definiteFailure: providerEffectFailureIsDefinite },
+    );
   }
 
   async invokeToolLoop(
@@ -2513,6 +3159,7 @@ export class LLMRuntime {
     const responses: ProviderResponse[] = [];
     let toolCalls = 0;
     for (let turn = 0; turn < maxTurns; turn += 1) {
+      if (options.contextBudget !== undefined) current = (await compactAutonomousProviderRequest(current, options.contextBudget)).request;
       const providerOptions = {
         ...options,
         executionTurn: turn + 1,
@@ -2921,6 +3568,38 @@ function modelFailoverAllowed(error: ProviderRuntimeError): boolean {
   return error.code === "timeout" && error.circuitOpen !== true;
 }
 
+function selectionIsCredentialUnavailable(ranking: readonly AutonomousModelRanking[]): boolean {
+  const credentialGateReasons = new Set(["credential not ready", "provider health ineligible"]);
+  return ranking.length > 0 && ranking.every((row) =>
+    row.reasons.includes("credential not ready")
+    && row.reasons.every((reason) => credentialGateReasons.has(reason))
+  );
+}
+
+async function emitContinuationSelectionTrace(
+  callback: AutonomousModelSelectionTraceEventCallback | undefined,
+  selection: AutonomousSelectionDecision,
+  plan: AutonomousModelContinuationPlan,
+  attempt: number,
+): Promise<void> {
+  if (!callback) return;
+  const selected = selection.selected_model;
+  const common = {
+    attempt,
+    failover: attempt > 1,
+    candidate_count: selection.ranking.length,
+    eligible_candidate_count: selection.ranking.filter((row) => row.eligible).length,
+    strategy: selection.strategy,
+    selected_provider: selected?.provider ?? null,
+    selected_model: selected?.model ?? null,
+    selection_digest: await digestJson(selection),
+    detail_digest: await digestJson({ continuation_plan_digest: plan.plan_digest, step_order: plan.steps.find((step) => step.provider === selected?.provider && step.model === selected?.model)?.order ?? null }),
+    failure_code: null,
+  } satisfies Omit<AutonomousModelSelectionTraceEvent, "phase" | "status">;
+  await callback({ ...common, phase: "model_selection_started", status: "running", selected_provider: null, selected_model: null, selection_digest: null });
+  await callback({ ...common, phase: "model_selection_finished", status: "selected" });
+}
+
 /**
  * Application-side composition for the autonomous brain boundary.
  *
@@ -2950,6 +3629,13 @@ export class AutonomousRuntime {
     } = {},
   ): Promise<AutonomousSelectionDecision> {
     if (options.selectionEventCallback !== undefined && typeof options.selectionEventCallback !== "function") throw new ProviderRuntimeError("autonomous model selection trace callback must be callable");
+    // Selection must rank against the request that will actually be dispatched. This prevents a
+    // large stale transcript from making a model appear eligible before compaction and then
+    // overflowing the same model at the provider boundary.
+    if (plan.contextBudget !== undefined) {
+      const prepared = await compactAutonomousProviderRequest(plan.request, plan.contextBudget);
+      plan = { ...plan, request: prepared.request };
+    }
     const selectionEventCallback = options.selectionEventCallback;
     const traceEnabled = selectionEventCallback !== undefined;
     const request = this.selectionRequest(plan, options.excludedProviders, options.excludedModels);
@@ -3019,7 +3705,11 @@ export class AutonomousRuntime {
       if (!ranking.some((row) => row.eligible)) {
         return finishSelection({ selected_model: null, strategy: this.selector ? "caller_selector" : "deterministic_health_utility", ranking, abstention_reason: ranking.flatMap((row) => row.reasons).join("; ") || "no eligible model candidate", selection_confidence: selectionConfidence, min_selection_confidence: minimumConfidence });
       }
-      if (minimumConfidence !== null && selectionConfidence < minimumConfidence) {
+      // A caller-owned selector may improve confidence with contextual or evaluator-backed
+      // evidence that is not present in the canonical cold-start ranking. Defer this gate until
+      // after selector validation; otherwise an attached learner can never promote a model from
+      // an initially tied prior.
+      if (!this.selector && minimumConfidence !== null && selectionConfidence < minimumConfidence) {
         return finishSelection({ selected_model: null, strategy: this.selector ? "caller_selector" : "deterministic_health_utility", ranking, abstention_reason: `selection confidence ${selectionConfidence.toFixed(6)} is below caller floor ${minimumConfidence.toFixed(6)}`, selection_confidence: selectionConfidence, min_selection_confidence: minimumConfidence });
       }
       if (this.selector) {
@@ -3028,11 +3718,16 @@ export class AutonomousRuntime {
         const projectedRanking = selectorRankingProjection(selected.ranking, ranking);
         const exploration = selectorExplorationProjection(selected);
         const selectedModel = selected.selected_model;
-        if (selectedModel === null) return finishSelection({ selected_model: null, strategy: "caller_selector", ranking: projectedRanking, abstention_reason: typeof selected.abstention_reason === "string" ? selected.abstention_reason : "caller selector abstained", selection_confidence: selectionConfidence, min_selection_confidence: minimumConfidence, ...exploration });
+        const selectorConfidence = selected.selection_confidence === undefined || selected.selection_confidence === null
+          ? selectionConfidence
+          : selected.selection_confidence;
+        if (typeof selectorConfidence !== "number" || !Number.isFinite(selectorConfidence) || selectorConfidence < 0 || selectorConfidence > 1) throw new ProviderRuntimeError("autonomous model selector returned an invalid selection_confidence");
+        if (selectedModel === null) return finishSelection({ selected_model: null, strategy: "caller_selector", ranking: projectedRanking, abstention_reason: typeof selected.abstention_reason === "string" ? selected.abstention_reason : "caller selector abstained", selection_confidence: selectorConfidence, min_selection_confidence: minimumConfidence, ...exploration });
         if (!isObject(selectedModel) || typeof selectedModel.provider !== "string" || typeof selectedModel.model !== "string") throw new ProviderRuntimeError("autonomous selector returned an invalid selected_model");
         const chosen = ranking.find((row) => row.provider === selectedModel.provider && row.model === selectedModel.model);
         if (!chosen || !chosen.eligible) throw new ProviderRuntimeError("autonomous selector chose an ineligible model");
-        return finishSelection({ selected_model: { provider: chosen.provider, model: chosen.model }, strategy: "caller_selector", ranking: projectedRanking, abstention_reason: null, selection_confidence: selectionConfidence, min_selection_confidence: minimumConfidence, ...exploration });
+        if (minimumConfidence !== null && selectorConfidence < minimumConfidence) return finishSelection({ selected_model: null, strategy: "caller_selector", ranking: projectedRanking, abstention_reason: `selection confidence ${selectorConfidence.toFixed(6)} is below caller floor ${minimumConfidence.toFixed(6)}`, selection_confidence: selectorConfidence, min_selection_confidence: minimumConfidence, ...exploration, exploration_taken: false });
+        return finishSelection({ selected_model: { provider: chosen.provider, model: chosen.model }, strategy: "caller_selector", ranking: projectedRanking, abstention_reason: null, selection_confidence: selectorConfidence, min_selection_confidence: minimumConfidence, ...exploration });
       }
       const chosen = ranking.find((row) => row.eligible);
       return finishSelection({ selected_model: chosen ? { provider: chosen.provider, model: chosen.model } : null, strategy: "deterministic_health_utility", ranking, abstention_reason: chosen ? null : "no eligible model candidate", selection_confidence: selectionConfidence, min_selection_confidence: minimumConfidence });
@@ -3063,40 +3758,266 @@ export class AutonomousRuntime {
       executionAttempt?: number;
       maxProviderFailovers?: number;
       reserveCost?: AutonomousCostReservationCallback;
+      authorizationContext?: AutonomousAuthorizationContext;
+      authorizationDomain?: string;
     } = {},
   ): Promise<AutonomousExecutionResult> {
     const maxProviderFailovers = autonomousProviderFailoverLimit(options);
-    const excludedProviders = new Set<string>();
-    const excludedModels = new Set<string>();
-    let failovers = 0;
+    let contextBudget: AutonomousContextBudgetPlan | null = null;
+    if (plan.contextBudget !== undefined) {
+      const prepared = await compactAutonomousProviderRequest(plan.request, plan.contextBudget);
+      plan = { ...plan, request: prepared.request };
+      contextBudget = prepared.plan;
+    }
+    const initialSelection = await this.select(plan, { selectionEventCallback: options.selectionEventCallback, attempt: 1 });
+    if (!initialSelection.selected_model) {
+      if (selectionIsCredentialUnavailable(initialSelection.ranking)) throw new CredentialError("autonomous selection requires a user credential handle");
+      throw new ProviderRuntimeError(`autonomous selection abstained: ${initialSelection.abstention_reason ?? "no model"}`);
+    }
+    const continuationPlan = await compileAutonomousModelContinuationPlan(plan, initialSelection, { maxFailovers: maxProviderFailovers });
+    let continuationState: AutonomousModelContinuationState = await createAutonomousModelContinuationState(continuationPlan);
+    const invocationSamples: AutonomousProviderInvocationSample[] = [];
+    const executionId = options.execution?.state.execution_id ?? null;
     while (true) {
-      const selection = await this.select(plan, { excludedProviders: [...excludedProviders], excludedModels: [...excludedModels], selectionEventCallback: options.selectionEventCallback, attempt: failovers + 1 });
-      if (!selection.selected_model) throw new ProviderRuntimeError(`autonomous selection abstained: ${selection.abstention_reason ?? "no model"}`);
-      const provider = selection.selected_model.provider;
+      const step = continuationPlan.steps[continuationState.next_step_index ?? -1];
+      if (!step) throw new ProviderRuntimeError("autonomous continuation has no next model");
+      const failovers = continuationState.failovers_used;
+      const selection = failovers === 0 ? initialSelection : continuationSelectionDecision(initialSelection, step);
+      if (failovers > 0) await emitContinuationSelectionTrace(options.selectionEventCallback, selection, continuationPlan, failovers + 1);
+      const provider = step.provider;
       const credential = options.credential ?? options.credentialFor?.(provider);
       const observer: ProviderInvocationObserver = {
         before: options.observer?.before,
         after: async (metadata, outcome) => {
-          await options.observer?.after?.(metadata, outcome);
-          await options.feedback?.(selection, outcome);
+          try {
+            await options.observer?.after?.(metadata, outcome);
+            await options.feedback?.(selection, outcome);
+          } finally {
+            invocationSamples.push({
+              executionId,
+              metadata: { ...metadata },
+              outcome: { ...outcome },
+              attempt: failovers,
+              turn: 0,
+              selectionDigest,
+              estimatedCostUnits,
+              costPerMillionTokens: selectedCandidate?.cost_per_million_tokens ?? 0,
+            });
+          }
         },
       };
-      const selectedCandidate = plan.candidates.find((candidate) => candidate.provider === provider && candidate.model === selection.selected_model!.model);
+      const selectedCandidate = plan.candidates.find((candidate) => candidate.provider === provider && candidate.model === step.model);
       const estimatedCostUnits = estimatedProviderCostUnits(selectedCandidate, plan.request);
       const selectionDigest = await digestJson(selection);
       try {
-        const response = await this.llm.invoke(provider, { ...plan.request, model: selection.selected_model.model }, { credential, signal: options.signal, observer, invocationKind: "autonomous_selected_model", execution: options.execution, executionAttempt: options.executionAttempt, executionTurn: 1, executionFailover: failovers > 0, selectionDigest, estimatedCostUnits, reserveCost: options.reserveCost });
-        return { selection, response };
+        const response = await this.llm.invoke(provider, { ...plan.request, model: step.model }, { credential, signal: options.signal, observer, invocationKind: "autonomous_selected_model", execution: options.execution, executionAttempt: options.executionAttempt, executionTurn: 1, executionFailover: failovers > 0, selectionDigest, estimatedCostUnits, reserveCost: options.reserveCost, authorizationContext: options.authorizationContext, authorizationDomain: options.authorizationDomain ?? plan.domain, authorizationAttempt: failovers, authorizationTurn: 0 });
+        continuationState = await completeAutonomousModelContinuationState(continuationPlan, continuationState, { provider, model: step.model, statusCode: response.statusCode });
+        const projection = await autonomousProviderInvocationProjection(invocationSamples, continuationPlan);
+        return { selection, response, continuation_plan: continuationPlan, provider_invocations: projection.providerInvocations, provider_failover: projection.providerFailover, context_budget: contextBudget };
       } catch (error) {
         if (!(error instanceof ProviderRuntimeError) || !error.retryable || failovers >= maxProviderFailovers) throw error;
-        const modelId = `${provider}/${selection.selected_model.model}`;
-        if (modelFailoverAllowed(error)) excludedModels.add(modelId);
-        else excludedProviders.add(provider);
-        const anotherModelRemains = plan.candidates.some((candidate) => !excludedProviders.has(candidate.provider) && !excludedModels.has(`${candidate.provider}/${candidate.model}`));
-        if (!anotherModelRemains) throw error;
-        failovers += 1;
+        const failureScope: AutonomousContinuationFailureScope = modelFailoverAllowed(error) ? "model" : "provider";
+        continuationState = await advanceAutonomousModelContinuationState(continuationPlan, continuationState, { provider, model: step.model, failureScope, failureCode: error.code, statusCode: error.statusCode });
+        if (continuationState.status !== "ready") throw error;
       }
     }
+  }
+
+  /**
+   * Select a model and open a live provider-neutral stream.
+   *
+   * Selection, context compaction, continuation compilation, and provider admission all happen
+   * before the handle is returned. Once an event has been observed, the stream is never replayed
+   * onto another model: a partial assistant turn may contain a caller-visible tool intent. A
+   * retry is therefore limited to a provider/model failure that occurs before the first event.
+   */
+  async invokeStream(
+    plan: AutonomousExecutionPlan,
+    options: AutonomousStreamInvocationOptions = {},
+  ): Promise<AutonomousStreamHandle> {
+    const maxProviderFailovers = autonomousProviderFailoverLimit(options);
+    let contextBudget: AutonomousContextBudgetPlan | null = null;
+    if (plan.contextBudget !== undefined) {
+      const prepared = await compactAutonomousProviderRequest(plan.request, plan.contextBudget);
+      plan = { ...plan, request: prepared.request };
+      contextBudget = prepared.plan;
+    }
+    const initialSelection = await this.select(plan, {
+      selectionEventCallback: options.selectionEventCallback,
+      attempt: 1,
+    });
+    if (!initialSelection.selected_model) {
+      if (selectionIsCredentialUnavailable(initialSelection.ranking)) throw new CredentialError("autonomous selection requires a user credential handle");
+      throw new ProviderRuntimeError(`autonomous selection abstained: ${initialSelection.abstention_reason ?? "no model"}`);
+    }
+    const continuationPlan = await compileAutonomousModelContinuationPlan(plan, initialSelection, { maxFailovers: maxProviderFailovers });
+    let completionResolver: ((completion: AutonomousStreamCompletion) => void) | undefined;
+    const completion = new Promise<AutonomousStreamCompletion>((resolve) => { completionResolver = resolve; });
+    const invocationSamples: AutonomousProviderInvocationSample[] = [];
+    const executionId = options.execution?.state.execution_id ?? null;
+    let eventCount = 0;
+    let textDeltaBytes = 0;
+    let doneSeen = false;
+    let sawEvent = false;
+    let finalized = false;
+    let consumed = false;
+    const effectIds: string[] = [];
+    const runtime = this.llm;
+
+    const finish = (status: AutonomousStreamCompletion["status"], error: unknown = null): void => {
+      if (finalized) return;
+      finalized = true;
+      const errorCode = error instanceof ProviderRuntimeError ? error.code : null;
+      const errorClass = error instanceof Error ? error.constructor.name : error === null ? null : "UnknownError";
+      void autonomousProviderInvocationProjection(invocationSamples, continuationPlan).then((projection) => {
+        completionResolver?.({
+          schema: AUTONOMOUS_STREAM_COMPLETION_SCHEMA,
+          status,
+          event_count: eventCount,
+          text_delta_bytes: textDeltaBytes,
+          done_seen: doneSeen,
+          provider_invocations: projection.providerInvocations,
+          provider_failover: projection.providerFailover,
+          effect_ids: [...effectIds],
+          error_code: errorCode,
+          error_class: errorClass,
+          retention: "metadata_only_no_stream_payloads_or_credentials",
+          secret_material: "never_returned",
+        });
+      }).catch(() => {
+        // Completion is a non-authoritative metadata receipt. Never turn a provider result into
+        // an unhandled promise rejection because a local digest/evidence projection failed.
+        completionResolver?.({
+          schema: AUTONOMOUS_STREAM_COMPLETION_SCHEMA,
+          status,
+          event_count: eventCount,
+          text_delta_bytes: textDeltaBytes,
+          done_seen: doneSeen,
+          provider_invocations: [],
+          provider_failover: null,
+          effect_ids: [...effectIds],
+          error_code: errorCode,
+          error_class: errorClass,
+          retention: "metadata_only_no_stream_payloads_or_credentials",
+          secret_material: "never_returned",
+        });
+      });
+    };
+
+    const events: AsyncIterable<ProviderStreamEvent> = {
+      [Symbol.asyncIterator]: async function* (): AsyncGenerator<ProviderStreamEvent> {
+        if (consumed) throw new ArgumentError("autonomous stream handles are single-consumer");
+        consumed = true;
+        let continuationState: AutonomousModelContinuationState;
+        try {
+          continuationState = await createAutonomousModelContinuationState(continuationPlan);
+          while (true) {
+            const step = continuationPlan.steps[continuationState.next_step_index ?? -1];
+            if (!step) throw new ProviderRuntimeError("autonomous stream continuation has no next model");
+            const failovers = continuationState.failovers_used;
+            const selection = failovers === 0 ? initialSelection : continuationSelectionDecision(initialSelection, step);
+            if (failovers > 0) await emitContinuationSelectionTrace(options.selectionEventCallback, selection, continuationPlan, failovers + 1);
+            const provider = step.provider;
+            const credential = options.credential ?? options.credentialFor?.(provider);
+            const selectedCandidate = plan.candidates.find((candidate) => candidate.provider === provider && candidate.model === step.model);
+            const estimatedCostUnits = estimatedProviderCostUnits(selectedCandidate, plan.request);
+            const selectionDigest = await digestJson(selection);
+            const observer: ProviderInvocationObserver = {
+              before: options.observer?.before,
+              after: async (metadata, outcome) => {
+                try {
+                  await options.observer?.after?.(metadata, outcome);
+                  await options.feedback?.(selection, outcome);
+                } finally {
+                  invocationSamples.push({
+                    executionId,
+                    metadata: { ...metadata },
+                    outcome: { ...outcome },
+                    attempt: failovers,
+                    turn: 0,
+                    selectionDigest,
+                    estimatedCostUnits,
+                    costPerMillionTokens: selectedCandidate?.cost_per_million_tokens ?? 0,
+                  });
+                }
+              },
+            };
+            const attemptEventCount = eventCount;
+            try {
+              let localDone = false;
+              for await (const event of runtime.invokeStream(provider, { ...plan.request, model: step.model }, {
+                credential,
+                signal: options.signal,
+                observer,
+                effectBoundary: options.effectBoundary,
+                invocationKind: "autonomous_selected_model_stream",
+                execution: options.execution,
+                executionAttempt: options.executionAttempt,
+                executionTurn: 1,
+                executionFailover: failovers > 0,
+                selectionDigest,
+                estimatedCostUnits,
+                reserveCost: options.reserveCost,
+                authorizationContext: options.authorizationContext,
+                authorizationDomain: plan.domain,
+                authorizationAttempt: failovers,
+                authorizationTurn: 0,
+                effectIdObserver: (effectId) => {
+                  if (!effectIds.includes(effectId)) effectIds.push(effectId);
+                  options.effectIdObserver?.(effectId);
+                },
+              })) {
+                sawEvent = true;
+                eventCount += 1;
+                textDeltaBytes += bytes(event.textDelta);
+                doneSeen = doneSeen || event.done;
+                localDone = localDone || event.done;
+                yield event;
+              }
+              if (!localDone) {
+                throw new ProviderRuntimeError("autonomous provider stream ended without a done event", {
+                  retryable: attemptEventCount === eventCount,
+                  code: "invalid_response",
+                });
+              }
+              continuationState = await completeAutonomousModelContinuationState(continuationPlan, continuationState, {
+                provider,
+                model: step.model,
+                statusCode: null,
+              });
+              finish("completed");
+              return;
+            } catch (error) {
+              // A stream can only fail over before its first event. This protects callers from
+              // receiving a concatenation of two model answers or replayed tool intent.
+              if (sawEvent || !(error instanceof ProviderRuntimeError) || !error.retryable || failovers >= maxProviderFailovers) {
+                finish("failed", error);
+                throw error;
+              }
+              const failureScope: AutonomousContinuationFailureScope = modelFailoverAllowed(error) ? "model" : "provider";
+              continuationState = await advanceAutonomousModelContinuationState(continuationPlan, continuationState, {
+                provider,
+                model: step.model,
+                failureScope,
+                failureCode: error.code,
+                statusCode: error.statusCode,
+              });
+              if (continuationState.status !== "ready") {
+                finish("failed", error);
+                throw error;
+              }
+            }
+          }
+        } catch (error) {
+          if (!finalized) finish("failed", error);
+          throw error;
+        } finally {
+          if (!finalized) finish("abandoned");
+        }
+      },
+    };
+
+    return { selection: initialSelection, continuation_plan: continuationPlan, context_budget: contextBudget, events, completion };
   }
 
   async invokeToolLoop(
@@ -3117,34 +4038,65 @@ export class AutonomousRuntime {
       maxProviderFailovers?: number;
       reserveCost?: AutonomousCostReservationCallback;
       toolReadOnly?: (call: ProviderToolCall) => boolean | Promise<boolean>;
+      authorizationContext?: AutonomousAuthorizationContext;
     },
-  ): Promise<{ selection: AutonomousSelectionDecision; loop: ProviderToolLoopResult }> {
+  ): Promise<{ selection: AutonomousSelectionDecision; loop: ProviderToolLoopResult; continuation_plan: AutonomousModelContinuationPlan; provider_invocations: AutonomousProviderInvocationReceipt[]; provider_failover: AutonomousProviderFailoverProjection | null; context_budget?: AutonomousContextBudgetPlan | null }> {
     const maxProviderFailovers = autonomousProviderFailoverLimit(options);
-    const excludedProviders = new Set<string>();
-    const excludedModels = new Set<string>();
-    let failovers = 0;
+    let contextBudget: AutonomousContextBudgetPlan | null = null;
+    if (plan.contextBudget !== undefined) {
+      const prepared = await compactAutonomousProviderRequest(plan.request, plan.contextBudget);
+      plan = { ...plan, request: prepared.request };
+      contextBudget = prepared.plan;
+    }
+    const initialSelection = await this.select(plan, { selectionEventCallback: options.selectionEventCallback, attempt: 1 });
+    if (!initialSelection.selected_model) {
+      if (selectionIsCredentialUnavailable(initialSelection.ranking)) throw new CredentialError("autonomous selection requires a user credential handle");
+      throw new ProviderRuntimeError(`autonomous selection abstained: ${initialSelection.abstention_reason ?? "no model"}`);
+    }
+    const continuationPlan = await compileAutonomousModelContinuationPlan(plan, initialSelection, { maxFailovers: maxProviderFailovers });
+    let continuationState: AutonomousModelContinuationState = await createAutonomousModelContinuationState(continuationPlan);
+    const invocationSamples: AutonomousProviderInvocationSample[] = [];
+    const executionId = options.execution?.state.execution_id ?? null;
     let toolActivity = false;
     while (true) {
-      const selection = await this.select(plan, { excludedProviders: [...excludedProviders], excludedModels: [...excludedModels], selectionEventCallback: options.selectionEventCallback, attempt: failovers + 1 });
-      if (!selection.selected_model) throw new ProviderRuntimeError(`autonomous selection abstained: ${selection.abstention_reason ?? "no model"}`);
-      const provider = selection.selected_model.provider;
+      const step = continuationPlan.steps[continuationState.next_step_index ?? -1];
+      if (!step) throw new ProviderRuntimeError("autonomous continuation has no next model");
+      const failovers = continuationState.failovers_used;
+      const selection = failovers === 0 ? initialSelection : continuationSelectionDecision(initialSelection, step);
+      if (failovers > 0) await emitContinuationSelectionTrace(options.selectionEventCallback, selection, continuationPlan, failovers + 1);
+      const provider = step.provider;
       const credential = options.credential ?? options.credentialFor?.(provider);
       const observer: ProviderInvocationObserver = {
         before: options.observer?.before,
         after: async (metadata, outcome) => {
-          await options.observer?.after?.(metadata, outcome);
-          await options.feedback?.(selection, outcome);
+          try {
+            await options.observer?.after?.(metadata, outcome);
+            await options.feedback?.(selection, outcome);
+          } finally {
+            invocationSamples.push({
+              executionId,
+              metadata: { ...metadata },
+              outcome: { ...outcome },
+              attempt: failovers,
+              turn: invocationTurn,
+              selectionDigest,
+              estimatedCostUnits,
+              costPerMillionTokens: selectedCandidate?.cost_per_million_tokens ?? 0,
+            });
+            invocationTurn += 1;
+          }
         },
       };
-      const selectedCandidate = plan.candidates.find((candidate) => candidate.provider === provider && candidate.model === selection.selected_model!.model);
+      const selectedCandidate = plan.candidates.find((candidate) => candidate.provider === provider && candidate.model === step.model);
       const estimatedCostUnits = estimatedProviderCostUnits(selectedCandidate, plan.request);
       const selectionDigest = await digestJson(selection);
+      let invocationTurn = 0;
       const authorizeAndExecute = async (calls: ProviderToolCall[]): Promise<ProviderToolResult[]> => {
         if (calls.length > 0) toolActivity = true;
         return options.authorizeAndExecute(calls);
       };
       try {
-        const loop = await this.llm.invokeToolLoop(provider, { ...plan.request, model: selection.selected_model.model }, {
+        const loop = await this.llm.invokeToolLoop(provider, { ...plan.request, model: step.model }, {
           credential,
           authorizeAndExecute,
           maxTurns: options.maxTurns,
@@ -3160,18 +4112,20 @@ export class AutonomousRuntime {
           reserveCost: options.reserveCost,
           costEstimator: (request) => estimatedProviderCostUnits(selectedCandidate, request),
           toolReadOnly: options.toolReadOnly,
+          contextBudget: plan.contextBudget,
+          authorizationContext: options.authorizationContext,
+          authorizationDomain: plan.domain,
         });
-        return { selection, loop };
+        continuationState = await completeAutonomousModelContinuationState(continuationPlan, continuationState, { provider, model: step.model, statusCode: loop.finalResponse?.statusCode ?? null });
+        const projection = await autonomousProviderInvocationProjection(invocationSamples, continuationPlan);
+        return { selection, loop, continuation_plan: continuationPlan, provider_invocations: projection.providerInvocations, provider_failover: projection.providerFailover, context_budget: contextBudget };
       } catch (error) {
         // Replaying a loop after any provider-issued tool call could duplicate an effect. A
         // failover is therefore permitted only before the first tool request is observed.
         if (toolActivity || !(error instanceof ProviderRuntimeError) || !error.retryable || failovers >= maxProviderFailovers) throw error;
-        const modelId = `${provider}/${selection.selected_model.model}`;
-        if (modelFailoverAllowed(error)) excludedModels.add(modelId);
-        else excludedProviders.add(provider);
-        const anotherModelRemains = plan.candidates.some((candidate) => !excludedProviders.has(candidate.provider) && !excludedModels.has(`${candidate.provider}/${candidate.model}`));
-        if (!anotherModelRemains) throw error;
-        failovers += 1;
+        const failureScope: AutonomousContinuationFailureScope = modelFailoverAllowed(error) ? "model" : "provider";
+        continuationState = await advanceAutonomousModelContinuationState(continuationPlan, continuationState, { provider, model: step.model, failureScope, failureCode: error.code, statusCode: error.statusCode });
+        if (continuationState.status !== "ready") throw error;
       }
     }
   }
@@ -3189,6 +4143,8 @@ export class AutonomousRuntime {
       min_quality: plan.minQuality,
       min_selection_confidence: plan.minSelectionConfidence,
     });
+    const weights = normalizeAutonomousSelectionWeights(plan.selectionWeights);
+    const observations = normalizeAutonomousModelObservations(plan.selectionObservations);
     const excluded = new Set(excludedProviders.map((provider) => boundedIdentifier("excluded provider", provider, 128)));
     const excludedModelIds = new Set(excludedModels.map((modelId) => boundedText("excluded model", modelId, 768)));
     const candidates = plan.candidates.map((candidate) => {
@@ -3235,6 +4191,8 @@ export class AutonomousRuntime {
       min_quality: plan.minQuality ?? null,
       min_selection_confidence: plan.minSelectionConfidence ?? null,
       require_json: plan.request.requireJson === true,
+      weights,
+      observations,
       candidates,
       provider_health: providerHealth,
       model_health: this.llm.modelHealthSnapshot(),
@@ -3254,7 +4212,24 @@ function selectorRankingProjection(value: unknown, fallback: AutonomousModelRank
     if (!isObject(row) || typeof row.provider !== "string" || !row.provider.trim() || typeof row.model !== "string" || !row.model.trim() || typeof row.score !== "number" || !Number.isFinite(row.score) || typeof row.eligible !== "boolean" || !Array.isArray(row.reasons) || row.reasons.length > 64 || row.reasons.some((reason) => typeof reason !== "string" || !reason.trim())) {
       throw new ProviderRuntimeError("autonomous model selector returned a malformed ranking row");
     }
-    return { provider: row.provider, model: row.model, score: row.score, eligible: row.eligible, reasons: [...row.reasons] };
+    const optionalMetric = (name: string): number | undefined => {
+      const metric = row[name];
+      if (metric === undefined || metric === null) return undefined;
+      if (typeof metric !== "number" || !Number.isFinite(metric)) throw new ProviderRuntimeError(`autonomous model selector returned an invalid ${name}`);
+      return metric;
+    };
+    const observedPulls = row.observed_pulls;
+    if (observedPulls !== undefined && observedPulls !== null && (typeof observedPulls !== "number" || !Number.isSafeInteger(observedPulls) || observedPulls < 0)) throw new ProviderRuntimeError("autonomous model selector returned invalid observed_pulls");
+    return {
+      provider: row.provider,
+      model: row.model,
+      score: row.score,
+      eligible: row.eligible,
+      reasons: [...row.reasons],
+      ...(row.base_score === undefined || row.base_score === null ? {} : { base_score: optionalMetric("base_score") }),
+      ...(row.exploration_bonus === undefined || row.exploration_bonus === null ? {} : { exploration_bonus: optionalMetric("exploration_bonus") }),
+      ...(observedPulls === undefined || observedPulls === null ? {} : { observed_pulls: observedPulls }),
+    };
   });
 }
 
@@ -3306,15 +4281,44 @@ function validateSelectionOutputRequirements(request: Pick<AutonomousSelectionRe
 export function rankAutonomousModels(request: AutonomousSelectionRequest): AutonomousModelRanking[] {
   validateSelectionConstraints(request);
   validateSelectionOutputRequirements(request);
+  const weights = normalizeAutonomousSelectionWeights(request.weights);
+  const observations = normalizeAutonomousModelObservations(request.observations);
+  const observationByArm = new Map(observations.map((observation) => [observation.arm_id, observation]));
+  const maxCost = Math.max(1, ...request.candidates.map((candidate) => candidate.cost_per_million_tokens));
+  const effectiveMetrics = new Map(request.candidates.map((candidate) => {
+    const armId = `${candidate.provider}/${candidate.model}`;
+    const health = request.model_health[armId];
+    const attempts = health?.attempts ?? 0;
+    const evidence = attempts > 0 && typeof health?.success_rate === "number"
+      ? { successRate: health.success_rate, latency: health.last_latency_ms ?? health.mean_latency_ms }
+      : null;
+    if (!evidence) return [armId, { reliability: candidate.reliability, latency: candidate.latency_ms }] as const;
+    const confidence = Math.min(attempts / 12, 0.75);
+    return [armId, {
+      reliability: (1 - confidence) * candidate.reliability + confidence * evidence.successRate,
+      latency: evidence.latency === null || evidence.latency === undefined
+        ? candidate.latency_ms
+        : (1 - confidence) * candidate.latency_ms + confidence * evidence.latency,
+    }] as const;
+  }));
+  const maxLatency = Math.max(1, ...[...effectiveMetrics.values()].map((metrics) => metrics.latency));
+  const totalPulls = observations.reduce((sum, observation) => sum + observation.pulls, 0);
+  const logTotal = Math.log(totalPulls + 1);
   return request.candidates.map((candidate) => {
     const reasons: string[] = [];
     const provider = request.provider_health[candidate.provider];
-    const model = request.model_health[`${candidate.provider}/${candidate.model}`];
+    const armId = `${candidate.provider}/${candidate.model}`;
+    const model = request.model_health[armId];
+    const metrics = effectiveMetrics.get(armId) ?? { reliability: candidate.reliability, latency: candidate.latency_ms };
+    const observation = observationByArm.get(armId);
     if (candidate.enabled === false) reasons.push("candidate disabled");
     if (!provider) reasons.push("provider not registered");
+    if (provider?.registered === false) reasons.push("provider not registered");
     if (provider?.circuit === "open") reasons.push("provider circuit open");
     if (model?.circuit === "open") reasons.push("model circuit open");
     if (provider?.credential_required !== false && provider?.credential_ready !== true) reasons.push("credential not ready");
+    if (provider?.eligible === false) reasons.push("provider health ineligible");
+    if (observation?.disabled === true) reasons.push("disabled by learning policy");
     if (candidate.max_output_tokens < request.requested_output_tokens) reasons.push("model output capacity is below the request");
     if (candidate.context_window_tokens < request.estimated_input_tokens + request.requested_output_tokens) reasons.push("model context capacity is below the request");
     if (request.required_capabilities.some((required) => !(candidate.capabilities ?? []).includes(required))) reasons.push("model lacks a required capability");
@@ -3322,16 +4326,29 @@ export function rankAutonomousModels(request: AutonomousSelectionRequest): Auton
     if (request.require_json === true && provider && provider.structured_output_mode === undefined) reasons.push("provider structured output capability is unknown");
     if (request.require_json === true && provider?.structured_output_mode === "disabled") reasons.push("provider structured output is disabled");
     if (request.max_cost_per_million_tokens !== undefined && request.max_cost_per_million_tokens !== null && candidate.cost_per_million_tokens > request.max_cost_per_million_tokens) reasons.push("model cost exceeds the caller budget");
-    if (request.max_latency_ms !== undefined && request.max_latency_ms !== null && candidate.latency_ms > request.max_latency_ms) reasons.push("model latency exceeds the caller bound");
+    if (request.max_latency_ms !== undefined && request.max_latency_ms !== null && metrics.latency > request.max_latency_ms) reasons.push("model latency exceeds the caller bound");
     if (request.min_quality !== undefined && request.min_quality !== null && candidate.quality < request.min_quality) reasons.push("model quality is below the caller floor");
-    const healthRate = typeof model?.success_rate === "number" && model.attempts && model.attempts > 0 ? model.success_rate : 0.5;
-    const qualityObservations = model?.quality_observations ?? 0;
-    const qualityRate = typeof model?.quality_mean === "number" && qualityObservations > 0 ? model.quality_mean : null;
-    const latencyUtility = 1 - Math.min(1, candidate.latency_ms / 60_000);
-    const costUtility = 1 - Math.min(1, candidate.cost_per_million_tokens / 10_000);
-    const adaptiveHealth = qualityRate === null ? healthRate * 0.15 : healthRate * 0.1 + qualityRate * 0.05;
-    const score = candidate.quality * 0.4 + candidate.reliability * 0.3 + adaptiveHealth + latencyUtility * 0.1 + costUtility * 0.05;
-    return { provider: candidate.provider, model: candidate.model, score: Number(score.toFixed(12)), eligible: reasons.length === 0, reasons };
+    const pulls = observation?.pulls ?? 0;
+    const meanReward = pulls > 0 ? observation!.reward_sum / pulls : 0;
+    const explorationBonus = pulls === 0
+      ? weights.exploration
+      : weights.exploration * Math.sqrt(logTotal / pulls);
+    const baseScore = weights.quality * candidate.quality
+      + weights.reliability * metrics.reliability
+      + weights.exploration * meanReward
+      - weights.cost * (candidate.cost_per_million_tokens / maxCost)
+      - weights.latency * (metrics.latency / maxLatency);
+    const score = baseScore + explorationBonus;
+    return {
+      provider: candidate.provider,
+      model: candidate.model,
+      score: Number(score.toFixed(12)),
+      eligible: reasons.length === 0,
+      reasons,
+      base_score: Number(baseScore.toFixed(12)),
+      exploration_bonus: Number(explorationBonus.toFixed(12)),
+      observed_pulls: pulls,
+    };
   }).sort((left, right) => Number(right.eligible) - Number(left.eligible) || right.score - left.score || left.provider.localeCompare(right.provider) || left.model.localeCompare(right.model));
 }
 

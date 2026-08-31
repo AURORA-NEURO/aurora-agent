@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AURORA Agent — a decision-context compiler for the Model Context Protocol</title>
+<meta name="description" content="Context engineering, with receipts: a local MCP server (259 tools) built on FIBER, a decision context compiler that certifies exactly what was omitted.">
+<link rel="canonical" href="https://aurora-neuro.github.io/aurora-agent/">
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<link rel="stylesheet" href="style.css">
+<meta property="og:type" content="website">
+<meta property="og:title" content="AURORA Agent — a decision-context compiler for the Model Context Protocol">
+<meta property="og:description" content="Context engineering as a compiler pass: the smallest decision-sufficient evidence region, plus a Context Certificate for every omission. 259 MCP tools, fully local, Apache-2.0.">
+<meta property="og:url" content="https://aurora-neuro.github.io/aurora-agent/">
+<meta property="og:site_name" content="AURORA Agent">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="AURORA Agent — a decision-context compiler for the Model Context Protocol">
+<meta name="twitter:description" content="Context engineering as a compiler pass: the smallest decision-sufficient evidence region, plus a Context Certificate for every omission. 259 MCP tools, fully local, Apache-2.0.">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "AURORA Agent",
+  "applicationCategory": "DeveloperApplication",
+  "operatingSystem": "Windows (prebuilt); builds from source with Cargo on other platforms",
+  "softwareVersion": "0.1.1",
+  "license": "https://www.apache.org/licenses/LICENSE-2.0",
+  "url": "https://aurora-neuro.github.io/aurora-agent/",
+  "downloadUrl": "https://github.com/AURORA-NEURO/aurora-agent/releases",
+  "codeRepository": "https://github.com/AURORA-NEURO/aurora-agent",
+  "description": "Context engineering, with receipts: a local MCP server (259 tools) built on FIBER, a decision context compiler that certifies exactly what was omitted.",
+  "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
+}
+</script>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {
+      "@type": "Question",
+      "name": "What is a Context Certificate?",
+      "acceptedAnswer": { "@type": "Answer", "text": "A Context Certificate is a machine-readable receipt issued alongside every compiled Decision Section. It states exactly which facts were omitted from the context and whether each omission could have changed the decision. Certificates hash canonical bytes, so they can be verified independently of the compiler that produced them." }
+    },
+    {
+      "@type": "Question",
+      "name": "How is AURORA Agent different from RAG?",
+      "acceptedAnswer": { "@type": "Answer", "text": "Retrieval-augmented generation ranks passages by similarity and hopes the top-k suffice. AURORA Agent's FIBER compiler treats context assembly as a compiler pass over a typed world: it computes a mandatory protected closure before any relevance step, slices dependencies, and emits a certificate accounting for every omission. The output is a claim about sufficiency, not a similarity ranking." }
+    },
+    {
+      "@type": "Question",
+      "name": "Does AURORA Agent need network access?",
+      "acceptedAnswer": { "@type": "Answer", "text": "No. It is a local program: no network requests, no external services, no telemetry, no data collection. The optional HTTP gateway binds to an address you choose (loopback by default) and calls no external services." }
+    },
+    {
+      "@type": "Question",
+      "name": "Why is the headline benchmark a tie?",
+      "acceptedAnswer": { "@type": "Answer", "text": "On the shipped reference world, a 5-hop graph walk, a BM25 retriever, and FIBER select the identical eleven facts, so that world cannot tell the methods apart. The project publishes this deliberate negative because equal-engineering baselines are the point: FIBER separates from the baselines only on a generated world built to vary structure independently, and the docs say exactly that." }
+    }
+  ]
+}
+</script>
+</head>
+<body>
+
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="./">
+      <svg viewBox="0 0 64 64" aria-hidden="true"><rect x="4" y="4" width="56" height="56" rx="10" fill="var(--accent)"/><path d="M32 14 L50 50 L42 50 L32 28 L22 50 L14 50 Z" fill="var(--bg)"/><rect x="27" y="41" width="10" height="5" rx="1.5" fill="var(--bg)"/></svg>
+      AURORA Agent
+    </a>
+    <nav class="site-nav" aria-label="Site">
+      <a href="./" aria-current="page">Overview</a>
+      <a href="install.html">Install</a>
+      <a href="benchmarks.html">Benchmarks</a>
+      <a href="research.html">Research</a>
+      <a href="explore.html">Explorer</a>
+      <a href="docs.html">Docs</a>
+      <a href="faq.html">FAQ</a>
+      <a href="https://github.com/AURORA-NEURO/aurora-agent">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <div class="wrap">
+
+    <h1>Context assembly as a compiler pass</h1>
+
+    <p class="tagline">Context engineering, with receipts.</p>
+
+    <p class="lede">AURORA Agent is a local <strong>Model Context Protocol server</strong> built on FIBER, a
+    <strong>decision context compiler</strong>. Instead of retrieval plus summarisation plus ad-hoc compaction,
+    a typed decision query is compiled into the <strong>smallest decision-sufficient evidence region</strong> —
+    delivered as a Decision Section, with a <strong>Context Certificate</strong> that states exactly what was
+    omitted and whether the omission could have changed the decision.</p>
+
+    <p>It is a Rust workspace of 79 crates (engine crates are prefixed <code>bioprism-</code>), exposing
+    259 MCP tools over stdio, a CLI (<code>bioprism --json</code>, with a ten-exit-code retryability
+    matrix), and an optional local HTTP gateway (<code>bioprism-api</code>). Apache-2.0, source on
+    <a href="https://github.com/AURORA-NEURO/aurora-agent">GitHub</a>.</p>
+
+    <h2>What the measurement says</h2>
+
+    <p>The shipped reference world contains 761 facts. FIBER compiles the query down to
+    <strong>11 facts — 1.45% of the world</strong> — and the deterministic oracle still returns the correct
+    verdict with all four leakage witnesses intact.</p>
+
+    <div class="callout">
+      <p><strong>The headline benchmark is a deliberate negative.</strong> On that same reference world,
+      a 5-hop graph walk and a BM25 retriever select <em>the identical eleven facts</em>. FIBER has no
+      measurable advantage there; it separates from both baselines only on a generated world built to
+      vary structure independently. Publishing the tie is the methodology: a compression claim without
+      equal-engineering baselines is unfalsifiable. Details on the
+      <a href="benchmarks.html">benchmarks page</a> and in
+      <a href="https://github.com/AURORA-NEURO/aurora-agent/blob/main/docs/FINDINGS.md">docs/FINDINGS.md</a>.</p>
+    </div>
+
+    <p>Correctness is pinned by cross-implementation parity: the certificate digest
+    <code>c0da17ffc80465258345c8a538171bfd868100cd883e9a20780a0dc5477e7ea4</code> is agreed byte-for-byte
+    by three implementations — the CPython reference, the eager Rust path, and the Rust indexed store.</p>
+
+    <h2>What you get as an MCP client</h2>
+
+    <ul>
+      <li><strong>Compilation, not top-k.</strong> A mandatory protected closure is computed before any
+      relevance step; a budget smaller than the closure fails rather than truncating.</li>
+      <li><strong>Omission accounting at every layer.</strong> An agent that stops at the first disclosure
+      layer still knows what it does not have — layering hides volume, never the fact of an omission.</li>
+      <li><strong>Independent verification.</strong> A certificate can be read and verified without linking
+      the engine that produced it.</li>
+      <li><strong>Fully local.</strong> No network requests, no external services, no telemetry, no data
+      collection — <a href="https://github.com/AURORA-NEURO/aurora-agent/blob/main/PRIVACY.md">privacy policy</a>.</li>
+    </ul>
+
+    <h2>Autonomous workflows, with receipts</h2>
+
+    <p><code>bioprism autopilot</code> drives an instantiated workflow's mission autonomously under an
+    explicit <strong>AutonomyGrant</strong> — the only source of authority; there is no default grant.
+    Every failed step is classified by its declared retry class, and only what the grant authorises is
+    re-dispatched as a repair subset; success is never inferred — it requires full step coverage, a
+    succeeded mission report, and (by default) a complete workflow reconciliation with valid integrity.
+    Every drive emits a digest-sealed report that <code>bioprism autopilot verify</code> recomputes,
+    detecting a single tampered byte.</p>
+
+    <p>What it deliberately does not do: no scheduling or recurrence, no MCP tool exposure of the
+    driver itself, no cross-process resume, no wall-clock deadlines. See
+    <a href="faq.html#autonomous-workflows">the FAQ entry</a> and
+    <a href="https://github.com/AURORA-NEURO/aurora-agent/blob/main/docs/AUTOPILOT.md">docs/AUTOPILOT.md</a>.</p>
+
+    <h2>Autonomous research, with receipts</h2>
+
+    <p><code>bioprism research template | run | verify</code> executes a fixed protocol over
+    synthetic decision worlds — generate, compile and certify, equal-engineering baseline panel,
+    structural sweep, metamorphic mutation, minimize — and writes a digest-sealed dossier in which
+    every finding cites the sha256 of the artifact supporting it. The committed worked example runs
+    12 steps in about four seconds and returns <strong>nine findings, seven of them negative</strong>:
+    FIBER is tied by <code>directed-walk-full</code> at every distractor level and is not separated
+    in 36 of 36 sweep cells.</p>
+
+    <p>Measurement over synthetic worlds only — no biology, literature coverage, or external-world
+    claims, and oracle review stays a human gate. See <a href="research.html">the research page</a>
+    and <a href="https://github.com/AURORA-NEURO/aurora-agent/blob/main/docs/RESEARCH.md">docs/RESEARCH.md</a>.</p>
+
+    <h2>Install</h2>
+
+    <dl class="facts">
+      <dt>Claude Desktop</dt>
+      <dd>Download <code>aurora-agent.mcpb</code> (v0.1.1, prebuilt for Windows only) from the
+      <a href="https://github.com/AURORA-NEURO/aurora-agent/releases">GitHub releases</a> and double-click it.</dd>
+      <dt>Claude Code</dt>
+      <dd><code>claude plugin marketplace add AURORA-NEURO/aurora-agent</code> then
+      <code>claude plugin install aurora-agent@aurora</code></dd>
+      <dt>MCP registry</dt>
+      <dd>Listed as <code>io.github.MurariAmbati/aurora-agent</code> v0.1.1 on
+      <a href="https://registry.modelcontextprotocol.io/">registry.modelcontextprotocol.io</a>.</dd>
+      <dt>Any MCP client</dt>
+      <dd>Build from source with Cargo and run <code>bioprism-mcp</code> over stdio — see the
+      <a href="install.html">install page</a>.</dd>
+    </dl>
+
+    <div class="boundary">Research and developer infrastructure: it does not diagnose an individual,
+    recommend treatment, triage care, enroll participants, or claim medical-device functionality.</div>
+
+  </div>
+</main>
+
+<footer class="site">
+  <div class="wrap">
+    <p>AURORA Agent — Apache-2.0 ·
+      <a href="https://github.com/AURORA-NEURO/aurora-agent">Source</a> ·
+      <a href="https://github.com/AURORA-NEURO/aurora-agent/blob/main/PRIVACY.md">Privacy</a> ·
+      MCP registry: <code>io.github.MurariAmbati/aurora-agent</code></p>
+    <p>Research and developer infrastructure: it does not diagnose an individual, recommend treatment,
+    triage care, enroll participants, or claim medical-device functionality.</p>
+  </div>
+</footer>
+
+</body>
+</html>

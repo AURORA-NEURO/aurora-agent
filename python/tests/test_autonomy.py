@@ -25,12 +25,16 @@ from prism_sdk import (
     AutonomousPlanHoldoutCase,
     AutonomousPlanHoldoutEvaluator,
     AutonomousPlanRefinementResult,
+    AutonomousOrderedStepPlanRefinementResult,
     AutonomousToolOutcomeEvaluator,
     AutonomousCrossDomainPlanRefinementResult,
     AutonomousCrossDomainCheckpoint,
     AutonomousCrossDomainResult,
     AutonomousCrossDomainReplanResult,
+    AutonomousEffectBoundary,
     InMemoryAutonomousDecisionCycleStateStore,
+    AutonomousDecisionCyclePersistenceCoordinator,
+    TransactionalJsonAutonomousDecisionCycleSnapshotPersistence,
     AutonomousRoutingHoldoutCase,
     AutonomousRoutingHoldoutEvaluator,
     AutonomousTaskRouter,
@@ -41,10 +45,14 @@ from prism_sdk import (
     AutonomousWorkflowRun,
     AutonomousWorkflowStageResult,
     AutonomousWorkflowCycleCheckpoint,
+    AutonomousPromptLearningState,
+    AutonomousPromptLearningPersistenceCoordinator,
+    TransactionalJsonAutonomousPromptLearningSnapshotPersistence,
     validate_autonomous_workflow_execution_receipt,
     AUTONOMOUS_WORKFLOW_CYCLE_CONTEXT_KEY,
     CompositeDomainEvaluator,
     DomainEvaluatorRegistry,
+    create_autonomous_cycle_evaluator_bridge,
     BrainRunError,
     BrainRunResult,
     BrainEpisodicMemory,
@@ -59,6 +67,7 @@ from prism_sdk import (
     CredentialError,
     LLMRuntime,
     InMemoryAutonomousCapabilityJournalStore,
+    InMemoryAutonomousEffectJournal,
     InMemoryAutonomousRunTraceStore,
     AutonomousCapabilityJournalPersistenceCoordinator,
     TransactionalJsonAutonomousCapabilityJournalSnapshotPersistence,
@@ -67,9 +76,12 @@ from prism_sdk import (
     ModelCatalogue,
     ProviderHealthLedger,
     ProviderError,
+    ProviderRequest,
+    ProviderStreamEvent,
     ProviderTool,
     ProviderToolResult,
     builtin_autonomous_domain_evaluator_profiles,
+    builtin_autonomous_prompt_registry,
     builtin_autonomous_workflow_strategies,
     openai_provider,
     provider_image_url_part,
@@ -77,6 +89,18 @@ from prism_sdk import (
     task_facet_digests,
 )
 from prism_sdk.errors import ArgumentError
+
+
+def _planner_context_digest(context: Mapping[str, object]) -> str:
+    stable = {
+        "domain": context["domain"],
+        "capability": context["capability"],
+        "risk_class": context["risk_class"],
+        "task_family": context.get("task_family"),
+    }
+    return hashlib.sha256(
+        json.dumps(stable, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
 
 
 class _CasTextStore:
@@ -117,6 +141,28 @@ class _ProviderHandler(BaseHTTPRequestHandler):
                         "focus_child_ids": ["route-data"] if route_children else ["data-review"],
                         "review_required": False,
                         "confidence": 0.82,
+                        "abstain": False,
+                    }
+                ),
+                "usage": {"total_tokens": 10},
+            }
+            payload = json.dumps(response).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+            return
+        if "Propose a bounded ordering and focus refinement for the reviewed step graph" in request_text:
+            response = {
+                "id": "autonomy-ordered-step-plan-refinement",
+                "model": "test-model",
+                "output_text": json.dumps(
+                    {
+                        "priority_order": ["inspect", "verify"],
+                        "focus_step_ids": ["verify"],
+                        "review_required": False,
+                        "confidence": 0.88,
                         "abstain": False,
                     }
                 ),
@@ -257,12 +303,15 @@ class _StructuredWorkflowProviderHandler(BaseHTTPRequestHandler):
                 stage_id = content.split("Execute workflow stage ", 1)[1].split(":", 1)[0]
                 break
         blocked = getattr(self.server, "block_stage", None) == stage_id
+        quality_failed = getattr(self.server, "quality_fail_stage", None) == stage_id
         large_checkpoint = getattr(self.server, "large_checkpoint", False)
         evidence = (
             [f"evidence for {stage_id} {index} " + ("x" * 480) for index in range(32)]
-            if large_checkpoint and not blocked
+            if large_checkpoint and not blocked and not quality_failed
             else [] if blocked else [f"evidence for {stage_id}"]
         )
+        if quality_failed:
+            evidence = []
         response = {
             "id": f"workflow-{stage_id}",
             "model": "test-model",
@@ -660,6 +709,234 @@ def _structured_runtime() -> tuple[LLMRuntime, CredentialStore, HTTPServer, thre
         )
     )
     return runtime, store, server, thread
+
+
+def _structured_value_from_schema(schema: object, index: int = 0) -> object:
+    """Produce a complete, provider-neutral fixture from the reviewed JSON schema."""
+
+    if not isinstance(schema, dict):
+        return "bounded fixture"
+    if "const" in schema:
+        return schema["const"]
+    enum = schema.get("enum")
+    if isinstance(enum, list) and enum:
+        return enum[0]
+    kind = schema.get("type")
+    if kind == "object":
+        properties = schema.get("properties", {})
+        if not isinstance(properties, dict):
+            return {}
+        result: dict[str, object] = {}
+        for key, value in properties.items():
+            if key == "stage_id" and isinstance(value, dict) and isinstance(value.get("enum"), list) and value["enum"]:
+                result[key] = value["enum"][index % len(value["enum"])]
+            else:
+                result[key] = _structured_value_from_schema(value, index)
+        return result
+    if kind == "array":
+        item_schema = schema.get("items", {})
+        minimum = schema.get("minItems", 1)
+        return [_structured_value_from_schema(item_schema, item_index) for item_index in range(minimum if isinstance(minimum, int) else 1)]
+    if kind == "boolean":
+        return True
+    if kind == "integer" or kind == "number":
+        return 1
+    return "bounded fixture"
+
+
+def test_cross_domain_structured_response_gate_admits_only_reviewed_synthesis() -> None:
+    calls: list[str] = []
+
+    def handler(request: object) -> dict[str, object]:
+        calls.append(getattr(request, "model", "unknown"))
+        schema = getattr(request, "response_schema", None)
+        return {
+            "output_text": json.dumps(_structured_value_from_schema(schema)),
+        }
+
+    runtime = LLMRuntime()
+    runtime.register_in_memory_provider("openai", handler)
+    candidate = dict(_model()[0])
+    agent = AutonomousAgent(
+        _Workspace(),
+        runtime,
+        model_catalogue=ModelCatalogue([candidate]),
+    )
+    task = "Review a biomedical neuroscience task with structural synthesis admission."
+    subtasks = (
+        {"id": "bio", "domain": "biomedical", "task": "Review the biomedical evidence."},
+        {"id": "neuro", "domain": "neuroscience", "task": "Review the neuroscience signal limits."},
+    )
+
+    blocked = agent.run_cross_domain(
+        task=task,
+        subtasks=subtasks,
+        credentials={},
+        approve_provider_call=True,
+        structured_domain_response=True,
+        require_response_alignment=True,
+    )
+    assert blocked.status == "response_review_required"
+    assert blocked.synthesis_result is None
+    assert blocked.response_assessment is not None
+    assert blocked.response_assessment.status == "needs_alignment_review"
+    assert "pairwise_alignment_incomplete" in blocked.response_assessment.gate_reasons
+    assert calls == ["test-model", "test-model"]
+    assert "bounded structured fixture" not in json.dumps(blocked.response_assessment.to_dict())
+    assert blocked.execution_receipt.next_action == "review_response_gate"
+    assert blocked.execution_receipt.safe_to_synthesize is False
+
+    completed = agent.run_cross_domain(
+        task=task,
+        subtasks=subtasks,
+        credentials={},
+        approve_provider_call=True,
+        structured_domain_response=True,
+    )
+    assert completed.status == "completed"
+    assert completed.synthesis_result is not None
+    assert completed.response_assessment is not None
+    assert completed.response_assessment.status == "completed"
+    assert len(completed.response_assessment.rows) == 3
+    assert calls == ["test-model"] * 5
+    assert completed.execution_receipt.next_action == "complete"
+
+
+def test_direct_structured_response_admission_holds_weak_answers_across_every_domain() -> None:
+    runtime = LLMRuntime()
+
+    def weak_handler(request: ProviderRequest) -> Mapping[str, object]:
+        value = _structured_value_from_schema(request.response_schema)
+        assert isinstance(value, dict)
+        for key in ("observations", "inferences", "uncertainty", "evidence_gaps", "next_actions"):
+            value[key] = []
+        stages = value.get("stages")
+        if isinstance(stages, list):
+            value["stages"] = [
+                {**stage, "evidence": [], "findings": [], "uncertainty": [], "open_questions": []}
+                for stage in stages
+                if isinstance(stage, dict)
+            ]
+        details = value.get("domain_details")
+        if isinstance(details, dict):
+            value["domain_details"] = {field: [] for field in details}
+        return {"output_text": json.dumps(value)}
+
+    runtime.register_in_memory_provider("openai", weak_handler)
+    candidate = dict(_model()[0])
+    candidate["capabilities"] = [*candidate["capabilities"], "structured_output"]
+    agent = AutonomousAgent(
+        _Workspace(),
+        runtime,
+        model_catalogue=ModelCatalogue([candidate]),
+    )
+
+    for domain in AUTONOMOUS_DOMAINS:
+        held = agent.run(
+            task=f"Produce a weak structured answer for {domain}.",
+            domain=domain,
+            credentials={},
+            approve_provider_call=True,
+            structured_domain_response=True,
+        )
+        assert held.status == "response_review_required", domain
+        assert held.response_evaluation is not None
+        assert held.response_evaluation["passed"] is False
+        assert held.response_evaluation["failure_class"] == "response_integrity_gate"
+
+        opted_out = agent.run(
+            task=f"Produce a weak structured answer for {domain}.",
+            domain=domain,
+            credentials={},
+            approve_provider_call=True,
+            structured_domain_response=True,
+            require_response_review=False,
+        )
+        assert opted_out.status.startswith("completed"), domain
+        assert opted_out.response_evaluation is not None
+        assert opted_out.response_evaluation["passed"] is False
+
+
+def test_structured_response_review_precedes_python_task_learning_across_every_domain(tmp_path: Path) -> None:
+    runtime = LLMRuntime()
+
+    def weak_handler(request: ProviderRequest) -> Mapping[str, object]:
+        value = _structured_value_from_schema(request.response_schema)
+        assert isinstance(value, dict)
+        for key in ("observations", "inferences", "uncertainty", "evidence_gaps", "next_actions"):
+            value[key] = []
+        stages = value.get("stages")
+        if isinstance(stages, list):
+            value["stages"] = [
+                {**stage, "evidence": [], "findings": [], "uncertainty": [], "open_questions": []}
+                for stage in stages
+                if isinstance(stage, dict)
+            ]
+        details = value.get("domain_details")
+        if isinstance(details, dict):
+            value["domain_details"] = {field: [] for field in details}
+        return {"output_text": json.dumps(value)}
+
+    runtime.register_in_memory_provider("openai", weak_handler)
+    candidate = dict(_model()[0])
+    candidate["capabilities"] = [*candidate["capabilities"], "structured_output"]
+    memory = BrainEpisodicMemory(tmp_path / "structured-learning-review.sqlite3")
+    try:
+        agent = AutonomousAgent(
+            _Workspace(),
+            runtime,
+            model_catalogue=ModelCatalogue([candidate]),
+            memory=memory,
+        )
+        evaluator = BrainOutcomeEvaluator(
+            lambda _input: {"reward": 0.8, "passed": True, "failed": False},
+            evaluator_id="python-task-quality-review",
+            evaluator_version="1",
+        )
+        state: Mapping[str, object] = {
+            "schema": "bioprism-brain-bandit/0.1",
+            "generation": 0,
+            "arms": [],
+        }
+        for domain in AUTONOMOUS_DOMAINS:
+            held = agent.run(
+                task=f"Learn from a weak structured answer for {domain}.",
+                domain=domain,
+                credentials={},
+                approve_provider_call=True,
+                structured_domain_response=True,
+                learn=True,
+                evaluator=evaluator,
+                bandit_state=state,
+                max_replans=0,
+                run_id=f"structured-review-{domain}",
+            )
+            assert held.status == "response_review_required", domain
+            assert held.final_result.response_evaluation is not None
+            assert held.final_result.response_evaluation["passed"] is False
+            assert held.memory_receipts == (), domain
+            assert all(item.get("kind") == "structured_response" for item in held.evaluations), domain
+            state = held.bandit_state
+
+            admitted = agent.run(
+                task=f"Opt out of the weak structured review gate for {domain}.",
+                domain=domain,
+                credentials={},
+                approve_provider_call=True,
+                structured_domain_response=True,
+                require_response_review=False,
+                learn=True,
+                evaluator=evaluator,
+                bandit_state=state,
+                max_replans=0,
+                run_id=f"structured-opt-out-{domain}",
+            )
+            assert admitted.status.startswith("completed"), domain
+            assert admitted.memory_receipts, domain
+            assert any(item.get("kind") != "structured_response" for item in admitted.evaluations), domain
+            state = admitted.bandit_state
+    finally:
+        memory.close()
 
 
 def test_model_catalogue_and_agent_facade_connect_readiness_session_and_execution():
@@ -1434,9 +1711,11 @@ def test_model_selection_preview_is_keyless_provider_free_and_covers_every_domai
             domain="coding",
             capability="debugging",
             credentials={},
+            selection_weights={"quality": 1, "reliability": 0, "cost": 0, "latency": 0, "exploration": 0},
         )
         assert focused["capability"] == "debugging"
         assert len(focused["capability_contract_digest"]) == 64
+        assert focused["selection_contract"]["selection_weights"]["quality"] == 1.0
         assert focused["selection_audit"]["retention"] == "metadata_only_no_task_or_provider_payloads"
         assert "brain_prompt_assemble" not in [name for name, _ in workspace.calls]
         assert "brain_plan" not in [name for name, _ in workspace.calls]
@@ -1505,17 +1784,34 @@ def test_approved_model_selection_revalidates_and_invokes_one_credentialless_arm
         model_catalogue=ModelCatalogue([candidate]),
     )
     task = "execute one reviewed local model decision"
+    selection_observations = [
+        {
+            "arm_id": "offline/offline-model",
+            "pulls": 3,
+            "reward_sum": 2.4,
+            "failures": 0,
+        }
+    ]
     previews: dict[str, dict[str, object]] = {}
     for domain in AUTONOMOUS_DOMAINS:
-        preview = agent.model_selection_preview(task=task, domain=domain, credentials={})
+        preview = agent.model_selection_preview(
+            task=task,
+            domain=domain,
+            credentials={},
+            selection_observations=selection_observations,
+        )
         previews[domain] = preview
         assert preview["status"] == "selected"
         assert preview["selection_contract"]["candidate_ids"] == ["offline/offline-model"]
+        assert preview["selection_contract"]["selection_observations_digest"] == content_digest(
+            selection_observations
+        )
         result = agent.run_approved_model_selection(
             task=task,
             domain=domain,
             selection_preview=preview,
             credentials={},
+            selection_observations=selection_observations,
         )
         assert result.status.startswith("completed")
         assert result.response is not None
@@ -1789,15 +2085,108 @@ def test_provider_plan_refinement_is_dependency_closed_and_approval_gated():
                 blueprint=blueprint,
                 credentials=session,
                 approve_provider_call=True,
+                prompt_registry=builtin_autonomous_prompt_registry(),
             )
             assert refined.status == "completed"
             assert refined.priority_stage_ids == ("scope", "inspect", "implement", "verify", "handoff")
             assert refined.focus_stage_ids == ("inspect", "verify")
             assert refined.review_required is False
+            assert refined.planner_context == {
+                "domain": "coding",
+                "capability": "planning",
+                "risk_class": blueprint.profile.risk_class,
+                "task_family": blueprint.workflow.workflow_id,
+            }
+            assert refined.planner_context_digest == _planner_context_digest(refined.planner_context)
+            assert "coding specialist" in server.request_body.decode("utf-8")  # type: ignore[attr-defined]
             assert refined.to_dict()["authorization"].startswith("plan_proposal_only")
             public = json.dumps(refined.to_dict())
             assert "plan-refinement-secret" not in public
             assert blueprint.spec.task not in public
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+
+def test_provider_ordered_step_plan_refinement_is_graph_closed_and_redacted():
+    runtime, store, server, thread = _runtime()
+    try:
+        agent = AutonomousAgent(_Workspace(), runtime, model_catalogue=ModelCatalogue(_model()))
+        with agent.onboarding.start_session(session_id="ordered-step-plan-session") as session:
+            session.register_value("openai", "ordered-step-plan-secret")
+            steps = [
+                {
+                    "id": "inspect",
+                    "domain": "coding",
+                    "capability": "debugging",
+                    "objective": "Inspect the repository and identify the bounded change.",
+                },
+                {
+                    "id": "verify",
+                    "domain": "coding",
+                    "capability": "testing",
+                    "objective": "Verify the change with local evidence.",
+                    "depends_on": ["inspect"],
+                },
+            ]
+            waiting = agent.plan_ordered_steps_with_provider(
+                task="Order the reviewed implementation steps.",
+                steps=steps,
+                credentials=session,
+                model_candidates=_model(),
+            )
+            assert isinstance(waiting, AutonomousOrderedStepPlanRefinementResult)
+            assert waiting.status == "approval_required"
+            assert waiting.priority_step_ids == ()
+            refined = agent.plan_ordered_steps_with_provider(
+                task="Order the reviewed implementation steps.",
+                steps=steps,
+                credentials=session,
+                model_candidates=_model(),
+                approve_provider_call=True,
+            )
+            assert refined.status == "completed"
+            assert refined.priority_step_ids == ("inspect", "verify")
+            assert refined.focus_step_ids == ("verify",)
+            assert refined.review_required is False
+            assert refined.planner_context == {
+                "domain": "coding",
+                "capability": "planning",
+                "risk_class": agent.orchestrator.registry.resolve("coding").risk_class,
+                "task_family": "ordered_step_plan",
+            }
+            public = json.dumps(refined.to_dict())
+            assert "ordered-step-plan-secret" not in public
+            assert "Order the reviewed implementation steps." not in public
+            assert refined.to_dict()["authorization"].startswith("plan_proposal_only")
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+
+def test_provider_ordered_step_plan_rejects_non_closed_graph_before_provider_contact():
+    runtime, _store, server, thread = _runtime()
+    try:
+        agent = AutonomousAgent(_Workspace(), runtime, model_catalogue=ModelCatalogue(_model()))
+        with pytest.raises(BrainRunError, match="dependencies are not closed"):
+            agent.plan_ordered_steps_with_provider(
+                task="Reject a malformed graph.",
+                steps=[
+                    {
+                        "id": "verify",
+                        "domain": "coding",
+                        "capability": "testing",
+                        "objective": "Verify only after a known prerequisite.",
+                        "depends_on": ["missing"],
+                    }
+                ],
+                credentials={},
+                model_candidates=_model(),
+                approve_provider_call=True,
+            )
+        assert not hasattr(server, "request_body")
     finally:
         server.shutdown()
         thread.join(timeout=2)
@@ -1842,6 +2231,13 @@ def test_provider_cross_domain_plan_refinement_reorders_only_existing_children()
             assert refined.priority_child_ids == ("data-review", "engineering-review")
             assert refined.focus_child_ids == ("data-review",)
             assert refined.review_required is False
+            assert refined.planner_context == {
+                "domain": "cross_domain",
+                "capability": "planning",
+                "risk_class": blueprint.synthesis_blueprint.profile.risk_class,
+                "task_family": blueprint.synthesis_blueprint.workflow.workflow_id,
+            }
+            assert refined.planner_context_digest == _planner_context_digest(refined.planner_context)
             public = json.dumps(refined.to_dict())
             assert task not in public
             assert "cross-domain-plan-secret" not in public
@@ -1949,6 +2345,132 @@ def test_agent_prepare_auto_and_run_auto_reuse_explicit_runtime_boundaries():
         server.server_close()
 
 
+def test_provider_planning_preserves_credential_failures_for_all_planning_entrypoints():
+    runtime, _, server, thread = _runtime()
+    try:
+        agent = AutonomousAgent(_Workspace(), runtime, model_catalogue=ModelCatalogue(_model()))
+        blueprint = agent.prepare(task="fix the Rust tests in the repository", domain="coding")
+        expected_failure = {
+            "error_class": "CredentialError",
+            "code": "credential",
+            "retryable": False,
+            "status_code": None,
+            "circuit_open": False,
+            "retention": "metadata_only;provider_error_message_and_payloads_not_retained",
+            "secret_material": "never_returned",
+        }
+
+        single = agent.plan_with_provider(
+            blueprint=blueprint,
+            model_candidates=_model(),
+            credentials={},
+            approve_provider_call=True,
+        )
+        assert single.status == "provider_failed"
+        assert single.failure == expected_failure
+        assert "no user credential handle" not in json.dumps(single.to_dict())
+
+        cross_blueprint = agent.prepare_cross_domain(
+            task="Combine engineering and data review into one decision package.",
+            subtasks=[
+                {"id": "engineering-review", "task": "Review implementation risk.", "domain": "coding"},
+                {"id": "data-review", "task": "Review data lineage risk.", "domain": "data"},
+            ],
+        )
+        cross = agent.plan_cross_domain_with_provider(
+            blueprint=cross_blueprint,
+            model_candidates=_model(),
+            credentials={},
+            approve_provider_call=True,
+        )
+        assert cross.status == "provider_failed"
+        assert cross.failure == expected_failure
+
+        ordered = agent.plan_ordered_steps_with_provider(
+            task="Order the implementation checks.",
+            steps=[
+                {
+                    "id": "inspect",
+                    "domain": "coding",
+                    "capability": "debugging",
+                    "objective": "Inspect the repository.",
+                },
+                {
+                    "id": "verify",
+                    "domain": "coding",
+                    "capability": "testing",
+                    "objective": "Verify the result.",
+                    "depends_on": ["inspect"],
+                },
+            ],
+            model_candidates=_model(),
+            credentials={},
+            approve_provider_call=True,
+        )
+        assert ordered.status == "provider_failed"
+        assert ordered.failure == expected_failure
+
+        assert getattr(server, "request_count", 0) == 0
+
+        automatic = agent.run_auto(
+            task="fix the Rust tests in the repository",
+            credentials={},
+            planning_mode="provider",
+            approve_provider_call=True,
+        )
+        assert automatic.status == "planning_review_required"
+        assert automatic.planning is not None
+        assert automatic.planning.status == "provider_failed"
+        assert automatic.planning.failure == expected_failure
+        assert automatic.result is None
+        assert "no user credential handle" not in json.dumps(automatic.to_dict())
+
+        def fail_planning(_request: ProviderRequest) -> str:
+            raise ProviderError(
+                "sensitive planner transport diagnostic",
+                retryable=True,
+                status_code=503,
+            )
+
+        runtime.register_in_memory_provider("failing-planner", fail_planning)
+        failing_model = [dict(_model()[0], provider="failing-planner", model="planner-model", requires_credential=False)]
+
+        class FailingProviderWorkspace(_Workspace):
+            def tool(self, name: str, arguments: dict[str, object] | None = None) -> dict[str, object]:
+                result = super().tool(name, arguments)
+                if name == "brain_model_select":
+                    result["selected_model"] = {"provider": "failing-planner", "model": "planner-model"}
+                elif name == "brain_model_select_contextual":
+                    selection = result.get("selection")
+                    assert isinstance(selection, dict)
+                    selection["selected_model"] = {"provider": "failing-planner", "model": "planner-model"}
+                return result
+
+        failing_agent = AutonomousAgent(FailingProviderWorkspace(), runtime, model_catalogue=ModelCatalogue(failing_model))
+        failing_blueprint = failing_agent.prepare(task="fix the Rust tests in the repository", domain="coding")
+        failing = failing_agent.plan_with_provider(
+            blueprint=failing_blueprint,
+            model_candidates=failing_model,
+            credentials={},
+            approve_provider_call=True,
+        )
+        assert failing.status == "provider_failed"
+        assert failing.failure == {
+            "error_class": "ProviderError",
+            "code": "provider_error",
+            "retryable": True,
+            "status_code": 503,
+            "circuit_open": False,
+            "retention": "metadata_only;provider_error_message_and_payloads_not_retained",
+            "secret_material": "never_returned",
+        }
+        assert "sensitive planner transport diagnostic" not in json.dumps(failing.to_dict())
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+
 def test_run_auto_provider_planning_is_approval_gated_and_never_dispatches_without_consent():
     runtime, store, server, thread = _runtime()
     cycle_store = InMemoryAutonomousDecisionCycleStateStore()
@@ -2044,6 +2566,12 @@ def test_run_auto_provider_planning_contract_is_domain_neutral_across_all_builti
         assert hasattr(blueprint, "workflow")
         planned_domains.append(blueprint.spec.domain)  # type: ignore[union-attr]
         stage_ids = tuple(stage.id for stage in blueprint.workflow.stages)  # type: ignore[union-attr]
+        planner_context = {
+            "domain": blueprint.spec.domain,  # type: ignore[union-attr]
+            "capability": "planning",
+            "risk_class": blueprint.profile.risk_class,  # type: ignore[union-attr]
+            "task_family": blueprint.workflow.workflow_id,  # type: ignore[union-attr]
+        }
         return AutonomousPlanRefinementResult(
             status="completed",
             task_digest=blueprint.spec.task_digest,  # type: ignore[union-attr]
@@ -2053,6 +2581,8 @@ def test_run_auto_provider_planning_contract_is_domain_neutral_across_all_builti
             focus_stage_ids=stage_ids[:1],
             review_required=False,
             confidence=1.0,
+            planner_context=planner_context,
+            planner_context_digest=_planner_context_digest(planner_context),
         )
 
     def fake_workflow(**_kwargs: object) -> object:
@@ -2072,6 +2602,8 @@ def test_run_auto_provider_planning_contract_is_domain_neutral_across_all_builti
         assert result.route.primary_domain == domain
         assert isinstance(result.planning, AutonomousPlanRefinementResult)
         assert result.planning.workflow_digest
+        assert result.planning.planner_context["domain"] == domain
+        assert result.planning.planner_context_digest == _planner_context_digest(result.planning.planner_context)
     assert planned_domains == list(AUTONOMOUS_DOMAINS)
 
 
@@ -2482,6 +3014,329 @@ def test_run_autonomous_selects_assembles_plans_and_preserves_provider_approval(
         server.server_close()
 
 
+def test_agent_run_stream_preflights_lazily_invokes_and_redacts_completion():
+    calls: list[ProviderRequest] = []
+
+    def stream_handler(request: ProviderRequest) -> list[ProviderStreamEvent]:
+        calls.append(request)
+        return [
+            ProviderStreamEvent(
+                provider="openai",
+                model=request.model,
+                sequence=0,
+                event_type="fixture.text",
+                text_delta="bounded ",
+                done=False,
+            ),
+            ProviderStreamEvent(
+                provider="openai",
+                model=request.model,
+                sequence=1,
+                event_type="fixture.done",
+                text_delta="answer",
+                done=True,
+                usage={"output_tokens": 2},
+            ),
+        ]
+
+    runtime = LLMRuntime()
+    runtime.register_in_memory_provider(
+        "openai",
+        lambda _request: "unused",
+        stream_handler=stream_handler,
+    )
+    agent = AutonomousAgent(_Workspace(), runtime, model_catalogue=ModelCatalogue(_model()))
+
+    waiting = agent.run_stream(
+        task="stream a reviewed coding answer",
+        domain="coding",
+        credentials={},
+        model_candidates=_model(),
+    )
+    assert waiting.completion is not None
+    assert waiting.completion.status == "approval_required"
+    assert list(waiting.events) == []
+    assert calls == []
+
+    live = agent.run_stream(
+        task="stream a reviewed coding answer",
+        domain="coding",
+        credentials={},
+        model_candidates=_model(),
+        approve_provider_call=True,
+    )
+    assert live.completion is None
+    events = list(live.events)
+    assert [event.event.text_delta for event in events if event.event is not None] == [
+        "bounded ",
+        "answer",
+    ]
+    assert live.completion is not None
+    assert live.completion.status == "completed"
+    assert live.completion.event_count == 2
+    assert live.completion.text_delta_bytes == len("bounded answer".encode("utf-8"))
+    assert live.completion.stage_count == 1
+    assert "bounded answer" not in json.dumps(live.completion.to_dict())
+    assert live.blueprint is not None
+    assert live.completion.blueprint_digest is not None
+    assert len(calls) == 1
+    assert calls[0].model == "test-model"
+    assert "stream a reviewed coding answer" in calls[0].messages[-1]["content"]
+    with pytest.raises(ProviderError, match="single-consumer"):
+        _ = live.events
+
+
+def test_agent_run_stream_propagates_effect_identity_to_high_level_completion():
+    journal = InMemoryAutonomousEffectJournal()
+    boundary = AutonomousEffectBoundary(journal=journal)
+    runtime = LLMRuntime(effect_boundary=boundary)
+    runtime.register_in_memory_provider(
+        "openai",
+        lambda _request: "unused",
+        stream_handler=lambda request: [
+            ProviderStreamEvent(
+                provider="openai",
+                model=request.model,
+                sequence=0,
+                event_type="fixture.done",
+                text_delta="high-level recovery receipt",
+                done=True,
+            )
+        ],
+    )
+    agent = AutonomousAgent(_Workspace(), runtime, model_catalogue=ModelCatalogue(_model()))
+    live = agent.run_stream(
+        task="stream a receipt with a recoverable dispatch identity",
+        domain="coding",
+        credentials={},
+        model_candidates=_model(),
+        approve_provider_call=True,
+    )
+    list(live.events)
+    completion = live.completion
+    assert completion is not None and completion.status == "completed"
+    assert len(completion.effect_ids) == 1
+    record = journal.get(completion.effect_ids[0])
+    assert record is not None and record.status == "completed"
+    assert "high-level recovery receipt" not in json.dumps(completion.to_dict())
+
+
+def test_agent_run_auto_stream_keeps_provider_free_routing_and_allows_only_one_domain():
+    runtime = LLMRuntime()
+    runtime.register_in_memory_provider(
+        "openai",
+        lambda _request: "unused",
+        stream_handler=lambda request: [
+            ProviderStreamEvent(
+                provider="openai",
+                model=request.model,
+                sequence=0,
+                event_type="fixture.done",
+                text_delta="auto",
+                done=True,
+            )
+        ],
+    )
+    agent = AutonomousAgent(_Workspace(), runtime, model_catalogue=ModelCatalogue(_model()))
+    live = agent.run_auto_stream(
+        task="review this coding implementation",
+        credentials={},
+        model_candidates=_model(),
+        approve_provider_call=True,
+    )
+    assert live.route is not None
+    assert live.completion is None
+    assert [event.event.text_delta for event in live.events if event.event is not None] == ["auto"]
+    assert live.completion is not None
+    assert live.completion.status == "completed"
+
+    with pytest.raises(BrainRunError, match="semantic routing"):
+        agent.run_auto_stream(
+            task="review this coding implementation",
+            credentials={},
+            model_candidates=_model(),
+            semantic_routing=True,
+        )
+
+
+def test_agent_run_cross_domain_stream_is_lazy_bounded_and_synthesizes_without_retention():
+    calls: list[ProviderRequest] = []
+
+    def stream_handler(request: ProviderRequest) -> list[ProviderStreamEvent]:
+        calls.append(request)
+        is_synthesis = request.messages[-1]["content"].startswith("Synthesize the domain analyses")
+        text = "synthesis answer" if is_synthesis else f"{request.model} specialist answer"
+        return [
+            ProviderStreamEvent(
+                provider="openai",
+                model=request.model,
+                sequence=0,
+                event_type="fixture.done",
+                text_delta=text,
+                done=True,
+            )
+        ]
+
+    runtime = LLMRuntime()
+    runtime.register_in_memory_provider(
+        "openai",
+        lambda _request: "unused",
+        stream_handler=stream_handler,
+    )
+    agent = AutonomousAgent(_Workspace(), runtime, model_catalogue=ModelCatalogue(_model()))
+    subtasks = [
+        {"id": "code", "task": "inspect the implementation", "domain": "coding"},
+        {"id": "science", "task": "inspect the evidence", "domain": "science"},
+    ]
+
+    waiting = agent.run_cross_domain_stream(
+        task="combine engineering and evidence review",
+        subtasks=subtasks,
+        credentials={},
+        model_candidates=_model(),
+    )
+    assert waiting.completion is not None
+    assert waiting.completion.status == "approval_required"
+    assert list(waiting.events) == []
+    assert calls == []
+
+    live = agent.run_cross_domain_stream(
+        task="combine engineering and evidence review",
+        subtasks=subtasks,
+        credentials={},
+        model_candidates=_model(),
+        approve_provider_call=True,
+        max_parallelism=2,
+    )
+    events = list(live.events)
+    lifecycle = [event for event in events if event.kind == "lifecycle"]
+    assert {event.phase for event in lifecycle} == {
+        "child_started",
+        "child_completed",
+        "synthesis_started",
+        "synthesis_completed",
+    }
+    assert {event.child_id for event in lifecycle if event.phase == "child_completed"} == {"code", "science"}
+    assert [event.event.text_delta for event in events if event.kind == "provider"] == [
+        "test-model specialist answer",
+        "test-model specialist answer",
+        "synthesis answer",
+    ]
+    assert live.completion is not None
+    assert live.completion.status == "completed"
+    assert live.completion.stage_count == 3
+    assert len(live.completion.inner_completions) == 3
+    serialized = json.dumps(live.completion.to_dict())
+    assert "specialist answer" not in serialized
+    assert "synthesis answer" not in serialized
+    assert live.blueprint is not None
+    assert len(calls) == 3
+    with pytest.raises(ProviderError, match="single-consumer"):
+        _ = live.events
+
+
+def test_agent_run_auto_stream_fans_out_when_deterministic_route_selects_multiple_domains():
+    runtime = LLMRuntime()
+    runtime.register_in_memory_provider(
+        "openai",
+        lambda _request: "unused",
+        stream_handler=lambda request: [
+            ProviderStreamEvent(
+                provider="openai",
+                model=request.model,
+                sequence=0,
+                event_type="fixture.done",
+                text_delta="auto cross-domain",
+                done=True,
+            )
+        ],
+    )
+    agent = AutonomousAgent(_Workspace(), runtime, model_catalogue=ModelCatalogue(_model()))
+    live = agent.run_auto_stream(
+        task="review coding and science",
+        credentials={},
+        model_candidates=_model(),
+        hints=("coding", "science"),
+        max_domains=2,
+        allow_cross_domain=True,
+        approve_provider_call=True,
+    )
+    assert live.route is not None
+    assert live.route.get("cross_domain") is True
+    events = list(live.events)
+    assert any(event.stage == "child" for event in events)
+    assert any(event.stage == "synthesis" for event in events)
+    assert live.completion is not None
+    assert live.completion.status == "completed"
+
+
+def test_agent_run_cross_domain_stream_preserves_partial_policy_and_redacts_failures():
+    calls: list[ProviderRequest] = []
+
+    def stream_handler(request: ProviderRequest) -> list[ProviderStreamEvent]:
+        calls.append(request)
+        request_text = json.dumps(list(request.messages))
+        if "FAIL_CHILD" in request_text:
+            raise ProviderError(
+                "sensitive stream diagnostic",
+                retryable=True,
+                status_code=503,
+                code="upstream_unavailable",
+            )
+        return [
+            ProviderStreamEvent(
+                provider="openai",
+                model=request.model,
+                sequence=0,
+                event_type="fixture.done",
+                text_delta="healthy stream output",
+                done=True,
+            )
+        ]
+
+    runtime = LLMRuntime()
+    runtime.register_in_memory_provider("openai", lambda _request: "unused", stream_handler=stream_handler)
+    agent = AutonomousAgent(_Workspace(), runtime, model_catalogue=ModelCatalogue(_model()))
+    subtasks = [
+        {"id": "failing", "task": "FAIL_CHILD inspect the biomedical evidence", "domain": "biomedical"},
+        {"id": "healthy", "task": "inspect the neuroscience evidence", "domain": "neuroscience"},
+    ]
+
+    blocked = agent.run_cross_domain_stream(
+        task="coordinate a bounded biomedical and neuroscience review",
+        subtasks=subtasks,
+        credentials={},
+        model_candidates=_model(),
+        approve_provider_call=True,
+        allow_partial=False,
+        max_parallelism=2,
+    )
+    blocked_events = list(blocked.events)
+    assert blocked.completion is not None
+    assert blocked.completion.status == "child_failed"
+    assert blocked.completion.stage_count == 2
+    assert not any(event.phase == "synthesis_started" for event in blocked_events if event.kind == "lifecycle")
+    assert "sensitive stream diagnostic" not in json.dumps(blocked.completion.to_dict())
+
+    partial = agent.run_cross_domain_stream(
+        task="coordinate a bounded biomedical and neuroscience review",
+        subtasks=subtasks,
+        credentials={},
+        model_candidates=_model(),
+        approve_provider_call=True,
+        allow_partial=True,
+        max_parallelism=2,
+    )
+    partial_events = list(partial.events)
+    assert partial.completion is not None
+    assert partial.completion.status == "completed"
+    assert partial.completion.stage_count == 3
+    assert any(event.phase == "synthesis_started" for event in partial_events if event.kind == "lifecycle")
+    assert "healthy stream output" not in json.dumps(partial.completion.to_dict())
+    assert "sensitive stream diagnostic" not in json.dumps(partial.completion.to_dict())
+    assert len(calls) == 5
+
+
 def test_run_autonomous_learning_records_explicit_reward_and_only_metadata_in_memory(tmp_path: Path):
     runtime, store, server, thread = _runtime()
     workspace = _Workspace()
@@ -2581,6 +3436,118 @@ def test_agent_settles_provider_planning_quality_into_bandit_and_model_health(tm
     assert replay["model_quality"]["replayed"] is True
     assert health_ledger.model_health_snapshot()["openai/test-model"]["quality_observations"] == 1
     assert "Original task" not in json.dumps(first["plan_refinement"])
+
+
+def test_agent_settles_ordered_step_planning_quality_with_protected_contract(tmp_path: Path):
+    health_ledger = ProviderHealthLedger(tmp_path / "ordered-planning-quality-health.jsonl")
+    agent = AutonomousAgent(_Workspace(), LLMRuntime(), health_ledger=health_ledger)
+    context = {
+        "domain": "coding",
+        "capability": "planning",
+        "risk_class": "planning_review",
+        "task_family": "ordered_step_plan",
+    }
+    plan = AutonomousOrderedStepPlanRefinementResult(
+        status="completed",
+        task_digest="a" * 64,
+        base_plan_digest="b" * 64,
+        protected_contract_digest="c" * 64,
+        priority_step_ids=("inspect", "verify"),
+        focus_step_ids=("verify",),
+        review_required=False,
+        confidence=0.92,
+        selected_model={"provider": "openai", "model": "test-model"},
+        selection_digest="d" * 64,
+        planner_prompt_digest="e" * 64,
+        planner_plan_digest="f" * 64,
+        outcome_digest="1" * 64,
+        planner_context=context,
+        planner_context_digest=_planner_context_digest(context),
+    )
+    settlement = agent.settle_planning_quality(
+        plan,
+        domain="coding",
+        evaluator_id="ordered-planner-reviewer",
+        evaluator_version="1",
+        reward=0.9,
+        passed=True,
+        evidence_digest="2" * 64,
+        bandit_state={"schema": "bioprism-brain-bandit/0.1", "generation": 0, "arms": []},
+    )
+    assert settlement["status"] == "settled"
+    assert settlement["next_state"]["generation"] == 1
+    assert settlement["planner_context"]["task_family"] == "ordered_step_plan"
+    assert settlement["plan_refinement"]["priority_step_ids"] == ["inspect", "verify"]
+    assert settlement["model_quality"]["status"] == "recorded"
+    assert health_ledger.model_health_snapshot()["openai/test-model"]["quality_observations"] == 1
+
+    different_graph = agent.settle_planning_quality(
+        replace(plan, protected_contract_digest="7" * 64),
+        domain="coding",
+        evaluator_id="ordered-planner-reviewer",
+        evaluator_version="1",
+        reward=0.9,
+        passed=True,
+        evidence_digest="2" * 64,
+        bandit_state={"schema": "bioprism-brain-bandit/0.1", "generation": 0, "arms": []},
+    )
+    assert different_graph["model_quality"]["outcome_digest"] != settlement["model_quality"]["outcome_digest"]
+    assert health_ledger.model_health_snapshot()["openai/test-model"]["quality_observations"] == 2
+
+
+def test_agent_planning_quality_credits_embedded_context_and_rejects_context_tampering():
+    workspace = _Workspace()
+    agent = AutonomousAgent(workspace, LLMRuntime())
+    context = {
+        "domain": "coding",
+        "capability": "planning",
+        "risk_class": "read_only",
+        "task_family": "coding_workflow",
+    }
+    plan = AutonomousPlanRefinementResult(
+        status="completed",
+        task_digest="a" * 64,
+        base_plan_digest="b" * 64,
+        workflow_digest="c" * 64,
+        priority_stage_ids=("scope",),
+        focus_stage_ids=("scope",),
+        review_required=False,
+        confidence=0.9,
+        selected_model={"provider": "openai", "model": "test-model"},
+        selection_digest="d" * 64,
+        planner_prompt_digest="e" * 64,
+        planner_plan_digest="f" * 64,
+        outcome_digest="1" * 64,
+        planner_context=context,
+        planner_context_digest=_planner_context_digest(context),
+    )
+    settlement = agent.settle_planning_quality(
+        plan,
+        domain="data",
+        evaluator_id="planner-reviewer",
+        evaluator_version="1",
+        reward=0.8,
+        passed=True,
+        bandit_state={"schema": "bioprism-brain-bandit/0.1", "generation": 0, "arms": []},
+    )
+    assert settlement["planner_context"] == context
+    assert settlement["planner_context_digest"] == plan.planner_context_digest
+    outcome_call = next(args for name, args in workspace.calls if name == "brain_outcome_record")
+    assert outcome_call["context"] == context
+    assert outcome_call["context_digest"] == plan.planner_context_digest
+
+    assert plan.planner_context is not None
+    plan.planner_context["capability"] = "tampered"
+    with pytest.raises(BrainRunError, match="planner_context_digest does not match"):
+        agent.settle_planning_quality(
+            plan,
+            domain="coding",
+            evaluator_id="planner-reviewer",
+            evaluator_version="1",
+            reward=0.8,
+            passed=True,
+            bandit_state={"schema": "bioprism-brain-bandit/0.1", "generation": 0, "arms": []},
+        )
 
 
 def test_agent_run_learning_is_the_explicit_facade_for_evaluator_backed_online_learning(tmp_path: Path):
@@ -2864,6 +3831,83 @@ def test_selection_confidence_floor_is_forwarded_for_every_builtin_domain():
         server.server_close()
 
 
+def test_selection_weights_are_normalized_and_conflicts_fail_closed():
+    runtime, credentials, server, thread = _runtime()
+    brain = AutonomousBrain(_Workspace(), runtime)
+    handle = credentials.register("openai", "selection-policy-secret")
+    try:
+        request = brain.build_adaptive_model_selection(
+            task="choose a model with an explicit policy",
+            model_candidates=_model(),
+            credentials={"openai": handle},
+            selection_weights={"quality": 1, "reliability": 0, "cost": 0, "latency": 0, "exploration": 0},
+        )
+        assert request["weights"] == {
+            "quality": 1.0,
+            "reliability": 0.0,
+            "cost": 0.0,
+            "latency": 0.0,
+            "exploration": 0.0,
+        }
+        override_request = brain.build_adaptive_model_selection(
+            task="choose a model from a persisted policy",
+            model_candidates=_model(),
+            credentials={"openai": handle},
+            selection_overrides={"weights": {"cost": 3}},
+        )
+        assert override_request["weights"]["cost"] == 3.0
+        explicit_observations = [
+            {
+                "arm_id": "openai/test-model",
+                "pulls": 4,
+                "reward_sum": 3.25,
+                "failures": 0,
+            }
+        ]
+        observed_request = brain.build_adaptive_model_selection(
+            task="choose a model from explicit online evidence",
+            model_candidates=_model(),
+            credentials={"openai": handle},
+            selection_observations=explicit_observations,
+        )
+        assert observed_request["observations"] == [
+            {
+                "arm_id": "openai/test-model",
+                "pulls": 4,
+                "reward_sum": 3.25,
+                "failures": 0,
+            }
+        ]
+        with pytest.raises(BrainRunError, match="observations"):
+            brain.build_adaptive_model_selection(
+                task="reject conflicting online evidence",
+                model_candidates=_model(),
+                credentials={"openai": handle},
+                selection_observations=explicit_observations,
+                selection_overrides={
+                    "observations": [
+                        {
+                            "arm_id": "openai/test-model",
+                            "pulls": 1,
+                            "reward_sum": 0.1,
+                            "failures": 0,
+                        }
+                    ]
+                },
+            )
+        with pytest.raises(BrainRunError, match="conflicts"):
+            brain.build_adaptive_model_selection(
+                task="reject conflicting policies",
+                model_candidates=_model(),
+                credentials={"openai": handle},
+                selection_weights={"quality": 1},
+                selection_overrides={"weights": {"cost": 3}},
+            )
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+
+
 def test_run_autonomous_tool_loop_learning_records_loop_metadata_only(tmp_path: Path):
     runtime, store, server, thread = _runtime()
     workspace = _Workspace()
@@ -2977,6 +4021,391 @@ def test_run_cross_domain_fans_out_then_synthesizes_with_approval_boundary():
         server.shutdown()
         thread.join(timeout=2)
         server.server_close()
+
+
+def test_cross_domain_opt_in_parallelism_preserves_order_and_waits_for_children():
+    runtime = LLMRuntime()
+    barrier = threading.Barrier(2)
+    activity_lock = threading.Lock()
+    active = 0
+    max_active = 0
+    invocation_count = 0
+
+    def handler(_request: ProviderRequest) -> Mapping[str, object]:
+        nonlocal active, max_active, invocation_count
+        with activity_lock:
+            invocation_count += 1
+            child_invocation = invocation_count <= 2
+            active += 1
+            max_active = max(max_active, active)
+        try:
+            if child_invocation:
+                try:
+                    barrier.wait(timeout=2.0)
+                except threading.BrokenBarrierError as error:
+                    raise AssertionError("cross-domain child provider calls did not overlap") from error
+            return {"output_text": "bounded parallel answer"}
+        finally:
+            with activity_lock:
+                active -= 1
+
+    runtime.register_in_memory_provider("openai", handler)
+    agent = AutonomousAgent(
+        _Workspace(),
+        runtime,
+        model_catalogue=ModelCatalogue(_model()),
+    )
+    result = agent.run_cross_domain(
+        task="Run two independent bounded specialist reviews before synthesis.",
+        subtasks=[
+            {"id": "first-review", "task": "Review the first bounded input.", "domain": "coding"},
+            {"id": "second-review", "task": "Review the second bounded input.", "domain": "data"},
+        ],
+        credentials={},
+        approve_provider_call=True,
+        max_parallelism=2,
+    )
+
+    assert result.status == "completed"
+    assert result.execution_child_ids == ("first-review", "second-review")
+    assert [child.status for child in result.child_results] == [
+        "completed_provider_call",
+        "completed_provider_call",
+    ]
+    assert result.synthesis_result is not None
+    assert result.synthesis_result.status == "completed_provider_call"
+    assert result.max_parallelism == 2
+    assert max_active >= 2
+    assert invocation_count == 3
+    assert result.to_dict()["max_parallelism"] == 2
+
+    with pytest.raises(BrainRunError, match="max_parallelism"):
+        agent.run_cross_domain(
+            task="Reject an invalid specialist parallelism ceiling.",
+            subtasks=[
+                {"id": "invalid-review", "task": "Review one input.", "domain": "coding"},
+            ],
+            credentials={},
+            max_parallelism=0,
+        )
+
+
+def test_cross_domain_provider_failures_become_redacted_child_results_and_respect_partial_policy():
+    runtime = LLMRuntime()
+
+    def handler(request: ProviderRequest) -> Mapping[str, object]:
+        prompt_text = json.dumps(list(request.messages))
+        if "FAIL_CHILD" in prompt_text or "FAIL_SYNTHESIS" in prompt_text:
+            raise ProviderError(
+                "sensitive provider diagnostic must not cross the child boundary",
+                retryable=True,
+                status_code=503,
+            )
+        return {"output_text": "healthy bounded specialist or synthesis output"}
+
+    runtime.register_in_memory_provider("openai", handler)
+    agent = AutonomousAgent(
+        _Workspace(),
+        runtime,
+        model_catalogue=ModelCatalogue(_model()),
+    )
+    partial = agent.run_cross_domain(
+        task="Coordinate a biomedical and neuroscience review with one failing specialist.",
+        subtasks=[
+            {"id": "failing-specialist", "task": "FAIL_CHILD review the biomedical evidence.", "domain": "biomedical"},
+            {"id": "healthy-specialist", "task": "Review the neuroscience signal limits.", "domain": "neuroscience"},
+        ],
+        credentials={},
+        approve_provider_call=True,
+        allow_partial=True,
+        max_parallelism=2,
+    )
+
+    # ``allow_partial`` permits synthesis to complete from the healthy child plus the
+    # redacted failure envelope; the child-level failure remains observable below.
+    assert partial.status == "completed"
+    assert partial.synthesis_result is not None
+    assert partial.synthesis_result.status == "completed_provider_call"
+    assert [result.status for result in partial.child_results] == [
+        "provider_failed",
+        "completed_provider_call",
+    ]
+    failed = partial.child_results[0]
+    assert isinstance(failed, BrainRunResult)
+    assert failed.failure == {
+        "error_class": "ProviderError",
+        "retryable": True,
+        "circuit_open": False,
+        "status_code": 503,
+        "retention": "metadata_only;provider_error_message_and_payloads_not_retained",
+        "secret_material": "never_returned",
+    }
+    public = json.dumps(partial.to_dict())
+    assert "sensitive provider diagnostic" not in public
+
+    blocked = agent.run_cross_domain(
+        task="Coordinate a biomedical and neuroscience review with one failing specialist.",
+        subtasks=[
+            {"id": "failing-specialist", "task": "FAIL_CHILD review the biomedical evidence.", "domain": "biomedical"},
+            {"id": "healthy-specialist", "task": "Review the neuroscience signal limits.", "domain": "neuroscience"},
+        ],
+        credentials={},
+        approve_provider_call=True,
+        allow_partial=False,
+        max_parallelism=1,
+    )
+    assert blocked.status == "child_failed"
+    assert blocked.synthesis_result is None
+    assert blocked.child_results[0].status == "provider_failed"
+
+    synthesis_failed = agent.run_cross_domain(
+        task="Coordinate a biomedical and neuroscience review with FAIL_SYNTHESIS at fan-in.",
+        subtasks=[
+            {"id": "biomedical-specialist", "task": "Review the biomedical evidence.", "domain": "biomedical"},
+            {"id": "neuroscience-specialist", "task": "Review the neuroscience signal limits.", "domain": "neuroscience"},
+        ],
+        credentials={},
+        approve_provider_call=True,
+        allow_partial=True,
+        max_parallelism=2,
+    )
+    assert synthesis_failed.status == "provider_failed"
+    assert all(result.status == "completed_provider_call" for result in synthesis_failed.child_results)
+    assert synthesis_failed.synthesis_result is not None
+    assert synthesis_failed.synthesis_result.status == "provider_failed"
+    assert isinstance(synthesis_failed.synthesis_result, BrainRunResult)
+    assert synthesis_failed.synthesis_result.failure == {
+        "error_class": "ProviderError",
+        "retryable": True,
+        "circuit_open": False,
+        "status_code": 503,
+        "retention": "metadata_only;provider_error_message_and_payloads_not_retained",
+        "secret_material": "never_returned",
+    }
+    assert "sensitive provider diagnostic" not in json.dumps(synthesis_failed.to_dict())
+
+    all_failed = agent.run_cross_domain(
+        task="Coordinate a biomedical and neuroscience review when every specialist provider fails.",
+        subtasks=[
+            {"id": "failing-biomedical", "task": "FAIL_CHILD review the biomedical evidence.", "domain": "biomedical"},
+            {"id": "failing-neuroscience", "task": "FAIL_CHILD review the neuroscience signal limits.", "domain": "neuroscience"},
+        ],
+        credentials={},
+        approve_provider_call=True,
+        allow_partial=True,
+        max_parallelism=2,
+    )
+    assert all_failed.status == "child_failed"
+    assert all_failed.synthesis_result is None
+    assert [result.status for result in all_failed.child_results] == [
+        "provider_failed",
+        "provider_failed",
+    ]
+
+
+def test_cross_domain_learning_provider_failures_preserve_ordered_evaluator_settlement(tmp_path: Path):
+    runtime = LLMRuntime()
+    runtime.register_in_memory_provider(
+        "openai",
+        lambda request: (
+            (_ for _ in ()).throw(
+                ProviderError(
+                    "sensitive learning provider diagnostic",
+                    retryable=True,
+                    status_code=503,
+                )
+            )
+            if "FAIL_CHILD" in json.dumps(list(request.messages))
+            else {"output_text": "healthy learning child or synthesis output"}
+        ),
+    )
+    memory = BrainEpisodicMemory(tmp_path / "cross-domain-learning-failure.sqlite3")
+    evaluator = BrainOutcomeEvaluator(
+        lambda _input: {"reward": 0.8, "passed": True, "failed": False},
+        evaluator_id="cross-domain-learning-failure-quality",
+        evaluator_version="1",
+    )
+    try:
+        agent = AutonomousAgent(
+            _Workspace(),
+            runtime,
+            memory=memory,
+            model_catalogue=ModelCatalogue(_model()),
+        )
+        subtasks = [
+            {"id": "failing-specialist", "task": "FAIL_CHILD review the biomedical evidence.", "domain": "biomedical"},
+            {"id": "healthy-specialist", "task": "Review the neuroscience signal limits.", "domain": "neuroscience"},
+        ]
+        partial = agent.run_cross_domain_learning(
+            task="Learn from a partially available biomedical and neuroscience review.",
+            subtasks=subtasks,
+            credentials={},
+            model_candidates=_model(),
+            evaluator=evaluator,
+            bandit_state={"schema": "bioprism-brain-bandit/0.1", "generation": 0, "arms": []},
+            approve_provider_call=True,
+            allow_partial=True,
+        )
+        assert partial.status == "completed"
+        assert [result.status for result in partial.cross_domain.child_results] == [
+            "provider_failed",
+            "completed_provider_call",
+        ]
+        assert partial.cross_domain.synthesis_result is not None
+        assert partial.cross_domain.synthesis_result.status == "completed_provider_call"
+        assert len(partial.evaluations) == 2
+        assert all(item["scope"] in {"child", "synthesis"} for item in partial.evaluations)
+        assert "sensitive learning provider diagnostic" not in json.dumps(partial.to_dict())
+
+        blocked = agent.run_cross_domain_learning(
+            task="Learn from a strict biomedical and neuroscience review.",
+            subtasks=subtasks,
+            credentials={},
+            model_candidates=_model(),
+            evaluator=evaluator,
+            bandit_state={"schema": "bioprism-brain-bandit/0.1", "generation": 0, "arms": []},
+            approve_provider_call=True,
+            allow_partial=False,
+        )
+        assert blocked.status == "child_failed"
+        assert blocked.cross_domain.synthesis_result is None
+        assert blocked.cross_domain.child_results[0].status == "provider_failed"
+        assert blocked.evaluations == ()
+
+        all_failed = agent.run_cross_domain_learning(
+            task="Learn from a review where every specialist provider fails.",
+            subtasks=[
+                {"id": "failing-biomedical", "task": "FAIL_CHILD review the biomedical evidence.", "domain": "biomedical"},
+                {"id": "failing-neuroscience", "task": "FAIL_CHILD review the neuroscience signal limits.", "domain": "neuroscience"},
+            ],
+            credentials={},
+            model_candidates=_model(),
+            evaluator=evaluator,
+            bandit_state={"schema": "bioprism-brain-bandit/0.1", "generation": 0, "arms": []},
+            approve_provider_call=True,
+            allow_partial=True,
+        )
+        assert all_failed.status == "child_failed"
+        assert all_failed.cross_domain.synthesis_result is None
+        assert [result.status for result in all_failed.cross_domain.child_results] == [
+            "provider_failed",
+            "provider_failed",
+        ]
+        assert all_failed.evaluations == ()
+    finally:
+        memory.close()
+
+
+def test_cross_domain_trajectory_learning_never_credits_incomplete_results(tmp_path: Path):
+    runtime = LLMRuntime()
+    evaluator_inputs: list[object] = []
+
+    def handler(request: ProviderRequest) -> Mapping[str, object]:
+        prompt_text = json.dumps(list(request.messages))
+        if "FAIL_CHILD" in prompt_text or "FAIL_SYNTHESIS" in prompt_text:
+            raise ProviderError(
+                "sensitive delayed-trajectory provider diagnostic",
+                retryable=True,
+                status_code=503,
+            )
+        return {"output_text": "healthy delayed-trajectory result"}
+
+    runtime.register_in_memory_provider("openai", handler)
+    memory = BrainEpisodicMemory(tmp_path / "cross-domain-trajectory-failure.sqlite3")
+    evaluator = BrainOutcomeEvaluator(
+        lambda value: (evaluator_inputs.append(value) or {"reward": 0.7, "passed": True, "failed": False}),
+        evaluator_id="cross-domain-delayed-failure-quality",
+        evaluator_version="1",
+    )
+    try:
+        agent = AutonomousAgent(
+            _Workspace(),
+            runtime,
+            memory=memory,
+            model_catalogue=ModelCatalogue(_model()),
+        )
+        subtasks = [
+            {"id": "failing-specialist", "task": "FAIL_CHILD review the biomedical evidence.", "domain": "biomedical"},
+            {"id": "healthy-specialist", "task": "Review the neuroscience signal limits.", "domain": "neuroscience"},
+        ]
+        partial = agent.run_cross_domain_trajectory_learning(
+            task="Settle a delayed biomedical and neuroscience review despite one provider outage.",
+            subtasks=subtasks,
+            model_candidates=_model(),
+            credentials={},
+            approve_provider_call=True,
+            allow_partial=True,
+            max_parallelism=2,
+            evaluator=evaluator,
+            trajectory_id="python-partial-cross-domain-trajectory",
+            bandit_state={"schema": "bioprism-brain-bandit/0.1", "generation": 0, "arms": []},
+        )
+        assert partial.status == "completed"
+        assert [result.status for result in partial.cross_domain.child_results] == [
+            "provider_failed",
+            "completed_provider_call",
+        ]
+        assert partial.cross_domain.synthesis_result is not None
+        assert partial.cross_domain.synthesis_result.status == "completed_provider_call"
+        assert [item["item_id"] for item in partial.evaluations] == ["healthy-specialist", "synthesis"]
+        assert len(partial.trajectory_result.trajectory.episodes) == 2
+        assert len(partial.trajectory_result.credited_rewards) == 2
+        assert len(evaluator_inputs) == 2
+        assert "sensitive delayed-trajectory provider diagnostic" not in json.dumps(partial.to_dict())
+
+        # Durable/caller-owned settlement applies the same filter even when the execution
+        # envelope was assembled elsewhere and advertises an overall completed synthesis.
+        settled = agent.settle_cross_domain_trajectory_learning(
+            cross_domain=partial.cross_domain,
+            bandit_state={"schema": "bioprism-brain-bandit/0.1", "generation": 0, "arms": []},
+            evaluator=evaluator,
+            trajectory_id="python-replayed-partial-cross-domain-trajectory",
+        )
+        assert [item["item_id"] for item in settled.evaluations] == ["healthy-specialist", "synthesis"]
+        assert len(settled.trajectory_result.trajectory.episodes) == 2
+        assert len(evaluator_inputs) == 4
+
+        synthesis_partial = agent.run_cross_domain_trajectory_learning(
+            task="Settle a delayed biomedical and neuroscience review with FAIL_SYNTHESIS at fan-in.",
+            subtasks=[
+                {"id": "biomedical-specialist", "task": "Review the biomedical evidence.", "domain": "biomedical"},
+                {"id": "neuroscience-specialist", "task": "Review the neuroscience signal limits.", "domain": "neuroscience"},
+            ],
+            model_candidates=_model(),
+            credentials={},
+            approve_provider_call=True,
+            allow_partial=True,
+            max_parallelism=2,
+            evaluator=evaluator,
+            trajectory_id="python-synthesis-failure-cross-domain-trajectory",
+            bandit_state={"schema": "bioprism-brain-bandit/0.1", "generation": 0, "arms": []},
+        )
+        assert synthesis_partial.cross_domain.synthesis_result is not None
+        assert synthesis_partial.cross_domain.synthesis_result.status == "provider_failed"
+        assert [item["item_id"] for item in synthesis_partial.evaluations] == [
+            "biomedical-specialist",
+            "neuroscience-specialist",
+        ]
+        assert len(synthesis_partial.trajectory_result.trajectory.episodes) == 2
+        assert len(evaluator_inputs) == 6
+
+        before_strict_evaluations = len(evaluator_inputs)
+        with pytest.raises(BrainRunError, match="strict mode"):
+            agent.run_cross_domain_trajectory_learning(
+                task="Strictly reject a delayed biomedical and neuroscience review with one outage.",
+                subtasks=subtasks,
+                model_candidates=_model(),
+                credentials={},
+                approve_provider_call=True,
+                allow_partial=False,
+                max_parallelism=1,
+                evaluator=evaluator,
+                trajectory_id="python-strict-cross-domain-trajectory",
+                bandit_state={"schema": "bioprism-brain-bandit/0.1", "generation": 0, "arms": []},
+            )
+        assert len(evaluator_inputs) == before_strict_evaluations
+    finally:
+        memory.close()
 
 
 def test_cross_domain_learning_updates_state_between_children_and_synthesis(tmp_path: Path):
@@ -3177,6 +4606,57 @@ def test_run_auto_routes_cross_domain_replan_learning_with_explicit_limits(tmp_p
         assert result.result.replan_count == 0
         assert len(result.result.attempts) == 1
         assert "auto-cross-domain-replan-secret" not in json.dumps(result.to_dict())
+    finally:
+        memory.close()
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+
+def test_run_auto_wires_the_metadata_only_evaluator_bridge_into_cross_domain_replan(tmp_path: Path):
+    runtime, store, server, thread = _runtime()
+    memory = BrainEpisodicMemory(tmp_path / "auto-bridge-cross-domain.sqlite3")
+    handle = store.register("openai", "auto-bridge-cross-domain-secret")
+    registry = DomainEvaluatorRegistry.with_builtin_autonomous_profiles()
+    contexts: list[dict[str, object]] = []
+
+    def evidence_for(context: dict[str, object]) -> dict[str, object]:
+        contexts.append(dict(context))
+        domain = str(context["domain"])
+        profile = registry.resolve_for_autonomous_domain(domain).profile
+        return {
+            "domain": domain,
+            "capability": "caller_review",
+            "risk_class": "read_only",
+            "signals": {signal: 1.0 for signal in profile.required_signals},
+        }
+
+    bridge = create_autonomous_cycle_evaluator_bridge(
+        evidence_for,
+        evaluator_registry=registry,
+    )
+    try:
+        agent = AutonomousAgent(_Workspace(), runtime, memory=memory)
+        result = agent.run_auto(
+            task="write python code for the dataset pipeline",
+            credentials={"openai": handle},
+            model_candidates=_model(),
+            min_confidence=0.20,
+            min_margin=0.10,
+            cross_domain_replan_learning=True,
+            cross_domain_replan_max_replans=0,
+            evaluator_bridge=bridge,
+            bandit_state={"schema": "bioprism-brain-bandit/0.1", "generation": 0, "arms": []},
+            approve_provider_call=True,
+        )
+        assert result.status == "completed"
+        assert result.result is not None
+        assert result.result.status == "completed"
+        assert len(result.result.attempts) == 1
+        assert {context["role"] for context in contexts} == {"specialist", "synthesis"}
+        assert all(context["mode"] == "cross_domain" for context in contexts)
+        assert all("task" not in context and "evidence" not in context for context in contexts)
+        assert "auto-bridge-cross-domain-secret" not in json.dumps(result.to_dict())
     finally:
         memory.close()
         server.shutdown()
@@ -3534,17 +5014,26 @@ def test_run_workflow_stage_contract_is_executable_for_every_builtin_domain():
     handle = store.register("openai", "all-domain-workflow-secret")
     workspace = _Workspace()
     brain = AutonomousBrain(workspace, runtime)
+    prompt_registry = builtin_autonomous_prompt_registry()
     try:
         for domain in AUTONOMOUS_DOMAINS:
             blueprint = brain.prepare_autonomous(
                 task=f"Prepare a bounded {domain} workflow result.",
                 domain=domain,
             )
+            prompt_selection = prompt_registry.select_for(
+                [
+                    {"domain": domain, "stage": stage.id, "required_capabilities": ()}
+                    for stage in blueprint.workflow.stages
+                ]
+            )
             result = brain.run_workflow(
                 blueprint=blueprint,
                 model_candidates=_model(),
                 credentials={"openai": handle},
                 approve_provider_call=True,
+                prompt_registry=prompt_registry,
+                prompt_selection=prompt_selection,
                 run_id=f"all-domain-{domain}",
                 max_stage_calls=1,
             )
@@ -3553,11 +5042,283 @@ def test_run_workflow_stage_contract_is_executable_for_every_builtin_domain():
             assert result.stage_results[0].declared_status == "completed"
             assert result.stage_results[0].response_evaluation is not None
             assert result.stage_results[0].response_evaluation["stage_id"] == blueprint.workflow.stages[0].id  # type: ignore[index]
+            assert result.stage_results[0].result.prompt["autonomous_prompt"]["domain"] == domain  # type: ignore[union-attr,index]
+            assert result.stage_results[0].result.prompt["autonomous_prompt"]["stage"] == blueprint.workflow.stages[0].id  # type: ignore[union-attr,index]
+            assert result.stage_results[0].result.prompt["autonomous_prompt"]["selection_plan_digest"] == prompt_selection.plan_digest  # type: ignore[union-attr,index]
             assert result.checkpoint.completed_stage_ids == (blueprint.workflow.stages[0].id,)
             assert result.checkpoint.stages[0]["response_evaluation"] is not None
             assert result.execution_receipt.completed_stage_ids == (blueprint.workflow.stages[0].id,)
             assert result.execution_receipt.next_action == "continue_workflow"
             assert result.execution_receipt.progress == 1 / len(blueprint.workflow.stages)
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+
+def test_run_workflow_blocks_an_evidence_free_completion_and_requires_an_explicit_quality_retry():
+    runtime, store, server, thread = _structured_runtime()
+    handle = store.register("openai", "workflow-quality-gate-secret")
+    brain = AutonomousBrain(_Workspace(), runtime)
+    try:
+        blueprint = brain.prepare_autonomous(
+            task="Require reviewable stage evidence.",
+            domain="coding",
+        )
+        server.quality_fail_stage = "scope"  # type: ignore[attr-defined]
+        blocked = brain.run_workflow(
+            blueprint=blueprint,
+            model_candidates=_model(),
+            credentials={"openai": handle},
+            approve_provider_call=True,
+            run_id="workflow-quality-gate",
+        )
+        assert blocked.status == "stage_blocked"
+        assert blocked.checkpoint.completed_stage_ids == ()
+        assert blocked.stage_results[0].execution_status == "blocked"
+        assert blocked.stage_results[0].response_evaluation is not None
+        assert blocked.stage_results[0].response_evaluation["passed"] is False
+        assert "evidence_present" in " ".join(blocked.stage_results[0].validation_errors)
+        assert blocked.checkpoint.stages[0]["status"] == "blocked"
+        assert blocked.checkpoint.stages[0]["execution_status"] == "blocked"
+        assert blocked.execution_receipt.next_action == "retry_stage"
+
+        server.quality_fail_stage = None  # type: ignore[attr-defined]
+        held = brain.run_workflow(
+            blueprint=blueprint,
+            model_candidates=_model(),
+            credentials={"openai": handle},
+            approve_provider_call=True,
+            checkpoint=blocked.checkpoint,
+            run_id="workflow-quality-gate",
+        )
+        assert held.status == "stage_blocked"
+
+        retried = brain.run_workflow(
+            blueprint=blueprint,
+            model_candidates=_model(),
+            credentials={"openai": handle},
+            approve_provider_call=True,
+            checkpoint=blocked.checkpoint,
+            retry_blocked=True,
+            run_id="workflow-quality-gate",
+        )
+        assert retried.status == "completed"
+        assert retried.checkpoint.completed_stage_ids == ("scope", "inspect", "implement", "verify", "handoff")
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+
+def test_run_workflow_honors_stage_approval_allowlist_without_runtime_name_error():
+    runtime, store, server, thread = _structured_runtime()
+    handle = store.register("openai", "workflow-stage-approval-secret")
+    brain = AutonomousBrain(_Workspace(), runtime)
+    try:
+        blueprint = brain.prepare_autonomous(
+            task="Prepare a reversible operations workflow.",
+            domain="operations",
+        )
+        waiting = brain.run_workflow(
+            blueprint=blueprint,
+            model_candidates=_model(),
+            credentials={"openai": handle},
+            approve_provider_call=True,
+            run_id="workflow-stage-approval",
+        )
+        assert waiting.status == "approval_required"
+        assert waiting.checkpoint.completed_stage_ids == ("observe", "impact", "rollback")
+        assert waiting.execution_receipt.next_action == "approve_provider_call"
+
+        approved = brain.run_workflow(
+            blueprint=blueprint,
+            model_candidates=_model(),
+            credentials={"openai": handle},
+            approve_provider_call=True,
+            approved_stage_ids=("approval",),
+            checkpoint=waiting.checkpoint,
+            run_id="workflow-stage-approval",
+        )
+        assert approved.status == "completed"
+        assert approved.checkpoint.completed_stage_ids == ("observe", "impact", "rollback", "approval", "handoff")
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+
+def test_run_workflow_propagates_adaptive_prompt_selection_through_every_builtin_domain():
+    runtime, store, server, thread = _structured_runtime()
+    handle = store.register("openai", "adaptive-workflow-secret")
+    brain = AutonomousBrain(_Workspace(), runtime)
+    prompt_registry = builtin_autonomous_prompt_registry()
+    learning_state = AutonomousPromptLearningState.empty(prompt_registry.registry_digest)
+    try:
+        for domain in AUTONOMOUS_DOMAINS:
+            blueprint = brain.prepare_autonomous(
+                task=f"Prepare an adaptive bounded {domain} workflow result.",
+                domain=domain,
+            )
+            result = brain.run_workflow(
+                blueprint=blueprint,
+                model_candidates=_model(),
+                credentials={"openai": handle},
+                approve_provider_call=True,
+                prompt_registry=prompt_registry,
+                prompt_learning_state=learning_state,
+                run_id=f"adaptive-workflow-{domain}",
+                max_stage_calls=1,
+            )
+            assert result.status == "paused"
+            prompt_projection = result.stage_results[0].result.prompt["autonomous_prompt"]  # type: ignore[union-attr,index]
+            assert prompt_projection["selection_policy"] == "ucb1_explicit_evaluator_v1"
+            assert len(prompt_projection["adaptive_selection_digest"]) == 64
+            assert len(prompt_projection["adaptive_arm_id"]) == 64
+            assert prompt_projection["adaptive_generation"] == 0
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+
+
+def test_agent_persistent_prompt_learner_rehydrates_high_level_direct_and_cross_domain_runs():
+    runtime, store, server, thread = _structured_runtime()
+    handle = store.register("openai", "persistent-prompt-learning-secret")
+    prompt_registry = builtin_autonomous_prompt_registry()
+    persistence = TransactionalJsonAutonomousPromptLearningSnapshotPersistence(_CasTextStore())
+    coordinator = AutonomousPromptLearningPersistenceCoordinator(prompt_registry, persistence=persistence)
+    agent = AutonomousAgent(
+        _Workspace(),
+        runtime,
+        model_catalogue=ModelCatalogue(_model()),
+        prompt_learning_coordinator=coordinator,
+    )
+    try:
+        with pytest.raises(BrainRunError, match="planning_prompt_registry"):
+            agent.run_auto(
+                task="Reject a planning registry replacement.",
+                credentials={"openai": handle},
+                hints=("coding",),
+                max_domains=1,
+                allow_cross_domain=False,
+                planning_prompt_registry=builtin_autonomous_prompt_registry(),
+            )
+        for domain in AUTONOMOUS_DOMAINS:
+            result = agent.run(
+                task=f"Review a bounded {domain} task with explicit evaluator feedback.",
+                domain=domain,
+                credentials={"openai": handle},
+                approve_provider_call=True,
+            )
+            selections = agent.prompt_learning_selections(result)
+            assert len(selections) == 1, domain
+            selection = selections[0]
+            assert selection.plan.rows[0].domain == domain
+            assert result.prompt["autonomous_prompt"]["adaptive_selection"]["selection_digest"] == selection.selection_digest  # type: ignore[index]
+            settled = agent.settle_prompt_learning(
+                selection,
+                arm_id=selection.arm_ids[0],
+                evaluator_id=f"{domain}-rubric",
+                evaluator_version="1",
+                reward=0.8,
+                passed=True,
+                outcome_digest=content_digest({"domain": domain, "run": result.run_id}),
+            )
+            assert settled.status == "settled"
+
+        cross = agent.run_cross_domain(
+            task="Review a bounded biomedical neuroscience task.",
+            subtasks=(
+                {"id": "bio", "domain": "biomedical", "task": "Review safety evidence."},
+                {"id": "neuro", "domain": "neuroscience", "task": "Review signal limitations."},
+            ),
+            credentials={"openai": handle},
+            approve_provider_call=True,
+        )
+        cross_selections = agent.prompt_learning_selections(cross)
+        assert {selection.plan.rows[0].domain for selection in cross_selections} == {
+            "biomedical",
+            "neuroscience",
+            "cross_domain",
+        }
+        for selection in cross_selections:
+            agent.settle_prompt_learning(
+                selection,
+                arm_id=selection.arm_ids[0],
+                evaluator_id="cross-domain-rubric",
+                evaluator_version="1",
+                reward=0.7,
+                passed=True,
+                outcome_digest=content_digest({"selection": selection.selection_digest}),
+            )
+
+        planning_blueprint = agent.prepare(
+            task="Review a coding workflow before provider-assisted planning.",
+            domain="coding",
+        )
+        planning = agent.plan_with_provider(
+            blueprint=planning_blueprint,
+            credentials={"openai": handle},
+            approve_provider_call=True,
+        )
+        planning_selections = agent.prompt_learning_selections(planning)
+        assert len(planning_selections) == 1
+        assert planning_selections[0].plan.rows[0].stage == "planning"
+        assert planning.to_dict()["adaptive_selection"]["selection_digest"] == planning_selections[0].selection_digest
+        assert "Review a coding workflow" not in json.dumps(planning.to_dict())
+        agent.settle_prompt_learning(
+            planning_selections[0],
+            arm_id=planning_selections[0].arm_ids[0],
+            evaluator_id="planning-rubric",
+            evaluator_version="1",
+            reward=0.75,
+            passed=True,
+            outcome_digest=content_digest({"planning": planning_selections[0].selection_digest}),
+        )
+
+        automatic = agent.run_auto(
+            task="Review a coding workflow with provider-assisted planning.",
+            credentials={"openai": handle},
+            hints=("coding",),
+            max_domains=1,
+            allow_cross_domain=False,
+            planning_mode="provider",
+            approve_provider_call=True,
+        )
+        automatic_selections = agent.prompt_learning_selections(automatic)
+        assert automatic.planning is not None, automatic.to_dict()
+        assert automatic.planning.adaptive_selection is not None, automatic.planning.to_dict()
+        automatic_planning = next(
+            selection for selection in automatic_selections if selection.plan.rows[0].stage == "planning"
+        )
+        assert automatic.planning is not None
+        assert automatic.planning.to_dict()["adaptive_selection"]["selection_digest"] == automatic_planning.selection_digest
+        agent.settle_prompt_learning(
+            automatic_planning,
+            arm_id=automatic_planning.arm_ids[0],
+            evaluator_id="automatic-planning-rubric",
+            evaluator_version="1",
+            reward=0.7,
+            passed=True,
+            outcome_digest=content_digest({"automatic_planning": automatic_planning.selection_digest}),
+        )
+        assert coordinator.state.generation == len(AUTONOMOUS_DOMAINS) + len(cross_selections) + 2
+        persisted = persistence.read()
+        assert persisted is not None
+        assert persisted.state.generation == coordinator.state.generation
+        assert "persistent-prompt-learning-secret" not in json.dumps(persisted.to_dict())
+        assert "Review a bounded" not in json.dumps(persisted.to_dict())
+
+        restored = AutonomousPromptLearningPersistenceCoordinator(prompt_registry, persistence=persistence)
+        assert restored.restore() is not None
+        assert restored.state.state_digest == coordinator.state.state_digest
+        with pytest.raises(BrainRunError, match="cannot override"):
+            agent.run(
+                task="Reject an externally supplied prompt state.",
+                domain="coding",
+                credentials={"openai": handle},
+                prompt_learning_state=AutonomousPromptLearningState.empty(prompt_registry.registry_digest),
+            )
     finally:
         server.shutdown()
         thread.join(timeout=2)
@@ -4258,6 +6019,316 @@ def test_durable_cross_domain_worker_resumes_children_and_synthesis_across_resta
         server.server_close()
 
 
+def test_durable_cross_domain_worker_requires_structured_response_review_after_restart(tmp_path: Path):
+    runtime = LLMRuntime()
+    calls: list[ProviderRequest] = []
+
+    def structured_handler(request: ProviderRequest) -> Mapping[str, object]:
+        calls.append(request)
+        assert request.response_schema is not None
+        return {
+            "model": request.model,
+            "output_text": json.dumps(_structured_value_from_schema(request.response_schema)),
+        }
+
+    runtime.register_in_memory_provider("openai", structured_handler)
+    model_candidates = _model()
+    model_candidates[0] = {
+        **model_candidates[0],
+        "capabilities": [*model_candidates[0]["capabilities"], "structured_output"],
+    }
+    brain = AutonomousBrain(_Workspace(), runtime)
+    task = "Review a bounded biomedical neuroscience EEG evidence package."
+    subtasks = [
+        {"id": "biomedical", "task": "Review the biomedical evidence and safety boundary.", "domain": "biomedical"},
+        {"id": "neuroscience", "task": "Analyze the EEG neuroscience design and signal limits.", "domain": "neuroscience"},
+    ]
+    blueprint = brain.prepare_cross_domain(
+        task=task,
+        subtasks=subtasks,
+        structured_domain_response=True,
+    )
+    caller_results: dict[str, object] = {}
+    alignments: list[Mapping[str, object]] = []
+    job_path = tmp_path / "durable-cross-domain-response-gate.sqlite3"
+
+    def resolve(metadata: dict[str, object]) -> dict[str, object]:
+        checkpoint_wire = metadata.get("checkpoint", {})
+        checkpoint = checkpoint_wire if isinstance(checkpoint_wire, dict) else {}
+        nested = checkpoint.get("cross_domain_checkpoint", {})
+        nested = nested if isinstance(nested, dict) else {}
+        completed = {
+            child_id: caller_results[child_id]
+            for child_id in nested.get("completed_child_ids", [])
+            if child_id in caller_results
+        }
+        return {
+            "blueprint": blueprint,
+            "model_candidates": model_candidates,
+            "credentials": {},
+            "completed_child_results": completed,
+            "cross_domain_options": {
+                "approve_provider_call": True,
+                "require_response_alignment": True,
+                "response_alignments": alignments,
+            },
+        }
+
+    with BrainJobStore(job_path) as store:
+        job, _ = store.submit(
+            {
+                "idempotency_key": "durable-cross-domain-response-gate",
+                "spec_digest": "a" * 64,
+                "domain": "cross_domain",
+                "capability": "cross_domain_synthesis",
+                "risk_class": "review",
+                "max_attempts": 8,
+            }
+        )
+        worker = BrainWorker(
+            brain,
+            store,
+            worker_id="response-gate-worker-a",
+            resolver=resolve,
+            evaluator=None,
+            bandit_state={"schema": "bioprism-brain-bandit/0.1", "generation": 0, "arms": []},
+            execution_kind="cross_domain",
+            lease_seconds=10,
+            heartbeat_seconds=0.1,
+        )
+        first = worker.run_once(job.job_id)
+        assert first is not None and first.status == "queued"
+        assert first.workflow is not None and first.workflow.phase == "child"
+        caller_results[first.workflow.item_id] = first.workflow.result
+        second = worker.run_once(job.job_id)
+        assert second is not None and second.status == "queued"
+        assert second.workflow is not None and second.workflow.phase == "child"
+        caller_results[second.workflow.item_id] = second.workflow.result
+        record = store.get(job.job_id)
+        assert record is not None
+        checkpoint = AutonomousCrossDomainCheckpoint.from_dict(record.checkpoint["cross_domain_checkpoint"])
+        assert checkpoint.status == "synthesis_pending"
+        assert checkpoint.completed_child_ids == ("biomedical", "neuroscience")
+
+    with BrainJobStore(job_path) as reopened:
+        restarted = BrainWorker(
+            brain,
+            reopened,
+            worker_id="response-gate-worker-b",
+            resolver=resolve,
+            evaluator=None,
+            bandit_state={"schema": "bioprism-brain-bandit/0.1", "generation": 0, "arms": []},
+            execution_kind="cross_domain",
+            lease_seconds=10,
+            heartbeat_seconds=0.1,
+        )
+        review = restarted.run_once(job.job_id)
+        assert review is not None and review.status == "queued"
+        assert review.workflow is not None
+        assert review.workflow.status == "response_review_required"
+        assert review.workflow.result is None
+        assessment = review.workflow.response_assessment
+        assert assessment is not None
+        assert assessment.status == "needs_alignment_review"
+        assert "pairwise_alignment_incomplete" in assessment.gate_reasons
+        rows = [row for row in assessment.rows if row.role == "specialist"]
+        assert len(rows) == 2
+        alignments[:] = [{
+            "alignment_id": "biomedical-neuroscience-review",
+            "left_domain": rows[0].domain,
+            "right_domain": rows[1].domain,
+            "stance": "neutral",
+            "confidence": 1.0,
+            "topic_digest": content_digest({"topic": "bounded EEG review"}),
+            "rationale_digest": None,
+            "left_response_digest": rows[0].response_digest,
+            "right_response_digest": rows[1].response_digest,
+        }]
+        completed = restarted.run_once(job.job_id)
+        assert completed is not None and completed.status == "succeeded"
+        assert completed.workflow is not None and completed.workflow.phase == "synthesis"
+        assert completed.workflow.result is not None
+        final = reopened.get(job.job_id)
+        assert final is not None and final.state == "succeeded"
+        final_checkpoint = AutonomousCrossDomainCheckpoint.from_dict(
+            final.checkpoint["result_metadata"]["cross_domain_checkpoint"]
+        )
+        assert final_checkpoint.status == "completed"
+        assert completed.workflow.response_assessment is not None
+        assert final_checkpoint.response_assessment_digest == completed.workflow.response_assessment.assessment_digest
+        assert len(calls) == 3
+
+
+def test_durable_cross_domain_worker_rechecks_synthesis_response_after_restart(tmp_path: Path):
+    runtime = LLMRuntime()
+    calls: list[ProviderRequest] = []
+    synthesis_attempts = 0
+
+    def structured_handler(request: ProviderRequest) -> Mapping[str, object]:
+        nonlocal synthesis_attempts
+        calls.append(request)
+        assert request.response_schema is not None
+        response = _structured_value_from_schema(request.response_schema)
+        assert isinstance(response, dict)
+        if response.get("domain") == "cross_domain":
+            synthesis_attempts += 1
+            if synthesis_attempts == 1:
+                response["status"] = "blocked"
+        return {"model": request.model, "output_text": json.dumps(response)}
+
+    runtime.register_in_memory_provider("openai", structured_handler)
+    model_candidates = _model()
+    model_candidates[0] = {
+        **model_candidates[0],
+        "capabilities": [*model_candidates[0]["capabilities"], "structured_output"],
+    }
+    brain = AutonomousBrain(_Workspace(), runtime)
+    task = "Review a bounded biomedical neuroscience EEG evidence package."
+    subtasks = [
+        {"id": "biomedical", "task": "Review the biomedical evidence and safety boundary.", "domain": "biomedical"},
+        {"id": "neuroscience", "task": "Analyze the EEG neuroscience design and signal limits.", "domain": "neuroscience"},
+    ]
+    blueprint = brain.prepare_cross_domain(
+        task=task,
+        subtasks=subtasks,
+        structured_domain_response=True,
+    )
+    caller_results: dict[str, object] = {}
+    alignments: list[Mapping[str, object]] = []
+    synthesis_result: object | None = None
+    retry_after_review = False
+    job_path = tmp_path / "durable-cross-domain-post-synthesis-gate.sqlite3"
+
+    def resolve(metadata: dict[str, object]) -> dict[str, object]:
+        checkpoint_wire = metadata.get("checkpoint", {})
+        checkpoint = checkpoint_wire if isinstance(checkpoint_wire, dict) else {}
+        nested = checkpoint.get("cross_domain_checkpoint", {})
+        nested = nested if isinstance(nested, dict) else {}
+        completed = {
+            child_id: caller_results[child_id]
+            for child_id in nested.get("completed_child_ids", [])
+            if child_id in caller_results
+        }
+        options: dict[str, object] = {
+            "approve_provider_call": True,
+            "require_response_alignment": True,
+            "response_alignments": alignments,
+            "retry_synthesis_after_response_review": retry_after_review,
+        }
+        if synthesis_result is not None and not retry_after_review:
+            options["completed_synthesis_result"] = synthesis_result
+        return {
+            "blueprint": blueprint,
+            "model_candidates": model_candidates,
+            "credentials": {},
+            "completed_child_results": completed,
+            "cross_domain_options": options,
+        }
+
+    with BrainJobStore(job_path) as store:
+        job, _ = store.submit(
+            {
+                "idempotency_key": "durable-cross-domain-post-synthesis-gate",
+                "spec_digest": "b" * 64,
+                "domain": "cross_domain",
+                "capability": "cross_domain_synthesis",
+                "risk_class": "review",
+                "max_attempts": 8,
+            }
+        )
+        worker = BrainWorker(
+            brain,
+            store,
+            worker_id="post-synthesis-worker-a",
+            resolver=resolve,
+            evaluator=None,
+            bandit_state={"schema": "bioprism-brain-bandit/0.1", "generation": 0, "arms": []},
+            execution_kind="cross_domain",
+            lease_seconds=10,
+            heartbeat_seconds=0.1,
+        )
+        first = worker.run_once(job.job_id)
+        assert first is not None and first.status == "queued"
+        assert first.workflow is not None and first.workflow.phase == "child"
+        caller_results[first.workflow.item_id] = first.workflow.result
+        second = worker.run_once(job.job_id)
+        assert second is not None and second.status == "queued"
+        assert second.workflow is not None and second.workflow.phase == "child"
+        caller_results[second.workflow.item_id] = second.workflow.result
+
+    with BrainJobStore(job_path) as reopened:
+        restarted = BrainWorker(
+            brain,
+            reopened,
+            worker_id="post-synthesis-worker-b",
+            resolver=resolve,
+            evaluator=None,
+            bandit_state={"schema": "bioprism-brain-bandit/0.1", "generation": 0, "arms": []},
+            execution_kind="cross_domain",
+            lease_seconds=10,
+            heartbeat_seconds=0.1,
+        )
+        pre_review = restarted.run_once(job.job_id)
+        assert pre_review is not None and pre_review.status == "queued"
+        assert pre_review.workflow is not None
+        assert pre_review.workflow.status == "response_review_required"
+        rows = [row for row in pre_review.workflow.response_assessment.rows if row.role == "specialist"]
+        assert len(rows) == 2
+        alignments[:] = [{
+            "alignment_id": "post-synthesis-biomedical-neuroscience-review",
+            "left_domain": rows[0].domain,
+            "right_domain": rows[1].domain,
+            "stance": "neutral",
+            "confidence": 1.0,
+            "topic_digest": content_digest({"topic": "bounded EEG review"}),
+            "rationale_digest": None,
+            "left_response_digest": rows[0].response_digest,
+            "right_response_digest": rows[1].response_digest,
+        }]
+        blocked = restarted.run_once(job.job_id)
+        assert blocked is not None and blocked.status == "queued"
+        assert blocked.workflow is not None
+        assert blocked.workflow.status == "synthesis_response_review_required"
+        assert blocked.workflow.result is not None
+        synthesis_result = blocked.workflow.result
+        blocked_assessment = blocked.workflow.response_assessment
+        assert blocked_assessment is not None
+        assert blocked_assessment.status != "completed"
+        blocked_record = reopened.get(job.job_id)
+        assert blocked_record is not None
+        blocked_checkpoint = AutonomousCrossDomainCheckpoint.from_dict(
+            blocked_record.checkpoint["cross_domain_checkpoint"]
+        )
+        assert blocked_checkpoint.status == "synthesis_response_review_required"
+        assert blocked_checkpoint.synthesis_result_digest == synthesis_result.outcome_digest
+        assert blocked_checkpoint.response_assessment_digest == blocked_assessment.assessment_digest
+        tampered_checkpoint = dict(blocked_record.checkpoint["cross_domain_checkpoint"])
+        tampered_checkpoint["response_assessment_digest"] = "0" * 64
+        with pytest.raises(BrainRunError, match="checkpoint digest"):
+            AutonomousCrossDomainCheckpoint.from_dict(tampered_checkpoint)
+        rehydrated_review = restarted.run_once(job.job_id)
+        assert rehydrated_review is not None and rehydrated_review.status == "queued"
+        assert rehydrated_review.workflow is not None
+        assert rehydrated_review.workflow.status == "synthesis_response_review_required"
+        assert synthesis_attempts == 1
+        retry_after_review = True
+        completed = restarted.run_once(job.job_id)
+        assert completed is not None and completed.status == "succeeded"
+        assert completed.workflow is not None and completed.workflow.phase == "synthesis"
+        assert completed.workflow.result is not None
+        assert completed.workflow.response_assessment is not None
+        assert completed.workflow.response_assessment.status == "completed"
+        final = reopened.get(job.job_id)
+        assert final is not None and final.state == "succeeded"
+        final_checkpoint = AutonomousCrossDomainCheckpoint.from_dict(
+            final.checkpoint["result_metadata"]["cross_domain_checkpoint"]
+        )
+        assert final_checkpoint.status == "completed"
+        assert final_checkpoint.response_assessment_digest == completed.workflow.response_assessment.assessment_digest
+        assert synthesis_attempts == 2
+        assert len(calls) == 4
+
+
 def test_durable_cross_domain_worker_parks_and_releases_provider_approval(tmp_path: Path):
     runtime, credentials, server, thread = _runtime()
     handle = credentials.register("openai", "durable-cross-domain-approval-secret")
@@ -4709,8 +6780,17 @@ def test_builtin_workflow_learning_signal_contract_covers_every_domain():
 
 def test_run_auto_binds_a_restart_safe_decision_cycle_without_reinvoking_on_rehydration():
     runtime, store, server, thread = _runtime()
-    agent = AutonomousAgent(_Workspace(), runtime, model_catalogue=ModelCatalogue(_model()))
     cycle_store = InMemoryAutonomousDecisionCycleStateStore()
+    cycle_persistence = AutonomousDecisionCyclePersistenceCoordinator(
+        cycle_store,
+        TransactionalJsonAutonomousDecisionCycleSnapshotPersistence(_CasTextStore()),
+    )
+    agent = AutonomousAgent(
+        _Workspace(),
+        runtime,
+        model_catalogue=ModelCatalogue(_model()),
+        decision_cycle_persistence=cycle_persistence,
+    )
     try:
         with agent.onboarding.start_session(session_id="decision-cycle-session") as session:
             session.register_value("openai", "decision-cycle-secret")
@@ -4719,7 +6799,6 @@ def test_run_auto_binds_a_restart_safe_decision_cycle_without_reinvoking_on_rehy
                 credentials=session,
                 approve_provider_call=True,
                 decision_cycle_id="decision-cycle-1",
-                decision_cycle_store=cycle_store,
             )
             assert result.status == "completed"
             assert result.execution_status == "completed_provider_call"
@@ -4744,14 +6823,12 @@ def test_run_auto_binds_a_restart_safe_decision_cycle_without_reinvoking_on_rehy
                     credentials=session,
                     approve_provider_call=True,
                     decision_cycle_id="decision-cycle-1",
-                    decision_cycle_store=cycle_store,
                 )
 
             resumed = agent.run_auto(
                 task="fix the Rust tests in the repository",
                 credentials=session,
                 decision_cycle_id="decision-cycle-1",
-                decision_cycle_store=cycle_store,
                 resume_decision_cycle=True,
                 decision_cycle_rehydrate_result=lambda _context: result,
             )
@@ -4762,7 +6839,6 @@ def test_run_auto_binds_a_restart_safe_decision_cycle_without_reinvoking_on_rehy
                     task="fix the Rust tests in the repository",
                     credentials=session,
                     decision_cycle_id="decision-cycle-1",
-                    decision_cycle_store=cycle_store,
                     resume_decision_cycle=True,
                     decision_cycle_rehydrate_result=lambda _context: tampered_result,
                 )

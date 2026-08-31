@@ -15,6 +15,7 @@ from prism_sdk import (
     builtin_autonomous_domain_profiles,
     builtin_autonomous_domain_policies,
     evaluate_autonomous_domain_policy,
+    validate_autonomous_domain_policy,
     LLMRuntime,
 )
 
@@ -92,6 +93,30 @@ def test_prompt_and_plan_bind_policy_metadata_for_every_domain():
 def test_policy_rejects_unknown_override():
     with pytest.raises(AutonomousDomainPolicyError):
         autonomous_domain_policy("coding", {"unknown": 1})
+
+
+def test_policy_replay_validation_rejects_tampering_and_cross_domain_binding():
+    policy = autonomous_domain_policy("coding")
+    assert validate_autonomous_domain_policy(policy.to_dict()).policy_digest == policy.policy_digest
+    tampered = policy.to_dict()
+    tampered["max_tool_turns"] += 1
+    with pytest.raises(AutonomousDomainPolicyError, match="digest"):
+        validate_autonomous_domain_policy(tampered)
+    missing_or_unknown = policy.to_dict()
+    missing_or_unknown.pop("policy_id")
+    missing_or_unknown["unexpected"] = True
+    with pytest.raises(AutonomousDomainPolicyError, match="missing or unsupported"):
+        validate_autonomous_domain_policy(missing_or_unknown)
+    with pytest.raises(AutonomousDomainPolicyError, match="expected domain"):
+        validate_autonomous_domain_policy(policy.to_dict(), expected_domain="science")
+    with pytest.raises(AutonomousDomainPolicyError, match="markers"):
+        validate_autonomous_domain_policy({**policy.to_dict(), "retention": "raw_policy"})
+
+
+def test_agent_exposes_policy_replay_validation():
+    agent = AutonomousAgent(object(), LLMRuntime())
+    policy = autonomous_domain_policy("science")
+    assert agent.validate_domain_policy(value=policy.to_dict(), expected_domain="science") == policy
 
 
 def test_strict_orchestrator_policy_blocks_every_domain_before_provider_dispatch():

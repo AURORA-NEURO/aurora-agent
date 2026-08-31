@@ -4,6 +4,8 @@ import {
   type AutonomousEvidencePlanJSON,
   type AutonomousEvidenceRequirement,
 } from "./autonomous-evidence.js";
+import { AutonomousProtectedRehydrationAdapter } from "./autonomous-protected-rehydration.js";
+import type { AutonomousAuthorizationContext, AutonomousAuthorizationOperation } from "./autonomous-authorization.js";
 import { canonicalJson, digestJson } from "./tooling.js";
 import type { JsonObject, JsonValue } from "./types.js";
 
@@ -238,6 +240,14 @@ export interface AutonomousEvidenceRuntimeExecuteOptions {
   stopOnFailure?: boolean;
   /** Re-run an evaluator for a journaled observed receipt whose prior verdict is unresolved. */
   reevaluatePending?: boolean;
+  /** Optional caller-issued authorization for live acquisition and evaluator callbacks. */
+  authorizationContext?: AutonomousAuthorizationContext;
+  /** Exact domain override; defaults to the requirement's domain. */
+  authorizationDomain?: string;
+  /** Optional capability override; omission preserves the context capability. */
+  authorizationCapability?: string | null;
+  /** Optional risk-class override; omission preserves the context risk class. */
+  authorizationRiskClass?: string | null;
 }
 
 export interface AutonomousEvidenceRuntimeResultJSON extends JsonObject {
@@ -434,14 +444,17 @@ function makeResult(json: AutonomousEvidenceRuntimeResultJSON, values: Record<st
 export class AutonomousEvidenceRuntime {
   readonly plan: AutonomousEvidencePlan;
   readonly journal: AutonomousEvidenceRuntimeJournal | null;
+  readonly protectedRehydration: AutonomousProtectedRehydrationAdapter | null;
   private readonly recordsByRequest = new Map<string, AutonomousEvidenceRuntimeJournalEntry>();
   private readonly valuesByRequest = new Map<string, JsonValue>();
 
-  constructor(options: { plan: AutonomousEvidencePlan; journal?: AutonomousEvidenceRuntimeJournal }) {
+  constructor(options: { plan: AutonomousEvidencePlan; journal?: AutonomousEvidenceRuntimeJournal; protectedRehydration?: AutonomousProtectedRehydrationAdapter }) {
     if (!(options?.plan instanceof AutonomousEvidencePlan)) throw new ArgumentError("evidence runtime requires an AutonomousEvidencePlan");
     if (options.journal !== undefined && (!options.journal || typeof options.journal.append !== "function" || typeof options.journal.records !== "function")) throw new ArgumentError("evidence runtime journal is malformed");
+    if (options.protectedRehydration !== undefined && !(options.protectedRehydration instanceof AutonomousProtectedRehydrationAdapter)) throw new ArgumentError("evidence runtime protectedRehydration adapter is malformed");
     this.plan = options.plan;
     this.journal = options.journal ?? null;
+    this.protectedRehydration = options.protectedRehydration ?? null;
   }
 
   async rehydrate(): Promise<{ restored: number; replayable: number; value_retention: "transient_caller_value_only" }> {
@@ -489,6 +502,29 @@ export class AutonomousEvidenceRuntime {
     return { ...descriptor, assessment_digest: await digestJson(descriptor) } as AutonomousEvidenceAssessmentJSON;
   }
 
+  private authorizeOperation(
+    authorizationContext: AutonomousAuthorizationContext | undefined,
+    input: {
+      operation: AutonomousAuthorizationOperation;
+      requirement: AutonomousEvidenceRequirement;
+      resourceDigest: string;
+      authorizationDomain?: string;
+      authorizationCapability?: string | null;
+      authorizationRiskClass?: string | null;
+    },
+  ): void {
+    if (!authorizationContext) return;
+    if (typeof authorizationContext.authorizeOperation !== "function") throw new ArgumentError("evidence runtime authorizationContext must implement authorizeOperation");
+    const request: Parameters<AutonomousAuthorizationContext["authorizeOperation"]>[0] = {
+      operation: input.operation,
+      domain: input.authorizationDomain ?? input.requirement.domain,
+      resourceDigest: input.resourceDigest,
+    };
+    if (input.authorizationCapability !== undefined && input.authorizationCapability !== null) request.capability = input.authorizationCapability;
+    if (input.authorizationRiskClass !== undefined && input.authorizationRiskClass !== null) request.riskClass = input.authorizationRiskClass;
+    authorizationContext.authorizeOperation(request);
+  }
+
   private async replayPrior(
     entry: AutonomousEvidenceRuntimeJournalEntry,
     request: AutonomousEvidenceAcquisitionRequest,
@@ -502,6 +538,10 @@ export class AutonomousEvidenceRuntime {
         if (prior.value_digest === null || await digestJson(restored) !== prior.value_digest) throw new ProviderRuntimeError("rehydrated evidence value does not match its receipt digest");
         value = restored;
       }
+    } else if (value === null && this.protectedRehydration && prior.value_digest !== null) {
+      const restored = this.protectedRehydration.resolveReceipt(prior, { purpose: "evidence_runtime_value", valueKind: "evidence_value", oneTime: false }) as JsonValue | null;
+      if (restored !== null && await digestJson(restored) !== prior.value_digest) throw new ProviderRuntimeError("protected evidence value does not match its receipt digest");
+      value = restored;
     }
     if (value === null && prior.value_digest !== null) {
       const { receipt_digest: _receiptDigest, ...descriptor } = prior;
@@ -523,6 +563,14 @@ export class AutonomousEvidenceRuntime {
       replay: "replayed",
       evaluator_status: "not_evaluated",
       assessment_digest: null,
+    });
+    this.authorizeOperation(options.authorizationContext, {
+      operation: "evaluation",
+      requirement,
+      resourceDigest: replayBase.receipt_digest,
+      authorizationDomain: options.authorizationDomain,
+      authorizationCapability: options.authorizationCapability,
+      authorizationRiskClass: options.authorizationRiskClass,
     });
     try {
       const decision = await options.evaluator.evaluate({
@@ -566,6 +614,8 @@ export class AutonomousEvidenceRuntime {
   async execute(requests: readonly AutonomousEvidenceAcquisitionRequest[], options: AutonomousEvidenceRuntimeExecuteOptions): Promise<AutonomousEvidenceRuntimeResult> {
     if (!Array.isArray(requests) || requests.length < 1 || requests.length > MAX_AUTONOMOUS_EVIDENCE_RUNTIME_REQUESTS) throw new ArgumentError(`evidence runtime requests must contain 1..${MAX_AUTONOMOUS_EVIDENCE_RUNTIME_REQUESTS} entries`);
     if (!options || !options.acquirer || typeof options.acquirer.acquire !== "function") throw new ArgumentError("evidence runtime requires a caller-owned acquirer");
+    if (!options.authorizationContext && [options.authorizationDomain, options.authorizationCapability, options.authorizationRiskClass].some((value) => value !== undefined && value !== null)) throw new ArgumentError("evidence runtime authorization overrides require authorizationContext");
+    if (options.authorizationContext && typeof options.authorizationContext.authorizeOperation !== "function") throw new ArgumentError("evidence runtime authorizationContext must implement authorizeOperation");
     if (options.projector !== undefined && typeof options.projector.project !== "function") throw new ArgumentError("evidence runtime projector is malformed");
     if (options.evaluator !== undefined && (typeof options.evaluator.evaluate !== "function" || !options.evaluator.evaluator_id || !options.evaluator.evaluator_version)) throw new ArgumentError("evidence runtime evaluator is malformed");
     const parentEvidenceDigests = boundedList("evidence runtime parent_evidence_digests", options.parentEvidenceDigests ?? [], 64);
@@ -607,6 +657,14 @@ export class AutonomousEvidenceRuntime {
       }
       const started = Date.now();
       const context: AutonomousEvidenceAcquisitionContext = { plan_digest: this.plan.plan_digest, requirement, request, attempt: 1, parent_evidence_digests: [...parentEvidenceDigests], execution: "caller_owned_adapter;raw_value_transient" };
+      this.authorizeOperation(options.authorizationContext, {
+        operation: "evidence_acquisition",
+        requirement,
+        resourceDigest: requestDigest,
+        authorizationDomain: options.authorizationDomain,
+        authorizationCapability: options.authorizationCapability,
+        authorizationRiskClass: options.authorizationRiskClass,
+      });
       let raw: JsonValue;
       try {
         raw = await options.acquirer.acquire(context);
@@ -643,6 +701,14 @@ export class AutonomousEvidenceRuntime {
       let receipt = baseReceipt;
       let assessment: AutonomousEvidenceAssessmentJSON | null = null;
       if (options.evaluator && observedIds.length) {
+        this.authorizeOperation(options.authorizationContext, {
+          operation: "evaluation",
+          requirement,
+          resourceDigest: baseReceipt.receipt_digest,
+          authorizationDomain: options.authorizationDomain,
+          authorizationCapability: options.authorizationCapability,
+          authorizationRiskClass: options.authorizationRiskClass,
+        });
         try {
           const decision = await options.evaluator.evaluate({ requirement, receipt: baseReceipt, observations, value: raw });
           const evaluatorId = boundedIdentifier("evidence runtime evaluator_id", decision.evaluator_id);

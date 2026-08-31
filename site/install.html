@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Install AURORA Agent — Claude Desktop, Claude Code, any MCP client</title>
+<meta name="description" content="Install the AURORA Agent MCP server: Claude Desktop .mcpb (Windows prebuilt), Claude Code plugin marketplace, or a Cargo source build for any MCP client.">
+<link rel="canonical" href="https://aurora-neuro.github.io/aurora-agent/install.html">
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<link rel="stylesheet" href="style.css">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Install AURORA Agent">
+<meta property="og:description" content="Claude Desktop .mcpb (Windows prebuilt), Claude Code plugin marketplace, MCP registry listing, or cargo build from source.">
+<meta property="og:url" content="https://aurora-neuro.github.io/aurora-agent/install.html">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="Install AURORA Agent">
+<meta name="twitter:description" content="Claude Desktop .mcpb (Windows prebuilt), Claude Code plugin marketplace, MCP registry listing, or cargo build from source.">
+</head>
+<body>
+
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="./">
+      <svg viewBox="0 0 64 64" aria-hidden="true"><rect x="4" y="4" width="56" height="56" rx="10" fill="var(--accent)"/><path d="M32 14 L50 50 L42 50 L32 28 L22 50 L14 50 Z" fill="var(--bg)"/><rect x="27" y="41" width="10" height="5" rx="1.5" fill="var(--bg)"/></svg>
+      AURORA Agent
+    </a>
+    <nav class="site-nav" aria-label="Site">
+      <a href="./">Overview</a>
+      <a href="install.html" aria-current="page">Install</a>
+      <a href="benchmarks.html">Benchmarks</a>
+      <a href="research.html">Research</a>
+      <a href="explore.html">Explorer</a>
+      <a href="docs.html">Docs</a>
+      <a href="faq.html">FAQ</a>
+      <a href="https://github.com/AURORA-NEURO/aurora-agent">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <div class="wrap">
+
+    <h1>Install</h1>
+
+    <p class="lede">Five ways in, all local. The server makes no network requests and collects no data
+    on any of them.</p>
+
+    <h2>Claude Desktop (.mcpb bundle)</h2>
+
+    <p>Download <code>aurora-agent.mcpb</code> from the
+    <a href="https://github.com/AURORA-NEURO/aurora-agent/releases">GitHub releases</a>
+    (v0.1.1) and double-click it, or add it via Settings → Extensions. The bundle ships with the
+    reference fixtures; the “AURORA data root” setting can point at a full checkout.</p>
+
+    <p><strong>The prebuilt bundle is Windows-only.</strong> On macOS or Linux, build from source
+    (below) and register the binary with your MCP client directly.</p>
+
+    <p>Release integrity — the v0.1.1 bundle's SHA-256:</p>
+    <pre><code>e987c396a01eb2ae812efa8226f6892fc3f70cb441102217476990816458f025</code></pre>
+
+    <h2>Claude Code (plugin marketplace)</h2>
+
+    <p>The repository is itself a Claude Code plugin marketplace:</p>
+
+    <pre><code>claude plugin marketplace add AURORA-NEURO/aurora-agent
+claude plugin install aurora-agent@aurora</code></pre>
+
+    <h2>VS Code (extension)</h2>
+
+    <p>Sideload <code>aurora-agent-0.1.3.vsix</code> from the
+    <a href="https://github.com/AURORA-NEURO/aurora-agent/releases/tag/v0.1.3">v0.1.3 release</a>:</p>
+
+    <pre><code>code --install-extension aurora-agent-0.1.3.vsix</code></pre>
+
+    <p>The extension registers the MCP server with VS Code (1.101+) so Copilot agent mode can call
+    the 259 tools, and adds workflow/autopilot/pipeline views. It can also be built from source in
+    <code>editors/vscode</code> with <code>npm install &amp;&amp; npm run package</code>.</p>
+
+    <h2>MCP registry</h2>
+
+    <p>The server is listed on the official Model Context Protocol registry as
+    <code>io.github.MurariAmbati/aurora-agent</code> (v0.1.1). Verify the listing directly:</p>
+
+    <pre><code>curl "https://registry.modelcontextprotocol.io/v0.1/servers?search=aurora-agent"</code></pre>
+
+    <p>The registry is metadata: tools that consume it (registry aggregators, editor integrations)
+    can discover the server there, but installation still happens through one of the paths on this
+    page.</p>
+
+    <h2>Any MCP client (build from source)</h2>
+
+    <p>The workspace builds offline against pinned dependencies:</p>
+
+    <pre><code>git clone https://github.com/AURORA-NEURO/aurora-agent
+cd aurora-agent
+cargo build --release --offline</code></pre>
+
+    <p>Then point any MCP client at the stdio server:</p>
+
+    <pre><code>./target/release/bioprism-mcp --root .</code></pre>
+
+    <p>The server speaks JSON-RPC 2.0 over newline-delimited stdio and follows the MCP lifecycle
+    (<code>initialize</code>, then <code>notifications/initialized</code>, then tool calls). Paths are
+    confined to <code>--root</code>; absolute paths, <code>..</code>, and symlink escapes are refused.
+    259 tools are exposed, from <code>fiber_compile</code> / <code>fiber_refine</code> /
+    <code>fiber_verify</code> through the evaluation, oracle, safety, and operations surfaces.</p>
+
+    <h3>CLI and HTTP gateway</h3>
+
+    <p>The same build produces <code>bioprism</code> (a CLI with <code>--json</code> envelopes and a
+    ten-exit-code retryability matrix — every failure code carries exactly one retry decision) and
+    <code>bioprism-api</code>, a bounded local HTTP gateway for deployments that need a network
+    boundary. The gateway binds to an address you choose, loopback by default, and calls no external
+    services.</p>
+
+    <div class="boundary">Research and developer infrastructure: it does not diagnose an individual,
+    recommend treatment, triage care, enroll participants, or claim medical-device functionality.</div>
+
+  </div>
+</main>
+
+<footer class="site">
+  <div class="wrap">
+    <p>AURORA Agent — Apache-2.0 ·
+      <a href="https://github.com/AURORA-NEURO/aurora-agent">Source</a> ·
+      <a href="https://github.com/AURORA-NEURO/aurora-agent/blob/main/PRIVACY.md">Privacy</a> ·
+      MCP registry: <code>io.github.MurariAmbati/aurora-agent</code></p>
+    <p>Research and developer infrastructure: it does not diagnose an individual, recommend treatment,
+    triage care, enroll participants, or claim medical-device functionality.</p>
+  </div>
+</footer>
+
+</body>
+</html>

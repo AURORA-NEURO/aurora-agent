@@ -207,6 +207,12 @@ fn the_radiogenomic_witnesses_name_the_subjects_a_reader_would_have_to_refute() 
                 assert_eq!(future_label_sources["S004"], "2025-06-01");
             }
             LeakageWitness::PreprocessingLeakage { .. } => {}
+            LeakageWitness::DomainCheck { check, .. } => {
+                panic!(
+                    "the reference split-integrity oracle emits no domain_check witness, yet the \
+                     radiogenomic slice produced one for rule {check:?}"
+                )
+            }
         }
     }
     assert!(seen_identity && seen_site && seen_temporal);
@@ -876,6 +882,36 @@ fn every_property_id_matches_its_serde_encoding() {
             !property.blueprint_modules().is_empty(),
             "{} cites no blueprint module",
             property.id()
+        );
+    }
+}
+
+/// A field the reader does not know is a field the digest cannot cover.
+///
+/// A registry report seals itself by re-serialising the parsed struct and hashing that, so
+/// anything a reader silently discards is outside the seal by construction: the recomputation
+/// cannot see it, the claimed digest still agrees, and a report carrying content nobody hashed
+/// reads as intact. This report is the artefact that says which claims the reference examples
+/// establish, so an invisible field in it is the difference between "these slices ran" and
+/// "somebody wrote a slice into the file after it was sealed".
+#[test]
+fn a_registry_report_carrying_an_undeclared_field_is_refused_rather_than_silently_dropped() {
+    let report = registry().run_all().expect("the standard registry runs");
+    assert!(report.digest_is_intact());
+    let sealed = serde_json::to_value(&report).expect("the report serialises");
+
+    for pointer in ["", "/slices/0", "/coverage"] {
+        let mut tampered = sealed.clone();
+        tampered
+            .pointer_mut(pointer)
+            .expect("the position exists")
+            .as_object_mut()
+            .expect("the position is an object")
+            .insert("injected".into(), serde_json::json!("added after sealing"));
+        assert!(
+            serde_json::from_value::<bioprism_examples::RegistryReport>(tampered).is_err(),
+            "a key injected at {pointer:?} was read back into a report whose digest still verifies, \
+             so the digest names less than the document does"
         );
     }
 }

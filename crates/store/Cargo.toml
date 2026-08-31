@@ -10,7 +10,6 @@ description = "Content-addressed indexed world storage: point lookups that do no
 [dependencies]
 bioprism-foundation = { workspace = true }
 bioprism-ids = { workspace = true }
-bioprism-scope = { workspace = true }
 bioprism-world = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

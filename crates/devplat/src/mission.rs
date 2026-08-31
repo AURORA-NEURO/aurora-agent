@@ -721,6 +721,17 @@ fn valid_tool_name(name: &str) -> bool {
             .all(|character| character.is_ascii_alphanumeric() || character == '_')
 }
 
+/// Recognise the mission tool itself under any ASCII casing.
+///
+/// A safe tool identifier may carry uppercase letters, so an exact-string recursion guard would
+/// let `Agent_Mission` be authored, allow-listed, and planned as `execution: "authorized"`. The
+/// in-tree dispatch table happens to match tool names exactly and would reject it, but the
+/// mission contract must not depend on a downstream table's case sensitivity for its own
+/// recursion invariant. Comparison stays fail-closed: it only ever adds a refusal.
+fn is_mission_tool(name: &str) -> bool {
+    name.eq_ignore_ascii_case("agent_mission")
+}
+
 fn valid_json_pointer(pointer: &str, allow_empty: bool) -> bool {
     if pointer.is_empty() {
         return allow_empty;
@@ -861,7 +872,7 @@ impl MissionPolicy {
             if !valid_tool_name(tool) {
                 return Err(MissionError::UnsafeTool { tool: tool.clone() });
             }
-            if tool == "agent_mission" {
+            if is_mission_tool(tool) {
                 return Err(MissionError::RecursiveTool);
             }
             if !allowed_keys.insert(tool.to_ascii_lowercase()) || !allowed.insert(tool.clone()) {
@@ -969,7 +980,7 @@ impl MissionStep {
                 tool: self.tool.clone(),
             });
         }
-        if self.tool == "agent_mission" {
+        if is_mission_tool(&self.tool) {
             return Err(MissionError::RecursiveTool);
         }
         if !self.arguments.is_object() {

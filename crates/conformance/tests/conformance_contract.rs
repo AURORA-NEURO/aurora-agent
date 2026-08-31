@@ -1131,3 +1131,53 @@ fn a_recommended_requirement_does_not_block_certification() {
         "a `should` failure must be disclosed but not counted against certification"
     );
 }
+
+/// A registry ingesting a bundle must be able to tell a broken claim from a rewritten result.
+///
+/// `CertificateDigestMismatch` says a certified implementation edited its results after
+/// certification — a finding a registry acts on. A `certificate_sha256` that is not a digest says
+/// only that the field beside the results is broken. Until these two were separated, a typo in
+/// the digest field read to an operator as evidence of tampering by the implementation.
+#[test]
+fn a_malformed_certificate_digest_is_reported_as_malformed_and_never_as_a_mismatch() {
+    let document = certified_report()
+        .certify("2026-08-08T00:00:00Z", "2027-08-08T00:00:00Z")
+        .expect("a fully conformant run certifies")
+        .to_json()
+        .expect("the certificate serialises");
+    ConformanceCertificate::verify(&document).expect("its own digest verifies");
+
+    let claimed = document["certificate_sha256"]
+        .as_str()
+        .expect("a digest")
+        .to_string();
+    for broken in [
+        String::new(),
+        "not-a-digest".to_string(),
+        claimed.to_ascii_uppercase(),
+        claimed[..63].to_string(),
+        format!("{claimed}0"),
+    ] {
+        let mut candidate = document.clone();
+        candidate["certificate_sha256"] = json!(broken.clone());
+        match ConformanceCertificate::verify(&candidate) {
+            Err(ConformanceError::CertificateDigestMalformed { claimed }) => {
+                assert_eq!(claimed, broken)
+            }
+            other => panic!(
+                "certificate_sha256 = {broken:?} is a defect in the claimed digest, not evidence \
+                 that the certified results changed, and it was reported as {other:?}"
+            ),
+        }
+    }
+
+    let mut edited = document;
+    edited["issued_at"] = json!("2026-01-01T00:00:00Z");
+    assert!(
+        matches!(
+            ConformanceCertificate::verify(&edited),
+            Err(ConformanceError::CertificateDigestMismatch { .. })
+        ),
+        "an edit to the certified body is the case the mismatch exists for"
+    );
+}

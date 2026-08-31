@@ -15,6 +15,13 @@ use crate::error::AdaptiveError;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
+/// Crate-private, and deliberately not [`bioprism_ids::validated_string_id`].
+///
+/// The shared macro reports failures as `bioprism_ids::IdError`. These identifiers report them as
+/// [`AdaptiveError`], because a caller of this crate handles one error type and a scheduler that
+/// refused an identifier is a scheduling failure, not an identity-crate failure. Consolidating the
+/// two would mean either widening `AdaptiveError` with a foreign variant or narrowing this crate's
+/// error surface to a type it does not own, so the duplication is the cheaper of the two.
 macro_rules! typed_id {
     ($(#[$meta:meta])* $name:ident, $kind:literal) => {
         $(#[$meta])*

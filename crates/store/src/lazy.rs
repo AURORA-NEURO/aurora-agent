@@ -20,12 +20,12 @@ use std::path::Path;
 
 pub struct LazyWorld {
     manifest: StoreManifest,
-    world_digest: ContentHash,
     facts: SortedIndex,
     variables: SortedIndex,
     factors: SortedIndex,
     producers: SortedIndex,
     tags: SortedIndex,
+    shadowed: SortedIndex,
     events: Vec<CausalEvent>,
 }
 
@@ -39,8 +39,6 @@ impl LazyWorld {
                 actual: manifest.schema_version,
             });
         }
-        let world_digest = ContentHash::parse(manifest.world_sha256.clone())
-            .map_err(|_| StoreError::MalformedWorld)?;
 
         let events = manifest
             .events
@@ -49,56 +47,14 @@ impl LazyWorld {
             .collect::<Result<Vec<_>, _>>()
             .map_err(|_| StoreError::MalformedWorld)?;
 
-        let facts = SortedIndex::open(directory, "facts")?;
-        let variables = SortedIndex::open(directory, "variables")?;
-        let factors = SortedIndex::open(directory, "factors")?;
-        let producers = SortedIndex::open(directory, "producers")?;
-        let tags = SortedIndex::open(directory, "tags")?;
-        if facts.len() != manifest.total_facts {
-            return Err(StoreError::CorruptIndex(format!(
-                "facts index contains {} records but the manifest declares {}",
-                facts.len(),
-                manifest.total_facts
-            )));
-        }
-        if factors.len() != manifest.total_factors {
-            return Err(StoreError::CorruptIndex(format!(
-                "factors index contains {} records but the manifest declares {}",
-                factors.len(),
-                manifest.total_factors
-            )));
-        }
-        if variables.len() > facts.len() || tags.len() != manifest.tag_counts.len() {
-            return Err(StoreError::CorruptIndex(
-                "manifest and derived index cardinalities disagree".into(),
-            ));
-        }
-        for (tag, expected_count) in &manifest.tag_counts {
-            let Some(raw_ids) = tags.get(tag)? else {
-                return Err(StoreError::CorruptIndex(format!(
-                    "manifest declares tag {tag:?} but its index has no record"
-                )));
-            };
-            let ids: Vec<String> = serde_json::from_str(&raw_ids).map_err(|_| {
-                StoreError::CorruptIndex(format!("tag index record {tag:?} is not a string list"))
-            })?;
-            if ids.len() != *expected_count {
-                return Err(StoreError::CorruptIndex(format!(
-                    "tag {tag:?} has {} indexed members but the manifest declares {}",
-                    ids.len(),
-                    expected_count
-                )));
-            }
-        }
-
         Ok(LazyWorld {
-            facts,
-            variables,
-            factors,
-            producers,
-            tags,
+            facts: SortedIndex::open(directory, "facts")?,
+            variables: SortedIndex::open(directory, "variables")?,
+            factors: SortedIndex::open(directory, "factors")?,
+            producers: SortedIndex::open(directory, "producers")?,
+            tags: SortedIndex::open(directory, "tags")?,
+            shadowed: SortedIndex::open(directory, "shadowed")?,
             events,
-            world_digest,
             manifest,
         })
     }
@@ -128,7 +84,8 @@ impl WorldSource for LazyWorld {
     }
 
     fn world_digest(&self) -> ContentHash {
-        self.world_digest.clone()
+        ContentHash::parse(self.manifest.world_sha256.clone())
+            .expect("manifest digest was written by the builder")
     }
 
     fn total_facts(&self) -> usize {
@@ -156,6 +113,10 @@ impl WorldSource for LazyWorld {
     fn fact_providing(&self, variable: &str) -> Option<Fact> {
         let id = self.variables.get(variable).ok().flatten()?;
         self.fact(&id)
+    }
+
+    fn shadowed_provider_ids(&self, variable: &str) -> Vec<String> {
+        Self::lookup_ids(&self.shadowed, variable)
     }
 
     fn factor(&self, id: &str) -> Option<Factor> {

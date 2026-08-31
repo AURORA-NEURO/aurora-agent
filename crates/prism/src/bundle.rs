@@ -87,6 +87,11 @@ impl ResultBundle {
     }
 
     /// Recomputes a bundle's attestation, the way a third party must before trusting it.
+    ///
+    /// The shape of the claimed digest is checked before the comparison, and separately from it.
+    /// A digest that is not 64 lowercase hex characters names no content at all, so it cannot
+    /// disagree with the recomputation — reporting it as a [`Attestation::Mismatch`] would tell a
+    /// reader the bundle body had been edited, on the evidence of a typo in the field beside it.
     pub fn verify(document: &Value) -> Attestation {
         let Some(map) = document.as_object() else {
             return Attestation::Malformed("not an object".into());
@@ -94,6 +99,11 @@ impl ResultBundle {
         let Some(claimed) = map.get("bundle_sha256").and_then(Value::as_str) else {
             return Attestation::Malformed("missing bundle_sha256".into());
         };
+        if ContentHash::parse(claimed.to_string()).is_err() {
+            return Attestation::Malformed(format!(
+                "bundle_sha256 {claimed:?} is not a 64-character lowercase hex digest"
+            ));
+        }
         let mut body = map.clone();
         body.remove("bundle_sha256");
         let body = Value::Object(body);

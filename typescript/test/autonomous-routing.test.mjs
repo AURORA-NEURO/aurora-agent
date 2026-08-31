@@ -167,3 +167,107 @@ test("semantic routing covers every built-in domain with catalogue-authoritative
     assert.equal(result.route.candidates[0].capability, profile.default_capability);
   }
 });
+
+test("high-level run can invoke semantic routing under the run approval boundary", async () => {
+  const { agent, calls } = routerAgent([
+    { selected_domains: [{ domain: "coding", score: 0.94, rationale: "implementation and verification" }], confidence: 0.93, abstain: false, abstain_reason: null },
+  ]);
+  const result = await agent.run("Debug this Rust repository and fix the failing tests.", {
+    semanticRouting: { approveProviderCall: true },
+    approveProviderCall: false,
+  });
+  assert.equal(result.status, "approval_required");
+  assert.equal(result.semantic_route.status, "completed");
+  assert.equal(result.semantic_route.route.source, "provider_semantic_hybrid");
+  assert.equal(result.route.route_digest, result.semantic_route.route.route_digest);
+  assert.equal(calls(), 1, "routing should be the only provider call before execution approval");
+});
+
+test("high-level run executes after semantic routing and retains one shared route proposal", async () => {
+  const { agent, calls } = routerAgent([
+    { selected_domains: [{ domain: "coding", score: 0.94, rationale: "implementation and verification" }], confidence: 0.93, abstain: false, abstain_reason: null },
+    { answer: "bounded execution response" },
+  ]);
+  const result = await agent.run("Debug this Rust repository and fix the failing tests.", {
+    semanticRouting: true,
+    approveProviderCall: true,
+  });
+  assert.equal(result.status, "completed");
+  assert.equal(result.semantic_route.status, "completed");
+  assert.equal(result.route.source, "provider_semantic_hybrid");
+  assert.equal(result.blueprint.route_digest, result.semantic_route.route.route_digest);
+  assert.equal(calls(), 2, "semantic classifier and execution should each use one provider call");
+});
+
+test("high-level semantic routing spans the complete built-in domain catalogue", async () => {
+  const profiles = await builtinAutonomousDomainProfiles();
+  const payloads = profiles.map((profile) => ({
+    selected_domains: [{ domain: profile.domain, score: 0.9, rationale: `high-level route for ${profile.domain}` }],
+    confidence: 0.9,
+    abstain: false,
+    abstain_reason: null,
+  }));
+  const { agent, calls } = routerAgent(payloads);
+  for (const profile of profiles) {
+    const result = await agent.run(`route this ${profile.domain} task`, {
+      semanticRouting: { approveProviderCall: true },
+      approveProviderCall: false,
+    });
+    assert.equal(result.semantic_route.status, "completed", profile.domain);
+    assert.equal(result.semantic_route.route.primary_domain, profile.domain, profile.domain);
+  }
+  assert.equal(calls(), profiles.length);
+});
+
+test("high-level semantic routing rejects explicit domains instead of silently bypassing the classifier", async () => {
+  const { agent, calls } = routerAgent([]);
+  await assert.rejects(
+    () => agent.run("implement this feature", { domain: "coding", semanticRouting: true }),
+    /semanticRouting cannot be combined with an explicit domain/,
+  );
+  assert.equal(calls(), 0);
+});
+
+test("high-level cross-domain execution reuses the approved semantic route for fan-out and synthesis", async () => {
+  const task = "Research a biomedical neuroscience experiment with EEG patient evidence.";
+  const { agent, calls } = routerAgent([
+    {
+      selected_domains: [
+        { domain: "biomedical", score: 0.93, rationale: "patient evidence and biomedical safety" },
+        { domain: "neuroscience", score: 0.91, rationale: "EEG and neural signal design" },
+      ],
+      confidence: 0.92,
+      abstain: false,
+      abstain_reason: null,
+    },
+    { answer: "bounded biomedical analysis" },
+    { answer: "bounded neuroscience analysis" },
+    { answer: "bounded synthesis" },
+  ]);
+  const result = await agent.runCrossDomain(task, {
+    semanticRouting: { approveProviderCall: true },
+    approveProviderCall: true,
+    allowCrossDomain: true,
+    maxParallelChildren: 1,
+  });
+  assert.equal(result.status, "completed");
+  assert.equal(result.semantic_route.status, "completed");
+  assert.equal(result.semantic_route.route.route_digest, result.route.route_digest);
+  assert.equal(result.blueprint.route_digest, result.semantic_route.route.route_digest);
+  assert.equal(result.child_runs.length, 2);
+  assert.equal(calls(), 4, "one classifier plus two specialists and one synthesis");
+});
+
+test("planAndRun resolves semantic routing before its independent planning approval", async () => {
+  const { agent, calls } = routerAgent([
+    { selected_domains: [{ domain: "coding", score: 0.94, rationale: "implementation and verification" }], confidence: 0.93, abstain: false, abstain_reason: null },
+  ]);
+  const result = await agent.planAndRun("Debug this Rust repository and fix the failing tests.", {
+    semanticRouting: { approveProviderCall: true },
+    approveProviderCall: false,
+  });
+  assert.equal(result.status, "approval_required");
+  assert.equal(result.semantic_route.status, "completed");
+  assert.equal(result.result, null);
+  assert.equal(calls(), 1, "semantic routing must not be confused with planning approval");
+});

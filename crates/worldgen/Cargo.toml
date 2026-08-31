@@ -16,6 +16,9 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
+# Tests and the scaling example only. The generator emits world and query *documents*; loading one
+# back is how the tests check it is well formed, and is not something the library itself does.
+bioprism-world = { workspace = true }
 bioprism-baseline = { workspace = true }
 bioprism-section = { workspace = true }
 bioprism-fiber = { workspace = true }

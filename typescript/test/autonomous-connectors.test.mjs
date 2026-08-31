@@ -3,6 +3,9 @@ import { test } from "node:test";
 
 import {
   AUTONOMOUS_DOMAIN_NAMES,
+  AutonomousAuthorizationContext,
+  AutonomousAuthorizationGate,
+  AutonomousAuthorizationLedger,
   AutonomousConnectorDispatchRequest,
   AutonomousConnectorObservation,
   AutonomousConnectorRegistration,
@@ -114,6 +117,64 @@ test("connector runtime enforces approval and scope, returns transient values, a
   const tampered = structuredClone(snapshot);
   tampered.entries[0].receipt.status = "error";
   assert.throws(() => restored.restore(tampered), /snapshot digest/);
+});
+
+test("connector runtime enforces the authorization context before every domain executor", async () => {
+  const calls = [];
+  const registry = new AutonomousConnectorRegistry(AUTONOMOUS_DOMAIN_NAMES.map((domain) =>
+    new AutonomousConnectorRegistration(manifest(`connector-${domain}`, [domain]), async () => {
+      calls.push(domain);
+      return { domain };
+    }, false),
+  ));
+  const runtime = new AutonomousConnectorRuntime(registry);
+  const ledger = new AutonomousAuthorizationLedger(4, 64);
+  const grant = ledger.issue({
+    grant_id: "connector-runtime-grant",
+    tenant_id: "tenant-a",
+    actor_id: "actor-a",
+    session_id: "session-a",
+    authorization_digest: "a".repeat(64),
+    allowed_domains: [...AUTONOMOUS_DOMAIN_NAMES],
+    allowed_operations: ["connector_dispatch"],
+    allowed_capabilities: [],
+    allowed_risk_classes: [],
+    issued_at: 1000,
+    expires_at: 2000,
+    max_uses: AUTONOMOUS_DOMAIN_NAMES.length,
+  });
+  const context = new AutonomousAuthorizationContext(
+    new AutonomousAuthorizationGate(ledger), grant.grant_id, grant.tenant_id, grant.actor_id,
+    grant.session_id, grant.authorization_digest, [...AUTONOMOUS_DOMAIN_NAMES], null,
+    "provider_invocation", "connector", () => 1200,
+  );
+  for (const domain of AUTONOMOUS_DOMAIN_NAMES) {
+    const plan = registry.selectForDomains([domain], { capability: "evidence_read" });
+    const result = await runtime.dispatchFromPlan(plan, request({
+      dispatch_id: `dispatch-${domain}`,
+      execution_id: `execution-${domain}`,
+      call_id: `call-${domain}`,
+      connector_id: `connector-${domain}`,
+      domains: [domain],
+      selection_plan_digest: plan.plan_digest,
+    }), { authorizationContext: context });
+    assert.equal(result.receipt.status, "observed", domain);
+  }
+  assert.deepEqual(calls, [...AUTONOMOUS_DOMAIN_NAMES]);
+  assert.equal(ledger.get(grant.grant_id).used_count, AUTONOMOUS_DOMAIN_NAMES.length);
+
+  const blockedLedger = new AutonomousAuthorizationLedger(2, 8);
+  const blocked = blockedLedger.issue({
+    grant_id: "blocked-connector-grant", tenant_id: "tenant-a", actor_id: "actor-a", session_id: "session-a",
+    authorization_digest: "a".repeat(64), allowed_domains: ["coding"], allowed_operations: ["tool_execution"],
+    allowed_capabilities: [], allowed_risk_classes: [], issued_at: 1000, expires_at: 2000, max_uses: 1,
+  });
+  const blockedContext = new AutonomousAuthorizationContext(
+    new AutonomousAuthorizationGate(blockedLedger), blocked.grant_id, blocked.tenant_id, blocked.actor_id,
+    blocked.session_id, blocked.authorization_digest, ["coding"], null, "provider_invocation", "blocked", () => 1200,
+  );
+  await assert.rejects(() => runtime.dispatch(request({ dispatch_id: "dispatch-blocked", execution_id: "execution-blocked", call_id: "call-blocked", connector_id: "connector-coding", domains: ["coding"] }), { authorizationContext: blockedContext }), /authorization was refused/);
+  assert.deepEqual(calls, [...AUTONOMOUS_DOMAIN_NAMES]);
 });
 
 test("connector runtime deduplicates concurrent dispatches and rejects credential-shaped payloads", async () => {

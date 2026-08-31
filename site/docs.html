@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AURORA Agent documentation map</title>
+<meta name="description" content="A curated map of AURORA Agent's load-bearing docs: architecture, benchmark findings, blueprint coverage, the HTTP API, SDKs, and audit surfaces.">
+<link rel="canonical" href="https://aurora-neuro.github.io/aurora-agent/docs.html">
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<link rel="stylesheet" href="style.css">
+<meta property="og:type" content="website">
+<meta property="og:title" content="AURORA Agent documentation map">
+<meta property="og:description" content="The load-bearing docs of the aurora-agent repository, summarised and linked.">
+<meta property="og:url" content="https://aurora-neuro.github.io/aurora-agent/docs.html">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="AURORA Agent documentation map">
+<meta name="twitter:description" content="The load-bearing docs of the aurora-agent repository, summarised and linked.">
+</head>
+<body>
+
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="./">
+      <svg viewBox="0 0 64 64" aria-hidden="true"><rect x="4" y="4" width="56" height="56" rx="10" fill="var(--accent)"/><path d="M32 14 L50 50 L42 50 L32 28 L22 50 L14 50 Z" fill="var(--bg)"/><rect x="27" y="41" width="10" height="5" rx="1.5" fill="var(--bg)"/></svg>
+      AURORA Agent
+    </a>
+    <nav class="site-nav" aria-label="Site">
+      <a href="./">Overview</a>
+      <a href="install.html">Install</a>
+      <a href="benchmarks.html">Benchmarks</a>
+      <a href="research.html">Research</a>
+      <a href="explore.html">Explorer</a>
+      <a href="docs.html" aria-current="page">Docs</a>
+      <a href="faq.html">FAQ</a>
+      <a href="https://github.com/AURORA-NEURO/aurora-agent">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <div class="wrap">
+
+    <h1>Documentation map</h1>
+
+    <p class="lede">The repository ships over ninety documentation files. These are the load-bearing
+    ones — start here, follow references outward.</p>
+
+    <div class="doc-entry">
+      <h2><a href="https://github.com/AURORA-NEURO/aurora-agent/blob/main/docs/ARCHITECTURE.md">ARCHITECTURE.md</a></h2>
+      <p>How the pieces fit and why the boundaries fall where they do. States the one idea — context
+      assembly is a compiler pass — then walks the layer diagram from foundation (<code>ids</code>,
+      <code>scope</code>) up through world/storage, compilation (<code>fiber</code>,
+      <code>section</code>), composition, evaluation, and the agent surface. Ends with a table of
+      cross-crate invariants and the exact test that pins each one, including “protected closure is
+      computed before any relevance step” and “a budget smaller than the closure fails rather than
+      truncating”.</p>
+    </div>
+
+    <div class="doc-entry">
+      <h2><a href="https://github.com/AURORA-NEURO/aurora-agent/blob/main/docs/FINDINGS.md">FINDINGS.md</a></h2>
+      <p>The measured results, including the ones that do not favour FIBER. Documents the three-way tie
+      on the reference world, calls the distribution's own earlier baseline script a strawman, presents
+      the discriminating world where FIBER is the cheapest admissible strategy (11 facts), and closes with an explicit
+      section on what the results do <em>not</em> establish, plus defects found in the upstream v0.6
+      distribution. Every number is asserted by a test.</p>
+    </div>
+
+    <div class="doc-entry">
+      <h2><a href="https://github.com/AURORA-NEURO/aurora-agent/blob/main/docs/BASELINE_COMPARISON.md">BASELINE_COMPARISON.md</a></h2>
+      <p>The full equal-engineering comparison table for the reference world
+      (<code>radiogenomic-integrity-demo-v1</code>, 761 facts): ten strategies, each scored for
+      soundness, protected closure, and admissibility, with method definitions. The cheapest admissible
+      strategy on this world is the 5-hop graph walk at 11 facts — not FIBER.</p>
+    </div>
+
+    <div class="doc-entry">
+      <h2><a href="https://github.com/AURORA-NEURO/aurora-agent/blob/main/docs/DISCRIMINATING_COMPARISON.md">DISCRIMINATING_COMPARISON.md</a></h2>
+      <p>The same panel run on <code>generated-discriminating-v1</code> (762 facts), where the methods
+      separate: the graph walk becomes unsound at every compact depth, BM25 reaches the right verdict
+      from an incomplete 91% closure — a contract violation that guessed right — and FIBER is the only
+      strategy that is sound, complete, and compact.</p>
+    </div>
+
+    <div class="doc-entry">
+      <h2><a href="https://github.com/AURORA-NEURO/aurora-agent/blob/main/docs/COVERAGE.md">COVERAGE.md</a></h2>
+      <p>Blueprint coverage, measured rather than asserted: which of the blueprint's 973 content
+      modules the workspace actually cites, with the criterion stated honestly — a citation means
+      “someone has taken a position on this”, never “this is done”. Also delimits what the MCP
+      integration layer does and does not turn into implemented workspace code.</p>
+    </div>
+
+    <div class="doc-entry">
+      <h2><a href="https://github.com/AURORA-NEURO/aurora-agent/blob/main/docs/ADR-001-language-strategy.md">ADR-001-language-strategy.md</a></h2>
+      <p>The language-strategy decision record, measurement first: scaling runs from 1,000 to 1,000,000
+      facts showing that parsing dominates compilation and that both scale with world size while the
+      output stays at 11 facts. Concludes the optimisation that matters is architectural — a
+      content-addressed indexed store — not a rewrite, and defines where Python and TypeScript sit
+      relative to the Rust kernel.</p>
+    </div>
+
+    <div class="doc-entry">
+      <h2><a href="https://github.com/AURORA-NEURO/aurora-agent/blob/main/docs/HTTP_API.md">HTTP_API.md</a></h2>
+      <p>The <code>bioprism-api</code> gateway: a deliberately bounded local HTTP layer over the MCP
+      dispatcher, with bearer authentication, per-route documentation (capabilities, missions, events,
+      webhooks, operations snapshots and gates), explicit size limits, and root confinement inherited
+      from the MCP server.</p>
+    </div>
+
+    <div class="doc-entry">
+      <h2><a href="https://github.com/AURORA-NEURO/aurora-agent/blob/main/docs/PYTHON_SDK.md">PYTHON_SDK.md</a></h2>
+      <p>The dependency-free Python SDK (<code>python/prism_sdk</code>): a standard-library client for
+      the MCP server and HTTP gateway that keeps Rust authoritative for canonical bytes, oracle
+      decisions, and release gates. Covers the typed request/report models, the artifact registry and
+      lineage surfaces, and the sync/async workspace facades.</p>
+    </div>
+
+    <div class="doc-entry">
+      <h2><a href="https://github.com/AURORA-NEURO/aurora-agent/blob/main/docs/TYPESCRIPT_SDK.md">TYPESCRIPT_SDK.md</a></h2>
+      <p>The dependency-free TypeScript Fetch SDK for browser and Node consumers: typed API errors,
+      request/response bounds, SSE cursor parsing, and the evidence and provider-connector contracts —
+      including the rule that credential material is rejected at the boundary and readiness always
+      stays a caller decision.</p>
+    </div>
+
+    <div class="doc-entry">
+      <h2><a href="https://github.com/AURORA-NEURO/aurora-agent/blob/main/docs/CAPABILITY_DASHBOARD.md">CAPABILITY_DASHBOARD.md</a></h2>
+      <p>The <code>capability_dashboard</code> tool: an operator-facing projection answering, before an
+      agent builds a mission, which domains are actually callable through this transport versus only
+      declared. Documents the callable/partial/declared-only classification, the digest binding, and
+      what a “ready” dashboard explicitly does not grant.</p>
+    </div>
+
+    <div class="doc-entry">
+      <h2><a href="https://github.com/AURORA-NEURO/aurora-agent/blob/main/docs/AUTOPILOT.md">AUTOPILOT.md</a></h2>
+      <p>Autopilot: grant-authorised autonomous mission driving. <code>bioprism autopilot</code>
+      drives an instantiated workflow's mission under an explicit AutonomyGrant — the only source of
+      authority, with no default grant — classifying every failed step by its declared 40.36 retry
+      class and re-dispatching only the grant-authorised repair subset with rematerialised bindings;
+      terminal and cancelled steps are never re-dispatched. Success requires full step coverage, a
+      succeeded mission report, and by default a complete reconciliation with valid integrity; every
+      drive emits a digest-sealed report that <code>autopilot verify</code> recomputes. States its
+      limits up front: no scheduling or recurrence, no MCP tool exposure of the driver itself, no
+      cross-process resume, no wall-clock deadlines.</p>
+    </div>
+
+    <div class="doc-entry">
+      <h2><a href="https://github.com/AURORA-NEURO/aurora-agent/blob/main/docs/RESEARCH.md">RESEARCH.md</a></h2>
+      <p>The research runner: <code>research template</code>, <code>research run</code>, and
+      <code>research verify</code> execute a fixed protocol over <strong>synthetic decision
+      worlds</strong> — anchor the committed reference fixture against the cross-language parity
+      digest, then per distractor point generate, compile and certify, and run the full
+      equal-engineering panel, plus optional structural sweep, metamorphic mutation, and
+      minimization. Documents the request schema (<code>deny_unknown_fields</code>; the
+      <code>question</code> is recorded verbatim and never interpreted), the dossier contract —
+      findings derived by fixed public rules, locked to level <code>observation</code>, each citing
+      the sha256 of its supporting artifacts — and what verification does and does not prove. The
+      committed worked example in <code>docs/research-example/</code> returns nine findings, seven
+      of them negative: FIBER is tied by <code>directed-walk-full</code> at every distractor point
+      and not separated in 36 of 36 sweep cells.</p>
+    </div>
+
+    <div class="doc-entry">
+      <h2><a href="https://github.com/AURORA-NEURO/aurora-agent/blob/main/docs/SECURITY_PRIVACY_AUDIT.md">SECURITY_PRIVACY_AUDIT.md</a></h2>
+      <p>The <code>security_privacy_audit</code> governance contract: a bounded, deterministic check
+      that a declared system's data assets, flows, identities, threats, reviews, and controls form a
+      coherent evidence chain — with the non-claims stated up front (not a scanner, not a
+      legal-compliance determination, not a deployment authorization).</p>
+    </div>
+
+    <div class="doc-entry">
+      <h2><a href="https://github.com/AURORA-NEURO/aurora-agent/blob/main/docs/EPISTEMIC_ADAPTIVE_ACQUISITION.md">EPISTEMIC_ADAPTIVE_ACQUISITION.md</a></h2>
+      <p>The exact finite-horizon acquisition planner behind
+      <code>epistemic_adaptive_acquisition</code>: a policy tree (not a scalar value-of-information
+      summary) minimising expected terminal Bayes risk plus declared acquisition cost, with the
+      boundary made explicit — it plans only, and never executes an assay or establishes a causal,
+      biological, clinical, or predictive fact.</p>
+    </div>
+
+    <div class="boundary">Research and developer infrastructure: it does not diagnose an individual,
+    recommend treatment, triage care, enroll participants, or claim medical-device functionality.</div>
+
+  </div>
+</main>
+
+<footer class="site">
+  <div class="wrap">
+    <p>AURORA Agent — Apache-2.0 ·
+      <a href="https://github.com/AURORA-NEURO/aurora-agent">Source</a> ·
+      <a href="https://github.com/AURORA-NEURO/aurora-agent/blob/main/PRIVACY.md">Privacy</a> ·
+      MCP registry: <code>io.github.MurariAmbati/aurora-agent</code></p>
+    <p>Research and developer infrastructure: it does not diagnose an individual, recommend treatment,
+    triage care, enroll participants, or claim medical-device functionality.</p>
+  </div>
+</footer>
+
+</body>
+</html>

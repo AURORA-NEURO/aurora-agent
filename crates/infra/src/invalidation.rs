@@ -164,10 +164,6 @@ impl DependencyGraph {
         Ok(())
     }
 
-    pub fn is_opaque(&self, resource: &ResourceId) -> bool {
-        self.opaque.contains(resource)
-    }
-
     pub fn opaque_resources(&self) -> &BTreeSet<ResourceId> {
         &self.opaque
     }

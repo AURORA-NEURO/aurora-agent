@@ -27,16 +27,18 @@
 //! every protected variable in the world stays readable at that same cut. The structural property
 //! is asserted in `tests/non_protected_temporal_withholding.rs`.
 //!
-//! ## `underdetermined_abstention` — the input exists, the compiler path does not
+//! ## `underdetermined_abstention` — the input exists; the default compile still calls it valid
 //!
 //! That blocker names `bioprism-fiber`, which this crate cannot touch and does not depend on.
 //! What it *can* supply is a world that genuinely underdetermines: [`underdetermined`] leaves
 //! three mutually exclusive hypotheses live over an evidence set that is complete, fully readable
-//! at the cut, and records its absences explicitly rather than omitting them. On the v0.1 oracle
-//! that world's witness list is empty, so it compiles to `valid` — a *wrong* answer rather than a
-//! missing one, which is a sharper failure than the blocker currently describes.
-//! [`underdetermined::AbstentionStep`] enumerates the six things a compiler would still have to
-//! do.
+//! at the cut, and records its absences explicitly rather than omitting them. `bioprism-fiber`
+//! has since gained `compile_with_oracle`, through which an injected oracle — `bioprism-domain`'s
+//! rule oracles are the worked case — can return an abstaining verdict; but the default
+//! `compile()` still runs the split-integrity oracle, whose witness list is empty on this world,
+//! so the default path still compiles it to `valid` — a *wrong* answer rather than a missing one.
+//! [`underdetermined::AbstentionStep`] enumerates the six things a judge of *this* world would
+//! still have to do; no oracle yet interprets its hypothesis factors.
 //!
 //! # The line this crate does not cross
 //!
@@ -70,6 +72,14 @@
 //! Every world is a pure function of its spec, including the seed. No clock is read, no system RNG
 //! is used, and the RNG is `bioprism-worldgen`'s own `SplitMix64`. `fixtures/` holds each world as
 //! it is built, and `tests/fixtures_are_current.rs` fails if a rebuild disagrees byte for byte.
+//!
+//! # Reading a report back
+//!
+//! [`SliceReport`] and [`CatalogReport`], and every struct they are made of, refuse a field they
+//! do not declare. Both seal themselves by re-serialising the parsed struct and hashing that, so a
+//! key the reader dropped would be outside the seal by construction: the recomputation never sees
+//! it, the claimed digest still agrees, and a report carrying content nobody hashed reads as
+//! intact.
 //!
 //! # Not implemented
 //!
@@ -143,9 +153,7 @@ pub use error::BioWorldError;
 pub use knobs::{MissingGeneratorKnob, REUSED_GENERATOR_KNOBS};
 pub use query::{QueryShape, QUERY_SCHEMA_VERSION};
 pub use slice::{BlockedProperty, CheckOutcome, SliceReport, StructuralCheck, VerticalSlice};
-pub use structure::{
-    profile, DependencyClosure, Neighbourhood, StructuralProfile, TemporalSplit,
-};
+pub use structure::{profile, DependencyClosure, Neighbourhood, StructuralProfile, TemporalSplit};
 pub use underdetermined::{AbstentionStep, UnderdeterminationProfile};
 
 /// The blueprint modules this crate implements.

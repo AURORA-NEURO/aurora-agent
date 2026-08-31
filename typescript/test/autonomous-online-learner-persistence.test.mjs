@@ -4,12 +4,16 @@ import { test } from "node:test";
 import {
   AutonomousOnlineLearner,
   AutonomousOnlineLearnerPersistenceCoordinator,
+  AutonomousAgent,
+  AUTONOMOUS_DOMAIN_NAMES,
+  LLMRuntime,
   JsonAutonomousOnlineLearnerSnapshotPersistence,
   TransactionalJsonAutonomousOnlineLearnerSnapshotPersistence,
   WebStorageAutonomousOnlineLearnerSnapshotTextStore,
   snapshotAutonomousOnlineLearner,
   validateAutonomousOnlineLearnerSnapshot,
   digestJson,
+  digestCanonicalJsonTextSync,
 } from "../dist/index.js";
 
 const digestA = "a".repeat(64);
@@ -120,4 +124,38 @@ test("online learner persistence rejects tampered state and credential-shaped fi
   assert.equal(upgraded.schema, "bioprism-typescript-autonomous-online-learner-snapshot/0.2");
   assert.equal(upgraded.snapshot_generation, 1);
   assert.equal(upgraded.previous_snapshot_digest, null);
+});
+
+test("AutonomousAgent composes restart-safe learner persistence across every built-in domain", async () => {
+  const store = transactionalTextStore();
+  const learner = new AutonomousOnlineLearner({ policy: { strategy: "ucb1", exploration: 0.4, seed: 19 } });
+  const persistence = new AutonomousOnlineLearnerPersistenceCoordinator(learner, new TransactionalJsonAutonomousOnlineLearnerSnapshotPersistence(store));
+  const agent = new AutonomousAgent(new LLMRuntime(), { learner, learnerPersistence: persistence });
+
+  for (const [index, domain] of AUTONOMOUS_DOMAIN_NAMES.entries()) {
+    const context = { domain, capability: "reasoning", risk_class: "review_required", task_family: `family-${index}` };
+    await agent.recordEvaluatorReward(`provider-${domain}/model-${index}`, 0.5 + index / 100, {
+      context,
+      contextDigest: digestCanonicalJsonTextSync(JSON.stringify(context)),
+      outcomeDigest: await digestJson({ domain, outcome: "bounded-evaluator-observation" }),
+    });
+  }
+
+  const flushed = await agent.flushOnlineLearning();
+  assert.equal(flushed.snapshot_generation, 1);
+  assert.equal(flushed.state.generation, AUTONOMOUS_DOMAIN_NAMES.length);
+  assert.equal(flushed.state.contextual_states?.length, AUTONOMOUS_DOMAIN_NAMES.length);
+  assert.equal(JSON.stringify(flushed).includes("bounded-evaluator-observation"), false);
+  assert.equal(JSON.stringify(flushed).includes("api_key"), false);
+
+  const restartedLearner = new AutonomousOnlineLearner({ policy: { strategy: "ucb1", exploration: 0.4, seed: 19 } });
+  const restartedPersistence = new AutonomousOnlineLearnerPersistenceCoordinator(restartedLearner, new TransactionalJsonAutonomousOnlineLearnerSnapshotPersistence(store));
+  const restartedAgent = new AutonomousAgent(new LLMRuntime(), { learner: restartedLearner, learnerPersistence: restartedPersistence });
+  const restored = await restartedAgent.restoreOnlineLearning();
+  assert.deepEqual(restored, flushed);
+  assert.deepEqual(restartedLearner.snapshot(), learner.snapshot());
+
+  const foreignLearner = new AutonomousOnlineLearner();
+  const foreignPersistence = new AutonomousOnlineLearnerPersistenceCoordinator(foreignLearner, new TransactionalJsonAutonomousOnlineLearnerSnapshotPersistence(transactionalTextStore()));
+  assert.throws(() => new AutonomousAgent(new LLMRuntime(), { learner, learnerPersistence: foreignPersistence }), /bound to the supplied learner/);
 });

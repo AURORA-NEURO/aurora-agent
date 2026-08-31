@@ -488,7 +488,13 @@ fn compare_digest(
             subject,
             "stored receipt digest must be a lowercase canonical SHA-256 digest",
         );
-        compare_value(findings, code, subject, supplied, expected)
+        finding(
+            findings,
+            &format!("{code}_malformed"),
+            subject,
+            "the stored receipt digest has the wrong shape; this is a defect in the claimed digest, not evidence that the projection moved",
+        );
+        false
     }
 }
 

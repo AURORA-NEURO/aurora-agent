@@ -16,6 +16,7 @@ use crate::json::object;
 use bioprism_ids::{ContentHash, WorldId};
 use serde_json::Value;
 use std::collections::BTreeSet;
+use std::sync::OnceLock;
 
 pub const WORLD_SCHEMA_VERSION: &str = "fiber-world/0.1";
 
@@ -28,6 +29,14 @@ pub struct World {
     pub events: Vec<CausalEvent>,
     index: WorldIndex,
     raw: Value,
+    /// Cached [`World::content_hash`].
+    ///
+    /// [`crate::source::WorldSource::world_digest`] documents the digest as precomputed, because a
+    /// backend that re-read its corpus to answer it would defeat the trait's whole purpose. The
+    /// eager world was the one implementation that did not honour that: it re-canonicalised and
+    /// re-hashed the entire document on every call, and a compile asks for the digest once, so a
+    /// second compile against the same world paid for it again.
+    digest: OnceLock<ContentHash>,
 }
 
 impl World {
@@ -50,10 +59,13 @@ impl World {
             });
         }
 
-        let world_id_text = map
-            .get("world_id")
-            .and_then(Value::as_str)
-            .ok_or(WorldError::MissingField { field: "world_id", subject: "world".into() })?;
+        let world_id_text =
+            map.get("world_id")
+                .and_then(Value::as_str)
+                .ok_or(WorldError::MissingField {
+                    field: "world_id",
+                    subject: "world".into(),
+                })?;
         let world_id = WorldId::parse(world_id_text).map_err(|e| WorldError::Identifier {
             subject: "world".into(),
             message: e.to_string(),
@@ -65,12 +77,16 @@ impl World {
 
         let world = World {
             world_id,
-            description: map.get("description").and_then(Value::as_str).map(str::to_string),
+            description: map
+                .get("description")
+                .and_then(Value::as_str)
+                .map(str::to_string),
             index: WorldIndex::build(&facts, &factors),
             facts,
             factors,
             events,
             raw,
+            digest: OnceLock::new(),
         };
         world.validate_reference_compat()?;
         Ok(world)
@@ -91,7 +107,9 @@ impl World {
         let mut seen_factors = BTreeSet::new();
         for factor in &self.factors {
             if !seen_factors.insert(factor.id.as_str()) {
-                return Err(WorldError::DuplicateFactorId(factor.id.as_str().to_string()));
+                return Err(WorldError::DuplicateFactorId(
+                    factor.id.as_str().to_string(),
+                ));
             }
         }
 
@@ -130,8 +148,17 @@ impl World {
         &self.raw
     }
 
+    /// Hash of the canonical world document.
+    ///
+    /// Memoised, which is sound because the digest is a pure function of `raw` and `raw` is
+    /// immutable after [`World::from_json`] — there is no accessor that hands out a mutable
+    /// reference to it. The first caller pays; every later caller reads the same bytes.
     pub fn content_hash(&self) -> ContentHash {
-        ContentHash::of_value(&self.raw).expect("world was parsed from finite JSON")
+        self.digest
+            .get_or_init(|| {
+                ContentHash::of_value(&self.raw).expect("world was parsed from finite JSON")
+            })
+            .clone()
     }
 
     pub fn fact(&self, id: &str) -> Option<&Fact> {
@@ -149,7 +176,10 @@ impl World {
     }
 
     pub fn producers_of(&self, variable: &str) -> impl Iterator<Item = &Factor> {
-        self.index.producers(variable).iter().map(|p| &self.factors[*p])
+        self.index
+            .producers(variable)
+            .iter()
+            .map(|p| &self.factors[*p])
     }
 
     /// Variables that some event governs. A variable in this set is readable only once its
@@ -168,7 +198,10 @@ fn parse_seq<T>(
     parse: impl Fn(&Value) -> Result<T, WorldError>,
 ) -> Result<Vec<T>, WorldError> {
     match value {
-        None => Err(WorldError::MissingField { field, subject: "world".into() }),
+        None => Err(WorldError::MissingField {
+            field,
+            subject: "world".into(),
+        }),
         Some(Value::Array(items)) => items.iter().map(parse).collect(),
         Some(_) => Err(WorldError::WrongType {
             field,

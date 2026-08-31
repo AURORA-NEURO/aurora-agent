@@ -121,5 +121,16 @@ fn describe_witness(witness: &LeakageWitness) -> String {
             )
         }
         LeakageWitness::PreprocessingLeakage { detail } => detail.clone(),
+        LeakageWitness::DomainCheck {
+            check,
+            observed,
+            detail,
+        } => {
+            let pairs: Vec<String> = observed
+                .iter()
+                .map(|(variable, value)| format!("{variable}={value}"))
+                .collect();
+            format!("check {check} fired on [{}] — {detail}", pairs.join(", "))
+        }
     }
 }

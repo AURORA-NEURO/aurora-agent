@@ -17,9 +17,16 @@ use std::collections::BTreeSet;
 use std::path::PathBuf;
 
 fn fixture(relative: &str) -> Value {
-    let path: PathBuf = [env!("CARGO_MANIFEST_DIR"), "..", "..", "fixtures", "fiber-v0.1", relative]
-        .iter()
-        .collect();
+    let path: PathBuf = [
+        env!("CARGO_MANIFEST_DIR"),
+        "..",
+        "..",
+        "fixtures",
+        "fiber-v0.1",
+        relative,
+    ]
+    .iter()
+    .collect();
     let text = std::fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("missing fixture {}: {e}", path.display()));
     serde_json::from_str(&text).expect("fixture is valid JSON")
@@ -45,8 +52,12 @@ fn decision_section_is_byte_identical_to_the_reference() {
 fn certificate_is_byte_identical_to_the_reference() {
     let out = compile(&golden_world(), &leakage_query()).expect("compiles");
     let expected = to_canonical_string(&fixture("golden/reference_certificate.json")).unwrap();
-    let actual = to_canonical_string(&out.certificate.to_json(CertificateProfile::Reference).unwrap())
-        .unwrap();
+    let actual = to_canonical_string(
+        &out.certificate
+            .to_json(CertificateProfile::Reference)
+            .unwrap(),
+    )
+    .unwrap();
     assert_eq!(actual, expected, "certificate diverged from CPython");
 }
 
@@ -54,7 +65,10 @@ fn certificate_is_byte_identical_to_the_reference() {
 fn certificate_digest_matches_the_published_value() {
     let out = compile(&golden_world(), &leakage_query()).expect("compiles");
     assert_eq!(
-        out.certificate.digest(CertificateProfile::Reference).unwrap().as_str(),
+        out.certificate
+            .digest(CertificateProfile::Reference)
+            .unwrap()
+            .as_str(),
         "c0da17ffc80465258345c8a538171bfd868100cd883e9a20780a0dc5477e7ea4"
     );
     assert_eq!(
@@ -74,8 +88,14 @@ fn compilation_is_deterministic() {
     let first = compile(&world, &query).unwrap();
     let second = compile(&world, &query).unwrap();
     assert_eq!(
-        first.certificate.to_json(CertificateProfile::Reference).unwrap(),
-        second.certificate.to_json(CertificateProfile::Reference).unwrap()
+        first
+            .certificate
+            .to_json(CertificateProfile::Reference)
+            .unwrap(),
+        second
+            .certificate
+            .to_json(CertificateProfile::Reference)
+            .unwrap()
     );
 }
 
@@ -99,7 +119,10 @@ fn protected_closure_is_retained() {
         "fact.policy",
         "fact.negative_duplicates",
     ] {
-        assert!(selected.contains(required), "protected fact {required} was dropped");
+        assert!(
+            selected.contains(required),
+            "protected fact {required} was dropped"
+        );
     }
     assert!(out.protected_closure_satisfied());
     assert!(out.trace.unmatched_protected_tags.is_empty());
@@ -162,7 +185,10 @@ fn expanding_around_the_selection_re_admits_the_whole_world() {
         .filter(|fact| one_hop.contains(fact.provides.as_str()))
         .count();
 
-    assert_eq!(neighbourhood_facts, 761, "the hub really does reach everything");
+    assert_eq!(
+        neighbourhood_facts, 761,
+        "the hub really does reach everything"
+    );
     assert_eq!(out.certificate.selected_facts.len(), 11);
     assert!(
         out.certificate.plan.fact_selection_ratio() < 0.05,
@@ -218,7 +244,10 @@ fn a_budget_smaller_than_the_protected_closure_is_a_hard_failure() {
     raw["budgets"]["max_facts"] = serde_json::json!(4);
     let query = Query::from_json(raw).unwrap();
     match compile(&golden_world(), &query) {
-        Err(FiberError::BudgetExceeded { selected, max_facts }) => {
+        Err(FiberError::BudgetExceeded {
+            selected,
+            max_facts,
+        }) => {
             assert_eq!(selected, 11);
             assert_eq!(max_facts, 4);
         }
@@ -235,14 +264,25 @@ fn the_extended_profile_classifies_omissions_by_influence() {
     assert_eq!(manifest.count_in(InfluenceClass::Unknown), 0);
     assert!(manifest.supports_sufficiency_claim());
 
-    let extended = out.certificate.to_json(CertificateProfile::Extended).unwrap();
-    assert_eq!(extended["supports_sufficiency_claim"], serde_json::json!(true));
+    let extended = out
+        .certificate
+        .to_json(CertificateProfile::Extended)
+        .unwrap();
+    assert_eq!(
+        extended["supports_sufficiency_claim"],
+        serde_json::json!(true)
+    );
 }
 
 #[test]
 fn the_compiler_reports_the_passes_it_could_not_run() {
     let out = compile(&golden_world(), &leakage_query()).unwrap();
-    let deferred: Vec<&str> = out.trace.deferred_passes.iter().map(|(name, _)| *name).collect();
+    let deferred: Vec<&str> = out
+        .trace
+        .deferred_passes
+        .iter()
+        .map(|(name, _)| *name)
+        .collect();
     for expected in [
         "obstruction_tests",
         "abstract_interpretation",
@@ -280,4 +320,102 @@ fn a_wrong_query_schema_is_rejected() {
         Query::from_json(raw),
         Err(FiberError::UnsupportedQuerySchema { .. })
     ));
+}
+
+fn reference_example(name: &str) -> Value {
+    let path: PathBuf = [
+        env!("CARGO_MANIFEST_DIR"),
+        "..",
+        "..",
+        "reference",
+        "fiber_runtime",
+        "examples",
+        name,
+    ]
+    .iter()
+    .collect();
+    serde_json::from_str(&std::fs::read_to_string(&path).expect("reference example is readable"))
+        .expect("reference example is valid JSON")
+}
+
+/// The two worlds added to catch the slicer divergence and the shadowed-omission collapse.
+///
+/// Both defects were invisible on the shipped reference world, so the fixtures that expose them
+/// are worthless unless CPython and Rust agree about them too — otherwise the fix would have been
+/// checked against one implementation's opinion. The digests here were produced by
+/// `reference/fiber_runtime/fiber_compile.py` and pasted in the direction that keeps the assertion
+/// cross-language: Python computed them, Rust must reproduce them.
+///
+/// `multi_output_world` is the one whose factor emits two variables at once; a slicer that walked
+/// backwards from the sibling output would select three factors instead of two and change
+/// `compiled_factor_count` in these bytes. `shadowed_evidence_world` is the one where two facts
+/// provide `risk_score`; the v0.1 profile cannot say which omission was proved and which was a
+/// tiebreak, and these bytes are what it says instead.
+#[test]
+fn the_new_multi_output_and_shadowed_fixtures_reproduce_the_cpython_digests() {
+    for (world, query, digest) in [
+        (
+            "multi_output_world.json",
+            "multi_output_query.json",
+            "2901acb37cae28eba10631327b2c14f9e5a936c58457e246f149908501835c0d",
+        ),
+        (
+            "shadowed_evidence_world.json",
+            "shadowed_evidence_query.json",
+            "f5eb61c99fe60c2d1283857c5cbb7e433ca9e7488aeaa800697f34288446bb4e",
+        ),
+    ] {
+        let world = World::from_json(reference_example(world)).expect("world loads");
+        let query = Query::from_json(reference_example(query)).expect("query loads");
+        let out = compile(&world, &query).expect("compiles");
+        assert_eq!(
+            out.certificate
+                .digest(CertificateProfile::Reference)
+                .unwrap()
+                .as_str(),
+            digest
+        );
+    }
+}
+
+/// The manifest is where the shadowed omission is separated, and it is not in the v0.1 bytes.
+///
+/// Both new fixtures emit the same frozen `classification` string, and on the shadowed world that
+/// string is not a true description of every omission it covers. That is a property of the v0.1
+/// wire format rather than of this compile, and the extended profile is where the compiler says
+/// what it actually determined — so the two profiles must disagree about sufficiency here, and a
+/// reader who only has the reference profile must not be able to infer the manifest's verdict from
+/// it.
+#[test]
+fn the_v0_1_classification_string_is_a_constant_and_not_a_verdict_about_the_omissions() {
+    let unreachable = compile(
+        &World::from_json(reference_example("multi_output_world.json")).unwrap(),
+        &Query::from_json(reference_example("multi_output_query.json")).unwrap(),
+    )
+    .unwrap();
+    let shadowed = compile(
+        &World::from_json(reference_example("shadowed_evidence_world.json")).unwrap(),
+        &Query::from_json(reference_example("shadowed_evidence_query.json")).unwrap(),
+    )
+    .unwrap();
+
+    assert_eq!(
+        unreachable.certificate.omissions.classification,
+        shadowed.certificate.omissions.classification,
+        "the string does not vary with what the compiler proved, so it cannot be read as a proof"
+    );
+    assert!(unreachable
+        .certificate
+        .manifest
+        .supports_sufficiency_claim());
+    assert!(
+        !shadowed.certificate.manifest.supports_sufficiency_claim(),
+        "the manifest, unlike the string, distinguishes the two worlds"
+    );
+    assert_eq!(
+        shadowed.trace.unproven_remainder, None,
+        "the shadowed world loses its sufficiency claim because a displaced fact was classified \
+         unproven, not because the accounting was refused; a refusal would fail the assertion \
+         above for an unrelated reason"
+    );
 }

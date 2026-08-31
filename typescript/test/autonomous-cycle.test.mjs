@@ -21,6 +21,8 @@ import {
   openaiCompatibleProvider,
   runAutonomousCrossDomainDecisionCycle,
   runAutonomousCrossDomainReplanCycle,
+  runAutonomousAutoDecisionCycle,
+  runAutonomousAutoReplanCycle,
   runAutonomousDecisionCycle,
   runAutonomousReplanCycle,
   validateAutonomousDecisionCycleSnapshot,
@@ -199,6 +201,174 @@ test("decision cycle connects approval, invocation, evaluator settlement, and ba
   assert.equal(outbox.rows().filter((command) => command.status === "applied").length, 1);
   assert.equal(calls(), 1);
   assert.equal(JSON.stringify(result.settlement).includes(task), false);
+});
+
+test("automatic decision cycle selects and settles every single-domain profile through one facade", async () => {
+  const { agent } = cycleAgent();
+  const learning = new AutonomousLearningController(agent);
+  const tasks = {
+    coding: "debug this repository and verify the tests",
+    browser: "research sources and compare citations",
+    data: "validate dataset schema lineage and quality",
+    science: "design a reproducible hypothesis experiment",
+    biomedical: "review biomedical evidence with safety boundaries",
+    neuroscience: "analyze EEG preprocessing and signal confounds",
+    operations: "prepare an outage rollback runbook",
+    enterprise: "review governance compliance ownership",
+    multi_agent: "delegate this specialist subtask and synthesize findings",
+    multimodal: "inspect this image transcript and evidence gaps",
+    evaluation: "run a benchmark holdout replay and report uncertainty",
+  };
+  for (const [domain, task] of Object.entries(tasks)) {
+    const result = await runAutonomousAutoDecisionCycle(agent, task, {
+      domain,
+      approveProviderCall: true,
+      learning: {
+        controller: learning,
+        episodeId: `automatic-cycle-${domain}`,
+        evaluate: () => ({ evaluator_id: "automatic-cycle-reviewer", evaluator_version: "1", reward: 0.81, passed: true }),
+      },
+    });
+    assert.equal(result.schema, "bioprism-typescript-autonomous-auto-decision-cycle/0.1", domain);
+    assert.equal(result.mode, "single_domain", domain);
+    assert.equal(result.status, "completed", domain);
+    assert.equal(result.next_action, "complete", domain);
+    assert.equal(result.cycle.route.primary_domain, domain, domain);
+    assert.equal(result.cycle.settlement.episode.status, "settled", domain);
+  }
+  assert.equal(learning.episodes.snapshotRows().length, Object.keys(tasks).length);
+});
+
+test("automatic decision cycle chooses bounded cross-domain fan-out and keeps semantic routing review-only", async () => {
+  const { agent, calls } = cycleAgent();
+  const cross = await runAutonomousAutoDecisionCycle(agent, "Research a biomedical neuroscience experiment with EEG patient evidence.", {
+    allowCrossDomain: true,
+    approveProviderCall: true,
+    maxParallelChildren: 1,
+  });
+  assert.equal(cross.mode, "cross_domain");
+  assert.equal(cross.status, "completed");
+  assert.equal(cross.next_action, "complete");
+  assert.equal(cross.cycle.run.child_runs.length, 2);
+  assert.equal(calls(), 3, "two specialists plus one synthesis call");
+
+  const reviewed = await runAutonomousAutoDecisionCycle(agent, "debug this coding repository", {
+    semanticRouting: { enabled: true, approveProviderCall: false },
+    approveProviderCall: true,
+  });
+  assert.equal(reviewed.status, "approval_required");
+  assert.equal(reviewed.next_action, "review_provider_or_effect_approval");
+  assert.equal(reviewed.semantic_route.status, "approval_required");
+  assert.equal(reviewed.cycle, null);
+  assert.equal(calls(), 3, "semantic routing approval must not dispatch a provider");
+});
+
+test("automatic replan cycle routes every domain, bounds retries, and keeps semantic approval separate", async () => {
+  const single = cycleAgent();
+  const learning = new AutonomousLearningController(single.agent);
+  const tasks = {
+    coding: "debug this repository and verify the tests",
+    browser: "research sources and compare citations",
+    data: "validate dataset schema lineage and quality",
+    science: "design a reproducible hypothesis experiment",
+    biomedical: "review biomedical evidence with safety boundaries",
+    neuroscience: "analyze EEG preprocessing and signal confounds",
+    operations: "prepare an outage rollback runbook",
+    enterprise: "review governance compliance ownership",
+    multi_agent: "delegate this specialist subtask and synthesize findings",
+    multimodal: "inspect this image transcript and evidence gaps",
+    evaluation: "run a benchmark holdout replay and report uncertainty",
+  };
+  for (const [domain, task] of Object.entries(tasks)) {
+    const result = await runAutonomousAutoReplanCycle(single.agent, task, {
+      domain,
+      approveProviderCall: true,
+      maxReplans: 0,
+      learning: { controller: learning, episodePrefix: `automatic-replan-${domain}` },
+      evaluate: () => ({ evaluator_id: "automatic-replan-reviewer", evaluator_version: "1", reward: 0.84, passed: true, replan_requested: false }),
+    });
+    assert.equal(result.schema, "bioprism-typescript-autonomous-auto-replan-cycle/0.1", domain);
+    assert.equal(result.mode, "single_domain", domain);
+    assert.equal(result.status, "completed", domain);
+    assert.equal(result.next_action, "complete", domain);
+    assert.equal(result.route.primary_domain, domain, domain);
+    assert.equal(result.cycle.attempts.length, 1, domain);
+    assert.equal(result.cycle.settlements[0].episode.status, "settled", domain);
+  }
+  assert.equal(single.calls(), Object.keys(tasks).length);
+  assert.equal(learning.episodes.snapshotRows().length, Object.keys(tasks).length);
+
+  let evaluations = 0;
+  const bounded = await runAutonomousAutoReplanCycle(single.agent, "Improve this coding implementation after reviewing its tests", {
+    domain: "coding",
+    approveProviderCall: true,
+    maxReplans: 1,
+    evaluate: () => {
+      const requested = evaluations++ === 0;
+      return {
+        evaluator_id: "bounded-replan-reviewer",
+        evaluator_version: "1",
+        reward: requested ? 0.31 : 0.91,
+        passed: !requested,
+        replan_requested: requested,
+        replan_instruction: requested ? "Make the test evidence and uncertainty explicit." : null,
+      };
+    },
+  });
+  assert.equal(bounded.mode, "single_domain");
+  assert.equal(bounded.status, "completed");
+  assert.equal(bounded.cycle.replan_count, 1);
+  assert.equal(bounded.cycle.attempts.length, 2);
+  assert.equal(single.calls(), Object.keys(tasks).length + 2);
+
+  const cross = cycleAgent();
+  const crossResult = await runAutonomousAutoReplanCycle(cross.agent, "Research a biomedical neuroscience experiment with EEG patient evidence", {
+    allowCrossDomain: true,
+    approveProviderCall: true,
+    maxParallelChildren: 1,
+    maxReplans: 0,
+    evaluate: () => ({ evaluator_id: "cross-automatic-replan-reviewer", evaluator_version: "1", reward: 0.8, passed: true, replan_requested: false, rewards: {} }),
+  });
+  assert.equal(crossResult.mode, "cross_domain");
+  assert.equal(crossResult.status, "completed");
+  assert.equal(crossResult.cycle.attempts.length, 1);
+  assert.equal(crossResult.cycle.final.run.child_runs.length, 2);
+  assert.equal(cross.calls(), 3);
+
+  const refused = cycleAgent();
+  const review = await runAutonomousAutoReplanCycle(refused.agent, "debug this coding repository", {
+    semanticRouting: { enabled: true, approveProviderCall: false },
+    approveProviderCall: true,
+    maxReplans: 0,
+    evaluate: () => ({ evaluator_id: "unreachable-reviewer", evaluator_version: "1", reward: 1, passed: true, replan_requested: false }),
+  });
+  assert.equal(review.status, "approval_required");
+  assert.equal(review.next_action, "review_provider_or_effect_approval");
+  assert.equal(review.semantic_route.status, "approval_required");
+  assert.equal(review.cycle, null);
+  assert.equal(refused.calls(), 0);
+});
+
+test("automatic replan cycle makes terminal persistence idempotent without rerouting or replaying the provider", async () => {
+  const first = cycleAgent();
+  const stateStore = new InMemoryAutonomousCycleReplanStateStore();
+  const options = {
+    domain: "coding",
+    approveProviderCall: true,
+    maxReplans: 0,
+    cycleId: "automatic-replan-restart",
+    stateStore,
+    evaluate: () => ({ evaluator_id: "restart-reviewer", evaluator_version: "1", reward: 0.86, passed: true, replan_requested: false }),
+  };
+  const task = "Restart-safe coding review with explicit evaluator settlement";
+  const completed = await runAutonomousAutoReplanCycle(first.agent, task, options);
+  assert.equal(completed.status, "completed");
+  assert.equal((await stateStore.load("automatic-replan-restart")).phase, "terminal");
+  const providerCalls = first.calls();
+  const replay = await runAutonomousAutoReplanCycle(first.agent, task, options);
+  assert.equal(replay.status, "completed");
+  assert.equal(replay.cycle.final, null);
+  assert.equal(first.calls(), providerCalls);
 });
 
 test("decision-cycle provider planning pauses, persists a digest, and resumes only with the accepted proposal", async () => {

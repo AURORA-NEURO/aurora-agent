@@ -1,0 +1,253 @@
+{
+  "name": "aurora-agent",
+  "displayName": "AURORA Agent",
+  "description": "Context engineering, with receipts — compile decision context, drive grant-authorised autonomous workflows, and manage the AURORA Agent platform from VS Code.",
+  "version": "0.1.3",
+  "publisher": "aurora-neuro",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/AURORA-NEURO/aurora-agent.git",
+    "directory": "editors/vscode"
+  },
+  "engines": {
+    "vscode": "^1.101.0"
+  },
+  "categories": [
+    "AI",
+    "Other"
+  ],
+  "keywords": [
+    "mcp",
+    "context",
+    "agent",
+    "bioprism",
+    "aurora"
+  ],
+  "icon": "media/icon.png",
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "mcpServerDefinitionProviders": [
+      {
+        "id": "aurora-agent",
+        "label": "AURORA Agent"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "auroraAgent",
+          "title": "AURORA Agent",
+          "icon": "media/activity.svg"
+        }
+      ]
+    },
+    "views": {
+      "auroraAgent": [
+        {
+          "id": "auroraAgent.workflows",
+          "name": "Workflows"
+        },
+        {
+          "id": "auroraAgent.reports",
+          "name": "Autopilot Reports"
+        },
+        {
+          "id": "auroraAgent.pipelines",
+          "name": "Pipelines"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "auroraAgent.compile",
+        "category": "AURORA Agent",
+        "title": "Compile Context (World + Query)"
+      },
+      {
+        "command": "auroraAgent.verifyCertificate",
+        "category": "AURORA Agent",
+        "title": "Verify Certificate"
+      },
+      {
+        "command": "auroraAgent.explainPlan",
+        "category": "AURORA Agent",
+        "title": "Explain Compile Plan"
+      },
+      {
+        "command": "auroraAgent.validateWorld",
+        "category": "AURORA Agent",
+        "title": "Validate World"
+      },
+      {
+        "command": "auroraAgent.browseCatalogue",
+        "category": "AURORA Agent",
+        "title": "Workflow: Browse Catalogue"
+      },
+      {
+        "command": "auroraAgent.scaffoldWorkflow",
+        "category": "AURORA Agent",
+        "title": "Workflow: Scaffold Group"
+      },
+      {
+        "command": "auroraAgent.instantiateWorkflow",
+        "category": "AURORA Agent",
+        "title": "Workflow: Instantiate Group (no-dispatch preflight)"
+      },
+      {
+        "command": "auroraAgent.createGrant",
+        "category": "AURORA Agent",
+        "title": "Autopilot: Create Grant"
+      },
+      {
+        "command": "auroraAgent.runAutopilot",
+        "category": "AURORA Agent",
+        "title": "Autopilot: Run"
+      },
+      {
+        "command": "auroraAgent.dryRunAutopilot",
+        "category": "AURORA Agent",
+        "title": "Autopilot: Dry-Run (no dispatch, zero writes)"
+      },
+      {
+        "command": "auroraAgent.verifyReport",
+        "category": "AURORA Agent",
+        "title": "Autopilot: Verify Report"
+      },
+      {
+        "command": "auroraAgent.gatewayStart",
+        "category": "AURORA Agent",
+        "title": "Gateway: Start (bioprism-api)"
+      },
+      {
+        "command": "auroraAgent.gatewayStop",
+        "category": "AURORA Agent",
+        "title": "Gateway: Stop"
+      },
+      {
+        "command": "auroraAgent.doctor",
+        "category": "AURORA Agent",
+        "title": "Status: Doctor"
+      },
+      {
+        "command": "auroraAgent.copyMcpJson",
+        "category": "AURORA Agent",
+        "title": "Copy MCP Configuration Snippet (.mcp.json)"
+      },
+      {
+        "command": "auroraAgent.openReport",
+        "category": "AURORA Agent",
+        "title": "Open Autopilot Report Summary"
+      },
+      {
+        "command": "auroraAgent.openRun",
+        "category": "AURORA Agent",
+        "title": "Open Pipeline Run in Browser"
+      },
+      {
+        "command": "auroraAgent.refreshWorkflows",
+        "category": "AURORA Agent",
+        "title": "Refresh Workflows",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "auroraAgent.refreshReports",
+        "category": "AURORA Agent",
+        "title": "Refresh Autopilot Reports",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "auroraAgent.refreshPipelines",
+        "category": "AURORA Agent",
+        "title": "Refresh Pipelines",
+        "icon": "$(refresh)"
+      }
+    ],
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "auroraAgent.openReport",
+          "when": "false"
+        },
+        {
+          "command": "auroraAgent.openRun",
+          "when": "false"
+        },
+        {
+          "command": "auroraAgent.scaffoldWorkflow",
+          "when": "false"
+        },
+        {
+          "command": "auroraAgent.instantiateWorkflow",
+          "when": "false"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "auroraAgent.refreshWorkflows",
+          "when": "view == auroraAgent.workflows",
+          "group": "navigation"
+        },
+        {
+          "command": "auroraAgent.refreshReports",
+          "when": "view == auroraAgent.reports",
+          "group": "navigation"
+        },
+        {
+          "command": "auroraAgent.refreshPipelines",
+          "when": "view == auroraAgent.pipelines",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "auroraAgent.scaffoldWorkflow",
+          "when": "view == auroraAgent.workflows && viewItem == workflowGroup",
+          "group": "auroraAgent@1"
+        },
+        {
+          "command": "auroraAgent.instantiateWorkflow",
+          "when": "view == auroraAgent.workflows && viewItem == workflowGroup",
+          "group": "auroraAgent@2"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "AURORA Agent",
+      "properties": {
+        "auroraAgent.binaryDir": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Directory containing the `bioprism`, `bioprism-mcp`, and `bioprism-api` binaries (for a checkout this is `<checkout>/target/release`). Highest-priority resolution source; leave empty to fall back to `AURORA_AGENT_ROOT`, workspace folders, `~/aurora-agent`, `~/bioprism`, then the managed download cache."
+        },
+        "auroraAgent.root": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Data root passed as `--root` (worlds, fixtures, stores). Overrides the detected checkout root. Required for fixture-dependent features when the binaries come from the managed download, which ships no fixtures."
+        },
+        "auroraAgent.reportsDir": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Directory watched by the Autopilot Reports view and used for `--report-out`. Empty means `<first workspace folder>/.aurora/reports`."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run build",
+    "icon": "node scripts/make-icon.js",
+    "build": "node scripts/make-icon.js && tsc -p ./",
+    "check": "tsc --noEmit -p ./",
+    "test": "npm run build && node --test out/test/*.test.js",
+    "package": "vsce package --no-dependencies"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@types/vscode": "1.101.0",
+    "@vscode/vsce": "^3.6.0",
+    "typescript": "^5.5.0"
+  }
+}

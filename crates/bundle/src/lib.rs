@@ -125,6 +125,7 @@ pub mod audit;
 pub mod bundle;
 pub mod environment;
 pub mod error;
+mod hex;
 pub mod mac;
 pub mod manifest;
 pub mod provenance;

@@ -96,6 +96,7 @@ test("client exposes the autonomous brain value-only kernel", async () => {
     steps: [{ id: "invoke", objective: "invoke", tool: "provider.invoke" }],
     allowed_tools: ["provider.invoke"],
     max_cost: 10,
+    max_parallelism: 2,
   });
   const state = { schema: "bioprism-brain-bandit/0.1", arms: [{ arm_id: "openai/test-model" }] };
   const bandit = await client.brainBanditSelect(state);
@@ -163,6 +164,7 @@ test("client exposes the autonomous brain value-only kernel", async () => {
   assert.deepEqual(seen.find(({ path }) => path.endsWith("brain_model_select")).body.model_health, {
     "openai/test-model": { attempts: 12, successes: 11, failures: 1, success_rate: 11 / 12, last_latency_ms: 42 },
   });
+  assert.equal(seen.find(({ path }) => path.endsWith("brain_plan")).body.max_parallelism, 2);
   assert.equal(seen.length, 22);
   assert.ok(seen.every(({ body }) => !Object.prototype.hasOwnProperty.call(body, "api_key")));
   assert.ok(seen.every(({ body }) => !Object.prototype.hasOwnProperty.call(body, "prompt")));
@@ -171,6 +173,7 @@ test("client exposes the autonomous brain value-only kernel", async () => {
 test("brain client methods fail before transport on malformed input", async () => {
   const client = new ApiClient({ baseUrl: "http://127.0.0.1:18788", fetch: async () => { throw new Error("must not call transport"); } });
   await assert.rejects(() => client.brainPromptAssemble({ task: "", max_input_tokens: 10 }), ArgumentError);
+  await assert.rejects(() => client.brainPlan({ objective: "x", steps: [{ id: "x", objective: "x", tool: "x" }], allowed_tools: ["x"], max_cost: 1, max_parallelism: 0 }), ArgumentError);
   await assert.rejects(() => client.brainModelSelect({ task: "x", input_tokens: 1, requested_output_tokens: 1, models: [] }), ArgumentError);
   await assert.rejects(() => client.brainModelSelect({
     task: "x",

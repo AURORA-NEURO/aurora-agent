@@ -10,6 +10,7 @@ import {
   AutonomousWorkflowPersistenceCoordinator,
   TransactionalJsonAutonomousWorkflowSnapshotPersistence,
   AutonomousWorkflowExecutor,
+  AutonomousPromptTemplate,
   AUTONOMOUS_WORKFLOW_EXECUTION_RECEIPT_SCHEMA,
   validateAutonomousWorkflowExecutionReceipt,
   CredentialStore,
@@ -20,6 +21,8 @@ import {
   digestJson,
   openaiCompatibleProvider,
   ProviderRuntimeError,
+  builtinAutonomousPromptRegistry,
+  AutonomousPromptLearningState,
 } from "../dist/index.js";
 
 function jsonResponse(payload, status = 200) {
@@ -199,6 +202,66 @@ test("workflow executor checkpoints stages, pauses at a bounded budget, and resu
     assert.equal(resumed.events[index].sequence, resumed.events[index - 1].sequence + 1);
   }
   await assert.rejects(() => executor.resume("workflow-job-1", "A different task", { candidates: agent.models(), approveProviderCall: true }), /digest/);
+});
+
+test("workflow executor validates rehydrated stage packets before provider dispatch", async () => {
+  let providerCalls = 0;
+  const llm = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async () => {
+      providerCalls += 1;
+      return jsonResponse({ choices: [{ message: { role: "assistant", content: JSON.stringify(workflowStagePayload({}, "inspect")) }, finish_reason: "stop" }] });
+    },
+  });
+  llm.registerProvider(openaiCompatibleProvider("workflow", "https://workflow.test", { requiresCredential: false }));
+  const agent = new AutonomousAgent(llm);
+  agent.registerModel(model());
+  const originalBlueprint = agent.blueprint.bind(agent);
+  agent.blueprint = async (...args) => {
+    const envelope = await originalBlueprint(...args);
+    const tampered = structuredClone(envelope.blueprint);
+    tampered.stage_execution_plans[0].stage_plan_digest = "0".repeat(64);
+    return { ...envelope, blueprint: tampered };
+  };
+
+  const result = await new AutonomousWorkflowExecutor(agent, new InMemoryAutonomousWorkflowCheckpointStore()).start(
+    "Reject a tampered staged workflow before dispatch",
+    { domain: "coding", jobId: "workflow-stage-packet-tamper-1", candidates: agent.models(), approveProviderCall: true, maxStages: 1 },
+  );
+  assert.equal(result.status, "failed");
+  assert.equal(result.checkpoint?.stage_outcomes[0]?.error_class, "ArgumentError");
+  assert.equal(result.checkpoint?.stage_outcomes[0]?.stage_plan_digest, null, "invalid packets must not be recorded as admitted plans");
+  assert.equal(providerCalls, 0, "tampered stage packets must fail before provider dispatch");
+});
+
+test("workflow adapters receive the admitted normalized stage packet", async () => {
+  let dispatches = 0;
+  let observedPlan = null;
+  const agent = new AutonomousAgent(new LLMRuntime({ credentials: new CredentialStore() }));
+  const adapter = async (context) => {
+    dispatches += 1;
+    observedPlan = context.stage_plan;
+    const structured = { stage_id: context.stage.id, status: "completed", evidence: [`adapter:${context.stage_plan.stage_plan_digest}`], uncertainty: [], notes: "adapter completed", next_actions: [] };
+    return {
+      schema: "bioprism-typescript-autonomous-run/0.1",
+      status: "completed",
+      route: context.route,
+      blueprint: context.blueprint,
+      plan_refinement_digest: null,
+      selection: null,
+      response: { text: JSON.stringify(structured), structured },
+      learning: "provider_health_feedback_only",
+      retention: "provider_response_local; value_only_learning_projection",
+    };
+  };
+  const result = await new AutonomousWorkflowExecutor(agent, new InMemoryAutonomousWorkflowCheckpointStore(), { stageExecutor: adapter }).start(
+    "Execute a stage through a local adapter",
+    { domain: "coding", jobId: "workflow-stage-packet-adapter-1", approveProviderCall: true, maxStages: 1 },
+  );
+  assert.equal(result.status, "paused");
+  assert.equal(dispatches, 1);
+  assert.deepEqual(observedPlan, result.blueprint.stage_execution_plans.find((candidate) => candidate.stage_id === "scope"));
+  assert.equal(result.stage_results[0].stage_plan_digest, observedPlan.stage_plan_digest);
 });
 
 test("durable workflows use approved semantic routing once and persist the route identity", async () => {
@@ -438,12 +501,31 @@ test("workflow resume refuses a changed selection contract before provider dispa
   const agent = new AutonomousAgent(llm);
   agent.registerModel(model());
   const executor = new AutonomousWorkflowExecutor(agent, new InMemoryAutonomousWorkflowCheckpointStore());
+  const promptRegistry = builtinAutonomousPromptRegistry(["coding"]);
+  const promptLearningState = new AutonomousPromptLearningState(promptRegistry.registryDigest);
   const task = "Resume only with the same model-selection contract";
-  const first = await executor.start(task, { domain: "coding", jobId: "workflow-contract-1", candidates: agent.models(), approveProviderCall: true, maxStages: 1, maxCostPerMillionTokens: 10 });
+  const first = await executor.start(task, { domain: "coding", jobId: "workflow-contract-1", candidates: agent.models(), promptRegistry, promptLearningState, promptLearningExploration: 0.35, approveProviderCall: true, maxStages: 1, maxCostPerMillionTokens: 10 });
   assert.equal(first.status, "paused");
   assert.equal(typeof first.checkpoint.execution_contract_digest, "string");
   await assert.rejects(
     () => executor.resume("workflow-contract-1", task, { candidates: agent.models(), approveProviderCall: true, maxStages: 32, maxCostPerMillionTokens: 1 }),
+    /execution contract/,
+  );
+  await assert.rejects(
+    () => executor.resume("workflow-contract-1", task, { candidates: agent.models(), promptRegistry, promptLearningState, promptLearningExploration: 0.5, approveProviderCall: true, maxStages: 32, maxCostPerMillionTokens: 10 }),
+    /execution contract/,
+  );
+  promptRegistry.register(new AutonomousPromptTemplate({
+    promptId: "builtin.coding.specialist",
+    version: "1.0.1",
+    domain: "coding",
+    capabilities: ["implementation", "debugging", "testing"],
+    stages: ["*"],
+    templateDigest: "f".repeat(64),
+    render: () => [{ role: "system", content: "replacement coding guidance" }, { role: "user", content: "bounded objective" }],
+  }), { replace: true });
+  await assert.rejects(
+    () => executor.resume("workflow-contract-1", task, { candidates: agent.models(), promptRegistry, approveProviderCall: true, maxStages: 32, maxCostPerMillionTokens: 10 }),
     /execution contract/,
   );
   assert.equal(calls, 1, "contract mismatch must be rejected before the next stage dispatch");
@@ -741,11 +823,15 @@ test("workflow executor runs every built-in single-domain workflow through the s
   }
   const agent = new AutonomousAgent(llm);
   agent.registerModel({ ...model(), provider: "all-domain-workflows", model: "all-domain-workflows-model", capabilities: [...capabilities] });
+  const promptRegistry = builtinAutonomousPromptRegistry();
+  const promptLearningState = new AutonomousPromptLearningState(promptRegistry.registryDigest);
   for (const profile of profiles) {
     const result = await new AutonomousWorkflowExecutor(agent, new InMemoryAutonomousWorkflowCheckpointStore()).start(`Run a bounded ${profile.domain} workflow`, {
       domain: profile.domain,
       jobId: `all-domain-workflow-${profile.domain}`,
       candidates: agent.models(),
+      promptRegistry,
+      promptLearningState,
       approveProviderCall: true,
       maxStages: 32,
     });
@@ -754,11 +840,19 @@ test("workflow executor runs every built-in single-domain workflow through the s
     assert.equal(result.stage_results.length, profile.workflow.stages.length, profile.domain);
     assert.ok(result.stage_results.every((stage) => stage.declared_status === "completed" && stage.validation_errors.length === 0), profile.domain);
     assert.ok(result.stage_results.every((stage) => stage.response_evaluation?.domain === profile.domain && stage.response_evaluation?.stage_id === stage.stage.id), profile.domain);
+    assert.ok(result.stage_results.every((stage) => stage.run?.prompt?.mode === "registry_selection" && stage.run.prompt.stage === stage.stage.id), profile.domain);
+    assert.ok(result.stage_results.every((stage) => typeof stage.run?.prompt?.adaptive_selection_digest === "string" && stage.run.prompt.adaptive_selection_digest.length === 64), profile.domain);
+    assert.ok(result.stage_results.every((stage) => stage.run?.prompt?.selection_policy === "ucb1_explicit_evaluator_v1"), profile.domain);
     assert.ok(result.checkpoint.stage_outcomes.filter((outcome) => outcome.status === "completed").every((outcome) => outcome.response_evaluation?.domain === profile.domain), profile.domain);
     assert.equal(result.response_learning_episode_ids.length, 0, "learning is disabled for this execution");
     assert.equal(result.execution_receipt.next_action, "complete", profile.domain);
     assert.equal(result.execution_receipt.completed_stage_ids.length, profile.workflow.stages.length, profile.domain);
     assert.equal(result.execution_receipt.incomplete_stage_ids.length, 0, profile.domain);
+    assert.deepEqual(
+      result.execution_receipt.stage_plan_digests,
+      Object.fromEntries(result.blueprint.stage_execution_plans.map((stagePlan) => [stagePlan.stage_id, stagePlan.stage_plan_digest])),
+      `${profile.domain} stage execution packet identity`,
+    );
     assert.equal(result.execution_receipt.progress, 1, profile.domain);
     assert.equal(result.execution_receipt.safe_to_continue, false, profile.domain);
     assert.equal(Object.hasOwn(result.execution_receipt, "response"), false, profile.domain);
@@ -770,6 +864,56 @@ test("workflow executor runs every built-in single-domain workflow through the s
       );
     }
   }
+});
+
+test("workflow executor blocks an evidence-free completion and requires an explicit quality retry", async () => {
+  let calls = 0;
+  const llm = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async (_url, init) => {
+      calls += 1;
+      const payload = workflowStagePayload(init);
+      if (calls === 1) payload.evidence = [];
+      return jsonResponse({ choices: [{ message: { role: "assistant", content: JSON.stringify(payload) }, finish_reason: "stop" }] });
+    },
+  });
+  llm.registerProvider(openaiCompatibleProvider("workflow-quality-gate", "https://workflow-quality-gate.test", { requiresCredential: false }));
+  const agent = new AutonomousAgent(llm);
+  const candidate = { ...model(), provider: "workflow-quality-gate", model: "workflow-quality-gate-model" };
+  agent.registerModel(candidate);
+  const executor = new AutonomousWorkflowExecutor(agent, new InMemoryAutonomousWorkflowCheckpointStore());
+
+  const blocked = await executor.start("Require reviewable stage evidence", {
+    domain: "coding",
+    jobId: "workflow-quality-gate-1",
+    candidates: [candidate],
+    approveProviderCall: true,
+    maxStages: 32,
+  });
+  assert.equal(blocked.status, "stage_blocked");
+  assert.equal(blocked.completed_stage_count, 0);
+  assert.equal(blocked.stage_results[0].response_evaluation.passed, false);
+  assert.match(blocked.stage_results[0].validation_errors.join(" "), /quality gate failed.*evidence_present/);
+  assert.equal(blocked.checkpoint.stage_outcomes.at(-1).error_class, "stage_quality_gate");
+  assert.equal(blocked.execution_receipt.next_action, "retry_stage");
+  await validateAutonomousWorkflowExecutionReceipt(blocked.execution_receipt);
+
+  const held = await executor.resume("workflow-quality-gate-1", "Require reviewable stage evidence", {
+    candidates: [candidate],
+    approveProviderCall: true,
+  });
+  assert.equal(held.status, "stage_blocked");
+  assert.equal(calls, 1, "a quality-gated stage must not replay without an explicit retry");
+
+  const retried = await executor.resume("workflow-quality-gate-1", "Require reviewable stage evidence", {
+    candidates: [candidate],
+    approveProviderCall: true,
+    maxStages: 32,
+    retryBlocked: true,
+  });
+  assert.equal(retried.status, "completed");
+  assert.equal(retried.completed_stage_count, 5);
+  assert.equal(calls, 6, "the explicit retry redispatches the failed stage and completes the DAG");
 });
 
 test("workflow executor forwards reviewed stage identity into live adapter dispatch", async () => {

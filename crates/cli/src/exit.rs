@@ -36,10 +36,15 @@
 //! asked. [`ExitCode::retryability`] returns `None` for both rather than inventing a third state
 //! that consumers would have to special-case anyway.
 
+use bioprism_adapter::AdapterError;
+use bioprism_autopilot::{AutopilotError, GrantError};
 use bioprism_baseline::CompareError;
 use bioprism_fiber::{FiberError, PolicyViolation};
 use bioprism_mutation::MutationError;
 use bioprism_prism::MinimizeError;
+use bioprism_project::ProjectError;
+use bioprism_repair::RepairError;
+use bioprism_research::ResearchError;
 use bioprism_store::StoreError;
 use std::fmt;
 
@@ -345,6 +350,92 @@ impl CliError {
         CliError::new(code, error.to_string())
     }
 
+    /// Routes a project scan, assembly or audit failure to the code carrying its 40.36 class.
+    ///
+    /// The split follows who has to move. A root that cannot be read is a dependency failure
+    /// (`io`, retryable as-is once the path exists). A malformed issues file, a source the
+    /// adapter refuses, and a tree whose component directories collide on one slug are all
+    /// conversations about the operator's input (`invalid_input`): re-sending the identical
+    /// command cannot succeed until the input is edited. An emitted fact the sealed ingestion
+    /// rejects, or an assembled world, pack or query that fails its own strict parser, is this
+    /// binary's fault — the emitter and the parser ship together, so the operator supplied
+    /// nothing that could be edited — and lands on [`CliError::internal`], exactly as
+    /// `world sweep` routes a generated world its own loader rejects.
+    ///
+    /// The fiber case defers to [`CliError::from_compile`] rather than naming a code, so the
+    /// paths that surface the same [`FiberError`] cannot drift apart. Written against the error
+    /// types rather than at the call site so a new variant on either enum fails to compile
+    /// until somebody decides which code it belongs under.
+    pub fn from_project(error: ProjectError) -> Self {
+        let message = error.to_string();
+        match error {
+            ProjectError::Adapter(adapter) => {
+                let code = match &adapter {
+                    AdapterError::Io { .. } => ExitCode::Io,
+                    AdapterError::UnsupportedSource { .. }
+                    | AdapterError::UnsupportedFormat { .. }
+                    | AdapterError::Csv(_)
+                    | AdapterError::AmbiguousIdentity { .. }
+                    | AdapterError::SchemaDrift { .. }
+                    | AdapterError::ValueTypeMismatch { .. }
+                    | AdapterError::Identifier { .. } => ExitCode::InvalidInput,
+                    AdapterError::MalformedFact { .. }
+                    | AdapterError::DuplicateFactId { .. }
+                    | AdapterError::Canonical { .. } => return CliError::internal(message),
+                };
+                CliError::new(code, message)
+            }
+            ProjectError::Issues(_) | ProjectError::Assembly(_) => CliError::invalid(message),
+            ProjectError::Io { .. } => CliError::new(ExitCode::Io, message),
+            ProjectError::World(_) | ProjectError::Domain(_) => CliError::internal(message),
+            ProjectError::Fiber(source) => {
+                CliError::new(CliError::from_compile(source).code, message)
+            }
+        }
+    }
+
+    /// Routes a repair-planning failure to the code carrying its 40.36 class.
+    ///
+    /// The split follows who has to move, and for this crate that is almost always the *author*:
+    /// a plan with no falsifier, a declaration file whose two items share a name, a plan body
+    /// edited after its content-derived id was minted, and an `--issue` naming an issue the tree
+    /// does not declare are all documents or flags an operator edits, so they are exit 3. Nothing
+    /// here is exit 4: `bioprism-repair` reports a failed check as an [`ItemStatus`] on the report
+    /// rather than as an error, so a `RepairError` never means "no result satisfies the contract",
+    /// it means "this document is not a plan".
+    ///
+    /// Three variants are this binary's fault instead. `MalformedIssueFact`, `RegionFactUnknown`
+    /// and `RegionWorldMismatch` can only fire when the world and the certificate handed to the
+    /// generator disagree, and both come from a single assembly performed here — the operator
+    /// supplied nothing that could be edited to clear them. `Canonical` is the same case one layer
+    /// down: JSON cannot carry a value that fails to canonicalise, so anything that does was made
+    /// unrepresentable here.
+    ///
+    /// Written against the error type rather than at the call site so a new variant fails to
+    /// compile until somebody decides which code it belongs under.
+    ///
+    /// [`ItemStatus`]: bioprism_repair::ItemStatus
+    pub fn from_repair(error: RepairError) -> Self {
+        let message = error.to_string();
+        match error {
+            RepairError::Document(_)
+            | RepairError::Predicate(_)
+            | RepairError::NoFalsifier { .. }
+            | RepairError::NoCriterion { .. }
+            | RepairError::DuplicateItemName { .. }
+            | RepairError::MissingMandatoryLimitation
+            | RepairError::EmptyField { .. }
+            | RepairError::RegionFactIds(_)
+            | RepairError::PlanIdMismatch { .. }
+            | RepairError::UnknownIssue { .. }
+            | RepairError::UnrepresentablePredicate(_) => CliError::invalid(message),
+            RepairError::Canonical(_)
+            | RepairError::MalformedIssueFact(_)
+            | RepairError::RegionFactUnknown { .. }
+            | RepairError::RegionWorldMismatch { .. } => CliError::internal(message),
+        }
+    }
+
     /// Routes a comparison failure to the code carrying its 40.36 class.
     ///
     /// [`CompareError`] has one variant and it is the oracle declining to judge the full-context
@@ -363,6 +454,130 @@ impl CliError {
             CompareError::OracleRefusedReference { source, .. } => {
                 CliError::new(CliError::from_compile(source).code, message)
             }
+        }
+    }
+
+    /// Routes an autopilot failure to the code carrying its 40.36 class.
+    ///
+    /// [`AutopilotError`] keeps the one distinction this registry cannot recover after the fact:
+    /// a grant that does not authorise the mission it was asked to drive is a policy refusal —
+    /// the mission is well-formed and the platform behaved correctly, so the caller's next
+    /// conversation is with whoever issues grants, which is exit 7. A mission, mission report,
+    /// workflow instantiation, or autopilot report that does not satisfy its contract is exit 3:
+    /// the document must change before any re-send can succeed. Canonicalisation is the one
+    /// failure that is this binary's fault rather than the caller's, so it lands where
+    /// [`CliError::internal`] lands. Written against the error type rather than at each call
+    /// site so a new variant fails to compile until somebody decides which code it belongs
+    /// under.
+    pub fn from_autopilot(error: AutopilotError) -> Self {
+        let message = error.to_string();
+        match error {
+            AutopilotError::GrantDoesNotAuthorise { .. } => {
+                CliError::new(ExitCode::PolicyDenied, message)
+            }
+            AutopilotError::InvalidMission { .. }
+            | AutopilotError::InvalidReport { .. }
+            | AutopilotError::InvalidInstantiation { .. }
+            | AutopilotError::InvalidAutopilotReport { .. }
+            | AutopilotError::InvalidCheckpoint { .. } => CliError::invalid(message),
+            AutopilotError::Canonicalisation { .. }
+            | AutopilotError::Persistence { .. }
+            | AutopilotError::CompareAndSwapConflict
+            | AutopilotError::Scheduling { .. } => CliError::internal(message),
+        }
+    }
+
+    /// Routes a research-runner failure to the code carrying its 40.36 class.
+    ///
+    /// The split follows who has to move. A request document defect (`InvalidRequest`) and a
+    /// dossier handed to verification or rendering that is not a research dossier at all
+    /// (`InvalidDossier`), or that lacks content the operation needs (`ArtifactMissing`,
+    /// `ArtifactNotInlined` — by the error type's own account, a foreign or hand-edited
+    /// dossier), are the caller's documents to edit, so they are exit 3. Every other variant is
+    /// this binary's fault rather than the caller's: the worlds are generated in-process from
+    /// committed presets, the reference fixtures are compiled in, and the protocol is planned by
+    /// the same crate that executes it — so a world the workspace's own loader rejects, a broken
+    /// parity anchor, or a figure renderer refusing an artifact this very run produced all land
+    /// where [`CliError::internal`] lands, because the operator supplied nothing that could be
+    /// edited to clear them.
+    ///
+    /// Nothing here is exit 1: a digest mismatch on `research verify` is a verdict on a
+    /// completed check, reported through the outcome rather than through this constructor, and a
+    /// negative finding is a first-class result of a *successful* run, not a failure of any
+    /// kind. Written against the error type rather than at each call site so a new variant fails
+    /// to compile until somebody decides which code it belongs under.
+    pub fn from_research(error: ResearchError) -> Self {
+        let message = error.to_string();
+        match error {
+            ResearchError::InvalidRequest { .. }
+            | ResearchError::InvalidDossier { .. }
+            | ResearchError::ArtifactMissing { .. }
+            | ResearchError::ArtifactNotInlined { .. } => CliError::invalid(message),
+            ResearchError::Canonicalisation { .. }
+            | ResearchError::ReferenceFixtureUnusable { .. }
+            | ResearchError::ReferenceAnchorMismatch { .. }
+            | ResearchError::WorldRejected { .. }
+            | ResearchError::QueryRejected { .. }
+            | ResearchError::CompileFailed { .. }
+            | ResearchError::CertificateRoundTrip { .. }
+            | ResearchError::NoReferenceVerdict { .. }
+            | ResearchError::SweepFailed { .. }
+            | ResearchError::MutationFailed { .. }
+            | ResearchError::MinimizeFailed { .. }
+            | ResearchError::ProtocolOutOfOrder { .. }
+            | ResearchError::FigureFailed { .. } => CliError::internal(message),
+        }
+    }
+
+    /// Routes a figure-builder refusal to the code carrying its 40.36 class.
+    ///
+    /// Every variant lands on `invalid_input`, and that is a decision rather than an omission.
+    /// The figure commands render a document the operator names on the command line: a field the
+    /// figure draws that the document does not carry, a field of the wrong type, an empty
+    /// collection, and a document that contradicts itself are all defects in that file, and
+    /// re-sending the identical command cannot succeed until it is edited. `Canonicalisation` is
+    /// here for the same reason and not on [`CliError::internal`], which is where the research
+    /// runner sends it: there, the value failing to canonicalise was produced in-process from
+    /// committed fixtures, so the operator supplied nothing that could be edited; here the value
+    /// came out of their own file, and a number JSON parsed but canonical bytes cannot represent
+    /// is a defect in that file.
+    ///
+    /// What the shared code costs is real and worth stating: a script branching on the status
+    /// alone cannot tell a missing field from an internal contradiction. Both are terminal and
+    /// both are fixed by editing the document, so the 40.36 retry decision survives; the
+    /// distinction lives in the message, which is where the caller has to look anyway to know
+    /// *which* field. Written against the error type rather than at each call site so a new
+    /// variant fails to compile until somebody decides which code it belongs under.
+    pub fn from_figure(error: bioprism_figures::FigureError) -> Self {
+        use bioprism_figures::FigureError;
+        let code = match &error {
+            FigureError::MissingField { .. }
+            | FigureError::WrongType { .. }
+            | FigureError::EmptyCollection { .. }
+            | FigureError::Inconsistent { .. }
+            | FigureError::Canonicalisation { .. } => ExitCode::InvalidInput,
+        };
+        CliError::new(code, error.to_string())
+    }
+
+    /// Routes an autonomy-grant refusal to `invalid_input`.
+    ///
+    /// Every [`GrantError`] names a field of the grant document that must change — an empty
+    /// allow-list, a recursive tool, an attempt budget outside its bounds — so all of them are
+    /// exit 3 rather than exit 7: nothing was refused *by* a policy here, the authority document
+    /// itself failed its schema, and sending the operator to obtain a grant would send them to
+    /// fix the wrong document. The match is exhaustive so a new refusal fails to compile until
+    /// somebody decides whether it still describes a document defect.
+    pub fn from_grant(error: GrantError) -> Self {
+        match &error {
+            GrantError::NoTools
+            | GrantError::TooManyTools { .. }
+            | GrantError::InvalidToolName { .. }
+            | GrantError::DuplicateTool { .. }
+            | GrantError::RecursiveTool
+            | GrantError::InvalidAttemptBudget { .. }
+            | GrantError::InvalidRetrySchedule { .. }
+            | GrantError::UnsupportedStopOption => CliError::invalid(error.to_string()),
         }
     }
 
@@ -513,6 +728,112 @@ mod tests {
         );
         assert_eq!(error.code, ExitCode::Stale);
         assert!(error.code.is_retryable());
+    }
+
+    #[test]
+    fn an_unauthorised_mission_is_policy_denied_and_a_malformed_grant_is_invalid_input() {
+        let refused = CliError::from_autopilot(AutopilotError::GrantDoesNotAuthorise {
+            reason: "step `a` uses tool `b`, which the grant does not allow".into(),
+        });
+        assert_eq!(refused.code, ExitCode::PolicyDenied);
+
+        let malformed_instantiation =
+            CliError::from_autopilot(AutopilotError::InvalidInstantiation {
+                reason: "workflow must be domain_workflow_instantiate".into(),
+            });
+        assert_eq!(malformed_instantiation.code, ExitCode::InvalidInput);
+
+        let malformed_grant = CliError::from_grant(GrantError::NoTools);
+        assert_eq!(malformed_grant.code, ExitCode::InvalidInput);
+        let recursive_grant = CliError::from_grant(GrantError::RecursiveTool);
+        assert_eq!(
+            recursive_grant.code,
+            ExitCode::InvalidInput,
+            "a grant naming agent_mission is a defect in the authority document, not a refusal \
+             a further grant could clear"
+        );
+    }
+
+    #[test]
+    fn a_plan_defect_is_the_authors_to_edit_and_never_reports_a_contract_the_tool_could_not_meet() {
+        for defect in [
+            RepairError::NoFalsifier {
+                issue: "ISSUE-1".into(),
+            },
+            RepairError::DuplicateItemName {
+                name: "check_cleared:unpinned_dependency".into(),
+            },
+            RepairError::MissingMandatoryLimitation,
+            RepairError::PlanIdMismatch {
+                declared: "repair-ISSUE-1-000000000000".into(),
+                derived: "repair-ISSUE-1-111111111111".into(),
+            },
+            RepairError::UnknownIssue {
+                issue_id: "ISSUE-9".into(),
+                variable: "issue_ISSUE-9_record".into(),
+            },
+        ] {
+            let error = CliError::from_repair(defect);
+            assert_eq!(
+                error.code,
+                ExitCode::InvalidInput,
+                "the operator edits a document or a flag to clear this, so it is not a compile \
+                 failure: {}",
+                error.message
+            );
+            assert_eq!(error.code.retryability(), Some(Retryability::Terminal));
+        }
+
+        let ours = CliError::from_repair(RepairError::MalformedIssueFact(
+            "\"issue_ISSUE-1_record\" carries no array \"components\"".into(),
+        ));
+        assert_eq!(
+            ours.code,
+            ExitCode::Io,
+            "a world this binary assembled and then could not read is this binary's fault; there \
+             is nothing for the operator to edit"
+        );
+    }
+
+    #[test]
+    fn a_research_request_defect_is_the_callers_and_a_runner_failure_is_this_binarys() {
+        let request = CliError::from_research(ResearchError::InvalidRequest {
+            reason: "distractor_points must name at least one point".into(),
+        });
+        assert_eq!(request.code, ExitCode::InvalidInput);
+        assert_eq!(request.code.retryability(), Some(Retryability::Terminal));
+
+        let foreign = CliError::from_research(ResearchError::ArtifactNotInlined {
+            name: "sweep-table".into(),
+            digest: "c".repeat(64),
+        });
+        assert_eq!(
+            foreign.code,
+            ExitCode::InvalidInput,
+            "a digest-only artifact names a foreign or hand-edited dossier, which is the \
+             caller's document to fix"
+        );
+
+        let anchor = CliError::from_research(ResearchError::ReferenceAnchorMismatch {
+            pinned: "a".repeat(64),
+            recomputed: "b".repeat(64),
+        });
+        assert_eq!(
+            anchor.code,
+            ExitCode::Io,
+            "the reference fixtures are compiled into the binary, so a broken parity anchor is \
+             this binary's fault; there is nothing for the operator to edit"
+        );
+
+        let generated = CliError::from_research(ResearchError::WorldRejected {
+            world_id: "research-discriminating-d50".into(),
+            reason: "missing facts".into(),
+        });
+        assert_eq!(
+            generated.code,
+            ExitCode::Io,
+            "a generated world its own loader rejects is routed exactly as world sweep routes it"
+        );
     }
 
     #[test]

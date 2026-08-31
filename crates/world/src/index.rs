@@ -15,7 +15,26 @@ pub struct WorldIndex {
     pub factor_by_id: BTreeMap<String, usize>,
     pub fact_by_variable: BTreeMap<String, usize>,
     pub producers_by_variable: BTreeMap<String, Vec<usize>>,
+    /// Positions of the facts carrying each tag, in document order.
+    ///
+    /// The protected closure and the omission counts are the only two questions the compiler asks
+    /// about tags, and both were answered by scanning the whole corpus — a dozen full passes per
+    /// compile, on a world whose compiled region is a dozen facts. `WorldIndex` is already built
+    /// once per world and already walks every fact, so this costs one pass and removes the rest.
+    /// A `BTreeMap` rather than a hash map because `WorldIndex` derives `Debug` and this workspace
+    /// treats a nondeterministic rendering of an index as a defect.
+    pub facts_by_tag: BTreeMap<String, Vec<usize>>,
     pub shadowed_variables: Vec<String>,
+    /// Positions of the facts that provide a variable and *lost* to a later one, in document order.
+    ///
+    /// [`Self::fact_by_variable`] keeps only the winner, so before this existed a shadowed fact was
+    /// unreachable through any index and the compiler could not tell it apart from a fact nothing
+    /// in the world depends on. The two are opposite claims: a shadowed fact provides a variable
+    /// the slice may well need, so it has a backward dependency path and its omission is a
+    /// tiebreak rather than a proof. `shadowed_variables` records *that* shadowing happened, for
+    /// [`crate::validate`]; this records *which facts* it happened to, which is what a per-fact
+    /// influence classification needs.
+    pub shadowed_by_variable: BTreeMap<String, Vec<usize>>,
 }
 
 impl WorldIndex {
@@ -23,13 +42,28 @@ impl WorldIndex {
         let mut index = WorldIndex::default();
 
         for (position, fact) in facts.iter().enumerate() {
-            index.fact_by_id.insert(fact.id.as_str().to_string(), position);
-            if index
+            index
+                .fact_by_id
+                .insert(fact.id.as_str().to_string(), position);
+            if let Some(displaced) = index
                 .fact_by_variable
                 .insert(fact.provides.as_str().to_string(), position)
-                .is_some()
             {
-                index.shadowed_variables.push(fact.provides.as_str().to_string());
+                index
+                    .shadowed_variables
+                    .push(fact.provides.as_str().to_string());
+                index
+                    .shadowed_by_variable
+                    .entry(fact.provides.as_str().to_string())
+                    .or_default()
+                    .push(displaced);
+            }
+            for tag in &fact.tags {
+                index
+                    .facts_by_tag
+                    .entry(tag.clone())
+                    .or_default()
+                    .push(position);
             }
         }
 
@@ -66,5 +100,18 @@ impl WorldIndex {
             .get(variable)
             .map(Vec::as_slice)
             .unwrap_or(&[])
+    }
+
+    /// Positions of the facts providing `variable` that a later fact shadowed, in document order.
+    pub fn shadowed_providers(&self, variable: &str) -> &[usize] {
+        self.shadowed_by_variable
+            .get(variable)
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
+    }
+
+    /// Positions of the facts carrying `tag`, in document order.
+    pub fn tagged(&self, tag: &str) -> &[usize] {
+        self.facts_by_tag.get(tag).map(Vec::as_slice).unwrap_or(&[])
     }
 }

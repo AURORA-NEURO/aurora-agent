@@ -5,11 +5,14 @@
 //! about the benchmark, not the method, and blueprint 43.39 exists to fix it.
 //!
 //! These tests hold the decisive skeleton fixed and vary only the structure around it. The
-//! reference-like corner reproduces the tie; the discriminating corner separates the strategies
-//! cleanly. Both are asserted, so neither result can quietly drift.
+//! reference-like corner reproduces the tie; the discriminating corner separates FIBER from the
+//! undirected walk and from lexical retrieval — but not, it turned out, from the directed
+//! dependency walk, which ties FIBER here exactly (see the final test and `docs/FINDINGS.md` §6).
+//! All of it is asserted, so neither the separations nor the tie can quietly drift.
 
 use bioprism_baseline::{
-    compare, Comparison, ContextStrategy, FiberCompiled, KHopIncidence, LexicalTopK,
+    compare, Comparison, ContextStrategy, DirectedDependencyWalk, EmbeddingTopK, FiberCompiled,
+    KHopIncidence, LexicalTopK,
 };
 use bioprism_fiber::Query;
 use bioprism_world::{validate, World};
@@ -147,9 +150,17 @@ fn lexical_retrieval_silently_breaks_protected_closure() {
     assert_eq!(fiber.facts_exposed, 11);
 }
 
-/// The summary claim, as one assertion.
+/// The summary claim, as one assertion — updated when the directed dependency walk landed,
+/// because it falsified the earlier, stronger claim.
+///
+/// This test asserted that FIBER was *uniquely* sound, closed and compact here. It no longer is:
+/// the walk over the **directed** factor edges qualifies with the identical eleven facts, so the
+/// discriminating world discriminates FIBER from adjacency and from lexical similarity, not from
+/// directed dependency. That negative-for-FIBER result is measured in
+/// `crates/baseline/tests/directed_walk.rs` and reported in `docs/FINDINGS.md` §6; this assertion
+/// keeps it from quietly regressing into the old uniqueness claim.
 #[test]
-fn fiber_is_uniquely_sound_compact_and_closed_on_the_discriminating_world() {
+fn only_fiber_and_the_directed_walk_are_sound_compact_and_closed_on_the_discriminating_world() {
     let (world, query) = build(&WorldSpec::discriminating(750));
 
     let depths: Vec<KHopIncidence> = (1..=MAX_DEPTH).map(|depth| KHopIncidence { depth }).collect();
@@ -157,6 +168,11 @@ fn fiber_is_uniquely_sound_compact_and_closed_on_the_discriminating_world() {
         .into_iter()
         .map(|k| LexicalTopK { k })
         .collect();
+    let embeddings: Vec<EmbeddingTopK> = [11, 12, 15, 20, 50]
+        .into_iter()
+        .map(|k| EmbeddingTopK { k })
+        .collect();
+    let walk = DirectedDependencyWalk::unbounded();
 
     let mut panel: Vec<&dyn ContextStrategy> = Vec::new();
     for strategy in &depths {
@@ -165,6 +181,10 @@ fn fiber_is_uniquely_sound_compact_and_closed_on_the_discriminating_world() {
     for strategy in &lexicals {
         panel.push(strategy);
     }
+    for strategy in &embeddings {
+        panel.push(strategy);
+    }
+    panel.push(&walk);
     panel.push(&FiberCompiled);
 
     let comparison = compared(&world, &query, &panel);
@@ -181,8 +201,8 @@ fn fiber_is_uniquely_sound_compact_and_closed_on_the_discriminating_world() {
 
     assert_eq!(
         qualifying,
-        vec!["fiber"],
-        "exactly one strategy should be sound, closed and compact"
+        vec!["directed-walk-full", "fiber"],
+        "the directed walk ties fiber; every other strategy family fails at least one axis"
     );
 }
 

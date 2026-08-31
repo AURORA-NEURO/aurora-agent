@@ -28,10 +28,20 @@ import json
 import math
 from threading import Lock
 import uuid
-from typing import Any, Callable, Mapping, Protocol, Sequence
+from typing import TYPE_CHECKING, Any, Callable, Mapping, Protocol, Sequence
+
+if TYPE_CHECKING:
+    from .workflow_cycle import AutonomousWorkflowCycleResult
 
 from .authoring import canonical_json, content_digest
 from .errors import ArgumentError
+from .autonomous_protected_rehydration import AutonomousProtectedRehydrationAdapter
+from .autonomous_authorization import (
+    AutonomousAuthorizationError,
+    AutonomousAuthorizationContext,
+    AutonomousAuthorizationGate,
+    AutonomousAuthorizationLedger,
+)
 from .autonomous_evidence import (
     AutonomousEvidencePlan,
     build_autonomous_evidence_plan,
@@ -41,6 +51,17 @@ from .autonomous_evidence_runtime import (
     AutonomousEvidenceRuntimeJournal,
     AutonomousEvidenceRuntimeResult,
 )
+from .autonomous_claim_integrity import (
+    AutonomousClaimIntegrityAssessment,
+    AutonomousClaimIntegrityClaim,
+    AutonomousClaimIntegrityEvidence,
+    AutonomousClaimIntegrityPolicy,
+    AutonomousClaimIntegrityAcquisitionBinding,
+    assess_autonomous_claim_integrity,
+    bind_autonomous_claim_integrity_acquisition_requests,
+    plan_autonomous_claim_integrity_acquisition,
+    reassess_autonomous_claim_integrity,
+)
 from .autonomous_domain_policy import (
     AUTONOMOUS_DOMAIN_POLICY_MODES,
     AutonomousDomainPolicy,
@@ -48,21 +69,40 @@ from .autonomous_domain_policy import (
     AutonomousDomainPolicyError,
     autonomous_domain_policy,
     evaluate_autonomous_domain_policy,
+    validate_autonomous_domain_policy,
 )
 from .autonomous_task_lens import (
     AUTONOMOUS_TASK_LENS_SCHEMA,
     AutonomousDomainTaskLens,
     autonomous_domain_task_lens,
+    validate_autonomous_domain_task_lens,
 )
 from .autonomous_task_intent import (
     AUTONOMOUS_TASK_INTENT_SCHEMA,
     AutonomousTaskIntent,
     infer_autonomous_task_intent,
+    validate_autonomous_task_intent,
+)
+from .autonomous_capability_routing import (
+    AutonomousCapabilityRoute,
+    route_autonomous_capability,
 )
 from .autonomous_task_decision import (
     AUTONOMOUS_TASK_DECISION_SCHEMA,
     AutonomousTaskDecision,
     infer_autonomous_task_decision,
+    validate_autonomous_task_decision,
+)
+from .autonomous_task_clarification import (
+    AUTONOMOUS_TASK_CLARIFICATION_RECOMPILE_SCHEMA,
+    MAX_AUTONOMOUS_TASK_CLARIFICATION_QUESTIONS,
+    AutonomousTaskClarificationPlan,
+    AutonomousTaskClarificationResolution,
+    plan_autonomous_task_clarification,
+    resolve_autonomous_task_clarification,
+    validate_autonomous_task_clarification_plan,
+    validate_autonomous_task_clarification_recompile,
+    validate_autonomous_task_clarification_resolution,
 )
 from .autonomous_domain_response import (
     AutonomousDomainResponseContract,
@@ -71,6 +111,24 @@ from .autonomous_domain_response import (
     replay_autonomous_domain_response_evaluation,
     validate_autonomous_domain_response_evaluation,
     validate_autonomous_provider_domain_response,
+)
+from .autonomous_cross_domain_response import (
+    AutonomousCrossDomainResponseAssessment,
+    assess_autonomous_cross_domain_response_set,
+)
+from .autonomous_outcome_integrity import (
+    AutonomousOutcomeIntegrityAssessment,
+    AutonomousOutcomeIntegrityClaimBinding,
+    AutonomousOutcomeIntegrityRun,
+    assess_autonomous_outcome_integrity,
+    bind_autonomous_outcome_integrity_claims,
+    project_autonomous_outcome_integrity_run,
+)
+from .autonomous_recovery import (
+    AutonomousRecoveryHandoffLedger,
+    AutonomousRecoveryObservation,
+    AutonomousRecoveryPlan,
+    plan_autonomous_recovery,
 )
 from .autonomous_workflow_response import (
     evaluate_autonomous_workflow_stage_response,
@@ -84,6 +142,7 @@ from .brain import (
     BrainLearningEpisode,
     BrainLearningCycleResult,
     BrainLearningLedger,
+    BrainLearningPersistenceCoordinator,
     BrainLearningTrajectory,
     BrainLearningTrajectoryResult,
     BrainJobRunResult,
@@ -96,7 +155,37 @@ from .brain import (
     _context_identity_digest,
     _ensure_bandit_arm,
     _json_digest,
+    _provider_messages_with_content_parts,
+    _valid_digest,
     build_model_selection_audit,
+)
+from .autonomous_selection_lab import (
+    normalize_autonomous_model_observations,
+    normalize_autonomous_selection_weights,
+)
+from .autonomous_prompt_registry import (
+    AutonomousPromptRegistry,
+    AutonomousPromptSelectionPlan,
+    AutonomousPromptTemplate,
+)
+from .autonomous_prompt_learning import (
+    AUTONOMOUS_PROMPT_LEARNING_POLICY,
+    AutonomousPromptAdaptiveSelection,
+    AutonomousPromptLearningPersistenceCoordinator,
+    AutonomousPromptLearningState,
+    extract_autonomous_prompt_learning_selections,
+    select_adaptive_autonomous_prompts,
+)
+from .autonomous_tool_selection_persistence import (
+    AutonomousToolSelectionPersistenceCoordinator,
+    AutonomousToolSelectionSnapshot,
+    AutonomousToolSelectionSnapshotPersistence,
+    validate_autonomous_tool_selection_snapshot,
+)
+from .autonomous_evaluator_calibration import (
+    AutonomousEvaluatorCalibrationRegistry,
+    AutonomousEvaluatorCalibrationRegistryPersistenceCoordinator,
+    validate_autonomous_evaluator_calibration_report,
 )
 from .domain_tools import (
     AUTONOMOUS_DOMAIN_NAMES,
@@ -109,6 +198,7 @@ from .domain_tools import (
     builtin_autonomous_domain_tool_profiles,
     plan_mcp_catalogue_bindings,
 )
+from .autonomous_effects import AutonomousEffectBoundary
 from .autonomous_connectors import (
     AUTONOMOUS_CONNECTOR_REGISTRY_SCHEMA,
     AutonomousConnectorDispatchRequest,
@@ -117,8 +207,11 @@ from .autonomous_connectors import (
     AutonomousConnectorRuntime,
     AutonomousConnectorSelectionPlan,
 )
+from .autonomous_connector_worker import AutonomousConnectorOperationRegistry
 from .autonomous_capabilities import (
+    AUTONOMOUS_CAPABILITY_JOURNAL_SNAPSHOT_SCHEMA,
     AutonomousCapabilityExecutionResult,
+    AutonomousCapabilityJournalPersistenceCoordinator,
     AutonomousCapabilityJournalStore,
     AutonomousCapabilityRuntime,
 )
@@ -135,6 +228,7 @@ from .autonomous_selection_promotion import validate_autonomous_selection_promot
 from .autonomy_persistence import (
     AutonomousExecutionController,
     AutonomousExecutionJournal,
+    AutonomousExecutionPersistenceCoordinator,
     AutonomousExecutionPolicy,
     AutonomyPersistenceError,
 )
@@ -144,15 +238,34 @@ from .autonomous_run_trace import (
     AutonomousTracedRunResult,
     autonomous_run_trace_status,
 )
+from .autonomous_run_analytics import (
+    AutonomousRunTraceAnalyticsPolicy,
+    AutonomousRunTraceAnalyticsReport,
+    analyze_autonomous_run_trace,
+)
+from .autonomous_run_analytics_ledger import (
+    AutonomousRunAnalyticsLedger,
+    AutonomousRunAnalyticsLedgerPolicy,
+)
+from .autonomous_run_analytics_controller import AutonomousRunAnalyticsController
+from .autonomous_run_trace_registry_controller import AutonomousRunTraceRegistryController
+from .autonomous_run_observability_controller import AutonomousRunObservabilityController
 from .autonomous_decision_persistence import (
     AutonomousDecisionCycle,
+    AutonomousDecisionCyclePersistenceCoordinator,
     AutonomousDecisionCycleRehydrationContext,
     AutonomousDecisionCycleStateStore,
 )
 from .autonomous_model_inventory import (
     AutonomousModelInventoryCoordinator,
+    AutonomousModelInventoryError,
+    AutonomousModelInventoryPersistenceCoordinator,
+    AutonomousModelInventoryReadiness,
     AutonomousModelInventorySnapshot,
     AutonomousModelInventoryStore,
+)
+from .autonomous_agent_lifecycle import (
+    AutonomousAgentPersistenceLifecycleCoordinator,
 )
 from .autonomous_builtin_connectors import (
     register_builtin_autonomous_domain_connectors,
@@ -167,11 +280,21 @@ from .evaluators import (
     DomainEvaluatorRegistry,
     builtin_autonomous_domain_evaluator_profiles,
 )
+from .autonomous_cycle_evaluator_bridge import AutonomousCycleEvaluatorBridge
 from .autonomy_evaluation import (
     AutonomousToolLearningReport,
     AutonomousToolOutcomeEvaluator,
 )
+from .autonomous_provider_evaluation import (
+    AutonomousProviderLearningReport,
+    AutonomousProviderOutcomeEvaluator,
+    settle_autonomous_provider_model_outcome,
+)
+from .autonomy_provider import AutonomousProviderInvocationReceipt
+from .autonomous_context_budget import AutonomousContextBudgetOptions
 from .llm_runtime import (
+    AutonomousCostReservationCallback,
+    CredentialError,
     CredentialHandle,
     CredentialProvisioner,
     CredentialProvisioningResult,
@@ -186,11 +309,25 @@ from .llm_runtime import (
     ProviderOnboarding,
     ProviderConfig,
     ProviderContentPart,
+    ProviderError,
     ProviderInvocationObserver,
     ProviderTool,
+    ProviderHealthPersistenceCoordinator,
+    LLMRuntimeHealthPersistenceCoordinator,
     normalize_provider_content_parts,
 )
-from .memory import BrainEpisodicMemory, BrainMemoryError, MemoryQuery, task_facet_digests
+from .memory import (
+    BrainEpisodicMemory,
+    BrainMemoryError,
+    BrainMemoryPersistenceCoordinator,
+    MemoryQuery,
+    task_facet_digests,
+)
+from .autonomous_memory_consolidation import (
+    MAX_AUTONOMOUS_MEMORY_CONSOLIDATION_PROMPT_LESSONS,
+    AutonomousMemoryConsolidationObservation,
+    AutonomousMemoryConsolidator,
+)
 from .goals import (
     GOAL_RETENTION,
     GOAL_STEP_SCHEMA,
@@ -201,12 +338,36 @@ from .goals import (
     goal_task_digest,
 )
 from .mission import MissionPolicy
+from .autonomous_mission_replan import (
+    AUTONOMOUS_MISSION_REPLAN_CHECKPOINT_SCHEMA,
+    AUTONOMOUS_MISSION_REPLAN_MAX_ATTEMPTS,
+    AUTONOMOUS_MISSION_REPLAN_MAX_INSTRUCTION_BYTES,
+    AUTONOMOUS_MISSION_REPLAN_MAX_REPLANS,
+    AUTONOMOUS_MISSION_REPLAN_SCHEMA,
+    AUTONOMOUS_MISSION_REPLAN_SNAPSHOT_SCHEMA,
+    AUTONOMOUS_MISSION_REPLAN_STATE_SCHEMA,
+    AutonomousMissionReplanAttempt,
+    AutonomousMissionReplanCheckpoint,
+    AutonomousMissionReplanPersistenceCoordinator,
+    AutonomousMissionReplanRehydrationContext,
+    AutonomousMissionReplanResult,
+    AutonomousMissionReplanSnapshot,
+    AutonomousMissionReplanSnapshotPersistence,
+    AutonomousMissionReplanState,
+    AutonomousMissionReplanStateStore,
+    AutonomousMissionReplanTextStore,
+    InMemoryAutonomousMissionReplanStateStore,
+    JsonAutonomousMissionReplanSnapshotPersistence,
+    run_autonomous_mission_replan_cycle,
+)
 from .tooling import ToolCatalogue, ToolDefinition
 
 
 AUTONOMY_SCHEMA = "bioprism-python-autonomous-task/0.1"
 AUTONOMOUS_AGENT_BATCH_SCHEMA = "bioprism-python-autonomous-agent-batch/0.1"
 AUTONOMOUS_BATCH_CHECKPOINT_SCHEMA = "bioprism-python-autonomous-batch-checkpoint/0.1"
+AUTONOMOUS_AUTOMATIC_BATCH_POLICY_SCHEMA = "bioprism-python-autonomous-automatic-batch-policy/0.1"
+AUTONOMOUS_TRACED_AUTO_BATCH_SCHEMA = "bioprism-python-autonomous-traced-auto-batch/0.1"
 AUTONOMOUS_BATCH_CONTROLLER_SCHEMA = "bioprism-python-autonomous-batch-controller/0.1"
 AUTONOMOUS_EXECUTION_MODES = ("provider", "tool_loop", "mission")
 AUTONOMOUS_LEARNING_MODES = ("off", "online", "trajectory")
@@ -293,6 +454,10 @@ AUTONOMOUS_PROVISIONED_RUN_SCHEMA = "bioprism-python-autonomous-provisioned-run/
 AUTONOMOUS_WORKFLOW_LEARNING_SCHEMA = "bioprism-python-autonomous-workflow-learning/0.1"
 AUTONOMOUS_WORKFLOW_TRAJECTORY_LEARNING_SCHEMA = "bioprism-python-autonomous-workflow-trajectory-learning/0.1"
 AUTONOMOUS_ROUTE_SCHEMA = "bioprism-python-autonomous-route/0.1"
+AUTONOMOUS_DECISION_CYCLE_SCHEMA = "bioprism-python-autonomous-decision-cycle/0.1"
+AUTONOMOUS_AUTO_DECISION_CYCLE_SCHEMA = "bioprism-python-autonomous-auto-decision-cycle/0.1"
+AUTONOMOUS_REPLAN_CYCLE_SCHEMA = "bioprism-python-autonomous-auto-replan-cycle/0.1"
+AUTONOMOUS_REPLAN_CONTEXT_SCHEMA = "bioprism-python-autonomous-replan-context/0.1"
 AUTONOMOUS_DOMAIN_PACK_SCHEMA = "bioprism-python-autonomous-domain-pack/0.1"
 AUTONOMOUS_EXECUTION_PLAN_SCHEMA = "bioprism-python-autonomous-execution-plan/0.1"
 AUTONOMOUS_DOMAIN_LEARNING_STATE_SCHEMA = "bioprism-python-autonomous-domain-learning-state/0.1"
@@ -301,8 +466,10 @@ AUTONOMOUS_CAPABILITY_PLAN_SCHEMA = "bioprism-python-autonomous-capability-plan/
 AUTONOMOUS_CAPABILITY_PORTFOLIO_SCHEMA = "bioprism-python-autonomous-capability-portfolio/0.1"
 AUTONOMOUS_TOOL_SELECTION_STATE_SCHEMA = "bioprism-autonomous-tool-selection-state/0.1"
 AUTONOMOUS_TOOL_SELECTION_POLICY = "stage_coverage_then_capability_then_ucb_value_then_task_relevance_then_read_only_then_name"
+AUTONOMOUS_TOOL_RISK_ORDER = ("read_only", "reversible_effect", "external_effect", "high_impact_effect")
 MAX_AUTONOMOUS_TOOL_SELECTION_ARMS = 512
 MAX_AUTONOMOUS_TOOL_SELECTION_CREDITS = 4096
+MAX_AUTONOMOUS_TOOL_SELECTION_CANDIDATES_PER_STAGE = 2
 AUTONOMOUS_WORKFLOW_STAGE_PLAN_SCHEMA = "bioprism-python-autonomous-workflow-stage-plan/0.1"
 AUTONOMOUS_CAPABILITY_PLAN_STATUSES = (
     "ready",
@@ -336,6 +503,10 @@ MAX_AUTONOMOUS_ROUTE_CANDIDATES = len(AUTONOMOUS_DOMAINS)
 MAX_AUTONOMOUS_ROUTE_DOMAINS = 4
 MAX_AUTONOMOUS_CROSS_DOMAIN_CHILDREN = 8
 MAX_AUTONOMOUS_CROSS_DOMAIN_REPLANS = 3
+MAX_AUTONOMOUS_REPLAN_CYCLE_REPLANS = MAX_AUTONOMOUS_CROSS_DOMAIN_REPLANS
+MAX_AUTONOMOUS_REPLAN_CYCLE_EVALUATIONS = (
+    (MAX_AUTONOMOUS_REPLAN_CYCLE_REPLANS + 1) * (MAX_AUTONOMOUS_ROUTE_DOMAINS + 1)
+)
 MAX_AUTONOMOUS_CROSS_DOMAIN_REPLAN_CHECKPOINT_BYTES = 128_000
 MAX_AUTONOMOUS_DOMAIN_PACK_ITEMS = 64
 MAX_AUTONOMOUS_EXECUTION_PLAN_BYTES = 512_000
@@ -346,6 +517,7 @@ MAX_AUTONOMOUS_CAPABILITY_PORTFOLIO_TASK_BYTES = 32_000
 MAX_AUTONOMOUS_WORKFLOW_STAGE_PLAN_BYTES = 64_000
 AUTONOMOUS_SEMANTIC_ROUTE_SCHEMA = "bioprism-python-autonomous-semantic-route/0.1"
 AUTONOMOUS_PLAN_REFINEMENT_SCHEMA = "bioprism-python-autonomous-plan-refinement/0.1"
+AUTONOMOUS_ORDERED_STEP_PLAN_REFINEMENT_SCHEMA = "bioprism-python-autonomous-ordered-step-plan-refinement/0.1"
 AUTONOMOUS_PLANNING_QUALITY_SETTLEMENT_SCHEMA = "bioprism-python-autonomous-planning-quality-settlement/0.1"
 AUTONOMOUS_ROUTE_EVIDENCE = {
     "fixed_catalogue_term_matches_only",
@@ -608,6 +780,107 @@ def _tool_selection_utility(arm: Mapping[str, Any] | None, total_pulls: int, exp
     return round(mean_reward - (failure_rate * 0.5) - latency_penalty + exploration_bonus, 12)
 
 
+def _tool_risk_allowed(risk_class: str, maximum: str) -> bool:
+    return risk_class in AUTONOMOUS_TOOL_RISK_ORDER and maximum in AUTONOMOUS_TOOL_RISK_ORDER and AUTONOMOUS_TOOL_RISK_ORDER.index(risk_class) <= AUTONOMOUS_TOOL_RISK_ORDER.index(maximum)
+
+
+def _portfolio_candidate_reason(
+    binding: AutonomousDomainToolBinding,
+    stage: "AutonomousWorkflowStage",
+    caller_allowed: set[str] | None,
+    read_only_only: bool,
+    maximum_risk_class: str,
+    arm: Mapping[str, Any] | None,
+) -> str:
+    if caller_allowed is not None and binding.name not in caller_allowed:
+        return "not_allowed"
+    if not _tool_risk_allowed(binding.risk_class, maximum_risk_class):
+        return "risk_budget_exceeded"
+    if (read_only_only and not binding.read_only) or (stage.read_only and not binding.read_only):
+        return "read_only_required"
+    if not stage.approval_required and binding.approval_required:
+        return "approval_required"
+    if arm is not None and bool(arm.get("disabled", False)):
+        return "learning_disabled"
+    return "eligible"
+
+
+def _portfolio_candidate_ranking(
+    tokens: Sequence[str],
+    requested_capabilities: Sequence[str],
+    stage: "AutonomousWorkflowStage",
+    bindings: Sequence[AutonomousDomainToolBinding],
+    domain: str,
+    tool_selection_state: Mapping[str, Any],
+    total_pulls: int,
+    exploration: float,
+    caller_allowed: set[str] | None,
+    read_only_only: bool,
+    maximum_risk_class: str,
+) -> list[dict[str, Any]]:
+    def reason_for(binding: AutonomousDomainToolBinding) -> str:
+        return _portfolio_candidate_reason(
+            binding,
+            stage,
+            caller_allowed,
+            read_only_only,
+            maximum_risk_class,
+            _tool_selection_arm_for(tool_selection_state, domain, stage, binding),
+        )
+
+    eligible = [binding for binding in bindings if reason_for(binding) == "eligible"]
+    ranked = sorted(
+        eligible,
+        key=lambda binding: _portfolio_score_key(
+            _portfolio_score(tokens, requested_capabilities, stage, binding, domain, tool_selection_state, total_pulls, exploration),
+            binding.name,
+        ),
+    )
+    rank_by_name = {binding.name: index + 1 for index, binding in enumerate(ranked)}
+    rows: list[dict[str, Any]] = []
+    for binding in bindings:
+        arm = _tool_selection_arm_for(tool_selection_state, domain, stage, binding)
+        score = _portfolio_score(tokens, requested_capabilities, stage, binding, domain, tool_selection_state, total_pulls, exploration)
+        pulls = int(arm["pulls"]) if arm is not None else 0
+        rows.append({
+            "tool": binding.name,
+            "capability": binding.capability,
+            "risk_class": binding.risk_class,
+            "read_only": binding.read_only,
+            "approval_required": binding.approval_required,
+            "eligible": binding.name in rank_by_name,
+            "rank": rank_by_name.get(binding.name),
+            "requested_capability_match": score[0] == 1,
+            "stage_capability_match": score[1] == 1,
+            "selection_utility": score[2],
+            "task_relevance": score[3],
+            "observed_pulls": pulls,
+            "observed_failure_rate": 0 if pulls == 0 else round(int(arm["failures"]) / pulls, 12),
+            "reason": reason_for(binding),
+        })
+    ranked_eligible = sorted(
+        (row for row in rows if row["eligible"]),
+        key=lambda row: (row["rank"], row["tool"]),
+    )
+    rejection_priority = {
+        "risk_budget_exceeded": 0,
+        "read_only_required": 1,
+        "approval_required": 2,
+        "not_allowed": 3,
+        "learning_disabled": 4,
+    }
+    ranked_rejected = sorted(
+        (row for row in rows if not row["eligible"]),
+        key=lambda row: (rejection_priority[row["reason"]], row["tool"]),
+    )
+    if not ranked_rejected:
+        return ranked_eligible[:MAX_AUTONOMOUS_TOOL_SELECTION_CANDIDATES_PER_STAGE]
+    return (
+        ranked_eligible[:1]
+        + ranked_rejected[:MAX_AUTONOMOUS_TOOL_SELECTION_CANDIDATES_PER_STAGE - 1]
+    )[:MAX_AUTONOMOUS_TOOL_SELECTION_CANDIDATES_PER_STAGE]
+
+
 def settle_autonomous_tool_selection_outcome(
     state: Mapping[str, Any] | None,
     *,
@@ -791,6 +1064,111 @@ def _sequence(name: str, value: Any, *, maximum: int = MAX_AUTONOMY_LIST_ITEMS) 
     return tuple(result)
 
 
+def _mapping_sequence(
+    name: str,
+    value: Any,
+    *,
+    maximum: int = MAX_AUTONOMY_LIST_ITEMS,
+) -> tuple[Mapping[str, Any], ...]:
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
+        raise BrainRunError(f"{name} must be a sequence")
+    if len(value) > maximum:
+        raise BrainRunError(f"{name} may contain at most {maximum} entries")
+    result: list[Mapping[str, Any]] = []
+    for item in value:
+        if not isinstance(item, Mapping):
+            raise BrainRunError(f"{name} must contain mappings")
+        result.append(item)
+    return tuple(result)
+
+
+def _cross_domain_subtask_domains_for_launch_admission(
+    subtasks: Sequence[Mapping[str, Any]],
+) -> tuple[str, ...]:
+    """Extract and validate specialist domains before execution setup begins."""
+
+    requested_domains: list[str] = []
+    for index, subtask in enumerate(subtasks):
+        if not isinstance(subtask, Mapping) or not isinstance(subtask.get("domain"), str):
+            raise BrainRunError(f"cross-domain launch admission subtask {index} has no valid domain")
+        requested_domains.append(subtask["domain"])
+    return tuple(requested_domains)
+
+
+def _authorize_launch_admission_domains(
+    launch_admission: Mapping[str, Any],
+    requested_domains: Sequence[str],
+) -> dict[str, Any]:
+    """Use one lazy process-boundary gate for every autonomous execution surface."""
+
+    from .autonomous_launch_admission import authorize_autonomous_launch_domains
+
+    return authorize_autonomous_launch_domains(launch_admission, requested_domains)
+
+
+def _launch_admission_domains(domains: Sequence[str] | None) -> Sequence[str]:
+    """Resolve an omitted evidence scope conservatively to the complete reviewed domain set."""
+
+    return AUTONOMOUS_DOMAINS if domains is None else domains
+
+
+def _capability_request_domains_for_launch_admission(request: Mapping[str, Any]) -> tuple[str, ...]:
+    if not isinstance(request, Mapping):
+        raise BrainRunError("capability launch admission request must be a mapping")
+    context = request.get("workflow_context")
+    if not isinstance(context, Mapping) or not isinstance(context.get("domain"), str):
+        raise BrainRunError("capability launch admission request has no valid workflow domain")
+    return (context["domain"],)
+
+
+def _mission_domains_for_launch_admission(mission: Any) -> tuple[str, ...]:
+    raw_steps = mission.get("steps") if isinstance(mission, Mapping) else getattr(mission, "steps", None)
+    if not isinstance(raw_steps, Sequence) or isinstance(raw_steps, (str, bytes, bytearray)):
+        raise BrainRunError("mission launch admission requires a sequence of domain-labelled steps")
+    domains: list[str] = []
+    for index, step in enumerate(raw_steps):
+        domain = step.get("domain") if isinstance(step, Mapping) else getattr(step, "domain", None)
+        if not isinstance(domain, str):
+            raise BrainRunError(f"mission launch admission step {index} has no valid domain")
+        domains.append(domain)
+    return tuple(domains)
+
+
+def _connector_plan_domains_for_launch_admission(plan: Any) -> tuple[str, ...]:
+    raw_domains = plan.get("domains") if isinstance(plan, Mapping) else getattr(plan, "domains", None)
+    if not isinstance(raw_domains, Sequence) or isinstance(raw_domains, (str, bytes, bytearray)):
+        raise BrainRunError("connector launch admission plan requires a sequence of domains")
+    domains = tuple(raw_domains)
+    if not domains or any(not isinstance(domain, str) for domain in domains):
+        raise BrainRunError("connector launch admission plan contains invalid domains")
+    return domains
+
+
+def _portfolio_plan_domains_for_launch_admission(plan: Any) -> tuple[str, ...]:
+    raw_items = plan.get("items") if isinstance(plan, Mapping) else getattr(plan, "items", None)
+    if not isinstance(raw_items, Sequence) or isinstance(raw_items, (str, bytes, bytearray)):
+        raise BrainRunError("workflow portfolio launch admission requires a sequence of items")
+    domains: list[str] = []
+    for index, item in enumerate(raw_items):
+        domain = item.get("domain") if isinstance(item, Mapping) else getattr(item, "domain", None)
+        if not isinstance(domain, str):
+            raise BrainRunError(f"workflow portfolio launch admission item {index} has no valid domain")
+        domains.append(domain)
+    return tuple(domains)
+
+
+def _portfolio_items_domains_for_launch_admission(items: Sequence[Any]) -> tuple[str, ...]:
+    if not isinstance(items, Sequence) or isinstance(items, (str, bytes, bytearray)):
+        raise BrainRunError("workflow portfolio evidence launch admission requires a sequence of items")
+    domains: list[str] = []
+    for index, item in enumerate(items):
+        domain = item.get("domain") if isinstance(item, Mapping) else getattr(item, "domain", None)
+        if not isinstance(domain, str):
+            raise BrainRunError(f"workflow portfolio evidence launch admission item {index} has no valid domain")
+        domains.append(domain)
+    return tuple(domains)
+
+
 def _safe_json(name: str, value: Any, *, maximum: int = MAX_AUTONOMY_CONTEXT_BYTES) -> Any:
     try:
         BrainLearningLedger._assert_safe(value)
@@ -876,6 +1254,66 @@ def _route_digest(value: Any, name: str) -> str:
     ):
         raise BrainRunError(f"{name} must be a lowercase SHA-256 digest")
     return value
+
+
+def _normalize_planner_context(value: Any, name: str = "planner context") -> dict[str, Any]:
+    """Normalize the stable planner identity used by contextual model selection."""
+
+    if not isinstance(value, Mapping):
+        raise BrainRunError(f"{name} must be a mapping")
+    expected_keys = {"domain", "capability", "risk_class", "task_family"}
+    if set(value) != expected_keys:
+        raise BrainRunError(f"{name} must contain exactly domain, capability, risk_class, and task_family")
+    domain = _identifier(f"{name}.domain", value.get("domain"))
+    if domain not in AUTONOMOUS_DOMAINS:
+        raise BrainRunError(f"{name}.domain must be a built-in autonomous domain")
+    capability = _identifier(f"{name}.capability", value.get("capability"))
+    risk_class = _identifier(f"{name}.risk_class", value.get("risk_class"))
+    task_family_value = value.get("task_family")
+    task_family = None if task_family_value is None else _identifier(f"{name}.task_family", task_family_value)
+    return {
+        "domain": domain,
+        "capability": capability,
+        "risk_class": risk_class,
+        "task_family": task_family,
+    }
+
+
+def _planner_context_binding(
+    value: Any,
+    digest: Any,
+    name: str = "planner context",
+) -> tuple[dict[str, Any], str]:
+    """Validate a planner context and its digest as one inseparable identity."""
+
+    context = _normalize_planner_context(value, name)
+    context_digest = _route_digest(digest, f"{name}_digest")
+    expected_digest = _context_identity_digest(context)
+    if context_digest != expected_digest:
+        raise BrainRunError(f"{name}_digest does not match {name}")
+    return context, context_digest
+
+
+def _provider_planner_context(
+    selection_context: Mapping[str, Any],
+    *,
+    task_family: str,
+) -> tuple[dict[str, Any], dict[str, Any], str]:
+    """Bind the exact stable context used by a provider-planning selector."""
+
+    if not isinstance(selection_context, Mapping):
+        raise BrainRunError("provider planner selection context must be a mapping")
+    planner_context = _normalize_planner_context(
+        {
+            "domain": selection_context.get("domain"),
+            "capability": selection_context.get("capability"),
+            "risk_class": selection_context.get("risk_class"),
+            "task_family": task_family,
+        },
+        "provider planner context",
+    )
+    bound_selection_context = {**dict(selection_context), "task_family": planner_context["task_family"]}
+    return planner_context, bound_selection_context, _context_identity_digest(planner_context)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1166,9 +1604,15 @@ class AutonomousPlanRefinementResult:
     selected_model: Mapping[str, str] | None = None
     selection_digest: str | None = None
     planner_prompt_digest: str | None = None
+    adaptive_selection: AutonomousPromptAdaptiveSelection | None = None
     planner_plan_digest: str | None = None
     outcome_digest: str | None = None
+    # Exact contextual identity used by the planner model-selection request.
+    planner_context: Mapping[str, Any] | None = None
+    planner_context_digest: str | None = None
     domain_policy_admission: AutonomousDomainPolicyAdmission | None = None
+    # Redacted provider/credential metadata; planner messages and exception text are never retained.
+    failure: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         if self.status not in {
@@ -1176,6 +1620,7 @@ class AutonomousPlanRefinementResult:
             "approval_required",
             "plan_refused",
             "provider_invalid",
+            "provider_failed",
             "provider_disagreement",
             "policy_review_required",
             "policy_blocked",
@@ -1210,8 +1655,24 @@ class AutonomousPlanRefinementResult:
         ):
             if value is not None:
                 _route_digest(value, f"plan refinement {name}")
+        if self.adaptive_selection is not None and not isinstance(self.adaptive_selection, AutonomousPromptAdaptiveSelection):
+            raise BrainRunError("plan refinement adaptive prompt selection is malformed")
+        if (self.planner_context is None) != (self.planner_context_digest is None):
+            raise BrainRunError("plan refinement planner_context and planner_context_digest must be supplied together")
+        if self.planner_context is not None and self.planner_context_digest is not None:
+            context, context_digest = _planner_context_binding(
+                self.planner_context,
+                self.planner_context_digest,
+                "plan refinement planner_context",
+            )
+            object.__setattr__(self, "planner_context", context)
+            object.__setattr__(self, "planner_context_digest", context_digest)
         if self.domain_policy_admission is not None and not isinstance(self.domain_policy_admission, AutonomousDomainPolicyAdmission):
             raise BrainRunError("plan refinement domain policy admission is malformed")
+        if self.status == "provider_failed" and self.failure is None:
+            raise BrainRunError("provider_failed plan refinement result requires a failure projection")
+        if self.failure is not None:
+            object.__setattr__(self, "failure", _normalize_planning_failure(self.failure, "plan refinement"))
         object.__setattr__(self, "priority_stage_ids", priority)
         object.__setattr__(self, "focus_stage_ids", focus)
         object.__setattr__(self, "confidence", float(self.confidence))
@@ -1235,8 +1696,154 @@ class AutonomousPlanRefinementResult:
             "retention": "stage_ids_and_digests_only; planner_transcript_not_retained",
             "authorization": "plan_proposal_only; no_tools_or_effects_authorized",
         }
+        if self.adaptive_selection is not None:
+            result["adaptive_selection"] = self.adaptive_selection.to_dict()
+        if self.planner_context is not None:
+            result["planner_context"] = dict(self.planner_context)
+            result["planner_context_digest"] = self.planner_context_digest
         if self.domain_policy_admission is not None:
             result["domain_policy_admission"] = self.domain_policy_admission.to_dict()
+        if self.failure is not None:
+            result["failure"] = dict(self.failure)
+        return result
+
+
+@dataclass(frozen=True, slots=True)
+class AutonomousOrderedStepPlanRefinementResult:
+    """A value-only provider proposal for an existing dependency-closed step graph."""
+
+    status: str
+    task_digest: str
+    base_plan_digest: str
+    protected_contract_digest: str | None = None
+    priority_step_ids: tuple[str, ...] = ()
+    focus_step_ids: tuple[str, ...] = ()
+    review_required: bool = True
+    confidence: float = 0.0
+    selected_model: Mapping[str, str] | None = None
+    selection_digest: str | None = None
+    planner_prompt_digest: str | None = None
+    adaptive_selection: AutonomousPromptAdaptiveSelection | None = None
+    planner_plan_digest: str | None = None
+    outcome_digest: str | None = None
+    planner_context: Mapping[str, Any] | None = None
+    planner_context_digest: str | None = None
+    domain_policy_admission: AutonomousDomainPolicyAdmission | None = None
+    failure: Mapping[str, Any] | None = None
+
+    def __post_init__(self) -> None:
+        if self.status not in {
+            "completed",
+            "approval_required",
+            "plan_refused",
+            "provider_invalid",
+            "provider_failed",
+            "provider_disagreement",
+            "policy_review_required",
+            "policy_blocked",
+        }:
+            raise BrainRunError("ordered-step plan refinement result has an invalid status")
+        _route_digest(self.task_digest, "ordered-step plan refinement task_digest")
+        _route_digest(self.base_plan_digest, "ordered-step plan refinement base_plan_digest")
+        if self.protected_contract_digest is not None:
+            _route_digest(
+                self.protected_contract_digest,
+                "ordered-step plan refinement protected_contract_digest",
+            )
+        priority = _ordered_step_ids(
+            "ordered-step plan refinement priority_step_ids",
+            self.priority_step_ids,
+        )
+        focus = _ordered_step_ids(
+            "ordered-step plan refinement focus_step_ids",
+            self.focus_step_ids,
+        )
+        if any(step_id not in priority for step_id in focus):
+            raise BrainRunError("ordered-step plan refinement focus steps must be in priority_step_ids")
+        if not isinstance(self.review_required, bool):
+            raise BrainRunError("ordered-step plan refinement review_required must be a boolean")
+        if isinstance(self.confidence, bool) or not isinstance(self.confidence, (int, float)):
+            raise BrainRunError("ordered-step plan refinement confidence must be finite")
+        if not math.isfinite(float(self.confidence)) or not 0.0 <= float(self.confidence) <= 1.0:
+            raise BrainRunError("ordered-step plan refinement confidence must be within [0, 1]")
+        if self.selected_model is not None:
+            if not isinstance(self.selected_model, Mapping):
+                raise BrainRunError("ordered-step plan refinement selected_model must be a mapping or None")
+            if set(self.selected_model) != {"provider", "model"} or any(
+                not isinstance(value, str) or not value.strip() for value in self.selected_model.values()
+            ):
+                raise BrainRunError("ordered-step plan refinement selected_model must contain provider and model")
+            object.__setattr__(self, "selected_model", dict(self.selected_model))
+        for name, value in (
+            ("selection_digest", self.selection_digest),
+            ("planner_prompt_digest", self.planner_prompt_digest),
+            ("planner_plan_digest", self.planner_plan_digest),
+            ("outcome_digest", self.outcome_digest),
+        ):
+            if value is not None:
+                _route_digest(value, f"ordered-step plan refinement {name}")
+        if self.adaptive_selection is not None and not isinstance(
+            self.adaptive_selection,
+            AutonomousPromptAdaptiveSelection,
+        ):
+            raise BrainRunError("ordered-step plan refinement adaptive prompt selection is malformed")
+        if (self.planner_context is None) != (self.planner_context_digest is None):
+            raise BrainRunError(
+                "ordered-step plan refinement planner_context and planner_context_digest must be supplied together"
+            )
+        if self.planner_context is not None and self.planner_context_digest is not None:
+            context, context_digest = _planner_context_binding(
+                self.planner_context,
+                self.planner_context_digest,
+                "ordered-step plan refinement planner_context",
+            )
+            object.__setattr__(self, "planner_context", context)
+            object.__setattr__(self, "planner_context_digest", context_digest)
+        if self.domain_policy_admission is not None and not isinstance(
+            self.domain_policy_admission,
+            AutonomousDomainPolicyAdmission,
+        ):
+            raise BrainRunError("ordered-step plan refinement domain policy admission is malformed")
+        if self.status == "provider_failed" and self.failure is None:
+            raise BrainRunError("provider_failed ordered-step plan refinement requires a failure projection")
+        if self.failure is not None:
+            object.__setattr__(
+                self,
+                "failure",
+                _normalize_planning_failure(self.failure, "ordered-step plan refinement"),
+            )
+        object.__setattr__(self, "priority_step_ids", priority)
+        object.__setattr__(self, "focus_step_ids", focus)
+        object.__setattr__(self, "confidence", float(self.confidence))
+
+    def to_dict(self) -> dict[str, Any]:
+        result = {
+            "schema": AUTONOMOUS_ORDERED_STEP_PLAN_REFINEMENT_SCHEMA,
+            "status": self.status,
+            "task_digest": self.task_digest,
+            "base_plan_digest": self.base_plan_digest,
+            "protected_contract_digest": self.protected_contract_digest,
+            "priority_step_ids": list(self.priority_step_ids),
+            "focus_step_ids": list(self.focus_step_ids),
+            "review_required": self.review_required,
+            "confidence": self.confidence,
+            "selected_model": None if self.selected_model is None else dict(self.selected_model),
+            "selection_digest": self.selection_digest,
+            "planner_prompt_digest": self.planner_prompt_digest,
+            "planner_plan_digest": self.planner_plan_digest,
+            "outcome_digest": self.outcome_digest,
+            "retention": "step_ids_and_digests_only; planner_transcript_not_retained",
+            "authorization": "plan_proposal_only; no_tools_arguments_or_effects_authorized",
+        }
+        if self.adaptive_selection is not None:
+            result["adaptive_selection"] = self.adaptive_selection.to_dict()
+        if self.planner_context is not None:
+            result["planner_context"] = dict(self.planner_context)
+            result["planner_context_digest"] = self.planner_context_digest
+        if self.domain_policy_admission is not None:
+            result["domain_policy_admission"] = self.domain_policy_admission.to_dict()
+        if self.failure is not None:
+            result["failure"] = dict(self.failure)
         return result
 
 
@@ -1479,6 +2086,140 @@ def _plan_refinement_response_schema(stage_ids: Sequence[str]) -> dict[str, Any]
         ],
         "additionalProperties": False,
     }
+
+
+def _ordered_step_plan_response_schema(step_ids: Sequence[str]) -> dict[str, Any]:
+    """Return a strict schema that can only order and focus existing graph nodes."""
+
+    steps = list(step_ids)
+    if not 1 <= len(steps) <= 128 or len(set(steps)) != len(steps):
+        raise BrainRunError("ordered-step planning requires a unique bounded step catalogue")
+    step_enum = {"type": "string", "enum": steps}
+    return {
+        "type": "object",
+        "properties": {
+            "priority_order": {
+                "type": "array",
+                "minItems": len(steps),
+                "maxItems": len(steps),
+                "items": step_enum,
+            },
+            "focus_step_ids": {
+                "type": "array",
+                "maxItems": len(steps),
+                "items": step_enum,
+            },
+            "review_required": {"type": "boolean"},
+            "confidence": {"type": "number"},
+            "abstain": {"type": "boolean"},
+        },
+        "required": [
+            "priority_order",
+            "focus_step_ids",
+            "review_required",
+            "confidence",
+            "abstain",
+        ],
+        "additionalProperties": False,
+    }
+
+
+def _normalize_ordered_step_graph(
+    steps: Sequence[Mapping[str, Any]],
+) -> tuple[dict[str, Any], ...]:
+    """Validate and project an ordered-step graph before it crosses the provider boundary."""
+
+    if not isinstance(steps, Sequence) or isinstance(steps, (str, bytes)):
+        raise BrainRunError("ordered-step planning steps must be a sequence")
+    if not 1 <= len(steps) <= 128:
+        raise BrainRunError("ordered-step planning steps are outside their bounds")
+    projected: list[dict[str, Any]] = []
+    ids: list[str] = []
+    identifier_chars = frozenset(
+        "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.:-"
+    )
+    for index, step in enumerate(steps):
+        if not isinstance(step, Mapping):
+            raise BrainRunError(f"ordered-step planning step {index} is malformed")
+        raw_id = step.get("id")
+        if (
+            not isinstance(raw_id, str)
+            or not 1 <= len(raw_id) <= 256
+            or any(character not in identifier_chars for character in raw_id)
+        ):
+            raise BrainRunError(f"ordered-step planning step {index} has an invalid id")
+        domain = _identifier(f"ordered-step planning step {raw_id}.domain", step.get("domain"))
+        if domain not in AUTONOMOUS_DOMAINS:
+            raise BrainRunError(f"ordered-step planning step {raw_id} has an unsupported domain")
+        capability = _identifier(
+            f"ordered-step planning step {raw_id}.capability",
+            step.get("capability"),
+        )
+        objective = _text(
+            f"ordered-step planning step {raw_id}.objective",
+            step.get("objective"),
+            maximum=MAX_AUTONOMY_TEXT_BYTES,
+        )
+        dependencies = step.get("depends_on", ())
+        if not isinstance(dependencies, Sequence) or isinstance(dependencies, (str, bytes)):
+            raise BrainRunError(f"ordered-step planning step {raw_id} dependencies must be a sequence")
+        dependency_ids: list[str] = []
+        for dependency in dependencies:
+            if (
+                not isinstance(dependency, str)
+                or not 1 <= len(dependency) <= 256
+                or any(character not in identifier_chars for character in dependency)
+            ):
+                raise BrainRunError(f"ordered-step planning step {raw_id} has an invalid dependency")
+            dependency_ids.append(dependency)
+        if len(dependency_ids) != len(set(dependency_ids)) or raw_id in dependency_ids:
+            raise BrainRunError(
+                f"ordered-step planning step {raw_id} dependencies are duplicated or self-referential"
+            )
+        required = step.get("required", True)
+        if not isinstance(required, bool):
+            raise BrainRunError(f"ordered-step planning step {raw_id}.required must be a boolean")
+        ids.append(raw_id)
+        projected.append(
+            {
+                "id": raw_id,
+                "domain": domain,
+                "capability": capability,
+                "objective": objective,
+                "depends_on": dependency_ids,
+                "required": required,
+            }
+        )
+    if len(ids) != len(set(ids)):
+        raise BrainRunError("ordered-step planning steps are duplicated")
+    known = set(ids)
+    if any(dependency not in known for step in projected for dependency in step["depends_on"]):
+        raise BrainRunError("ordered-step planning dependencies are not closed")
+    return tuple(projected)
+
+
+def _ordered_step_ids(name: str, value: Any) -> tuple[str, ...]:
+    """Validate a bounded proposal identifier list without accepting arbitrary text."""
+
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
+        raise BrainRunError(f"{name} must be a sequence")
+    if len(value) > 128:
+        raise BrainRunError(f"{name} may contain at most 128 entries")
+    identifier_chars = frozenset(
+        "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.:-"
+    )
+    result: list[str] = []
+    for item in value:
+        if (
+            not isinstance(item, str)
+            or not 1 <= len(item) <= 256
+            or any(character not in identifier_chars for character in item)
+        ):
+            raise BrainRunError(f"{name} contains an invalid step id")
+        if item in result:
+            raise BrainRunError(f"{name} contains a duplicate step id")
+        result.append(item)
+    return tuple(result)
 
 
 def _cross_domain_plan_response_schema(child_ids: Sequence[str]) -> dict[str, Any]:
@@ -2007,7 +2748,7 @@ def builtin_autonomous_domain_profiles() -> tuple[AutonomousDomainProfile, ...]:
             risk_class="scientific_inference",
             default_capability="scientific_reasoning",
             required_model_capabilities=("reasoning", "science"),
-            capabilities=("literature", "hypothesis", "experiment", "statistics", "reproducibility"),
+            capabilities=("scientific_reasoning", "literature", "hypothesis", "experiment", "statistics", "reproducibility"),
             guardrails=(*common, "do not present a hypothesis, correlation, or simulation as established causality"),
             system_instructions="Act as a rigorous scientific reasoning assistant. Track claims, evidence, alternatives, limitations, and reproducibility requirements.",
             evaluator_domain="research",
@@ -2037,7 +2778,7 @@ def builtin_autonomous_domain_profiles() -> tuple[AutonomousDomainProfile, ...]:
             risk_class="operational_effect",
             default_capability="operations_planning",
             required_model_capabilities=("reasoning", "operations"),
-            capabilities=("runbook", "incident_response", "observability", "risk_review", "rollback", "approval"),
+            capabilities=("operations_planning", "runbook", "incident_response", "observability", "risk_review", "rollback", "approval"),
             guardrails=(*common, "plan reversible checkpoints and require explicit authorization before effects"),
             system_instructions="Act as a reliability and operations planner. Make blast radius, rollback, approvals, and observability concrete.",
             evaluator_domain="operations",
@@ -2047,7 +2788,7 @@ def builtin_autonomous_domain_profiles() -> tuple[AutonomousDomainProfile, ...]:
             risk_class="enterprise_governance",
             default_capability="enterprise_workflow",
             required_model_capabilities=("reasoning", "enterprise"),
-            capabilities=("workflow", "governance", "compliance", "analytics", "coordination"),
+            capabilities=("enterprise_workflow", "workflow", "governance", "compliance", "analytics", "coordination"),
             guardrails=(*common, "do not infer authorization from organizational context; identify the accountable approver"),
             system_instructions="Act as an enterprise workflow assistant. Optimize for traceability, ownership, policy alignment, and reversible decisions.",
             evaluator_domain="operations",
@@ -2057,7 +2798,7 @@ def builtin_autonomous_domain_profiles() -> tuple[AutonomousDomainProfile, ...]:
             risk_class="coordination",
             default_capability="agent_coordination",
             required_model_capabilities=("reasoning", "coordination"),
-            capabilities=("delegation", "coordination", "consensus", "handoff", "conflict_resolution"),
+            capabilities=("agent_coordination", "delegation", "coordination", "consensus", "handoff", "conflict_resolution"),
             guardrails=(*common, "delegate only bounded subproblems and preserve one accountable effect authority"),
             system_instructions="Act as a coordinator of bounded specialist agents. Define contracts, dependencies, conflict handling, and synthesis criteria.",
             evaluator_domain="engineering",
@@ -2067,7 +2808,7 @@ def builtin_autonomous_domain_profiles() -> tuple[AutonomousDomainProfile, ...]:
             risk_class="multimodal_interpretation",
             default_capability="multimodal_analysis",
             required_model_capabilities=("reasoning", "multimodal"),
-            capabilities=("image", "audio", "video", "document", "cross_modal_alignment"),
+            capabilities=("multimodal_analysis", "image", "audio", "video", "document", "cross_modal_alignment"),
             guardrails=(*common, "identify modality blind spots and never imply an absent modality was inspected"),
             system_instructions="Act as a multimodal analysis assistant. Track which modalities were available, what each supports, and where alignment is uncertain.",
             evaluator_domain="research",
@@ -2077,7 +2818,7 @@ def builtin_autonomous_domain_profiles() -> tuple[AutonomousDomainProfile, ...]:
             risk_class="cross_domain_integration",
             default_capability="cross_domain_synthesis",
             required_model_capabilities=("reasoning", "coordination"),
-            capabilities=("routing", "synthesis", "evidence_alignment", "workflow_composition"),
+            capabilities=("cross_domain_synthesis", "routing", "synthesis", "evidence_alignment", "workflow_composition"),
             guardrails=(*common, "keep domain-specific claims attached to their source discipline and evaluator"),
             system_instructions="Act as a cross-domain synthesis planner. Route work to the right capability, preserve each domain's evidence standard, and expose conflicts.",
             evaluator_domain="research",
@@ -2087,7 +2828,7 @@ def builtin_autonomous_domain_profiles() -> tuple[AutonomousDomainProfile, ...]:
             risk_class="evaluation_integrity",
             default_capability="agent_evaluation",
             required_model_capabilities=("reasoning", "evaluation"),
-            capabilities=("benchmarking", "rubric", "replay", "failure_analysis", "reproducibility"),
+            capabilities=("agent_evaluation", "benchmarking", "rubric", "replay", "failure_analysis", "reproducibility"),
             guardrails=(*common, "do not let the system under evaluation author its own pass signal"),
             system_instructions="Act as an evaluation and reliability analyst. Keep test inputs, evaluator policy, outcomes, and conclusions separate.",
             evaluator_domain="engineering",
@@ -3214,6 +3955,8 @@ class AutonomousTaskBlueprint:
     task_intent: AutonomousTaskIntent | None = None
     # Intent-to-action posture; guidance metadata never authorizes execution.
     task_decision: AutonomousTaskDecision | None = None
+    # Provider-free capability selection; this never authorizes provider, tool, or effect work.
+    capability_route: AutonomousCapabilityRoute | None = None
     # Digest-bound opt-in response contract for this reviewed workflow.
     response_contract: AutonomousDomainResponseContract | None = None
 
@@ -3293,6 +4036,14 @@ class AutonomousTaskBlueprint:
                     required_model_capabilities=self.required_capabilities,
                 )
             ).to_dict(),
+            "capability_route": (
+                self.capability_route
+                or route_autonomous_capability(
+                    self.spec.task,
+                    self.spec.domain,
+                    explicit_capability=self.spec.capability,
+                )
+            ).to_dict(),
             "response_contract": None if self.response_contract is None else {
                 "schema": self.response_contract.schema,
                 "contract_digest": self.response_contract.contract_digest,
@@ -3313,14 +4064,121 @@ class AutonomousTaskBlueprint:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class AutonomousClarificationRecompile:
+    """Transient fresh blueprint plus a metadata-only binding to its clarification receipt.
+
+    The original task and clarified task remain available only through the caller's live
+    ``blueprint`` object.  The serialized projection contains digests and reviewed identities,
+    allowing a worker to audit which receipt caused a recompile without retaining answer values
+    or task text.  The returned blueprint is still a plan, not provider, tool, evaluator,
+    credential, or external-effect authorization.
+    """
+
+    plan_digest: str
+    resolution_digest: str
+    original_task_digest: str
+    recompiled_task_digest: str
+    domain: str
+    workflow_id: str
+    recompiled_intent_digest: str
+    recompiled_decision_digest: str
+    execution_plan_digest: str
+    blueprint: AutonomousTaskBlueprint
+
+    def __post_init__(self) -> None:
+        for name, value in (
+            ("clarification recompile plan_digest", self.plan_digest),
+            ("clarification recompile resolution_digest", self.resolution_digest),
+            ("clarification recompile original_task_digest", self.original_task_digest),
+            ("clarification recompile recompiled_task_digest", self.recompiled_task_digest),
+            ("clarification recompile recompiled_intent_digest", self.recompiled_intent_digest),
+            ("clarification recompile recompiled_decision_digest", self.recompiled_decision_digest),
+            ("clarification recompile execution_plan_digest", self.execution_plan_digest),
+        ):
+            if not isinstance(value, str) or len(value) != 64 or any(character not in "0123456789abcdef" for character in value):
+                raise BrainRunError(f"{name} must be a lowercase SHA-256 digest")
+        _identifier("clarification recompile domain", self.domain)
+        _identifier("clarification recompile workflow_id", self.workflow_id)
+        if not isinstance(self.blueprint, AutonomousTaskBlueprint):
+            raise BrainRunError("clarification recompile blueprint must be an AutonomousTaskBlueprint")
+        if self.blueprint.spec.task_digest != self.recompiled_task_digest:
+            raise BrainRunError("clarification recompile task digest does not match the blueprint")
+        if self.blueprint.spec.domain != self.domain or self.blueprint.workflow.workflow_id != self.workflow_id:
+            raise BrainRunError("clarification recompile blueprint identity does not match its receipt")
+        if self.blueprint.task_intent is None or self.blueprint.task_intent.intent_digest != self.recompiled_intent_digest:
+            raise BrainRunError("clarification recompile intent digest does not match the blueprint")
+        if self.blueprint.task_decision is None or self.blueprint.task_decision.decision_digest != self.recompiled_decision_digest:
+            raise BrainRunError("clarification recompile decision digest does not match the blueprint")
+        execution_plan_digest = content_digest(self.blueprint.to_dict()["plan"])
+        if execution_plan_digest != self.execution_plan_digest:
+            raise BrainRunError("clarification recompile execution plan digest does not match the blueprint")
+
+    def _descriptor(self) -> dict[str, Any]:
+        return {
+            "schema": AUTONOMOUS_TASK_CLARIFICATION_RECOMPILE_SCHEMA,
+            "plan_digest": self.plan_digest,
+            "resolution_digest": self.resolution_digest,
+            "original_task_digest": self.original_task_digest,
+            "recompiled_task_digest": self.recompiled_task_digest,
+            "domain": self.domain,
+            "workflow_id": self.workflow_id,
+            "recompiled_intent_digest": self.recompiled_intent_digest,
+            "recompiled_decision_digest": self.recompiled_decision_digest,
+            "execution_plan_digest": self.execution_plan_digest,
+            "status": "ready",
+        }
+
+    @property
+    def recompile_digest(self) -> str:
+        return content_digest(self._descriptor())
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            **self._descriptor(),
+            "recompile_digest": self.recompile_digest,
+            "blueprint": self.blueprint.to_dict(),
+            "execution": "not_started; fresh_blueprint_requires_existing_gates",
+            "authorization": "recompile_only; provider_source_tool_and_effect_gates_remain_required",
+            "retention": "metadata_only; task_text_and_answer_values_not_retained",
+            "secret_material": "never_returned",
+        }
+
+
 def _memory_selection_context(blueprint: AutonomousTaskBlueprint) -> dict[str, Any]:
     """Project live selector metadata into the smaller episodic-memory envelope."""
 
-    return {
-        key: value
-        for key, value in blueprint.selection_context.items()
-        if not key.startswith(("task_lens_", "task_intent_", "task_decision_"))
-    }
+    # The live selector context intentionally contains the complete catalogue and workflow
+    # projections. Episodic memory has a smaller bounded envelope, so retain stable identity
+    # and digest fields explicitly instead of allowing catalogue arrays to grow the record or
+    # silently crowd out capability-route identity.
+    keys = (
+        "schema",
+        "workflow",
+        "domain",
+        "capability",
+        "risk_class",
+        "execution_mode",
+        "domain_pack_id",
+        "domain_pack_version",
+        "domain_pack_digest",
+        "workflow_id",
+        "workflow_digest",
+        "evidence_plan_digest",
+        "evidence_requirement_count",
+        "task_digest",
+        "user_context_digest",
+        "required_model_capabilities",
+        "capability_contract_digest",
+        "capability_route_digest",
+        "capability_route_reason",
+        "capability_route_confidence",
+        "execution_plan_digest",
+        "execution_plan_status",
+        "stage_execution_plan_digest",
+        "stage_id",
+    )
+    return {key: blueprint.selection_context[key] for key in keys if key in blueprint.selection_context}
 
 
 def _memory_task_lens_digest(blueprint: AutonomousTaskBlueprint) -> str:
@@ -3388,6 +4246,7 @@ class AutonomousAutoBlueprint:
     blueprint: AutonomousTaskBlueprint | None = None
     cross_domain_blueprint: "AutonomousCrossDomainBlueprint | None" = None
     semantic_route: AutonomousSemanticRouteResult | None = None
+    capability_route: AutonomousCapabilityRoute | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.route, AutonomousRouteProposal):
@@ -3402,6 +4261,11 @@ class AutonomousAutoBlueprint:
             self.semantic_route, AutonomousSemanticRouteResult
         ):
             raise BrainRunError("automatic blueprint contains an invalid semantic route result")
+        if self.capability_route is not None and not isinstance(self.capability_route, AutonomousCapabilityRoute):
+            raise BrainRunError("automatic blueprint contains an invalid capability route")
+        if self.blueprint is not None and self.capability_route is not None:
+            if self.blueprint.capability_route is not None and self.blueprint.capability_route.route_digest != self.capability_route.route_digest:
+                raise BrainRunError("automatic blueprint capability route does not match its task blueprint")
         if self.semantic_route is not None and self.semantic_route.status == "completed":
             if self.semantic_route.route.route_digest != self.route.route_digest:
                 raise BrainRunError("completed semantic route must match the automatic blueprint route")
@@ -3418,6 +4282,9 @@ class AutonomousAutoBlueprint:
             "schema": "bioprism-python-autonomous-auto-blueprint/0.1",
             "route": self.route.to_dict(),
             "blueprint": None if self.blueprint is None else self.blueprint.to_dict(),
+            "capability_route": None
+            if self.capability_route is None
+            else self.capability_route.to_dict(),
             "cross_domain_blueprint": None
             if self.cross_domain_blueprint is None
             else self.cross_domain_blueprint.to_dict(),
@@ -3540,6 +4407,393 @@ class AutonomousAutoResult:
             "task_decision_digest": self.task_decision_digest,
             "task_decision_posture": self.task_decision_posture,
             "retention": "route_metadata_only; provider_result_caller_owned",
+        }
+
+
+def _autonomous_decision_cycle_public_status(status: str) -> str:
+    """Normalize successful execution variants to the cross-runtime cycle status."""
+
+    if status in {
+        "completed",
+        "completed_provider_call",
+        "completed_tool_loop",
+        "completed_mission",
+        "completed_workflow",
+        "children_completed",
+        "succeeded",
+    }:
+        return "completed"
+    return status
+
+
+def _autonomous_decision_cycle_next_action(status: str) -> str:
+    """Map a terminal/review status to a safe caller action.
+
+    This is intentionally a small policy table rather than a generic ``status == completed``
+    check.  Provider, routing, planning, approval, and reconciliation failures have different
+    owners; collapsing them into ``retry`` would make an automatic host repeat an unsafe or
+    already-invalid boundary.
+    """
+
+    if status in {
+        "route_review_required",
+        "provider_abstained",
+        "policy_review_required",
+        "policy_blocked",
+    }:
+        return "review_route"
+    if status in {"planning_review_required", "provider_failed", "provider_invalid", "provider_disagreement", "plan_refused"}:
+        return "review_plan"
+    if status in {"approval_required", "reconciliation_required"}:
+        return "review_provider_or_effect_approval"
+    if status == "completed":
+        return "complete"
+    return "inspect_result"
+
+
+def _autonomous_decision_cycle_result_projection(value: Any, route: AutonomousRouteProposal) -> dict[str, Any]:
+    """Project a private execution result into restart-safe metadata.
+
+    ``AutonomousAutoResult.to_dict`` is intentionally caller-facing and may contain a provider
+    response.  Decision-cycle journals have a stricter contract, so this helper only follows
+    known selection/evaluation identities and never calls an arbitrary result serializer.
+    """
+
+    status = getattr(value, "status", None)
+    if not isinstance(status, str) or not status:
+        status = "unknown"
+    outcome_digest = getattr(value, "outcome_digest", None)
+    if not isinstance(outcome_digest, str) or len(outcome_digest) != 64:
+        outcome_digest = content_digest(
+            {
+                "status": status,
+                "route_digest": route.route_digest,
+                "result_kind": type(value).__name__,
+            }
+        )
+    return {
+        "status": status,
+        "selection_digest": _decision_cycle_selection_digest(value),
+        "outcome_digest": outcome_digest,
+        "result_kind": type(value).__name__,
+        "retention": "metadata_only;provider_result_caller_owned",
+    }
+
+
+def _autonomous_decision_cycle_evaluation_projection(value: Any) -> dict[str, Any] | None:
+    """Return only value-only evaluator fields from any supported learning envelope."""
+
+    projection = _goal_learning_value_projection(value)
+    evaluations = projection.get("evaluations")
+    if not isinstance(evaluations, Sequence) or isinstance(evaluations, (str, bytes)) or not evaluations:
+        return None
+    normalized = [dict(item) for item in evaluations if isinstance(item, Mapping)]
+    if not normalized:
+        return None
+    return {
+        "evaluation_digest": content_digest({"evaluations": normalized}),
+        "evaluations": normalized,
+        "evaluation_count": len(normalized),
+        "retention": "value_only_evaluation;provider_evidence_caller_owned",
+    }
+
+
+@dataclass(frozen=True, slots=True)
+class AutonomousDecisionCycleResult:
+    """One route-frozen execution/evaluation boundary.
+
+    ``run`` remains caller-owned and can contain a provider response.  ``to_dict`` deliberately
+    emits only a bounded run projection, evaluator values, and settlement identities.  This
+    makes the object useful both as an in-process result and as the public shape attached to a
+    queue event or restart journal without accidentally persisting credentials, prompts, tool
+    arguments, raw evidence, or provider output.
+    """
+
+    status: str
+    route: AutonomousRouteProposal
+    semantic_route: AutonomousSemanticRouteResult | None = None
+    run: Any | None = None
+    plan_refinement: AutonomousPlanRefinementResult | AutonomousCrossDomainPlanRefinementResult | None = None
+    learning_episode_id: str | None = None
+    evaluation: Mapping[str, Any] | None = None
+    settlement: Mapping[str, Any] | None = None
+    planner_evaluation: Mapping[str, Any] | None = None
+    planner_settlement: Mapping[str, Any] | None = None
+    memory: Mapping[str, Any] | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.status, str) or not self.status.strip() or len(self.status) > 128:
+            raise BrainRunError("decision-cycle status must be bounded non-empty text")
+        if not isinstance(self.route, AutonomousRouteProposal):
+            raise BrainRunError("decision cycle requires an AutonomousRouteProposal")
+        if self.semantic_route is not None and not isinstance(self.semantic_route, AutonomousSemanticRouteResult):
+            raise BrainRunError("decision-cycle semantic route is malformed")
+        if self.semantic_route is not None and self.semantic_route.status == "completed" and self.semantic_route.route.route_digest != self.route.route_digest:
+            raise BrainRunError("completed decision-cycle semantic route must match the route")
+        if self.plan_refinement is not None and not isinstance(
+            self.plan_refinement,
+            (AutonomousPlanRefinementResult, AutonomousCrossDomainPlanRefinementResult),
+        ):
+            raise BrainRunError("decision-cycle plan refinement is malformed")
+        if self.learning_episode_id is not None:
+            _identifier("decision-cycle learning_episode_id", self.learning_episode_id)
+        for name, value in (
+            ("evaluation", self.evaluation),
+            ("settlement", self.settlement),
+            ("planner_evaluation", self.planner_evaluation),
+            ("planner_settlement", self.planner_settlement),
+            ("memory", self.memory),
+        ):
+            if value is not None and not isinstance(value, Mapping):
+                raise BrainRunError(f"decision-cycle {name} must be a mapping or None")
+
+    def to_dict(self) -> dict[str, Any]:
+        learning_episode_ids: list[str] = []
+        settlement_digests: list[str] = []
+        if self.learning_episode_id is not None:
+            learning_episode_ids.append(self.learning_episode_id)
+        if self.settlement is not None:
+            raw = self.settlement.get("settlement_digests")
+            if isinstance(raw, Sequence) and not isinstance(raw, (str, bytes)):
+                settlement_digests.extend(
+                    value for value in raw if isinstance(value, str) and len(value) == 64
+                )
+        return {
+            "schema": AUTONOMOUS_DECISION_CYCLE_SCHEMA,
+            "status": self.status,
+            "route": self.route.to_dict(),
+            "semantic_route": None if self.semantic_route is None else self.semantic_route.to_dict(),
+            "run": None if self.run is None else _autonomous_decision_cycle_result_projection(self.run, self.route),
+            "plan_refinement": None
+            if self.plan_refinement is None
+            else {
+                "plan_refinement_digest": content_digest(self.plan_refinement.to_dict()),
+                "status": self.plan_refinement.status,
+                "retention": "metadata_only;plan_payload_caller_owned",
+            },
+            "learning_episode_id": self.learning_episode_id,
+            "learning_episode_ids": learning_episode_ids,
+            "evaluation": None if self.evaluation is None else dict(self.evaluation),
+            "settlement": None if self.settlement is None else dict(self.settlement),
+            "planner_evaluation": None if self.planner_evaluation is None else dict(self.planner_evaluation),
+            "planner_settlement": None if self.planner_settlement is None else dict(self.planner_settlement),
+            "memory": None if self.memory is None else dict(self.memory),
+            "settlement_digests": settlement_digests,
+            "retention": "provider_response_local;value_only_evaluation_and_learning_projection",
+            "authorization": "routing_planning_provider_effects_and_evaluator_settlement_remain_explicit",
+            "secret_material": "never_returned",
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class AutonomousAutoDecisionCycleResult:
+    """Automatic route-once selection of the single- or cross-domain cycle kernel.
+
+    ``private_result`` is an in-process escape hatch for callers that own restart storage.  It
+    is intentionally excluded from :meth:`to_dict`; applications may retain it in a protected
+    result store and return it from ``decision_cycle_rehydrate_result`` without placing provider
+    output in a queue event, snapshot, or log.
+    """
+
+    status: str
+    mode: str | None
+    route: AutonomousRouteProposal
+    cycle: AutonomousDecisionCycleResult | None = None
+    semantic_route: AutonomousSemanticRouteResult | None = None
+    private_result: AutonomousAutoResult | None = field(default=None, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.status, str) or not self.status.strip() or len(self.status) > 128:
+            raise BrainRunError("automatic decision-cycle status must be bounded non-empty text")
+        if not isinstance(self.route, AutonomousRouteProposal):
+            raise BrainRunError("automatic decision cycle requires a route proposal")
+        if self.mode not in {None, "single_domain", "cross_domain"}:
+            raise BrainRunError("automatic decision-cycle mode is invalid")
+        expected_mode = (
+            "cross_domain"
+            if self.route.cross_domain and len(self.route.selected_domains) > 1
+            else "single_domain"
+        ) if not self.route.abstained else None
+        if self.mode != expected_mode:
+            raise BrainRunError("automatic decision-cycle mode does not match its route")
+        if self.cycle is not None:
+            if not isinstance(self.cycle, AutonomousDecisionCycleResult):
+                raise BrainRunError("automatic decision-cycle kernel result is malformed")
+            if self.cycle.route.route_digest != self.route.route_digest:
+                raise BrainRunError("automatic decision-cycle kernel route does not match its outer route")
+        if self.private_result is not None:
+            if not isinstance(self.private_result, AutonomousAutoResult):
+                raise BrainRunError("automatic decision-cycle private result is malformed")
+            if self.private_result.route.route_digest != self.route.route_digest:
+                raise BrainRunError("automatic decision-cycle private result route does not match its outer route")
+        if self.semantic_route is not None:
+            if not isinstance(self.semantic_route, AutonomousSemanticRouteResult):
+                raise BrainRunError("automatic decision-cycle semantic route is malformed")
+            if self.semantic_route.status == "completed" and self.semantic_route.route.route_digest != self.route.route_digest:
+                raise BrainRunError("automatic decision-cycle semantic route does not match its route")
+        if self.status == "completed" and self.cycle is None:
+            raise BrainRunError("completed automatic decision cycle requires a kernel result")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema": AUTONOMOUS_AUTO_DECISION_CYCLE_SCHEMA,
+            "status": self.status,
+            "mode": self.mode,
+            "route": self.route.to_dict(),
+            "semantic_route": None if self.semantic_route is None else self.semantic_route.to_dict(),
+            "cycle": None if self.cycle is None else self.cycle.to_dict(),
+            "next_action": _autonomous_decision_cycle_next_action(self.status),
+            "retention": "provider_response_local;route_and_cycle_metadata_value_only;execution_result_caller_owned",
+            "authorization": "routing_planning_provider_effects_and_evaluator_settlement_remain_explicit",
+            "secret_material": "never_returned",
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class AutonomousAutoReplanResult:
+    """Route-frozen automatic execution with evaluator-controlled bounded replanning.
+
+    ``AutonomousAgent.run_auto`` already contains the lower-level provider, prompt, model,
+    and learning machinery.  This envelope makes the complete automatic loop inspectable as a
+    first-class application result: route once, execute through the existing approval boundary,
+    settle explicit evaluator feedback, and allow only a bounded evaluator-requested retry.
+
+    ``final`` and ``attempt_results`` are caller-transient execution values.  ``to_dict`` emits
+    only route, attempt identity, evaluation values, and digests, so an application can attach
+    the projection to a queue event or restart journal without persisting task text, prompts,
+    provider responses, tool arguments, credentials, or evaluator instructions.
+    """
+
+    status: str
+    mode: str | None
+    route: AutonomousRouteProposal
+    final: AutonomousAutoResult | None = None
+    attempt_results: tuple[Any, ...] = ()
+    evaluations: tuple[Mapping[str, Any], ...] = ()
+    replan_count: int = 0
+    semantic_route: AutonomousSemanticRouteResult | None = None
+
+    _STATUSES = frozenset({
+        "completed",
+        "completed_without_replan",
+        "replan_limit_reached",
+        "route_review_required",
+        "planning_review_required",
+        "policy_review_required",
+        "policy_blocked",
+        "approval_required",
+        "provider_failed",
+        "provider_invalid",
+        "plan_refused",
+        "provider_abstained",
+        "provider_disagreement",
+        "reconciliation_required",
+    })
+
+    def __post_init__(self) -> None:
+        if self.status not in self._STATUSES:
+            raise BrainRunError("automatic replan result status is invalid")
+        if self.mode not in {None, "single_domain", "cross_domain"}:
+            raise BrainRunError("automatic replan result mode is invalid")
+        if not isinstance(self.route, AutonomousRouteProposal):
+            raise BrainRunError("automatic replan result requires a route proposal")
+        expected_mode = (
+            "cross_domain" if self.route.cross_domain and len(self.route.selected_domains) > 1
+            else "single_domain"
+        ) if not self.route.abstained else None
+        if self.mode != expected_mode:
+            raise BrainRunError("automatic replan result mode does not match its route")
+        if self.final is not None and not isinstance(self.final, AutonomousAutoResult):
+            raise BrainRunError("automatic replan result final value is malformed")
+        attempts = tuple(self.attempt_results)
+        if len(attempts) > MAX_AUTONOMOUS_REPLAN_CYCLE_REPLANS + 1:
+            raise BrainRunError("automatic replan result exceeds its attempt bound")
+        if any(not hasattr(value, "status") for value in attempts):
+            raise BrainRunError("automatic replan result contains a malformed attempt")
+        if not isinstance(self.evaluations, Sequence) or isinstance(self.evaluations, (str, bytes)):
+            raise BrainRunError("automatic replan result evaluations must be a sequence")
+        if any(not isinstance(value, Mapping) for value in self.evaluations):
+            raise BrainRunError("automatic replan result evaluations must contain mappings")
+        evaluations = tuple(dict(value) for value in self.evaluations)
+        if len(evaluations) > MAX_AUTONOMOUS_REPLAN_CYCLE_EVALUATIONS:
+            raise BrainRunError("automatic replan result exceeds its evaluation bound")
+        if isinstance(self.replan_count, bool) or not isinstance(self.replan_count, int) or not 0 <= self.replan_count <= MAX_AUTONOMOUS_REPLAN_CYCLE_REPLANS:
+            raise BrainRunError("automatic replan result replan_count is outside its bound")
+        if self.replan_count != max(0, len(attempts) - 1) and attempts:
+            raise BrainRunError("automatic replan result replan_count does not match attempts")
+        if self.semantic_route is not None and not isinstance(self.semantic_route, AutonomousSemanticRouteResult):
+            raise BrainRunError("automatic replan result semantic route is malformed")
+        object.__setattr__(self, "attempt_results", attempts)
+        object.__setattr__(self, "evaluations", evaluations)
+
+    @staticmethod
+    def _attempt_projection(value: Any) -> dict[str, Any]:
+        status = getattr(value, "status", None)
+        if not isinstance(status, str):
+            status = "unknown"
+        selection = getattr(value, "selection", None)
+        selection_digest = selection.get("decision_digest") if isinstance(selection, Mapping) else None
+        outcome_digest = getattr(value, "outcome_digest", None)
+        if outcome_digest is not None and (not isinstance(outcome_digest, str) or len(outcome_digest) != 64):
+            outcome_digest = None
+        return {
+            "status": status,
+            "selection_digest": selection_digest if isinstance(selection_digest, str) else None,
+            "outcome_digest": outcome_digest,
+            "result_kind": type(value).__name__,
+            "retention": "metadata_only;provider_result_caller_owned",
+        }
+
+    @staticmethod
+    def _evaluation_projection(value: Mapping[str, Any]) -> dict[str, Any]:
+        decision = value.get("decision", value.get("evaluation", value))
+        if not isinstance(decision, Mapping):
+            raise BrainRunError("automatic replan evaluation is malformed")
+        projection = {
+            key: decision.get(key)
+            for key in (
+                "evaluator_id", "evaluator_version", "reward", "passed", "failed",
+                "feedback_digest", "failure_class", "evidence_digest", "replan_requested",
+            )
+            if key in decision
+        }
+        instruction = decision.get("replan_instruction")
+        projection["replan_instruction_digest"] = (
+            content_digest(instruction) if isinstance(instruction, str) else None
+        )
+        projection["retention"] = "value_only_evaluation;replan_instruction_digest_only"
+        return projection
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema": AUTONOMOUS_REPLAN_CYCLE_SCHEMA,
+            "status": self.status,
+            "mode": self.mode,
+            "route": self.route.to_dict(),
+            "semantic_route": None if self.semantic_route is None else self.semantic_route.to_dict(),
+            "attempts": [self._attempt_projection(value) for value in self.attempt_results],
+            "evaluations": [self._evaluation_projection(value) for value in self.evaluations],
+            "replan_count": self.replan_count,
+            "final_status": None if self.final is None else self.final.execution_status,
+            "next_action": {
+                "completed": "inspect_result",
+                "completed_without_replan": "inspect_evaluator_feedback",
+                "replan_limit_reached": "review_replan_limit",
+                "route_review_required": "review_route",
+                "planning_review_required": "review_plan",
+                "provider_failed": "review_provider_output",
+                "policy_review_required": "review_policy",
+                "policy_blocked": "resolve_policy_block",
+                "approval_required": "approve_provider_call",
+                "provider_invalid": "review_provider_output",
+                "plan_refused": "review_plan",
+                "provider_abstained": "review_route",
+                "provider_disagreement": "review_route",
+                "reconciliation_required": "reconcile_provider_boundary",
+            }[self.status],
+            "retention": "provider_response_local;replan_instructions_transient;value_only_evaluation_and_learning_projection",
+            "authorization": "routing_and_provider_invocation_require_separate_explicit_approval",
+            "secret_material": "never_returned",
         }
 
 
@@ -3688,6 +4942,186 @@ def _batch_request_digest(descriptor: Mapping[str, Any], mode: str) -> str:
     return content_digest(payload)
 
 
+_BATCH_SEMANTIC_POLICY_SCALARS = (
+    "semantic_weight",
+    "min_confidence",
+    "min_margin",
+    "max_domains",
+    "allow_cross_domain",
+    "semantic_input_tokens",
+    "semantic_requested_output_tokens",
+    "semantic_max_cost_per_million_tokens",
+    "semantic_max_latency_ms",
+    "semantic_min_quality",
+    "semantic_run_id",
+    "semantic_max_output_tokens",
+    "semantic_temperature",
+    "domain_policy_mode",
+    "domain_policy_evidence_ready",
+    "domain_policy_evaluator_configured",
+    "domain_policy_effects_requested",
+    "domain_policy_effects_approved",
+    "approve_provider_call",
+)
+_BATCH_SEMANTIC_POLICY_DIGESTS = (
+    "semantic_bandit_state",
+    "semantic_contextual_observations",
+    "semantic_selection_overrides",
+)
+
+
+def _batch_semantic_routing_policy_digest(
+    prepared: Sequence[Mapping[str, Any]],
+    mode: str,
+) -> str | None:
+    """Digest per-item semantic routing policy without retaining private option values.
+
+    The batch descriptor already contains normalized, secret-free model candidates. We bind their
+    digest together with every semantic classifier control that can change a route proposal. Raw
+    contextual observations, bandit state, and selection overrides are represented only by their
+    content digests.
+    """
+
+    rows: list[dict[str, Any]] = []
+    enabled_any = False
+    for descriptor in prepared:
+        options = descriptor.get("options", {})
+        if not isinstance(options, Mapping):
+            raise BrainRunError("autonomous batch semantic-routing options must be a mapping")
+        enabled = options.get("semantic_routing", False)
+        if not isinstance(enabled, bool):
+            raise BrainRunError("autonomous batch semantic_routing must be boolean")
+        row: dict[str, Any] = {"enabled": enabled}
+        if enabled:
+            enabled_any = True
+            candidates = descriptor.get("model_candidates", ())
+            try:
+                candidate_projection = [
+                    candidate.to_dict()
+                    if isinstance(candidate, ModelCandidate)
+                    else ModelCandidate.from_mapping(candidate).to_dict()
+                    for candidate in candidates
+                ]
+                row["candidates_digest"] = content_digest(candidate_projection)
+                for name in _BATCH_SEMANTIC_POLICY_SCALARS:
+                    if name in options:
+                        row[name] = options[name]
+                for name in _BATCH_SEMANTIC_POLICY_DIGESTS:
+                    if name in options:
+                        row[f"{name}_digest"] = content_digest(options[name])
+            except (TypeError, ValueError, ProviderError) as error:
+                raise BrainRunError("autonomous batch semantic-routing policy is not JSON-safe") from error
+        rows.append(row)
+    if not enabled_any:
+        return None
+    return content_digest({
+        "schema": "bioprism-python-autonomous-batch-semantic-routing-policy/0.1",
+        "mode": mode,
+        "items": rows,
+    })
+
+
+def _batch_policy_projection(
+    value: Any,
+    *,
+    _depth: int = 0,
+    _active: set[int] | None = None,
+) -> Any:
+    """Convert transient automatic controls into a digestable, value-free projection.
+
+    Automatic options contain callbacks, typed proposal objects, and sometimes large private
+    context values.  The projection is used only as input to ``content_digest``; it is never
+    placed in a checkpoint.  Callables are represented by bounded type/name metadata, typed
+    objects by their own public projection when available, and arbitrary mappings/sequences are
+    recursively normalized so a policy change cannot silently reuse a prior result.
+    """
+
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    if _depth >= 32:
+        return {"kind": "depth_limit", "type": type(value).__name__}
+    active = _active if _active is not None else set()
+    if callable(value):
+        return {
+            "kind": "callable",
+            "type": type(value).__name__,
+            "name": getattr(value, "__qualname__", getattr(value, "__name__", "callable")),
+        }
+    to_dict = getattr(value, "to_dict", None)
+    if callable(to_dict):
+        identity = id(value)
+        if identity in active:
+            return {"kind": "cycle", "type": type(value).__name__}
+        active.add(identity)
+        try:
+            return {
+                "kind": "typed",
+                "type": type(value).__name__,
+                "value": _batch_policy_projection(to_dict(), _depth=_depth + 1, _active=active),
+            }
+        except Exception:
+            return {"kind": "typed", "type": type(value).__name__}
+        finally:
+            active.remove(identity)
+    if isinstance(value, Mapping):
+        identity = id(value)
+        if identity in active:
+            return {"kind": "cycle", "type": type(value).__name__}
+        active.add(identity)
+        try:
+            return {
+                str(key): _batch_policy_projection(item, _depth=_depth + 1, _active=active)
+                for key, item in sorted(value.items(), key=lambda pair: str(pair[0]))
+            }
+        finally:
+            active.remove(identity)
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        identity = id(value)
+        if identity in active:
+            return {"kind": "cycle", "type": type(value).__name__}
+        active.add(identity)
+        try:
+            return [_batch_policy_projection(item, _depth=_depth + 1, _active=active) for item in value]
+        finally:
+            active.remove(identity)
+    if isinstance(value, (bytes, bytearray)):
+        return {"kind": "bytes", "digest": content_digest(value.hex())}
+    return {"kind": "opaque", "type": type(value).__name__}
+
+
+def _batch_automatic_execution_policy_digest(
+    prepared: Sequence[Mapping[str, Any]],
+    mode: str,
+) -> str | None:
+    """Bind every automatic batch control without persisting transient option values."""
+
+    if mode != "auto":
+        return None
+    rows: list[dict[str, Any]] = []
+    try:
+        for descriptor in prepared:
+            candidates = descriptor.get("model_candidates", ())
+            candidate_projection = [
+                candidate.to_dict()
+                if isinstance(candidate, ModelCandidate)
+                else ModelCandidate.from_mapping(candidate).to_dict()
+                for candidate in candidates
+            ]
+            rows.append({
+                "index": descriptor["index"],
+                "execution_id": _batch_policy_projection(descriptor.get("execution_id")),
+                "model_candidates_digest": content_digest(candidate_projection),
+                "options": _batch_policy_projection(descriptor.get("options", {})),
+            })
+        return content_digest({
+            "schema": AUTONOMOUS_AUTOMATIC_BATCH_POLICY_SCHEMA,
+            "mode": mode,
+            "items": rows,
+        })
+    except (RecursionError, TypeError, ValueError, ProviderError) as error:
+        raise BrainRunError("autonomous automatic batch execution policy is not digestable") from error
+
+
 def _batch_item_digest(item: "AutonomousBatchItem") -> str:
     """Digest the redacted item projection used for restart validation."""
 
@@ -3717,10 +5151,94 @@ class AutonomousBatchRehydrationContext:
 
 
 @dataclass(frozen=True, slots=True)
+class AutonomousBatchProtectedRehydration:
+    """Resolve completed batch results through the caller's protected-value boundary.
+
+    The batch checkpoint remains digest-only. On restart, receipt_resolver receives only
+    the opaque batch identity and returns a caller-owned receipt; the protected adapter resolves
+    the transient value, verifies its digest, and value_decoder can turn a canonical mapping
+    back into the SDK's typed result. No receipt or resolved value is retained by this object.
+    """
+
+    adapter: AutonomousProtectedRehydrationAdapter
+    receipt_resolver: Callable[[AutonomousBatchRehydrationContext], Mapping[str, Any]]
+    value_decoder: Callable[[Any], Any] | None = None
+    domain: str | None = None
+    purpose: str = "autonomous_batch_result"
+    value_kind: str = "autonomous_batch_result"
+    one_time: bool = False
+    digest_scheme: str = "canonical_json"
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.adapter, AutonomousProtectedRehydrationAdapter):
+            raise BrainRunError("autonomous batch protected rehydration requires a protected rehydration adapter")
+        if not callable(self.receipt_resolver):
+            raise BrainRunError("autonomous batch protected rehydration receipt_resolver must be callable")
+        if self.value_decoder is not None and not callable(self.value_decoder):
+            raise BrainRunError("autonomous batch protected rehydration value_decoder must be callable")
+        if self.domain is not None and self.domain not in AUTONOMOUS_DOMAINS:
+            raise BrainRunError("autonomous batch protected rehydration domain is unsupported")
+        if not isinstance(self.one_time, bool):
+            raise BrainRunError("autonomous batch protected rehydration one_time must be boolean")
+
+    def resolve(self, context: AutonomousBatchRehydrationContext) -> Any:
+        if not isinstance(context, AutonomousBatchRehydrationContext):
+            raise BrainRunError("autonomous batch protected rehydration context is malformed")
+        try:
+            receipt = self.receipt_resolver(context)
+        except Exception as error:
+            raise BrainRunError(f"autonomous batch protected receipt lookup failed for item {context.index}") from error
+        if not isinstance(receipt, Mapping):
+            raise BrainRunError("autonomous batch protected receipt resolver must return a mapping")
+        for key, expected in (
+            ("job_id", context.job_id),
+            ("index", context.index),
+            ("mode", context.mode),
+            ("request_digest", context.request_digest),
+            ("task_digest", context.task_digest),
+            ("expected_result_digest", context.expected_result_digest),
+        ):
+            if receipt.get(key) != expected:
+                raise BrainRunError(f"autonomous batch protected receipt {key} does not match item {context.index}")
+        try:
+            value = self.adapter.resolve_receipt(
+                receipt,
+                domain=self.domain,
+                purpose=self.purpose,
+                value_kind=self.value_kind,
+                one_time=self.one_time,
+                digest_scheme=self.digest_scheme,
+            )
+            return self.value_decoder(value) if self.value_decoder is not None else value
+        except BrainRunError:
+            raise
+        except Exception as error:
+            raise BrainRunError(f"autonomous batch protected result resolution failed for item {context.index}") from error
+
+
+class AutonomousAutomaticBatchProtectedRehydration(AutonomousBatchProtectedRehydration):
+    """Strict protected-result adapter for automatic batches.
+
+    The base adapter remains backward-compatible for callers that deliberately share one
+    receipt resolver across batch modes.  This specialization is the safer controller default
+    for automatic recovery: a direct or cross-domain checkpoint context can never be widened
+    into automatic execution by the protected-result callback.
+    """
+
+    def resolve(self, context: AutonomousBatchRehydrationContext) -> Any:
+        if not isinstance(context, AutonomousBatchRehydrationContext) or context.mode != "auto":
+            raise BrainRunError(
+                "autonomous automatic batch protected rehydration requires an auto checkpoint context"
+            )
+        return super().resolve(context)
+
+
+@dataclass(frozen=True, slots=True)
 class AutonomousBatchCheckpoint:
     """Metadata-only, restart-safe progress for one bounded task batch.
 
-    The checkpoint deliberately stores only request and result digests. A caller-owned
+    The checkpoint deliberately stores only request and result digests plus an optional
+    non-secret semantic-routing or automatic-execution policy digest. A caller-owned
     ``rehydrate_result`` callback must provide the transient result for every completed item;
     the callback never receives a task, prompt, credential, provider response, or tool payload.
     """
@@ -3734,12 +5252,22 @@ class AutonomousBatchCheckpoint:
     max_parallelism: int = 4
     stop_on_error: bool = False
     status: str = "running"
+    semantic_routing_policy_digest: str | None = None
+    automatic_execution_policy_digest: str | None = None
 
     def __post_init__(self) -> None:
         _identifier("batch checkpoint job_id", self.job_id)
         if self.mode not in AUTONOMOUS_BATCH_MODES:
             raise BrainRunError("batch checkpoint mode is unsupported")
         _route_digest(self.batch_input_digest, "batch checkpoint batch_input_digest")
+        if self.semantic_routing_policy_digest is not None:
+            _route_digest(self.semantic_routing_policy_digest, "batch checkpoint semantic_routing_policy_digest")
+        if self.automatic_execution_policy_digest is not None:
+            _route_digest(self.automatic_execution_policy_digest, "batch checkpoint automatic_execution_policy_digest")
+        if self.mode == "auto" and self.automatic_execution_policy_digest is None:
+            raise BrainRunError("automatic batch checkpoint requires an automatic execution policy digest")
+        if self.mode != "auto" and self.automatic_execution_policy_digest is not None:
+            raise BrainRunError("non-automatic batch checkpoint cannot contain an automatic execution policy digest")
         requests = _sequence("batch checkpoint request_digests", self.request_digests, maximum=MAX_AUTONOMOUS_AGENT_BATCH)
         for digest in requests:
             _route_digest(digest, "batch checkpoint request digest")
@@ -3788,6 +5316,16 @@ class AutonomousBatchCheckpoint:
             "job_id": self.job_id,
             "mode": self.mode,
             "batch_input_digest": self.batch_input_digest,
+            **(
+                {"semantic_routing_policy_digest": self.semantic_routing_policy_digest}
+                if self.semantic_routing_policy_digest is not None
+                else {}
+            ),
+            **(
+                {"automatic_execution_policy_digest": self.automatic_execution_policy_digest}
+                if self.automatic_execution_policy_digest is not None
+                else {}
+            ),
             "request_digests": list(self.request_digests if requests is None else requests),
             "completed_indices": list(self.completed_indices if indices is None else indices),
             "completed_result_digests": list(self.completed_result_digests if result_digests is None else result_digests),
@@ -3816,12 +5354,14 @@ class AutonomousBatchCheckpoint:
             job_id=value.get("job_id"),
             mode=value.get("mode"),
             batch_input_digest=value.get("batch_input_digest"),
+            semantic_routing_policy_digest=value.get("semantic_routing_policy_digest"),
             request_digests=tuple(value.get("request_digests", ())),
             completed_indices=tuple(value.get("completed_indices", ())),
             completed_result_digests=tuple(value.get("completed_result_digests", ())),
             max_parallelism=value.get("max_parallelism", 4),
             stop_on_error=value.get("stop_on_error", False),
             status=value.get("status", "running"),
+            automatic_execution_policy_digest=value.get("automatic_execution_policy_digest"),
         )
         supplied_digest = value.get("checkpoint_digest")
         if supplied_digest is not None and supplied_digest != checkpoint.checkpoint_digest:
@@ -3875,7 +5415,8 @@ def _normalize_batch_checkpoint(value: Mapping[str, Any]) -> dict[str, Any]:
         "completed_result_digests", "max_parallelism", "stop_on_error", "status", "checkpoint_digest",
         "retention", "secret_material",
     }
-    if set(value) != expected:
+    optional = {"semantic_routing_policy_digest", "automatic_execution_policy_digest"}
+    if not expected.issubset(value) or set(value) - expected - optional:
         raise BrainRunError("autonomous batch checkpoint contains unsupported or missing fields")
     if value.get("retention") != "request_and_result_digests_only;tasks_prompts_credentials_and_payloads_never_persisted" or value.get("secret_material") != "never_returned":
         raise BrainRunError("autonomous batch checkpoint retention markers are invalid")
@@ -4356,7 +5897,19 @@ class AutonomousCrossDomainExecutionReceipt:
         incomplete = tuple(child_id for child_id in result.execution_child_ids if not statuses[child_id].startswith("completed"))
         synthesis_status = None if result.synthesis_result is None else result.synthesis_result.status
         synthesis_digest = None if result.synthesis_result is None else _autonomous_result_digest(result.synthesis_result)
-        if synthesis_status is not None and synthesis_status.startswith("completed"):
+        response_assessment = result.response_assessment
+        # A partial fan-out still has a more fundamental recovery action: finish or retry the
+        # missing child before asking an operator to review response alignment. Once all children
+        # are present, or synthesis has already been attempted for an explicitly partial run,
+        # the response gate becomes the authoritative next action.
+        response_gate_requires_review = (
+            response_assessment is not None
+            and response_assessment.status not in {"ready_to_synthesize", "completed"}
+            and (not incomplete or synthesis_status is not None)
+        )
+        if response_gate_requires_review:
+            next_action = "review_response_gate"
+        elif synthesis_status is not None and synthesis_status.startswith("completed"):
             next_action = "complete" if not incomplete else "inspect_partial_synthesis"
         elif synthesis_status is not None and synthesis_status == "approval_required":
             next_action = "approve_synthesis"
@@ -4396,7 +5949,11 @@ class AutonomousCrossDomainExecutionReceipt:
             total_units=total_units,
             progress=completed_units / total_units,
             next_action=next_action,
-            safe_to_synthesize=not incomplete and result.synthesis_result is None,
+            safe_to_synthesize=(
+                not incomplete
+                and result.synthesis_result is None
+                and not response_gate_requires_review
+            ),
             reconciliation_required=reconciliation_required,
         )
 
@@ -4411,6 +5968,12 @@ class AutonomousCrossDomainResult:
     synthesis_result: BrainRunResult | BrainToolLoopResult | BrainMissionResult | None
     plan_refinement_digest: str | None = None
     execution_child_ids: tuple[str, ...] = ()
+    # Digest-only structural admission for specialist/synthesis responses. Provider payloads
+    # remain on the caller-owned child/synthesis result objects and never enter this projection.
+    response_assessment: AutonomousCrossDomainResponseAssessment | None = None
+    # The child fan-out ceiling is retained as control-plane metadata. It never grants provider,
+    # tool, credential, or effect authority and does not change the accepted child order.
+    max_parallelism: int = 1
 
     def __post_init__(self) -> None:
         if not isinstance(self.blueprint, AutonomousCrossDomainBlueprint):
@@ -4426,6 +5989,17 @@ class AutonomousCrossDomainResult:
             (BrainRunResult, BrainToolLoopResult, BrainMissionResult),
         ):
             raise BrainRunError("cross-domain synthesis_result is unsupported")
+        if self.response_assessment is not None:
+            if not isinstance(self.response_assessment, AutonomousCrossDomainResponseAssessment):
+                raise BrainRunError("cross-domain response_assessment is unsupported")
+            if self.response_assessment.context_digest != self.blueprint.task_digest:
+                raise BrainRunError("cross-domain response_assessment is not bound to the blueprint task")
+        if (
+            not isinstance(self.max_parallelism, int)
+            or isinstance(self.max_parallelism, bool)
+            or not 1 <= self.max_parallelism <= MAX_AUTONOMOUS_AGENT_PARALLELISM
+        ):
+            raise BrainRunError("cross-domain max_parallelism is outside its bound")
         if self.plan_refinement_digest is not None:
             _route_digest(self.plan_refinement_digest, "cross-domain result plan_refinement_digest")
         order = self.execution_child_ids or self.blueprint.child_ids[: len(self.child_results)]
@@ -4449,6 +6023,8 @@ class AutonomousCrossDomainResult:
             "synthesis_result": None if self.synthesis_result is None else self.synthesis_result.to_dict(),
             "plan_refinement_digest": self.plan_refinement_digest,
             "execution_child_ids": list(self.execution_child_ids),
+            "response_assessment": None if self.response_assessment is None else self.response_assessment.to_dict(),
+            "max_parallelism": self.max_parallelism,
             "execution": "completed" if receipt.next_action == "complete" else "partial_or_blocked",
             "execution_receipt": receipt.to_dict(),
             "retention": "provider_responses_returned_to_caller; learning_memory_not_implicit",
@@ -4480,9 +6056,15 @@ class AutonomousCrossDomainPlanRefinementResult:
     selected_model: Mapping[str, str] | None = None
     selection_digest: str | None = None
     planner_prompt_digest: str | None = None
+    adaptive_selection: AutonomousPromptAdaptiveSelection | None = None
     planner_plan_digest: str | None = None
     outcome_digest: str | None = None
+    # Exact contextual identity used by the cross-domain planner model-selection request.
+    planner_context: Mapping[str, Any] | None = None
+    planner_context_digest: str | None = None
     domain_policy_admission: AutonomousDomainPolicyAdmission | None = None
+    # Redacted provider/credential metadata; planner messages and exception text are never retained.
+    failure: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         if self.status not in {
@@ -4490,6 +6072,7 @@ class AutonomousCrossDomainPlanRefinementResult:
             "approval_required",
             "plan_refused",
             "provider_invalid",
+            "provider_failed",
             "provider_disagreement",
             "policy_review_required",
             "policy_blocked",
@@ -4531,8 +6114,24 @@ class AutonomousCrossDomainPlanRefinementResult:
         ):
             if value is not None:
                 _route_digest(value, f"cross-domain plan refinement {name}")
+        if self.adaptive_selection is not None and not isinstance(self.adaptive_selection, AutonomousPromptAdaptiveSelection):
+            raise BrainRunError("cross-domain plan refinement adaptive prompt selection is malformed")
+        if (self.planner_context is None) != (self.planner_context_digest is None):
+            raise BrainRunError("cross-domain plan refinement planner_context and planner_context_digest must be supplied together")
+        if self.planner_context is not None and self.planner_context_digest is not None:
+            context, context_digest = _planner_context_binding(
+                self.planner_context,
+                self.planner_context_digest,
+                "cross-domain plan refinement planner_context",
+            )
+            object.__setattr__(self, "planner_context", context)
+            object.__setattr__(self, "planner_context_digest", context_digest)
         if self.domain_policy_admission is not None and not isinstance(self.domain_policy_admission, AutonomousDomainPolicyAdmission):
             raise BrainRunError("cross-domain plan refinement domain policy admission is malformed")
+        if self.status == "provider_failed" and self.failure is None:
+            raise BrainRunError("provider_failed cross-domain plan refinement result requires a failure projection")
+        if self.failure is not None:
+            object.__setattr__(self, "failure", _normalize_planning_failure(self.failure, "cross-domain plan refinement"))
         object.__setattr__(self, "priority_child_ids", priority)
         object.__setattr__(self, "focus_child_ids", focus)
         object.__setattr__(self, "confidence", float(self.confidence))
@@ -4555,9 +6154,82 @@ class AutonomousCrossDomainPlanRefinementResult:
             "retention": "child_ids_and_digests_only; planner_transcript_not_retained",
             "authorization": "plan_proposal_only; caller_acceptance_required",
         }
+        if self.adaptive_selection is not None:
+            result["adaptive_selection"] = self.adaptive_selection.to_dict()
+        if self.planner_context is not None:
+            result["planner_context"] = dict(self.planner_context)
+            result["planner_context_digest"] = self.planner_context_digest
         if self.domain_policy_admission is not None:
             result["domain_policy_admission"] = self.domain_policy_admission.to_dict()
+        if self.failure is not None:
+            result["failure"] = dict(self.failure)
         return result
+
+
+_AUTONOMOUS_PLANNING_FAILURE_RETENTION = "metadata_only;provider_error_message_and_payloads_not_retained"
+
+
+def _planning_failure_projection(error: ProviderError | CredentialError) -> dict[str, Any]:
+    """Convert an operational planner exception into a stable, secret-free value projection."""
+
+    if isinstance(error, CredentialError):
+        return {
+            "error_class": "CredentialError",
+            "code": "credential",
+            "retryable": False,
+            "status_code": None,
+            "circuit_open": False,
+            "retention": _AUTONOMOUS_PLANNING_FAILURE_RETENTION,
+            "secret_material": "never_returned",
+        }
+    if not isinstance(error, ProviderError):
+        raise BrainRunError("planning failure must be a provider or credential error")
+    status_code = error.status_code
+    if isinstance(status_code, bool) or not isinstance(status_code, int) or not 100 <= status_code <= 599:
+        status_code = None
+    return {
+        "error_class": "ProviderError",
+        "code": "provider_error",
+        "retryable": bool(error.retryable),
+        "status_code": status_code,
+        "circuit_open": bool(error.circuit_open),
+        "retention": _AUTONOMOUS_PLANNING_FAILURE_RETENTION,
+        "secret_material": "never_returned",
+    }
+
+
+def _normalize_planning_failure(value: Mapping[str, Any], subject: str) -> dict[str, Any]:
+    """Validate and copy only the public fields allowed in a planner failure projection."""
+
+    if not isinstance(value, Mapping):
+        raise BrainRunError(f"{subject} failure must be a mapping or None")
+    error_class = value.get("error_class")
+    expected_code = "credential" if error_class == "CredentialError" else "provider_error"
+    # Older BrainRunResult envelopes did not expose a stable code field. Accept that
+    # legacy shape here, then emit the canonical code for deterministic replay/parity.
+    code = value.get("code", expected_code)
+    if error_class not in {"ProviderError", "CredentialError"} or code != expected_code:
+        raise BrainRunError(f"{subject} failure class or code is malformed")
+    retryable = value.get("retryable")
+    circuit_open = value.get("circuit_open")
+    status_code = value.get("status_code")
+    if not isinstance(retryable, bool) or not isinstance(circuit_open, bool):
+        raise BrainRunError(f"{subject} failure retryability metadata is malformed")
+    if isinstance(status_code, bool) or (status_code is not None and (not isinstance(status_code, int) or not 100 <= status_code <= 599)):
+        raise BrainRunError(f"{subject} failure status_code is malformed")
+    if value.get("retention") != _AUTONOMOUS_PLANNING_FAILURE_RETENTION or value.get("secret_material") != "never_returned":
+        raise BrainRunError(f"{subject} failure retention metadata is malformed")
+    if error_class == "CredentialError" and (retryable or circuit_open or status_code is not None):
+        raise BrainRunError(f"{subject} credential failure metadata is inconsistent")
+    return {
+        "error_class": error_class,
+        "code": code,
+        "retryable": retryable,
+        "status_code": status_code,
+        "circuit_open": circuit_open,
+        "retention": _AUTONOMOUS_PLANNING_FAILURE_RETENTION,
+        "secret_material": "never_returned",
+    }
 
 
 def _autonomous_result_digest(
@@ -4667,6 +6339,8 @@ class AutonomousCrossDomainCheckpoint:
     next_child_id: str | None = None
     plan_refinement_digest: str | None = None
     synthesis_result_digest: str | None = None
+    # Digest-only pre-synthesis response admission; structured response values remain caller-owned.
+    response_assessment_digest: str | None = None
     status: str = "children_pending"
     last_item_id: str | None = None
     last_item_phase: str | None = None
@@ -4725,10 +6399,26 @@ class AutonomousCrossDomainCheckpoint:
             _route_digest(self.synthesis_result_digest, "cross-domain checkpoint synthesis_result_digest")
             if len(completed) != len(execution):
                 raise BrainRunError("cross-domain checkpoint cannot contain synthesis before all children")
-        if self.status not in {"children_pending", "synthesis_pending", "approval_required", "completed", "reconciliation_required"}:
+        if self.response_assessment_digest is not None:
+            _route_digest(self.response_assessment_digest, "cross-domain checkpoint response_assessment_digest")
+        if self.status not in {"children_pending", "synthesis_pending", "response_review_required", "synthesis_response_review_required", "approval_required", "completed", "reconciliation_required"}:
             raise BrainRunError("cross-domain checkpoint has an invalid status")
         if self.status == "synthesis_pending" and len(completed) != len(execution):
             raise BrainRunError("cross-domain synthesis_pending checkpoint has incomplete children")
+        if self.status == "response_review_required" and (
+            len(completed) != len(execution)
+            or self.next_child_id is not None
+            or self.synthesis_result_digest is not None
+            or self.response_assessment_digest is None
+        ):
+            raise BrainRunError("cross-domain response_review_required checkpoint must bind complete pre-synthesis assessment")
+        if self.status == "synthesis_response_review_required" and (
+            len(completed) != len(execution)
+            or self.next_child_id is not None
+            or self.synthesis_result_digest is None
+            or self.response_assessment_digest is None
+        ):
+            raise BrainRunError("cross-domain synthesis_response_review_required checkpoint must bind synthesis and post-synthesis assessment")
         if self.status == "completed" and self.synthesis_result_digest is None:
             raise BrainRunError("completed cross-domain checkpoint must contain synthesis digest")
         if self.last_item_id is not None:
@@ -4756,6 +6446,7 @@ class AutonomousCrossDomainCheckpoint:
                 "next_child_id": self.next_child_id,
                 "plan_refinement_digest": self.plan_refinement_digest,
                 "synthesis_result_digest": self.synthesis_result_digest,
+                "response_assessment_digest": self.response_assessment_digest,
                 "status": self.status,
                 "last_item_id": self.last_item_id,
                 "last_item_phase": self.last_item_phase,
@@ -4789,6 +6480,7 @@ class AutonomousCrossDomainCheckpoint:
                 "next_child_id": self.next_child_id,
                 "plan_refinement_digest": self.plan_refinement_digest,
                 "synthesis_result_digest": self.synthesis_result_digest,
+                "response_assessment_digest": self.response_assessment_digest,
                 "status": self.status,
                 "last_item_id": self.last_item_id,
                 "last_item_phase": self.last_item_phase,
@@ -4811,6 +6503,7 @@ class AutonomousCrossDomainCheckpoint:
             "next_child_id": self.next_child_id,
             "plan_refinement_digest": self.plan_refinement_digest,
             "synthesis_result_digest": self.synthesis_result_digest,
+            "response_assessment_digest": self.response_assessment_digest,
             "status": self.status,
             "last_item_id": self.last_item_id,
             "last_item_phase": self.last_item_phase,
@@ -4836,6 +6529,7 @@ class AutonomousCrossDomainCheckpoint:
             next_child_id=value.get("next_child_id"),
             plan_refinement_digest=value.get("plan_refinement_digest"),
             synthesis_result_digest=value.get("synthesis_result_digest"),
+            response_assessment_digest=value.get("response_assessment_digest"),
             status=value.get("status", "children_pending"),
             last_item_id=value.get("last_item_id"),
             last_item_phase=value.get("last_item_phase"),
@@ -4872,11 +6566,12 @@ class AutonomousCrossDomainStepResult:
     phase: str
     item_id: str
     blueprint: AutonomousCrossDomainBlueprint
-    result: BrainRunResult | BrainToolLoopResult | BrainMissionResult
+    result: BrainRunResult | BrainToolLoopResult | BrainMissionResult | None
     execution_child_ids: tuple[str, ...]
     completed_child_ids: tuple[str, ...] = ()
     child_result_digests: Mapping[str, str] = field(default_factory=dict)
     plan_refinement_digest: str | None = None
+    response_assessment: AutonomousCrossDomainResponseAssessment | None = None
 
     def __post_init__(self) -> None:
         if self.phase not in {"child", "synthesis"}:
@@ -4885,7 +6580,10 @@ class AutonomousCrossDomainStepResult:
             raise BrainRunError("cross-domain step item_id must be non-empty")
         if not isinstance(self.blueprint, AutonomousCrossDomainBlueprint):
             raise BrainRunError("cross-domain step blueprint is invalid")
-        if not isinstance(self.result, (BrainRunResult, BrainToolLoopResult, BrainMissionResult)):
+        if self.result is None:
+            if self.status != "response_review_required" or self.phase != "synthesis" or self.response_assessment is None:
+                raise BrainRunError("cross-domain step may omit its result only at response review")
+        elif not isinstance(self.result, (BrainRunResult, BrainToolLoopResult, BrainMissionResult)):
             raise BrainRunError("cross-domain step result is unsupported")
         execution = _sequence(
             "cross-domain step execution_child_ids",
@@ -4925,7 +6623,8 @@ class AutonomousCrossDomainStepResult:
             "completed_child_ids": list(self.completed_child_ids),
             "child_result_digests": dict(self.child_result_digests),
             "plan_refinement_digest": self.plan_refinement_digest,
-            "result": self.result.to_dict(),
+            "response_assessment": None if self.response_assessment is None else self.response_assessment.to_dict(),
+            "result": None if self.result is None else self.result.to_dict(),
             "retention": "provider_result_caller_owned; continuation_metadata_digest_bound",
         }
 
@@ -5814,6 +7513,169 @@ def compile_autonomous_workflow_stage_execution_plan(
     )
 
 
+def validate_autonomous_workflow_stage_execution_plan(
+    value: Mapping[str, Any] | AutonomousWorkflowStageExecutionPlan,
+    *,
+    blueprint: AutonomousTaskBlueprint | None = None,
+    stage: AutonomousWorkflowStage | None = None,
+) -> AutonomousWorkflowStageExecutionPlan:
+    """Reconstruct and verify a persisted stage packet before workflow admission.
+
+    Stage packets are intentionally small metadata handoffs, but they still control which
+    capabilities and tools a later worker may present to a provider.  Treating a JSON packet as
+    trusted merely because it contains a 64-character digest would leave a restart boundary
+    vulnerable to changed fields, stale capability contracts, or an execution-posture downgrade.
+    This validator reconstructs the typed packet, checks every derived digest and safety marker,
+    and optionally binds it to the live reviewed blueprint and stage.  It never accepts task text,
+    provider values, credentials, arguments, or effect authority.
+    """
+
+    if isinstance(value, AutonomousWorkflowStageExecutionPlan):
+        raw: Mapping[str, Any] = value.to_dict()
+    elif isinstance(value, Mapping):
+        raw = value
+    else:
+        raise BrainRunError("workflow stage execution plan must be a mapping")
+    allowed = {
+        "schema",
+        "domain",
+        "workflow_id",
+        "workflow_digest",
+        "stage_id",
+        "stage_objective",
+        "required_capabilities",
+        "tool_capabilities",
+        "capability_contracts",
+        "required_model_capabilities",
+        "evidence_outputs",
+        "evaluator_signals",
+        "active_tool_names",
+        "selected_tool_names",
+        "withheld_tool_names",
+        "approval_required",
+        "read_only",
+        "execution_posture",
+        "source_plan_digest",
+        "stage_plan_digest",
+        "capability_contract_digests",
+        "credential_posture",
+        "authority_posture",
+    }
+    if set(raw) != allowed:
+        raise BrainRunError("workflow stage execution plan has unexpected or missing fields")
+    normalized = _safe_json(
+        "workflow stage execution plan",
+        raw,
+        maximum=MAX_AUTONOMOUS_WORKFLOW_STAGE_PLAN_BYTES,
+    )
+    if not isinstance(normalized, Mapping):
+        raise BrainRunError("workflow stage execution plan must remain a mapping")
+    if normalized.get("schema") != AUTONOMOUS_WORKFLOW_STAGE_PLAN_SCHEMA:
+        raise BrainRunError("workflow stage execution plan schema is invalid")
+    if normalized.get("credential_posture") != "caller_supplied_opaque_handles; no_keys_or_handles":
+        raise BrainRunError("workflow stage execution plan credential posture is invalid")
+    if normalized.get("authority_posture") != "metadata_only; stage_plan_does_not_grant_authority":
+        raise BrainRunError("workflow stage execution plan authority posture is invalid")
+
+    packet = AutonomousWorkflowStageExecutionPlan(
+        domain=normalized.get("domain"),
+        workflow_id=normalized.get("workflow_id"),
+        workflow_digest=normalized.get("workflow_digest"),
+        stage_id=normalized.get("stage_id"),
+        stage_objective=normalized.get("stage_objective"),
+        required_capabilities=normalized.get("required_capabilities"),
+        tool_capabilities=normalized.get("tool_capabilities"),
+        capability_contracts=normalized.get("capability_contracts"),
+        required_model_capabilities=normalized.get("required_model_capabilities"),
+        evidence_outputs=normalized.get("evidence_outputs"),
+        evaluator_signals=normalized.get("evaluator_signals"),
+        active_tool_names=normalized.get("active_tool_names"),
+        selected_tool_names=normalized.get("selected_tool_names"),
+        withheld_tool_names=normalized.get("withheld_tool_names"),
+        approval_required=normalized.get("approval_required"),
+        read_only=normalized.get("read_only"),
+        execution_posture=normalized.get("execution_posture"),
+        source_plan_digest=normalized.get("source_plan_digest"),
+    )
+    supplied_digest = normalized.get("stage_plan_digest")
+    _workflow_digest(supplied_digest, "workflow stage execution plan stage_plan_digest")
+    if supplied_digest != packet.stage_plan_digest:
+        raise BrainRunError("workflow stage execution plan digest does not match its contents")
+    supplied_contract_digests = normalized.get("capability_contract_digests")
+    if not isinstance(supplied_contract_digests, Sequence) or isinstance(
+        supplied_contract_digests, (str, bytes)
+    ):
+        raise BrainRunError("workflow stage execution plan capability_contract_digests must be a sequence")
+    normalized_contract_digests = tuple(
+        _workflow_digest(item, "workflow stage execution plan capability_contract_digest")
+        for item in supplied_contract_digests
+    )
+    if normalized_contract_digests != packet.capability_contract_digests:
+        raise BrainRunError("workflow stage execution plan capability contract digests are inconsistent")
+    if set(packet.selected_tool_names).difference(packet.active_tool_names):
+        raise BrainRunError("workflow stage execution plan selected tools must be active")
+    if set(packet.active_tool_names).intersection(packet.withheld_tool_names):
+        raise BrainRunError("workflow stage execution plan active and withheld tools overlap")
+    expected_posture = (
+        "approval_gated"
+        if packet.approval_required
+        else "tool_backed"
+        if packet.selected_tool_names
+        else "provider_only_or_blocked"
+    )
+    if packet.execution_posture != expected_posture:
+        raise BrainRunError("workflow stage execution plan execution_posture is inconsistent")
+
+    for contract in packet.capability_contracts:
+        contract_digest = contract.get("contract_digest")
+        _workflow_digest(contract_digest, "workflow stage execution plan capability contract contract_digest")
+        descriptor = {
+            key: value
+            for key, value in contract.items()
+            if key not in {"contract_digest", "adapter_posture", "credential_posture", "authority_posture"}
+        }
+        if content_digest(descriptor) != contract_digest:
+            raise BrainRunError("workflow stage execution plan capability contract digest is invalid")
+        if contract.get("schema") != AUTONOMOUS_CAPABILITY_CONTRACT_SCHEMA:
+            raise BrainRunError("workflow stage execution plan capability contract schema is invalid")
+        if contract.get("adapter_posture") != "exact_capability_aliases_only":
+            raise BrainRunError("workflow stage execution plan capability contract adapter posture is invalid")
+        if contract.get("credential_posture") != "caller_supplied_opaque_handles":
+            raise BrainRunError("workflow stage execution plan capability contract credential posture is invalid")
+        if contract.get("authority_posture") != "metadata_only; no_provider_or_effect_authority":
+            raise BrainRunError("workflow stage execution plan capability contract authority posture is invalid")
+
+    if stage is not None:
+        if not isinstance(stage, AutonomousWorkflowStage):
+            raise BrainRunError("workflow stage execution plan stage binding is invalid")
+        if packet.stage_id != stage.id:
+            raise BrainRunError("workflow stage execution plan stage binding does not match")
+        if packet.stage_objective != stage.objective:
+            raise BrainRunError("workflow stage execution plan stage objective does not match")
+        if packet.required_capabilities != stage.required_capabilities:
+            raise BrainRunError("workflow stage execution plan stage capabilities do not match")
+        if packet.evidence_outputs != stage.evidence_outputs or packet.evaluator_signals != stage.evaluator_signals:
+            raise BrainRunError("workflow stage execution plan stage evidence contract does not match")
+        if packet.approval_required != stage.approval_required or packet.read_only != stage.read_only:
+            raise BrainRunError("workflow stage execution plan stage safety posture does not match")
+
+    if blueprint is not None:
+        if not isinstance(blueprint, AutonomousTaskBlueprint):
+            raise BrainRunError("workflow stage execution plan blueprint binding is invalid")
+        if packet.domain != blueprint.profile.domain:
+            raise BrainRunError("workflow stage execution plan blueprint domain does not match")
+        if packet.workflow_id != blueprint.workflow.workflow_id or packet.workflow_digest != blueprint.workflow.workflow_digest:
+            raise BrainRunError("workflow stage execution plan blueprint workflow does not match")
+        if packet.required_model_capabilities != blueprint.required_capabilities:
+            raise BrainRunError("workflow stage execution plan blueprint model capabilities do not match")
+        reviewed = next((item for item in blueprint.workflow.stages if item.id == packet.stage_id), None)
+        if reviewed is None:
+            raise BrainRunError("workflow stage execution plan stage is outside the blueprint workflow")
+        validate_autonomous_workflow_stage_execution_plan(packet, stage=reviewed)
+
+    return packet
+
+
 @dataclass(frozen=True, slots=True)
 class AutonomousWorkflowStageResult:
     """One executed stage plus its bounded model contract and caller-visible result."""
@@ -5830,6 +7692,7 @@ class AutonomousWorkflowStageResult:
     response_digest: str | None = None
     stage_execution_plan: Mapping[str, Any] | None = None
     response_evaluation: Mapping[str, Any] | None = None
+    stage_execution_metadata: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         if self.execution_status not in AUTONOMOUS_WORKFLOW_EXECUTION_STATUSES:
@@ -5854,10 +7717,21 @@ class AutonomousWorkflowStageResult:
             object.__setattr__(
                 self,
                 "stage_execution_plan",
-                _safe_json(
-                    "workflow stage execution plan",
+                validate_autonomous_workflow_stage_execution_plan(
                     self.stage_execution_plan,
-                    maximum=MAX_AUTONOMOUS_WORKFLOW_STAGE_PLAN_BYTES,
+                    stage=self.stage,
+                ).to_dict(),
+            )
+        if self.stage_execution_metadata is not None:
+            if not isinstance(self.stage_execution_metadata, Mapping):
+                raise BrainRunError("workflow stage execution metadata must be a mapping or None")
+            object.__setattr__(
+                self,
+                "stage_execution_metadata",
+                _safe_json(
+                    "workflow stage execution metadata",
+                    self.stage_execution_metadata,
+                    maximum=64_000,
                 ),
             )
         object.__setattr__(self, "evidence", _sequence("workflow stage evidence", self.evidence, maximum=MAX_AUTONOMOUS_WORKFLOW_STAGE_EVIDENCE))
@@ -5925,6 +7799,9 @@ class AutonomousWorkflowStageResult:
             "response_evaluation": None
             if self.response_evaluation is None
             else dict(self.response_evaluation),
+            "stage_execution_metadata": None
+            if self.stage_execution_metadata is None
+            else dict(self.stage_execution_metadata),
             "result": None if self.result is None else self.result.to_dict(),
             "retention": "provider_result_returned_to_caller; checkpoint_is_structured_only",
         }
@@ -6604,6 +8481,7 @@ class AutonomousPromptBuilder:
         capability_contract: AutonomousCapabilityContract | None = None,
         max_input_tokens: int = 4_096,
         memory_episodes: Sequence[Mapping[str, Any]] = (),
+        memory_lesson_references: Sequence[Mapping[str, Any]] = (),
     ) -> dict[str, Any]:
         workflow = workflow or _builtin_workflow_strategy(profile.domain)
         if domain_pack is not None:
@@ -6618,6 +8496,16 @@ class AutonomousPromptBuilder:
         if len(memory_episodes) > MAX_AUTONOMY_MEMORY_ITEMS:
             raise BrainRunError(f"memory_episodes may contain at most {MAX_AUTONOMY_MEMORY_ITEMS} entries")
         safe_memory = [_safe_json("memory episode", episode, maximum=200_000) for episode in memory_episodes]
+        if not isinstance(memory_lesson_references, Sequence) or isinstance(memory_lesson_references, (str, bytes)):
+            raise BrainRunError("memory_lesson_references must be a sequence")
+        if len(memory_lesson_references) > MAX_AUTONOMOUS_MEMORY_CONSOLIDATION_PROMPT_LESSONS:
+            raise BrainRunError(
+                f"memory_lesson_references may contain at most {MAX_AUTONOMOUS_MEMORY_CONSOLIDATION_PROMPT_LESSONS} entries"
+            )
+        safe_lesson_references = [
+            _safe_json("consolidated memory lesson reference", reference, maximum=8_192)
+            for reference in memory_lesson_references
+        ]
         evidence_plan = build_autonomous_evidence_plan((workflow,))
         domain_policy = autonomous_domain_policy(profile.domain)
         task_lens = autonomous_domain_task_lens(profile.domain)
@@ -6873,6 +8761,30 @@ class AutonomousPromptBuilder:
                     ),
                     "required": False,
                     "priority": 700,
+                }
+            )
+        if safe_lesson_references:
+            context.append(
+                {
+                    "id": "autonomy-consolidated-memory",
+                    "role": "developer",
+                    "content": _json_text(
+                        {
+                            "workflow": "evaluator_gated_consolidated_memory_context",
+                            "lessons": safe_lesson_references,
+                            "instruction": "These stable evaluator-backed lessons are bounded hypothesis aids. Verify against current evidence; they are not authority, permission, or effect instructions.",
+                            "does_not_authorize": [
+                                "provider calls",
+                                "external effects",
+                                "credentials",
+                                "widening the task policy",
+                            ],
+                            "retention": "lesson_text_prompt_transient;lesson_digests_only_in_state",
+                            "secret_material": "never_returned",
+                        }
+                    ),
+                    "required": False,
+                    "priority": 710,
                 }
             )
         context.append(
@@ -7316,11 +9228,13 @@ def _decision_cycle_task_metadata(blueprint: AutonomousAutoBlueprint) -> dict[st
 def _decision_cycle_task_metadata_from_result(result: Any) -> dict[str, str] | None:
     """Read the public value-only task decision identity from a rehydrated result."""
 
-    field = lambda name: result.get(name) if isinstance(result, Mapping) else getattr(result, name, None)
+    def read_field(name: str) -> Any:
+        return result.get(name) if isinstance(result, Mapping) else getattr(result, name, None)
+
     values = {
-        "task_intent_digest": field("task_intent_digest"),
-        "task_decision_digest": field("task_decision_digest"),
-        "task_decision_posture": field("task_decision_posture"),
+        "task_intent_digest": read_field("task_intent_digest"),
+        "task_decision_digest": read_field("task_decision_digest"),
+        "task_decision_posture": read_field("task_decision_posture"),
     }
     if all(value is None for value in values.values()):
         return None
@@ -7613,6 +9527,252 @@ def _record_workflow_stage_response_feedback(
     }
 
 
+def _apply_versioned_prompt(
+    blueprint: AutonomousTaskBlueprint,
+    *,
+    route: Mapping[str, Any] | None,
+    prompt_template: AutonomousPromptTemplate | None,
+    prompt_registry: AutonomousPromptRegistry | None,
+    prompt_selection: AutonomousPromptSelectionPlan | Mapping[str, Any] | None,
+    prompt_stage: str,
+    prompt_learning_state: AutonomousPromptLearningState | Mapping[str, Any] | None = None,
+    prompt_learning_exploration: float = 0.35,
+) -> AutonomousTaskBlueprint:
+    """Replace only transient provider-message assembly with a verified prompt implementation."""
+
+    if prompt_template is not None and not isinstance(prompt_template, AutonomousPromptTemplate):
+        raise BrainRunError("prompt_template must be an AutonomousPromptTemplate or None")
+    if prompt_registry is not None and not isinstance(prompt_registry, AutonomousPromptRegistry):
+        raise BrainRunError("prompt_registry must be an AutonomousPromptRegistry or None")
+    if prompt_template is not None and (prompt_registry is not None or prompt_selection is not None):
+        raise BrainRunError("prompt_template cannot be combined with prompt_registry or prompt_selection")
+    if prompt_selection is not None and prompt_registry is None:
+        raise BrainRunError("prompt_selection requires prompt_registry")
+    if prompt_learning_state is not None and prompt_registry is None:
+        raise BrainRunError("prompt_learning_state requires prompt_registry")
+    if prompt_learning_state is not None and prompt_selection is not None:
+        raise BrainRunError("prompt_learning_state cannot be combined with prompt_selection")
+    if prompt_template is None and prompt_registry is None:
+        return blueprint
+    stage = _identifier("prompt_stage", prompt_stage)
+    domain = blueprint.profile.domain
+    route_value = {} if route is None else dict(route)
+    context = {
+        "task": blueprint.spec.task,
+        "objective": blueprint.spec.task,
+        "requirement": {
+            "domain": domain,
+            "stage_id": stage,
+            "objective": blueprint.spec.task,
+            "workflow_id": blueprint.workflow.workflow_id,
+            "required_capabilities": list(blueprint.required_capabilities),
+        },
+        "route": {
+            "route_digest": route_value.get("route_digest"),
+            "selected_domains": list(route_value.get("selected_domains", [domain])),
+            "primary_domain": route_value.get("primary_domain", domain),
+            "cross_domain": bool(route_value.get("cross_domain", False)),
+        },
+        "context_ids": [
+            chunk.get("id")
+            for chunk in blueprint.prompt.get("context", [])
+            if isinstance(chunk, Mapping) and isinstance(chunk.get("id"), str)
+        ],
+    }
+    if prompt_template is not None:
+        rendered = prompt_template.render_transient(context)
+        mode = "versioned_template"
+    else:
+        selection = prompt_selection
+        adaptive_selection: AutonomousPromptAdaptiveSelection | None = None
+        if selection is None:
+            request = {
+                "domain": domain,
+                "stage": stage,
+                # Prompt capabilities are a reviewed namespace separate from model
+                # capabilities such as reasoning/code; do not conflate the two during
+                # automatic high-level selection.
+                "required_capabilities": [],
+            }
+            if prompt_learning_state is None:
+                selection = prompt_registry.select_for([request])
+            else:
+                adaptive_selection = select_adaptive_autonomous_prompts(
+                    prompt_registry,
+                    [request],
+                    state=prompt_learning_state,
+                    exploration=prompt_learning_exploration,
+                )
+                selection = adaptive_selection.plan
+        rendered = prompt_registry.render(selection, context)
+        mode = "registry_selection"
+    if any(
+        not isinstance(message, Mapping) or not isinstance(message.get("content"), str)
+        for message in rendered.messages
+    ):
+        raise BrainRunError("versioned prompt messages must contain text content for the Python provider runtime")
+
+    # Preserve the existing bounded caller/memory context while replacing only the generated
+    # domain framing and task message. This makes prompt rollout additive rather than silently
+    # dropping evidence contracts, route context, or recalled value-only episodes.
+    supporting_messages: list[dict[str, Any]] = []
+    raw_context = blueprint.prompt.get("context", [])
+    if not isinstance(raw_context, Sequence) or isinstance(raw_context, (str, bytes)):
+        raise BrainRunError("autonomous prompt context must be a sequence")
+    for chunk in raw_context:
+        if not isinstance(chunk, Mapping):
+            raise BrainRunError("autonomous prompt context must contain mappings")
+        chunk_id = chunk.get("id")
+        content = chunk.get("content")
+        if not isinstance(chunk_id, str) or not isinstance(content, str):
+            raise BrainRunError("autonomous prompt context contains malformed content")
+        supporting_messages.append(
+            {
+                "role": chunk.get("role", "developer"),
+                "content": f"Context {chunk_id}:\n{content}",
+            }
+        )
+    rendered_messages = [dict(message) for message in rendered.messages]
+    last_user_index = max(
+        (index for index, message in enumerate(rendered_messages) if message.get("role") == "user"),
+        default=-1,
+    )
+    insertion_index = len(rendered_messages) if last_user_index < 0 else last_user_index
+    rendered_messages[insertion_index:insertion_index] = supporting_messages
+    override = {
+        "messages": rendered_messages,
+        "metadata": {
+            **rendered.to_dict(),
+            "mode": mode,
+            **(
+                {
+                    "selection_policy": AUTONOMOUS_PROMPT_LEARNING_POLICY,
+                    "adaptive_selection_digest": adaptive_selection.selection_digest,
+                    "adaptive_arm_id": adaptive_selection.arm_ids[0],
+                    "adaptive_generation": adaptive_selection.generation,
+                    # This is a registry-bound selection receipt, not rendered prompt content.
+                    # It lets an application settle the exact arm after evaluator feedback,
+                    # including after the provider result has crossed a process boundary.
+                    "adaptive_selection": adaptive_selection.to_dict(),
+                }
+                if adaptive_selection is not None
+                else {}
+            ),
+            "retention": "prompt_messages_transient;digest_only_projection",
+            "secret_material": "never_returned",
+        },
+    }
+    prompt = dict(blueprint.prompt)
+    prompt["_provider_messages_override"] = override
+    return replace(blueprint, prompt=prompt)
+
+
+def _planner_prompt_digest(blueprint: AutonomousTaskBlueprint) -> str:
+    """Return a digest of the transient planner prompt plus its versioned identity metadata."""
+
+    prompt = blueprint.prompt
+    base_digest = prompt.get("prompt_digest")
+    if not isinstance(base_digest, str):
+        if not isinstance(prompt, Mapping):
+            raise BrainRunError("planner prompt is missing its bounded digest and request")
+        base_digest = _json_digest(dict(prompt))
+    override = prompt.get("_provider_messages_override")
+    if not isinstance(override, Mapping):
+        return base_digest
+    messages = override.get("messages")
+    metadata = override.get("metadata")
+    if not isinstance(messages, Sequence) or isinstance(messages, (str, bytes)) or not isinstance(metadata, Mapping):
+        raise BrainRunError("planner prompt override is malformed")
+    return _json_digest(
+        {
+            "schema": "bioprism-python-autonomous-planner-prompt/0.1",
+            "base_prompt_digest": base_digest,
+            "message_digest": _json_digest(list(messages)),
+            "versioned_prompt": dict(metadata),
+        }
+    )
+
+
+def _planner_adaptive_prompt_selection(
+    blueprint: AutonomousTaskBlueprint,
+    prompt_registry: AutonomousPromptRegistry | None,
+) -> AutonomousPromptAdaptiveSelection | None:
+    """Recover the exact adaptive prompt receipt attached to a transient planner blueprint."""
+
+    if prompt_registry is None:
+        return None
+    prompt = blueprint.prompt
+    override = prompt.get("_provider_messages_override")
+    if not isinstance(override, Mapping):
+        return None
+    metadata = override.get("metadata")
+    if not isinstance(metadata, Mapping):
+        raise BrainRunError("planner prompt override metadata is malformed")
+    raw = metadata.get("adaptive_selection")
+    if raw is None:
+        return None
+    if not isinstance(raw, Mapping):
+        raise BrainRunError("planner adaptive prompt selection is malformed")
+    try:
+        selection = AutonomousPromptAdaptiveSelection.from_dict(raw)
+        prompt_registry.verify_selection(selection.plan)
+    except ArgumentError as error:
+        raise BrainRunError("planner adaptive prompt selection is stale or malformed") from error
+    return selection
+
+
+def _selection_overrides_with_weights(
+    selection_overrides: Mapping[str, Any] | None,
+    selection_weights: Mapping[str, Any] | None,
+    selection_observations: Sequence[Mapping[str, Any]] | None = None,
+) -> Mapping[str, Any] | None:
+    """Bind a typed selection policy to the legacy override envelope.
+
+    The override envelope remains useful for persisted health projections and deployment-specific
+    metadata. A first-class policy must nevertheless be normalized before it crosses any nested
+    run boundary, and conflicting representations must fail before planning or provider work.
+    """
+
+    if selection_weights is None and selection_observations is None:
+        return selection_overrides
+    if selection_overrides is not None and not isinstance(selection_overrides, Mapping):
+        raise BrainRunError("selection_overrides must be a mapping or None")
+    try:
+        normalized = (
+            None
+            if selection_weights is None
+            else normalize_autonomous_selection_weights(selection_weights)
+        )
+        existing = None if selection_overrides is None else selection_overrides.get("weights")
+        if normalized is not None and existing is not None and normalize_autonomous_selection_weights(existing) != normalized:
+            raise BrainRunError("selection_weights conflicts with selection_overrides.weights")
+        normalized_observations = (
+            None
+            if selection_observations is None
+            else normalize_autonomous_model_observations(selection_observations)
+        )
+        existing_observations = (
+            None if selection_overrides is None else selection_overrides.get("observations")
+        )
+        if (
+            normalized_observations is not None
+            and existing_observations is not None
+            and normalize_autonomous_model_observations(existing_observations)
+            != normalized_observations
+        ):
+            raise BrainRunError(
+                "selection_observations conflicts with selection_overrides.observations"
+            )
+    except ArgumentError as error:
+        raise BrainRunError(str(error)) from error
+    merged = {} if selection_overrides is None else dict(selection_overrides)
+    if normalized is not None:
+        merged["weights"] = normalized
+    if normalized_observations is not None:
+        merged["observations"] = normalized_observations
+    return merged
+
+
 class AutonomousTaskOrchestrator:
     """Compose domain intake with adaptive execution and optional online learning."""
 
@@ -7692,6 +9852,8 @@ class AutonomousTaskOrchestrator:
         bandit_state: Mapping[str, Any] | None = None,
         contextual_observations: Sequence[Mapping[str, Any]] = (),
         selection_overrides: Mapping[str, Any] | None = None,
+        selection_weights: Mapping[str, Any] | None = None,
+        selection_observations: Sequence[Mapping[str, Any]] | None = None,
         input_tokens: int = 4_096,
         requested_output_tokens: int = 1_024,
         max_cost_per_million_tokens: int | None = None,
@@ -7706,6 +9868,7 @@ class AutonomousTaskOrchestrator:
         domain_policy_evaluator_configured: bool | None = None,
         domain_policy_effects_requested: bool | None = None,
         domain_policy_effects_approved: bool | None = None,
+        authorization_context: AutonomousAuthorizationContext | None = None,
     ) -> AutonomousSemanticRouteResult:
         """Use one approved provider call to improve routing, then reconcile it with the catalogue.
 
@@ -7820,6 +9983,8 @@ class AutonomousTaskOrchestrator:
             max_latency_ms=max_latency_ms,
             min_quality=min_quality,
             selection_overrides=selection_overrides,
+            selection_weights=selection_weights,
+            selection_observations=selection_observations,
         )
         run = self.brain.run(
             task=classifier_task,
@@ -7835,6 +10000,8 @@ class AutonomousTaskOrchestrator:
             response_schema=route_schema,
             context=blueprint.selection_context,
             contextual_observations=contextual_observations,
+            authorization_context=authorization_context,
+            authorization_domain="cross_domain",
         )
         selection = run.selection
         selected_model = selection.get("selected_model")
@@ -8083,6 +10250,375 @@ class AutonomousTaskOrchestrator:
             **metadata,
         )
 
+    def plan_ordered_steps_with_provider(
+        self,
+        *,
+        task: str,
+        steps: Sequence[Mapping[str, Any]],
+        model_candidates: Sequence[Mapping[str, Any]],
+        credentials: Mapping[str, CredentialHandle],
+        domain: str | None = None,
+        capability: str | None = None,
+        protected_contract_digest: str | None = None,
+        context: Mapping[str, Any] | None = None,
+        bandit_state: Mapping[str, Any] | None = None,
+        contextual_observations: Sequence[Mapping[str, Any]] = (),
+        selection_overrides: Mapping[str, Any] | None = None,
+        selection_weights: Mapping[str, Any] | None = None,
+        selection_observations: Sequence[Mapping[str, Any]] | None = None,
+        input_tokens: int = 4_096,
+        requested_output_tokens: int = 1_024,
+        max_cost_per_million_tokens: int | None = None,
+        max_latency_ms: int | None = None,
+        min_quality: float | None = None,
+        approve_provider_call: bool = False,
+        run_id: str | None = None,
+        max_output_tokens: int = 1_024,
+        temperature: float | None = None,
+        prompt_template: AutonomousPromptTemplate | None = None,
+        prompt_registry: AutonomousPromptRegistry | None = None,
+        prompt_selection: AutonomousPromptSelectionPlan | Mapping[str, Any] | None = None,
+        prompt_stage: str = "planning",
+        prompt_learning_state: AutonomousPromptLearningState | Mapping[str, Any] | None = None,
+        prompt_learning_exploration: float = 0.35,
+        domain_policy_mode: str = "audit",
+        domain_policy_evidence_ready: bool | None = None,
+        domain_policy_evaluator_configured: bool | None = None,
+        domain_policy_effects_requested: bool | None = None,
+        domain_policy_effects_approved: bool | None = None,
+        authorization_context: AutonomousAuthorizationContext | None = None,
+    ) -> AutonomousOrderedStepPlanRefinementResult:
+        """Ask a provider to order an existing dependency-closed graph without authorizing it.
+
+        This is deliberately separate from workflow-stage refinement: mission schedulers and
+        application-owned planners can submit arbitrary bounded step metadata while keeping
+        tools, arguments, credentials, permissions, claims, and effects outside the provider
+        proposal. The returned ordering is never dispatched by this method.
+        """
+
+        task_text = _text("ordered-step planning task", task, maximum=32_000)
+        graph = _normalize_ordered_step_graph(steps)
+        if not isinstance(model_candidates, Sequence) or isinstance(model_candidates, (str, bytes)):
+            raise BrainRunError("ordered-step planning model_candidates must be a sequence")
+        if not isinstance(credentials, Mapping):
+            raise BrainRunError("ordered-step planning credentials must be a mapping")
+        if any(
+            not isinstance(provider, str)
+            or not isinstance(handle, CredentialHandle)
+            or provider != handle.provider
+            for provider, handle in credentials.items()
+        ):
+            raise BrainRunError("ordered-step planning credentials must map providers to matching handles")
+        if not isinstance(contextual_observations, Sequence) or isinstance(
+            contextual_observations, (str, bytes)
+        ):
+            raise BrainRunError("ordered-step planning contextual_observations must be a sequence")
+        if context is not None:
+            BrainLearningLedger._assert_safe(context)
+        step_ids = tuple(step["id"] for step in graph)
+        step_domains = tuple(dict.fromkeys(step["domain"] for step in graph))
+        resolved_domain = domain or (step_domains[0] if len(step_domains) == 1 else "cross_domain")
+        if resolved_domain not in AUTONOMOUS_DOMAINS:
+            raise BrainRunError(f"ordered-step planning has an unsupported domain: {resolved_domain!r}")
+        resolved_capability = "planning" if capability is None else _identifier(
+            "ordered-step planning capability",
+            capability,
+        )
+        if protected_contract_digest is not None:
+            _route_digest(
+                protected_contract_digest,
+                "ordered-step planning protected_contract_digest",
+            )
+        task_digest = content_digest({"task": task_text})
+        base_plan_digest = content_digest({"steps": list(graph)})
+        planner_task = (
+            "Propose a bounded ordering and focus refinement for the reviewed step graph. Return only "
+            "the required JSON object. Use every existing step identifier exactly once in "
+            "priority_order. Preserve dependency order. Do not add, remove, rewrite, authorize, or "
+            "execute tools, arguments, credentials, permissions, effects, claims, or external writes. "
+            "Mark review_required when a human should inspect the proposal. Original task:\n\n"
+            + task_text
+        )
+        _text("ordered-step planning prompt", planner_task, maximum=32_000)
+        planner_context: dict[str, Any] = {
+            "planning_contract": {
+                "schema": AUTONOMOUS_ORDERED_STEP_PLAN_REFINEMENT_SCHEMA,
+                "task_digest": task_digest,
+                "base_plan_digest": base_plan_digest,
+                "protected_contract_digest": protected_contract_digest,
+                "step_catalogue": [dict(step) for step in graph],
+                "reconciliation": (
+                    "priority_order_must_contain_each_existing_step_exactly_once_and_respect_dependencies"
+                ),
+                "does_not_authorize": [
+                    "tools",
+                    "arguments",
+                    "credentials",
+                    "permissions",
+                    "effects",
+                    "claims",
+                    "external_writes",
+                ],
+            },
+            "base_plan_metadata": {
+                "domain": resolved_domain,
+                "step_count": len(graph),
+                "step_domains": list(step_domains),
+            },
+        }
+        if context is not None:
+            planner_context["caller_context"] = dict(context)
+        response_schema = _ordered_step_plan_response_schema(step_ids)
+        planner_blueprint = self.prepare(
+            task=planner_task,
+            domain=resolved_domain,
+            capability=resolved_capability,
+            context=planner_context,
+            desired_outputs=("dependency-closed step priority", "focus steps", "review decision"),
+            max_steps=min(128, max(1, len(graph))),
+            require_json=True,
+            response_schema=response_schema,
+            execution_mode="provider",
+            max_input_tokens=input_tokens,
+            required_model_capabilities=("structured_output",),
+        )
+        planner_blueprint = _apply_versioned_prompt(
+            planner_blueprint,
+            route=None,
+            prompt_template=prompt_template,
+            prompt_registry=prompt_registry,
+            prompt_selection=prompt_selection,
+            prompt_stage=prompt_stage,
+            prompt_learning_state=prompt_learning_state,
+            prompt_learning_exploration=prompt_learning_exploration,
+        )
+        planner_prompt_digest = _planner_prompt_digest(planner_blueprint)
+        adaptive_selection = _planner_adaptive_prompt_selection(planner_blueprint, prompt_registry)
+        planner_learning_context, planner_selection_context, planner_learning_context_digest = _provider_planner_context(
+            planner_blueprint.selection_context,
+            task_family="ordered_step_plan",
+        )
+        domain_policy_admission = _planning_domain_policy_admission(
+            domain=resolved_domain,
+            mode=domain_policy_mode,
+            estimated_input_tokens=input_tokens,
+            requested_output_tokens=max_output_tokens,
+            evidence_ready=domain_policy_evidence_ready,
+            evaluator_configured=domain_policy_evaluator_configured,
+            effects_requested=domain_policy_effects_requested,
+            effects_approved=domain_policy_effects_approved,
+        )
+        base_kwargs: dict[str, Any] = {
+            "task_digest": task_digest,
+            "base_plan_digest": base_plan_digest,
+            "protected_contract_digest": protected_contract_digest,
+            "planner_prompt_digest": planner_prompt_digest,
+            "adaptive_selection": adaptive_selection,
+            "planner_context": planner_learning_context,
+            "planner_context_digest": planner_learning_context_digest,
+            "domain_policy_admission": domain_policy_admission,
+        }
+        if domain_policy_admission is not None and domain_policy_admission.decision != "admitted":
+            return AutonomousOrderedStepPlanRefinementResult(
+                status=(
+                    "policy_blocked"
+                    if domain_policy_admission.decision == "blocked"
+                    else "policy_review_required"
+                ),
+                **base_kwargs,
+            )
+        if domain_policy_mode == "strict" and approve_provider_call is not True:
+            return AutonomousOrderedStepPlanRefinementResult(
+                status="approval_required",
+                **base_kwargs,
+            )
+
+        if authorization_context is not None:
+            authorization_context.authorize_operation(
+                operation="plan",
+                domain=resolved_domain,
+                resource_digest=content_digest({
+                    "schema": "bioprism-autonomous-plan-authorization-resource/0.1",
+                    "domain": resolved_domain,
+                    "task_digest": task_digest,
+                    "base_plan_digest": base_plan_digest,
+                    "planner_prompt_digest": _planner_prompt_digest(planner_blueprint),
+                }),
+            )
+
+        selection_request: Mapping[str, Any] | None = None
+        try:
+            selection_request = self.brain.build_adaptive_model_selection(
+                task=planner_task,
+                model_candidates=model_candidates,
+                credentials=credentials,
+                bandit_state=bandit_state,
+                context=planner_selection_context,
+                contextual_observations=contextual_observations,
+                required_capabilities=planner_blueprint.required_capabilities,
+                input_tokens=input_tokens,
+                requested_output_tokens=requested_output_tokens,
+                max_cost_per_million_tokens=max_cost_per_million_tokens,
+                max_latency_ms=max_latency_ms,
+                min_quality=min_quality,
+                selection_overrides=selection_overrides,
+                selection_weights=selection_weights,
+                selection_observations=selection_observations,
+            )
+            run = self.brain.run(
+                task=planner_task,
+                model_selection=selection_request,
+                prompt=planner_blueprint.prompt,
+                plan=planner_blueprint.plan,
+                credentials=credentials,
+                approve_provider_call=approve_provider_call,
+                run_id=run_id,
+                max_output_tokens=max_output_tokens,
+                temperature=temperature,
+                require_json=True,
+                response_schema=response_schema,
+                context=planner_selection_context,
+                contextual_observations=contextual_observations,
+                authorization_context=authorization_context,
+                authorization_domain=resolved_domain,
+            )
+        except (ProviderError, CredentialError) as error:
+            failure = _planning_failure_projection(error)
+            selected = None if selection_request is None else selection_request.get("selected_model")
+            safe_model = (
+                {"provider": selected["provider"], "model": selected["model"]}
+                if isinstance(selected, Mapping)
+                and isinstance(selected.get("provider"), str)
+                and isinstance(selected.get("model"), str)
+                else None
+            )
+            selection_digest = (
+                None
+                if selection_request is None or not isinstance(selection_request.get("decision_digest"), str)
+                else selection_request["decision_digest"]
+            )
+            return AutonomousOrderedStepPlanRefinementResult(
+                status="provider_failed",
+                selected_model=safe_model,
+                selection_digest=selection_digest,
+                outcome_digest=_json_digest(
+                    {
+                        "status": "provider_failed",
+                        "failure": failure,
+                        "task_digest": task_digest,
+                        "base_plan_digest": base_plan_digest,
+                        "planner_context_digest": planner_learning_context_digest,
+                        "planner_prompt_digest": planner_prompt_digest,
+                    }
+                ),
+                failure=failure,
+                **base_kwargs,
+            )
+
+        selected_model = run.selection.get("selected_model")
+        safe_model = None
+        if isinstance(selected_model, Mapping) and isinstance(selected_model.get("provider"), str) and isinstance(
+            selected_model.get("model"), str
+        ):
+            safe_model = {"provider": selected_model["provider"], "model": selected_model["model"]}
+        planner_plan_value = run.plan.get("plan")
+        planner_plan_digest = (
+            planner_plan_value.get("plan_digest")
+            if isinstance(planner_plan_value, Mapping)
+            else None
+        )
+        metadata: dict[str, Any] = {
+            **base_kwargs,
+            "selected_model": safe_model,
+            "selection_digest": run.selection.get("decision_digest"),
+            "planner_plan_digest": planner_plan_digest,
+            "outcome_digest": _json_digest(
+                {
+                    "provider_outcome_digest": run.outcome_digest,
+                    "learning_context_digest": planner_learning_context_digest,
+                    "planner_prompt_digest": planner_prompt_digest,
+                }
+            ),
+        }
+        if run.status == "provider_failed":
+            if not isinstance(run.failure, Mapping):
+                raise BrainRunError("provider_failed ordered-step planning result did not contain a failure projection")
+            metadata["failure"] = _normalize_planning_failure(run.failure, "ordered-step plan refinement")
+        if run.status != "completed_provider_call" or run.response is None:
+            return AutonomousOrderedStepPlanRefinementResult(
+                status=(
+                    run.status
+                    if run.status in {"approval_required", "plan_refused", "provider_failed"}
+                    else "provider_invalid"
+                ),
+                **metadata,
+            )
+        raw = run.response.structured
+        if not isinstance(raw, Mapping):
+            return AutonomousOrderedStepPlanRefinementResult(status="provider_invalid", **metadata)
+        priority = raw.get("priority_order")
+        focus = raw.get("focus_step_ids")
+        review_required = raw.get("review_required")
+        confidence = raw.get("confidence")
+        abstain = raw.get("abstain")
+        if (
+            not isinstance(priority, list)
+            or not isinstance(focus, list)
+            or not isinstance(review_required, bool)
+            or not isinstance(confidence, (int, float))
+            or isinstance(confidence, bool)
+            or not math.isfinite(float(confidence))
+            or not 0.0 <= float(confidence) <= 1.0
+            or not isinstance(abstain, bool)
+        ):
+            return AutonomousOrderedStepPlanRefinementResult(status="provider_invalid", **metadata)
+        try:
+            priority_ids = _ordered_step_ids(
+                "ordered-step provider priority_order",
+                priority,
+            )
+            focus_ids = _ordered_step_ids(
+                "ordered-step provider focus_step_ids",
+                focus,
+            )
+        except BrainRunError:
+            return AutonomousOrderedStepPlanRefinementResult(status="provider_invalid", **metadata)
+        if len(priority_ids) != len(step_ids) or set(priority_ids) != set(step_ids):
+            return AutonomousOrderedStepPlanRefinementResult(status="provider_invalid", **metadata)
+        if any(step_id not in step_ids for step_id in focus_ids):
+            return AutonomousOrderedStepPlanRefinementResult(status="provider_invalid", **metadata)
+        priority_position = {step_id: index for index, step_id in enumerate(priority_ids)}
+        if any(
+            priority_position[dependency] > priority_position[step["id"]]
+            for step in graph
+            for dependency in step["depends_on"]
+        ):
+            return AutonomousOrderedStepPlanRefinementResult(
+                status="provider_disagreement",
+                priority_step_ids=priority_ids,
+                focus_step_ids=focus_ids,
+                review_required=True,
+                confidence=confidence,
+                **metadata,
+            )
+        if abstain:
+            return AutonomousOrderedStepPlanRefinementResult(
+                status="provider_disagreement",
+                priority_step_ids=priority_ids,
+                focus_step_ids=focus_ids,
+                review_required=True,
+                confidence=confidence,
+                **metadata,
+            )
+        return AutonomousOrderedStepPlanRefinementResult(
+            status="completed",
+            priority_step_ids=priority_ids,
+            focus_step_ids=focus_ids,
+            review_required=review_required,
+            confidence=confidence,
+            **metadata,
+        )
+
     def plan_with_provider(
         self,
         *,
@@ -8093,6 +10629,8 @@ class AutonomousTaskOrchestrator:
         bandit_state: Mapping[str, Any] | None = None,
         contextual_observations: Sequence[Mapping[str, Any]] = (),
         selection_overrides: Mapping[str, Any] | None = None,
+        selection_weights: Mapping[str, Any] | None = None,
+        selection_observations: Sequence[Mapping[str, Any]] | None = None,
         input_tokens: int = 4_096,
         requested_output_tokens: int = 1_024,
         max_cost_per_million_tokens: int | None = None,
@@ -8102,11 +10640,18 @@ class AutonomousTaskOrchestrator:
         run_id: str | None = None,
         max_output_tokens: int = 1_024,
         temperature: float | None = None,
+        prompt_template: AutonomousPromptTemplate | None = None,
+        prompt_registry: AutonomousPromptRegistry | None = None,
+        prompt_selection: AutonomousPromptSelectionPlan | Mapping[str, Any] | None = None,
+        prompt_stage: str = "planning",
+        prompt_learning_state: AutonomousPromptLearningState | Mapping[str, Any] | None = None,
+        prompt_learning_exploration: float = 0.35,
         domain_policy_mode: str = "audit",
         domain_policy_evidence_ready: bool | None = None,
         domain_policy_evaluator_configured: bool | None = None,
         domain_policy_effects_requested: bool | None = None,
         domain_policy_effects_approved: bool | None = None,
+        authorization_context: AutonomousAuthorizationContext | None = None,
     ) -> AutonomousPlanRefinementResult:
         """Ask a provider to prioritize existing stages under a dependency-closed contract."""
 
@@ -8184,6 +10729,22 @@ class AutonomousTaskOrchestrator:
             max_input_tokens=input_tokens,
             required_model_capabilities=blueprint.required_capabilities,
         )
+        planner_blueprint = _apply_versioned_prompt(
+            planner_blueprint,
+            route=None,
+            prompt_template=prompt_template,
+            prompt_registry=prompt_registry,
+            prompt_selection=prompt_selection,
+            prompt_stage=prompt_stage,
+            prompt_learning_state=prompt_learning_state,
+            prompt_learning_exploration=prompt_learning_exploration,
+        )
+        planner_prompt_digest = _planner_prompt_digest(planner_blueprint)
+        adaptive_selection = _planner_adaptive_prompt_selection(planner_blueprint, prompt_registry)
+        planner_learning_context, planner_selection_context, planner_learning_context_digest = _provider_planner_context(
+            planner_blueprint.selection_context,
+            task_family=blueprint.workflow.workflow_id,
+        )
         domain_policy_admission = _planning_domain_policy_admission(
             domain=blueprint.profile.domain,
             mode=domain_policy_mode,
@@ -8200,7 +10761,10 @@ class AutonomousTaskOrchestrator:
                 task_digest=blueprint.spec.task_digest,
                 base_plan_digest=base_plan_digest,
                 workflow_digest=blueprint.workflow.workflow_digest,
-                planner_prompt_digest=planner_blueprint.prompt.get("prompt_digest"),
+                planner_prompt_digest=planner_prompt_digest,
+                adaptive_selection=adaptive_selection,
+                planner_context=planner_learning_context,
+                planner_context_digest=planner_learning_context_digest,
                 domain_policy_admission=domain_policy_admission,
             )
         if domain_policy_mode == "strict" and approve_provider_call is not True:
@@ -8209,15 +10773,31 @@ class AutonomousTaskOrchestrator:
                 task_digest=blueprint.spec.task_digest,
                 base_plan_digest=base_plan_digest,
                 workflow_digest=blueprint.workflow.workflow_digest,
-                planner_prompt_digest=planner_blueprint.prompt.get("prompt_digest"),
+                planner_prompt_digest=planner_prompt_digest,
+                adaptive_selection=adaptive_selection,
+                planner_context=planner_learning_context,
+                planner_context_digest=planner_learning_context_digest,
                 domain_policy_admission=domain_policy_admission,
+            )
+        if authorization_context is not None:
+            authorization_context.authorize_operation(
+                operation="plan",
+                domain=blueprint.profile.domain,
+                resource_digest=content_digest({
+                    "schema": "bioprism-autonomous-plan-authorization-resource/0.1",
+                    "domain": blueprint.profile.domain,
+                    "task_digest": blueprint.spec.task_digest,
+                    "base_plan_digest": base_plan_digest,
+                    "planner_prompt_digest": planner_prompt_digest,
+                    "planner_context_digest": planner_learning_context_digest,
+                }),
             )
         selection_request = self.brain.build_adaptive_model_selection(
             task=planner_task,
             model_candidates=model_candidates,
             credentials=credentials,
             bandit_state=bandit_state,
-            context=planner_blueprint.selection_context,
+            context=planner_selection_context,
             contextual_observations=contextual_observations,
             required_capabilities=blueprint.required_capabilities,
             input_tokens=input_tokens,
@@ -8226,22 +10806,62 @@ class AutonomousTaskOrchestrator:
             max_latency_ms=max_latency_ms,
             min_quality=min_quality,
             selection_overrides=selection_overrides,
+            selection_weights=selection_weights,
+            selection_observations=selection_observations,
         )
-        run = self.brain.run(
-            task=planner_task,
-            model_selection=selection_request,
-            prompt=planner_blueprint.prompt,
-            plan=planner_blueprint.plan,
-            credentials=credentials,
-            approve_provider_call=approve_provider_call,
-            run_id=run_id,
-            max_output_tokens=max_output_tokens,
-            temperature=temperature,
-            require_json=True,
-            response_schema=response_schema,
-            context=planner_blueprint.selection_context,
-            contextual_observations=contextual_observations,
-        )
+        try:
+            run = self.brain.run(
+                task=planner_task,
+                model_selection=selection_request,
+                prompt=planner_blueprint.prompt,
+                plan=planner_blueprint.plan,
+                credentials=credentials,
+                approve_provider_call=approve_provider_call,
+                run_id=run_id,
+                max_output_tokens=max_output_tokens,
+                temperature=temperature,
+                require_json=True,
+                response_schema=response_schema,
+                context=planner_selection_context,
+                contextual_observations=contextual_observations,
+                authorization_context=authorization_context,
+                authorization_domain=blueprint.profile.domain,
+            )
+        except (ProviderError, CredentialError) as error:
+            failure = _planning_failure_projection(error)
+            selected = selection_request.get("selected_model")
+            safe_model = (
+                {"provider": selected["provider"], "model": selected["model"]}
+                if isinstance(selected, Mapping)
+                and isinstance(selected.get("provider"), str)
+                and isinstance(selected.get("model"), str)
+                else None
+            )
+            selection_digest = selection_request.get("decision_digest")
+            if not isinstance(selection_digest, str):
+                selection_digest = None
+            return AutonomousPlanRefinementResult(
+                status="provider_failed",
+                task_digest=blueprint.spec.task_digest,
+                base_plan_digest=base_plan_digest,
+                workflow_digest=blueprint.workflow.workflow_digest,
+                selected_model=safe_model,
+                selection_digest=selection_digest,
+                planner_prompt_digest=planner_prompt_digest,
+                adaptive_selection=adaptive_selection,
+                outcome_digest=_json_digest({
+                    "status": "provider_failed",
+                    "failure": failure,
+                    "task_digest": blueprint.spec.task_digest,
+                    "base_plan_digest": base_plan_digest,
+                    "planner_context_digest": planner_learning_context_digest,
+                    "planner_prompt_digest": planner_prompt_digest,
+                }),
+                planner_context=planner_learning_context,
+                planner_context_digest=planner_learning_context_digest,
+                domain_policy_admission=domain_policy_admission,
+                failure=failure,
+            )
         selection = run.selection
         selected_model = selection.get("selected_model")
         safe_model = None
@@ -8264,15 +10884,26 @@ class AutonomousTaskOrchestrator:
             "workflow_digest": blueprint.workflow.workflow_digest,
             "selected_model": safe_model,
             "selection_digest": selection.get("decision_digest"),
-            "planner_prompt_digest": run.prompt.get("prompt_digest"),
+            "planner_prompt_digest": planner_prompt_digest,
+            "adaptive_selection": adaptive_selection,
             "planner_plan_digest": planner_plan_digest,
-            "outcome_digest": run.outcome_digest,
+            "outcome_digest": _json_digest({
+                "provider_outcome_digest": run.outcome_digest,
+                "learning_context_digest": planner_learning_context_digest,
+                "planner_prompt_digest": planner_prompt_digest,
+            }),
+            "planner_context": planner_learning_context,
+            "planner_context_digest": planner_learning_context_digest,
         }
         if domain_policy_admission is not None:
             metadata["domain_policy_admission"] = domain_policy_admission
+        if run.status == "provider_failed":
+            if not isinstance(run.failure, Mapping):
+                raise BrainRunError("provider_failed planning result did not contain a failure projection")
+            metadata["failure"] = _normalize_planning_failure(run.failure, "plan refinement")
         if run.status != "completed_provider_call" or run.response is None:
             return AutonomousPlanRefinementResult(
-                status=run.status if run.status in {"approval_required", "plan_refused"} else "provider_invalid",
+                status=run.status if run.status in {"approval_required", "plan_refused", "provider_failed"} else "provider_invalid",
                 **metadata,
             )
         raw = run.response.structured
@@ -8336,6 +10967,8 @@ class AutonomousTaskOrchestrator:
         bandit_state: Mapping[str, Any] | None = None,
         contextual_observations: Sequence[Mapping[str, Any]] = (),
         selection_overrides: Mapping[str, Any] | None = None,
+        selection_weights: Mapping[str, Any] | None = None,
+        selection_observations: Sequence[Mapping[str, Any]] | None = None,
         input_tokens: int = 4_096,
         requested_output_tokens: int = 1_024,
         max_cost_per_million_tokens: int | None = None,
@@ -8345,11 +10978,18 @@ class AutonomousTaskOrchestrator:
         run_id: str | None = None,
         max_output_tokens: int = 1_024,
         temperature: float | None = None,
+        prompt_template: AutonomousPromptTemplate | None = None,
+        prompt_registry: AutonomousPromptRegistry | None = None,
+        prompt_selection: AutonomousPromptSelectionPlan | Mapping[str, Any] | None = None,
+        prompt_stage: str = "planning",
+        prompt_learning_state: AutonomousPromptLearningState | Mapping[str, Any] | None = None,
+        prompt_learning_exploration: float = 0.35,
         domain_policy_mode: str = "audit",
         domain_policy_evidence_ready: bool | None = None,
         domain_policy_evaluator_configured: bool | None = None,
         domain_policy_effects_requested: bool | None = None,
         domain_policy_effects_approved: bool | None = None,
+        authorization_context: AutonomousAuthorizationContext | None = None,
     ) -> AutonomousCrossDomainPlanRefinementResult:
         """Ask a provider to prioritize existing cross-domain specialists only."""
 
@@ -8443,6 +11083,22 @@ class AutonomousTaskOrchestrator:
             max_input_tokens=input_tokens,
             required_model_capabilities=required_model_capabilities,
         )
+        planner_blueprint = _apply_versioned_prompt(
+            planner_blueprint,
+            route=None,
+            prompt_template=prompt_template,
+            prompt_registry=prompt_registry,
+            prompt_selection=prompt_selection,
+            prompt_stage=prompt_stage,
+            prompt_learning_state=prompt_learning_state,
+            prompt_learning_exploration=prompt_learning_exploration,
+        )
+        planner_prompt_digest = _planner_prompt_digest(planner_blueprint)
+        adaptive_selection = _planner_adaptive_prompt_selection(planner_blueprint, prompt_registry)
+        planner_learning_context, planner_selection_context, planner_learning_context_digest = _provider_planner_context(
+            planner_blueprint.selection_context,
+            task_family=blueprint.synthesis_blueprint.workflow.workflow_id,
+        )
         domain_policy_admission = _planning_domain_policy_admission(
             domain="cross_domain",
             mode=domain_policy_mode,
@@ -8458,7 +11114,10 @@ class AutonomousTaskOrchestrator:
                 status=("policy_blocked" if domain_policy_admission.decision == "blocked" else "policy_review_required"),
                 task_digest=blueprint.task_digest,
                 base_plan_digest=base_plan_digest,
-                planner_prompt_digest=planner_blueprint.prompt.get("prompt_digest"),
+                planner_prompt_digest=planner_prompt_digest,
+                adaptive_selection=adaptive_selection,
+                planner_context=planner_learning_context,
+                planner_context_digest=planner_learning_context_digest,
                 domain_policy_admission=domain_policy_admission,
             )
         if domain_policy_mode == "strict" and approve_provider_call is not True:
@@ -8466,15 +11125,31 @@ class AutonomousTaskOrchestrator:
                 status="approval_required",
                 task_digest=blueprint.task_digest,
                 base_plan_digest=base_plan_digest,
-                planner_prompt_digest=planner_blueprint.prompt.get("prompt_digest"),
+                planner_prompt_digest=planner_prompt_digest,
+                adaptive_selection=adaptive_selection,
+                planner_context=planner_learning_context,
+                planner_context_digest=planner_learning_context_digest,
                 domain_policy_admission=domain_policy_admission,
+            )
+        if authorization_context is not None:
+            authorization_context.authorize_operation(
+                operation="plan",
+                domain="cross_domain",
+                resource_digest=content_digest({
+                    "schema": "bioprism-autonomous-plan-authorization-resource/0.1",
+                    "domain": "cross_domain",
+                    "task_digest": blueprint.task_digest,
+                    "base_plan_digest": base_plan_digest,
+                    "planner_prompt_digest": planner_prompt_digest,
+                    "planner_context_digest": planner_learning_context_digest,
+                }),
             )
         selection_request = self.brain.build_adaptive_model_selection(
             task=planner_task,
             model_candidates=model_candidates,
             credentials=credentials,
             bandit_state=bandit_state,
-            context=planner_blueprint.selection_context,
+            context=planner_selection_context,
             contextual_observations=contextual_observations,
             required_capabilities=required_model_capabilities,
             input_tokens=input_tokens,
@@ -8483,22 +11158,61 @@ class AutonomousTaskOrchestrator:
             max_latency_ms=max_latency_ms,
             min_quality=min_quality,
             selection_overrides=selection_overrides,
+            selection_weights=selection_weights,
+            selection_observations=selection_observations,
         )
-        run = self.brain.run(
-            task=planner_task,
-            model_selection=selection_request,
-            prompt=planner_blueprint.prompt,
-            plan=planner_blueprint.plan,
-            credentials=credentials,
-            approve_provider_call=approve_provider_call,
-            run_id=run_id,
-            max_output_tokens=max_output_tokens,
-            temperature=temperature,
-            require_json=True,
-            response_schema=response_schema,
-            context=planner_blueprint.selection_context,
-            contextual_observations=contextual_observations,
-        )
+        try:
+            run = self.brain.run(
+                task=planner_task,
+                model_selection=selection_request,
+                prompt=planner_blueprint.prompt,
+                plan=planner_blueprint.plan,
+                credentials=credentials,
+                approve_provider_call=approve_provider_call,
+                run_id=run_id,
+                max_output_tokens=max_output_tokens,
+                temperature=temperature,
+                require_json=True,
+                response_schema=response_schema,
+                context=planner_selection_context,
+                contextual_observations=contextual_observations,
+                authorization_context=authorization_context,
+                authorization_domain="cross_domain",
+            )
+        except (ProviderError, CredentialError) as error:
+            failure = _planning_failure_projection(error)
+            selected = selection_request.get("selected_model")
+            safe_model = (
+                {"provider": selected["provider"], "model": selected["model"]}
+                if isinstance(selected, Mapping)
+                and isinstance(selected.get("provider"), str)
+                and isinstance(selected.get("model"), str)
+                else None
+            )
+            selection_digest = selection_request.get("decision_digest")
+            if not isinstance(selection_digest, str):
+                selection_digest = None
+            return AutonomousCrossDomainPlanRefinementResult(
+                status="provider_failed",
+                task_digest=blueprint.task_digest,
+                base_plan_digest=base_plan_digest,
+                selected_model=safe_model,
+                selection_digest=selection_digest,
+                planner_prompt_digest=planner_prompt_digest,
+                adaptive_selection=adaptive_selection,
+                outcome_digest=_json_digest({
+                    "status": "provider_failed",
+                    "failure": failure,
+                    "task_digest": blueprint.task_digest,
+                    "base_plan_digest": base_plan_digest,
+                    "planner_context_digest": planner_learning_context_digest,
+                    "planner_prompt_digest": planner_prompt_digest,
+                }),
+                planner_context=planner_learning_context,
+                planner_context_digest=planner_learning_context_digest,
+                domain_policy_admission=domain_policy_admission,
+                failure=failure,
+            )
         selected_model = run.selection.get("selected_model")
         safe_model = None
         if isinstance(selected_model, Mapping) and isinstance(selected_model.get("provider"), str) and isinstance(
@@ -8512,15 +11226,26 @@ class AutonomousTaskOrchestrator:
             "base_plan_digest": base_plan_digest,
             "selected_model": safe_model,
             "selection_digest": run.selection.get("decision_digest"),
-            "planner_prompt_digest": run.prompt.get("prompt_digest"),
+            "planner_prompt_digest": planner_prompt_digest,
+            "adaptive_selection": adaptive_selection,
             "planner_plan_digest": planner_plan_digest,
-            "outcome_digest": run.outcome_digest,
+            "outcome_digest": _json_digest({
+                "provider_outcome_digest": run.outcome_digest,
+                "learning_context_digest": planner_learning_context_digest,
+                "planner_prompt_digest": planner_prompt_digest,
+            }),
+            "planner_context": planner_learning_context,
+            "planner_context_digest": planner_learning_context_digest,
         }
         if domain_policy_admission is not None:
             metadata["domain_policy_admission"] = domain_policy_admission
+        if run.status == "provider_failed":
+            if not isinstance(run.failure, Mapping):
+                raise BrainRunError("provider_failed cross-domain planning result did not contain a failure projection")
+            metadata["failure"] = _normalize_planning_failure(run.failure, "cross-domain plan refinement")
         if run.status != "completed_provider_call" or run.response is None:
             return AutonomousCrossDomainPlanRefinementResult(
-                status=run.status if run.status in {"approval_required", "plan_refused"} else "provider_invalid",
+                status=run.status if run.status in {"approval_required", "plan_refused", "provider_failed"} else "provider_invalid",
                 **metadata,
             )
         raw = run.response.structured
@@ -8603,6 +11328,7 @@ class AutonomousTaskOrchestrator:
         max_input_tokens: int = 4_096,
         required_model_capabilities: Sequence[str] = (),
         memory_episodes: Sequence[Mapping[str, Any]] = (),
+        memory_lesson_references: Sequence[Mapping[str, Any]] = (),
     ) -> AutonomousTaskBlueprint:
         profile = self.registry.resolve(domain)
         workflow = self.workflow_registry.resolve(profile.domain)
@@ -8620,7 +11346,12 @@ class AutonomousTaskOrchestrator:
                 "workflow requires capabilities outside the domain profile: "
                 + ", ".join(unsupported_workflow_capabilities)
             )
-        resolved_capability = profile.default_capability if capability is None else _identifier("capability", capability)
+        capability_route = route_autonomous_capability(
+            task,
+            profile.domain,
+            explicit_capability=None if capability is None else _identifier("capability", capability),
+        )
+        resolved_capability = capability_route.selected_capability or profile.default_capability
         resolved_risk = profile.risk_class if risk_class is None else _identifier("risk_class", risk_class)
         capability_contract = _resolve_domain_capability_contract(
             profile,
@@ -8734,7 +11465,23 @@ class AutonomousTaskOrchestrator:
             "capability_stage_ids": list(capability_contract.stage_ids),
             "capability_evidence_outputs": list(capability_contract.evidence_outputs),
             "capability_evaluator_signals": list(capability_contract.evaluator_signals),
+            "capability_route_digest": capability_route.route_digest,
+            "capability_route_reason": capability_route.reason,
+            "capability_route_confidence": capability_route.confidence,
         }
+        if memory_lesson_references:
+            lesson_metadata = []
+            for index, reference in enumerate(memory_lesson_references):
+                if not isinstance(reference, Mapping):
+                    raise BrainRunError(f"memory lesson reference {index} must be a mapping")
+                lesson_id = reference.get("lesson_id")
+                lesson_digest = reference.get("lesson_digest")
+                if not isinstance(lesson_id, str) or not isinstance(lesson_digest, str):
+                    raise BrainRunError(f"memory lesson reference {index} is missing a stable identity")
+                lesson_metadata.append({"lesson_id": lesson_id, "lesson_digest": lesson_digest})
+            selection_context["consolidated_memory_retrieval_digest"] = content_digest(
+                {"lessons": lesson_metadata}
+            )
         runtime_execution_plan = spec.context.get(_AUTONOMOUS_EXECUTION_PLAN_CONTEXT_KEY)
         if runtime_execution_plan is not None:
             if not isinstance(runtime_execution_plan, Mapping):
@@ -8763,6 +11510,7 @@ class AutonomousTaskOrchestrator:
             capability_contract=capability_contract,
             max_input_tokens=max_input_tokens,
             memory_episodes=memory_episodes,
+            memory_lesson_references=memory_lesson_references,
         )
         plan = AutonomousPlanBuilder.build(spec, workflow, domain_pack)
         _safe_json("autonomous selection context", selection_context)
@@ -8779,6 +11527,7 @@ class AutonomousTaskOrchestrator:
             task_lens=task_lens,
             task_intent=task_intent,
             task_decision=task_decision,
+            capability_route=capability_route,
             response_contract=response_contract,
         )
 
@@ -8841,6 +11590,10 @@ class AutonomousTaskOrchestrator:
         available_evidence: Sequence[str] = (),
         completed_stages: Mapping[str, Sequence[str]] | None = None,
         journal: AutonomousEvidenceRuntimeJournal | None = None,
+        authorization_context: AutonomousAuthorizationContext | None = None,
+        authorization_domain: str | None = None,
+        authorization_capability: str | None = None,
+        authorization_risk_class: str | None = None,
     ) -> AutonomousEvidenceRuntimeResult:
         """Acquire and optionally evaluate evidence through application-owned adapters.
 
@@ -8862,6 +11615,10 @@ class AutonomousTaskOrchestrator:
             rehydrate_value=rehydrate_value,
             parent_evidence_digests=parent_evidence_digests,
             stop_on_failure=stop_on_failure,
+            authorization_context=authorization_context,
+            authorization_domain=authorization_domain,
+            authorization_capability=authorization_capability,
+            authorization_risk_class=authorization_risk_class,
         )
 
     @staticmethod
@@ -8932,6 +11689,7 @@ class AutonomousTaskOrchestrator:
                 route=route,
                 blueprint=blueprint,
                 semantic_route=semantic_route,
+                capability_route=blueprint.capability_route,
             )
         subtasks = [
             {
@@ -8979,6 +11737,7 @@ class AutonomousTaskOrchestrator:
         self,
         *,
         task: str,
+        route_override: AutonomousRouteProposal | None = None,
         hints: Sequence[str] = (),
         context: Mapping[str, Any] | None = None,
         constraints: Sequence[str] = (),
@@ -9000,14 +11759,22 @@ class AutonomousTaskOrchestrator:
     ) -> AutonomousAutoBlueprint:
         """Create a single- or cross-domain blueprint, or an explicit review request."""
 
-        route = self.route_task(
-            task=task,
-            hints=hints,
-            min_confidence=min_confidence,
-            min_margin=min_margin,
-            max_domains=max_domains,
-            allow_cross_domain=allow_cross_domain,
-        )
+        if route_override is None:
+            route = self.route_task(
+                task=task,
+                hints=hints,
+                min_confidence=min_confidence,
+                min_margin=min_margin,
+                max_domains=max_domains,
+                allow_cross_domain=allow_cross_domain,
+            )
+        else:
+            if not isinstance(route_override, AutonomousRouteProposal):
+                raise BrainRunError("route_override must be an AutonomousRouteProposal")
+            expected_task_digest = content_digest({"task": task})
+            if route_override.task_digest != expected_task_digest:
+                raise BrainRunError("route_override task does not match the automatic task")
+            route = route_override
         return self._prepare_auto_from_route(
             task=task,
             route=route,
@@ -9054,6 +11821,8 @@ class AutonomousTaskOrchestrator:
         bandit_state: Mapping[str, Any] | None = None,
         contextual_observations: Sequence[Mapping[str, Any]] = (),
         selection_overrides: Mapping[str, Any] | None = None,
+        selection_weights: Mapping[str, Any] | None = None,
+        selection_observations: Sequence[Mapping[str, Any]] | None = None,
         input_tokens: int = 4_096,
         requested_output_tokens: int = 1_024,
         max_cost_per_million_tokens: int | None = None,
@@ -9085,6 +11854,8 @@ class AutonomousTaskOrchestrator:
             bandit_state=bandit_state,
             contextual_observations=contextual_observations,
             selection_overrides=selection_overrides,
+            selection_weights=selection_weights,
+            selection_observations=selection_observations,
             input_tokens=input_tokens,
             requested_output_tokens=requested_output_tokens,
             max_cost_per_million_tokens=max_cost_per_million_tokens,
@@ -9288,6 +12059,7 @@ class AutonomousTaskOrchestrator:
         domain: str,
         capability: str | None,
         risk_class: str | None,
+        authorization_context: AutonomousAuthorizationContext | None = None,
     ) -> tuple[BrainEpisodicMemory | None, tuple[Mapping[str, Any], ...]]:
         store = memory if memory is not None else brain.memory
         if store is None:
@@ -9325,10 +12097,119 @@ class AutonomousTaskOrchestrator:
                 limit=query.limit,
             )
         try:
-            episodes = tuple(store.retrieve(query, limit=memory_limit))
+            episodes = tuple(
+                brain.recall_memory(
+                    query,
+                    limit=memory_limit,
+                    memory=store,
+                    authorization_context=authorization_context,
+                    authorization_domain=domain,
+                    authorization_capability=capability,
+                    authorization_risk_class=risk_class,
+                )
+            )
         except BrainMemoryError as error:
             raise BrainRunError("autonomous memory retrieval failed") from error
         return store, episodes
+
+    @staticmethod
+    def _authorize_memory_evaluation(
+        authorization_context: AutonomousAuthorizationContext | None,
+        *,
+        domain: str,
+        episode_id: str,
+        decision_digest: str,
+        trajectory_id: str | None = None,
+        trajectory_step: int | None = None,
+    ) -> None:
+        """Authorize one metadata-only evaluation write immediately before persistence.
+
+        Episode writes and evaluation writes are separate durable operations.  Keeping this
+        check at the final write boundary prevents workflow, mission, and cross-domain helpers
+        from accidentally bypassing the same caller-issued memory grant used by ``remember_result``.
+        """
+
+        if authorization_context is None:
+            return
+        authorization_context.authorize_operation(
+            operation="memory_write",
+            domain=domain,
+            resource_digest=content_digest(
+                {
+                    "schema": "bioprism-autonomous-memory-evaluation-authorization-resource/0.1",
+                    "episode_id": episode_id,
+                    "decision_digest": decision_digest,
+                    "trajectory_id": trajectory_id,
+                    "trajectory_step": trajectory_step,
+                }
+            ),
+        )
+
+    @staticmethod
+    def _consolidated_memory(
+        consolidator: AutonomousMemoryConsolidator | None,
+        lesson_resolver: Callable[[str], str | None] | None,
+        lesson_context_resolver: Callable[[Mapping[str, Any]], str | None] | None,
+        *,
+        domains: Sequence[str],
+        capability: str | None,
+        limit: int,
+        retrieve: bool,
+        required: bool,
+        authorization_context: AutonomousAuthorizationContext | None = None,
+    ) -> tuple[Mapping[str, Any], ...]:
+        """Resolve stable lesson digests into transient, domain-scoped prompt references."""
+
+        if not isinstance(retrieve, bool) or not isinstance(required, bool):
+            raise BrainRunError("consolidated memory retrieve/required flags must be booleans")
+        if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= MAX_AUTONOMOUS_MEMORY_CONSOLIDATION_PROMPT_LESSONS:
+            raise BrainRunError(
+                f"consolidated_memory_limit must be between 1 and {MAX_AUTONOMOUS_MEMORY_CONSOLIDATION_PROMPT_LESSONS}"
+            )
+        if lesson_resolver is not None and not callable(lesson_resolver):
+            raise BrainRunError("memory_lesson_resolver must be callable or None")
+        if lesson_context_resolver is not None and not callable(lesson_context_resolver):
+            raise BrainRunError("memory_lesson_context_resolver must be callable or None")
+        if lesson_resolver is not None and lesson_context_resolver is not None:
+            raise BrainRunError("memory_lesson_resolver and memory_lesson_context_resolver are mutually exclusive")
+        requested = retrieve and consolidator is not None and (lesson_resolver is not None or lesson_context_resolver is not None)
+        if required and not requested:
+            raise BrainRunError(
+                "consolidated_memory_required needs a consolidator and one lesson resolver"
+            )
+        if not requested:
+            return ()
+        references: dict[tuple[str, str], Mapping[str, Any]] = {}
+        try:
+            for domain in dict.fromkeys(domains):
+                if authorization_context is not None:
+                    authorization_context.authorize_operation(
+                        operation="memory_retrieval",
+                        domain=domain,
+                        resource_digest=content_digest(
+                            {
+                                "schema": "bioprism-autonomous-consolidated-memory-authorization-resource/0.1",
+                                "domain": domain,
+                                "capability": capability,
+                                "limit": limit,
+                                "resolver": "lesson_context" if lesson_context_resolver is not None else "lesson",
+                            }
+                        ),
+                    )
+                for reference in consolidator.prompt_references(
+                    domain=domain,
+                    capability=capability,
+                    lesson_resolver=lesson_resolver,
+                    lesson_context_resolver=lesson_context_resolver,
+                    limit=limit,
+                ):
+                    key = (str(reference["lesson_id"]), str(reference["lesson_digest"]))
+                    references.setdefault(key, dict(reference))
+        except AutonomousAuthorizationError:
+            raise
+        except Exception as error:
+            raise BrainRunError("autonomous consolidated memory retrieval failed") from error
+        return tuple(list(references.values())[:MAX_AUTONOMOUS_MEMORY_CONSOLIDATION_PROMPT_LESSONS])
 
     @staticmethod
     def _merge_options(
@@ -9339,6 +12220,7 @@ class AutonomousTaskOrchestrator:
         required_capabilities: Sequence[str],
         contextual_observations: Sequence[Mapping[str, Any]],
         input_tokens: int,
+        context_budget: AutonomousContextBudgetOptions | Mapping[str, Any] | None,
         requested_output_tokens: int,
         max_cost_per_million_tokens: int | None,
         max_latency_ms: int | None,
@@ -9357,6 +12239,9 @@ class AutonomousTaskOrchestrator:
         provider_tools: Sequence[ProviderTool],
         tool_choice: str | None,
         max_provider_failovers: int,
+        authorization_context: AutonomousAuthorizationContext | None,
+        authorization_domain: str,
+        reserve_cost: AutonomousCostReservationCallback | None,
     ) -> dict[str, Any]:
         if options is not None and not isinstance(options, Mapping):
             raise BrainRunError("mission_options must be a mapping or None")
@@ -9371,6 +12256,7 @@ class AutonomousTaskOrchestrator:
             "contextual_observations": [dict(item) for item in contextual_observations],
             "required_capabilities": list(required_capabilities),
             "input_tokens": input_tokens,
+            "context_budget": context_budget,
             "requested_output_tokens": requested_output_tokens,
             "approve_provider_call": approve_provider_call,
             "approve_mission_dispatch": approve_mission_dispatch,
@@ -9384,6 +12270,9 @@ class AutonomousTaskOrchestrator:
             "provider_tools": tuple(provider_tools),
             "tool_choice": tool_choice,
             "max_provider_failovers": max_provider_failovers,
+            "authorization_context": authorization_context,
+            "authorization_domain": authorization_domain,
+            "reserve_cost": reserve_cost,
         }
         for name, value in (
             ("max_cost_per_million_tokens", max_cost_per_million_tokens),
@@ -9425,6 +12314,29 @@ class AutonomousTaskOrchestrator:
             )
         return replace(result, brain_run=replace(result.brain_run, response_evaluation=evaluation))
 
+    @staticmethod
+    def _apply_direct_response_review_gate(
+        result: Any,
+        *,
+        require_response_review: bool,
+    ) -> Any:
+        """Project a failed structural response into an explicit caller-review state.
+
+        Provider transport success is deliberately retained in the response and evaluation
+        metadata.  The status only communicates that the answer did not earn admission as a
+        completed autonomous result; callers can opt out when they need the legacy projection.
+        """
+
+        if not require_response_review:
+            return result
+        evaluation = _structured_response_evaluation(result)
+        if not isinstance(evaluation, Mapping) or evaluation.get("passed") is not False:
+            return result
+        status = getattr(result, "status", None)
+        if not isinstance(status, str) or not status.startswith("completed"):
+            return result
+        return replace(result, status="response_review_required")
+
     def _execute(
         self,
         blueprint: AutonomousTaskBlueprint,
@@ -9436,6 +12348,7 @@ class AutonomousTaskOrchestrator:
         content_parts: Sequence[Mapping[str, Any]] | None,
         contextual_observations: Sequence[Mapping[str, Any]],
         input_tokens: int,
+        context_budget: AutonomousContextBudgetOptions | Mapping[str, Any] | None,
         requested_output_tokens: int,
         max_cost_per_million_tokens: int | None,
         max_latency_ms: int | None,
@@ -9461,6 +12374,8 @@ class AutonomousTaskOrchestrator:
         execution_controller: AutonomousExecutionController | None = None,
         invocation_observer: ProviderInvocationObserver | None = None,
         trace_event_callback: Callable[..., Any] | None = None,
+        authorization_context: AutonomousAuthorizationContext | None = None,
+        reserve_cost: AutonomousCostReservationCallback | None = None,
     ) -> BrainRunResult | BrainToolLoopResult | BrainMissionResult:
         # Keep the legacy ``mission_policy`` shorthand while making the execution route
         # explicit for new callers.
@@ -9481,6 +12396,7 @@ class AutonomousTaskOrchestrator:
                 contextual_observations=contextual_observations,
                 required_capabilities=blueprint.required_capabilities,
                 input_tokens=input_tokens,
+                context_budget=context_budget,
                 requested_output_tokens=requested_output_tokens,
                 max_cost_per_million_tokens=max_cost_per_million_tokens,
                 max_latency_ms=max_latency_ms,
@@ -9498,7 +12414,10 @@ class AutonomousTaskOrchestrator:
                 max_provider_failovers=max_provider_failovers,
                 execution_controller=execution_controller,
                 invocation_observer=invocation_observer,
+                reserve_cost=reserve_cost,
                 trace_event_callback=trace_event_callback,
+                authorization_context=authorization_context,
+                authorization_domain=blueprint.spec.domain,
             )
             return self._attach_domain_response_evaluation(blueprint, result)
         if effective_mode == "tool_loop":
@@ -9549,6 +12468,7 @@ class AutonomousTaskOrchestrator:
                 contextual_observations=contextual_observations,
                 required_capabilities=blueprint.required_capabilities,
                 input_tokens=input_tokens,
+                context_budget=context_budget,
                 requested_output_tokens=requested_output_tokens,
                 max_cost_per_million_tokens=max_cost_per_million_tokens,
                 max_latency_ms=max_latency_ms,
@@ -9558,7 +12478,10 @@ class AutonomousTaskOrchestrator:
                 max_provider_failovers=max_provider_failovers,
                 execution_controller=execution_controller,
                 invocation_observer=invocation_observer,
+                reserve_cost=reserve_cost,
                 trace_event_callback=trace_event_callback,
+                authorization_context=authorization_context,
+                authorization_domain=blueprint.spec.domain,
             )
             return self._attach_domain_response_evaluation(blueprint, result)
         if effective_mode != "mission":
@@ -9572,6 +12495,7 @@ class AutonomousTaskOrchestrator:
             required_capabilities=blueprint.required_capabilities,
             contextual_observations=contextual_observations,
             input_tokens=input_tokens,
+            context_budget=context_budget,
             requested_output_tokens=requested_output_tokens,
             max_cost_per_million_tokens=max_cost_per_million_tokens,
             max_latency_ms=max_latency_ms,
@@ -9590,6 +12514,9 @@ class AutonomousTaskOrchestrator:
             provider_tools=provider_tools,
             tool_choice=tool_choice,
             max_provider_failovers=max_provider_failovers,
+            authorization_context=authorization_context,
+            authorization_domain=blueprint.spec.domain,
+            reserve_cost=reserve_cost,
         )
         result = self.brain.run_adaptive_mission(
             task=blueprint.spec.task,
@@ -9706,7 +12633,7 @@ class AutonomousTaskOrchestrator:
 
     def _run_prepared(self, blueprint: AutonomousTaskBlueprint, **kwargs: Any) -> BrainRunResult | BrainToolLoopResult | BrainMissionResult:
         allowed = {
-            "model_candidates", "credentials", "ledger", "content_parts", "contextual_observations", "input_tokens",
+            "model_candidates", "credentials", "ledger", "content_parts", "contextual_observations", "input_tokens", "context_budget",
             "requested_output_tokens", "max_cost_per_million_tokens", "max_latency_ms", "min_quality",
             "selection_overrides", "approve_provider_call", "approve_mission_dispatch", "run_id",
             "max_output_tokens", "temperature", "response_schema", "idempotency_key", "mission_policy",
@@ -9714,7 +12641,7 @@ class AutonomousTaskOrchestrator:
             "provider_tools", "tool_choice", "max_provider_failovers", "prompt", "execution_mode",
             "tool_loop_options", "bandit_state",
             "execution_controller", "invocation_observer",
-            "trace_event_callback",
+            "trace_event_callback", "authorization_context", "reserve_cost",
         }
         unknown = sorted(set(kwargs).difference(allowed))
         if unknown:
@@ -10328,9 +13255,16 @@ class AutonomousTaskOrchestrator:
         desired_outputs: Sequence[str] = (),
         context: Mapping[str, Any] | None = None,
         content_parts: Sequence[ProviderContentPart | Mapping[str, Any]] | None = None,
+        prompt_template: AutonomousPromptTemplate | None = None,
+        prompt_registry: AutonomousPromptRegistry | None = None,
+        prompt_selection: AutonomousPromptSelectionPlan | Mapping[str, Any] | None = None,
+        prompt_stage: str = "answer",
+        prompt_learning_state: AutonomousPromptLearningState | Mapping[str, Any] | None = None,
+        prompt_learning_exploration: float = 0.35,
         max_steps: int = 8,
         require_json: bool = False,
         structured_domain_response: bool = False,
+        require_response_review: bool = True,
         response_schema: Mapping[str, Any] | None = None,
         execution_mode: str = "provider",
         domain_policy_mode: str = "audit",
@@ -10344,13 +13278,22 @@ class AutonomousTaskOrchestrator:
         memory: BrainEpisodicMemory | None = None,
         memory_query: MemoryQuery | Mapping[str, Any] | None = None,
         memory_limit: int = 8,
+        memory_consolidator: AutonomousMemoryConsolidator | None = None,
+        memory_lesson_resolver: Callable[[str], str | None] | None = None,
+        memory_lesson_context_resolver: Callable[[Mapping[str, Any]], str | None] | None = None,
+        consolidated_memory_limit: int = 8,
+        retrieve_consolidated_memory: bool = True,
+        consolidated_memory_required: bool = False,
         contextual_observations: Sequence[Mapping[str, Any]] = (),
         input_tokens: int = 4_096,
+        context_budget: AutonomousContextBudgetOptions | Mapping[str, Any] | None = None,
         requested_output_tokens: int = 2_048,
         max_cost_per_million_tokens: int | None = None,
         max_latency_ms: int | None = None,
         min_quality: float | None = None,
         selection_overrides: Mapping[str, Any] | None = None,
+        selection_weights: Mapping[str, Any] | None = None,
+        selection_observations: Sequence[Mapping[str, Any]] | None = None,
         approve_provider_call: bool = False,
         approve_mission_dispatch: bool = False,
         approved_stage_ids: Sequence[str] = (),
@@ -10378,6 +13321,8 @@ class AutonomousTaskOrchestrator:
         memory_tags: Sequence[str] = (),
         invocation_observer: ProviderInvocationObserver | None = None,
         trace_event_callback: Callable[..., Any] | None = None,
+        authorization_context: AutonomousAuthorizationContext | None = None,
+        reserve_cost: AutonomousCostReservationCallback | None = None,
     ) -> Any:
         """Run one domain-aware task through adaptive selection and bounded invocation.
 
@@ -10385,6 +13330,14 @@ class AutonomousTaskOrchestrator:
         learning loop. Pass ``mission_policy`` to promote the provider proposal into the existing
         route/mission executor; dispatch still requires ``approve_mission_dispatch=True``.
         """
+
+        if not isinstance(require_response_review, bool):
+            raise BrainRunError("require_response_review must be a boolean")
+        selection_overrides = _selection_overrides_with_weights(
+            selection_overrides,
+            selection_weights,
+            selection_observations,
+        )
 
         normalized_content_parts = (
             None if content_parts is None else normalize_provider_content_parts(content_parts)
@@ -10399,6 +13352,18 @@ class AutonomousTaskOrchestrator:
             domain=domain,
             capability=capability,
             risk_class=risk_class,
+            authorization_context=authorization_context,
+        )
+        consolidated_references = self._consolidated_memory(
+            memory_consolidator,
+            memory_lesson_resolver,
+            memory_lesson_context_resolver,
+            domains=(domain,),
+            capability=capability,
+            limit=consolidated_memory_limit,
+            retrieve=retrieve_consolidated_memory,
+            required=consolidated_memory_required,
+            authorization_context=authorization_context,
         )
         blueprint = self.prepare(
             task=task,
@@ -10416,6 +13381,18 @@ class AutonomousTaskOrchestrator:
             max_input_tokens=input_tokens,
             required_model_capabilities=required_model_capabilities,
             memory_episodes=recalled,
+            memory_lesson_references=consolidated_references,
+        )
+        route_binding = blueprint.selection_context.get("autonomous_route")
+        blueprint = _apply_versioned_prompt(
+            blueprint,
+            route=route_binding if isinstance(route_binding, Mapping) else None,
+            prompt_template=prompt_template,
+            prompt_registry=prompt_registry,
+            prompt_selection=prompt_selection,
+            prompt_stage=prompt_stage,
+            prompt_learning_state=prompt_learning_state,
+            prompt_learning_exploration=prompt_learning_exploration,
         )
         _assert_task_decision_allows_provider(
             blueprint.task_decision,
@@ -10577,6 +13554,9 @@ class AutonomousTaskOrchestrator:
                         "provider_tools": provider_tools,
                         "tool_choice": tool_choice,
                         "max_provider_failovers": max_provider_failovers,
+                        "authorization_context": authorization_context,
+                        "authorization_domain": blueprint.spec.domain,
+                        "reserve_cost": reserve_cost,
                     }
                 )
                 learning_cycle = self.brain.run_adaptive_mission_learning_cycle(
@@ -10617,10 +13597,12 @@ class AutonomousTaskOrchestrator:
                 ledger=ledger,
                 max_replans=max_replans,
                 memory_tags=memory_tags,
+                require_response_review=require_response_review,
                 execution_kwargs={
                     "contextual_observations": contextual_observations,
                     "content_parts": normalized_content_parts,
                     "input_tokens": input_tokens,
+                    "context_budget": context_budget,
                     "requested_output_tokens": requested_output_tokens,
                     "max_cost_per_million_tokens": max_cost_per_million_tokens,
                     "max_latency_ms": max_latency_ms,
@@ -10644,12 +13626,14 @@ class AutonomousTaskOrchestrator:
                     "execution_mode": execution_mode,
                     "tool_loop_options": tool_loop_options,
                     "bandit_state": bandit_state,
+                    "reserve_cost": reserve_cost,
                     "execution_controller": execution_controller,
                     "invocation_observer": invocation_observer,
                     "trace_event_callback": trace_event_callback,
-                },
-            ))
-        return self._execute(
+                    "authorization_context": authorization_context,
+                    },
+                ))
+        result = self._execute(
             blueprint,
             model_candidates=model_candidates,
             credentials=credentials,
@@ -10657,6 +13641,7 @@ class AutonomousTaskOrchestrator:
             content_parts=normalized_content_parts,
             contextual_observations=contextual_observations,
             input_tokens=input_tokens,
+            context_budget=context_budget,
             requested_output_tokens=requested_output_tokens,
             max_cost_per_million_tokens=max_cost_per_million_tokens,
             max_latency_ms=max_latency_ms,
@@ -10683,6 +13668,12 @@ class AutonomousTaskOrchestrator:
             execution_controller=execution_controller,
             invocation_observer=invocation_observer,
             trace_event_callback=trace_event_callback,
+            authorization_context=authorization_context,
+            reserve_cost=reserve_cost,
+        )
+        return self._apply_direct_response_review_gate(
+            result,
+            require_response_review=require_response_review,
         )
 
     @staticmethod
@@ -10772,8 +13763,10 @@ class AutonomousTaskOrchestrator:
         notes = structured.get("notes", "")
         if not isinstance(notes, str) or len(notes.encode("utf-8")) > MAX_AUTONOMY_TEXT_BYTES:
             errors.append("provider stage notes are malformed or exceed their bound")
-        if declared == "completed" and not evidence:
-            errors.append("completed stage returned no evidence")
+        # Evidence presence is evaluated by the digest-bound stage response evaluator below.
+        # Keeping it out of the syntactic validator means a missing-evidence completion is
+        # recorded as a quality-gated block with replayable evaluator feedback, rather than
+        # disappearing as an unscored provider parse failure.
         if declared == "completed" and not stage.evidence_outputs:
             errors.append("workflow stage has no declared evidence outputs")
         return declared, evidence, uncertainty, tuple(errors)
@@ -10860,6 +13853,7 @@ class AutonomousTaskOrchestrator:
         model_candidates: Sequence[Mapping[str, Any]],
         credentials: Mapping[str, CredentialHandle],
         completed_child_results: Mapping[str, BrainRunResult | BrainToolLoopResult | BrainMissionResult] | None = None,
+        completed_synthesis_result: BrainRunResult | BrainToolLoopResult | BrainMissionResult | None = None,
         next_child_id: str | None = None,
         accepted_plan_refinement: AutonomousCrossDomainPlanRefinementResult | None = None,
         ledger: BrainLearningLedger | None = None,
@@ -10874,8 +13868,11 @@ class AutonomousTaskOrchestrator:
         max_latency_ms: int | None = None,
         min_quality: float | None = None,
         selection_overrides: Mapping[str, Any] | None = None,
+        selection_weights: Mapping[str, Any] | None = None,
+        selection_observations: Sequence[Mapping[str, Any]] | None = None,
         approve_provider_call: bool = False,
         approve_mission_dispatch: bool = False,
+        approved_stage_ids: Sequence[str] = (),
         run_id: str | None = None,
         max_output_tokens: int = 2_048,
         temperature: float | None = None,
@@ -10891,7 +13888,15 @@ class AutonomousTaskOrchestrator:
         max_provider_failovers: int = 2,
         tool_loop_options: Mapping[str, Any] | None = None,
         bandit_state: Mapping[str, Any] | None = None,
+        response_alignments: Sequence[Mapping[str, Any]] = (),
+        require_response_alignment: bool = False,
+        minimum_response_reward: float = 0.8,
+        minimum_response_alignment_confidence: float = 0.75,
+        response_contradiction_confidence_threshold: float = 0.75,
+        retry_synthesis_after_response_review: bool = False,
         execution_controller: AutonomousExecutionController | None = None,
+        authorization_context: AutonomousAuthorizationContext | None = None,
+        reserve_cost: AutonomousCostReservationCallback | None = None,
     ) -> AutonomousCrossDomainStepResult:
         """Execute exactly one child or the final synthesis for restart-safe fan-out.
 
@@ -10902,6 +13907,18 @@ class AutonomousTaskOrchestrator:
 
         if not isinstance(blueprint, AutonomousCrossDomainBlueprint):
             raise BrainRunError("cross-domain step requires an AutonomousCrossDomainBlueprint")
+        if not isinstance(require_response_alignment, bool):
+            raise BrainRunError("require_response_alignment must be a boolean")
+        if not isinstance(retry_synthesis_after_response_review, bool):
+            raise BrainRunError("retry_synthesis_after_response_review must be a boolean")
+        response_alignments = _mapping_sequence("cross-domain response_alignments", response_alignments, maximum=64)
+        for name, value in (
+            ("minimum_response_reward", minimum_response_reward),
+            ("minimum_response_alignment_confidence", minimum_response_alignment_confidence),
+            ("response_contradiction_confidence_threshold", response_contradiction_confidence_threshold),
+        ):
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(float(value)) or not 0.0 <= float(value) <= 1.0:
+                raise BrainRunError(f"{name} must be finite and within [0, 1]")
         plan_priority, plan_refinement_digest, plan_focus_child_ids = self._accepted_cross_domain_plan(
             blueprint,
             accepted_plan_refinement,
@@ -10923,6 +13940,13 @@ class AutonomousTaskOrchestrator:
             if not result.status.startswith("completed"):
                 raise BrainRunError("cross-domain step cannot rehydrate an incomplete child result")
             prior[child_id] = result
+        if completed_synthesis_result is not None and not isinstance(
+            completed_synthesis_result,
+            (BrainRunResult, BrainToolLoopResult, BrainMissionResult),
+        ):
+            raise BrainRunError("cross-domain step completed synthesis result is unsupported")
+        if completed_synthesis_result is not None and not completed_synthesis_result.status.startswith("completed"):
+            raise BrainRunError("cross-domain step cannot rehydrate an incomplete synthesis result")
 
         def child_context_for(child_id: str) -> dict[str, Any]:
             child = child_by_id[child_id]
@@ -10954,7 +13978,9 @@ class AutonomousTaskOrchestrator:
                 context=context,
                 max_steps=item.spec.max_steps,
                 require_json=item.spec.require_json,
-                response_schema=item.spec.response_schema,
+                structured_domain_response=item.spec.structured_domain_response,
+                require_response_review=False,
+                response_schema=None if item.spec.structured_domain_response else item.spec.response_schema,
                 execution_mode=item.spec.execution_mode,
                 required_model_capabilities=tuple(
                     capability
@@ -10973,6 +13999,8 @@ class AutonomousTaskOrchestrator:
                 max_latency_ms=max_latency_ms,
                 min_quality=min_quality,
                 selection_overrides=selection_overrides,
+                selection_weights=selection_weights,
+                selection_observations=selection_observations,
                 bandit_state=bandit_state,
                 approve_provider_call=approve_provider_call,
                 approve_mission_dispatch=approve_mission_dispatch,
@@ -10991,6 +14019,8 @@ class AutonomousTaskOrchestrator:
                 max_provider_failovers=max_provider_failovers,
                 tool_loop_options=tool_loop_options,
                 execution_controller=execution_controller,
+                authorization_context=authorization_context,
+                reserve_cost=reserve_cost,
             )
             if not isinstance(result, (BrainRunResult, BrainToolLoopResult, BrainMissionResult)):
                 raise BrainRunError("cross-domain step returned an unsupported brain result")
@@ -11027,6 +14057,96 @@ class AutonomousTaskOrchestrator:
 
         if set(prior) != set(execution_child_ids):
             raise BrainRunError("cross-domain synthesis requires every completed child result")
+        response_assessment = None
+        structured_mode = any(
+            item.spec.structured_domain_response
+            for item in (*blueprint.child_blueprints, blueprint.synthesis_blueprint)
+        )
+        if completed_synthesis_result is not None and not retry_synthesis_after_response_review:
+            if structured_mode:
+                entries = self._cross_domain_response_entries(
+                    blueprint,
+                    execution_child_ids,
+                    tuple(prior[child_id] for child_id in execution_child_ids),
+                    synthesis_result=completed_synthesis_result,
+                )
+                if entries is not None:
+                    response_assessment = assess_autonomous_cross_domain_response_set(
+                        entries,
+                        requested_domains=tuple(child.profile.domain for child in blueprint.child_blueprints),
+                        context_digest=blueprint.task_digest,
+                        alignments=response_alignments,
+                        require_synthesis=True,
+                        require_complete_alignment=require_response_alignment,
+                        minimum_reward=float(minimum_response_reward),
+                        minimum_alignment_confidence=float(minimum_response_alignment_confidence),
+                        contradiction_confidence_threshold=float(response_contradiction_confidence_threshold),
+                    )
+            if response_assessment is not None and response_assessment.status != "completed":
+                return AutonomousCrossDomainStepResult(
+                    status="synthesis_response_review_required",
+                    phase="synthesis",
+                    item_id="synthesis",
+                    blueprint=blueprint,
+                    result=completed_synthesis_result,
+                    execution_child_ids=execution_child_ids,
+                    completed_child_ids=execution_child_ids,
+                    child_result_digests={
+                        child_id: _autonomous_result_digest(prior[child_id])
+                        for child_id in execution_child_ids
+                    },
+                    plan_refinement_digest=plan_refinement_digest,
+                    response_assessment=response_assessment,
+                )
+            return AutonomousCrossDomainStepResult(
+                status=completed_synthesis_result.status,
+                phase="synthesis",
+                item_id="synthesis",
+                blueprint=blueprint,
+                result=completed_synthesis_result,
+                execution_child_ids=execution_child_ids,
+                completed_child_ids=execution_child_ids,
+                child_result_digests={
+                    child_id: _autonomous_result_digest(prior[child_id])
+                    for child_id in execution_child_ids
+                },
+                plan_refinement_digest=plan_refinement_digest,
+                response_assessment=response_assessment,
+            )
+        if structured_mode:
+            entries = self._cross_domain_response_entries(
+                blueprint,
+                execution_child_ids,
+                tuple(prior[child_id] for child_id in execution_child_ids),
+            )
+            if entries is not None:
+                response_assessment = assess_autonomous_cross_domain_response_set(
+                    entries,
+                    requested_domains=tuple(child.profile.domain for child in blueprint.child_blueprints),
+                    context_digest=blueprint.task_digest,
+                    alignments=response_alignments,
+                    require_synthesis=False,
+                    require_complete_alignment=require_response_alignment,
+                    minimum_reward=float(minimum_response_reward),
+                    minimum_alignment_confidence=float(minimum_response_alignment_confidence),
+                    contradiction_confidence_threshold=float(response_contradiction_confidence_threshold),
+                )
+        if response_assessment is not None and not response_assessment.ready_to_synthesize:
+            return AutonomousCrossDomainStepResult(
+                status="response_review_required",
+                phase="synthesis",
+                item_id="synthesis",
+                blueprint=blueprint,
+                result=None,
+                execution_child_ids=execution_child_ids,
+                completed_child_ids=execution_child_ids,
+                child_result_digests={
+                    child_id: _autonomous_result_digest(prior[child_id])
+                    for child_id in execution_child_ids
+                },
+                plan_refinement_digest=plan_refinement_digest,
+                response_assessment=response_assessment,
+            )
         child_outputs = [
             {
                 "id": child_id,
@@ -11054,6 +14174,41 @@ class AutonomousTaskOrchestrator:
             context=synthesis_context,
             identity_suffix="synthesis",
         )
+        if structured_mode and synthesis_result.status.startswith("completed"):
+            entries = self._cross_domain_response_entries(
+                blueprint,
+                execution_child_ids,
+                tuple(prior[child_id] for child_id in execution_child_ids),
+                synthesis_result=synthesis_result,
+            )
+            if entries is not None:
+                response_assessment = assess_autonomous_cross_domain_response_set(
+                    entries,
+                    requested_domains=tuple(child.profile.domain for child in blueprint.child_blueprints),
+                    context_digest=blueprint.task_digest,
+                    alignments=response_alignments,
+                    require_synthesis=True,
+                    require_complete_alignment=require_response_alignment,
+                    minimum_reward=float(minimum_response_reward),
+                    minimum_alignment_confidence=float(minimum_response_alignment_confidence),
+                    contradiction_confidence_threshold=float(response_contradiction_confidence_threshold),
+                )
+                if response_assessment.status != "completed":
+                    return AutonomousCrossDomainStepResult(
+                        status="synthesis_response_review_required",
+                        phase="synthesis",
+                        item_id="synthesis",
+                        blueprint=blueprint,
+                        result=synthesis_result,
+                        execution_child_ids=execution_child_ids,
+                        completed_child_ids=execution_child_ids,
+                        child_result_digests={
+                            child_id: _autonomous_result_digest(prior[child_id])
+                            for child_id in execution_child_ids
+                        },
+                        plan_refinement_digest=plan_refinement_digest,
+                        response_assessment=response_assessment,
+                    )
         return AutonomousCrossDomainStepResult(
             status=synthesis_result.status,
             phase="synthesis",
@@ -11067,6 +14222,7 @@ class AutonomousTaskOrchestrator:
                 for child_id in execution_child_ids
             },
             plan_refinement_digest=plan_refinement_digest,
+            response_assessment=response_assessment,
         )
 
     def run_workflow(
@@ -11092,8 +14248,11 @@ class AutonomousTaskOrchestrator:
         max_latency_ms: int | None = None,
         min_quality: float | None = None,
         selection_overrides: Mapping[str, Any] | None = None,
+        selection_weights: Mapping[str, Any] | None = None,
+        selection_observations: Sequence[Mapping[str, Any]] | None = None,
         approve_provider_call: bool = False,
         approve_mission_dispatch: bool = False,
+        approved_stage_ids: Sequence[str] = (),
         run_id: str | None = None,
         max_output_tokens: int = 2_048,
         temperature: float | None = None,
@@ -11116,10 +14275,18 @@ class AutonomousTaskOrchestrator:
         domain_policy_effects_approved: bool | None = None,
         context: Mapping[str, Any] | None = None,
         content_parts: Sequence[ProviderContentPart | Mapping[str, Any]] | None = None,
+        prompt_template: AutonomousPromptTemplate | None = None,
+        prompt_registry: AutonomousPromptRegistry | None = None,
+        prompt_selection: AutonomousPromptSelectionPlan | Mapping[str, Any] | None = None,
+        prompt_stage: str | None = None,
+        prompt_learning_state: AutonomousPromptLearningState | Mapping[str, Any] | None = None,
+        prompt_learning_exploration: float = 0.35,
         execution_plan_context: Mapping[str, Any] | None = None,
         execution_controller: AutonomousExecutionController | None = None,
         invocation_observer: ProviderInvocationObserver | None = None,
         trace_event_callback: Callable[..., Any] | None = None,
+        authorization_context: AutonomousAuthorizationContext | None = None,
+        reserve_cost: AutonomousCostReservationCallback | None = None,
     ) -> AutonomousWorkflowRun:
         """Execute a prepared domain workflow as a resumable, dependency-checked stage DAG.
 
@@ -11155,6 +14322,19 @@ class AutonomousTaskOrchestrator:
             raise BrainRunError("max_stage_calls must be between 1 and 16")
         if not isinstance(auto_route, bool):
             raise BrainRunError("auto_route must be a boolean")
+        approved_stage_ids = _sequence(
+            "workflow approved_stage_ids",
+            approved_stage_ids,
+            maximum=len(blueprint.workflow.stages),
+        )
+        unknown_approved_stages = sorted(
+            set(approved_stage_ids).difference(stage.id for stage in blueprint.workflow.stages)
+        )
+        if unknown_approved_stages:
+            raise BrainRunError(
+                "workflow approved_stage_ids contains unknown stages: "
+                + ", ".join(unknown_approved_stages)
+            )
         if execution_plan_context is not None:
             if not isinstance(execution_plan_context, Mapping):
                 raise BrainRunError("workflow execution_plan_context must be a mapping or None")
@@ -11358,12 +14538,20 @@ class AutonomousTaskOrchestrator:
                 memory_limit=memory_limit,
                 contextual_observations=contextual_observations,
                 content_parts=content_parts,
+                prompt_template=prompt_template,
+                prompt_registry=prompt_registry,
+                prompt_selection=prompt_selection,
+                prompt_stage=ready.id if prompt_stage is None else prompt_stage,
+                prompt_learning_state=prompt_learning_state,
+                prompt_learning_exploration=prompt_learning_exploration,
                 input_tokens=input_tokens,
                 requested_output_tokens=requested_output_tokens,
                 max_cost_per_million_tokens=max_cost_per_million_tokens,
                 max_latency_ms=max_latency_ms,
                 min_quality=min_quality,
                 selection_overrides=selection_overrides,
+                selection_weights=selection_weights,
+                selection_observations=selection_observations,
                 approve_provider_call=approve_provider_call,
                 approve_mission_dispatch=approve_mission_dispatch,
                 run_id=f"{workflow_run_id}-stage-{ready.id}",
@@ -11389,6 +14577,8 @@ class AutonomousTaskOrchestrator:
                 execution_controller=execution_controller,
                 invocation_observer=invocation_observer,
                 trace_event_callback=trace_event_callback,
+                authorization_context=authorization_context,
+                reserve_cost=reserve_cost,
             )
             if not isinstance(stage_result, (BrainRunResult, BrainToolLoopResult, BrainMissionResult)):
                 raise BrainRunError("workflow stage returned an unsupported result")
@@ -11408,6 +14598,22 @@ class AutonomousTaskOrchestrator:
                     workflow_digest=blueprint.workflow.workflow_digest,
                     stage_id=ready.id,
                 ).to_dict()
+            quality_gate_failed = (
+                execution_status == "completed"
+                and not errors
+                and declared == "completed"
+                and response_evaluation is not None
+                and response_evaluation["passed"] is False
+            )
+            stage_validation_errors = tuple(errors)
+            if quality_gate_failed:
+                missing = response_evaluation.get("missing_signals", ())
+                stage_validation_errors = (
+                    *stage_validation_errors,
+                    "workflow stage quality gate failed: "
+                    + (", ".join(str(item) for item in missing) or "integrity evaluation"),
+                )
+                execution_status = "blocked"
             stage_report = AutonomousWorkflowStageResult(
                 stage=ready,
                 execution_status=execution_status,
@@ -11416,7 +14622,7 @@ class AutonomousTaskOrchestrator:
                 structured=structured,
                 evidence=evidence,
                 uncertainty=uncertainty,
-                validation_errors=errors,
+                validation_errors=stage_validation_errors,
                 response_digest=response_digest,
                 attempt=1,
                 stage_execution_plan=stage_execution_plan.to_dict(),
@@ -11428,16 +14634,44 @@ class AutonomousTaskOrchestrator:
                 status="running",
                 plan_digest=stage_execution_plan.stage_plan_digest,
                 detail_digest=response_digest,
-                failure_code="workflow_stage_validation_failed" if errors else None,
+                failure_code=(
+                    "workflow_stage_quality_gate_failed"
+                    if quality_gate_failed
+                    else "workflow_stage_validation_failed"
+                    if errors
+                    else None
+                ),
             )
             stage_results.append(stage_report)
             snapshot = stage_report.checkpoint_snapshot()
             if snapshot is not None and not errors:
+                if quality_gate_failed:
+                    # Preserve the evaluator and transient structured output for an explicit
+                    # retry, while making the stage non-completable until retry_blocked=True.
+                    snapshot = {
+                        **snapshot,
+                        "status": "blocked",
+                        "execution_status": "blocked",
+                    }
                 snapshots[ready.id] = snapshot
             if execution_status == "approval_required":
                 return AutonomousWorkflowRun(
                     workflow_run_id,
                     "approval_required",
+                    blueprint,
+                    tuple(stage_results),
+                    self._workflow_checkpoint(
+                        run_id=workflow_run_id,
+                        blueprint=blueprint,
+                        snapshots=tuple(snapshots.values()),
+                        plan_refinement_digest=plan_refinement_digest,
+                    ),
+                    (ready.id,),
+                )
+            if quality_gate_failed:
+                return AutonomousWorkflowRun(
+                    workflow_run_id,
+                    "stage_blocked",
                     blueprint,
                     tuple(stage_results),
                     self._workflow_checkpoint(
@@ -11617,6 +14851,9 @@ class AutonomousTaskOrchestrator:
         memory_store = memory if memory is not None else self.brain.memory
         if memory_store is not None and not isinstance(memory_store, BrainEpisodicMemory):
             raise BrainRunError("workflow learning memory must be a BrainEpisodicMemory or None")
+        authorization_context = workflow_kwargs.get("authorization_context")
+        if authorization_context is not None and not isinstance(authorization_context, AutonomousAuthorizationContext):
+            raise BrainRunError("workflow learning authorization_context must be an AutonomousAuthorizationContext or None")
         normalized_tags = _sequence("workflow learning memory_tags", memory_tags, maximum=32)
         blueprint = workflow_kwargs.get("blueprint")
         if not isinstance(blueprint, AutonomousTaskBlueprint):
@@ -11730,13 +14967,24 @@ class AutonomousTaskOrchestrator:
                             "task_decision_digest": _memory_task_decision_digest(blueprint),
                         },
                         memory=memory_store,
+                        authorization_context=authorization_context,
+                        authorization_domain=blueprint.spec.domain,
+                        authorization_capability=blueprint.spec.capability,
+                        authorization_risk_class=blueprint.spec.risk_class,
                     )
                     try:
+                        decision_digest = content_digest(decision.to_dict())
+                        self._authorize_memory_evaluation(
+                            authorization_context,
+                            domain=blueprint.spec.domain,
+                            episode_id=episode_id,
+                            decision_digest=decision_digest,
+                        )
                         evaluation_receipt = memory_store.record_evaluation(
                             episode_id,
                             {
                                 **decision.to_dict(),
-                                "decision_digest": content_digest(decision.to_dict()),
+                                "decision_digest": decision_digest,
                             },
                         ).to_dict()
                     except BrainMemoryError as error:
@@ -11818,6 +15066,9 @@ class AutonomousTaskOrchestrator:
         memory_store = memory if memory is not None else self.brain.memory
         if memory_store is not None and not isinstance(memory_store, BrainEpisodicMemory):
             raise BrainRunError("workflow trajectory memory must be a BrainEpisodicMemory or None")
+        authorization_context = workflow_kwargs.get("authorization_context")
+        if authorization_context is not None and not isinstance(authorization_context, AutonomousAuthorizationContext):
+            raise BrainRunError("workflow trajectory authorization_context must be an AutonomousAuthorizationContext or None")
         normalized_tags = _sequence("workflow trajectory memory_tags", memory_tags, maximum=32)
         blueprint = workflow_kwargs.get("blueprint")
         if not isinstance(blueprint, AutonomousTaskBlueprint):
@@ -11974,13 +15225,26 @@ class AutonomousTaskOrchestrator:
                             "task_decision_digest": _memory_task_decision_digest(blueprint),
                         },
                         memory=memory_store,
+                        authorization_context=authorization_context,
+                        authorization_domain=blueprint.spec.domain,
+                        authorization_capability=blueprint.spec.capability,
+                        authorization_risk_class=blueprint.spec.risk_class,
                     )
                     try:
+                        decision_digest = content_digest(decision.to_dict())
+                        self._authorize_memory_evaluation(
+                            authorization_context,
+                            domain=blueprint.spec.domain,
+                            episode_id=episode_id,
+                            decision_digest=decision_digest,
+                            trajectory_id=trajectory_result.trajectory.trajectory_id,
+                            trajectory_step=index,
+                        )
                         evaluation_receipt = memory_store.record_evaluation(
                             episode_id,
                             {
                                 **decision.to_dict(),
-                                "decision_digest": content_digest(decision.to_dict()),
+                                "decision_digest": decision_digest,
                             },
                         ).to_dict()
                     except BrainMemoryError as error:
@@ -12004,6 +15268,88 @@ class AutonomousTaskOrchestrator:
         )
 
     @staticmethod
+    def _provider_failure_result(
+        blueprint: AutonomousTaskBlueprint,
+        *,
+        child_id: str,
+        error: ProviderError | CredentialError,
+        run_id: str | None,
+    ) -> BrainRunResult:
+        """Convert a provider-boundary exception into a safe child result envelope.
+
+        A provider or credential failure is an expected operational outcome for a bounded
+        fan-out, not a reason to lose every sibling result.  Only stable class/transport
+        metadata crosses this boundary.  In particular, ``str(error)`` is never copied because
+        provider implementations and credential stores may include sensitive diagnostics there.
+        ``BrainRunError`` and other programming/configuration errors remain exceptions so an
+        invalid request cannot be disguised as an unavailable child.
+        """
+
+        failure: dict[str, Any] = {
+            "error_class": type(error).__name__,
+            "retryable": bool(getattr(error, "retryable", False)),
+            "circuit_open": bool(getattr(error, "circuit_open", False)),
+            "status_code": getattr(error, "status_code", None),
+            "retention": "metadata_only;provider_error_message_and_payloads_not_retained",
+            "secret_material": "never_returned",
+        }
+        identity = {
+            "schema": "bioprism-python-autonomous-provider-failure/0.1",
+            "child_id": child_id,
+            "plan_digest": blueprint.plan.get("plan_digest"),
+            "error_class": failure["error_class"],
+            "retryable": failure["retryable"],
+            "circuit_open": failure["circuit_open"],
+            "status_code": failure["status_code"],
+        }
+        failure_run_id = run_id or f"cross-child-failure-{content_digest(identity)[:48]}"
+        return BrainRunResult(
+            run_id=failure_run_id,
+            status="provider_failed",
+            selection={
+                "status": "provider_failed",
+                "selected_model": None,
+                "retention": "selection_metadata_only;provider_failure_no_model_payload",
+            },
+            prompt={
+                "prompt_digest": content_digest(blueprint.prompt),
+                "retention": "provider_prompt_not_dispatched;digest_only",
+            },
+            plan={
+                "plan_digest": blueprint.plan.get("plan_digest"),
+                "status": "provider_failed",
+                "retention": "plan_metadata_only",
+            },
+            response=None,
+            outcome_digest=content_digest({**identity, "run_id": failure_run_id}),
+            failure=failure,
+        )
+
+    @classmethod
+    def _provider_failure_call(
+        cls,
+        blueprint: AutonomousTaskBlueprint,
+        *,
+        child_id: str,
+        run_id: str | None,
+        invoke: Callable[[], BrainRunResult | BrainToolLoopResult | BrainMissionResult],
+    ) -> BrainRunResult | BrainToolLoopResult | BrainMissionResult:
+        """Run one provider-bound item while preserving a typed failure envelope."""
+
+        try:
+            result = invoke()
+        except (ProviderError, CredentialError) as error:
+            result = cls._provider_failure_result(
+                blueprint,
+                child_id=child_id,
+                error=error,
+                run_id=run_id,
+            )
+        if not isinstance(result, (BrainRunResult, BrainToolLoopResult, BrainMissionResult)):
+            raise BrainRunError("provider-bound cross-domain call returned an unsupported result")
+        return result
+
+    @staticmethod
     def _cross_domain_output(result: BrainRunResult | BrainToolLoopResult | BrainMissionResult) -> str:
         response = None
         if isinstance(result, BrainRunResult):
@@ -12018,6 +15364,50 @@ class AutonomousTaskOrchestrator:
             return ""
         encoded = response.text.encode("utf-8")[:32_000]
         return encoded.decode("utf-8", errors="ignore")
+
+    def _cross_domain_response_entries(
+        self,
+        blueprint: AutonomousCrossDomainBlueprint,
+        execution_child_ids: Sequence[str],
+        child_results: Sequence[BrainRunResult | BrainToolLoopResult | BrainMissionResult],
+        *,
+        synthesis_result: BrainRunResult | BrainToolLoopResult | BrainMissionResult | None = None,
+    ) -> list[dict[str, Any]] | None:
+        """Build transient structured-response entries for the synthesis admission gate."""
+
+        if not any(child.response_contract is not None for child in blueprint.child_blueprints) and blueprint.synthesis_blueprint.response_contract is None:
+            return None
+        child_by_id = dict(zip(blueprint.child_ids, blueprint.child_blueprints))
+        entries: list[dict[str, Any]] = []
+        for child_id, result in zip(execution_child_ids, child_results):
+            child = child_by_id.get(child_id)
+            if child is None or child.response_contract is None:
+                continue
+            provider_response = self._workflow_provider_response(result)
+            response = getattr(provider_response, "structured", None)
+            if response is None and isinstance(provider_response, Mapping):
+                response = provider_response.get("structured")
+            if response is None:
+                continue
+            entries.append({
+                "domain": child.profile.domain,
+                "contract": child.response_contract,
+                "response": response,
+                "role": "specialist",
+            })
+        if synthesis_result is not None and blueprint.synthesis_blueprint.response_contract is not None:
+            provider_response = self._workflow_provider_response(synthesis_result)
+            response = getattr(provider_response, "structured", None)
+            if response is None and isinstance(provider_response, Mapping):
+                response = provider_response.get("structured")
+            if response is not None:
+                entries.append({
+                    "domain": blueprint.synthesis_blueprint.profile.domain,
+                    "contract": blueprint.synthesis_blueprint.response_contract,
+                    "response": response,
+                    "role": "synthesis",
+                })
+        return entries or None
 
     @staticmethod
     def _cross_domain_identity(prefix: str, parent: str | None, child_id: str) -> str | None:
@@ -12046,6 +15436,55 @@ class AutonomousTaskOrchestrator:
         )
         return scoped
 
+    @staticmethod
+    def _cross_domain_trajectory_items(
+        cross_domain: AutonomousCrossDomainResult,
+        *,
+        allow_partial: bool,
+    ) -> list[tuple[str, str, AutonomousTaskBlueprint, BrainRunResult | BrainToolLoopResult | BrainMissionResult]]:
+        """Return only completed fan-out/fan-in results that may receive delayed credit.
+
+        Provider, approval, route, and execution failures are useful control-plane evidence, but
+        they are not task outcomes. Keeping them out of a trajectory is especially important for
+        delayed settlement: ``prepare_learning_trajectory`` intentionally accepts typed result
+        envelopes without deciding whether an individual envelope is creditable. This boundary
+        therefore performs the status admission once and preserves accepted execution order; the
+        original ``cross_domain`` envelope remains available to the caller for control-plane
+        inspection without exposing provider payloads through the trajectory.
+        """
+
+        if not isinstance(cross_domain, AutonomousCrossDomainResult):
+            raise BrainRunError("cross-domain trajectory requires an execution result")
+        if not isinstance(allow_partial, bool):
+            raise BrainRunError("cross-domain trajectory allow_partial must be a boolean")
+        child_by_id = dict(zip(cross_domain.blueprint.child_ids, cross_domain.blueprint.child_blueprints))
+        raw_items: list[
+            tuple[str, str, AutonomousTaskBlueprint, BrainRunResult | BrainToolLoopResult | BrainMissionResult]
+        ] = []
+        for child_id, result in zip(cross_domain.execution_child_ids, cross_domain.child_results):
+            child = child_by_id[child_id]
+            raw_items.append(("child", child_id, child, result))
+        if cross_domain.synthesis_result is not None:
+            raw_items.append(
+                (
+                    "synthesis",
+                    "synthesis",
+                    cross_domain.blueprint.synthesis_blueprint,
+                    cross_domain.synthesis_result,
+                )
+            )
+        if not raw_items:
+            raise BrainRunError("cross-domain trajectory contains no results to evaluate")
+        if any(not item[3].status.startswith("completed") for item in raw_items) and not allow_partial:
+            raise BrainRunError(
+                "cross-domain trajectory cannot settle a non-completed run in strict mode; "
+                "set allow_partial=True to settle completed items only"
+            )
+        completed_items = [item for item in raw_items if item[3].status.startswith("completed")]
+        if not completed_items:
+            raise BrainRunError("cross-domain trajectory contains no completed results to evaluate")
+        return completed_items
+
     def run_cross_domain(
         self,
         *,
@@ -12055,6 +15494,12 @@ class AutonomousTaskOrchestrator:
         credentials: Mapping[str, CredentialHandle],
         context: Mapping[str, Any] | None = None,
         content_parts: Sequence[ProviderContentPart | Mapping[str, Any]] | None = None,
+        prompt_template: AutonomousPromptTemplate | None = None,
+        prompt_registry: AutonomousPromptRegistry | None = None,
+        prompt_selection: AutonomousPromptSelectionPlan | Mapping[str, Any] | None = None,
+        prompt_stage: str = "answer",
+        prompt_learning_state: AutonomousPromptLearningState | Mapping[str, Any] | None = None,
+        prompt_learning_exploration: float = 0.35,
         execution_plan_context: Mapping[str, Any] | None = None,
         desired_outputs: Sequence[str] = (
             "domain-attributed findings",
@@ -12071,6 +15516,12 @@ class AutonomousTaskOrchestrator:
         memory: BrainEpisodicMemory | None = None,
         memory_query: MemoryQuery | Mapping[str, Any] | None = None,
         memory_limit: int = 8,
+        memory_consolidator: AutonomousMemoryConsolidator | None = None,
+        memory_lesson_resolver: Callable[[str], str | None] | None = None,
+        memory_lesson_context_resolver: Callable[[Mapping[str, Any]], str | None] | None = None,
+        consolidated_memory_limit: int = 8,
+        retrieve_consolidated_memory: bool = True,
+        consolidated_memory_required: bool = False,
         contextual_observations: Sequence[Mapping[str, Any]] = (),
         input_tokens: int = 4_096,
         requested_output_tokens: int = 2_048,
@@ -12078,6 +15529,8 @@ class AutonomousTaskOrchestrator:
         max_latency_ms: int | None = None,
         min_quality: float | None = None,
         selection_overrides: Mapping[str, Any] | None = None,
+        selection_weights: Mapping[str, Any] | None = None,
+        selection_observations: Sequence[Mapping[str, Any]] | None = None,
         approve_provider_call: bool = False,
         approve_mission_dispatch: bool = False,
         run_id: str | None = None,
@@ -12102,26 +15555,64 @@ class AutonomousTaskOrchestrator:
         domain_policy_effects_approved: bool | None = None,
         synthesize: bool = True,
         allow_partial: bool = False,
+        max_parallelism: int = 1,
         bandit_state: Mapping[str, Any] | None = None,
         accepted_plan_refinement: AutonomousCrossDomainPlanRefinementResult | None = None,
+        response_alignments: Sequence[Mapping[str, Any]] = (),
+        require_response_alignment: bool = False,
+        minimum_response_reward: float = 0.8,
+        minimum_response_alignment_confidence: float = 0.75,
+        response_contradiction_confidence_threshold: float = 0.75,
         execution_controller: AutonomousExecutionController | None = None,
         invocation_observer: ProviderInvocationObserver | None = None,
         trace_event_callback: Callable[..., Any] | None = None,
+        authorization_context: AutonomousAuthorizationContext | None = None,
+        reserve_cost: AutonomousCostReservationCallback | None = None,
     ) -> AutonomousCrossDomainResult:
         """Execute bounded domain specialists, then optionally synthesize their outputs.
 
-        Children run sequentially in accepted priority order (or declaration order when no
-        refinement is accepted), so approval, provider health, and failure boundaries are
-        observable. A child failure or pending approval prevents synthesis unless
-        ``allow_partial`` is explicitly enabled. This method never invents a child permission or
-        silently persists provider output into learning memory.
+        Children run in accepted priority order (or declaration order when no refinement is
+        accepted) and results are returned in that same order. ``max_parallelism`` optionally
+        overlaps independent specialist provider calls; synthesis still waits for every child
+        future, and the shared execution controller remains the authority for aggregate steps,
+        provider calls, failovers, tools, and cost. A child failure or pending approval prevents
+        synthesis unless ``allow_partial`` is explicitly enabled. This method never invents a
+        child permission or silently persists provider output into learning memory.
         """
 
         normalized_content_parts = (
             None if content_parts is None else normalize_provider_content_parts(content_parts)
         )
+        selection_overrides = _selection_overrides_with_weights(
+            selection_overrides,
+            selection_weights,
+            selection_observations,
+        )
         if not isinstance(synthesize, bool) or not isinstance(allow_partial, bool):
             raise BrainRunError("synthesize and allow_partial must be booleans")
+        if not isinstance(require_response_alignment, bool):
+            raise BrainRunError("require_response_alignment must be a boolean")
+        if (
+            not isinstance(max_parallelism, int)
+            or isinstance(max_parallelism, bool)
+            or not 1 <= max_parallelism <= MAX_AUTONOMOUS_AGENT_PARALLELISM
+        ):
+            raise BrainRunError(
+                "cross-domain max_parallelism must be between 1 and "
+                f"{MAX_AUTONOMOUS_AGENT_PARALLELISM}"
+            )
+        response_alignments = _mapping_sequence(
+            "cross-domain response_alignments",
+            response_alignments,
+            maximum=64,
+        )
+        for name, value in (
+            ("minimum_response_reward", minimum_response_reward),
+            ("minimum_response_alignment_confidence", minimum_response_alignment_confidence),
+            ("response_contradiction_confidence_threshold", response_contradiction_confidence_threshold),
+        ):
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(float(value)) or not 0.0 <= float(value) <= 1.0:
+                raise BrainRunError(f"{name} must be finite and within [0, 1]")
         if execution_plan_context is not None:
             if not isinstance(execution_plan_context, Mapping):
                 raise BrainRunError("cross-domain execution_plan_context must be a mapping or None")
@@ -12160,8 +15651,10 @@ class AutonomousTaskOrchestrator:
         execution_child_ids = tuple(
             sorted(blueprint.child_ids, key=lambda child_id: plan_priority.get(child_id, len(plan_priority)))
         )
-        child_results: list[BrainRunResult | BrainToolLoopResult | BrainMissionResult] = []
-        for child_id in execution_child_ids:
+
+        def execute_child(
+            child_id: str,
+        ) -> BrainRunResult | BrainToolLoopResult | BrainMissionResult:
             child = child_by_id[child_id]
             child_context = dict(child.spec.context)
             if execution_plan_context is not None:
@@ -12172,76 +15665,146 @@ class AutonomousTaskOrchestrator:
                     "priority_rank": plan_priority[child_id],
                     "focus": child_id in plan_focus_child_ids,
                 }
-            result = self.run(
-                task=child.spec.task,
-                domain=child.spec.domain,
-                model_candidates=model_candidates,
-                credentials=credentials,
-                capability=child.spec.capability,
-                risk_class=child.spec.risk_class,
-                constraints=child.spec.constraints,
-                desired_outputs=child.spec.desired_outputs,
-                context=child_context,
-                content_parts=normalized_content_parts,
-                max_steps=child.spec.max_steps,
-                require_json=child.spec.require_json,
-                structured_domain_response=child.spec.structured_domain_response,
-                response_schema=child.spec.response_schema,
-                execution_mode=child.spec.execution_mode,
-                required_model_capabilities=tuple(
-                    capability
-                    for capability in child.required_capabilities
-                    if capability not in child.profile.required_model_capabilities
-                ),
-                ledger=ledger,
-                memory=memory,
-                memory_query=memory_query,
-                memory_limit=memory_limit,
-                contextual_observations=contextual_observations,
-                input_tokens=input_tokens,
-                requested_output_tokens=requested_output_tokens,
-                max_cost_per_million_tokens=max_cost_per_million_tokens,
-                max_latency_ms=max_latency_ms,
-                min_quality=min_quality,
-                selection_overrides=selection_overrides,
-                bandit_state=bandit_state,
-                approve_provider_call=approve_provider_call,
-                approve_mission_dispatch=approve_mission_dispatch,
-                run_id=self._cross_domain_identity("cross-child", run_id, child_id),
-                max_output_tokens=max_output_tokens,
-                temperature=temperature,
-                idempotency_key=self._cross_domain_identity("cross-key", idempotency_key, child_id),
-                mission_policy=mission_policy,
-                mission_options=mission_options,
-                route_request=route_request,
-                auto_route=auto_route,
-                enforce_route_tools=enforce_route_tools,
-                require_resolved_route=require_resolved_route,
-                 provider_tools=provider_tools,
-                 tool_choice=tool_choice,
-                 max_provider_failovers=max_provider_failovers,
-                 domain_policy_mode=domain_policy_mode,
-                 domain_policy_evidence_ready=domain_policy_evidence_ready,
-                 domain_policy_evaluator_configured=domain_policy_evaluator_configured,
-                 domain_policy_plan_accepted=domain_policy_plan_accepted,
-                 domain_policy_effects_requested=domain_policy_effects_requested,
-                 domain_policy_effects_approved=domain_policy_effects_approved,
-                 tool_loop_options=self._cross_domain_tool_loop_options(
-                    tool_loop_options,
-                    execution_id=self._cross_domain_identity("cross-tool", run_id, child_id),
+            try:
+                result = self.run(
+                    task=child.spec.task,
                     domain=child.spec.domain,
-                ),
-                execution_controller=execution_controller,
-                invocation_observer=invocation_observer,
-                trace_event_callback=trace_event_callback,
-            )
+                    model_candidates=model_candidates,
+                    credentials=credentials,
+                    capability=child.spec.capability,
+                    risk_class=child.spec.risk_class,
+                    constraints=child.spec.constraints,
+                    desired_outputs=child.spec.desired_outputs,
+                    context=child_context,
+                    content_parts=normalized_content_parts,
+                    prompt_template=prompt_template,
+                    prompt_registry=prompt_registry,
+                    prompt_selection=prompt_selection,
+                    prompt_stage=prompt_stage,
+                    prompt_learning_state=prompt_learning_state,
+                    prompt_learning_exploration=prompt_learning_exploration,
+                    max_steps=child.spec.max_steps,
+                    require_json=child.spec.require_json,
+                    structured_domain_response=child.spec.structured_domain_response,
+                    require_response_review=False,
+                    # ``prepare`` stores the generated contract schema in the spec for replay, but
+                    # the structured mode owns that schema at the run boundary. Passing it back as
+                    # a custom schema would incorrectly trip the mutually-exclusive option guard.
+                    response_schema=None if child.spec.structured_domain_response else child.spec.response_schema,
+                    execution_mode=child.spec.execution_mode,
+                    required_model_capabilities=tuple(
+                        capability
+                        for capability in child.required_capabilities
+                        if capability not in child.profile.required_model_capabilities
+                    ),
+                    ledger=ledger,
+                    memory=memory,
+                    memory_query=memory_query,
+                    memory_limit=memory_limit,
+                    memory_consolidator=memory_consolidator,
+                    memory_lesson_resolver=memory_lesson_resolver,
+                    memory_lesson_context_resolver=memory_lesson_context_resolver,
+                    consolidated_memory_limit=consolidated_memory_limit,
+                    retrieve_consolidated_memory=retrieve_consolidated_memory,
+                    consolidated_memory_required=consolidated_memory_required,
+                    contextual_observations=contextual_observations,
+                    input_tokens=input_tokens,
+                    requested_output_tokens=requested_output_tokens,
+                    max_cost_per_million_tokens=max_cost_per_million_tokens,
+                    max_latency_ms=max_latency_ms,
+                    min_quality=min_quality,
+                    selection_overrides=selection_overrides,
+                    bandit_state=bandit_state,
+                    approve_provider_call=approve_provider_call,
+                    approve_mission_dispatch=approve_mission_dispatch,
+                    run_id=self._cross_domain_identity("cross-child", run_id, child_id),
+                    max_output_tokens=max_output_tokens,
+                    temperature=temperature,
+                    idempotency_key=self._cross_domain_identity("cross-key", idempotency_key, child_id),
+                    mission_policy=mission_policy,
+                    mission_options=mission_options,
+                    route_request=route_request,
+                    auto_route=auto_route,
+                    enforce_route_tools=enforce_route_tools,
+                    require_resolved_route=require_resolved_route,
+                    provider_tools=provider_tools,
+                    tool_choice=tool_choice,
+                    max_provider_failovers=max_provider_failovers,
+                    domain_policy_mode=domain_policy_mode,
+                    domain_policy_evidence_ready=domain_policy_evidence_ready,
+                    domain_policy_evaluator_configured=domain_policy_evaluator_configured,
+                    domain_policy_plan_accepted=domain_policy_plan_accepted,
+                    domain_policy_effects_requested=domain_policy_effects_requested,
+                    domain_policy_effects_approved=domain_policy_effects_approved,
+                    tool_loop_options=self._cross_domain_tool_loop_options(
+                        tool_loop_options,
+                        execution_id=self._cross_domain_identity("cross-tool", run_id, child_id),
+                        domain=child.spec.domain,
+                    ),
+                    execution_controller=execution_controller,
+                    invocation_observer=invocation_observer,
+                    trace_event_callback=trace_event_callback,
+                    authorization_context=authorization_context,
+                    reserve_cost=reserve_cost,
+                )
+            except (ProviderError, CredentialError) as error:
+                result = self._provider_failure_result(
+                    child,
+                    child_id=child_id,
+                    error=error,
+                    run_id=self._cross_domain_identity("cross-child", run_id, child_id),
+                )
             if not isinstance(result, (BrainRunResult, BrainToolLoopResult, BrainMissionResult)):
                 raise BrainRunError("cross-domain child returned an unsupported result")
-            child_results.append(result)
+            return result
+
+        if max_parallelism == 1 or len(execution_child_ids) == 1:
+            child_results = [execute_child(child_id) for child_id in execution_child_ids]
+        else:
+            # Submit in accepted order and collect in that order. Worker completion can vary, but
+            # the public result and synthesis input remain deterministic. No evaluator or
+            # learning update runs in this concurrent path; those APIs intentionally preserve
+            # ordered delayed-credit semantics.
+            with ThreadPoolExecutor(
+                max_workers=min(max_parallelism, len(execution_child_ids)),
+                thread_name_prefix="aurora-cross-domain",
+            ) as pool:
+                futures = [pool.submit(execute_child, child_id) for child_id in execution_child_ids]
+                child_results = [future.result() for future in futures]
 
         complete = [result.status.startswith("completed") for result in child_results]
-        if not all(complete) and not allow_partial:
-            status = "approval_required" if any(result.status == "approval_required" for result in child_results) else "child_incomplete"
+        response_assessment = None
+        if structured_domain_response:
+            entries = self._cross_domain_response_entries(
+                blueprint,
+                execution_child_ids,
+                child_results,
+            )
+            if entries is not None:
+                response_assessment = assess_autonomous_cross_domain_response_set(
+                    entries,
+                    requested_domains=tuple(child.profile.domain for child in blueprint.child_blueprints),
+                    context_digest=blueprint.task_digest,
+                    alignments=response_alignments,
+                    require_synthesis=False,
+                    require_complete_alignment=require_response_alignment,
+                    minimum_reward=float(minimum_response_reward),
+                    minimum_alignment_confidence=float(minimum_response_alignment_confidence),
+                    contradiction_confidence_threshold=float(response_contradiction_confidence_threshold),
+                )
+        # Partial fan-in is useful only when at least one specialist produced usable evidence.
+        # Never spend another provider call synthesizing an empty or entirely blocked fan-out.
+        # This keeps provider/credential failures from becoming a successful-looking conclusion.
+        if not all(complete) and (not allow_partial or (synthesize and not any(complete))):
+            status = (
+                "reconciliation_required"
+                if any(result.status == "reconciliation_required" for result in child_results)
+                else "approval_required"
+                if any(result.status == "approval_required" for result in child_results)
+                else "child_failed"
+                if any(result.status == "provider_failed" for result in child_results)
+                else "child_incomplete"
+            )
             return AutonomousCrossDomainResult(
                 status,
                 blueprint,
@@ -12249,6 +15812,19 @@ class AutonomousTaskOrchestrator:
                 None,
                 plan_refinement_digest,
                 execution_child_ids,
+                response_assessment,
+                max_parallelism=max_parallelism,
+            )
+        if synthesize and response_assessment is not None and not response_assessment.ready_to_synthesize:
+            return AutonomousCrossDomainResult(
+                "response_review_required",
+                blueprint,
+                tuple(child_results),
+                None,
+                plan_refinement_digest,
+                execution_child_ids,
+                response_assessment,
+                max_parallelism=max_parallelism,
             )
         if not synthesize:
             return AutonomousCrossDomainResult(
@@ -12258,6 +15834,8 @@ class AutonomousTaskOrchestrator:
                 None,
                 plan_refinement_digest,
                 execution_child_ids,
+                response_assessment,
+                max_parallelism=max_parallelism,
             )
         child_outputs = [
             {
@@ -12283,7 +15861,11 @@ class AutonomousTaskOrchestrator:
                 "focus_child_ids": list(plan_focus_child_ids),
             }
         synthesis = blueprint.synthesis_blueprint
-        synthesis_result = self.run(
+        synthesis_result = self._provider_failure_call(
+            synthesis,
+            child_id="synthesis",
+            run_id=self._cross_domain_identity("cross-synthesis", run_id, "synthesis"),
+            invoke=lambda: self.run(
             task=synthesis.spec.task,
             domain=synthesis.spec.domain,
             model_candidates=model_candidates,
@@ -12294,15 +15876,28 @@ class AutonomousTaskOrchestrator:
             desired_outputs=synthesis.spec.desired_outputs,
             context=synthesis_context,
             content_parts=normalized_content_parts,
+            prompt_template=prompt_template,
+            prompt_registry=prompt_registry,
+            prompt_selection=prompt_selection,
+            prompt_stage=prompt_stage,
+            prompt_learning_state=prompt_learning_state,
+            prompt_learning_exploration=prompt_learning_exploration,
             max_steps=synthesis.spec.max_steps,
             require_json=synthesis.spec.require_json,
             structured_domain_response=synthesis.spec.structured_domain_response,
-            response_schema=synthesis.spec.response_schema,
+            require_response_review=False,
+            response_schema=None if synthesis.spec.structured_domain_response else synthesis.spec.response_schema,
             execution_mode=synthesis.spec.execution_mode,
             ledger=ledger,
             memory=memory,
             memory_query=memory_query,
             memory_limit=memory_limit,
+            memory_consolidator=memory_consolidator,
+            memory_lesson_resolver=memory_lesson_resolver,
+            memory_lesson_context_resolver=memory_lesson_context_resolver,
+            consolidated_memory_limit=consolidated_memory_limit,
+            retrieve_consolidated_memory=retrieve_consolidated_memory,
+            consolidated_memory_required=consolidated_memory_required,
             contextual_observations=contextual_observations,
             input_tokens=input_tokens,
             requested_output_tokens=requested_output_tokens,
@@ -12340,16 +15935,43 @@ class AutonomousTaskOrchestrator:
             execution_controller=execution_controller,
             invocation_observer=invocation_observer,
             trace_event_callback=trace_event_callback,
+            authorization_context=authorization_context,
+            reserve_cost=reserve_cost,
+            ),
         )
         if not isinstance(synthesis_result, (BrainRunResult, BrainToolLoopResult, BrainMissionResult)):
             raise BrainRunError("cross-domain synthesis returned an unsupported result")
+        if structured_domain_response and synthesis_result.status.startswith("completed"):
+            entries = self._cross_domain_response_entries(
+                blueprint,
+                execution_child_ids,
+                child_results,
+                synthesis_result=synthesis_result,
+            )
+            if entries is not None:
+                response_assessment = assess_autonomous_cross_domain_response_set(
+                    entries,
+                    requested_domains=tuple(child.profile.domain for child in blueprint.child_blueprints),
+                    context_digest=blueprint.task_digest,
+                    alignments=response_alignments,
+                    require_synthesis=True,
+                    require_complete_alignment=require_response_alignment,
+                    minimum_reward=float(minimum_response_reward),
+                    minimum_alignment_confidence=float(minimum_response_alignment_confidence),
+                    contradiction_confidence_threshold=float(response_contradiction_confidence_threshold),
+                )
+        result_status = "completed" if synthesis_result.status.startswith("completed") else synthesis_result.status
+        if response_assessment is not None and response_assessment.status != "completed" and synthesis_result.status.startswith("completed"):
+            result_status = "response_review_required"
         return AutonomousCrossDomainResult(
-            "completed" if synthesis_result.status.startswith("completed") else synthesis_result.status,
+            result_status,
             blueprint,
             tuple(child_results),
             synthesis_result,
             plan_refinement_digest,
             execution_child_ids,
+            response_assessment,
+            max_parallelism=max_parallelism,
         )
 
     def run_cross_domain_learning(
@@ -12384,6 +16006,9 @@ class AutonomousTaskOrchestrator:
             raise BrainRunError("memory is required for cross-domain online learning")
         if not isinstance(memory_store, BrainEpisodicMemory):
             raise BrainRunError("cross-domain learning memory must be a BrainEpisodicMemory")
+        authorization_context = kwargs.get("authorization_context")
+        if authorization_context is not None and not isinstance(authorization_context, AutonomousAuthorizationContext):
+            raise BrainRunError("cross-domain learning authorization_context must be an AutonomousAuthorizationContext or None")
         if evaluator is not None and not isinstance(evaluator, BrainOutcomeEvaluator):
             raise BrainRunError("cross-domain evaluator must be a BrainOutcomeEvaluator or None")
         if evaluator_registry is not None and not isinstance(evaluator_registry, DomainEvaluatorRegistry):
@@ -12450,6 +16075,7 @@ class AutonomousTaskOrchestrator:
         allow_partial = take("allow_partial", False)
         execution_plan_context = take("execution_plan_context", None)
         execution_controller = take("execution_controller", None)
+        authorization_context = take("authorization_context", authorization_context)
         if kwargs:
             raise BrainRunError(
                 "unsupported cross-domain learning options: " + ", ".join(sorted(kwargs))
@@ -12559,11 +16185,25 @@ class AutonomousTaskOrchestrator:
                     "task_decision_digest": _memory_task_decision_digest(blueprint_item),
                 },
                 memory=memory_store,
+                authorization_context=authorization_context,
+                authorization_domain=blueprint_item.spec.domain,
+                authorization_capability=blueprint_item.spec.capability,
+                authorization_risk_class=blueprint_item.spec.risk_class,
             )
-            evaluation_receipt = memory_store.record_evaluation(
-                episode_id,
-                {**decision.to_dict(), "decision_digest": content_digest(decision.to_dict())},
-            ).to_dict()
+            decision_digest = content_digest(decision.to_dict())
+            self._authorize_memory_evaluation(
+                authorization_context,
+                domain=blueprint_item.spec.domain,
+                episode_id=episode_id,
+                decision_digest=decision_digest,
+            )
+            try:
+                evaluation_receipt = memory_store.record_evaluation(
+                    episode_id,
+                    {**decision.to_dict(), "decision_digest": decision_digest},
+                ).to_dict()
+            except BrainMemoryError as error:
+                raise BrainRunError("cross-domain evaluation memory record failed") from error
             memory_receipts.extend((receipt, evaluation_receipt))
             evaluations.append(
                 {
@@ -12589,7 +16229,11 @@ class AutonomousTaskOrchestrator:
                     "priority_rank": plan_priority[child_id],
                     "focus": child_id in plan_focus_child_ids,
                 }
-            result = self.run(
+            result = self._provider_failure_call(
+                child,
+                child_id=child_id,
+                run_id=self._cross_domain_identity("cross-child", run_id, child_id),
+                invoke=lambda: self.run(
                 task=child.spec.task,
                 domain=child.spec.domain,
                 model_candidates=model_candidates,
@@ -12603,7 +16247,8 @@ class AutonomousTaskOrchestrator:
                 max_steps=child.spec.max_steps,
                 require_json=child.spec.require_json,
                 structured_domain_response=child.spec.structured_domain_response,
-                response_schema=child.spec.response_schema,
+                require_response_review=False,
+                response_schema=None if child.spec.structured_domain_response else child.spec.response_schema,
                 execution_mode=child.spec.execution_mode,
                 required_model_capabilities=tuple(
                     capability
@@ -12649,6 +16294,8 @@ class AutonomousTaskOrchestrator:
                 ),
                 bandit_state=state,
                 execution_controller=execution_controller,
+                authorization_context=authorization_context,
+                ),
             )
             if not isinstance(result, (BrainRunResult, BrainToolLoopResult, BrainMissionResult)):
                 raise BrainRunError("cross-domain learning child returned an unsupported result")
@@ -12661,17 +16308,29 @@ class AutonomousTaskOrchestrator:
                 result=result,
                 item_evidence=item_evidence,
             )
+            # A strict learning fan-out must not spend provider/evaluator budget on later
+            # specialists after a refusal or provider-boundary failure.  The caller can opt into
+            # sibling continuation with allow_partial=True; already-settled results remain in the
+            # ordered envelope either way.
+            if not allow_partial and not result.status.startswith("completed"):
+                break
 
         complete = [result.status.startswith("completed") for result in child_results]
-        if not all(complete) and not allow_partial:
-            status = "approval_required" if any(result.status == "approval_required" for result in child_results) else "child_incomplete"
+        if not all(complete) and (not allow_partial or (synthesize and not any(complete))):
+            status = (
+                "approval_required"
+                if any(result.status == "approval_required" for result in child_results)
+                else "child_failed"
+                if any(result.status == "provider_failed" for result in child_results)
+                else "child_incomplete"
+            )
             cross_domain = AutonomousCrossDomainResult(
                 status,
                 blueprint,
                 tuple(child_results),
                 None,
                 plan_refinement_digest,
-                execution_child_ids,
+                execution_child_ids[: len(child_results)],
             )
             return AutonomousCrossDomainLearningResult(status, cross_domain, tuple(evaluations), state, tuple(memory_receipts))
         if not synthesize:
@@ -12710,7 +16369,11 @@ class AutonomousTaskOrchestrator:
                 "priority_child_ids": list(execution_child_ids),
                 "focus_child_ids": list(plan_focus_child_ids),
             }
-        synthesis_result = self.run(
+        synthesis_result = self._provider_failure_call(
+            synthesis,
+            child_id="synthesis",
+            run_id=self._cross_domain_identity("cross-synthesis", run_id, "synthesis"),
+            invoke=lambda: self.run(
             task=synthesis.spec.task,
             domain=synthesis.spec.domain,
             model_candidates=model_candidates,
@@ -12724,7 +16387,8 @@ class AutonomousTaskOrchestrator:
             max_steps=synthesis.spec.max_steps,
             require_json=synthesis.spec.require_json,
             structured_domain_response=synthesis.spec.structured_domain_response,
-            response_schema=synthesis.spec.response_schema,
+            require_response_review=False,
+            response_schema=None if synthesis.spec.structured_domain_response else synthesis.spec.response_schema,
             execution_mode=synthesis.spec.execution_mode,
             ledger=ledger,
             memory=memory_store,
@@ -12765,6 +16429,8 @@ class AutonomousTaskOrchestrator:
             ),
             bandit_state=state,
             execution_controller=execution_controller,
+            authorization_context=authorization_context,
+            ),
         )
         if not isinstance(synthesis_result, (BrainRunResult, BrainToolLoopResult, BrainMissionResult)):
             raise BrainRunError("cross-domain learning synthesis returned an unsupported result")
@@ -12800,6 +16466,7 @@ class AutonomousTaskOrchestrator:
         trajectory_terminal_reward: float | None = None,
         retain_replan_instruction: bool = True,
         ledger: BrainLearningLedger | None = None,
+        authorization_context: AutonomousAuthorizationContext | None = None,
     ) -> AutonomousCrossDomainTrajectoryLearningResult:
         """Settle delayed credit for already-executed caller-owned cross-domain results.
 
@@ -12832,16 +16499,13 @@ class AutonomousTaskOrchestrator:
         memory_store = memory if memory is not None else self.brain.memory
         if not isinstance(memory_store, BrainEpisodicMemory):
             raise BrainRunError("cross-domain trajectory memory must be a BrainEpisodicMemory")
+        if authorization_context is not None and not isinstance(authorization_context, AutonomousAuthorizationContext):
+            raise BrainRunError("cross-domain trajectory authorization_context must be an AutonomousAuthorizationContext or None")
         normalized_tags = _sequence("cross-domain trajectory memory_tags", memory_tags, maximum=32)
-        child_by_id = dict(zip(cross_domain.blueprint.child_ids, cross_domain.blueprint.child_blueprints))
-        items: list[tuple[str, str, AutonomousTaskBlueprint, BrainRunResult | BrainToolLoopResult | BrainMissionResult]] = []
-        for child_id, result in zip(cross_domain.execution_child_ids, cross_domain.child_results):
-            child = child_by_id[child_id]
-            items.append(("child", child_id, child, result))
-        if cross_domain.synthesis_result is not None:
-            items.append(("synthesis", "synthesis", cross_domain.blueprint.synthesis_blueprint, cross_domain.synthesis_result))
-        if not items:
-            raise BrainRunError("cross-domain trajectory contains no results to evaluate")
+        items = self._cross_domain_trajectory_items(
+            cross_domain,
+            allow_partial=True,
+        )
         results = [item[3] for item in items]
         evidence_packets = [None if evidence is None else evidence.get(item[1]) for item in items]
         trajectory = self.brain.prepare_learning_trajectory(
@@ -12893,6 +16557,10 @@ class AutonomousTaskOrchestrator:
                     "task_decision_digest": _memory_task_decision_digest(blueprint_item),
                 },
                 memory=memory_store,
+                authorization_context=authorization_context,
+                authorization_domain=blueprint_item.spec.domain,
+                authorization_capability=blueprint_item.spec.capability,
+                authorization_risk_class=blueprint_item.spec.risk_class,
             )
             try:
                 evaluation_record = decision.to_dict()
@@ -12903,11 +16571,20 @@ class AutonomousTaskOrchestrator:
                         else content_digest(decision.replan_instruction)
                     )
                     evaluation_record.pop("replan_instruction", None)
+                decision_digest = content_digest(evaluation_record)
+                self._authorize_memory_evaluation(
+                    authorization_context,
+                    domain=blueprint_item.spec.domain,
+                    episode_id=episode_id,
+                    decision_digest=decision_digest,
+                    trajectory_id=trajectory.trajectory_id,
+                    trajectory_step=index,
+                )
                 evaluation_receipt = memory_store.record_evaluation(
                     episode_id,
                     {
                         **evaluation_record,
-                        "decision_digest": content_digest(evaluation_record),
+                        "decision_digest": decision_digest,
                     },
                 ).to_dict()
             except BrainMemoryError as error:
@@ -12987,11 +16664,17 @@ class AutonomousTaskOrchestrator:
         memory_store = memory if memory is not None else self.brain.memory
         if not isinstance(memory_store, BrainEpisodicMemory):
             raise BrainRunError("cross-domain trajectory memory must be a BrainEpisodicMemory")
+        authorization_context = kwargs.get("authorization_context")
+        if authorization_context is not None and not isinstance(authorization_context, AutonomousAuthorizationContext):
+            raise BrainRunError("cross-domain trajectory authorization_context must be an AutonomousAuthorizationContext or None")
         normalized_tags = _sequence("cross-domain trajectory memory_tags", memory_tags, maximum=32)
         execution_options = dict(kwargs)
         execution_options.pop("bandit_state", None)
         execution_options["memory"] = memory_store
         execution_options["ledger"] = ledger
+        allow_partial = execution_options.get("allow_partial", False)
+        if not isinstance(allow_partial, bool):
+            raise BrainRunError("cross-domain trajectory allow_partial must be a boolean")
         cross_domain = self.run_cross_domain(
             task=task,
             subtasks=subtasks,
@@ -13000,15 +16683,10 @@ class AutonomousTaskOrchestrator:
             bandit_state=bandit_state,
             **execution_options,
         )
-        items: list[tuple[str, str, AutonomousTaskBlueprint, BrainRunResult | BrainToolLoopResult | BrainMissionResult]] = []
-        child_by_id = dict(zip(cross_domain.blueprint.child_ids, cross_domain.blueprint.child_blueprints))
-        for child_id, result in zip(cross_domain.execution_child_ids, cross_domain.child_results):
-            child = child_by_id[child_id]
-            items.append(("child", child_id, child, result))
-        if cross_domain.synthesis_result is not None:
-            items.append(("synthesis", "synthesis", cross_domain.blueprint.synthesis_blueprint, cross_domain.synthesis_result))
-        if not items:
-            raise BrainRunError("cross-domain trajectory contains no results to evaluate")
+        items = self._cross_domain_trajectory_items(
+            cross_domain,
+            allow_partial=allow_partial,
+        )
         results = [item[3] for item in items]
         evidence_packets = [None if evidence is None else evidence.get(item[1]) for item in items]
         trajectory = self.brain.prepare_learning_trajectory(
@@ -13058,13 +16736,26 @@ class AutonomousTaskOrchestrator:
                     "task_decision_digest": _memory_task_decision_digest(blueprint_item),
                 },
                 memory=memory_store,
+                authorization_context=authorization_context,
+                authorization_domain=blueprint_item.spec.domain,
+                authorization_capability=blueprint_item.spec.capability,
+                authorization_risk_class=blueprint_item.spec.risk_class,
             )
             try:
+                decision_digest = content_digest(decision.to_dict())
+                self._authorize_memory_evaluation(
+                    authorization_context,
+                    domain=blueprint_item.spec.domain,
+                    episode_id=episode_id,
+                    decision_digest=decision_digest,
+                    trajectory_id=trajectory.trajectory_id,
+                    trajectory_step=index,
+                )
                 evaluation_receipt = memory_store.record_evaluation(
                     episode_id,
                     {
                         **decision.to_dict(),
-                        "decision_digest": content_digest(decision.to_dict()),
+                        "decision_digest": decision_digest,
                     },
                 ).to_dict()
             except BrainMemoryError as error:
@@ -13146,6 +16837,9 @@ class AutonomousTaskOrchestrator:
         memory_store = memory if memory is not None else self.brain.memory
         if not isinstance(memory_store, BrainEpisodicMemory):
             raise BrainRunError("cross-domain replan memory must be a BrainEpisodicMemory")
+        authorization_context = kwargs.get("authorization_context")
+        if authorization_context is not None and not isinstance(authorization_context, AutonomousAuthorizationContext):
+            raise BrainRunError("cross-domain replan authorization_context must be an AutonomousAuthorizationContext or None")
         if evidence is not None:
             if not isinstance(evidence, Mapping) or any(
                 not isinstance(key, str) or not isinstance(value, Mapping)
@@ -13369,6 +17063,7 @@ class AutonomousTaskOrchestrator:
                 trajectory_terminal_reward=trajectory_terminal_reward,
                 retain_replan_instruction=False,
                 ledger=ledger,
+                authorization_context=authorization_context,
             )
             state = dict(trajectory_result.bandit_state)
             decisions = trajectory_result.trajectory_result.decisions
@@ -13458,10 +17153,14 @@ class AutonomousTaskOrchestrator:
         ledger: BrainLearningLedger | None,
         max_replans: int,
         memory_tags: Sequence[str],
+        require_response_review: bool,
         execution_kwargs: Mapping[str, Any],
     ) -> AutonomousLearningResult:
         if store is None:
             raise BrainRunError("memory is required for autonomous online learning")
+        authorization_context = execution_kwargs.get("authorization_context")
+        if authorization_context is not None and not isinstance(authorization_context, AutonomousAuthorizationContext):
+            raise BrainRunError("autonomous learning authorization_context must be an AutonomousAuthorizationContext or None")
         resolved_evaluator = evaluator
         if resolved_evaluator is None:
             registry = evaluator_registry or DomainEvaluatorRegistry.with_builtin_autonomous_profiles()
@@ -13496,6 +17195,23 @@ class AutonomousTaskOrchestrator:
             attempts.append(result)
             if result.status not in {"completed_provider_call", "completed_provider_tool_loop"}:
                 final_status = result.status
+                break
+            structured_evaluation = _structured_response_evaluation(result)
+            if (
+                require_response_review
+                and isinstance(structured_evaluation, Mapping)
+                and structured_evaluation.get("passed") is False
+            ):
+                structured_feedback = _record_structured_response_feedback(
+                    self.brain,
+                    result,
+                    bandit_state=state,
+                    ledger=ledger,
+                )
+                if structured_feedback is not None:
+                    state, structured_evaluation_record = structured_feedback
+                    evaluations.append(structured_evaluation_record)
+                final_status = "response_review_required"
                 break
             decision, report = resolved_evaluator.evaluate_and_record_with_decision(
                 self.brain,
@@ -13538,11 +17254,22 @@ class AutonomousTaskOrchestrator:
                     "task_decision_digest": _memory_task_decision_digest(blueprint),
                 },
                 memory=store,
+                authorization_context=authorization_context,
+                authorization_domain=blueprint.spec.domain,
+                authorization_capability=blueprint.spec.capability,
+                authorization_risk_class=blueprint.spec.risk_class,
             )
             try:
+                decision_digest = content_digest(decision.to_dict())
+                self._authorize_memory_evaluation(
+                    authorization_context,
+                    domain=blueprint.spec.domain,
+                    episode_id=episode_id,
+                    decision_digest=decision_digest,
+                )
                 evaluation_receipt = store.record_evaluation(
                     episode_id,
-                    {**decision.to_dict(), "decision_digest": content_digest(decision.to_dict())},
+                    {**decision.to_dict(), "decision_digest": decision_digest},
                 ).to_dict()
             except BrainMemoryError as error:
                 raise BrainRunError("autonomous evaluation memory record failed") from error
@@ -13593,18 +17320,32 @@ class AutonomousAgent:
         router: AutonomousTaskRouter | None = None,
         pack_registry: AutonomousDomainPackRegistry | None = None,
         ledger: BrainLearningLedger | None = None,
+        learning_persistence: BrainLearningPersistenceCoordinator | None = None,
         memory: BrainEpisodicMemory | None = None,
+        memory_persistence: BrainMemoryPersistenceCoordinator | None = None,
+        memory_consolidator: AutonomousMemoryConsolidator | None = None,
         health_ledger: ProviderHealthLedger | None = None,
+        health_persistence: ProviderHealthPersistenceCoordinator | None = None,
+        runtime_health_persistence: LLMRuntimeHealthPersistenceCoordinator | None = None,
         tool_registry: AutonomousDomainToolRegistry | None = None,
         tool_runtime: AutonomousDomainToolRuntime | None = None,
+        effect_boundary: AutonomousEffectBoundary | None = None,
         capability_journal: AutonomousCapabilityJournalStore | None = None,
+        capability_journal_persistence: AutonomousCapabilityJournalPersistenceCoordinator | None = None,
         activation: AutonomousCapabilityActivation | None = None,
         execution_journal: AutonomousExecutionJournal | None = None,
+        decision_cycle_persistence: AutonomousDecisionCyclePersistenceCoordinator | None = None,
+        execution_persistence: AutonomousExecutionPersistenceCoordinator | None = None,
         execution_policy: AutonomousExecutionPolicy | Mapping[str, Any] | None = None,
         credential_provisioner: CredentialProvisioner | None = None,
         connector_registry: AutonomousConnectorRegistry | None = None,
         connector_runtime: AutonomousConnectorRuntime | None = None,
         selection_promotion: AutonomousSelectionPromotionLifecycle | None = None,
+        evaluator_calibration_registry: AutonomousEvaluatorCalibrationRegistry | None = None,
+        evaluator_calibration_persistence: AutonomousEvaluatorCalibrationRegistryPersistenceCoordinator | None = None,
+        prompt_learning_coordinator: AutonomousPromptLearningPersistenceCoordinator | None = None,
+        tool_selection_state: Mapping[str, Any] | None = None,
+        tool_selection_persistence: AutonomousToolSelectionSnapshotPersistence | None = None,
     ) -> None:
         if not isinstance(runtime, LLMRuntime):
             raise BrainRunError("runtime must be an LLMRuntime")
@@ -13616,14 +17357,56 @@ class AutonomousAgent:
             raise BrainRunError("model_catalogue must be a ModelCatalogue or None")
         if ledger is not None and not isinstance(ledger, BrainLearningLedger):
             raise BrainRunError("ledger must be a BrainLearningLedger or None")
+        if learning_persistence is not None and not isinstance(
+            learning_persistence,
+            BrainLearningPersistenceCoordinator,
+        ):
+            raise BrainRunError(
+                "learning_persistence must be a BrainLearningPersistenceCoordinator or None"
+            )
+        if learning_persistence is not None and learning_persistence.store is not ledger:
+            raise BrainRunError("learning_persistence must be bound to the supplied ledger")
         if memory is not None and not isinstance(memory, BrainEpisodicMemory):
             raise BrainRunError("memory must be a BrainEpisodicMemory or None")
+        if memory_persistence is not None and not isinstance(
+            memory_persistence,
+            BrainMemoryPersistenceCoordinator,
+        ):
+            raise BrainRunError(
+                "memory_persistence must be a BrainMemoryPersistenceCoordinator or None"
+            )
+        if memory_persistence is not None and memory_persistence.store is not memory:
+            raise BrainRunError("memory_persistence must be bound to the supplied memory")
+        if memory_consolidator is not None and not isinstance(memory_consolidator, AutonomousMemoryConsolidator):
+            raise BrainRunError("memory_consolidator must be an AutonomousMemoryConsolidator or None")
         if health_ledger is not None and not isinstance(health_ledger, ProviderHealthLedger):
             raise BrainRunError("health_ledger must be a ProviderHealthLedger or None")
+        if health_persistence is not None and not isinstance(
+            health_persistence,
+            ProviderHealthPersistenceCoordinator,
+        ):
+            raise BrainRunError(
+                "health_persistence must be a ProviderHealthPersistenceCoordinator or None"
+            )
+        if health_persistence is not None and health_persistence.store is not health_ledger:
+            raise BrainRunError("health_persistence must be bound to the supplied health_ledger")
+        if runtime_health_persistence is not None and not isinstance(
+            runtime_health_persistence,
+            LLMRuntimeHealthPersistenceCoordinator,
+        ):
+            raise BrainRunError(
+                "runtime_health_persistence must be an LLMRuntimeHealthPersistenceCoordinator or None"
+            )
+        if runtime_health_persistence is not None and runtime_health_persistence.runtime is not runtime:
+            raise BrainRunError("runtime_health_persistence must be bound to the supplied runtime")
         if tool_registry is not None and not isinstance(tool_registry, AutonomousDomainToolRegistry):
             raise BrainRunError("tool_registry must be an AutonomousDomainToolRegistry or None")
         if tool_runtime is not None and not isinstance(tool_runtime, AutonomousDomainToolRuntime):
             raise BrainRunError("tool_runtime must be an AutonomousDomainToolRuntime or None")
+        if effect_boundary is not None and not isinstance(effect_boundary, AutonomousEffectBoundary):
+            raise BrainRunError("effect_boundary must be an AutonomousEffectBoundary or None")
+        if tool_runtime is not None and effect_boundary is not None and tool_runtime.effect_boundary is not effect_boundary:
+            raise BrainRunError("effect_boundary must match the supplied tool_runtime effect boundary")
         if tool_runtime is not None and tool_registry is not None and tool_runtime.registry is not tool_registry:
             raise BrainRunError("tool_runtime registry must be the same registry supplied to the agent")
         if capability_journal is not None and not all(
@@ -13631,12 +17414,37 @@ class AutonomousAgent:
             for method in ("append", "find", "records")
         ):
             raise BrainRunError("capability_journal must implement append, find, and records")
+        if capability_journal_persistence is not None and not isinstance(
+            capability_journal_persistence,
+            AutonomousCapabilityJournalPersistenceCoordinator,
+        ):
+            raise BrainRunError(
+                "capability_journal_persistence must be an AutonomousCapabilityJournalPersistenceCoordinator or None"
+            )
+        if capability_journal_persistence is not None and capability_journal_persistence.store is not capability_journal:
+            raise BrainRunError("capability_journal_persistence must be bound to the supplied capability_journal")
         if activation is not None and not isinstance(activation, AutonomousCapabilityActivation):
             raise BrainRunError("activation must be an AutonomousCapabilityActivation or None")
         if pack_registry is not None and not isinstance(pack_registry, AutonomousDomainPackRegistry):
             raise BrainRunError("pack_registry must be an AutonomousDomainPackRegistry or None")
         if execution_journal is not None and not isinstance(execution_journal, AutonomousExecutionJournal):
             raise BrainRunError("execution_journal must be an AutonomousExecutionJournal or None")
+        if execution_persistence is not None and not isinstance(
+            execution_persistence,
+            AutonomousExecutionPersistenceCoordinator,
+        ):
+            raise BrainRunError(
+                "execution_persistence must be an AutonomousExecutionPersistenceCoordinator or None"
+            )
+        if execution_persistence is not None and execution_persistence.journal is not execution_journal:
+            raise BrainRunError("execution_persistence must be bound to the supplied execution_journal")
+        if decision_cycle_persistence is not None and not isinstance(
+            decision_cycle_persistence,
+            AutonomousDecisionCyclePersistenceCoordinator,
+        ):
+            raise BrainRunError(
+                "decision_cycle_persistence must be an AutonomousDecisionCyclePersistenceCoordinator or None"
+            )
         if credential_provisioner is not None and not isinstance(credential_provisioner, CredentialProvisioner):
             raise BrainRunError("credential_provisioner must be a CredentialProvisioner or None")
         if connector_registry is not None and not isinstance(connector_registry, AutonomousConnectorRegistry):
@@ -13645,6 +17453,37 @@ class AutonomousAgent:
             raise BrainRunError("connector_runtime must be an AutonomousConnectorRuntime or None")
         if selection_promotion is not None and not isinstance(selection_promotion, AutonomousSelectionPromotionLifecycle):
             raise BrainRunError("selection_promotion must be an AutonomousSelectionPromotionLifecycle or None")
+        if evaluator_calibration_registry is not None and not isinstance(
+            evaluator_calibration_registry,
+            AutonomousEvaluatorCalibrationRegistry,
+        ):
+            raise BrainRunError(
+                "evaluator_calibration_registry must be an AutonomousEvaluatorCalibrationRegistry or None"
+            )
+        if evaluator_calibration_persistence is not None and not isinstance(
+            evaluator_calibration_persistence,
+            AutonomousEvaluatorCalibrationRegistryPersistenceCoordinator,
+        ):
+            raise BrainRunError(
+                "evaluator_calibration_persistence must be an AutonomousEvaluatorCalibrationRegistryPersistenceCoordinator or None"
+            )
+        if (
+            evaluator_calibration_persistence is not None
+            and evaluator_calibration_persistence.registry is not evaluator_calibration_registry
+        ):
+            raise BrainRunError("evaluator_calibration_persistence must be bound to the supplied evaluator calibration registry")
+        if prompt_learning_coordinator is not None and not isinstance(
+            prompt_learning_coordinator,
+            AutonomousPromptLearningPersistenceCoordinator,
+        ):
+            raise BrainRunError(
+                "prompt_learning_coordinator must be an AutonomousPromptLearningPersistenceCoordinator or None"
+            )
+        if tool_selection_persistence is not None and not all(
+            callable(getattr(tool_selection_persistence, method, None))
+            for method in ("read", "write")
+        ):
+            raise BrainRunError("tool_selection_persistence must implement read and write")
         if (
             connector_registry is not None
             and connector_runtime is not None
@@ -13673,14 +17512,46 @@ class AutonomousAgent:
         self.credential_provisioner = credential_provisioner or CredentialProvisioner(self.onboarding)
         self.catalogue = model_catalogue or ModelCatalogue()
         self.model_inventory = AutonomousModelInventoryCoordinator(runtime, self.catalogue)
+        self.model_inventory_persistence: AutonomousModelInventoryPersistenceCoordinator | None = None
+        self._persistence_lifecycle_coordinator: AutonomousAgentPersistenceLifecycleCoordinator | None = None
+        self._persistence_lifecycle_activation_store: AutonomousCapabilityActivationStore | None = None
+        self._persistence_lifecycle_selection_promotion_store: AutonomousSelectionPromotionLifecycleStore | None = None
+        self._persistence_lifecycle_capability_journal_persistence: AutonomousCapabilityJournalPersistenceCoordinator | None = None
+        self._persistence_lifecycle_decision_cycle_persistence: AutonomousDecisionCyclePersistenceCoordinator | None = None
+        self._persistence_lifecycle_execution_persistence: AutonomousExecutionPersistenceCoordinator | None = None
         self.brain = brain or AutonomousBrain(workspace, runtime)
         self.ledger = ledger
+        self.learning_persistence = learning_persistence
         self.memory = memory
+        self.memory_persistence = memory_persistence
+        self.memory_consolidator = memory_consolidator
         self.health_ledger = health_ledger
+        self.health_persistence = health_persistence
+        self.runtime_health_persistence = runtime_health_persistence
         self.tool_registry = tool_registry
         self.activation = activation or AutonomousCapabilityActivation()
         self.selection_promotion = selection_promotion
+        self.evaluator_calibration_registry = evaluator_calibration_registry
+        self.evaluator_calibration_persistence = evaluator_calibration_persistence
+        self.prompt_learning_coordinator = prompt_learning_coordinator
+        try:
+            self.tool_selection_state = normalize_autonomous_tool_selection_state(tool_selection_state)
+        except (ArgumentError, BrainRunError) as error:
+            raise BrainRunError("tool_selection_state is invalid") from error
+        self.tool_selection_persistence = tool_selection_persistence
+        self._tool_selection_configured = tool_selection_state is not None or tool_selection_persistence is not None
+        self._tool_selection_persistence_coordinator = (
+            AutonomousToolSelectionPersistenceCoordinator(
+                lambda: dict(self.tool_selection_state),
+                self._set_tool_selection_state,
+                tool_selection_persistence,
+            )
+            if tool_selection_persistence is not None
+            else None
+        )
         self.execution_journal = execution_journal
+        self.decision_cycle_persistence = decision_cycle_persistence
+        self.execution_persistence = execution_persistence
         self.execution_policy = resolved_execution_policy
         self.connector_registry = connector_registry or (
             connector_runtime.registry if connector_runtime is not None else None
@@ -13692,10 +17563,20 @@ class AutonomousAgent:
             self.tool_runtime = AutonomousDomainToolRuntime(
                 tool_registry,
                 executor=lambda tool, arguments: workspace.tool(tool.name, dict(arguments)),
+                effect_boundary=effect_boundary,
             )
         else:
             self.tool_runtime = None
+        self.effect_boundary = effect_boundary if effect_boundary is not None else (
+            self.tool_runtime.effect_boundary if self.tool_runtime is not None else None
+        )
+        if self.effect_boundary is not None:
+            try:
+                runtime.bind_effect_boundary(self.effect_boundary)
+            except ProviderError as error:
+                raise BrainRunError("runtime and agent effect boundaries must be the same instance") from error
         self.capability_journal = capability_journal
+        self.capability_journal_persistence = capability_journal_persistence
         self.capability_runtime = (
             AutonomousCapabilityRuntime(self.tool_runtime, journal=capability_journal)
             if self.tool_runtime is not None
@@ -13710,6 +17591,110 @@ class AutonomousAgent:
             router=router,
             pack_registry=pack_registry,
         )
+
+    def goal_agent_runtime(
+        self,
+        ledger: AutonomousGoalLedger,
+        *,
+        task_resolver: Callable[[Any, Any], str] | None = None,
+        run_options_factory: Callable[[Any, Any], Mapping[str, Any]] | None = None,
+        action_handoff_resolver: Callable[[Any, Any, str], Mapping[str, Any] | None] | None = None,
+        evaluator: Any | None = None,
+        learner: Any | None = None,
+        journal: Any | None = None,
+        batch_id_prefix: str = "autonomous-goal-agent",
+    ) -> Any:
+        """Create the long-horizon goal bridge bound to this complete agent facade.
+
+        The goal scheduler remains metadata-only, while each claimed goal is executed through
+        this agent's normal session-aware routing surface.  That means model inventory, opaque
+        credential handles, prompt/plan construction, provider approval, connector/tool policy,
+        and online learning remain the same boundaries as a direct ``run`` call.  The task and
+        run-options callbacks are invoked only at execution time and are never persisted by the
+        goal ledger.  When configured, ``action_handoff_resolver`` supplies a caller-owned,
+        digest-bound operator handoff that is replayed through ``execute_action_handoff`` before
+        the provider run boundary.
+        """
+
+        from .autonomous_goal_agent import AutonomousGoalAgentRuntime
+
+        try:
+            return AutonomousGoalAgentRuntime(
+                self.orchestrator,
+                ledger,
+                agent=self,
+                task_resolver=task_resolver,
+                run_options_factory=run_options_factory,
+                action_handoff_resolver=action_handoff_resolver,
+                evaluator=evaluator,
+                learner=learner,
+                journal=journal,
+                batch_id_prefix=batch_id_prefix,
+            )
+        except (ArgumentError, BrainRunError):
+            raise
+        except Exception as error:
+            raise BrainRunError("goal agent runtime could not be created") from error
+
+    def run_goal_control_loop(
+        self,
+        ledger: AutonomousGoalLedger,
+        *,
+        task_resolver: Callable[[Any, Any], str],
+        run_options_factory: Callable[[Any, Any], Mapping[str, Any]] | None = None,
+        action_handoff_resolver: Callable[[Any, Any, str], Mapping[str, Any] | None] | None = None,
+        evaluator: Any | None = None,
+        learner: Any | None = None,
+        journal: Any | None = None,
+        batch_id_prefix: str = "autonomous-goal-agent",
+        schedule_options: Mapping[str, Any] | None = None,
+        options_factory: Callable[[Any], Mapping[str, Any]] | None = None,
+        max_cycles: int = 128,
+        max_total_runs: int = 8_192,
+        expected_preview_digest: str | None = None,
+        preview_approval: Mapping[str, Any] | None = None,
+    ) -> Any:
+        """Run bounded long-horizon goals through the facade-backed autonomous control loop."""
+
+        runtime = self.goal_agent_runtime(
+            ledger,
+            task_resolver=task_resolver,
+            run_options_factory=run_options_factory,
+            action_handoff_resolver=action_handoff_resolver,
+            evaluator=evaluator,
+            learner=learner,
+            journal=journal,
+            batch_id_prefix=batch_id_prefix,
+        )
+        return runtime.run(
+            schedule_options=schedule_options,
+            options_factory=options_factory,
+            max_cycles=max_cycles,
+            max_total_runs=max_total_runs,
+            expected_preview_digest=expected_preview_digest,
+            preview_approval=preview_approval,
+        )
+
+    def preview_goal_control_loop(
+        self,
+        ledger: AutonomousGoalLedger,
+        *,
+        batch_id_prefix: str = "autonomous-goal-agent",
+        schedule_options: Mapping[str, Any] | None = None,
+    ) -> Any:
+        """Inspect the next goal admission decision without requiring task rehydration.
+
+        The preview is provider-free and does not call a resolver, open credentials, invoke an
+        evaluator, mutate learner state, or enter any execution boundary.  A task resolver is
+        still required when the returned runtime is later used for ``run``.
+        """
+
+        runtime = self.goal_agent_runtime(
+            ledger,
+            task_resolver=None,
+            batch_id_prefix=batch_id_prefix,
+        )
+        return runtime.preview(schedule_options=schedule_options)
 
     def register_model(
         self,
@@ -13793,6 +17778,19 @@ class AutonomousAgent:
             providers=providers,
         )
 
+    def _model_inventory_persistence_for(
+        self,
+        snapshot_store: AutonomousModelInventoryStore,
+    ) -> AutonomousModelInventoryPersistenceCoordinator:
+        coordinator = self.model_inventory_persistence
+        if coordinator is None or coordinator.store is not snapshot_store:
+            coordinator = AutonomousModelInventoryPersistenceCoordinator(
+                self.model_inventory,
+                snapshot_store,
+            )
+            self.model_inventory_persistence = coordinator
+        return coordinator
+
     def refresh_model_inventory(
         self,
         *,
@@ -13826,17 +17824,28 @@ class AutonomousAgent:
                 and isinstance(row.get("model_capabilities"), Sequence)
             }
         try:
-            snapshot = self.model_inventory.refresh(
-                credentials=credentials,
-                providers=providers,
-                priors=priors,
-                prior_factory=prior_factory,
-                domain_requirements=domain_requirements,
-                limit=limit,
-                snapshot_store=snapshot_store,
-                refresh_id=refresh_id,
-                raise_on_error=raise_on_error,
-            )
+            if snapshot_store is None:
+                snapshot = self.model_inventory.refresh(
+                    credentials=credentials,
+                    providers=providers,
+                    priors=priors,
+                    prior_factory=prior_factory,
+                    domain_requirements=domain_requirements,
+                    limit=limit,
+                    refresh_id=refresh_id,
+                    raise_on_error=raise_on_error,
+                )
+            else:
+                snapshot = self._model_inventory_persistence_for(snapshot_store).refresh(
+                    credentials=credentials,
+                    providers=providers,
+                    priors=priors,
+                    prior_factory=prior_factory,
+                    domain_requirements=domain_requirements,
+                    limit=limit,
+                    refresh_id=refresh_id,
+                    raise_on_error=raise_on_error,
+                )
         except Exception as error:
             if isinstance(error, BrainRunError):
                 raise
@@ -13844,6 +17853,161 @@ class AutonomousAgent:
         if not isinstance(snapshot, AutonomousModelInventorySnapshot):
             raise BrainRunError("model inventory coordinator returned an invalid snapshot")
         return snapshot.to_dict()
+
+    def restore_model_inventory(
+        self,
+        snapshot_store: AutonomousModelInventoryStore,
+    ) -> dict[str, Any] | None:
+        """Restore a metadata-only model catalogue and retain its next inventory CAS fence."""
+
+        try:
+            snapshot = self._model_inventory_persistence_for(snapshot_store).restore()
+        except AutonomousModelInventoryError as error:
+            raise BrainRunError("model inventory restore failed") from error
+        return None if snapshot is None else snapshot.to_dict()
+
+    def model_inventory_readiness(
+        self,
+        *,
+        domain_requirements: Mapping[str, Sequence[str]] | None = None,
+        estimated_input_tokens: int = 4_096,
+        requested_output_tokens: int = 1_024,
+    ) -> dict[str, Any]:
+        """Return a provider-free live eligibility projection for the model catalogue.
+
+        This complements ``refresh_model_inventory``: refresh performs authenticated discovery
+        and may mutate the caller-owned catalogue, while this method only joins the current
+        catalogue with the reviewed domain requirements and live runtime gates. It is safe to
+        call from a readiness screen before a user has supplied any credential.
+        """
+
+        if domain_requirements is None:
+            domain_requirements = {
+                domain: tuple(self.orchestrator.registry.resolve(domain).required_model_capabilities)
+                for domain in AUTONOMOUS_DOMAINS
+            }
+        try:
+            report = self.model_inventory.readiness(
+                domain_requirements=domain_requirements,
+                estimated_input_tokens=estimated_input_tokens,
+                requested_output_tokens=requested_output_tokens,
+            )
+        except Exception as error:
+            if isinstance(error, BrainRunError):
+                raise
+            raise BrainRunError("model inventory readiness projection failed") from error
+        if not isinstance(report, AutonomousModelInventoryReadiness):
+            raise BrainRunError("model inventory coordinator returned an invalid readiness report")
+        return report.to_dict()
+
+    def flush_model_inventory(
+        self,
+        snapshot_store: AutonomousModelInventoryStore,
+    ) -> dict[str, Any] | None:
+        """Re-commit the last inventory image without rediscovering or contacting a provider."""
+
+        try:
+            snapshot = self._model_inventory_persistence_for(snapshot_store).flush()
+        except AutonomousModelInventoryError as error:
+            raise BrainRunError("model inventory flush failed") from error
+        return None if snapshot is None else snapshot.to_dict()
+
+    def _persistence_lifecycle_for(
+        self,
+        model_inventory_store: AutonomousModelInventoryStore | None = None,
+        *,
+        activation_store: AutonomousCapabilityActivationStore | None = None,
+        selection_promotion_store: AutonomousSelectionPromotionLifecycleStore | None = None,
+        capability_journal_persistence: AutonomousCapabilityJournalPersistenceCoordinator | None = None,
+        decision_cycle_persistence: AutonomousDecisionCyclePersistenceCoordinator | None = None,
+        execution_persistence: AutonomousExecutionPersistenceCoordinator | None = None,
+        require_all: bool = False,
+        continue_on_error: bool = False,
+    ) -> AutonomousAgentPersistenceLifecycleCoordinator:
+        coordinator = self._persistence_lifecycle_coordinator
+        if (
+            coordinator is None
+            or coordinator.model_inventory_store is not model_inventory_store
+            or coordinator.activation_store is not activation_store
+            or coordinator.selection_promotion_store is not selection_promotion_store
+            or coordinator.capability_journal_persistence is not capability_journal_persistence
+            or coordinator.decision_cycle_persistence is not decision_cycle_persistence
+            or coordinator.execution_persistence is not execution_persistence
+            or coordinator.require_all != require_all
+            or coordinator.continue_on_error != continue_on_error
+        ):
+            coordinator = AutonomousAgentPersistenceLifecycleCoordinator(
+                self,
+                model_inventory_store=model_inventory_store,
+                activation_store=activation_store,
+                selection_promotion_store=selection_promotion_store,
+                capability_journal_persistence=capability_journal_persistence,
+                decision_cycle_persistence=decision_cycle_persistence,
+                execution_persistence=execution_persistence,
+                require_all=require_all,
+                continue_on_error=continue_on_error,
+            )
+            self._persistence_lifecycle_coordinator = coordinator
+            self._persistence_lifecycle_activation_store = activation_store
+            self._persistence_lifecycle_selection_promotion_store = selection_promotion_store
+            self._persistence_lifecycle_capability_journal_persistence = capability_journal_persistence
+            self._persistence_lifecycle_decision_cycle_persistence = decision_cycle_persistence
+            self._persistence_lifecycle_execution_persistence = execution_persistence
+        return coordinator
+
+    def restore_persisted_state(
+        self,
+        *,
+        model_inventory_store: AutonomousModelInventoryStore | None = None,
+        activation_store: AutonomousCapabilityActivationStore | None = None,
+        selection_promotion_store: AutonomousSelectionPromotionLifecycleStore | None = None,
+        capability_journal_persistence: AutonomousCapabilityJournalPersistenceCoordinator | None = None,
+        decision_cycle_persistence: AutonomousDecisionCyclePersistenceCoordinator | None = None,
+        execution_persistence: AutonomousExecutionPersistenceCoordinator | None = None,
+        strict: bool = True,
+        require_all: bool = False,
+        continue_on_error: bool = False,
+    ) -> dict[str, Any]:
+        """Restore all configured brain metadata stores in dependency order."""
+
+        report = self._persistence_lifecycle_for(
+            model_inventory_store,
+            activation_store=activation_store,
+            selection_promotion_store=selection_promotion_store,
+            capability_journal_persistence=(self.capability_journal_persistence if capability_journal_persistence is None else capability_journal_persistence),
+            decision_cycle_persistence=(self.decision_cycle_persistence if decision_cycle_persistence is None else decision_cycle_persistence),
+            execution_persistence=(self.execution_persistence if execution_persistence is None else execution_persistence),
+            require_all=require_all,
+            continue_on_error=continue_on_error,
+        ).restore(strict=strict, continue_on_error=continue_on_error)
+        return report.to_dict()
+
+    def flush_persisted_state(
+        self,
+        *,
+        model_inventory_store: AutonomousModelInventoryStore | None = None,
+        activation_store: AutonomousCapabilityActivationStore | None = None,
+        selection_promotion_store: AutonomousSelectionPromotionLifecycleStore | None = None,
+        capability_journal_persistence: AutonomousCapabilityJournalPersistenceCoordinator | None = None,
+        decision_cycle_persistence: AutonomousDecisionCyclePersistenceCoordinator | None = None,
+        execution_persistence: AutonomousExecutionPersistenceCoordinator | None = None,
+        strict: bool = True,
+        require_all: bool = False,
+        continue_on_error: bool = False,
+    ) -> dict[str, Any]:
+        """Flush all configured brain metadata stores in reverse dependency order."""
+
+        report = self._persistence_lifecycle_for(
+            model_inventory_store,
+            activation_store=activation_store,
+            selection_promotion_store=selection_promotion_store,
+            capability_journal_persistence=(self.capability_journal_persistence if capability_journal_persistence is None else capability_journal_persistence),
+            decision_cycle_persistence=(self.decision_cycle_persistence if decision_cycle_persistence is None else decision_cycle_persistence),
+            execution_persistence=(self.execution_persistence if execution_persistence is None else execution_persistence),
+            require_all=require_all,
+            continue_on_error=continue_on_error,
+        ).flush(strict=strict, continue_on_error=continue_on_error)
+        return report.to_dict()
 
     def register_provider(self, config: ProviderConfig) -> None:
         """Register non-secret provider transport metadata for the key-entry flow."""
@@ -14097,6 +18261,46 @@ class AutonomousAgent:
             ),
         )
 
+    def run_with_provisioned_credentials_with_launch_admission(
+        self,
+        *,
+        task: str,
+        domain: str,
+        launch_admission: Mapping[str, Any],
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        **kwargs: Any,
+    ) -> AutonomousProvisionedRun:
+        """Admit an explicit domain before provisioning any deployment-managed credential."""
+
+        _authorize_launch_admission_domains(launch_admission, (domain,))
+        return self.run_with_provisioned_credentials(
+            task=task,
+            domain=domain,
+            model_candidates=model_candidates,
+            **kwargs,
+        )
+
+    def run_auto_with_provisioned_credentials_with_launch_admission(
+        self,
+        *,
+        task: str,
+        launch_admission: Mapping[str, Any],
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        **kwargs: Any,
+    ) -> AutonomousProvisionedRun:
+        """Preview and admit automatic routing before provisioning deployment-managed credentials."""
+
+        self.authorize_auto_launch_admission(
+            task=task,
+            launch_admission=launch_admission,
+            **kwargs,
+        )
+        return self.run_auto_with_provisioned_credentials(
+            task=task,
+            model_candidates=model_candidates,
+            **kwargs,
+        )
+
     def unregister_credential_source(self, provider: str, source_id: str) -> bool:
         """Remove deployment wiring; active sessions remain caller-owned and independently revocable."""
 
@@ -14260,11 +18464,11 @@ class AutonomousAgent:
             return supplied
         merged = dict(historical)
         merged.update(dict(supplied))
-        for field in ("provider_health", "model_health"):
-            historical_rows = historical.get(field)
-            supplied_rows = supplied.get(field)
+        for field_name in ("provider_health", "model_health"):
+            historical_rows = historical.get(field_name)
+            supplied_rows = supplied.get(field_name)
             if isinstance(historical_rows, Mapping) and isinstance(supplied_rows, Mapping):
-                merged[field] = {**dict(historical_rows), **dict(supplied_rows)}
+                merged[field_name] = {**dict(historical_rows), **dict(supplied_rows)}
         return merged
 
     def credential_status(self, provider: str) -> dict[str, Any]:
@@ -14387,6 +18591,20 @@ class AutonomousAgent:
         except AutonomousActivationError as error:
             raise BrainRunError("activation state could not be persisted") from error
 
+    def restore_activation(
+        self,
+        store: AutonomousCapabilityActivationStore,
+    ) -> dict[str, Any] | None:
+        """Restore redacted activation state while preserving revocation and identity fences."""
+
+        if not isinstance(store, AutonomousCapabilityActivationStore):
+            raise BrainRunError("restore_activation requires an AutonomousCapabilityActivationStore")
+        try:
+            state = store.load()
+            return None if state is None else self.activation.restore(state).to_dict()
+        except AutonomousActivationError as error:
+            raise BrainRunError("activation state could not be restored") from error
+
     def revoke_activation(self, *, reason: str = "activation_revoked") -> dict[str, Any]:
         """Revoke the activation snapshot without pretending to revoke provider credentials."""
 
@@ -14404,6 +18622,308 @@ class AutonomousAgent:
         """Return the redacted domain strategy catalogue used by automatic intake."""
 
         return self.orchestrator.registry.catalogue()
+
+    def plan_information_acquisition(
+        self,
+        *,
+        task: str,
+        candidates: Sequence[Mapping[str, Any] | Any],
+        domains: Sequence[str] | None = None,
+        hints: Sequence[str] = (),
+        max_domains: int = 3,
+        allow_cross_domain: bool = True,
+        policy: Mapping[str, Any] | Any | None = None,
+        satisfied_candidate_ids: Sequence[str] = (),
+    ) -> Any:
+        """Choose the next evidence/context acquisitions without dispatching anything.
+
+        Automatic intake binds the plan to the deterministic route digest.  Explicit ``domains``
+        are caller-selected and therefore get an explicit-domain digest rather than being
+        presented as semantic routing evidence.  The returned plan is the input to a caller's
+        reviewed evidence queue; this method never contacts a source, provider, tool, learner,
+        or credential store.
+        """
+
+        from .autonomous_information_acquisition import plan_autonomous_information_acquisition
+
+        if not isinstance(task, str) or not task.strip() or "\x00" in task or len(task.encode("utf-8")) > 32_000:
+            raise BrainRunError("information acquisition task is outside its bound")
+        task_digest = content_digest({"task": task})
+        if domains is None:
+            route = self.route(
+                task=task,
+                hints=hints,
+                max_domains=max_domains,
+                allow_cross_domain=allow_cross_domain,
+            )
+            if route.abstained:
+                raise BrainRunError("information acquisition planning requires route review before candidate selection")
+            requested_domains = route.selected_domains or ((route.primary_domain,) if route.primary_domain else ())
+            route_digest = route.route_digest
+        else:
+            requested_domains = tuple(domains)
+            route_digest = content_digest({"schema": "bioprism-python-explicit-information-domains/0.1", "domains": list(requested_domains)})
+        if not requested_domains:
+            raise BrainRunError("information acquisition planning requires at least one routed domain")
+        return plan_autonomous_information_acquisition(
+            task_digest=task_digest,
+            route_digest=route_digest,
+            candidates=candidates,
+            requested_domains=requested_domains,
+            policy=policy,
+            satisfied_candidate_ids=satisfied_candidate_ids,
+        )
+
+    def assess_claim_integrity(
+        self,
+        *,
+        task: str,
+        claims: Sequence[AutonomousClaimIntegrityClaim | Mapping[str, Any]],
+        evidence: Sequence[AutonomousClaimIntegrityEvidence | Mapping[str, Any]],
+        reference_time: str,
+        policy: AutonomousClaimIntegrityPolicy | Mapping[str, Any] | None = None,
+    ) -> AutonomousClaimIntegrityAssessment:
+        """Fuse evidence metadata before a provider or effect can rely on a claim.
+
+        This is intentionally adjacent to information acquisition planning: the result's
+        provider-free actions can become the next candidate capabilities, while source dispatch,
+        contradiction resolution, and reproduction remain separately approved caller work.
+        """
+
+        if not isinstance(task, str) or not task.strip() or "\x00" in task or len(task.encode("utf-8")) > 32_000:
+            raise BrainRunError("claim integrity task is outside its bound")
+        return assess_autonomous_claim_integrity(
+            context_digest=content_digest({"task": task}),
+            claims=claims,
+            evidence=evidence,
+            reference_time=reference_time,
+            policy=policy,
+        )
+
+    def reassess_claim_integrity(
+        self,
+        previous: AutonomousClaimIntegrityAssessment,
+        *,
+        claims: Sequence[AutonomousClaimIntegrityClaim | Mapping[str, Any]],
+        evidence: Sequence[AutonomousClaimIntegrityEvidence | Mapping[str, Any]],
+        reference_time: str,
+        policy: AutonomousClaimIntegrityPolicy | Mapping[str, Any] | None = None,
+    ) -> AutonomousClaimIntegrityAssessment:
+        """Continue a claim decision chain after caller-owned evidence changes."""
+
+        return reassess_autonomous_claim_integrity(
+            previous,
+            claims=claims,
+            evidence=evidence,
+            reference_time=reference_time,
+            policy=policy,
+        )
+
+    def plan_claim_integrity_acquisition(
+        self,
+        assessment: AutonomousClaimIntegrityAssessment,
+        *,
+        candidates: Sequence[Mapping[str, Any] | Any],
+        policy: Mapping[str, Any] | Any | None = None,
+        requested_domains: Sequence[str] | None = None,
+    ) -> Any:
+        """Translate unresolved claim actions into a reviewed, provider-free acquisition plan."""
+
+        return plan_autonomous_claim_integrity_acquisition(
+            assessment,
+            candidates=candidates,
+            policy=policy,
+            requested_domains=requested_domains,
+        )
+
+    def bind_claim_integrity_acquisition(
+        self,
+        bridge: Any,
+        requests: Sequence[Mapping[str, Any]],
+    ) -> AutonomousClaimIntegrityAcquisitionBinding:
+        """Bind one caller-owned request to each candidate selected by an integrity bridge.
+
+        The returned binding is metadata-only when serialized.  Its transient request batch is
+        ordered by the information planner and carries assessment, bridge, plan, candidate, and
+        candidate-digest metadata into the existing reviewed evidence runtime.
+        """
+
+        return bind_autonomous_claim_integrity_acquisition_requests(bridge, requests)
+
+    def execute_claim_integrity_acquisition(
+        self,
+        bridge: Any,
+        registry: Any,
+        requests: Sequence[Mapping[str, Any]],
+        *,
+        prepare_options: Mapping[str, Any] | None = None,
+        execute_options: Mapping[str, Any] | None = None,
+        available_evidence: Sequence[str] = (),
+        completed_stages: Mapping[str, Sequence[str]] | None = None,
+    ) -> Any:
+        """Execute only the reviewed evidence requests selected for unresolved claims.
+
+        This closes the integrity-to-source queue without collapsing authorization boundaries:
+        ``approve_source_dispatch`` remains required by the evidence controller, and provider
+        contracts/evaluators remain caller-owned.  A fresh evidence plan is compiled for exactly
+        the selected candidate domains and the controller rechecks readiness before dispatch.
+        """
+
+        from .autonomous_evidence_execution import AutonomousEvidenceExecutionController
+
+        binding = self.bind_claim_integrity_acquisition(bridge, requests)
+        plan = bridge.acquisition_plan
+        if plan is None:
+            raise ArgumentError("integrity acquisition bridge has no executable plan")
+        evidence_plan = self.evidence_plan(
+            plan.selected_domains,
+            available_evidence=available_evidence,
+            completed_stages=completed_stages,
+        )
+        preparation = dict(prepare_options or {})
+        health_store = preparation.pop("health_store", None)
+        controller = AutonomousEvidenceExecutionController(registry, health_store)
+        execution_plan = controller.prepare(evidence_plan, **preparation)
+        execution = dict(execute_options or {})
+        if "provider_contracts" not in execution and "provider_contracts" in preparation:
+            execution["provider_contracts"] = preparation["provider_contracts"]
+        return controller.execute(execution_plan, evidence_plan, binding.requests, **execution)
+
+    def execute_claim_integrity_acquisition_resumable(
+        self,
+        bridge: Any,
+        registry: Any,
+        requests: Sequence[Mapping[str, Any]],
+        *,
+        job_id: str,
+        checkpoint_store: Any,
+        prepare_options: Mapping[str, Any] | None = None,
+        execute_options: Mapping[str, Any] | None = None,
+        available_evidence: Sequence[str] = (),
+        completed_stages: Mapping[str, Sequence[str]] | None = None,
+    ) -> Any:
+        """Resume the integrity-selected evidence queue through the existing checkpoint fence."""
+
+        binding = self.bind_claim_integrity_acquisition(bridge, requests)
+        plan = bridge.acquisition_plan
+        if plan is None:
+            raise ArgumentError("integrity acquisition bridge has no executable plan")
+        return self.execute_reviewed_evidence_resumable(
+            registry,
+            plan.selected_domains,
+            binding.requests,
+            job_id=job_id,
+            checkpoint_store=checkpoint_store,
+            prepare_options=prepare_options,
+            execute_options=execute_options,
+            available_evidence=available_evidence,
+            completed_stages=completed_stages,
+        )
+
+    def project_outcome_integrity_run(
+        self,
+        result: Any,
+        *,
+        task_digest: str | None = None,
+        domain: str | None = None,
+    ) -> AutonomousOutcomeIntegrityRun:
+        """Project a direct, automatic, or cross-domain result into a reliance identity."""
+
+        return project_autonomous_outcome_integrity_run(
+            result,
+            task_digest=task_digest,
+            domain=domain,
+        )
+
+    def bind_outcome_integrity_claims(
+        self,
+        result: Any,
+        bindings: Sequence[Mapping[str, Any] | AutonomousOutcomeIntegrityClaimBinding],
+        *,
+        task_digest: str | None = None,
+        domain: str | None = None,
+    ) -> tuple[AutonomousOutcomeIntegrityClaimBinding, ...]:
+        """Bind explicit claim declarations to the exact result output and response digest."""
+
+        run = self.project_outcome_integrity_run(result, task_digest=task_digest, domain=domain)
+        return bind_autonomous_outcome_integrity_claims(run, bindings)
+
+    def assess_outcome_integrity(
+        self,
+        result: Any,
+        *,
+        claims: Sequence[AutonomousClaimIntegrityClaim | Mapping[str, Any]],
+        evidence: Sequence[AutonomousClaimIntegrityEvidence | Mapping[str, Any]],
+        claim_bindings: Sequence[Mapping[str, Any] | AutonomousOutcomeIntegrityClaimBinding],
+        reference_time: str,
+        policy: AutonomousClaimIntegrityPolicy | Mapping[str, Any] | None = None,
+        response_assessment: AutonomousCrossDomainResponseAssessment | None = None,
+        require_completed_run: bool = True,
+        require_response_assessment: bool = False,
+        require_synthesis: bool = False,
+        task_digest: str | None = None,
+        domain: str | None = None,
+    ) -> AutonomousOutcomeIntegrityAssessment:
+        """Run the final provider-free claim/reliance gate for one exact autonomous outcome.
+
+        The result remains transient.  The returned assessment contains only digests, counts,
+        statuses, and next actions; it does not turn a provider response into external truth or
+        authorize a new provider, source, tool, effect, or evaluator settlement.
+        """
+
+        run = self.project_outcome_integrity_run(result, task_digest=task_digest, domain=domain)
+        return assess_autonomous_outcome_integrity(
+            run=run,
+            claims=claims,
+            evidence=evidence,
+            claim_bindings=claim_bindings,
+            reference_time=reference_time,
+            policy=policy,
+            response_assessment=response_assessment,
+            require_completed_run=require_completed_run,
+            require_response_assessment=require_response_assessment,
+            require_synthesis=require_synthesis,
+        )
+
+    def assess_cross_domain_responses(
+        self,
+        responses: Sequence[Mapping[str, Any]],
+        *,
+        task: str | None = None,
+        context_digest: str | None = None,
+        requested_domains: Sequence[str] | None = None,
+        alignments: Sequence[Mapping[str, Any]] = (),
+        require_synthesis: bool = False,
+        require_complete_alignment: bool = True,
+        minimum_reward: float = 0.8,
+        minimum_alignment_confidence: float = 0.75,
+        contradiction_confidence_threshold: float = 0.75,
+    ) -> AutonomousCrossDomainResponseAssessment:
+        """Gate structured specialist outputs before cross-domain synthesis.
+
+        ``responses`` are transient caller/provider values.  The returned assessment keeps only
+        response/evaluation digests, bounded scores, explicit alignment metadata, and next
+        actions.  Supplying ``task`` creates a digest-only context binding; its text is never
+        retained by this façade.
+        """
+
+        if task is not None:
+            if context_digest is not None:
+                raise BrainRunError("cross-domain response assessment accepts task or context_digest, not both")
+            if not isinstance(task, str) or not task.strip() or "\x00" in task or len(task.encode("utf-8")) > 32_000:
+                raise BrainRunError("cross-domain response assessment task is outside its bound")
+            context_digest = content_digest({"task": task})
+        return assess_autonomous_cross_domain_response_set(
+            responses,
+            requested_domains=requested_domains,
+            context_digest=context_digest,
+            alignments=alignments,
+            require_synthesis=require_synthesis,
+            require_complete_alignment=require_complete_alignment,
+            minimum_reward=minimum_reward,
+            minimum_alignment_confidence=minimum_alignment_confidence,
+            contradiction_confidence_threshold=contradiction_confidence_threshold,
+        )
 
     def evidence_plan(
         self,
@@ -14451,6 +18971,10 @@ class AutonomousAgent:
         available_evidence: Sequence[str] = (),
         completed_stages: Mapping[str, Sequence[str]] | None = None,
         journal: AutonomousEvidenceRuntimeJournal | None = None,
+        authorization_context: AutonomousAuthorizationContext | None = None,
+        authorization_domain: str | None = None,
+        authorization_capability: str | None = None,
+        authorization_risk_class: str | None = None,
     ) -> AutonomousEvidenceRuntimeResult:
         """Run evidence acquisition through explicit caller-owned adapters."""
 
@@ -14466,7 +18990,371 @@ class AutonomousAgent:
             available_evidence=available_evidence,
             completed_stages=completed_stages,
             journal=journal,
+            authorization_context=authorization_context,
+            authorization_domain=authorization_domain,
+            authorization_capability=authorization_capability,
+            authorization_risk_class=authorization_risk_class,
         )
+
+    def prepare_reviewed_evidence(
+        self,
+        registry: Any,
+        domains: Sequence[str] = AUTONOMOUS_DOMAINS,
+        *,
+        available_evidence: Sequence[str] = (),
+        completed_stages: Mapping[str, Sequence[str]] | None = None,
+        **options: Any,
+    ) -> Any:
+        """Prepare a generic adapter execution plan without contacting a source.
+
+        This is the high-level bridge for applications that use one agent across files,
+        browsers, databases, scientific sources, enterprise systems, and other reviewed
+        connectors.  ``options`` are forwarded to the typed execution controller's planning
+        boundary; source dispatch remains impossible until the matching execute method receives
+        explicit approval.
+        """
+
+        from .autonomous_evidence_execution import AutonomousEvidenceExecutionController
+
+        if not hasattr(registry, "registry_digest"):
+            raise ArgumentError("prepare_reviewed_evidence requires an evidence adapter registry")
+        evidence_plan = self.evidence_plan(
+            domains,
+            available_evidence=available_evidence,
+            completed_stages=completed_stages,
+        )
+        return AutonomousEvidenceExecutionController(registry, options.pop("health_store", None)).prepare(evidence_plan, **options)
+
+    def execute_reviewed_evidence(
+        self,
+        registry: Any,
+        domains: Sequence[str],
+        requests: Sequence[Mapping[str, Any]],
+        *,
+        prepare_options: Mapping[str, Any] | None = None,
+        execute_options: Mapping[str, Any] | None = None,
+        available_evidence: Sequence[str] = (),
+        completed_stages: Mapping[str, Sequence[str]] | None = None,
+    ) -> Any:
+        """Run the complete generic reviewed-evidence lifecycle through the agent facade."""
+
+        from .autonomous_evidence_execution import AutonomousEvidenceExecutionController
+
+        plan = self.evidence_plan(domains, available_evidence=available_evidence, completed_stages=completed_stages)
+        preparation = dict(prepare_options or {})
+        health_store = preparation.pop("health_store", None)
+        controller = AutonomousEvidenceExecutionController(registry, health_store)
+        execution_plan = controller.prepare(plan, **preparation)
+        return controller.execute(execution_plan, plan, requests, **dict(execute_options or {}))
+
+    def execute_reviewed_evidence_resumable(
+        self,
+        registry: Any,
+        domains: Sequence[str],
+        requests: Sequence[Mapping[str, Any]],
+        *,
+        job_id: str,
+        checkpoint_store: Any,
+        prepare_options: Mapping[str, Any] | None = None,
+        execute_options: Mapping[str, Any] | None = None,
+        available_evidence: Sequence[str] = (),
+        completed_stages: Mapping[str, Sequence[str]] | None = None,
+    ) -> Any:
+        """Execute or resume generic reviewed evidence with a digest-bound checkpoint."""
+
+        from .autonomous_evidence_execution import AutonomousEvidenceExecutionController
+        from .autonomous_evidence_execution_resumable import AutonomousEvidenceExecutionResumableController
+
+        plan = self.evidence_plan(domains, available_evidence=available_evidence, completed_stages=completed_stages)
+        preparation = dict(prepare_options or {})
+        health_store = preparation.pop("health_store", None)
+        controller = AutonomousEvidenceExecutionController(registry, health_store)
+        execution_plan = controller.prepare(plan, **preparation)
+        return AutonomousEvidenceExecutionResumableController(controller, checkpoint_store, job_id).run(
+            execution_plan,
+            plan,
+            requests,
+            **dict(execute_options or {}),
+        )
+
+    def run_with_reviewed_evidence(
+        self,
+        *,
+        task: str,
+        requests: Sequence[Mapping[str, Any]],
+        acquirer: Any,
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        domains: Sequence[str] | None = None,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        projector: Any | None = None,
+        evaluator: Any | None = None,
+        rehydrate_value: Callable[[Mapping[str, Any]], Any] | None = None,
+        parent_evidence_digests: Sequence[str] = (),
+        stop_on_failure: bool = False,
+        reevaluate_pending: bool = False,
+        available_evidence: Sequence[str] = (),
+        completed_stages: Mapping[str, Sequence[str]] | None = None,
+        journal: AutonomousEvidenceRuntimeJournal | None = None,
+        approve_source_dispatch: bool = False,
+        allow_incomplete_evidence: bool = False,
+        approve_provider_call: bool = False,
+        provider_run_override: Any | None = None,
+        before_provider_run: Callable[[Any], None] | None = None,
+        prompt_builder: Callable[[AutonomousEvidenceRuntimeResult], Mapping[str, Any]] | None = None,
+        run_mode: str = "auto",
+        run_options: Mapping[str, Any] | None = None,
+    ) -> Any:
+        """Acquire accepted evidence and compose it with the ordinary autonomous run.
+
+        This is the façade-level bridge between the provider-free evidence runtime and model
+        execution.  The bridge keeps source dispatch approval, evidence acceptance, and provider
+        approval independent.  Its serialized result is metadata-only; raw evidence values,
+        prompt projections, and provider responses remain transient caller-owned objects.
+        """
+
+        from .autonomous_evidence_brain import run_autonomous_evidence_backed
+
+        return run_autonomous_evidence_backed(
+            self,
+            task=task,
+            requests=requests,
+            acquirer=acquirer,
+            credentials=credentials,
+            domains=domains,
+            model_candidates=model_candidates,
+            projector=projector,
+            evaluator=evaluator,
+            rehydrate_value=rehydrate_value,
+            parent_evidence_digests=parent_evidence_digests,
+            stop_on_failure=stop_on_failure,
+            reevaluate_pending=reevaluate_pending,
+            available_evidence=available_evidence,
+            completed_stages=completed_stages,
+            journal=journal,
+            approve_source_dispatch=approve_source_dispatch,
+            allow_incomplete_evidence=allow_incomplete_evidence,
+            approve_provider_call=approve_provider_call,
+            provider_run_override=provider_run_override,
+            before_provider_run=before_provider_run,
+            prompt_builder=prompt_builder,
+            run_mode=run_mode,
+            run_options=run_options,
+        )
+
+    def run_with_reviewed_evidence_with_launch_admission(
+        self,
+        *,
+        launch_admission: Mapping[str, Any],
+        **kwargs: Any,
+    ) -> Any:
+        """Acquire reviewed evidence only after its complete domain scope is admitted."""
+
+        _authorize_launch_admission_domains(
+            launch_admission,
+            _launch_admission_domains(kwargs.get("domains")),
+        )
+        return self.run_with_reviewed_evidence(**kwargs)
+
+    def run_with_llm_evidence(
+        self,
+        *,
+        task: str,
+        requests: Sequence[Mapping[str, Any]],
+        adapter: Any,
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        projector: Any | None = None,
+        **kwargs: Any,
+    ) -> Any:
+        """Run reviewed evidence acquisition through a provider-backed adapter or router.
+
+        ``AutonomousLLMEvidenceAdapter`` and ``AutonomousLLMEvidenceAdapterRouter`` both expose
+        ``acquire``.  A router also exposes ``project``; a single adapter uses its
+        ``project_value`` method.  The remaining keyword arguments are passed to
+        :meth:`run_with_reviewed_evidence`, so source approval, evidence acceptance, provider
+        approval, journaling, and model-routing policy stay visible at the call site.
+        """
+
+        if not callable(getattr(adapter, "acquire", None)):
+            raise ArgumentError("LLM evidence adapter must expose a callable acquire method")
+        selected_projector = projector
+        if selected_projector is None:
+            candidate = getattr(adapter, "project", None)
+            if callable(candidate):
+                selected_projector = candidate
+            else:
+                candidate = getattr(adapter, "project_value", None)
+                if callable(candidate):
+                    selected_projector = candidate
+        return self.run_with_reviewed_evidence(
+            task=task,
+            requests=requests,
+            acquirer=adapter,
+            credentials=credentials,
+            projector=selected_projector,
+            **kwargs,
+        )
+
+    def run_with_llm_evidence_with_launch_admission(
+        self,
+        *,
+        launch_admission: Mapping[str, Any],
+        **kwargs: Any,
+    ) -> Any:
+        """Run adapter-backed evidence acquisition only after its domain scope is admitted."""
+
+        _authorize_launch_admission_domains(
+            launch_admission,
+            _launch_admission_domains(kwargs.get("domains")),
+        )
+        return self.run_with_llm_evidence(**kwargs)
+
+    def run_with_domain_evidence_catalogue(
+        self,
+        *,
+        task: str,
+        catalogue: Any,
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        domains: Sequence[str] | None = None,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        available_evidence: Sequence[str] = (),
+        completed_stages: Mapping[str, Sequence[str]] | None = None,
+        prepare_options: Mapping[str, Any] | None = None,
+        prepare_for_requirement: Callable[[Any], Mapping[str, Any]] | None = None,
+        execute_options: Mapping[str, Any] | None = None,
+        max_parallel_requirements: int | None = None,
+        allow_incomplete_evidence: bool = False,
+        approve_source_dispatch: bool = False,
+        approve_provider_call: bool = False,
+        provider_run_override: Any | None = None,
+        before_provider_run: Callable[[Any], None] | None = None,
+        prompt_builder: Callable[[Any], Mapping[str, Any]] | None = None,
+        run_mode: str = "auto",
+        run_options: Mapping[str, Any] | None = None,
+    ) -> Any:
+        """Compose reviewed catalogue routes with the ordinary autonomous brain lifecycle.
+
+        Each workflow evidence requirement gets its own digest-bound catalogue reconciliation.
+        Source dispatch, evidence acceptance, and provider approval remain separate; the default
+        prompt contains only reconciliation metadata, while ``prompt_builder`` is the explicit
+        transient bridge for caller-owned values. The resulting envelope keeps typed preparation
+        and reconciliation objects available to the caller but serializes only digests and status.
+        """
+
+        from .autonomous_domain_evidence_brain import run_autonomous_domain_evidence_backed
+
+        return run_autonomous_domain_evidence_backed(
+            self,
+            task=task,
+            catalogue=catalogue,
+            credentials=credentials,
+            domains=domains,
+            model_candidates=model_candidates,
+            available_evidence=available_evidence,
+            completed_stages=completed_stages,
+            prepare_options=prepare_options,
+            prepare_for_requirement=prepare_for_requirement,
+            execute_options=execute_options,
+            max_parallel_requirements=max_parallel_requirements,
+            allow_incomplete_evidence=allow_incomplete_evidence,
+            approve_source_dispatch=approve_source_dispatch,
+            approve_provider_call=approve_provider_call,
+            provider_run_override=provider_run_override,
+            before_provider_run=before_provider_run,
+            prompt_builder=prompt_builder,
+            run_mode=run_mode,
+            run_options=run_options,
+        )
+
+    def run_with_domain_evidence_catalogue_with_launch_admission(
+        self,
+        *,
+        launch_admission: Mapping[str, Any],
+        **kwargs: Any,
+    ) -> Any:
+        """Run catalogue-backed evidence workflows only after their domain scope is admitted."""
+
+        _authorize_launch_admission_domains(
+            launch_admission,
+            _launch_admission_domains(kwargs.get("domains")),
+        )
+        return self.run_with_domain_evidence_catalogue(**kwargs)
+
+    def run_resumable_evidence_backed(self, **kwargs: Any) -> Any:
+        """Run or resume reviewed evidence-backed work through a caller checkpoint sink.
+
+        The resumable boundary never replays a provider result implicitly.  Callers must provide
+        a caller-owned evidence journal and either rehydrate an observed provider result or pass
+        an explicit provider-resume decision.
+        """
+
+        from .autonomous_evidence_backed_resumable import run_autonomous_evidence_backed_resumable
+
+        return run_autonomous_evidence_backed_resumable(self, **kwargs)
+
+    def run_resumable_evidence_backed_with_launch_admission(
+        self,
+        *,
+        launch_admission: Mapping[str, Any],
+        **kwargs: Any,
+    ) -> Any:
+        """Run or resume evidence-backed work only after its complete scope is admitted."""
+
+        _authorize_launch_admission_domains(
+            launch_admission,
+            _launch_admission_domains(kwargs.get("domains")),
+        )
+        return self.run_resumable_evidence_backed(**kwargs)
+
+    def run_resumable_llm_evidence(
+        self,
+        *,
+        task: str,
+        requests: Sequence[Mapping[str, Any]],
+        adapter: Any,
+        projector: Any | None = None,
+        **kwargs: Any,
+    ) -> Any:
+        """Run or resume provider-backed reviewed evidence with the same explicit adapter seam."""
+
+        if not callable(getattr(adapter, "acquire", None)):
+            raise ArgumentError("LLM evidence adapter must expose a callable acquire method")
+        selected_projector = projector
+        if selected_projector is None:
+            candidate = getattr(adapter, "project", None)
+            if callable(candidate):
+                selected_projector = candidate
+            else:
+                candidate = getattr(adapter, "project_value", None)
+                if callable(candidate):
+                    selected_projector = candidate
+        return self.run_resumable_evidence_backed(
+            task=task,
+            requests=requests,
+            acquirer=adapter,
+            projector=selected_projector,
+            **kwargs,
+        )
+
+    def run_resumable_llm_evidence_with_launch_admission(
+        self,
+        *,
+        launch_admission: Mapping[str, Any],
+        **kwargs: Any,
+    ) -> Any:
+        """Run or resume adapter-backed evidence only after its domain scope is admitted."""
+
+        _authorize_launch_admission_domains(
+            launch_admission,
+            _launch_admission_domains(kwargs.get("domains")),
+        )
+        return self.run_resumable_llm_evidence(**kwargs)
+
+    def evidence_backed_controller(self, job_id: str, persistence: Any) -> Any:
+        """Create a serialized, optionally CAS-fenced evidence-backed restart controller."""
+
+        from .autonomous_evidence_backed_resumable import AutonomousEvidenceBackedController
+
+        return AutonomousEvidenceBackedController(self, job_id, persistence)
 
     def workflows(self) -> list[dict[str, Any]]:
         """Return the deterministic workflow contracts available to automatic intake."""
@@ -14679,6 +19567,19 @@ class AutonomousAgent:
         except Exception as error:
             raise BrainRunError("connector workflow execution failed") from error
 
+    def run_connector_workflow_with_launch_admission(
+        self,
+        *,
+        blueprint: AutonomousTaskBlueprint,
+        launch_admission: Mapping[str, Any],
+        **kwargs: Any,
+    ) -> Any:
+        """Run a connector workflow only after the blueprint domain passes launch admission."""
+
+        domain = getattr(getattr(blueprint, "spec", None), "domain", None)
+        _authorize_launch_admission_domains(launch_admission, (domain,))
+        return self.run_connector_workflow(blueprint=blueprint, **kwargs)
+
     def run_connector_mission(
         self,
         *,
@@ -14694,6 +19595,7 @@ class AutonomousAgent:
         selection_signals: Mapping[str, Mapping[str, Any]] | None = None,
         feedback_ledger: Any | None = None,
         feedback_by_step: Mapping[str, Mapping[str, Any]] | None = None,
+        quality_evaluator: Callable[[Any], Mapping[str, Any]] | None = None,
         trace_event_callback: Callable[..., Any] | None = None,
     ) -> Any:
         """Execute a typed mission DAG through reviewed connectors without model credentials.
@@ -14723,12 +19625,178 @@ class AutonomousAgent:
                 selection_signals=selection_signals,
                 feedback_ledger=feedback_ledger,
                 feedback_by_step=feedback_by_step,
+                quality_evaluator=quality_evaluator,
                 trace_event_callback=trace_event_callback,
             )
         except (ArgumentError, BrainRunError):
             raise
         except Exception as error:
             raise BrainRunError("connector mission execution failed") from error
+
+    def run_connector_mission_with_provider_planning(
+        self,
+        *,
+        mission: Any,
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        provider_planning_options: Mapping[str, Any] | None = None,
+        accepted_plan_refinement: Any | None = None,
+        accept_plan: bool = False,
+        execution_options: Mapping[str, Any] | None = None,
+    ) -> Any:
+        """Plan an existing connector mission, then execute only after explicit acceptance.
+
+        The provider sees a redacted step catalogue containing identifiers, domains,
+        capabilities, objectives, dependencies, and required flags.  It cannot see connector
+        arguments or receive a dispatch authority.  ``accepted_plan_refinement`` is the
+        restart-safe caller-owned replay path: pass the previously reviewed value-only proposal
+        to avoid replaying the planner provider on resume.  ``execution_options`` is forwarded
+        only after the plan passes every contract check.
+
+        A planning review or provider error returns a metadata-rich
+        ``AutonomousConnectorPlannedMissionRun`` with no connector calls.  A completed plan is
+        still not enough to execute; ``accept_plan=True`` and the ordinary connector approval in
+        ``execution_options`` are both required.
+        """
+
+        from .autonomous_connector_mission import (
+            AutonomousConnectorPlannedMissionRun,
+            _normalize_request,
+            apply_autonomous_ordered_step_plan,
+            connector_mission_planner_steps,
+            connector_mission_protected_contract_digest,
+        )
+
+        if not isinstance(accept_plan, bool):
+            raise BrainRunError("connector mission accept_plan must be boolean")
+        if provider_planning_options is not None and not isinstance(provider_planning_options, Mapping):
+            raise BrainRunError("provider_planning_options must be a mapping or None")
+        if execution_options is not None and not isinstance(execution_options, Mapping):
+            raise BrainRunError("execution_options must be a mapping or None")
+        if accepted_plan_refinement is not None and provider_planning_options is not None:
+            raise BrainRunError(
+                "accepted_plan_refinement cannot be combined with provider_planning_options; "
+                "choose a live planning pass or caller-owned replay"
+            )
+        request, steps = _normalize_request(mission)
+        protected_contract_digest = connector_mission_protected_contract_digest(request, steps=steps)
+        if accepted_plan_refinement is None:
+            planning_options = {} if provider_planning_options is None else dict(provider_planning_options)
+            forbidden = {
+                "task",
+                "steps",
+                "credentials",
+                "model_candidates",
+                "protected_contract_digest",
+            }
+            invalid = sorted(forbidden.intersection(planning_options))
+            if invalid:
+                raise BrainRunError(
+                    "provider_planning_options cannot override protected planner inputs: "
+                    + ", ".join(invalid)
+                )
+            refinement = self.plan_ordered_steps_with_provider(
+                task=request.goal,
+                steps=connector_mission_planner_steps(steps),
+                credentials=credentials,
+                model_candidates=model_candidates,
+                protected_contract_digest=protected_contract_digest,
+                **planning_options,
+            )
+        else:
+            refinement = accepted_plan_refinement
+
+        from .autonomy import AutonomousOrderedStepPlanRefinementResult
+
+        if not isinstance(refinement, AutonomousOrderedStepPlanRefinementResult):
+            raise BrainRunError("provider planning did not return an ordered-step refinement")
+        if refinement.status == "approval_required":
+            result_status = "planning_approval_required"
+        elif refinement.status in {"policy_review_required"}:
+            result_status = "planning_policy_review_required"
+        elif refinement.status in {"policy_blocked"}:
+            result_status = "planning_policy_blocked"
+        elif refinement.status in {"provider_invalid"}:
+            result_status = "planning_provider_invalid"
+        elif refinement.status in {"provider_disagreement", "plan_refused"}:
+            result_status = "planning_provider_disagreement"
+        elif refinement.status != "completed" or refinement.review_required or not accept_plan:
+            result_status = "planning_review_required"
+        else:
+            planned_mission = apply_autonomous_ordered_step_plan(
+                request,
+                refinement,
+                protected_contract_digest=protected_contract_digest,
+            )
+            options = {} if execution_options is None else dict(execution_options)
+            if "mission" in options:
+                raise BrainRunError("execution_options cannot override the planned mission")
+            execution = self.run_connector_mission(mission=planned_mission, **options)
+            return AutonomousConnectorPlannedMissionRun(
+                status=execution.status,
+                mission=planned_mission,
+                protected_contract_digest=protected_contract_digest,
+                plan_refinement=refinement,
+                execution=execution,
+            )
+
+        return AutonomousConnectorPlannedMissionRun(
+            status=result_status,
+            mission=request,
+            protected_contract_digest=protected_contract_digest,
+            plan_refinement=refinement,
+            execution=None,
+        )
+
+    def run_connector_mission_with_provider_planning_and_launch_admission(
+        self,
+        *,
+        mission: Any,
+        launch_admission: Mapping[str, Any],
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        provider_planning_options: Mapping[str, Any] | None = None,
+        accepted_plan_refinement: Any | None = None,
+        accept_plan: bool = False,
+        execution_options: Mapping[str, Any] | None = None,
+    ) -> Any:
+        """Run provider planning and connector execution behind the domain launch gate.
+
+        Domain admission occurs before planner credential resolution, provider invocation, or
+        connector setup.  The planner and connector still retain their independent approvals.
+        """
+
+        from .autonomous_connector_mission import _normalize_request
+
+        _request, steps = _normalize_request(mission)
+        _authorize_launch_admission_domains(
+            launch_admission,
+            tuple(dict.fromkeys(step.domain for step in steps)),
+        )
+        return self.run_connector_mission_with_provider_planning(
+            mission=mission,
+            credentials=credentials,
+            model_candidates=model_candidates,
+            provider_planning_options=provider_planning_options,
+            accepted_plan_refinement=accepted_plan_refinement,
+            accept_plan=accept_plan,
+            execution_options=execution_options,
+        )
+
+    def run_connector_mission_with_launch_admission(
+        self,
+        *,
+        mission: Any,
+        launch_admission: Mapping[str, Any],
+        **kwargs: Any,
+    ) -> Any:
+        """Run a connector mission only after every domain-labelled step is admitted."""
+
+        _authorize_launch_admission_domains(
+            launch_admission,
+            _mission_domains_for_launch_admission(mission),
+        )
+        return self.run_connector_mission(mission=mission, **kwargs)
 
     def connector_selection_plan(
         self,
@@ -14810,6 +19878,10 @@ class AutonomousAgent:
         request: AutonomousConnectorDispatchRequest,
         *,
         trace_event_callback: Callable[..., Any] | None = None,
+        authorization_context: AutonomousAuthorizationContext | None = None,
+        authorization_domain: str | None = None,
+        authorization_capability: str | None = None,
+        authorization_risk_class: str | None = None,
     ) -> AutonomousConnectorDispatchResult:
         """Dispatch one connector only through a configured, plan-verifying runtime."""
 
@@ -14820,11 +19892,43 @@ class AutonomousAgent:
                 plan,
                 request,
                 trace_event_callback=trace_event_callback,
+                authorization_context=authorization_context,
+                authorization_domain=authorization_domain,
+                authorization_capability=authorization_capability,
+                authorization_risk_class=authorization_risk_class,
             )
         except (ArgumentError, BrainRunError):
             raise
         except Exception as error:
             raise BrainRunError("connector dispatch failed") from error
+
+    def dispatch_connector_with_launch_admission(
+        self,
+        plan: AutonomousConnectorSelectionPlan | Mapping[str, Any],
+        request: AutonomousConnectorDispatchRequest,
+        *,
+        launch_admission: Mapping[str, Any],
+        trace_event_callback: Callable[..., Any] | None = None,
+        authorization_context: AutonomousAuthorizationContext | None = None,
+        authorization_domain: str | None = None,
+        authorization_capability: str | None = None,
+        authorization_risk_class: str | None = None,
+    ) -> AutonomousConnectorDispatchResult:
+        """Dispatch a reviewed connector plan only after every plan domain is admitted."""
+
+        _authorize_launch_admission_domains(
+            launch_admission,
+            _connector_plan_domains_for_launch_admission(plan),
+        )
+        return self.dispatch_connector(
+            plan,
+            request,
+            trace_event_callback=trace_event_callback,
+            authorization_context=authorization_context,
+            authorization_domain=authorization_domain,
+            authorization_capability=authorization_capability,
+            authorization_risk_class=authorization_risk_class,
+        )
 
     def capability_portfolio(
         self,
@@ -14835,6 +19939,7 @@ class AutonomousAgent:
         allowed_tools: Sequence[str] | None = None,
         max_tools: int = 32,
         read_only_only: bool = False,
+        max_risk_class: str | None = None,
         tool_learning_state: Mapping[str, Any] | None = None,
         exploration: float = 0.15,
     ) -> dict[str, Any]:
@@ -14866,6 +19971,9 @@ class AutonomousAgent:
             raise BrainRunError(
                 f"capability portfolio max_tools must be between 1 and {MAX_AUTONOMOUS_CAPABILITY_PORTFOLIO_TOOLS}"
             )
+        maximum_risk_class = "high_impact_effect" if max_risk_class is None else max_risk_class
+        if maximum_risk_class not in AUTONOMOUS_TOOL_RISK_ORDER:
+            raise BrainRunError("capability portfolio max_risk_class is unsupported")
         tool_learning_state = normalize_autonomous_tool_selection_state(tool_learning_state)
         exploration = float(_tool_selection_number("capability portfolio exploration", exploration, 0, 1))
         total_pulls = sum(int(arm["pulls"]) for arm in tool_learning_state["arms"])
@@ -14923,6 +20031,9 @@ class AutonomousAgent:
                     binding
                     for binding in live_bindings
                     if (not read_only_only or binding.read_only)
+                    and (not stage.read_only or binding.read_only)
+                    and (stage.approval_required or not binding.approval_required)
+                    and _tool_risk_allowed(binding.risk_class, maximum_risk_class)
                     and (effective_allowed is None or binding.name in effective_allowed)
                     and not bool((_tool_selection_arm_for(tool_learning_state, domain, stage, binding) or {}).get("disabled", False))
                 ]
@@ -15010,13 +20121,46 @@ class AutonomousAgent:
                 status = "provider_only"
             elif not row["live_bindings"]:
                 status = "catalogue_missing"
-            elif effective_allowed is not None and not row["eligible"]:
+            elif effective_allowed is not None and not row["eligible"] and all(binding.name not in effective_allowed for binding in row["live_bindings"]):
                 status = "activation_required"
+            elif row["live_bindings"] and all(not _tool_risk_allowed(binding.risk_class, maximum_risk_class) for binding in row["live_bindings"]):
+                status = "risk_budget_blocked"
             elif any(bool((_tool_selection_arm_for(tool_learning_state, row["domain"], row["stage"], binding) or {}).get("disabled", False)) for binding in row["live_bindings"]):
                 status = "learning_disabled"
             else:
                 status = "capacity_limited"
             selected_arm = None if selected is None else _tool_selection_arm_for(tool_learning_state, row["domain"], row["stage"], selected)
+            candidate_ranking = _portfolio_candidate_ranking(
+                tokens,
+                requested_capabilities,
+                row["stage"],
+                row["live_bindings"],
+                row["domain"],
+                tool_learning_state,
+                total_pulls,
+                exploration,
+                effective_allowed,
+                read_only_only,
+                maximum_risk_class,
+            )
+            selected_rank = None if selected is None else next((candidate["rank"] for candidate in candidate_ranking if candidate["tool"] == selected.name), None)
+            rationale = (
+                "highest_ranked_eligible_candidate"
+                if selected is not None and selected_rank == 1
+                else "portfolio_reuse_lower_rank_candidate"
+                if selected is not None
+                else "no_reviewed_binding_for_stage"
+                if status == "provider_only"
+                else "no_live_catalogue_binding"
+                if status == "catalogue_missing"
+                else "activation_or_allowlist_required"
+                if status == "activation_required"
+                else "all_candidates_learning_disabled"
+                if status == "learning_disabled"
+                else "risk_budget_excluded_all_candidates"
+                if status == "risk_budget_blocked"
+                else "portfolio_capacity_limit"
+            )
             coverage.append(
                 {
                     "domain": row["domain"],
@@ -15028,6 +20172,8 @@ class AutonomousAgent:
                     "approval_required": False if selected is None else selected.approval_required,
                     "selected_arm_id": None if selected_arm is None else selected_arm["arm_id"],
                     "selection_utility": None if selected is None else _tool_selection_utility(selected_arm, total_pulls, exploration),
+                    "candidate_ranking": candidate_ranking,
+                    "selection_rationale": rationale,
                     "status": status,
                 }
             )
@@ -15058,11 +20204,15 @@ class AutonomousAgent:
                 "activation_required"
                 if effective_allowed is not None and name not in effective_allowed
                 else (
+                    "risk_budget_limited"
+                    if not _tool_risk_allowed(binding.risk_class, maximum_risk_class)
+                    else (
                     "learning_disabled"
                     if disabled
                     else "capacity_limited"
                     if name in preferred
                     else "not_required_for_reviewed_workflow"
+                    )
                 )
             )
             omissions.append(
@@ -15107,6 +20257,12 @@ class AutonomousAgent:
                 "known_arm_count": len(tool_learning_state["arms"]),
                 "disabled_arm_count": sum(int(arm["disabled"]) for arm in tool_learning_state["arms"]),
                 "retention": "value_only;tool_arguments_outputs_prompts_and_credentials_never_returned",
+            },
+            "selection_constraints": {
+                "max_risk_class": maximum_risk_class,
+                "read_only_only": read_only_only,
+                "allowed_tools_digest": None if caller_allowed is None else content_digest(sorted(caller_allowed)),
+                "policy": AUTONOMOUS_TOOL_SELECTION_POLICY,
             },
             "selection_policy": AUTONOMOUS_TOOL_SELECTION_POLICY,
             "execution": "metadata_only; no_provider_or_tool_calls",
@@ -15336,6 +20492,8 @@ class AutonomousAgent:
         min_quality: float | None = None,
         min_selection_confidence: float | None = None,
         selection_overrides: Mapping[str, Any] | None = None,
+        selection_weights: Mapping[str, Any] | None = None,
+        selection_observations: Sequence[Mapping[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """Preview the live domain-scoped selector without contacting a provider.
 
@@ -15398,6 +20556,25 @@ class AutonomousAgent:
         if not isinstance(effective_state, Mapping):
             raise BrainRunError("model selection preview bandit state is malformed")
 
+        # The approval contract binds only caller-supplied observations. The live request may
+        # also merge persisted health-ledger or bandit evidence, but that mutable state must not
+        # invalidate a preview merely because it changed between review and dispatch.
+        raw_preview_observations = (
+            selection_observations
+            if selection_observations is not None
+            else (
+                selection_overrides.get("observations")
+                if isinstance(selection_overrides, Mapping)
+                else None
+            )
+        )
+        try:
+            normalized_preview_observations = normalize_autonomous_model_observations(
+                raw_preview_observations
+            )
+        except ArgumentError as error:
+            raise BrainRunError(str(error)) from error
+
         effective_overrides = (
             None if selection_overrides is None else dict(selection_overrides)
         )
@@ -15406,6 +20583,11 @@ class AutonomousAgent:
                 self.health_ledger.selection_overrides(),
                 effective_overrides,
             )
+        effective_overrides = _selection_overrides_with_weights(
+            effective_overrides,
+            selection_weights,
+            selection_observations,
+        )
         merged_overrides = {} if effective_overrides is None else dict(effective_overrides)
         merged_overrides.update(
             {
@@ -15442,6 +20624,7 @@ class AutonomousAgent:
             min_quality=min_quality,
             min_selection_confidence=min_selection_confidence,
             selection_overrides=merged_overrides,
+            selection_observations=selection_observations,
         )
         report = self.brain._preview_adaptive_selection(
             task=task,
@@ -15490,6 +20673,8 @@ class AutonomousAgent:
                 "max_latency_ms": max_latency_ms,
                 "min_quality": min_quality,
                 "min_selection_confidence": min_selection_confidence,
+                "selection_weights": selection_request["weights"],
+                "selection_observations_digest": content_digest(normalized_preview_observations),
             },
             "selection_audit": audit,
             "review": {
@@ -15537,6 +20722,8 @@ class AutonomousAgent:
         min_quality: float | None = None,
         min_selection_confidence: float | None = None,
         selection_overrides: Mapping[str, Any] | None = None,
+        selection_weights: Mapping[str, Any] | None = None,
+        selection_observations: Sequence[Mapping[str, Any]] | None = None,
         **kwargs: Any,
     ) -> Any:
         """Revalidate a provider-free preview, then invoke only its reviewed model arm."""
@@ -15553,6 +20740,47 @@ class AutonomousAgent:
         audit = selection_preview.get("selection_audit")
         if not isinstance(contract, Mapping) or not isinstance(audit, Mapping):
             raise BrainRunError("approved model selection preview is missing its selection contract")
+        try:
+            supplied_weights = normalize_autonomous_selection_weights(
+                selection_weights
+                if selection_weights is not None
+                else (
+                    selection_overrides.get("weights")
+                    if isinstance(selection_overrides, Mapping)
+                    else None
+                )
+            )
+            reviewed_weights = normalize_autonomous_selection_weights(
+                contract.get("selection_weights")
+            )
+            raw_supplied_observations = (
+                selection_observations
+                if selection_observations is not None
+                else (
+                    selection_overrides.get("observations")
+                    if isinstance(selection_overrides, Mapping)
+                    else None
+                )
+            )
+            supplied_observations = normalize_autonomous_model_observations(
+                raw_supplied_observations
+            )
+        except ArgumentError as error:
+            raise BrainRunError(str(error)) from error
+        if supplied_weights != reviewed_weights:
+            raise BrainRunError("approved model selection weights changed; re-review required")
+        reviewed_observations_digest = contract.get("selection_observations_digest")
+        if (
+            not isinstance(reviewed_observations_digest, str)
+            or not _valid_digest(reviewed_observations_digest)
+            or content_digest(supplied_observations) != reviewed_observations_digest
+        ):
+            raise BrainRunError("approved model selection observations changed; re-review required")
+        effective_selection_overrides = _selection_overrides_with_weights(
+            selection_overrides,
+            supplied_weights,
+            supplied_observations,
+        )
         selected = audit.get("selected_model")
         selected_id = selected.get("model_id") if isinstance(selected, Mapping) else None
         if not isinstance(selected_id, str) or not selected_id.strip() or "/" not in selected_id:
@@ -15599,6 +20827,8 @@ class AutonomousAgent:
             "max_latency_ms": max_latency_ms,
             "min_quality": min_quality,
             "min_selection_confidence": min_selection_confidence,
+            "selection_weights": supplied_weights,
+            "selection_observations_digest": reviewed_observations_digest,
         }
         if contract != expected_contract:
             raise BrainRunError("approved model selection inputs changed; re-review required")
@@ -15619,16 +20849,18 @@ class AutonomousAgent:
             max_latency_ms=max_latency_ms,
             min_quality=min_quality,
             min_selection_confidence=min_selection_confidence,
-            selection_overrides=selection_overrides,
+            selection_overrides=effective_selection_overrides,
+            selection_weights=supplied_weights,
+            selection_observations=supplied_observations,
         )
-        for field in (
+        for field_name in (
             "task_digest", "domain", "capability", "risk_class", "workflow_id",
             "workflow_digest", "domain_pack_digest", "task_intent_digest", "task_decision_digest",
             "task_decision_posture", "selection_context_digest",
             "execution_plan_digest", "required_model_capabilities", "selection_contract",
             "selection_audit",
         ):
-            if fresh.get(field) != selection_preview.get(field):
+            if fresh.get(field_name) != selection_preview.get(field_name):
                 raise BrainRunError("approved model selection is stale; re-review required")
         fresh_selected = fresh["selection_audit"].get("selected_model")
         if not isinstance(fresh_selected, Mapping) or fresh_selected.get("model_id") != selected_id:
@@ -15653,7 +20885,9 @@ class AutonomousAgent:
                 "max_cost_per_million_tokens": max_cost_per_million_tokens,
                 "max_latency_ms": max_latency_ms,
                 "min_quality": min_quality,
-                "selection_overrides": selection_overrides,
+                "selection_overrides": effective_selection_overrides,
+                "selection_weights": supplied_weights,
+                "selection_observations": supplied_observations,
                 "approve_provider_call": True,
                 "max_provider_failovers": 0,
             }
@@ -15664,6 +20898,59 @@ class AutonomousAgent:
             credentials=credentials,
             model_candidates=selected_candidates,
             **run_options,
+        )
+
+    def run_approved_model_selection_with_launch_admission(
+        self,
+        *,
+        task: str,
+        domain: str,
+        selection_preview: Mapping[str, Any],
+        launch_admission: Mapping[str, Any],
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        capability: str | None = None,
+        risk_class: str | None = None,
+        context: Mapping[str, Any] | None = None,
+        bandit_state: Mapping[str, Any] | None = None,
+        contextual_observations: Sequence[Mapping[str, Any]] = (),
+        required_model_capabilities: Sequence[str] = (),
+        input_tokens: int = 4_096,
+        requested_output_tokens: int = 2_048,
+        max_cost_per_million_tokens: int | None = None,
+        max_latency_ms: int | None = None,
+        min_quality: float | None = None,
+        min_selection_confidence: float | None = None,
+        selection_overrides: Mapping[str, Any] | None = None,
+        selection_weights: Mapping[str, Any] | None = None,
+        selection_observations: Sequence[Mapping[str, Any]] | None = None,
+        **kwargs: Any,
+    ) -> Any:
+        """Invoke an approved model arm only after its domain passes launch admission."""
+
+        _authorize_launch_admission_domains(launch_admission, (domain,))
+        return self.run_approved_model_selection(
+            task=task,
+            domain=domain,
+            selection_preview=selection_preview,
+            credentials=credentials,
+            model_candidates=model_candidates,
+            capability=capability,
+            risk_class=risk_class,
+            context=context,
+            bandit_state=bandit_state,
+            contextual_observations=contextual_observations,
+            required_model_capabilities=required_model_capabilities,
+            input_tokens=input_tokens,
+            requested_output_tokens=requested_output_tokens,
+            max_cost_per_million_tokens=max_cost_per_million_tokens,
+            max_latency_ms=max_latency_ms,
+            min_quality=min_quality,
+            min_selection_confidence=min_selection_confidence,
+            selection_overrides=selection_overrides,
+            selection_weights=selection_weights,
+            selection_observations=selection_observations,
+            **kwargs,
         )
 
     def run_capability(
@@ -15734,6 +21021,43 @@ class AutonomousAgent:
             domain=domain,
             credentials=credentials,
             model_candidates=model_candidates,
+            execution_id=execution_id,
+            resume_execution=resume_execution,
+            **kwargs,
+        )
+
+    def run_capability_with_launch_admission(
+        self,
+        *,
+        task: str,
+        domain: str,
+        capability: str,
+        launch_admission: Mapping[str, Any],
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        approve_capability: bool = False,
+        execution_id: str | None = None,
+        resume_execution: bool = False,
+        **kwargs: Any,
+    ) -> Any:
+        """Run a reviewed capability only after its domain is launch-admitted.
+
+        The admission check deliberately precedes capability-plan compilation, credential
+        resolution, and provider/tool setup.  This makes the capability facade safe to call
+        from a host process that has not yet collected credentials or opened external tool
+        transports.
+        """
+
+        from .autonomous_launch_admission import authorize_autonomous_launch_domains
+
+        authorize_autonomous_launch_domains(launch_admission, (domain,))
+        return self.run_capability(
+            task=task,
+            domain=domain,
+            capability=capability,
+            credentials=credentials,
+            model_candidates=model_candidates,
+            approve_capability=approve_capability,
             execution_id=execution_id,
             resume_execution=resume_execution,
             **kwargs,
@@ -15992,6 +21316,24 @@ class AutonomousAgent:
         except (ArgumentError, TypeError, ValueError) as error:
             raise BrainRunError("capability execution request was rejected") from error
 
+    def execute_capability_with_launch_admission(
+        self,
+        request: Mapping[str, Any],
+        *,
+        launch_admission: Mapping[str, Any],
+        project_observations: Callable[[Any, Mapping[str, Any]], Sequence[Mapping[str, Any]]] | None = None,
+    ) -> AutonomousCapabilityExecutionResult:
+        """Execute one capability only after its workflow domain passes launch admission."""
+
+        _authorize_launch_admission_domains(
+            launch_admission,
+            _capability_request_domains_for_launch_admission(request),
+        )
+        return self.execute_capability(
+            request,
+            project_observations=project_observations,
+        )
+
     def execute_capability_batch(
         self,
         requests: Sequence[Mapping[str, Any]],
@@ -16014,12 +21356,97 @@ class AutonomousAgent:
         except (ArgumentError, TypeError, ValueError) as error:
             raise BrainRunError("capability batch was rejected") from error
 
+    def execute_capability_batch_with_launch_admission(
+        self,
+        requests: Sequence[Mapping[str, Any]],
+        *,
+        launch_admission: Mapping[str, Any],
+        project_observations: Callable[[Any, Mapping[str, Any]], Sequence[Mapping[str, Any]]] | None = None,
+        max_parallelism: int = 1,
+    ) -> tuple[AutonomousCapabilityExecutionResult, ...]:
+        """Execute a capability batch only after every request domain is admitted."""
+
+        requested_domains: list[str] = []
+        for request in requests:
+            requested_domains.extend(_capability_request_domains_for_launch_admission(request))
+        _authorize_launch_admission_domains(launch_admission, tuple(requested_domains))
+        return self.execute_capability_batch(
+            requests,
+            project_observations=project_observations,
+            max_parallelism=max_parallelism,
+        )
+
     def restore_capability_journal(self) -> dict[str, Any]:
         """Rehydrate committed capability replay identities from the configured journal."""
 
         if self.capability_runtime is None:
             raise BrainRunError("restore_capability_journal requires a configured capability runtime")
         return self.capability_runtime.rehydrate()
+
+    def restore_capability_journal_persistence(self) -> dict[str, Any]:
+        """Restore durable capability metadata, then open its replay barrier in this process."""
+
+        if self.capability_journal_persistence is None:
+            raise BrainRunError("restore_capability_journal_persistence requires configured persistence")
+        persisted = self.capability_journal_persistence.restore()
+        runtime = self.capability_runtime
+        rehydrated = runtime.rehydrate() if runtime is not None else {
+            "restored": 0,
+            "replayable": 0,
+            "value_retention": "transient_caller_value_only",
+        }
+        return {
+            "schema": AUTONOMOUS_CAPABILITY_JOURNAL_SNAPSHOT_SCHEMA,
+            **persisted,
+            "rehydrated": rehydrated["restored"],
+            "replayable": rehydrated["replayable"],
+            "value_retention": rehydrated["value_retention"],
+            "retention": "metadata_only;caller_values_not_restored",
+        }
+
+    def flush_capability_journal_persistence(self) -> dict[str, Any]:
+        """Flush the capability replay barrier without returning journal entries."""
+
+        if self.capability_journal_persistence is None:
+            raise BrainRunError("flush_capability_journal_persistence requires configured persistence")
+        return self.capability_journal_persistence.flush()
+
+    def restore_decision_cycle_persistence(self) -> dict[str, Any]:
+        """Restore metadata-only route/planning/evaluation checkpoints for all persisted cycles."""
+
+        if self.decision_cycle_persistence is None:
+            raise BrainRunError("restore_decision_cycle_persistence requires configured persistence")
+        snapshot = self.decision_cycle_persistence.restore()
+        if snapshot is None:
+            return {
+                "restored": False,
+                "snapshot_digest": None,
+                "cycles": 0,
+                "terminal_cycles": 0,
+                "retention": "metadata_only_hash_bound",
+            }
+        return {
+            "restored": True,
+            "schema": snapshot.schema,
+            "snapshot_digest": snapshot.snapshot_digest,
+            "cycles": len(snapshot.states),
+            "terminal_cycles": sum(state.phase == "terminal" for state in snapshot.states),
+            "retention": "metadata_only_hash_bound",
+        }
+
+    def flush_decision_cycle_persistence(self) -> dict[str, Any]:
+        """Flush decision-cycle checkpoints while projecting no task or provider payloads."""
+
+        if self.decision_cycle_persistence is None:
+            raise BrainRunError("flush_decision_cycle_persistence requires configured persistence")
+        snapshot = self.decision_cycle_persistence.flush()
+        return {
+            "schema": snapshot.schema,
+            "snapshot_digest": snapshot.snapshot_digest,
+            "cycles": len(snapshot.states),
+            "terminal_cycles": sum(state.phase == "terminal" for state in snapshot.states),
+            "retention": "metadata_only_hash_bound",
+        }
 
     def capability_execution_evidence(self) -> list[dict[str, Any]]:
         """Return bounded metadata-only capability records for evaluator integration."""
@@ -16044,17 +21471,25 @@ class AutonomousAgent:
 
         if not isinstance(evaluator, AutonomousToolOutcomeEvaluator):
             raise BrainRunError("evaluator must be an AutonomousToolOutcomeEvaluator")
+        caller_provided_tool_selection_state = tool_selection_state is not None
+        effective_tool_selection_state = tool_selection_state if caller_provided_tool_selection_state else (
+            self.tool_selection_state if self._tool_selection_configured else None
+        )
         try:
-            return evaluator.evaluate_capability_result(
+            report = evaluator.evaluate_capability_result(
                 result,
                 evidence=evidence,
                 allow_reconciliation=allow_reconciliation,
                 bandit_state=bandit_state,
                 bandit_updater=bandit_updater,
                 ledger=self.ledger if ledger is None else ledger,
-                tool_selection_state=tool_selection_state,
+                tool_selection_state=effective_tool_selection_state,
                 tool_selection_updater=_update_autonomous_tool_selection_state,
             )
+            next_state = report.get("next_tool_selection_state") if isinstance(report, Mapping) else None
+            if not caller_provided_tool_selection_state and self._tool_selection_configured and isinstance(next_state, Mapping):
+                self._set_tool_selection_state(next_state)
+            return report
         except (ArgumentError, TypeError, ValueError) as error:
             raise BrainRunError("capability execution evaluation failed") from error
 
@@ -16074,17 +21509,25 @@ class AutonomousAgent:
 
         if not isinstance(evaluator, AutonomousToolOutcomeEvaluator):
             raise BrainRunError("evaluator must be an AutonomousToolOutcomeEvaluator")
+        caller_provided_tool_selection_state = tool_selection_state is not None
+        effective_tool_selection_state = tool_selection_state if caller_provided_tool_selection_state else (
+            self.tool_selection_state if self._tool_selection_configured else None
+        )
         try:
-            return evaluator.evaluate_capability_results(
+            report = evaluator.evaluate_capability_results(
                 results,
                 evidence=evidence,
                 allow_reconciliation=allow_reconciliation,
                 bandit_state=bandit_state,
                 bandit_updater=bandit_updater,
                 ledger=self.ledger if ledger is None else ledger,
-                tool_selection_state=tool_selection_state,
+                tool_selection_state=effective_tool_selection_state,
                 tool_selection_updater=_update_autonomous_tool_selection_state,
             )
+            next_state = report.get("next_tool_selection_state") if isinstance(report, Mapping) else None
+            if not caller_provided_tool_selection_state and self._tool_selection_configured and isinstance(next_state, Mapping):
+                self._set_tool_selection_state(next_state)
+            return report
         except (ArgumentError, TypeError, ValueError) as error:
             raise BrainRunError("capability execution batch evaluation failed") from error
 
@@ -16114,26 +21557,105 @@ class AutonomousAgent:
         selected = self.tool_runtime.receipts if receipts is None else tuple(receipts)
         if any(not isinstance(receipt, AutonomousDomainToolReceipt) for receipt in selected):
             raise BrainRunError("receipts must contain AutonomousDomainToolReceipt values")
+        caller_provided_tool_selection_state = tool_selection_state is not None
+        effective_tool_selection_state = tool_selection_state if caller_provided_tool_selection_state else (
+            self.tool_selection_state if self._tool_selection_configured else None
+        )
         try:
-            return evaluator.evaluate_receipts(
+            report = evaluator.evaluate_receipts(
                 selected,
                 evidence=evidence,
                 bandit_state=bandit_state,
                 bandit_updater=bandit_updater,
                 ledger=self.ledger if ledger is None else ledger,
-                tool_selection_state=tool_selection_state,
+                tool_selection_state=effective_tool_selection_state,
                 tool_selection_updater=_update_autonomous_tool_selection_state,
             )
+            next_state = report.get("next_tool_selection_state") if isinstance(report, Mapping) else None
+            if not caller_provided_tool_selection_state and self._tool_selection_configured and isinstance(next_state, Mapping):
+                self._set_tool_selection_state(next_state)
+            return report
         except (ArgumentError, ValueError) as error:
             raise BrainRunError("domain tool receipt evaluation failed") from error
+
+    def evaluate_provider_receipts(
+        self,
+        *,
+        evaluator: AutonomousProviderOutcomeEvaluator,
+        receipts: Sequence[Mapping[str, Any] | AutonomousProviderInvocationReceipt],
+        contexts: Mapping[str, Mapping[str, Any]] | None = None,
+        evidence: Mapping[str, Mapping[str, Any]] | None = None,
+        learning_state: Mapping[str, Any] | None = None,
+        learning_updater: Callable[[Mapping[str, Any], Mapping[str, Any], Mapping[str, Any]], Mapping[str, Any]] | None = None,
+    ) -> AutonomousProviderLearningReport:
+        """Evaluate redacted provider receipts and update explicit model-arm learning.
+
+        Provider success is transport evidence only.  The independent evaluator is the sole
+        source of reward, while the default updater applies the value-only result to the same
+        portable contextual bandit state used by model selection.  Callers that persist a
+        learning ledger should persist ``report.next_learning_state`` through their normal
+        caller-owned snapshot/CAS boundary; no credential or provider payload is retained here.
+        """
+
+        if not isinstance(evaluator, AutonomousProviderOutcomeEvaluator):
+            raise BrainRunError("evaluator must be an AutonomousProviderOutcomeEvaluator")
+        if learning_updater is None:
+            learning_updater = settle_autonomous_provider_model_outcome
+        try:
+            return evaluator.evaluate_receipts(
+                receipts,
+                contexts=contexts,
+                evidence=evidence,
+                learning_state=self.learning_state() if learning_state is None else learning_state,
+                learning_updater=learning_updater,
+            )
+        except (ArgumentError, ValueError, TypeError) as error:
+            raise BrainRunError("provider receipt evaluation failed") from error
+
+    def plan_recovery(self, observation: Mapping[str, Any] | AutonomousRecoveryObservation) -> AutonomousRecoveryPlan:
+        """Build a deterministic recovery plan from a caller-owned failure projection."""
+
+        try:
+            return plan_autonomous_recovery(observation)
+        except (ArgumentError, TypeError, ValueError) as error:
+            raise BrainRunError("autonomous recovery observation was rejected") from error
+
+    def submit_recovery_handoff(
+        self,
+        ledger: AutonomousRecoveryHandoffLedger,
+        observation: Mapping[str, Any] | AutonomousRecoveryObservation,
+        *,
+        run_id_digest: str,
+        attempt: int = 0,
+    ) -> dict[str, Any]:
+        """Queue a recovery plan in caller-owned metadata without retrying or dispatching it."""
+
+        if not isinstance(ledger, AutonomousRecoveryHandoffLedger):
+            raise BrainRunError("autonomous recovery handoff requires an AutonomousRecoveryHandoffLedger")
+        try:
+            return ledger.submit(self.plan_recovery(observation), run_id_digest=run_id_digest, attempt=attempt)
+        except (ArgumentError, TypeError, ValueError) as error:
+            raise BrainRunError("autonomous recovery handoff was rejected") from error
 
     def readiness(
         self,
         *,
         selection_promotion_report: Mapping[str, Any] | None = None,
         require_promoted_selection: bool = False,
+        evidence_readiness: Mapping[str, Any] | None = None,
+        calibration_report: Mapping[str, Any] | None = None,
+        calibration_report_digest: str | None = None,
     ) -> dict[str, Any]:
-        """Project provider/model readiness plus learned-selection admission without secrets."""
+        """Project provider/model readiness plus optional evidence and calibration gates.
+
+        ``evidence_readiness`` is a caller-owned configuration mapping with a typed adapter
+        registry, an optional health store, and optional auditor options.  ``calibration_report``
+        is a validated, aggregate-only evaluator report produced by
+        :func:`calibrate_autonomous_evaluators`; ``calibration_report_digest`` resolves that
+        report from the explicitly configured aggregate registry.  Supplying either option
+        performs only a local projection; it never dispatches an evidence source, mutates
+        learning, or invokes a provider.
+        """
 
         if not isinstance(require_promoted_selection, bool):
             raise BrainRunError("require_promoted_selection must be a boolean")
@@ -16146,6 +21668,55 @@ class AutonomousAgent:
             and (promotion_report is None or promotion_state.active_promotion_digest == promotion_report["promotion_digest"])
         )
         promotion_blocks = require_promoted_selection and not promotion_admitted
+
+        if calibration_report is not None and calibration_report_digest is not None:
+            raise BrainRunError("provide calibration_report or calibration_report_digest, not both")
+        stored_calibration_report = None
+        if calibration_report_digest is not None:
+            if self.evaluator_calibration_registry is None:
+                raise BrainRunError("calibration_report_digest requires an evaluator calibration registry")
+            try:
+                stored_calibration_report = self.evaluator_calibration_registry.get(calibration_report_digest)
+            except (ArgumentError, TypeError, ValueError) as error:
+                raise BrainRunError("calibration_report_digest was rejected") from error
+            if stored_calibration_report is None:
+                raise BrainRunError("calibration_report_digest was not found in the registry")
+        supplied_calibration_report = calibration_report if calibration_report is not None else stored_calibration_report
+        evaluator_calibration_report = None
+        if supplied_calibration_report is not None:
+            try:
+                evaluator_calibration_report = validate_autonomous_evaluator_calibration_report(supplied_calibration_report)
+            except (ArgumentError, TypeError, ValueError) as error:
+                raise BrainRunError("evaluator calibration report was rejected") from error
+        calibration_by_domain = (
+            {}
+            if evaluator_calibration_report is None
+            else {
+                row["domain"]: row
+                for row in evaluator_calibration_report["domains"]
+            }
+        )
+
+        evidence_readiness_report = None
+        if evidence_readiness is not None:
+            from .autonomous_evidence_readiness import AutonomousLLMEvidenceReadinessAuditor
+
+            if not isinstance(evidence_readiness, Mapping):
+                raise BrainRunError("evidence_readiness must be a mapping or None")
+            evidence_registry = evidence_readiness.get("registry")
+            if evidence_registry is None:
+                raise BrainRunError("evidence_readiness requires a typed adapter registry")
+            evidence_health_store = evidence_readiness.get("health_store")
+            evidence_options = evidence_readiness.get("options", {})
+            if not isinstance(evidence_options, Mapping):
+                raise BrainRunError("evidence_readiness options must be a mapping")
+            try:
+                evidence_readiness_report = AutonomousLLMEvidenceReadinessAuditor(
+                    evidence_registry,
+                    evidence_health_store,
+                ).audit(AUTONOMOUS_DOMAINS, **dict(evidence_options))
+            except (ArgumentError, TypeError, ValueError) as error:
+                raise BrainRunError("evidence readiness audit was rejected") from error
 
         provider_names = {
             candidate["provider"]
@@ -16244,7 +21815,27 @@ class AutonomousAgent:
                 if provider_missing
                 else "partial"
             )
-            state = "partial" if promotion_blocks else base_state
+            evidence_row = None
+            if evidence_readiness_report is not None:
+                evidence_row = next(
+                    (item for item in evidence_readiness_report.domains if item.domain == domain),
+                    None,
+                )
+                if evidence_row is None:
+                    raise BrainRunError(f"evidence readiness report does not cover domain: {domain}")
+            evidence_blocks = evidence_row is not None and evidence_row.status != "ready"
+            calibration_row = calibration_by_domain.get(domain)
+            calibration_blocks = evaluator_calibration_report is not None and (
+                evaluator_calibration_report["status"] != "ready"
+                or calibration_row is None
+                or calibration_row.get("status") != "ready"
+            )
+            if promotion_blocks or (evidence_blocks and base_state == "ready_for_caller_approval") or (
+                calibration_blocks and base_state == "ready_for_caller_approval"
+            ):
+                state = "partial"
+            else:
+                state = base_state
             readiness_states.add(state)
             row.update(
                 {
@@ -16254,6 +21845,39 @@ class AutonomousAgent:
                     "state": state,
                 }
             )
+            if evidence_row is not None:
+                row["evidence_readiness"] = {
+                    "status": evidence_row.status,
+                    "coverage_state": evidence_row.coverage_state,
+                    "selected_adapter_id": evidence_row.selected_adapter_id,
+                    "selected_manifest_digest": evidence_row.selected_manifest_digest,
+                    "candidate_count": evidence_row.candidate_count,
+                    "eligible_candidate_count": evidence_row.eligible_candidate_count,
+                    "selection_reason": evidence_row.selection_reason,
+                    "selection_strategy": evidence_row.selection_strategy,
+                    "health": evidence_row.health.to_dict(),
+                    "failover_policy_digest": evidence_row.failover_policy_digest,
+                    "reason": evidence_row.reason,
+                    "report_digest": evidence_readiness_report.report_digest,
+                    "execution": "readiness_projection_only;does_not_dispatch_source",
+                    "secret_material": "never_returned",
+                }
+            if calibration_row is not None:
+                row["evaluator_calibration"] = {
+                    "status": calibration_row["status"],
+                    "evaluator_id": calibration_row["evaluator_id"],
+                    "evaluator_version": calibration_row["evaluator_version"],
+                    "pass_threshold": calibration_row["pass_threshold"],
+                    "calibration_scored_count": calibration_row["calibration"]["scored_count"],
+                    "holdout_scored_count": calibration_row["holdout"]["scored_count"],
+                    "holdout_expected_calibration_error": calibration_row["holdout"]["expected_calibration_error"],
+                    "holdout_brier_score": calibration_row["holdout"]["brier_score"],
+                    "case_set_digest": calibration_row["case_set_digest"],
+                    "evaluation_digest": calibration_row["evaluation_digest"],
+                    "report_digest": evaluator_calibration_report["report_digest"],
+                    "execution": "readiness_projection_only;no_learning_mutation",
+                    "secret_material": "never_returned",
+                }
             row_next_actions = set(row.get("next_actions", ()))
             if state == "model_catalogue_required":
                 row_next_actions.add("register at least one model candidate with the reviewed domain capabilities")
@@ -16270,6 +21894,14 @@ class AutonomousAgent:
                     "attach and apply an admitted all-domain selection promotion report before enabling learned selection"
                     if promotion_state is None
                     else f"resolve selection promotion lifecycle hold: {promotion_state.last_reason or promotion_state.status}"
+                )
+            if evidence_row is not None and evidence_row.status != "ready":
+                row_next_actions.add(
+                    "resolve evidence routing readiness before source dispatch: " + evidence_row.reason
+                )
+            if calibration_blocks:
+                row_next_actions.add(
+                    "hold learned evaluator updates until calibration and independent holdout evidence are ready"
                 )
             row["next_actions"] = sorted(row_next_actions)
             row["selection_promotion"] = {
@@ -16297,6 +21929,38 @@ class AutonomousAgent:
                 else f"resolve selection promotion lifecycle hold: {promotion_state.last_reason or promotion_state.status}"
             )
         learning = self.domain_learning_coverage()
+        if evaluator_calibration_report is not None:
+            learning["evaluator_calibration"] = {
+                "configured": True,
+                "report_digest": evaluator_calibration_report["report_digest"],
+                "status": evaluator_calibration_report["status"],
+                "decision": evaluator_calibration_report["gate"]["decision"],
+                "missing_domains": list(evaluator_calibration_report["missing_domains"]),
+                "non_ready_domains": list(evaluator_calibration_report["gate"]["non_ready_domains"]),
+                "execution": "readiness_projection_only;no_learning_mutation",
+                "secret_material": "never_returned",
+            }
+            for learning_row in learning["rows"]:
+                calibration_row = calibration_by_domain.get(learning_row["domain"])
+                learning_row["calibration_status"] = None if calibration_row is None else calibration_row["status"]
+                learning_row["calibration_report_digest"] = evaluator_calibration_report["report_digest"]
+                learning_row["calibration_admit_learning"] = bool(
+                    evaluator_calibration_report["gate"]["decision"] == "admit_learning"
+                    and calibration_row is not None
+                    and calibration_row["status"] == "ready"
+                )
+        else:
+            learning["evaluator_calibration"] = {
+                "configured": False,
+                "report_digest": None,
+                "status": "unconfigured",
+                "decision": "hold_learning",
+                "missing_domains": [],
+                "non_ready_domains": [],
+                "execution": "readiness_projection_only;no_learning_mutation",
+                "secret_material": "never_returned",
+            }
+        model_inventory_readiness = self.model_inventory_readiness()
         learning["selection_promotion"] = {
             "configured": promotion_report is not None or promotion_state is not None,
             "required": require_promoted_selection,
@@ -16314,7 +21978,7 @@ class AutonomousAgent:
             readiness_state = next(iter(readiness_states))
         else:
             readiness_state = "partial"
-        return {
+        result = {
             "schema": "bioprism-autonomous-agent-readiness/0.1",
             "providers": providers,
             "models": models,
@@ -16322,9 +21986,19 @@ class AutonomousAgent:
                 tuple(sorted(provider_names))
             ),
             "provider_health": health,
+            "model_inventory_readiness": model_inventory_readiness,
             "domains": domain_rows,
             "model_capability_coverage": self.model_capability_coverage(),
             "domain_learning_coverage": learning,
+            "evaluator_calibration": None if evaluator_calibration_report is None else {
+                "report_digest": evaluator_calibration_report["report_digest"],
+                "status": evaluator_calibration_report["status"],
+                "decision": evaluator_calibration_report["gate"]["decision"],
+                "missing_domains": list(evaluator_calibration_report["missing_domains"]),
+                "non_ready_domains": list(evaluator_calibration_report["gate"]["non_ready_domains"]),
+                "execution": "readiness_projection_only;no_learning_mutation",
+                "secret_material": "never_returned",
+            },
             "workflows": self.workflows(),
             "domain_packs": self.domain_packs(),
             "domain_pack_registry_digest": self.orchestrator.pack_registry.digest,
@@ -16352,6 +22026,29 @@ class AutonomousAgent:
             "secret_material": "never_returned",
             "credential_posture": "caller_supplied_opaque_handles",
         }
+        if evidence_readiness_report is not None:
+            result["evidence"] = {
+                "configured": True,
+                "registry_digest": evidence_readiness_report.registry_digest,
+                "report_digest": evidence_readiness_report.report_digest,
+                "status": evidence_readiness_report.status,
+                "complete": evidence_readiness_report.complete,
+                "ready_count": evidence_readiness_report.ready_count,
+                "degraded_count": evidence_readiness_report.degraded_count,
+                "blocked_count": evidence_readiness_report.blocked_count,
+                "missing_count": evidence_readiness_report.missing_count,
+                "domains": [row.to_dict() for row in evidence_readiness_report.domains],
+                "execution": "readiness_projection_only;no_source_dispatch",
+                "secret_material": "never_returned",
+            }
+            if evidence_readiness_report.status != "ready":
+                result["next_actions"] = sorted(
+                    {
+                        *result["next_actions"],
+                        "resolve evidence routing readiness before source dispatch",
+                    }
+                )
+        return result
 
     @staticmethod
     def _credential_mapping(
@@ -16375,6 +22072,240 @@ class AutonomousAgent:
 
         return self.orchestrator.prepare(**kwargs)
 
+    def clarification_plan(
+        self,
+        *,
+        task: str,
+        domain: str,
+        capability: str | None = None,
+        risk_class: str | None = None,
+        constraints: Sequence[str] = (),
+        desired_outputs: Sequence[str] = (),
+        context: Mapping[str, Any] | None = None,
+        max_steps: int = 8,
+        require_json: bool = False,
+        structured_domain_response: bool = False,
+        response_schema: Mapping[str, Any] | None = None,
+        execution_mode: str = "provider",
+        max_input_tokens: int = 4_096,
+        required_model_capabilities: Sequence[str] = (),
+        max_questions: int = MAX_AUTONOMOUS_TASK_CLARIFICATION_QUESTIONS,
+    ) -> AutonomousTaskClarificationPlan:
+        """Compile bounded user questions before provider, source, tool, or effect work.
+
+        This is an explicit preflight boundary. It reuses the exact task artifacts that would
+        shape execution, but its result is guidance only. A caller must collect answers, rebuild
+        the task description/intent/decision when scope changes, and still pass the existing
+        provider, evidence, tool, credential, evaluator, and effect gates.
+        """
+
+        blueprint = self.orchestrator.prepare(
+            task=task,
+            domain=domain,
+            capability=capability,
+            risk_class=risk_class,
+            constraints=constraints,
+            desired_outputs=desired_outputs,
+            context=context,
+            max_steps=max_steps,
+            require_json=require_json,
+            structured_domain_response=structured_domain_response,
+            response_schema=response_schema,
+            execution_mode=execution_mode,
+            max_input_tokens=max_input_tokens,
+            required_model_capabilities=required_model_capabilities,
+        )
+        if blueprint.task_intent is None or blueprint.task_lens is None or blueprint.domain_policy is None or blueprint.task_decision is None:
+            raise BrainRunError("clarification plan requires complete prepared task artifacts")
+        return plan_autonomous_task_clarification(
+            intent=blueprint.task_intent,
+            lens=blueprint.task_lens,
+            policy=blueprint.domain_policy,
+            decision=blueprint.task_decision,
+            max_questions=max_questions,
+        )
+
+    def resolve_clarification(
+        self,
+        *,
+        plan: AutonomousTaskClarificationPlan | Mapping[str, Any],
+        task: str,
+        answers: Mapping[str, str],
+    ) -> AutonomousTaskClarificationResolution:
+        """Turn transient answers into a digest-only receipt bound to the original task."""
+
+        task_text = _text("clarification task", task, maximum=MAX_AUTONOMY_TEXT_BYTES)
+        return resolve_autonomous_task_clarification(
+            plan,
+            task_digest=content_digest({"task": task_text}),
+            answers=answers,
+        )
+
+    def validate_clarification(
+        self,
+        *,
+        plan: AutonomousTaskClarificationPlan | Mapping[str, Any],
+        receipt: AutonomousTaskClarificationResolution | Mapping[str, Any],
+    ) -> AutonomousTaskClarificationResolution:
+        """Rehydrate a persisted clarification receipt against its exact plan.
+
+        This is intentionally a validation boundary rather than an execution shortcut. It
+        verifies receipt integrity, question identity, answer counts, and blocked/resolved
+        invariants, but it cannot recover answer values and does not authorize a provider,
+        source, tool, evaluator, credential, or external effect. Callers must still recompile
+        task intent and decision artifacts after incorporating any material answer.
+        """
+
+        return validate_autonomous_task_clarification_resolution(receipt, plan=plan)
+
+    def validate_task_lens(
+        self,
+        *,
+        value: AutonomousDomainTaskLens | Mapping[str, Any],
+        expected_domain: str | None = None,
+    ) -> AutonomousDomainTaskLens:
+        """Validate a persisted domain lens before task classification or planning resumes."""
+
+        return validate_autonomous_domain_task_lens(value, expected_domain=expected_domain)
+
+    def validate_task_intent(
+        self,
+        *,
+        value: AutonomousTaskIntent | Mapping[str, Any],
+        lens: AutonomousDomainTaskLens | Mapping[str, Any] | None = None,
+        expected_task_digest: str | None = None,
+    ) -> AutonomousTaskIntent:
+        """Validate persisted intent metadata and optionally bind it to the current task/lens."""
+
+        return validate_autonomous_task_intent(
+            value,
+            lens=lens,
+            expected_task_digest=expected_task_digest,
+        )
+
+    def validate_domain_policy(
+        self,
+        *,
+        value: AutonomousDomainPolicy | Mapping[str, Any],
+        expected_domain: str | None = None,
+    ) -> AutonomousDomainPolicy:
+        """Validate a persisted domain policy before a resumed decision replay."""
+
+        return validate_autonomous_domain_policy(value, expected_domain=expected_domain)
+
+    def validate_task_decision(
+        self,
+        *,
+        value: AutonomousTaskDecision | Mapping[str, Any],
+        intent: Any | None = None,
+        lens: Any | None = None,
+        policy: Any | None = None,
+        required_model_capabilities: Sequence[str] | None = None,
+    ) -> AutonomousTaskDecision:
+        """Validate a persisted task decision before a resumed execution boundary.
+
+        Without bindings this verifies the decision's canonical metadata and digest.  Supplying
+        the live intent, lens, and policy additionally replays the deterministic decision so a
+        stale task artifact cannot silently retain old approval requirements.
+        """
+
+        return validate_autonomous_task_decision(
+            value,
+            intent=intent,
+            lens=lens,
+            policy=policy,
+            required_model_capabilities=required_model_capabilities,
+        )
+
+    def recompile_clarification(
+        self,
+        *,
+        plan: AutonomousTaskClarificationPlan | Mapping[str, Any],
+        receipt: AutonomousTaskClarificationResolution | Mapping[str, Any],
+        task: str,
+        clarified_task: str,
+        capability: str | None = None,
+        risk_class: str | None = None,
+        constraints: Sequence[str] = (),
+        desired_outputs: Sequence[str] = (),
+        context: Mapping[str, Any] | None = None,
+        max_steps: int = 8,
+        require_json: bool = False,
+        structured_domain_response: bool = False,
+        response_schema: Mapping[str, Any] | None = None,
+        execution_mode: str = "provider",
+        max_input_tokens: int = 4_096,
+        required_model_capabilities: Sequence[str] = (),
+        memory_episodes: Sequence[Mapping[str, Any]] = (),
+        memory_lesson_references: Sequence[Mapping[str, Any]] = (),
+    ) -> AutonomousClarificationRecompile:
+        """Recompile a clarified task only after its complete receipt is verified.
+
+        The caller explicitly supplies ``clarified_task`` after rehydrating transient answer
+        values.  This keeps answer interpretation in the application, where it can be reviewed,
+        while the agent enforces the original task digest, exact plan binding, complete-answer
+        status, and fixed domain before building a fresh intent, decision, prompt, and execution
+        plan.  The returned live blueprint is usable by the ordinary execution APIs; its
+        ``to_dict`` projection contains no task text, answer values, credentials, or provider
+        payloads.
+        """
+
+        resolved_plan = validate_autonomous_task_clarification_plan(plan)
+        original_task_text = _text("clarification task", task, maximum=MAX_AUTONOMY_TEXT_BYTES)
+        original_task_digest = content_digest({"task": original_task_text})
+        if resolved_plan.task_digest != original_task_digest:
+            raise BrainRunError("clarification recompile task does not match the original plan")
+        resolved_receipt = validate_autonomous_task_clarification_resolution(receipt, plan=resolved_plan)
+        if resolved_receipt.task_digest != original_task_digest:
+            raise BrainRunError("clarification recompile receipt does not match the original task")
+        if resolved_receipt.status != "resolved":
+            raise BrainRunError("clarification recompile requires a resolved clarification receipt")
+        clarified_task_text = _text("clarified task", clarified_task, maximum=MAX_AUTONOMY_TEXT_BYTES)
+        blueprint = self.prepare(
+            task=clarified_task_text,
+            domain=resolved_plan.domain,
+            capability=capability,
+            risk_class=risk_class,
+            constraints=constraints,
+            desired_outputs=desired_outputs,
+            context=context,
+            max_steps=max_steps,
+            require_json=require_json,
+            structured_domain_response=structured_domain_response,
+            response_schema=response_schema,
+            execution_mode=execution_mode,
+            max_input_tokens=max_input_tokens,
+            required_model_capabilities=required_model_capabilities,
+            memory_episodes=memory_episodes,
+            memory_lesson_references=memory_lesson_references,
+        )
+        if blueprint.task_intent is None or blueprint.task_decision is None:
+            raise BrainRunError("clarification recompile produced incomplete task artifacts")
+        execution_plan_digest = content_digest(blueprint.to_dict()["plan"])
+        return AutonomousClarificationRecompile(
+            plan_digest=resolved_plan.plan_digest,
+            resolution_digest=resolved_receipt.resolution_digest,
+            original_task_digest=original_task_digest,
+            recompiled_task_digest=blueprint.spec.task_digest,
+            domain=blueprint.spec.domain,
+            workflow_id=blueprint.workflow.workflow_id,
+            recompiled_intent_digest=blueprint.task_intent.intent_digest,
+            recompiled_decision_digest=blueprint.task_decision.decision_digest,
+            execution_plan_digest=execution_plan_digest,
+            blueprint=blueprint,
+        )
+
+    def validate_clarification_recompile(
+        self,
+        *,
+        value: Mapping[str, Any],
+        plan: AutonomousTaskClarificationPlan | Mapping[str, Any] | None = None,
+        receipt: AutonomousTaskClarificationResolution | Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Validate a persisted recompile projection without restoring transient task values."""
+
+        return validate_autonomous_task_clarification_recompile(value, plan=plan, receipt=receipt)
+
     def route(self, *, task: str, **kwargs: Any) -> AutonomousRouteProposal:
         """Return an auditable domain proposal without contacting a provider."""
 
@@ -16396,6 +22327,8 @@ class AutonomousAgent:
         bandit_state: Mapping[str, Any] | None = None,
         contextual_observations: Sequence[Mapping[str, Any]] = (),
         selection_overrides: Mapping[str, Any] | None = None,
+        selection_weights: Mapping[str, Any] | None = None,
+        selection_observations: Sequence[Mapping[str, Any]] | None = None,
         input_tokens: int = 4_096,
         requested_output_tokens: int = 1_024,
         max_cost_per_million_tokens: int | None = None,
@@ -16438,6 +22371,8 @@ class AutonomousAgent:
             bandit_state=bandit_state,
             contextual_observations=contextual_observations,
             selection_overrides=resolved_overrides,
+            selection_weights=selection_weights,
+            selection_observations=selection_observations,
             input_tokens=input_tokens,
             requested_output_tokens=requested_output_tokens,
             max_cost_per_million_tokens=max_cost_per_million_tokens,
@@ -16458,6 +22393,587 @@ class AutonomousAgent:
         """Build an automatic single-domain, cross-domain, or review-required blueprint."""
 
         return self.orchestrator.prepare_auto(**kwargs)
+
+    def action_plan(self, *, task: str, domain: str | None = None, **kwargs: Any) -> dict[str, Any]:
+        """Compile the prepared automatic route into one metadata-only next-action handoff.
+
+        The returned plan is provider-free and does not authorize provider, evidence, tool,
+        evaluator, credential, or effect dispatch.  Callers can persist the plan for review,
+        then invoke the existing explicit admission boundary that corresponds to its
+        ``next_action``.
+        """
+
+        from .autonomous_action_plan import plan_autonomous_action
+
+        if domain is None:
+            blueprint = self.orchestrator.prepare_auto(task=task, **kwargs)
+        else:
+            # Explicit domain requests are still represented as a normal route proposal so the
+            # action plan has one stable digest boundary.  The route is caller-selected, while
+            # the domain workflow/policy/decision artifacts remain the same as automatic intake.
+            route = self.orchestrator.route_task(
+                task=task,
+                hints=(domain,),
+                allow_cross_domain=False,
+                min_confidence=0.0,
+                min_margin=0.0,
+            )
+            profile = self.orchestrator.registry.resolve(domain)
+            workflow = self.orchestrator.workflow_registry.resolve(domain)
+            candidate = next((item for item in route.candidates if item.domain == domain), None)
+            if candidate is None:
+                candidate = AutonomousRouteCandidate(
+                    domain=domain,
+                    score=1.0,
+                    matched_terms=("explicit_domain",),
+                    capability=profile.default_capability,
+                    risk_class=profile.risk_class,
+                    workflow_id=workflow.workflow_id,
+                )
+            explicit_route = AutonomousRouteProposal(
+                task_digest=route.task_digest,
+                candidates=(candidate,),
+                selected_domains=(domain,),
+                confidence=max(1.0, candidate.score),
+                abstained=False,
+                reason="routed",
+                cross_domain=False,
+                source=route.source,
+            )
+            prepare_kwargs = dict(kwargs)
+            # These options belong to automatic routing and have no meaning once the caller
+            # has selected an explicit domain.
+            for route_option in ("hints", "min_confidence", "min_margin", "max_domains", "allow_cross_domain"):
+                prepare_kwargs.pop(route_option, None)
+            blueprint = AutonomousAutoBlueprint(
+                route=explicit_route,
+                blueprint=self.orchestrator.prepare(task=task, domain=domain, **prepare_kwargs),
+            )
+        return plan_autonomous_action(blueprint).to_dict()
+
+    def admit_action_plan(
+        self,
+        plan: Mapping[str, Any] | Any,
+        *,
+        approvals: Mapping[str, bool] | None = None,
+        reviewed: bool = False,
+    ) -> dict[str, Any]:
+        """Record the caller's explicit gates against one exact action-plan digest.
+
+        Admission is provider-free and does not consume credentials.  A returned ``admitted``
+        record is still not an authorization token; it is the value-only input required by
+        :meth:`execute_action_plan` before that method may delegate to ``run_auto``.
+        """
+
+        from .autonomous_action_execution import admit_autonomous_action_plan
+
+        return admit_autonomous_action_plan(
+            plan,
+            approvals=approvals,
+            reviewed=reviewed,
+        ).to_dict()
+
+    def execute_action_plan(
+        self,
+        *,
+        task: str,
+        plan: Mapping[str, Any] | Any,
+        credentials: Mapping[str, CredentialHandle] | CredentialSession | None = None,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        approvals: Mapping[str, bool] | None = None,
+        reviewed: bool = False,
+        domain: str | None = None,
+        route_options: Mapping[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> Any:
+        """Replay, admit, and execute one digest-bound action plan.
+
+        ``route_options`` (or equivalent routing keys in ``kwargs``) must reproduce the
+        provider-free plan.  The task is transient and is never copied into the plan or the
+        admission record.  If review, policy, evidence, or approval gates are incomplete, the
+        method returns an :class:`AutonomousActionExecution` without touching a provider,
+        connector, evaluator, learner, or credential.
+
+        Once admitted, the recommended path is translated into existing execution controls:
+        workflow paths opt into checkpointable workflow execution, planning paths opt into the
+        provider-planning boundary, and cross-domain paths retain the reviewed fan-out/fan-in
+        route.  The caller still owns credentials, evidence, evaluator settlement, and effects.
+        """
+
+        from .autonomous_action_execution import (
+            AutonomousActionExecution,
+            admit_autonomous_action_plan,
+        )
+        from .autonomous_action_plan import AutonomousActionPlan
+
+        if isinstance(plan, Mapping):
+            parsed_plan = AutonomousActionPlan.from_dict(plan)
+        elif isinstance(plan, AutonomousActionPlan):
+            parsed_plan = plan
+        else:
+            raise BrainRunError("execute_action_plan requires an AutonomousActionPlan or serialized plan")
+        if route_options is not None and not isinstance(route_options, Mapping):
+            raise BrainRunError("execute_action_plan route_options must be a mapping")
+        normalized_route_options = dict(route_options or {})
+        route_option_names = {
+            "hints",
+            "min_confidence",
+            "min_margin",
+            "max_domains",
+            "allow_cross_domain",
+            "context",
+            "constraints",
+            "desired_outputs",
+            "capability",
+            "risk_class",
+            "max_steps",
+            "require_json",
+            "structured_domain_response",
+            "response_schema",
+            "execution_mode",
+            "max_input_tokens",
+            "required_model_capabilities",
+            "memory_episodes",
+            "domain_policy_mode",
+            "domain_policy_evidence_ready",
+            "domain_policy_evaluator_configured",
+            "domain_policy_effects_requested",
+            "domain_policy_effects_approved",
+        }
+        execution_options = dict(kwargs)
+        for name in route_option_names:
+            if name not in execution_options:
+                continue
+            value = execution_options.pop(name)
+            if name in normalized_route_options and normalized_route_options[name] != value:
+                raise BrainRunError(f"execute_action_plan {name} differs between route_options and execution options")
+            normalized_route_options[name] = value
+        for name in ("credentials", "model_candidates", "approvals", "reviewed", "plan", "domain"):
+            if name in normalized_route_options:
+                raise BrainRunError(f"execute_action_plan route_options cannot contain {name}")
+
+        expected_public = self.action_plan(
+            task=task,
+            domain=domain,
+            **normalized_route_options,
+        )
+        expected_plan = AutonomousActionPlan.from_dict(expected_public)
+        if expected_plan.plan_digest != parsed_plan.plan_digest:
+            raise BrainRunError(
+                "action plan is stale or was compiled with different task, route, or blueprint inputs"
+            )
+
+        admission = admit_autonomous_action_plan(
+            parsed_plan,
+            approvals=approvals,
+            reviewed=reviewed,
+        )
+        if admission.status != "admitted":
+            return AutonomousActionExecution(
+                status=admission.status,
+                plan=parsed_plan,
+                admission=admission,
+            )
+        if credentials is None:
+            raise BrainRunError("admitted action-plan execution requires caller-supplied credentials")
+
+        # The automatic runner owns routing. Explicit domain plans are reproduced through the
+        # same deterministic hint boundary used by action_plan, never by bypassing the router.
+        execution_options.update(normalized_route_options)
+        if domain is not None:
+            execution_options.update(
+                {
+                    "hints": (domain,),
+                    "min_confidence": 0.0,
+                    "min_margin": 0.0,
+                    "allow_cross_domain": False,
+                }
+            )
+
+        def enable_gate(name: str) -> None:
+            current = execution_options.get(name)
+            if current is not None and current is not True:
+                raise BrainRunError(f"action-plan approval contradicts explicit {name}=False")
+            execution_options[name] = True
+
+        for gate in admission.approved_approvals:
+            if gate == "provider_call":
+                enable_gate("approve_provider_call")
+            elif gate == "evidence_dispatch":
+                enable_gate("domain_policy_evidence_ready")
+            elif gate == "plan_acceptance":
+                enable_gate("domain_policy_plan_accepted")
+            elif gate == "effect_approval":
+                enable_gate("domain_policy_effects_requested")
+                enable_gate("domain_policy_effects_approved")
+            elif gate == "evaluator_settlement":
+                # Evaluator identity/evidence remain caller-owned kwargs. The admission gate
+                # proves only that the caller reviewed the requirement, never that reward exists.
+                continue
+
+        if admission.execution_path == "workflow":
+            enable_gate("workflow_execution")
+        elif admission.execution_path == "planning":
+            current_planning_mode = execution_options.get("planning_mode")
+            if current_planning_mode is not None and current_planning_mode != "provider":
+                raise BrainRunError("planning action plans require planning_mode='provider'")
+            execution_options["planning_mode"] = "provider"
+
+        result = self.run_auto(
+            task=task,
+            credentials=credentials,
+            model_candidates=model_candidates,
+            **execution_options,
+        )
+        execution_status = getattr(result, "execution_status", None)
+        return AutonomousActionExecution(
+            status="completed" if execution_status == "completed" else "review_required",
+            plan=parsed_plan,
+            admission=admission,
+            result=result,
+        )
+
+    def execute_action_handoff(
+        self,
+        *,
+        task: str,
+        handoff: Mapping[str, Any],
+        credentials: Mapping[str, CredentialHandle] | CredentialSession | None = None,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        domain: str | None = None,
+        **kwargs: Any,
+    ) -> Any:
+        """Revalidate and execute one operator-produced action dispatch handoff.
+
+        The handoff proves plan/admission continuity only.  This method replays the embedded
+        plan against transient task input and delegates to :meth:`execute_action_plan`, leaving
+        credentials, provider approval, evidence, tools, evaluator settlement, and effects as
+        separate caller-owned gates.
+        """
+
+        from .autonomous_action_admission_controller import validate_autonomous_action_dispatch_handoff
+
+        reserved = {"approvals", "reviewed", "plan", "handoff"}
+        if reserved.intersection(kwargs):
+            raise BrainRunError("execute_action_handoff does not allow overriding handoff admission fields")
+        normalized = validate_autonomous_action_dispatch_handoff(handoff)
+        selected_domains = normalized["selected_domains"]
+        if domain is not None and domain not in selected_domains and not (domain == "cross_domain" and normalized["cross_domain"]):
+            raise BrainRunError("action handoff does not cover the requested domain")
+        approvals = {gate: True for gate in normalized["admission"]["approved_approvals"]}
+        execution = self.execute_action_plan(
+            task=task,
+            plan=normalized["plan"],
+            credentials=credentials,
+            model_candidates=model_candidates,
+            approvals=approvals,
+            reviewed=True,
+            domain=domain,
+            **kwargs,
+        )
+        execution_plan = getattr(execution, "plan", None)
+        execution_admission = getattr(execution, "admission", None)
+        if execution_plan is None or execution_admission is None or execution_plan.plan_digest != normalized["plan_digest"] or execution_admission.admission_digest != normalized["admission_digest"]:
+            raise BrainRunError("action handoff admission drifted during execution replay")
+        return execution
+
+    def plan_workflow_portfolio(
+        self,
+        requests: Sequence[Any],
+        *,
+        require_all_domains: bool = False,
+        allow_partial: bool = True,
+    ) -> dict[str, Any]:
+        """Compile multiple reviewed domain workflows into dependency waves without dispatch.
+
+        The portfolio compiler is intentionally provider-free.  It composes the same twelve
+        domain profiles, workflow DAGs, evidence plans, and task decisions used by ordinary
+        execution, but returns only request/task/route/workflow digests and bounded metadata.
+        Call :meth:`verify_workflow_portfolio` after caller-owned rehydration and hand individual
+        ready blueprints to the existing approved workflow runner.
+        """
+
+        from .autonomous_workflow_portfolio import plan_autonomous_workflow_portfolio
+
+        return plan_autonomous_workflow_portfolio(
+            self,
+            requests,
+            require_all_domains=require_all_domains,
+            allow_partial=allow_partial,
+        ).to_dict()
+
+    def admit_workflow_portfolio(
+        self,
+        requests: Sequence[Any],
+        *,
+        plan: Mapping[str, Any] | Any | None = None,
+        verify_plan: bool = True,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        require_available_tools: bool = False,
+        require_calibrated_learning: bool = False,
+        input_tokens: int = 4_096,
+        output_tokens: int = 1_024,
+        max_cost_per_million_tokens: float | None = None,
+        max_latency_ms: float | None = None,
+        min_quality: float | None = None,
+        readiness_options: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Project provider-free readiness and model admission for a reviewed portfolio.
+
+        Admission is intentionally separate from execution. It checks current domain readiness,
+        model capability/constraint coverage, optional tool/evidence/calibration gates, and
+        dependency closure, while returning only a digest-bound metadata image for caller review.
+        """
+
+        from .autonomous_workflow_portfolio_admission import admit_autonomous_workflow_portfolio
+
+        return admit_autonomous_workflow_portfolio(
+            self,
+            requests,
+            plan=plan,
+            verify_plan=verify_plan,
+            model_candidates=model_candidates,
+            require_available_tools=require_available_tools,
+            require_calibrated_learning=require_calibrated_learning,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            max_cost_per_million_tokens=max_cost_per_million_tokens,
+            max_latency_ms=max_latency_ms,
+            min_quality=min_quality,
+            readiness_options=readiness_options,
+        ).to_dict()
+
+    def verify_workflow_portfolio(
+        self,
+        plan: Mapping[str, Any],
+        requests: Sequence[Any],
+        *,
+        require_all_domains: bool | None = None,
+        allow_partial: bool | None = None,
+    ) -> dict[str, Any]:
+        """Replay a workflow portfolio plan and return a digest-bound metadata verification."""
+
+        from .autonomous_workflow_portfolio import verify_autonomous_workflow_portfolio
+
+        return verify_autonomous_workflow_portfolio(
+            self,
+            plan,
+            requests,
+            require_all_domains=require_all_domains,
+            allow_partial=allow_partial,
+        ).to_dict()
+
+    def execute_workflow_portfolio(
+        self,
+        plan: Mapping[str, Any] | Any,
+        requests: Sequence[Any],
+        *,
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        job_id: str,
+        max_parallelism: int = 4,
+        stop_on_error: bool = False,
+        admission: Mapping[str, Any] | Any | None = None,
+        checkpoint: Mapping[str, Any] | Any | None = None,
+        checkpoint_sink: Any | None = None,
+        rehydrate_result: Any | None = None,
+        workflow_options_factory: Any | None = None,
+    ) -> Any:
+        """Execute a previously reviewed workflow portfolio in dependency waves.
+
+        The portfolio runner performs a provider-free replay before dispatch, then delegates each
+        ready item to this agent's ordinary credential/model-aware workflow runner.  Checkpoints
+        contain only digests and status metadata; callers retain and rehydrate successful raw runs.
+        """
+
+        from .autonomous_workflow_portfolio import execute_autonomous_workflow_portfolio
+
+        return execute_autonomous_workflow_portfolio(
+            self,
+            plan,
+            requests,
+            credentials=credentials,
+            model_candidates=model_candidates,
+            job_id=job_id,
+            max_parallelism=max_parallelism,
+            stop_on_error=stop_on_error,
+            admission=admission,
+            checkpoint=checkpoint,
+            checkpoint_sink=checkpoint_sink,
+            rehydrate_result=rehydrate_result,
+            workflow_options_factory=workflow_options_factory,
+        )
+
+    def execute_workflow_portfolio_with_launch_admission(
+        self,
+        plan: Mapping[str, Any] | Any,
+        requests: Sequence[Any],
+        *,
+        launch_admission: Mapping[str, Any],
+        **kwargs: Any,
+    ) -> Any:
+        """Execute a workflow portfolio only after every planned item domain is admitted."""
+
+        _authorize_launch_admission_domains(
+            launch_admission,
+            _portfolio_plan_domains_for_launch_admission(plan),
+        )
+        return self.execute_workflow_portfolio(plan, requests, **kwargs)
+
+    def execute_workflow_portfolio_evidence(
+        self,
+        execution: Any,
+        *,
+        items: Sequence[Any],
+        runtime: Any,
+        plan: Any | None = None,
+        evidence_plan: Any | None = None,
+        journal_for: Any | None = None,
+        max_parallelism: int = 4,
+        stop_on_failure: bool = False,
+        progress_sink: Any | None = None,
+    ) -> Any:
+        """Supervise caller-owned evidence across a completed provider portfolio.
+
+        Provider execution and evidence truth remain separate boundaries.  This method composes
+        the existing evidence runtime across portfolio dependency waves, propagating only
+        provider/result digests and parent evidence digests between items.  Acquirers, projectors,
+        evaluators, journals, and transient values remain caller-owned.
+        """
+
+        from .autonomous_workflow_portfolio_evidence import (
+            execute_autonomous_workflow_portfolio_evidence,
+        )
+
+        return execute_autonomous_workflow_portfolio_evidence(
+            self,
+            execution,
+            items=items,
+            runtime=runtime,
+            plan=plan,
+            evidence_plan=evidence_plan,
+            journal_for=journal_for,
+            max_parallelism=max_parallelism,
+            stop_on_failure=stop_on_failure,
+            progress_sink=progress_sink,
+        )
+
+    def execute_workflow_portfolio_evidence_with_launch_admission(
+        self,
+        execution: Any,
+        *,
+        items: Sequence[Any],
+        launch_admission: Mapping[str, Any],
+        **kwargs: Any,
+    ) -> Any:
+        """Supervise portfolio evidence only after every evidence item domain is admitted."""
+
+        _authorize_launch_admission_domains(
+            launch_admission,
+            _portfolio_items_domains_for_launch_admission(items),
+        )
+        return self.execute_workflow_portfolio_evidence(
+            execution,
+            items=items,
+            **kwargs,
+        )
+
+    def execute_workflow_portfolio_evidence_resumable(
+        self,
+        execution: Any,
+        *,
+        job_id: str,
+        items: Sequence[Any],
+        runtime: Any,
+        checkpoint_sink: Any,
+        checkpoint: Any | None = None,
+        plan: Any | None = None,
+        evidence_plan: Any | None = None,
+        require_admission: bool = True,
+        runtime_policy_digest: str | None = None,
+        journal_for: Any | None = None,
+        max_parallelism: int = 4,
+        stop_on_failure: bool = False,
+        progress_sink: Any | None = None,
+    ) -> Any:
+        """Run portfolio evidence with digest-bound checkpoints and journal replay."""
+
+        from .autonomous_workflow_portfolio_evidence import (
+            execute_autonomous_workflow_portfolio_evidence_resumable,
+        )
+
+        return execute_autonomous_workflow_portfolio_evidence_resumable(
+            self,
+            execution,
+            job_id=job_id,
+            items=items,
+            runtime=runtime,
+            checkpoint_sink=checkpoint_sink,
+            checkpoint=checkpoint,
+            plan=plan,
+            evidence_plan=evidence_plan,
+            require_admission=require_admission,
+            runtime_policy_digest=runtime_policy_digest,
+            journal_for=journal_for,
+            max_parallelism=max_parallelism,
+            stop_on_failure=stop_on_failure,
+            progress_sink=progress_sink,
+        )
+
+    def execute_workflow_portfolio_evidence_resumable_with_launch_admission(
+        self,
+        execution: Any,
+        *,
+        job_id: str,
+        items: Sequence[Any],
+        runtime: Any,
+        checkpoint_sink: Any,
+        launch_admission: Mapping[str, Any],
+        **kwargs: Any,
+    ) -> Any:
+        """Resume portfolio evidence only after every checkpointed item domain is admitted."""
+
+        _authorize_launch_admission_domains(
+            launch_admission,
+            _portfolio_items_domains_for_launch_admission(items),
+        )
+        return self.execute_workflow_portfolio_evidence_resumable(
+            execution,
+            job_id=job_id,
+            items=items,
+            runtime=runtime,
+            checkpoint_sink=checkpoint_sink,
+            **kwargs,
+        )
+
+    def admit_workflow_portfolio_evidence_work(
+        self,
+        queue: Any,
+        execution: Any,
+        *,
+        job_id: str,
+        evidence_plan_digest: str,
+        item_request_digests: Sequence[str],
+        checkpoint_digest: str | None = None,
+        max_attempts: int = 3,
+        now: int | None = None,
+    ) -> tuple[Any, ...]:
+        """Admit reviewed provider items into a lease-fenced evidence work queue."""
+
+        from .autonomous_workflow_portfolio_evidence_queue import (
+            admit_autonomous_workflow_portfolio_evidence_work_items,
+        )
+
+        return admit_autonomous_workflow_portfolio_evidence_work_items(
+            queue,
+            job_id=job_id,
+            execution=execution,
+            evidence_plan_digest=evidence_plan_digest,
+            item_request_digests=item_request_digests,
+            checkpoint_digest=checkpoint_digest,
+            max_attempts=max_attempts,
+            now=now,
+        )
 
     def prepare_auto_with_provider(
         self,
@@ -16498,6 +23014,7 @@ class AutonomousAgent:
     ) -> AutonomousPlanRefinementResult:
         """Ask a BYOK provider to prioritize an existing blueprint's reviewed workflow stages."""
 
+        kwargs = self._prompt_learning_options(kwargs)
         self._assert_selection_promotion_admitted()
         candidates = self._resolve_candidates(
             model_candidates,
@@ -16517,6 +23034,38 @@ class AutonomousAgent:
             **kwargs,
         )
 
+    def plan_ordered_steps_with_provider(
+        self,
+        *,
+        task: str,
+        steps: Sequence[Mapping[str, Any]],
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        **kwargs: Any,
+    ) -> AutonomousOrderedStepPlanRefinementResult:
+        """Ask a BYOK provider to order an existing dependency-closed step graph."""
+
+        kwargs = self._prompt_learning_options(kwargs)
+        self._assert_selection_promotion_admitted()
+        candidates = self._resolve_candidates(
+            model_candidates,
+            allow_empty=kwargs.get("domain_policy_mode") == "strict",
+        )
+        resolved_credentials = self._credential_mapping(credentials)
+        selection_overrides = kwargs.pop("selection_overrides", None)
+        if self.health_ledger is not None:
+            selection_overrides = self._merge_selection_overrides(
+                self.health_ledger.selection_overrides(), selection_overrides
+            )
+        return self.orchestrator.plan_ordered_steps_with_provider(
+            task=task,
+            steps=steps,
+            model_candidates=candidates,
+            credentials=resolved_credentials,
+            selection_overrides=selection_overrides,
+            **kwargs,
+        )
+
     def plan_cross_domain_with_provider(
         self,
         *,
@@ -16527,6 +23076,7 @@ class AutonomousAgent:
     ) -> AutonomousCrossDomainPlanRefinementResult:
         """Ask a BYOK provider to prioritize an existing cross-domain fan-out."""
 
+        kwargs = self._prompt_learning_options(kwargs)
         self._assert_selection_promotion_admitted()
         candidates = self._resolve_candidates(
             model_candidates,
@@ -16563,6 +23113,48 @@ class AutonomousAgent:
             "generation": 0,
             "arms": [],
         }
+
+    def consolidate_memory(
+        self,
+        observations: Sequence[Mapping[str, Any] | AutonomousMemoryConsolidationObservation],
+        *,
+        generation: int | None = None,
+    ) -> dict[str, Any]:
+        """Consolidate explicit evaluator observations into the configured lesson index.
+
+        The index is deliberately separate from episodic recall: only value-only evaluator
+        observations may promote a lesson, while a caller-owned resolver controls any transient
+        text returned to a future prompt.
+        """
+
+        if self.memory_consolidator is None:
+            raise BrainRunError("memory_consolidator is not configured")
+        return self.memory_consolidator.consolidate(observations, generation=generation)
+
+    def memory_references(
+        self,
+        *,
+        domain: str,
+        capability: str | None = None,
+        lesson_resolver: Callable[[str], str | None] | None = None,
+        lesson_context_resolver: Callable[[Mapping[str, Any]], str | None] | None = None,
+        limit: int = 8,
+    ) -> list[dict[str, Any]]:
+        """Return stable lesson references with transient caller-owned text.
+
+        The context-aware resolver receives the requested domain, capability, scope, and
+        evaluator confidence so a deployment can authorize text lookup before prompt assembly.
+        """
+
+        if self.memory_consolidator is None:
+            raise BrainRunError("memory_consolidator is not configured")
+        return self.memory_consolidator.prompt_references(
+            domain=domain,
+            capability=capability,
+            lesson_resolver=lesson_resolver,
+            lesson_context_resolver=lesson_context_resolver,
+            limit=limit,
+        )
 
     def domain_learning_state(
         self,
@@ -16669,6 +23261,229 @@ class AutonomousAgent:
             "secret_material": "never_returned",
         }
 
+    def calibrate_evaluators(
+        self,
+        cases: Sequence[Mapping[str, Any]],
+        *,
+        evaluator_registry: DomainEvaluatorRegistry | None = None,
+        domains: Sequence[str] | None = None,
+        seed: str = "default",
+        holdout_fraction: float = 0.2,
+        bins: int = 10,
+        min_calibration_cases_per_domain: int = 4,
+        min_holdout_cases_per_domain: int = 2,
+        max_expected_calibration_error: float = 0.15,
+        max_brier_score: float = 0.15,
+        require_all_domains: bool = True,
+    ) -> dict[str, Any]:
+        """Calibrate the reviewed domain evaluator catalogue without provider calls.
+
+        The caller owns the evidence cases and labels.  The agent returns only aggregate metrics
+        and digests, so this method is safe to use as a pre-admission gate before enabling
+        evaluator-linked online learning or learned model selection.
+        """
+
+        from .autonomous_evaluator_calibration import calibrate_autonomous_evaluators
+
+        try:
+            return calibrate_autonomous_evaluators(
+                cases,
+                registry=evaluator_registry,
+                domains=domains,
+                seed=seed,
+                holdout_fraction=holdout_fraction,
+                bins=bins,
+                min_calibration_cases_per_domain=min_calibration_cases_per_domain,
+                min_holdout_cases_per_domain=min_holdout_cases_per_domain,
+                max_expected_calibration_error=max_expected_calibration_error,
+                max_brier_score=max_brier_score,
+                require_all_domains=require_all_domains,
+            )
+        except (ArgumentError, TypeError, ValueError) as error:
+            raise BrainRunError("evaluator calibration was rejected") from error
+
+    def replay_evaluator_calibration(
+        self,
+        report: Mapping[str, Any],
+        cases: Sequence[Mapping[str, Any]],
+        *,
+        evaluator_registry: DomainEvaluatorRegistry | None = None,
+    ) -> dict[str, Any]:
+        """Replay calibration against caller-owned cases and expose catalogue/case drift."""
+
+        from .autonomous_evaluator_calibration import replay_autonomous_evaluator_calibration
+
+        try:
+            return replay_autonomous_evaluator_calibration(
+                report,
+                cases,
+                registry=evaluator_registry,
+            )
+        except (ArgumentError, TypeError, ValueError) as error:
+            raise BrainRunError("evaluator calibration replay was rejected") from error
+
+    def admit_evaluator_calibration(self, report: Mapping[str, Any], domain: str) -> dict[str, Any]:
+        """Return a digest-bound, domain-scoped decision for enabling learned updates."""
+
+        from .autonomous_evaluator_calibration import admit_autonomous_evaluator_calibration
+
+        try:
+            return admit_autonomous_evaluator_calibration(report, domain)
+        except (ArgumentError, TypeError, ValueError) as error:
+            raise BrainRunError("evaluator calibration admission was rejected") from error
+
+    def learning_controller(
+        self,
+        *,
+        calibration_report: Mapping[str, Any] | None = None,
+        require_calibrated_learning: bool = False,
+        ledger: BrainLearningLedger | None = None,
+    ) -> Any:
+        """Build the calibration-gated settlement controller for delayed learning updates.
+
+        The import is intentionally lazy so the existing agent construction path does not pay
+        for SQLite/persistence dependencies unless a caller enables the delayed-feedback path.
+        """
+
+        from .autonomous_learning_controller import AutonomousLearningController
+
+        return AutonomousLearningController(
+            self.brain,
+            ledger=self.ledger if ledger is None else ledger,
+            calibration_report=calibration_report,
+            require_calibrated_learning=require_calibrated_learning,
+        )
+
+    def deployment_readiness(
+        self,
+        *,
+        policy: Mapping[str, Any] | None = None,
+        capabilities: Mapping[str, Any] | None = None,
+        readiness_options: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Join this agent's keyless readiness with deployment-owned capability gates.
+
+        The auditor is intentionally lazy and provider-free: it returns a review artifact but
+        never resolves credentials, initializes persistence/queues, acquires evidence, or grants
+        authority.  ``readiness_options`` is forwarded to the existing local readiness projection.
+        """
+
+        from .autonomous_deployment_readiness import audit_autonomous_agent_deployment_readiness
+
+        return audit_autonomous_agent_deployment_readiness(
+            self,
+            policy=policy,
+            capabilities=capabilities,
+            readiness_options=readiness_options,
+        )
+
+    def domain_audit(
+        self,
+        *,
+        available_tool_names: Sequence[str] | None = None,
+        available_evidence: Sequence[str] | None = None,
+        completed_stages: Mapping[str, Sequence[str]] | None = None,
+    ) -> dict[str, Any]:
+        """Audit this agent's all-domain contracts before any dispatch.
+
+        The audit reads the agent's bound profile/workflow registries and, when present, the
+        registered tool names.  It never resolves credentials, contacts a provider, acquires
+        evidence, executes a tool, mutates learning, or treats registration as authorization.
+        ``available_evidence`` remains caller-owned because the agent cannot infer source truth
+        from a provider response or a tool registration.
+        """
+
+        from .autonomous_domain_audit import audit_autonomous_agent_domain_contracts
+
+        return audit_autonomous_agent_domain_contracts(
+            self,
+            available_tool_names=available_tool_names,
+            available_evidence=available_evidence,
+            completed_stages=completed_stages,
+        )
+
+    def domain_operating_kit(self, domain: str) -> Any:
+        """Return one complete provider-free operating contract for a built-in domain."""
+
+        from .autonomous_domain_operating_kit import build_autonomous_domain_operating_kit
+
+        return build_autonomous_domain_operating_kit(domain)
+
+    def domain_operating_kits(self, domains: Sequence[str] | None = None) -> tuple[Any, ...]:
+        """Return deterministic operating contracts for the requested built-in domains."""
+
+        from .autonomous_domain_operating_kit import build_autonomous_domain_operating_kits
+
+        return build_autonomous_domain_operating_kits(domains)
+
+    def validate_domain_operating_kit(self, value: Mapping[str, Any] | Any) -> Any:
+        """Rebuild and validate a caller-held operating contract against current metadata."""
+
+        from .autonomous_domain_operating_kit import validate_autonomous_domain_operating_kit
+
+        return validate_autonomous_domain_operating_kit(value)
+
+    def launch_preflight(
+        self,
+        *,
+        available_tool_names: Sequence[str] | None = None,
+        available_evidence: Sequence[str] | None = None,
+        completed_stages: Mapping[str, Sequence[str]] | None = None,
+        readiness_options: Mapping[str, Any] | None = None,
+        deployment_policy: Mapping[str, Any] | Any | None = None,
+        deployment_capabilities: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Compose every local launch gate into one all-domain review artifact.
+
+        This is deliberately a preflight projection, not an activation or authorization call.
+        It joins contract, model/provider, evidence, deployment, and learning posture while
+        consuming no credential, contacting no provider/source, executing no tool, and mutating
+        no learner.  Callers still own approval, source truth, credential provisioning, effect
+        authorization, and durable runtime scheduling.
+        """
+
+        from .autonomous_launch_preflight import audit_autonomous_agent_launch_preflight
+
+        return audit_autonomous_agent_launch_preflight(
+            self,
+            available_tool_names=available_tool_names,
+            available_evidence=available_evidence,
+            completed_stages=completed_stages,
+            readiness_options=readiness_options,
+            deployment_policy=deployment_policy,
+            deployment_capabilities=deployment_capabilities,
+        )
+
+    def launch_admission(
+        self,
+        preflight_report: Mapping[str, Any] | None = None,
+        *,
+        decision: str,
+        approved_domains: Sequence[str] | None = None,
+        authorization_digest: str | None = None,
+        reason: str | None = None,
+        admission_id: str = "autonomous-launch-admission",
+    ) -> dict[str, Any]:
+        """Bind an explicit caller review decision to one launch-preflight digest.
+
+        The resulting value-only admission record is useful to a deployment-owned scheduler or
+        approval service, but it does not grant provider, source, tool, credential, learner, queue,
+        or effect authority.  When ``preflight_report`` is omitted, a fresh provider-free preflight
+        is generated before the decision is recorded.
+        """
+
+        from .autonomous_launch_admission import create_autonomous_launch_admission
+
+        report = self.launch_preflight() if preflight_report is None else preflight_report
+        return create_autonomous_launch_admission(
+            report,
+            decision=decision,
+            approved_domains=approved_domains,
+            authorization_digest=authorization_digest,
+            reason=reason,
+            admission_id=admission_id,
+        )
+
     def domain_evaluator(
         self,
         domain: str,
@@ -16713,7 +23528,9 @@ class AutonomousAgent:
 
     def settle_planning_quality(
         self,
-        plan: AutonomousPlanRefinementResult | AutonomousCrossDomainPlanRefinementResult,
+        plan: AutonomousPlanRefinementResult
+        | AutonomousCrossDomainPlanRefinementResult
+        | AutonomousOrderedStepPlanRefinementResult,
         *,
         domain: str,
         evaluator_id: str,
@@ -16733,18 +23550,27 @@ class AutonomousAgent:
 
         Planning has no provider episode of its own, so this method creates a metadata-only
         planning identity and submits it through the same Rust bandit outcome boundary used by
-        executions. The plan proposal is projected by digest and stage/child ids only. Model
+        executions. The plan proposal is projected by digest and stage/child/step ids only. Model
         transport health is never incremented; the optional health ledger receives an evaluator
         quality observation keyed by the planning outcome digest.
         """
 
-        if not isinstance(plan, (AutonomousPlanRefinementResult, AutonomousCrossDomainPlanRefinementResult)):
+        if not isinstance(
+            plan,
+            (
+                AutonomousPlanRefinementResult,
+                AutonomousCrossDomainPlanRefinementResult,
+                AutonomousOrderedStepPlanRefinementResult,
+            ),
+        ):
             raise BrainRunError("planning quality requires a plan refinement result")
         if plan.status != "completed":
             return {
                 "schema": AUTONOMOUS_PLANNING_QUALITY_SETTLEMENT_SCHEMA,
                 "status": "not_eligible",
                 "plan_refinement": plan.to_dict(),
+                "planner_context": None,
+                "planner_context_digest": None,
                 "evaluation": None,
                 "next_state": None,
                 "model_quality": None,
@@ -16754,11 +23580,6 @@ class AutonomousAgent:
             }
         if not isinstance(domain, str) or domain not in AUTONOMOUS_DOMAINS:
             raise BrainRunError("planning quality domain must be a built-in autonomous domain")
-        for name, value in (("capability", capability), ("risk_class", risk_class)):
-            if not isinstance(value, str) or not value.strip():
-                raise BrainRunError(f"planning quality {name} must be a non-empty string")
-        if task_family is not None and (not isinstance(task_family, str) or not task_family.strip()):
-            raise BrainRunError("planning quality task_family must be a non-empty string or None")
         if not isinstance(evaluator_id, str) or not evaluator_id.strip() or not isinstance(evaluator_version, str) or not evaluator_version.strip():
             raise BrainRunError("planning quality evaluator identity must be non-empty")
         if isinstance(reward, bool) or not isinstance(reward, (int, float)) or not math.isfinite(float(reward)) or not -1.0 <= float(reward) <= 1.0:
@@ -16795,14 +23616,38 @@ class AutonomousAgent:
         }
         if any(not isinstance(value, str) or len(value) != 64 for value in required_digests.values()):
             raise BrainRunError("completed planning quality result is missing a planning digest")
-        context = {"domain": domain, "capability": capability, "risk_class": risk_class, "task_family": task_family}
-        context_digest = _context_identity_digest(context)
-        planning_outcome_digest = _json_digest({
+        if plan.planner_context is None and plan.planner_context_digest is None:
+            for name, value in (("capability", capability), ("risk_class", risk_class)):
+                if not isinstance(value, str) or not value.strip():
+                    raise BrainRunError(f"planning quality {name} must be a non-empty string")
+            if task_family is not None and (not isinstance(task_family, str) or not task_family.strip()):
+                raise BrainRunError("planning quality task_family must be a non-empty string or None")
+            context = {
+                "domain": domain,
+                "capability": capability,
+                "risk_class": risk_class,
+                "task_family": task_family,
+            }
+            context_digest = _context_identity_digest(context)
+        else:
+            context, context_digest = _planner_context_binding(
+                plan.planner_context,
+                plan.planner_context_digest,
+                "planning quality planner_context",
+            )
+        planning_identity = {
             "kind": "planning_quality",
             "plan_outcome_digest": plan.outcome_digest,
             "selection_digest": plan.selection_digest,
             "planner_plan_digest": plan.planner_plan_digest,
-        })
+            "base_plan_digest": plan.base_plan_digest,
+        }
+        if isinstance(plan, AutonomousOrderedStepPlanRefinementResult):
+            # Ordered-step proposals protect a caller-owned graph contract. Include that
+            # identity in the learning key so two equally successful orderings for different
+            # graphs cannot replay each other's credit.
+            planning_identity["protected_contract_digest"] = plan.protected_contract_digest
+        planning_outcome_digest = _json_digest(planning_identity)
         current_state = self.learning_state() if bandit_state is None else dict(bandit_state)
         normalized_state = _ensure_bandit_arm(
             current_state,
@@ -16889,6 +23734,8 @@ class AutonomousAgent:
             "schema": AUTONOMOUS_PLANNING_QUALITY_SETTLEMENT_SCHEMA,
             "status": "settled",
             "plan_refinement": plan.to_dict(),
+            "planner_context": dict(context),
+            "planner_context_digest": context_digest,
             "evaluation": decision.to_dict(),
             "next_state": dict(next_state),
             "model_quality": model_quality,
@@ -17236,6 +24083,39 @@ class AutonomousAgent:
             return []
         return [dict(row) for row in self.execution_journal.events(execution_id=execution_id, after_sequence=after_sequence, limit=limit)]
 
+    def restore_execution_persistence(self) -> dict[str, Any]:
+        """Restore the metadata-only execution checkpoint used by long-horizon recovery."""
+
+        if self.execution_persistence is None:
+            raise BrainRunError("restore_execution_persistence requires configured persistence")
+        snapshot = self.execution_persistence.restore()
+        if snapshot is None:
+            return {"restored": False, "snapshot_digest": None, "events": 0, "retention": "metadata_only"}
+        rows = snapshot.get("rows")
+        return {
+            "restored": True,
+            "schema": snapshot.get("schema"),
+            "snapshot_digest": snapshot.get("snapshot_digest"),
+            "head_digest": snapshot.get("head_digest"),
+            "events": len(rows) if isinstance(rows, list) else 0,
+            "retention": "metadata_only_hash_chained",
+        }
+
+    def flush_execution_persistence(self) -> dict[str, Any]:
+        """Flush the execution journal while projecting only checkpoint metadata."""
+
+        if self.execution_persistence is None:
+            raise BrainRunError("flush_execution_persistence requires configured persistence")
+        snapshot = self.execution_persistence.flush()
+        rows = snapshot.get("rows")
+        return {
+            "schema": snapshot.get("schema"),
+            "snapshot_digest": snapshot.get("snapshot_digest"),
+            "head_digest": snapshot.get("head_digest"),
+            "events": len(rows) if isinstance(rows, list) else 0,
+            "retention": "metadata_only_hash_chained",
+        }
+
     def _resolve_candidates(
         self,
         model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None,
@@ -17277,7 +24157,10 @@ class AutonomousAgent:
         capability_focus = resolved_options.pop("_aurora_capability_focus", None)
         capability_contract = resolved_options.pop("_aurora_capability_contract", None)
         tool_learning_state = resolved_options.pop("tool_learning_state", resolved_options.pop("toolSelectionState", None))
+        if tool_learning_state is None and self._tool_selection_configured:
+            tool_learning_state = self.tool_selection_state
         tool_selection_exploration = resolved_options.pop("tool_selection_exploration", resolved_options.pop("toolSelectionExploration", 0.15))
+        max_tool_risk_class = resolved_options.pop("max_tool_risk_class", resolved_options.pop("maxToolRiskClass", None))
         if capability_focus is not None:
             capability_focus = _identifier("capability focus", capability_focus)
             if not tool_domains:
@@ -17309,7 +24192,6 @@ class AutonomousAgent:
             )
         if self.tool_registry is not None and "provider_tools" not in resolved_options:
             selected_tools = self.tool_registry.tools_for(tool_domains or None)
-            registered_tool_names = {tool.name for tool in selected_tools}
             reviewed_tool_bindings = {
                 (binding.name, binding.capability)
                 for profile in builtin_autonomous_domain_tool_profiles()
@@ -17333,6 +24215,7 @@ class AutonomousAgent:
                     capability=capability_focus,
                     tool_learning_state=tool_learning_state,
                     exploration=tool_selection_exploration,
+                    max_risk_class=max_tool_risk_class,
                 )
                 selected_names = set(portfolio_packet["selected_tool_names"])
                 # A caller-owned binding may intentionally describe a capability that is not
@@ -17508,6 +24391,7 @@ class AutonomousAgent:
                         policy=execution_policy,
                         journal=self.execution_journal,
                         resume=resume_execution,
+                        authorization_context=resolved_options.get("authorization_context"),
                     )
                     execution_controller = session_runtime.controller
                 else:
@@ -17532,6 +24416,7 @@ class AutonomousAgent:
             session_runtime = self.tool_runtime.scoped(
                 execution_id=resolved_execution_id,
                 domain=selected_domain,
+                authorization_context=resolved_options.get("authorization_context"),
             )
         if execution_controller is not None:
             # This is an internal capability, never a caller/model option.  The orchestrator
@@ -17665,6 +24550,268 @@ class AutonomousAgent:
             except Exception:
                 continue
 
+    def _prompt_learning_options(self, options: Mapping[str, Any]) -> dict[str, Any]:
+        """Bind configured prompt learning persistence to one high-level run."""
+
+        if not isinstance(options, Mapping):
+            raise BrainRunError("autonomous prompt learning options must be a mapping")
+        resolved = dict(options)
+        if self.memory_consolidator is not None:
+            resolved.setdefault("memory_consolidator", self.memory_consolidator)
+        coordinator = self.prompt_learning_coordinator
+        if coordinator is None:
+            return resolved
+        supplied_state = resolved.get("prompt_learning_state")
+        if supplied_state is not None and supplied_state is not coordinator.state:
+            raise BrainRunError(
+                "prompt_learning_state cannot override the agent's persistent prompt learner"
+            )
+        supplied_registry = resolved.get("prompt_registry")
+        if supplied_registry is not None and supplied_registry is not coordinator.registry:
+            raise BrainRunError(
+                "prompt_registry must be the same registry as the agent's prompt learner"
+            )
+        supplied_planning_state = resolved.get("planning_prompt_learning_state")
+        if supplied_planning_state is not None and supplied_planning_state is not coordinator.state:
+            raise BrainRunError(
+                "planning_prompt_learning_state cannot override the agent's persistent prompt learner"
+            )
+        supplied_planning_registry = resolved.get("planning_prompt_registry")
+        if supplied_planning_registry is not None and supplied_planning_registry is not coordinator.registry:
+            raise BrainRunError(
+                "planning_prompt_registry must be the same registry as the agent's prompt learner"
+            )
+        resolved["prompt_registry"] = coordinator.registry
+        resolved["prompt_learning_state"] = coordinator.state
+        return resolved
+
+    def prompt_learning_selections(self, result: Any) -> tuple[AutonomousPromptAdaptiveSelection, ...]:
+        """Recover exact metadata-only prompt choices from a completed or paused run."""
+
+        coordinator = self.prompt_learning_coordinator
+        if coordinator is None:
+            raise BrainRunError("prompt learning coordinator is not configured")
+        try:
+            return extract_autonomous_prompt_learning_selections(result, coordinator.registry)
+        except ArgumentError as error:
+            raise BrainRunError("autonomous prompt learning result is not settleable") from error
+
+    def settle_prompt_learning(self, selection: AutonomousPromptAdaptiveSelection, **kwargs: Any) -> Any:
+        """Apply explicit evaluator credit to one selection and persist it with CAS fencing."""
+
+        coordinator = self.prompt_learning_coordinator
+        if coordinator is None:
+            raise BrainRunError("prompt learning coordinator is not configured")
+        try:
+            return coordinator.settle(selection, **kwargs)
+        except ArgumentError as error:
+            raise BrainRunError("autonomous prompt learning settlement failed") from error
+
+    def restore_prompt_learning(self) -> Any:
+        """Restore the configured prompt learner before accepting new high-level work."""
+
+        coordinator = self.prompt_learning_coordinator
+        if coordinator is None:
+            raise BrainRunError("prompt learning coordinator is not configured")
+        return coordinator.restore()
+
+    def flush_prompt_learning(self) -> Any:
+        """Flush the current prompt learner without inventing evaluator credit."""
+
+        coordinator = self.prompt_learning_coordinator
+        if coordinator is None:
+            raise BrainRunError("prompt learning coordinator is not configured")
+        return coordinator.flush()
+
+    def restore_learning(self) -> Any:
+        """Restore the evaluator/bandit ledger from its caller-owned persistence boundary."""
+
+        if self.ledger is None:
+            raise BrainRunError("AutonomousAgent has no learning ledger")
+        coordinator = self.learning_persistence
+        if coordinator is None:
+            raise BrainRunError("AutonomousAgent learning persistence is not configured")
+        return coordinator.restore()
+
+    def flush_learning(self) -> Any:
+        """Flush evaluator/bandit state through its caller-owned CAS boundary."""
+
+        if self.ledger is None:
+            raise BrainRunError("AutonomousAgent has no learning ledger")
+        coordinator = self.learning_persistence
+        if coordinator is None:
+            raise BrainRunError("AutonomousAgent learning persistence is not configured")
+        return coordinator.flush()
+
+    def restore_health(self) -> Any:
+        """Restore provider/model health priors from the caller-owned persistence boundary."""
+
+        if self.health_ledger is None:
+            raise BrainRunError("AutonomousAgent has no provider health ledger")
+        coordinator = self.health_persistence
+        if coordinator is None:
+            raise BrainRunError("AutonomousAgent health persistence is not configured")
+        return coordinator.restore()
+
+    def flush_health(self) -> Any:
+        """Flush provider/model health observations through their caller-owned CAS boundary."""
+
+        if self.health_ledger is None:
+            raise BrainRunError("AutonomousAgent has no provider health ledger")
+        coordinator = self.health_persistence
+        if coordinator is None:
+            raise BrainRunError("AutonomousAgent health persistence is not configured")
+        return coordinator.flush()
+
+    def restore_provider_health(self) -> Any:
+        """Compatibility alias for restoring the agent's provider/model health ledger."""
+
+        return self.restore_health()
+
+    def flush_provider_health(self) -> Any:
+        """Compatibility alias for flushing the agent's provider/model health ledger."""
+
+        return self.flush_health()
+
+    def restore_runtime_health(self) -> Any:
+        """Restore process-local provider circuits and transport observations after restart."""
+
+        coordinator = self.runtime_health_persistence
+        if coordinator is None:
+            raise BrainRunError("AutonomousAgent runtime health persistence is not configured")
+        return coordinator.restore()
+
+    def flush_runtime_health(self) -> Any:
+        """Flush process-local provider circuits and transport observations through CAS storage."""
+
+        coordinator = self.runtime_health_persistence
+        if coordinator is None:
+            raise BrainRunError("AutonomousAgent runtime health persistence is not configured")
+        return coordinator.flush()
+
+    def restore_transport_health(self) -> Any:
+        """Compatibility alias for restoring runtime transport health."""
+
+        return self.restore_runtime_health()
+
+    def flush_transport_health(self) -> Any:
+        """Compatibility alias for flushing runtime transport health."""
+
+        return self.flush_runtime_health()
+
+    def register_evaluator_calibration(self, report: Mapping[str, Any]) -> str:
+        """Register one validated aggregate evaluator calibration report by digest."""
+
+        registry = self.evaluator_calibration_registry
+        if registry is None:
+            raise BrainRunError("AutonomousAgent evaluator calibration registry is not configured")
+        try:
+            return registry.register(report)
+        except (ArgumentError, TypeError, ValueError) as error:
+            raise BrainRunError("evaluator calibration report was rejected") from error
+
+    def evaluator_calibration_report(self, report_digest: str) -> dict[str, Any] | None:
+        """Return one aggregate calibration report without exposing source evaluation cases."""
+
+        registry = self.evaluator_calibration_registry
+        if registry is None:
+            raise BrainRunError("AutonomousAgent evaluator calibration registry is not configured")
+        try:
+            return registry.get(report_digest)
+        except (ArgumentError, TypeError, ValueError) as error:
+            raise BrainRunError("evaluator calibration report digest was rejected") from error
+
+    def evaluator_calibration_reports(self) -> list[dict[str, Any]]:
+        """Return all registered aggregate calibration reports in deterministic digest order."""
+
+        registry = self.evaluator_calibration_registry
+        if registry is None:
+            raise BrainRunError("AutonomousAgent evaluator calibration registry is not configured")
+        return registry.reports()
+
+    def restore_evaluator_calibration(self) -> Any:
+        """Restore aggregate evaluator calibration before admitting readiness or learning."""
+
+        if self.evaluator_calibration_registry is None:
+            raise BrainRunError("AutonomousAgent evaluator calibration registry is not configured")
+        coordinator = self.evaluator_calibration_persistence
+        if coordinator is None:
+            raise BrainRunError("AutonomousAgent evaluator calibration persistence is not configured")
+        return coordinator.restore()
+
+    def flush_evaluator_calibration(self) -> Any:
+        """Flush aggregate evaluator calibration through its caller-owned CAS boundary."""
+
+        if self.evaluator_calibration_registry is None:
+            raise BrainRunError("AutonomousAgent evaluator calibration registry is not configured")
+        coordinator = self.evaluator_calibration_persistence
+        if coordinator is None:
+            raise BrainRunError("AutonomousAgent evaluator calibration persistence is not configured")
+        return coordinator.flush()
+
+    def restore_online_learning(self) -> Any:
+        """Compatibility alias for restoring the agent's value-only online-learning ledger."""
+
+        return self.restore_learning()
+
+    def flush_online_learning(self) -> Any:
+        """Compatibility alias for flushing the agent's value-only online-learning ledger."""
+
+        return self.flush_learning()
+
+    def _set_tool_selection_state(self, state: Mapping[str, Any]) -> None:
+        self.tool_selection_state = normalize_autonomous_tool_selection_state(state)
+
+    def tool_selection_state_snapshot(self) -> dict[str, Any]:
+        """Return a fresh normalized copy of the agent-owned tool selector state."""
+
+        return normalize_autonomous_tool_selection_state(self.tool_selection_state)
+
+    def restore_tool_selection(self) -> AutonomousToolSelectionSnapshot | None:
+        """Restore evaluator-approved tool-arm statistics before planning resumes."""
+
+        if self._tool_selection_persistence_coordinator is None:
+            raise BrainRunError("AutonomousAgent tool selection persistence is not configured")
+        return self._tool_selection_persistence_coordinator.restore()
+
+    def flush_tool_selection(self) -> AutonomousToolSelectionSnapshot:
+        """Flush evaluator-approved tool-arm statistics through the caller-owned CAS boundary."""
+
+        if self._tool_selection_persistence_coordinator is None:
+            raise BrainRunError("AutonomousAgent tool selection persistence is not configured")
+        return self._tool_selection_persistence_coordinator.flush()
+
+    def record_tool_selection_reward(self, outcome: Mapping[str, Any]) -> dict[str, Any]:
+        """Apply one independent evaluator reward to the agent-owned adaptive selector."""
+
+        if not self._tool_selection_configured:
+            raise BrainRunError("AutonomousAgent tool selection state is not configured")
+        try:
+            self._set_tool_selection_state(_update_autonomous_tool_selection_state(self.tool_selection_state, outcome))
+        except (ArgumentError, BrainRunError, TypeError, ValueError) as error:
+            raise BrainRunError("tool selection reward could not be recorded") from error
+        return self.tool_selection_state_snapshot()
+
+    def restore_memory(self) -> Any:
+        """Restore episodic memory from its caller-owned persistence boundary."""
+
+        if self.memory is None:
+            raise BrainRunError("AutonomousAgent has no episodic memory")
+        coordinator = self.memory_persistence
+        if coordinator is None:
+            raise BrainRunError("AutonomousAgent memory persistence is not configured")
+        return coordinator.restore()
+
+    def flush_memory(self) -> Any:
+        """Flush episodic memory through its caller-owned CAS boundary."""
+
+        if self.memory is None:
+            raise BrainRunError("AutonomousAgent has no episodic memory")
+        coordinator = self.memory_persistence
+        if coordinator is None:
+            raise BrainRunError("AutonomousAgent memory persistence is not configured")
+        return coordinator.flush()
+
     def run(
         self,
         *,
@@ -17683,10 +24830,11 @@ class AutonomousAgent:
         provider/mission approval.  No option here widens those authorization boundaries.
         """
 
+        run_options = self._prompt_learning_options(kwargs)
         candidates, resolved_credentials, options, execution_controller = self._execution_inputs(
             credentials=credentials,
             model_candidates=model_candidates,
-            options=kwargs,
+            options=run_options,
             tool_domains=(domain,),
             task=task,
             resume_learning=bool(kwargs.get("learn")),
@@ -17707,6 +24855,1084 @@ class AutonomousAgent:
         self._record_model_quality_from_learning_result(result)
         self._finish_execution(execution_controller, result=result)
         return result
+
+    def run_stream(
+        self,
+        *,
+        task: str,
+        domain: str,
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        execution_id: str | None = None,
+        resume_execution: bool = False,
+        **kwargs: Any,
+    ) -> Any:
+        """Run one reviewed domain task as a lazy, provider-neutral event stream.
+
+        The method performs the normal route, blueprint, model-selection, prompt, and plan
+        preflight immediately with ``approve_provider_call=False``.  The returned handle starts
+        provider transport only when its ``events`` iterator is consumed and only when the
+        caller supplied ``approve_provider_call=True``.  Streaming is intentionally limited to
+        the direct provider mode: tool-loop, mission, evaluator settlement, and memory writes
+        remain on their existing execution APIs, where their separate authority boundaries can
+        be represented faithfully.
+
+        ``execution_id``/``resume_execution`` are rejected here because a streamed provider
+        response cannot be atomically checkpointed by this synchronous façade.  Deployments that
+        need restart recovery should use the existing resumable result controllers and rehydrate
+        the caller-owned response explicitly rather than replaying a partial stream.
+        """
+
+        from .autonomous_agent_stream import (
+            AutonomousAgentStreamHandle,
+            build_autonomous_agent_stream_request,
+        )
+        from .autonomous_stream import AutonomousStreamArm, AutonomousStreamRuntime
+
+        if execution_id is not None or resume_execution:
+            raise BrainRunError(
+                "run_stream does not support execution persistence; use a resumable result controller"
+            )
+        if not isinstance(task, str) or not task.strip():
+            raise BrainRunError("stream task must be a non-empty string")
+        if not isinstance(domain, str) or not domain.strip():
+            raise BrainRunError("stream domain must be a non-empty string")
+        requested_approval = kwargs.pop("approve_provider_call", False)
+        if not isinstance(requested_approval, bool):
+            raise BrainRunError("stream approve_provider_call must be a boolean")
+        execution_mode = kwargs.get("execution_mode", "provider")
+        if execution_mode not in (None, "provider"):
+            raise BrainRunError("run_stream supports only execution_mode='provider'")
+        if kwargs.get("mission_policy") is not None or kwargs.get("tool_loop_options") is not None:
+            raise BrainRunError(
+                "run_stream cannot execute mission or tool-loop continuations; use run() for those modes"
+            )
+        if kwargs.get("learn") is True or kwargs.get("evaluator") is not None or kwargs.get("evidence") is not None:
+            raise BrainRunError(
+                "run_stream cannot settle evaluator learning; use run_learning() or run()"
+            )
+
+        run_options = self._prompt_learning_options(kwargs)
+        candidates, resolved_credentials, resolved_options, execution_controller = self._execution_inputs(
+            credentials=credentials,
+            model_candidates=model_candidates,
+            options=run_options,
+            tool_domains=(domain,),
+            task=task,
+            resume_learning=False,
+        )
+        if execution_controller is not None:
+            raise BrainRunError(
+                "run_stream cannot attach a durable execution controller; use a resumable result controller"
+            )
+
+        # Compile the same blueprint used by the ordinary direct runner.  This second provider-
+        # free compilation gives the stream handle a stable public plan digest without putting
+        # transient task/prompt values into its completion receipt.
+        prepare_options = {
+            key: resolved_options[key]
+            for key in (
+                "capability",
+                "risk_class",
+                "constraints",
+                "desired_outputs",
+                "context",
+                "max_steps",
+                "require_json",
+                "structured_domain_response",
+                "response_schema",
+                "execution_mode",
+                "max_input_tokens",
+                "required_model_capabilities",
+                "memory_episodes",
+            )
+            if key in resolved_options
+        }
+        blueprint = self.orchestrator.prepare(task=task, domain=domain, **prepare_options)
+        route_binding = blueprint.selection_context.get("autonomous_route")
+        blueprint = _apply_versioned_prompt(
+            blueprint,
+            route=route_binding if isinstance(route_binding, Mapping) else None,
+            prompt_template=resolved_options.get("prompt_template"),
+            prompt_registry=resolved_options.get("prompt_registry"),
+            prompt_selection=resolved_options.get("prompt_selection"),
+            prompt_stage=resolved_options.get("prompt_stage", "answer"),
+            prompt_learning_state=resolved_options.get("prompt_learning_state"),
+            prompt_learning_exploration=resolved_options.get("prompt_learning_exploration", 0.35),
+        )
+        blueprint_public = blueprint.to_dict()
+        blueprint_digest = content_digest(blueprint_public)
+        task_digest = content_digest({"task": task})
+        resolved_options["approve_provider_call"] = False
+        try:
+            preflight = self.orchestrator.run(
+                task=task,
+                domain=domain,
+                model_candidates=candidates,
+                credentials=resolved_credentials,
+                **resolved_options,
+            )
+        except Exception:
+            # Do not translate malformed/configuration errors into a stream receipt.  This is
+            # the same hard-failure posture as the non-streaming API and avoids hiding contract
+            # bugs behind a deferred iterator.
+            raise
+        if not isinstance(preflight, BrainRunResult):
+            raise BrainRunError("run_stream preflight returned a non-direct result")
+
+        route = blueprint.selection_context.get("autonomous_route")
+        route_public = dict(route) if isinstance(route, Mapping) else None
+        selected = preflight.selection.get("selected_model")
+        if not isinstance(selected, Mapping):
+            return AutonomousAgentStreamHandle(
+                selection=preflight.selection,
+                route=route_public,
+                blueprint=blueprint_public,
+                task_digest=task_digest,
+                blueprint_digest=blueprint_digest,
+                inner=None,
+                initial_status="selection_refused",
+            )
+        provider = selected.get("provider")
+        model = selected.get("model")
+        if not isinstance(provider, str) or not isinstance(model, str):
+            raise BrainRunError("run_stream preflight selected malformed provider metadata")
+        if preflight.status != "approval_required":
+            status = preflight.status if preflight.status in {"plan_refused", "route_review_required"} else "selection_refused"
+            return AutonomousAgentStreamHandle(
+                selection=preflight.selection,
+                route=route_public,
+                blueprint=blueprint_public,
+                task_digest=task_digest,
+                blueprint_digest=blueprint_digest,
+                inner=None,
+                initial_status=status,
+            )
+        if not requested_approval:
+            return AutonomousAgentStreamHandle(
+                selection=preflight.selection,
+                route=route_public,
+                blueprint=blueprint_public,
+                task_digest=task_digest,
+                blueprint_digest=blueprint_digest,
+                inner=None,
+                initial_status="approval_required",
+            )
+
+        raw_messages = preflight.prompt.get("messages")
+        if not isinstance(raw_messages, Sequence) or isinstance(raw_messages, (str, bytes)) or not raw_messages:
+            raise BrainRunError("run_stream preflight did not retain provider messages")
+        normalized_content_parts = resolved_options.get("content_parts")
+        if normalized_content_parts is not None:
+            normalized_content_parts = normalize_provider_content_parts(normalized_content_parts)
+        provider_messages = _provider_messages_with_content_parts(
+            [dict(message) for message in raw_messages],
+            () if normalized_content_parts is None else normalized_content_parts,
+        )
+        tools = resolved_options.get("provider_tools", ())
+        if not isinstance(tools, Sequence) or isinstance(tools, (str, bytes)):
+            raise BrainRunError("run_stream provider_tools must be a sequence")
+        max_output_tokens = resolved_options.get("max_output_tokens", 2_048)
+        if not isinstance(max_output_tokens, int) or isinstance(max_output_tokens, bool):
+            raise BrainRunError("run_stream max_output_tokens must be an integer")
+        max_provider_failovers = resolved_options.get("max_provider_failovers", 2)
+        if (
+            not isinstance(max_provider_failovers, int)
+            or isinstance(max_provider_failovers, bool)
+            or not 0 <= max_provider_failovers <= 8
+        ):
+            raise BrainRunError("run_stream max_provider_failovers must be within [0, 8]")
+        request = build_autonomous_agent_stream_request(
+            model=model,
+            messages=provider_messages,
+            max_output_tokens=max_output_tokens,
+            temperature=resolved_options.get("temperature"),
+            require_json=blueprint.spec.require_json,
+            response_schema=blueprint.spec.response_schema,
+            idempotency_key=resolved_options.get("idempotency_key"),
+            tools=tools,
+            tool_choice=resolved_options.get("tool_choice"),
+        )
+        selection_models = preflight.selection.get("models", ())
+        if not isinstance(selection_models, Sequence) or isinstance(selection_models, (str, bytes)):
+            selection_models = ()
+        fallbacks: list[AutonomousStreamArm] = []
+        seen = {f"{provider}/{model}"}
+        for candidate in selection_models:
+            if not isinstance(candidate, Mapping):
+                continue
+            fallback_provider = candidate.get("provider")
+            fallback_model = candidate.get("model")
+            if not isinstance(fallback_provider, str) or not isinstance(fallback_model, str):
+                continue
+            arm_id = f"{fallback_provider}/{fallback_model}"
+            if arm_id in seen:
+                continue
+            if len(fallbacks) >= max_provider_failovers:
+                break
+            seen.add(arm_id)
+            cost = candidate.get("cost_per_million_tokens", 0.0)
+            if isinstance(cost, bool) or not isinstance(cost, (int, float)):
+                cost = 0.0
+            fallbacks.append(
+                AutonomousStreamArm(
+                    provider=fallback_provider,
+                    model=fallback_model,
+                    cost_per_million_tokens=float(cost),
+                )
+            )
+        inner = AutonomousStreamRuntime(self.runtime).open(
+            request,
+            provider=provider,
+            model=model,
+            fallbacks=fallbacks,
+            credential=resolved_credentials.get(provider),
+            credential_for=lambda name: resolved_credentials.get(name),
+            max_provider_failovers=max_provider_failovers,
+            context_budget=resolved_options.get("context_budget"),
+            observer=resolved_options.get("invocation_observer"),
+            invocation_kind="autonomous_agent_stream",
+            selection=preflight.selection,
+            reserve_cost=resolved_options.get("reserve_cost"),
+            authorization_context=resolved_options.get("authorization_context"),
+            authorization_domain=domain,
+        )
+        return AutonomousAgentStreamHandle(
+            selection=preflight.selection,
+            route=route_public,
+            blueprint=blueprint_public,
+            task_digest=task_digest,
+            blueprint_digest=blueprint_digest,
+            inner=inner,
+        )
+
+    def run_auto_stream(
+        self,
+        *,
+        task: str,
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        **kwargs: Any,
+    ) -> Any:
+        """Route deterministically, then expose the selected single-domain stream.
+
+        Provider-assisted semantic routing, provider planning, learning loops, and cross-domain
+        fan-out are intentionally rejected until their separate stream lifecycle contracts are
+        available.  This prevents an automatic stream from silently making an unreviewed second
+        provider call or collapsing several child completions into one ambiguous transcript.
+        """
+
+        from .autonomous_agent_stream import AutonomousAgentStreamHandle
+
+        if kwargs.get("semantic_routing") is True:
+            raise BrainRunError("run_auto_stream requires provider-free routing; semantic routing is a separate provider boundary")
+        if kwargs.get("planning_mode", "deterministic") != "deterministic":
+            raise BrainRunError("run_auto_stream supports only deterministic planning")
+        if any(
+            kwargs.get(name) is True
+            for name in (
+                "workflow_execution",
+                "workflow_learning",
+                "workflow_trajectory_learning",
+                "cross_domain_learning",
+                "cross_domain_trajectory_learning",
+                "cross_domain_replan_learning",
+            )
+        ) or kwargs.get("learn") is True:
+            raise BrainRunError("run_auto_stream cannot combine automatic learning or workflow execution")
+        route_options = self._automatic_route_options(kwargs)
+        automatic = self.prepare_auto(task=task, **route_options)
+        route = automatic.route
+        task_digest = content_digest({"task": task})
+        if route.abstained:
+            return AutonomousAgentStreamHandle(
+                selection={},
+                route=route.to_dict(),
+                blueprint=None,
+                task_digest=task_digest,
+                blueprint_digest=None,
+                inner=None,
+                initial_status="route_review_required",
+            )
+        if len(route.selected_domains) != 1:
+            cross_blueprint = automatic.cross_domain_blueprint
+            if cross_blueprint is None:
+                raise BrainRunError("run_auto_stream route selected multiple domains without a cross-domain blueprint")
+            subtasks = [
+                {
+                    "id": child_id,
+                    "task": child.spec.task,
+                    "domain": child.profile.domain,
+                    "capability": child.spec.capability,
+                    "risk_class": child.spec.risk_class,
+                    "constraints": child.spec.constraints,
+                    "desired_outputs": child.spec.desired_outputs,
+                    "context": child.spec.context,
+                    "max_steps": child.spec.max_steps,
+                    "require_json": child.spec.require_json,
+                    "structured_domain_response": child.spec.structured_domain_response,
+                    "response_schema": child.spec.response_schema,
+                    "execution_mode": "provider",
+                    "required_model_capabilities": child.required_capabilities,
+                }
+                for child_id, child in zip(cross_blueprint.child_ids, cross_blueprint.child_blueprints)
+            ]
+            cross_options = dict(kwargs)
+            for name in (
+                "hints",
+                "min_confidence",
+                "min_margin",
+                "max_domains",
+                "allow_cross_domain",
+                "semantic_routing",
+                "semantic_weight",
+                "planning_mode",
+                "route_override",
+            ):
+                cross_options.pop(name, None)
+            handle = self.run_cross_domain_stream(
+                task=task,
+                subtasks=subtasks,
+                credentials=credentials,
+                model_candidates=model_candidates,
+                **cross_options,
+            )
+            if not hasattr(handle, "route"):
+                raise BrainRunError("run_auto_stream cross-domain stream returned an invalid handle")
+            handle.route = route.to_dict()
+            return handle
+        selected_domain = route.selected_domains[0]
+        direct_options = dict(kwargs)
+        for name in (
+            "hints",
+            "min_confidence",
+            "min_margin",
+            "max_domains",
+            "allow_cross_domain",
+            "semantic_routing",
+            "semantic_weight",
+            "planning_mode",
+        ):
+            direct_options.pop(name, None)
+        handle = self.run_stream(
+            task=task,
+            domain=selected_domain,
+            credentials=credentials,
+            model_candidates=model_candidates,
+            **direct_options,
+        )
+        if not isinstance(handle, AutonomousAgentStreamHandle):
+            raise BrainRunError("run_auto_stream direct stream returned an invalid handle")
+        handle.route = route.to_dict()
+        return handle
+
+    def run_cross_domain_stream(
+        self,
+        *,
+        task: str,
+        subtasks: Sequence[Mapping[str, Any]],
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        execution_id: str | None = None,
+        resume_execution: bool = False,
+        **kwargs: Any,
+    ) -> Any:
+        """Stream bounded specialist fan-out followed by optional synthesis.
+
+        The parent plan is compiled and run through the normal provider-free cross-domain
+        preflight before a handle is returned.  Each child then uses :meth:`run_stream`, so
+        model eligibility, prompt assembly, provider failover, caller approval, and secret
+        redaction remain identical to a direct stream.  Child and synthesis output is live-only:
+        the fan-in buffer is bounded, and only metadata-only completion receipts survive.
+
+        This synchronous façade intentionally does not combine durable execution checkpoints,
+        evaluator settlement, missions, tool loops, or provider-assisted planning with a live
+        transcript.  Those paths already have explicit resumable APIs; replaying a partial stream
+        would risk duplicating model output or effects.
+        """
+
+        from .autonomous_agent_stream import (
+            AutonomousCrossDomainStreamHandle,
+            MAX_AUTONOMOUS_CROSS_DOMAIN_STREAM_CHILDREN,
+        )
+
+        if execution_id is not None or resume_execution:
+            raise BrainRunError(
+                "run_cross_domain_stream does not support execution persistence; use a resumable cross-domain controller"
+            )
+        if not isinstance(task, str) or not task.strip():
+            raise BrainRunError("cross-domain stream task must be a non-empty string")
+        if not isinstance(subtasks, Sequence) or isinstance(subtasks, (str, bytes)) or not subtasks:
+            raise BrainRunError("cross-domain stream subtasks must be a non-empty sequence")
+        if len(subtasks) > MAX_AUTONOMOUS_CROSS_DOMAIN_STREAM_CHILDREN:
+            raise BrainRunError("cross-domain stream exceeds its bounded child count")
+        if any(not isinstance(item, Mapping) for item in subtasks):
+            raise BrainRunError("cross-domain stream subtasks must contain mappings")
+
+        requested_approval = kwargs.pop("approve_provider_call", False)
+        if not isinstance(requested_approval, bool):
+            raise BrainRunError("cross-domain stream approve_provider_call must be a boolean")
+        child_execution_mode = kwargs.pop("child_execution_mode", "provider")
+        synthesis_execution_mode = kwargs.pop("synthesis_execution_mode", "provider")
+        if child_execution_mode not in (None, "provider") or synthesis_execution_mode not in (None, "provider"):
+            raise BrainRunError("cross-domain streaming supports only provider child and synthesis modes")
+        synthesize = kwargs.pop("synthesize", True)
+        allow_partial = kwargs.pop("allow_partial", False)
+        max_parallelism = kwargs.pop("max_parallelism", 1)
+        if not isinstance(synthesize, bool) or not isinstance(allow_partial, bool):
+            raise BrainRunError("cross-domain stream synthesize and allow_partial must be booleans")
+        if (
+            isinstance(max_parallelism, bool)
+            or not isinstance(max_parallelism, int)
+            or not 1 <= max_parallelism <= MAX_AUTONOMOUS_CROSS_DOMAIN_STREAM_CHILDREN
+        ):
+            raise BrainRunError("cross-domain stream max_parallelism must be between 1 and 8")
+        if kwargs.get("mission_policy") is not None or kwargs.get("tool_loop_options") is not None:
+            raise BrainRunError(
+                "cross-domain streaming cannot execute missions or tool loops; use run_cross_domain()"
+            )
+        if kwargs.get("learn") is True or kwargs.get("evaluator") is not None or kwargs.get("evidence") is not None:
+            raise BrainRunError(
+                "cross-domain streaming cannot settle evaluator learning; use run_cross_domain_learning()"
+            )
+        if kwargs.get("execution_controller") is not None:
+            raise BrainRunError(
+                "cross-domain streaming cannot attach a durable execution controller"
+            )
+        if kwargs.get("semantic_routing") is True:
+            raise BrainRunError(
+                "cross-domain streaming requires an explicit reviewed subtask route; use prepare_auto() for routing"
+            )
+        if kwargs.get("auto_route") is True:
+            raise BrainRunError("cross-domain streaming does not run automatic route resolution")
+        if kwargs.get("execution_mode") not in (None, "provider"):
+            raise BrainRunError("cross-domain streaming supports only execution_mode='provider'")
+
+        run_options = self._prompt_learning_options(kwargs)
+        child_domains = tuple(
+            item.get("domain") for item in subtasks if isinstance(item.get("domain"), str)
+        )
+        if len(child_domains) != len(subtasks):
+            raise BrainRunError("cross-domain stream every subtask requires a string domain")
+        candidates, resolved_credentials, resolved_options, execution_controller = self._execution_inputs(
+            credentials=credentials,
+            model_candidates=model_candidates,
+            options=run_options,
+            tool_domains=(*child_domains, "cross_domain"),
+            task=task,
+            resume_learning=False,
+        )
+        if execution_controller is not None:
+            raise BrainRunError(
+                "cross-domain streaming cannot attach a durable execution controller; use a resumable controller"
+            )
+
+        # Keep only options accepted by the canonical cross-domain runner.  `_execution_inputs`
+        # may add reviewed ledger/memory/tool context, while unsupported façade-only flags must
+        # never leak into the lower-level call as an accidental override.
+        cross_domain_keys = {
+            "context",
+            "content_parts",
+            "prompt_template",
+            "prompt_registry",
+            "prompt_selection",
+            "prompt_stage",
+            "prompt_learning_state",
+            "prompt_learning_exploration",
+            "execution_plan_context",
+            "desired_outputs",
+            "max_steps",
+            "require_json",
+            "structured_domain_response",
+            "response_schema",
+            "ledger",
+            "memory",
+            "memory_query",
+            "memory_limit",
+            "memory_consolidator",
+            "memory_lesson_resolver",
+            "memory_lesson_context_resolver",
+            "consolidated_memory_limit",
+            "retrieve_consolidated_memory",
+            "consolidated_memory_required",
+            "contextual_observations",
+            "input_tokens",
+            "requested_output_tokens",
+            "max_cost_per_million_tokens",
+            "max_latency_ms",
+            "min_quality",
+            "selection_overrides",
+            "selection_weights",
+            "selection_observations",
+            "approve_mission_dispatch",
+            "run_id",
+            "max_output_tokens",
+            "temperature",
+            "idempotency_key",
+            "mission_policy",
+            "mission_options",
+            "route_request",
+            "enforce_route_tools",
+            "require_resolved_route",
+            "provider_tools",
+            "tool_choice",
+            "max_provider_failovers",
+            "domain_policy_mode",
+            "domain_policy_evidence_ready",
+            "domain_policy_evaluator_configured",
+            "domain_policy_plan_accepted",
+            "domain_policy_effects_requested",
+            "domain_policy_effects_approved",
+            "bandit_state",
+            "accepted_plan_refinement",
+            "response_alignments",
+            "require_response_alignment",
+            "minimum_response_reward",
+            "minimum_response_alignment_confidence",
+            "response_contradiction_confidence_threshold",
+            "invocation_observer",
+            "trace_event_callback",
+        }
+        preflight_options = {
+            key: resolved_options[key]
+            for key in cross_domain_keys
+            if key in resolved_options
+        }
+        preflight_options.update({
+            "child_execution_mode": "provider",
+            "synthesis_execution_mode": "provider",
+            "approve_provider_call": False,
+            "approve_mission_dispatch": False,
+            "synthesize": synthesize,
+            "allow_partial": allow_partial,
+            "max_parallelism": max_parallelism,
+        })
+        preflight = self.orchestrator.run_cross_domain(
+            task=task,
+            subtasks=subtasks,
+            model_candidates=candidates,
+            credentials=resolved_credentials,
+            **preflight_options,
+        )
+        if not isinstance(preflight, AutonomousCrossDomainResult):
+            raise BrainRunError("cross-domain stream preflight returned an invalid result")
+        blueprint = preflight.blueprint
+        blueprint_public = blueprint.to_dict()
+        blueprint_digest = content_digest(blueprint_public)
+        task_digest = content_digest({"task": task})
+        initial_failure_statuses = {
+            "route_review_required",
+            "plan_refused",
+            "selection_refused",
+            "response_review_required",
+            "reconciliation_required",
+            "provider_failed",
+            "child_failed",
+            "child_incomplete",
+            "children_completed",
+            "children_partial",
+        }
+        if preflight.status != "approval_required":
+            status = preflight.status if preflight.status in initial_failure_statuses else "plan_refused"
+            return AutonomousCrossDomainStreamHandle(
+                selection={
+                    "strategy": "cross_domain_preflight",
+                    "child_count": len(blueprint.child_ids),
+                    "retention": "selection_metadata_only",
+                },
+                route=None,
+                blueprint=blueprint_public,
+                task_digest=task_digest,
+                blueprint_digest=blueprint_digest,
+                child_specs=(),
+                synthesis_spec={},
+                open_stream=self.run_stream,
+                model_candidates=candidates,
+                credentials=resolved_credentials,
+                base_options={},
+                synthesize=synthesize,
+                allow_partial=allow_partial,
+                max_parallelism=max_parallelism,
+                initial_status=status,
+            )
+        if not requested_approval:
+            return AutonomousCrossDomainStreamHandle(
+                selection={
+                    "strategy": "cross_domain_preflight",
+                    "child_count": len(blueprint.child_ids),
+                    "retention": "selection_metadata_only",
+                },
+                route=None,
+                blueprint=blueprint_public,
+                task_digest=task_digest,
+                blueprint_digest=blueprint_digest,
+                child_specs=(),
+                synthesis_spec={},
+                open_stream=self.run_stream,
+                model_candidates=candidates,
+                credentials=resolved_credentials,
+                base_options={},
+                synthesize=synthesize,
+                allow_partial=allow_partial,
+                max_parallelism=max_parallelism,
+                initial_status="approval_required",
+            )
+
+        def stream_spec(item: AutonomousTaskBlueprint, item_id: str) -> dict[str, Any]:
+            return {
+                "id": item_id,
+                "task": item.spec.task,
+                "domain": item.profile.domain,
+                "capability": item.spec.capability,
+                "risk_class": item.spec.risk_class,
+                "constraints": item.spec.constraints,
+                "desired_outputs": item.spec.desired_outputs,
+                "context": dict(item.spec.context),
+                "max_steps": item.spec.max_steps,
+                "require_json": item.spec.require_json,
+                "structured_domain_response": item.spec.structured_domain_response,
+                "response_schema": item.spec.response_schema,
+                "required_model_capabilities": item.required_capabilities,
+            }
+
+        child_specs = tuple(
+            stream_spec(child, child_id)
+            for child_id, child in zip(blueprint.child_ids, blueprint.child_blueprints)
+        )
+        synthesis_spec = stream_spec(blueprint.synthesis_blueprint, "synthesis")
+        # The worker receives caller options, not the preflight-enriched context.  Each child
+        # must rebuild its own domain execution-plan/tool projection; copying the parent reserved
+        # contract would be rejected as a stale override by `_execution_inputs`.
+        stream_base_options = dict(run_options)
+        stream_base_options.update({
+            "child_execution_mode": "provider",
+            "synthesis_execution_mode": "provider",
+        })
+        return AutonomousCrossDomainStreamHandle(
+            selection={
+                "strategy": "cross_domain_child_streams",
+                "child_count": len(child_specs),
+                "child_ids": [spec["id"] for spec in child_specs],
+                "max_parallelism": max_parallelism,
+                "synthesis_enabled": synthesize,
+                "retention": "selection_metadata_only;child_choices_transient",
+                "secret_material": "never_returned",
+            },
+            route=None,
+            blueprint=blueprint_public,
+            task_digest=task_digest,
+            blueprint_digest=blueprint_digest,
+            child_specs=child_specs,
+            synthesis_spec=synthesis_spec,
+            open_stream=self.run_stream,
+            model_candidates=candidates,
+            credentials=resolved_credentials,
+            base_options=stream_base_options,
+            synthesize=synthesize,
+            allow_partial=allow_partial,
+            max_parallelism=max_parallelism,
+        )
+
+    def run_mission_replan_cycle(
+        self,
+        *,
+        task: str,
+        domain: str,
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        mission_policy: MissionPolicy | Mapping[str, Any],
+        evaluator: BrainOutcomeEvaluator,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        bandit_state: Mapping[str, Any] | None = None,
+        evidence: Mapping[str, Any] | None = None,
+        max_replans: int = 1,
+        root_mission_id: str | None = None,
+        state_store: AutonomousMissionReplanStateStore | None = None,
+        resume: bool = False,
+        rehydrate_result: Callable[[AutonomousMissionReplanRehydrationContext], BrainMissionResult] | None = None,
+        rehydrate_instruction: Callable[[AutonomousMissionReplanRehydrationContext], str] | None = None,
+        checkpoint_sink: Callable[[AutonomousMissionReplanCheckpoint], Any] | None = None,
+        mission_options: Mapping[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> AutonomousMissionReplanResult:
+        """Run a domain mission through evaluator-guided, restart-safe replanning.
+
+        This is the application façade for the durable mission kernel.  It compiles the reviewed
+        domain prompt and plan without contacting a provider, resolves only caller-owned opaque
+        credential handles, then delegates provider selection, invocation, mission authorization,
+        evaluator credit, and metadata checkpointing to the existing brain boundaries.  Retry
+        feedback is transient prompt context; it cannot grant tools, credentials, dispatch, or
+        external effects.
+        """
+
+        if not isinstance(evaluator, BrainOutcomeEvaluator):
+            raise BrainRunError("mission replan evaluator must be a BrainOutcomeEvaluator")
+        if mission_options is not None and not isinstance(mission_options, Mapping):
+            raise BrainRunError("mission_options must be a mapping or None")
+        options = dict(kwargs)
+        if mission_options is not None:
+            overlap = sorted(set(options).intersection(mission_options))
+            if overlap:
+                raise BrainRunError("mission_options duplicates runtime options: " + ", ".join(overlap))
+            options.update(dict(mission_options))
+        options = self._prompt_learning_options(options)
+        supplied_execution_mode = options.get("execution_mode")
+        if supplied_execution_mode not in (None, "mission"):
+            raise BrainRunError("run_mission_replan_cycle requires execution_mode='mission'")
+        options["execution_mode"] = "mission"
+        resolved_bandit_state = self.learning_state() if bandit_state is None else bandit_state
+
+        candidates, resolved_credentials, resolved_options, execution_controller = self._execution_inputs(
+            credentials=credentials,
+            model_candidates=model_candidates,
+            options=options,
+            tool_domains=(domain,),
+            task=task,
+            resume_learning=False,
+        )
+        prepare_options = {
+            key: resolved_options[key]
+            for key in (
+                "capability",
+                "risk_class",
+                "constraints",
+                "desired_outputs",
+                "context",
+                "max_steps",
+                "require_json",
+                "structured_domain_response",
+                "response_schema",
+                "required_model_capabilities",
+                "memory_episodes",
+                "memory_lesson_references",
+            )
+            if key in resolved_options
+        }
+        prepare_options["execution_mode"] = "mission"
+        blueprint = self.orchestrator.prepare(task=task, domain=domain, **prepare_options)
+        route_binding = blueprint.selection_context.get("autonomous_route")
+        blueprint = _apply_versioned_prompt(
+            blueprint,
+            route=route_binding if isinstance(route_binding, Mapping) else None,
+            prompt_template=options.get("prompt_template"),
+            prompt_registry=options.get("prompt_registry"),
+            prompt_selection=options.get("prompt_selection"),
+            prompt_stage=options.get("prompt_stage", "answer"),
+            prompt_learning_state=options.get("prompt_learning_state"),
+            prompt_learning_exploration=options.get("prompt_learning_exploration", 0.35),
+        )
+
+        # `_execution_inputs` enriches the ordinary agent request with reviewed tool/catalogue
+        # context. Filter that request down to the explicit adaptive-mission kernel contract so
+        # orchestration-only keys can never leak into a lower-level call as an implicit override.
+        adaptive_keys = {
+            "context",
+            "content_parts",
+            "contextual_observations",
+            "input_tokens",
+            "requested_output_tokens",
+            "max_cost_per_million_tokens",
+            "max_latency_ms",
+            "min_quality",
+            "selection_overrides",
+            "approve_provider_call",
+            "approve_mission_dispatch",
+            "run_id",
+            "max_output_tokens",
+            "temperature",
+            "response_schema",
+            "idempotency_key",
+            "claim_requests",
+            "evaluator_review",
+            "workflow_binding",
+            "route_review",
+            "operations_gate_acceptance",
+            "route_request",
+            "enforce_route_tools",
+            "require_resolved_route",
+            "provider_tools",
+            "tool_choice",
+            "max_provider_failovers",
+            "reserve_cost",
+        }
+        adaptive_options = {
+            key: resolved_options[key]
+            for key in adaptive_keys
+            if key in resolved_options
+        }
+        adaptive_options["required_capabilities"] = blueprint.required_capabilities
+        adaptive_options["response_schema"] = (
+            adaptive_options.get("response_schema") or blueprint.spec.response_schema
+        )
+
+        def record_mission_model_quality(
+            result: BrainMissionResult,
+            decision: BrainEvaluatorDecision,
+        ) -> Mapping[str, Any]:
+            """Record only evaluator-derived model quality; never retain the live result."""
+
+            try:
+                episode = self.brain.prepare_learning_episode(result, evidence=evidence)
+                quality = self._record_model_quality_feedback(episode, decision)
+                coordinator = self.prompt_learning_coordinator
+                if coordinator is not None:
+                    selections = extract_autonomous_prompt_learning_selections(
+                        {"prompt": dict(result.brain_run.prompt)},
+                        coordinator.registry,
+                    )
+                    quality = {
+                        **quality,
+                        "prompt_learning": {
+                            "selection_count": len(selections),
+                            "selection_digests": [selection.selection_digest for selection in selections],
+                            "selections": [selection.to_dict() for selection in selections],
+                            "retention": "selection_metadata_only;rendered_messages_transient",
+                            "secret_material": "never_returned",
+                        },
+                    }
+                return quality
+            except Exception as error:
+                return {
+                    "status": "failed",
+                    "error_class": type(error).__name__,
+                    "retention": "metadata_only_model_quality_no_payloads",
+                    "secret_material": "never_returned",
+                }
+
+        try:
+            result = run_autonomous_mission_replan_cycle(
+                self.brain,
+                task=task,
+                model_candidates=candidates,
+                prompt=blueprint.prompt,
+                plan=blueprint.plan,
+                credentials=resolved_credentials,
+                mission_policy=mission_policy,
+                evaluator=evaluator,
+                bandit_state=resolved_bandit_state,
+                evidence=evidence,
+                ledger=self.ledger,
+                mission_options=adaptive_options,
+                max_replans=max_replans,
+                root_mission_id=root_mission_id,
+                state_store=state_store,
+                resume=resume,
+                rehydrate_result=rehydrate_result,
+                rehydrate_instruction=rehydrate_instruction,
+                checkpoint_sink=checkpoint_sink,
+                execution_controller=execution_controller,
+                invocation_observer=resolved_options.get("invocation_observer"),
+                trace_event_callback=resolved_options.get("trace_event_callback"),
+                model_quality_callback=record_mission_model_quality,
+            )
+        except Exception as error:
+            self._finish_execution(execution_controller, error=error)
+            raise
+        self._finish_execution(execution_controller, result=result)
+        return result
+
+    def run_with_launch_admission(
+        self,
+        *,
+        task: str,
+        domain: str,
+        launch_admission: Mapping[str, Any],
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        execution_id: str | None = None,
+        resume_execution: bool = False,
+        **kwargs: Any,
+    ) -> Any:
+        """Run one domain only when a caller-owned launch admission covers it.
+
+        The admission check happens before credential resolution and orchestration.  It is an
+        additional launch gate, not a replacement for provider, tool, learner, or effect approval
+        supplied through ``kwargs``.
+        """
+
+        from .autonomous_launch_admission import authorize_autonomous_launch_domains
+
+        authorize_autonomous_launch_domains(launch_admission, (domain,))
+        return self.run(
+            task=task,
+            domain=domain,
+            credentials=credentials,
+            model_candidates=model_candidates,
+            execution_id=execution_id,
+            resume_execution=resume_execution,
+            **kwargs,
+        )
+
+    def run_auto_with_launch_admission(
+        self,
+        *,
+        task: str,
+        launch_admission: Mapping[str, Any],
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        **kwargs: Any,
+    ) -> AutonomousAutoResult:
+        """Route automatically, enforce admission, then enter the ordinary automatic runtime.
+
+        The first route compilation is provider-free and is the route whose selected domains are
+        checked.  Provider-assisted semantic routing is intentionally rejected here because its
+        classifier call would occur before a final domain-scoped admission; callers can admit that
+        separate boundary explicitly through the semantic-routing APIs.
+        """
+
+        self.authorize_auto_launch_admission(
+            task=task,
+            launch_admission=launch_admission,
+            **kwargs,
+        )
+        return self.run_auto(task=task, credentials=credentials, **kwargs)
+
+    def authorize_auto_launch_admission(
+        self,
+        *,
+        task: str,
+        launch_admission: Mapping[str, Any],
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """Compile one automatic route offline and return its verified admission metadata.
+
+        This is the provider-free process-boundary counterpart to
+        :meth:`run_auto_with_launch_admission`.  Hosts can call it before collecting a
+        short-lived credential, opening MCP, or constructing a provider client.  The same route
+        controls are accepted by the execution wrapper so a caller can use one exact policy at
+        both the preview and dispatch boundaries.
+        """
+
+        from .autonomous_launch_admission import authorize_autonomous_launch_domains
+
+        semantic_routing = kwargs.get("semantic_routing", False)
+        if not isinstance(semantic_routing, bool):
+            raise BrainRunError("semantic_routing must be a boolean")
+        if semantic_routing:
+            raise BrainRunError(
+                "launch-admitted automatic execution requires provider-free routing; "
+                "admit semantic routing separately before enabling it"
+            )
+        route_options = self._automatic_route_options(kwargs)
+        blueprint = self.prepare_auto(task=task, **route_options)
+        return authorize_autonomous_launch_domains(launch_admission, blueprint.route.selected_domains)
+
+    @staticmethod
+    def _automatic_route_options(options: Mapping[str, Any]) -> dict[str, Any]:
+        """Keep provider-free automatic route compilation aligned across launch gates."""
+
+        return {
+            key: options[key]
+            for key in (
+                "hints",
+                "min_confidence",
+                "min_margin",
+                "max_domains",
+                "allow_cross_domain",
+                "context",
+                "constraints",
+                "desired_outputs",
+                "capability",
+                "risk_class",
+                "max_steps",
+                "require_json",
+                "structured_domain_response",
+                "response_schema",
+                "execution_mode",
+                "max_input_tokens",
+                "required_model_capabilities",
+                "memory_episodes",
+            )
+            if key in options
+        }
+
+    def run_auto_replan_cycle_with_launch_admission(
+        self,
+        *,
+        task: str,
+        launch_admission: Mapping[str, Any],
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        evaluator: BrainOutcomeEvaluator | DomainEvaluatorRegistry,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        max_replans: int = 1,
+        hints: Sequence[str] = (),
+        min_confidence: float = 0.25,
+        min_margin: float = 0.10,
+        max_domains: int = 3,
+        allow_cross_domain: bool = True,
+        **kwargs: Any,
+    ) -> AutonomousAutoReplanResult:
+        """Run the automatic learning/replan loop behind a process-boundary launch gate.
+
+        Routing is compiled once without a provider, the approved route is passed as an exact
+        route override, and every evaluator retry reuses that route.  Provider-assisted semantic
+        routing is rejected because its classifier is a separate provider boundary that must be
+        admitted independently.  Route abstention returns a review result without consuming the
+        launch admission or any credential.
+        """
+
+        semantic_routing = kwargs.pop("semantic_routing", False)
+        if not isinstance(semantic_routing, bool):
+            raise BrainRunError("semantic_routing must be a boolean")
+        if semantic_routing:
+            raise BrainRunError(
+                "launch-admitted automatic replan execution requires provider-free routing; "
+                "admit semantic routing separately before enabling it"
+            )
+        if not isinstance(evaluator, (BrainOutcomeEvaluator, DomainEvaluatorRegistry)):
+            raise BrainRunError(
+                "automatic replan evaluator must be a BrainOutcomeEvaluator or DomainEvaluatorRegistry"
+            )
+        if (
+            isinstance(max_replans, bool)
+            or not isinstance(max_replans, int)
+            or not 0 <= max_replans <= MAX_AUTONOMOUS_REPLAN_CYCLE_REPLANS
+        ):
+            raise BrainRunError(
+                f"automatic replan max_replans must be within [0, {MAX_AUTONOMOUS_REPLAN_CYCLE_REPLANS}]"
+            )
+        if "route_override" in kwargs:
+            raise BrainRunError(
+                "run_auto_replan_cycle_with_launch_admission owns the route override; "
+                "pass routing controls instead"
+            )
+
+        route_options = self._automatic_route_options(kwargs)
+        route_options.update(
+            {
+                "hints": hints,
+                "min_confidence": min_confidence,
+                "min_margin": min_margin,
+                "max_domains": max_domains,
+                "allow_cross_domain": allow_cross_domain,
+            }
+        )
+        blueprint = self.prepare_auto(task=task, **route_options)
+        route = blueprint.route
+        if route.abstained:
+            return AutonomousAutoReplanResult(
+                status="route_review_required",
+                mode=None,
+                route=route,
+                final=AutonomousAutoResult(status="route_review_required", route=route),
+            )
+
+        from .autonomous_launch_admission import authorize_autonomous_launch_domains
+
+        authorize_autonomous_launch_domains(launch_admission, route.selected_domains)
+        return self.run_auto_replan_cycle(
+            task=task,
+            credentials=credentials,
+            evaluator=evaluator,
+            model_candidates=model_candidates,
+            max_replans=max_replans,
+            route_override=route,
+            hints=hints,
+            min_confidence=min_confidence,
+            min_margin=min_margin,
+            max_domains=max_domains,
+            allow_cross_domain=allow_cross_domain,
+            semantic_routing=False,
+            **kwargs,
+        )
 
     def run_learning(
         self,
@@ -17739,6 +25965,36 @@ class AutonomousAgent:
             execution_id=execution_id,
             resume_execution=resume_execution,
             **options,
+        )
+
+    def run_learning_with_launch_admission(
+        self,
+        *,
+        task: str,
+        domain: str,
+        launch_admission: Mapping[str, Any],
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        execution_id: str | None = None,
+        resume_execution: bool = False,
+        **kwargs: Any,
+    ) -> Any:
+        """Run learning only after the requested domain passes the launch gate.
+
+        Learning changes policy state and therefore uses the same process-boundary admission as
+        ordinary execution.  The check is deliberately before the learner, credential resolver,
+        provider router, and execution controller are constructed.
+        """
+
+        _authorize_launch_admission_domains(launch_admission, (domain,))
+        return self.run_learning(
+            task=task,
+            domain=domain,
+            credentials=credentials,
+            model_candidates=model_candidates,
+            execution_id=execution_id,
+            resume_execution=resume_execution,
+            **kwargs,
         )
 
     @staticmethod
@@ -17827,6 +26083,7 @@ class AutonomousAgent:
             run_id=resolved_run_id,
             task_digest=task_digest,
             domains=(domain,),
+            authorization_context=kwargs.get("authorization_context"),
         )
         session.started()
         live_observer = session.provider_observer()
@@ -17864,6 +26121,115 @@ class AutonomousAgent:
             raise
         return AutonomousTracedRunResult(result=result, trace=session.summary())
 
+    def run_with_trace_and_launch_admission(
+        self,
+        *,
+        launch_admission: Mapping[str, Any],
+        **kwargs: Any,
+    ) -> AutonomousTracedRunResult:
+        """Run a traced task only when its domain was approved at the launch boundary."""
+
+        domain = kwargs.get("domain")
+        _authorize_launch_admission_domains(launch_admission, (domain,))
+        return self.run_with_trace(**kwargs)
+
+    @staticmethod
+    def analyze_run_trace(
+        snapshot: Mapping[str, Any] | Any,
+        policy: AutonomousRunTraceAnalyticsPolicy | Mapping[str, Any] | None = None,
+    ) -> AutonomousRunTraceAnalyticsReport:
+        """Aggregate a verified metadata-only trace into conservative health observations.
+
+        This is deliberately separate from execution: it never invokes a provider, reads a
+        credential, or treats absent latency/token observations as zero. Callers can persist
+        the returned digest-bound report or re-run the analysis with different thresholds.
+        """
+
+        return analyze_autonomous_run_trace(snapshot, policy)
+
+    @staticmethod
+    def create_run_analytics_ledger(
+        policy: AutonomousRunAnalyticsLedgerPolicy | Mapping[str, Any] | None = None,
+        *,
+        clock: Callable[[], float] | None = None,
+    ) -> AutonomousRunAnalyticsLedger:
+        """Create a bounded longitudinal ledger for already-verified trace reports.
+
+        The ledger is deliberately analytics-only: it never invokes a provider, reads a
+        credential, or retains prompts, responses, tool payloads, or cost claims.  Callers own
+        persistence and may pass a mapping when restoring configuration from JSON.
+        """
+
+        if isinstance(policy, AutonomousRunAnalyticsLedgerPolicy) or policy is None:
+            normalized_policy = policy
+        else:
+            policy_mapping = dict(policy)
+            policy_mapping.setdefault("expected_domains", list(AUTONOMOUS_DOMAIN_NAMES))
+            policy_mapping.setdefault("max_reports", AutonomousRunAnalyticsLedgerPolicy().max_reports)
+            normalized_policy = AutonomousRunAnalyticsLedgerPolicy.from_dict(policy_mapping)
+        return AutonomousRunAnalyticsLedger(normalized_policy) if clock is None else AutonomousRunAnalyticsLedger(normalized_policy, clock=clock)
+
+    def create_run_analytics_controller(
+        self,
+        ledger: AutonomousRunAnalyticsLedger,
+        persistence: Any,
+    ) -> AutonomousRunAnalyticsController:
+        """Bind a metadata-only analytics ledger to this agent's application lifecycle.
+
+        The controller is restore-before-read, re-entrancy fenced, and persistence-aware.  It
+        never gains provider authority and accepts only a caller-owned ledger and JSON/CAS
+        persistence adapter.
+        """
+
+        return AutonomousRunAnalyticsController(self, ledger, persistence)
+
+    @staticmethod
+    def create_authorization_ledger(
+        *,
+        max_grants: int = 4_096,
+        max_events: int = 32_768,
+    ) -> AutonomousAuthorizationLedger:
+        """Create the caller-owned tenant/actor/session authorization boundary.
+
+        The ledger is intentionally separate from task execution: applications issue grants
+        from their identity system, call ``authorize`` immediately before a provider/source/tool
+        or effect boundary, and persist the metadata-only snapshot through the authorization
+        persistence coordinator. No task, prompt, credential, or result is accepted here.
+        """
+
+        return AutonomousAuthorizationLedger(max_grants=max_grants, max_events=max_events)
+
+    @staticmethod
+    def create_authorization_gate(
+        ledger: AutonomousAuthorizationLedger,
+    ) -> AutonomousAuthorizationGate:
+        """Create the fail-closed gate used immediately before caller-owned dispatch."""
+
+        return AutonomousAuthorizationGate(ledger)
+
+    def create_trace_registry_controller(
+        self,
+        registry: Any,
+        persistence: Any,
+    ) -> AutonomousRunTraceRegistryController:
+        """Bind the metadata-only trace registry to this agent's application lifecycle.
+
+        The controller is restore-before-read and persistence-aware. It does not authorize
+        provider calls, replay a run, or retain source values.
+        """
+
+        return AutonomousRunTraceRegistryController(self, registry, persistence)
+
+    def create_run_observability_controller(
+        self,
+        trace_registry: AutonomousRunTraceRegistryController,
+        run_analytics: AutonomousRunAnalyticsController,
+        alert_sink: Any | None = None,
+    ) -> AutonomousRunObservabilityController:
+        """Coordinate one source snapshot across trace indexing and longitudinal analytics."""
+
+        return AutonomousRunObservabilityController(self, trace_registry, run_analytics, alert_sink)
+
     def run_cross_domain_with_trace(
         self,
         *,
@@ -17890,6 +26256,7 @@ class AutonomousAgent:
             run_id=resolved_run_id,
             task_digest=content_digest({"task": task}),
             domains=trace_domains,
+            authorization_context=kwargs.get("authorization_context"),
         )
         session.started()
         live_observer = session.provider_observer()
@@ -17929,6 +26296,18 @@ class AutonomousAgent:
             raise
         return AutonomousTracedRunResult(result=result, trace=session.summary())
 
+    def run_cross_domain_with_trace_and_launch_admission(
+        self,
+        *,
+        launch_admission: Mapping[str, Any],
+        **kwargs: Any,
+    ) -> AutonomousTracedRunResult:
+        """Run one traced cross-domain fan-out only after every specialist is admitted."""
+
+        requested_domains = _cross_domain_subtask_domains_for_launch_admission(kwargs.get("subtasks", ()))
+        _authorize_launch_admission_domains(launch_admission, requested_domains)
+        return self.run_cross_domain_with_trace(**kwargs)
+
     @staticmethod
     def _batch_controls(max_parallelism: int, stop_on_error: bool) -> tuple[int, bool]:
         if (
@@ -17943,6 +26322,179 @@ class AutonomousAgent:
         if not isinstance(stop_on_error, bool):
             raise BrainRunError("autonomous batch stop_on_error must be a boolean")
         return max_parallelism, stop_on_error
+
+    def _authorize_batch_launch_admission(
+        self,
+        requests: Sequence[Mapping[str, Any]],
+        *,
+        mode: str,
+        launch_admission: Mapping[str, Any],
+        options_factory: Callable[[Mapping[str, Any], int], Mapping[str, Any]] | None,
+    ) -> Callable[[Mapping[str, Any], int], Mapping[str, Any]] | None:
+        """Authorize every route in a batch before credentials or dispatch are touched.
+
+        Batch preparation normally resolves the shared credential mapping before it builds item
+        descriptors.  A launch admission must sit outside that path: callers should be able to
+        reject a held or under-scoped batch even when the credential argument is deliberately
+        absent or malformed.  The options-factory replay cache also makes the provider-free route
+        preview and the later executor consume exactly one caller-produced option mapping per item.
+        """
+
+        from .autonomous_launch_admission import authorize_autonomous_launch_domains
+
+        if mode not in AUTONOMOUS_BATCH_MODES:
+            raise BrainRunError("autonomous batch mode must be one of: domain, auto, cross_domain")
+        if not isinstance(requests, Sequence) or isinstance(requests, (str, bytes)):
+            raise BrainRunError("autonomous batch requests must be a sequence")
+        if not 1 <= len(requests) <= MAX_AUTONOMOUS_AGENT_BATCH:
+            raise BrainRunError(
+                "autonomous batch requests must contain between 1 and "
+                f"{MAX_AUTONOMOUS_AGENT_BATCH} entries"
+            )
+        if options_factory is not None and not callable(options_factory):
+            raise BrainRunError("autonomous batch options_factory must be callable or None")
+
+        cached_factory_options: dict[int, Mapping[str, Any]] = {}
+
+        def merged_options(raw: Mapping[str, Any], index: int) -> dict[str, Any]:
+            raw_options = raw.get("options", {})
+            if raw_options is None:
+                raw_options = {}
+            if not isinstance(raw_options, Mapping):
+                raise BrainRunError(f"autonomous batch request {index} options must be a mapping")
+            options = dict(raw_options)
+            if options_factory is not None:
+                generated = cached_factory_options.get(index)
+                if generated is None:
+                    try:
+                        generated_value = options_factory(raw, index)
+                    except Exception as error:
+                        raise BrainRunError(
+                            f"autonomous batch options_factory failed for request {index}"
+                        ) from error
+                    if not isinstance(generated_value, Mapping):
+                        raise BrainRunError(
+                            f"autonomous batch options_factory result {index} must be a mapping"
+                        )
+                    generated = dict(generated_value)
+                    cached_factory_options[index] = generated
+                options.update(generated)
+            reserved = {
+                "credentials",
+                "task",
+                "domain",
+                "subtasks",
+                "model_candidates",
+                "execution_id",
+            }
+            overridden = sorted(reserved.intersection(options))
+            if overridden:
+                raise BrainRunError(
+                    f"autonomous batch request {index} options cannot override: {', '.join(overridden)}"
+                )
+            return options
+
+        requested_domains: list[str] = []
+        for index, raw in enumerate(requests):
+            if not isinstance(raw, Mapping):
+                raise BrainRunError(f"autonomous batch request {index} must be a mapping")
+            if "credentials" in raw:
+                raise BrainRunError(
+                    "autonomous batch requests cannot carry credentials; pass one shared opaque "
+                    "credential mapping or session"
+                )
+            task = _text(
+                f"autonomous batch request {index} task",
+                raw.get("task"),
+                maximum=MAX_AUTONOMY_TEXT_BYTES,
+            )
+            options = merged_options(raw, index)
+            if mode == "domain":
+                domain = raw.get("domain")
+                _identifier(f"autonomous batch request {index} domain", domain)
+                if domain not in AUTONOMOUS_DOMAINS:
+                    raise BrainRunError(
+                        f"autonomous batch request {index} domain is unsupported: {domain!r}"
+                    )
+                requested_domains.append(domain)
+            elif mode == "cross_domain":
+                subtasks = raw.get("subtasks")
+                if not isinstance(subtasks, Sequence) or isinstance(subtasks, (str, bytes)):
+                    raise BrainRunError(
+                        f"autonomous cross-domain batch request {index} subtasks must be a sequence"
+                    )
+                if not 1 <= len(subtasks) <= MAX_AUTONOMOUS_CROSS_DOMAIN_CHILDREN:
+                    raise BrainRunError(
+                        f"autonomous cross-domain batch request {index} subtasks are outside their bound"
+                    )
+                for subtask_index, subtask in enumerate(subtasks):
+                    if not isinstance(subtask, Mapping) or not isinstance(subtask.get("domain"), str):
+                        raise BrainRunError(
+                            f"autonomous cross-domain batch request {index} subtask {subtask_index} has no valid domain"
+                        )
+                    domain = subtask["domain"]
+                    _identifier(
+                        f"autonomous cross-domain batch request {index} subtask {subtask_index} domain",
+                        domain,
+                    )
+                    if domain not in AUTONOMOUS_DOMAINS:
+                        raise BrainRunError(
+                            f"autonomous cross-domain batch request {index} domain is unsupported: {domain!r}"
+                        )
+                    requested_domains.append(domain)
+            else:
+                semantic_routing = options.get("semantic_routing", False)
+                if not isinstance(semantic_routing, bool):
+                    raise BrainRunError("autonomous batch semantic_routing must be boolean")
+                if semantic_routing:
+                    raise BrainRunError(
+                        "launch-admitted automatic batch execution requires provider-free routing; "
+                        "admit semantic routing separately before enabling it"
+                    )
+                route_options = {
+                    key: options[key]
+                    for key in (
+                        "hints",
+                        "min_confidence",
+                        "min_margin",
+                        "max_domains",
+                        "allow_cross_domain",
+                        "context",
+                        "constraints",
+                        "desired_outputs",
+                        "capability",
+                        "risk_class",
+                        "max_steps",
+                        "require_json",
+                        "structured_domain_response",
+                        "response_schema",
+                        "execution_mode",
+                        "max_input_tokens",
+                        "required_model_capabilities",
+                        "memory_episodes",
+                    )
+                    if key in options
+                }
+                blueprint = self.prepare_auto(task=task, **route_options)
+                requested_domains.extend(blueprint.route.selected_domains)
+
+        authorize_autonomous_launch_domains(
+            launch_admission,
+            tuple(dict.fromkeys(requested_domains)),
+        )
+        if options_factory is None:
+            return None
+
+        def replay_factory(_raw: Mapping[str, Any], index: int) -> Mapping[str, Any]:
+            # The outer batch preparer merges this generated mapping with the raw request options.
+            # Returning the cached copy prevents a non-deterministic factory from changing the
+            # route after the admission was reviewed.
+            try:
+                return cached_factory_options[index]
+            except KeyError as error:  # pragma: no cover - the preparer always visits each item
+                raise BrainRunError(f"autonomous batch options cache is missing request {index}") from error
+
+        return replay_factory
 
     def _prepare_batch_invocations(
         self,
@@ -18256,7 +26808,23 @@ class AutonomousAgent:
                 )
 
         request_digests = tuple(_batch_request_digest(descriptor, mode) for descriptor in prepared)
-        batch_input_digest = content_digest({"schema": AUTONOMOUS_BATCH_CHECKPOINT_SCHEMA, "mode": mode, "request_digests": list(request_digests)})
+        semantic_routing_policy_digest = _batch_semantic_routing_policy_digest(prepared, mode)
+        automatic_execution_policy_digest = _batch_automatic_execution_policy_digest(prepared, mode)
+        batch_input_digest = content_digest({
+            "schema": AUTONOMOUS_BATCH_CHECKPOINT_SCHEMA,
+            "mode": mode,
+            "request_digests": list(request_digests),
+            **(
+                {"semantic_routing_policy_digest": semantic_routing_policy_digest}
+                if semantic_routing_policy_digest is not None
+                else {}
+            ),
+            **(
+                {"automatic_execution_policy_digest": automatic_execution_policy_digest}
+                if automatic_execution_policy_digest is not None
+                else {}
+            ),
+        })
         current_checkpoint: AutonomousBatchCheckpoint | None
         if checkpoint is None:
             current_checkpoint = None
@@ -18271,8 +26839,16 @@ class AutonomousAgent:
                 raise BrainRunError("autonomous batch checkpoint job_id does not match")
             if current_checkpoint.mode != mode:
                 raise BrainRunError("autonomous batch checkpoint mode does not match")
-            if current_checkpoint.batch_input_digest != batch_input_digest or current_checkpoint.request_digests != request_digests:
+            if current_checkpoint.request_digests != request_digests:
                 raise BrainRunError("autonomous batch checkpoint requests do not match the current batch")
+            if semantic_routing_policy_digest is not None and current_checkpoint.semantic_routing_policy_digest is None:
+                raise BrainRunError("legacy autonomous batch checkpoint requires explicit semantic-routing policy rebinding")
+            if current_checkpoint.semantic_routing_policy_digest != semantic_routing_policy_digest:
+                raise BrainRunError("autonomous batch checkpoint semantic-routing policy does not match")
+            if current_checkpoint.automatic_execution_policy_digest != automatic_execution_policy_digest:
+                raise BrainRunError("autonomous batch checkpoint automatic execution policy does not match")
+            if current_checkpoint.batch_input_digest != batch_input_digest:
+                raise BrainRunError("autonomous batch checkpoint does not match the current execution policy")
             if current_checkpoint.max_parallelism != max_parallelism or current_checkpoint.stop_on_error != stop_on_error:
                 raise BrainRunError("autonomous batch checkpoint execution controls do not match")
             if current_checkpoint.completed_indices and rehydrate_result is None:
@@ -18323,6 +26899,8 @@ class AutonomousAgent:
                 mode=mode,
                 batch_input_digest=batch_input_digest,
                 request_digests=request_digests,
+                semantic_routing_policy_digest=semantic_routing_policy_digest,
+                automatic_execution_policy_digest=automatic_execution_policy_digest,
                 completed_indices=tuple(index for index, _item in completed_items),
                 completed_result_digests=tuple(_batch_item_digest(item) for _index, item in completed_items),
                 max_parallelism=max_parallelism,
@@ -18346,6 +26924,204 @@ class AutonomousAgent:
         )
         persist("completed" if result.status == "completed" else "partial")
         return result
+
+    def run_resumable_auto_batch_with_trace(
+        self,
+        requests: Sequence[Mapping[str, Any]],
+        *,
+        job_id: str,
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        trace_store: AutonomousRunTraceStore,
+        run_id: str | None = None,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        options_factory: Callable[[Mapping[str, Any], int], Mapping[str, Any]] | None = None,
+        max_parallelism: int = 4,
+        stop_on_error: bool = False,
+        checkpoint: AutonomousBatchCheckpoint | Mapping[str, Any] | None = None,
+        checkpoint_sink: Callable[[AutonomousBatchCheckpoint], Any] | None = None,
+        rehydrate_result: Callable[[AutonomousBatchRehydrationContext], Any] | None = None,
+    ) -> AutonomousTracedRunResult:
+        """Resume an automatic batch with one trace spanning recovery and fresh execution.
+
+        The generic resumable runner remains the authority for checkpoint digest validation and
+        rehydration. This adapter only composes value-only trace callbacks around it, records
+        settled item metadata after the runner classifies each item, and never serializes the
+        restored result. Trace persistence therefore cannot bypass a checkpoint, provider
+        approval, credential scope, or effect reconciliation boundary.
+        """
+
+        self._trace_store(trace_store)
+        resolved_job_id = _identifier("autonomous traced batch job_id", job_id)
+        if not isinstance(requests, Sequence) or isinstance(requests, (str, bytes)):
+            raise BrainRunError("autonomous traced automatic batch requests must be a sequence")
+        task_digests = [
+            content_digest({"task": request.get("task") if isinstance(request, Mapping) else None})
+            for request in requests
+        ]
+        resolved_run_id = run_id or f"trace-{uuid.uuid4().hex}"
+        session = AutonomousRunTraceSession(
+            trace_store,
+            run_id=resolved_run_id,
+            task_digest=content_digest({
+                "schema": AUTONOMOUS_TRACED_AUTO_BATCH_SCHEMA,
+                "mode": "auto",
+                "task_digests": task_digests,
+            }),
+            domains=AUTONOMOUS_DOMAINS,
+        )
+        session.started(detail_digest=content_digest({
+            "mode": "auto",
+            "job_id": resolved_job_id,
+            "item_count": len(task_digests),
+            "task_digests": task_digests,
+        }))
+        rehydrated_indices: set[int] = set()
+
+        def traced_factory(request: Mapping[str, Any], index: int) -> Mapping[str, Any]:
+            raw_options = request.get("options", {}) if isinstance(request, Mapping) else {}
+            if isinstance(raw_options, Mapping) and any(
+                key in raw_options for key in ("invocation_observer", "trace_event_callback")
+            ):
+                raise BrainRunError(
+                    "automatic traced batch options cannot override invocation_observer or trace_event_callback"
+                )
+            options = {} if options_factory is None else options_factory(request, index)
+            if not isinstance(options, Mapping):
+                raise BrainRunError("autonomous traced automatic batch options_factory must return a mapping")
+            if any(key in options for key in ("invocation_observer", "trace_event_callback")):
+                raise BrainRunError(
+                    "automatic traced batch options cannot override invocation_observer or trace_event_callback"
+                )
+            return {
+                **dict(options),
+                "invocation_observer": session.provider_observer(),
+                "trace_event_callback": session.record,
+            }
+
+        def traced_rehydrate(context: AutonomousBatchRehydrationContext) -> Any:
+            if rehydrate_result is None:
+                raise BrainRunError("resuming a traced automatic batch requires rehydrate_result")
+            result = rehydrate_result(context)
+            # The generic runner verifies the returned value and its result digest after this
+            # callback returns. Record the rehydration only after that verification succeeds.
+            rehydrated_indices.add(context.index)
+            return result
+
+        try:
+            result = self.run_resumable_batch(
+                requests,
+                job_id=resolved_job_id,
+                mode="auto",
+                credentials=credentials,
+                model_candidates=model_candidates,
+                options_factory=traced_factory,
+                max_parallelism=max_parallelism,
+                stop_on_error=stop_on_error,
+                checkpoint=checkpoint,
+                checkpoint_sink=checkpoint_sink,
+                rehydrate_result=traced_rehydrate if rehydrate_result is not None else None,
+            )
+            for item in result.items:
+                metadata = self._trace_execution_metadata(item.result) if item.result is not None else {
+                    "route_digest": None,
+                    "plan_digest": None,
+                    "selection_digest": None,
+                }
+                if item.result is not None:
+                    trace_status = autonomous_run_trace_status(getattr(item.result, "status", "unknown"))
+                    terminal_phase = (
+                        "completed"
+                        if trace_status in {"completed", "partial"}
+                        else trace_status
+                        if trace_status in {"paused", "refused", "failed"}
+                        else "failed"
+                    )
+                else:
+                    trace_status = "failed"
+                    terminal_phase = "failed"
+                session.record(
+                    phase="plan_compiled",
+                    status="running",
+                    route_digest=metadata["route_digest"],
+                    plan_digest=metadata["plan_digest"],
+                    selection_digest=metadata["selection_digest"],
+                    detail_digest=content_digest({
+                        "index": item.index,
+                        "task_digest": task_digests[item.index],
+                        "state": "rehydrated" if item.index in rehydrated_indices else "settled",
+                    }),
+                )
+                session.record(
+                    phase=terminal_phase,
+                    status=trace_status,
+                    route_digest=metadata["route_digest"],
+                    plan_digest=metadata["plan_digest"],
+                    selection_digest=metadata["selection_digest"],
+                    failure_class=item.error_class,
+                    failure_code=item.failure_code,
+                    detail_digest=content_digest({
+                        "index": item.index,
+                        "status": item.status,
+                        "result_status": item.result_status,
+                    }),
+                )
+            session.complete(
+                status=autonomous_run_trace_status(result.status),
+                detail_digest=content_digest({
+                    "batch_digest": result.batch_digest,
+                    "completed_count": result.completed_count,
+                    "failed_count": result.failed_count,
+                    "omitted_count": result.omitted_count,
+                }),
+            )
+        except Exception as error:
+            session.fail(
+                failure_class=type(error).__name__,
+                failure_code="execution_error",
+                detail_digest=content_digest({"error_class": type(error).__name__}),
+            )
+            raise
+        return AutonomousTracedRunResult(result=result, trace=session.summary())
+
+    def run_resumable_auto_batch_with_launch_admission_and_trace(
+        self,
+        requests: Sequence[Mapping[str, Any]],
+        *,
+        job_id: str,
+        launch_admission: Mapping[str, Any],
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        trace_store: AutonomousRunTraceStore,
+        run_id: str | None = None,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        options_factory: Callable[[Mapping[str, Any], int], Mapping[str, Any]] | None = None,
+        max_parallelism: int = 4,
+        stop_on_error: bool = False,
+        checkpoint: AutonomousBatchCheckpoint | Mapping[str, Any] | None = None,
+        checkpoint_sink: Callable[[AutonomousBatchCheckpoint], Any] | None = None,
+        rehydrate_result: Callable[[AutonomousBatchRehydrationContext], Any] | None = None,
+    ) -> AutonomousTracedRunResult:
+        """Re-admit every current automatic route before traced checkpoint recovery or dispatch."""
+
+        replay_factory = self._authorize_batch_launch_admission(
+            requests,
+            mode="auto",
+            launch_admission=launch_admission,
+            options_factory=options_factory,
+        )
+        return self.run_resumable_auto_batch_with_trace(
+            requests,
+            job_id=job_id,
+            credentials=credentials,
+            trace_store=trace_store,
+            run_id=run_id,
+            model_candidates=model_candidates,
+            options_factory=replay_factory,
+            max_parallelism=max_parallelism,
+            stop_on_error=stop_on_error,
+            checkpoint=checkpoint,
+            checkpoint_sink=checkpoint_sink,
+            rehydrate_result=rehydrate_result,
+        )
 
     def _prepare_auto_batch_invocations(
         self,
@@ -18496,6 +27272,181 @@ class AutonomousAgent:
             stop_on_error=stop_on_error,
         )
 
+    def run_auto_batch_with_trace(
+        self,
+        requests: Sequence[Mapping[str, Any]],
+        *,
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        trace_store: AutonomousRunTraceStore,
+        run_id: str | None = None,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        options_factory: Callable[[Mapping[str, Any], int], Mapping[str, Any]] | None = None,
+        max_parallelism: int = 4,
+        stop_on_error: bool = False,
+    ) -> AutonomousTracedRunResult:
+        """Route and execute an automatic batch with one metadata-only lifecycle trace.
+
+        The trace is deliberately shared by every item so operators can correlate routing,
+        provider selection, failover, learning callbacks, refusals, omissions, and the aggregate
+        terminal state.  The underlying batch still owns deterministic item ordering and bounded
+        concurrency.  A trace request owns the invocation observer and callback slots; callers
+        that need custom observers should compose them outside this high-level helper rather than
+        silently replacing the audit stream.
+        """
+
+        self._trace_store(trace_store)
+        max_parallelism, stop_on_error = self._batch_controls(max_parallelism, stop_on_error)
+        prepared, resolved_credentials = self._prepare_auto_batch_invocations(
+            requests,
+            credentials=credentials,
+            model_candidates=model_candidates,
+            options_factory=options_factory,
+        )
+        resolved_run_id = run_id or f"trace-{uuid.uuid4().hex}"
+        task_digest = content_digest({
+            "schema": AUTONOMOUS_TRACED_AUTO_BATCH_SCHEMA,
+            "mode": "auto",
+            "task_digests": [descriptor["task_digest"] for descriptor in prepared],
+        })
+        session = AutonomousRunTraceSession(
+            trace_store,
+            run_id=resolved_run_id,
+            task_digest=task_digest,
+            domains=AUTONOMOUS_DOMAINS,
+        )
+        session.started(detail_digest=content_digest({
+            "mode": "auto",
+            "item_count": len(prepared),
+            "task_digests": [descriptor["task_digest"] for descriptor in prepared],
+        }))
+
+        def invoke(descriptor: Mapping[str, Any]) -> Any:
+            index = descriptor["index"]
+            options = dict(descriptor["options"])
+            if "invocation_observer" in options or "trace_event_callback" in options:
+                raise BrainRunError(
+                    "automatic traced batch options cannot override invocation_observer or trace_event_callback"
+                )
+            options["invocation_observer"] = session.provider_observer()
+            options["trace_event_callback"] = session.record
+            before_provider_events = len(
+                trace_store.events({"run_id": resolved_run_id, "phase": "provider_invocation_finished"})
+            )
+            try:
+                result = self.run_auto(
+                    task=descriptor["task"],
+                    credentials=resolved_credentials,
+                    model_candidates=descriptor["model_candidates"],
+                    execution_id=descriptor["execution_id"],
+                    **options,
+                )
+                metadata = self._trace_execution_metadata(result)
+                session.record(
+                    phase="plan_compiled",
+                    status="running",
+                    route_digest=metadata["route_digest"],
+                    plan_digest=metadata["plan_digest"],
+                    selection_digest=metadata["selection_digest"],
+                    detail_digest=content_digest({
+                        "index": index,
+                        "task_digest": descriptor["task_digest"],
+                        "state": "prepared_and_executed",
+                    }),
+                )
+                after_provider_events = len(
+                    trace_store.events({"run_id": resolved_run_id, "phase": "provider_invocation_finished"})
+                )
+                if after_provider_events == before_provider_events:
+                    session.record_provider_receipts(metadata["receipts"])
+                trace_status = autonomous_run_trace_status(getattr(result, "status", "unknown"))
+                terminal_phase = (
+                    "completed"
+                    if trace_status in {"completed", "partial"}
+                    else trace_status
+                    if trace_status in {"paused", "refused", "failed"}
+                    else "failed"
+                )
+                session.record(
+                    phase=terminal_phase,
+                    status=trace_status,
+                    route_digest=metadata["route_digest"],
+                    plan_digest=metadata["plan_digest"],
+                    selection_digest=metadata["selection_digest"],
+                    detail_digest=content_digest({
+                        "index": index,
+                        "result_status": getattr(result, "status", "unknown"),
+                    }),
+                )
+                return result
+            except Exception as error:
+                session.record(
+                    phase="failed",
+                    status="failed",
+                    detail_digest=content_digest({
+                        "index": index,
+                        "error_class": type(error).__name__,
+                        "failure_code": "execution_error",
+                    }),
+                )
+                raise
+
+        try:
+            result = self._execute_prepared_batch(
+                prepared,
+                invoke=invoke,
+                max_parallelism=max_parallelism,
+                stop_on_error=stop_on_error,
+            )
+            session.complete(
+                status=autonomous_run_trace_status(result.status),
+                detail_digest=content_digest({
+                    "batch_digest": result.batch_digest,
+                    "completed_count": result.completed_count,
+                    "failed_count": result.failed_count,
+                    "omitted_count": result.omitted_count,
+                }),
+            )
+        except Exception as error:
+            session.fail(
+                failure_class=type(error).__name__,
+                failure_code="execution_error",
+                detail_digest=content_digest({"error_class": type(error).__name__}),
+            )
+            raise
+        return AutonomousTracedRunResult(result=result, trace=session.summary())
+
+    def run_auto_batch_with_launch_admission_and_trace(
+        self,
+        requests: Sequence[Mapping[str, Any]],
+        *,
+        launch_admission: Mapping[str, Any],
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        trace_store: AutonomousRunTraceStore,
+        run_id: str | None = None,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        options_factory: Callable[[Mapping[str, Any], int], Mapping[str, Any]] | None = None,
+        max_parallelism: int = 4,
+        stop_on_error: bool = False,
+    ) -> AutonomousTracedRunResult:
+        """Run the traced automatic batch only after its complete route union is admitted."""
+
+        replay_factory = self._authorize_batch_launch_admission(
+            requests,
+            mode="auto",
+            launch_admission=launch_admission,
+            options_factory=options_factory,
+        )
+        return self.run_auto_batch_with_trace(
+            requests,
+            credentials=credentials,
+            trace_store=trace_store,
+            run_id=run_id,
+            model_candidates=model_candidates,
+            options_factory=replay_factory,
+            max_parallelism=max_parallelism,
+            stop_on_error=stop_on_error,
+        )
+
     def run_cross_domain_batch(
         self,
         requests: Sequence[Mapping[str, Any]],
@@ -18534,6 +27485,132 @@ class AutonomousAgent:
             stop_on_error=stop_on_error,
         )
 
+    def run_batch_with_launch_admission(
+        self,
+        requests: Sequence[Mapping[str, Any]],
+        *,
+        launch_admission: Mapping[str, Any],
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        options_factory: Callable[[Mapping[str, Any], int], Mapping[str, Any]] | None = None,
+        max_parallelism: int = 4,
+        stop_on_error: bool = False,
+    ) -> AutonomousBatchResult:
+        """Run an explicit-domain batch only after one admission covers every item domain."""
+
+        replay_factory = self._authorize_batch_launch_admission(
+            requests,
+            mode="domain",
+            launch_admission=launch_admission,
+            options_factory=options_factory,
+        )
+        return self.run_batch(
+            requests,
+            credentials=credentials,
+            model_candidates=model_candidates,
+            options_factory=replay_factory,
+            max_parallelism=max_parallelism,
+            stop_on_error=stop_on_error,
+        )
+
+    def run_auto_batch_with_launch_admission(
+        self,
+        requests: Sequence[Mapping[str, Any]],
+        *,
+        launch_admission: Mapping[str, Any],
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        options_factory: Callable[[Mapping[str, Any], int], Mapping[str, Any]] | None = None,
+        max_parallelism: int = 4,
+        stop_on_error: bool = False,
+    ) -> AutonomousBatchResult:
+        """Route a batch provider-free, then require admission for the union of selected domains."""
+
+        replay_factory = self._authorize_batch_launch_admission(
+            requests,
+            mode="auto",
+            launch_admission=launch_admission,
+            options_factory=options_factory,
+        )
+        return self.run_auto_batch(
+            requests,
+            credentials=credentials,
+            model_candidates=model_candidates,
+            options_factory=replay_factory,
+            max_parallelism=max_parallelism,
+            stop_on_error=stop_on_error,
+        )
+
+    def run_cross_domain_batch_with_launch_admission(
+        self,
+        requests: Sequence[Mapping[str, Any]],
+        *,
+        launch_admission: Mapping[str, Any],
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        options_factory: Callable[[Mapping[str, Any], int], Mapping[str, Any]] | None = None,
+        max_parallelism: int = 4,
+        stop_on_error: bool = False,
+    ) -> AutonomousBatchResult:
+        """Run fan-out/fan-in batch work only when every specialist domain is admitted."""
+
+        replay_factory = self._authorize_batch_launch_admission(
+            requests,
+            mode="cross_domain",
+            launch_admission=launch_admission,
+            options_factory=options_factory,
+        )
+        return self.run_cross_domain_batch(
+            requests,
+            credentials=credentials,
+            model_candidates=model_candidates,
+            options_factory=replay_factory,
+            max_parallelism=max_parallelism,
+            stop_on_error=stop_on_error,
+        )
+
+    def run_resumable_batch_with_launch_admission(
+        self,
+        requests: Sequence[Mapping[str, Any]],
+        *,
+        job_id: str,
+        launch_admission: Mapping[str, Any],
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        mode: str = "domain",
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        options_factory: Callable[[Mapping[str, Any], int], Mapping[str, Any]] | None = None,
+        max_parallelism: int = 4,
+        stop_on_error: bool = False,
+        checkpoint: AutonomousBatchCheckpoint | Mapping[str, Any] | None = None,
+        checkpoint_sink: Callable[[AutonomousBatchCheckpoint], Any] | None = None,
+        rehydrate_result: Callable[[AutonomousBatchRehydrationContext], Any] | None = None,
+    ) -> AutonomousBatchResult:
+        """Resume a batch only after re-reviewing its complete current route set.
+
+        Admission is checked before checkpoint rehydration and credential resolution.  A restored
+        successful item therefore cannot be used to skip a changed or newly under-scoped route.
+        """
+
+        replay_factory = self._authorize_batch_launch_admission(
+            requests,
+            mode=mode,
+            launch_admission=launch_admission,
+            options_factory=options_factory,
+        )
+        return self.run_resumable_batch(
+            requests,
+            job_id=job_id,
+            mode=mode,
+            credentials=credentials,
+            model_candidates=model_candidates,
+            options_factory=replay_factory,
+            max_parallelism=max_parallelism,
+            stop_on_error=stop_on_error,
+            checkpoint=checkpoint,
+            checkpoint_sink=checkpoint_sink,
+            rehydrate_result=rehydrate_result,
+        )
+
     def settle_cross_domain_trajectory_learning(
         self,
         *,
@@ -18568,6 +27645,7 @@ class AutonomousAgent:
         *,
         task: str,
         credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        route_override: AutonomousRouteProposal | None = None,
         model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
         hints: Sequence[str] = (),
         min_confidence: float = 0.25,
@@ -18609,6 +27687,7 @@ class AutonomousAgent:
         cross_domain_replan_max_replans: int = 1,
         cross_domain_evidence: Mapping[str, Mapping[str, Any]] | None = None,
         cross_domain_evaluator: BrainOutcomeEvaluator | DomainEvaluatorRegistry | None = None,
+        evaluator_bridge: AutonomousCycleEvaluatorBridge | None = None,
         cross_domain_trajectory_discount: float = 0.90,
         cross_domain_trajectory_terminal_reward: float | None = None,
         accepted_cross_domain_plan_refinement: AutonomousCrossDomainPlanRefinementResult | None = None,
@@ -18652,6 +27731,11 @@ class AutonomousAgent:
         An abstained route never invokes a provider.
         """
 
+        # Bind the persistent prompt learner before routing or provider-assisted planning so the
+        # automatic path cannot silently use a different prompt state than direct execution.
+        kwargs = self._prompt_learning_options(kwargs)
+        if decision_cycle_store is None and decision_cycle_id is not None and self.decision_cycle_persistence is not None:
+            decision_cycle_store = self.decision_cycle_persistence.store
         if (decision_cycle_id is None) != (decision_cycle_store is None):
             raise BrainRunError("decision_cycle_id and decision_cycle_store must be supplied together")
         if not isinstance(resume_decision_cycle, bool):
@@ -18661,6 +27745,13 @@ class AutonomousAgent:
 
         if not isinstance(workflow_execution, bool):
             raise BrainRunError("workflow_execution must be a boolean")
+        if route_override is not None:
+            if not isinstance(route_override, AutonomousRouteProposal):
+                raise BrainRunError("route_override must be an AutonomousRouteProposal")
+            if route_override.task_digest != content_digest({"task": task}):
+                raise BrainRunError("route_override task does not match the automatic task")
+            if semantic_routing:
+                raise BrainRunError("route_override cannot be combined with semantic_routing")
         if planning_mode not in AUTONOMOUS_PLANNING_MODES:
             raise BrainRunError(
                 "planning_mode must be one of: " + ", ".join(AUTONOMOUS_PLANNING_MODES)
@@ -18720,6 +27811,32 @@ class AutonomousAgent:
         ):
             raise BrainRunError(
                 "cross_domain_evaluator must be a BrainOutcomeEvaluator, DomainEvaluatorRegistry, or None"
+            )
+        if evaluator_bridge is not None and not isinstance(
+            evaluator_bridge,
+            AutonomousCycleEvaluatorBridge,
+        ):
+            raise BrainRunError(
+                "evaluator_bridge must be an AutonomousCycleEvaluatorBridge or None"
+            )
+        if evaluator_bridge is not None and not (
+            explicit_learning or learning_mode != "off"
+        ):
+            raise BrainRunError(
+                "evaluator_bridge requires an explicit automatic learning mode"
+            )
+        if evaluator_bridge is not None and any(
+            value is not None
+            for value in (
+                kwargs.get("evaluator"),
+                kwargs.get("evaluator_registry"),
+                kwargs.get("evidence"),
+                cross_domain_evidence,
+                cross_domain_evaluator,
+            )
+        ):
+            raise BrainRunError(
+                "evaluator_bridge cannot be combined with evaluator, evaluator_registry, evidence, or cross-domain evaluator inputs"
             )
         if not isinstance(workflow_retry_blocked, bool):
             raise BrainRunError("workflow_retry_blocked must be a boolean")
@@ -18909,6 +28026,8 @@ class AutonomousAgent:
                 "memory_episodes",
             }
         }
+        if route_override is not None:
+            prepare_options["route_override"] = route_override
         if semantic_routing:
             blueprint = self.prepare_auto_with_provider(
                 task=task,
@@ -19052,6 +28171,12 @@ class AutonomousAgent:
                 "run_id": planning_run_id,
                 "max_output_tokens": planning_max_output_tokens,
                 "temperature": kwargs.get("temperature"),
+                "prompt_template": kwargs.get("planning_prompt_template", kwargs.get("prompt_template")),
+                "prompt_registry": kwargs.get("planning_prompt_registry", kwargs.get("prompt_registry")),
+                "prompt_selection": kwargs.get("planning_prompt_selection", kwargs.get("prompt_selection")),
+                "prompt_stage": kwargs.get("planning_prompt_stage", "planning"),
+                "prompt_learning_state": kwargs.get("planning_prompt_learning_state", kwargs.get("prompt_learning_state")),
+                "prompt_learning_exploration": kwargs.get("planning_prompt_learning_exploration", kwargs.get("prompt_learning_exploration", 0.35)),
                 "domain_policy_mode": domain_policy_mode,
                 "domain_policy_evidence_ready": domain_policy_evidence_ready,
                 "domain_policy_evaluator_configured": domain_policy_evaluator_configured,
@@ -19142,10 +28267,25 @@ class AutonomousAgent:
             "max_input_tokens",
             "required_model_capabilities",
             "memory_episodes",
+            "planning_prompt_template",
+            "planning_prompt_registry",
+            "planning_prompt_selection",
+            "planning_prompt_stage",
+            "planning_prompt_learning_state",
+            "planning_prompt_learning_exploration",
         }:
             execution_kwargs.pop(key, None)
         routed_context = self.orchestrator._route_context(kwargs.get("context"), blueprint.route)
         execution_kwargs["context"] = routed_context
+        if evaluator_bridge is not None:
+            if blueprint.blueprint is not None:
+                execution_kwargs["evaluator"] = evaluator_bridge.evaluator_for_domain(
+                    blueprint.route.selected_domains[0]
+                )
+            else:
+                execution_kwargs["evaluator"] = evaluator_bridge.evaluator_for_cross_domain(
+                    blueprint.route.selected_domains
+                )
         if learning_mode != "off":
             # The ledger is caller-owned and stores value-only state. Supplying it here lets all
             # three execution branches begin from the same state without making the caller repeat
@@ -19289,7 +28429,11 @@ class AutonomousAgent:
                     raise BrainRunError(
                         "cross-domain learning requires caller-owned bandit_state"
                     )
-            if cross_domain_replan_learning and cross_domain_evaluator is None:
+            if (
+                cross_domain_replan_learning
+                and cross_domain_evaluator is None
+                and evaluator_bridge is None
+            ):
                 raise BrainRunError("cross-domain replan learning requires cross_domain_evaluator")
             if cross_domain_evidence is not None:
                 if "evidence" in execution_kwargs:
@@ -19398,6 +28542,572 @@ class AutonomousAgent:
             )
         return automatic_result
 
+    def run_auto_cycle(
+        self,
+        *,
+        task: str,
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        domain: str | None = None,
+        route_override: AutonomousRouteProposal | None = None,
+        hints: Sequence[str] = (),
+        min_confidence: float = 0.25,
+        min_margin: float = 0.10,
+        max_domains: int = 3,
+        allow_cross_domain: bool = True,
+        semantic_routing: bool = False,
+        semantic_weight: float = 0.65,
+        semantic_bandit_state: Mapping[str, Any] | None = None,
+        semantic_contextual_observations: Sequence[Mapping[str, Any]] = (),
+        semantic_selection_overrides: Mapping[str, Any] | None = None,
+        semantic_selection_weights: Mapping[str, Any] | None = None,
+        semantic_selection_observations: Sequence[Mapping[str, Any]] | None = None,
+        semantic_input_tokens: int = 4_096,
+        semantic_requested_output_tokens: int = 1_024,
+        semantic_max_cost_per_million_tokens: int | None = None,
+        semantic_max_latency_ms: int | None = None,
+        semantic_min_quality: float | None = None,
+        semantic_run_id: str | None = None,
+        semantic_max_output_tokens: int = 1_024,
+        semantic_temperature: float | None = None,
+        learning_mode: str = "off",
+        evaluator: BrainOutcomeEvaluator | DomainEvaluatorRegistry | None = None,
+        evaluator_bridge: AutonomousCycleEvaluatorBridge | None = None,
+        decision_cycle_id: str | None = None,
+        decision_cycle_store: AutonomousDecisionCycleStateStore | None = None,
+        resume_decision_cycle: bool = False,
+        decision_cycle_rehydrate_result: Callable[[AutonomousDecisionCycleRehydrationContext], Any] | None = None,
+        retry_semantic_routing_on_restart: bool = False,
+        **kwargs: Any,
+    ) -> AutonomousAutoDecisionCycleResult:
+        """Resolve one route and enter the matching autonomous decision-cycle kernel.
+
+        This is the Python application-facing counterpart to the TypeScript automatic cycle.
+        Routing occurs exactly once: deterministic routing is provider-free, and semantic routing
+        is an explicitly approved classifier boundary.  The reviewed route is then passed as an
+        exact override to :meth:`run_auto`, which retains the existing planning, model selection,
+        prompt assembly, provider approval, tool/effect, evaluator, learning, and persistence
+        contracts.  A cross-domain route therefore enters the existing fan-out/fan-in learning
+        kernel automatically instead of making callers guess which execution API to choose.
+
+        ``evaluator`` is optional.  When supplied, the cycle opts into online learning unless the
+        caller chooses ``learning_mode="trajectory"``; its value-only result is projected into
+        ``evaluation`` and no provider response is promoted to reward.  An
+        :class:`AutonomousCycleEvaluatorBridge` may be used instead when evaluator selection is
+        itself caller-owned metadata.  Restart callbacks rehydrate private results at the
+        persisted boundary and must return an :class:`AutonomousAutoResult`; the public cycle
+        envelope never stores that private value.
+        """
+
+        if not isinstance(task, str) or not task.strip():
+            raise BrainRunError("automatic decision-cycle task must be non-empty text")
+        if not isinstance(semantic_routing, bool):
+            raise BrainRunError("semantic_routing must be a boolean")
+        if not isinstance(retry_semantic_routing_on_restart, bool):
+            raise BrainRunError("retry_semantic_routing_on_restart must be a boolean")
+        if learning_mode not in AUTONOMOUS_LEARNING_MODES:
+            raise BrainRunError(
+                "learning_mode must be one of: " + ", ".join(AUTONOMOUS_LEARNING_MODES)
+            )
+        if evaluator is not None and not isinstance(evaluator, (BrainOutcomeEvaluator, DomainEvaluatorRegistry)):
+            raise BrainRunError(
+                "evaluator must be a BrainOutcomeEvaluator, DomainEvaluatorRegistry, or None"
+            )
+        if evaluator_bridge is not None and not isinstance(evaluator_bridge, AutonomousCycleEvaluatorBridge):
+            raise BrainRunError("evaluator_bridge must be an AutonomousCycleEvaluatorBridge or None")
+        if evaluator is not None and evaluator_bridge is not None:
+            raise BrainRunError("evaluator and evaluator_bridge are mutually exclusive")
+        if decision_cycle_store is None and decision_cycle_id is not None and self.decision_cycle_persistence is not None:
+            decision_cycle_store = self.decision_cycle_persistence.store
+        if (decision_cycle_id is None) != (decision_cycle_store is None):
+            raise BrainRunError("decision_cycle_id and decision_cycle_store must be supplied together")
+        if resume_decision_cycle and (decision_cycle_id is None or decision_cycle_store is None):
+            raise BrainRunError("resume_decision_cycle requires decision_cycle_id and decision_cycle_store")
+        if route_override is not None and semantic_routing:
+            raise BrainRunError("route_override cannot be combined with semantic_routing")
+        if route_override is not None and domain is not None:
+            raise BrainRunError("route_override cannot be combined with domain")
+        if route_override is not None and route_override.task_digest != content_digest({"task": task}):
+            raise BrainRunError("route_override task does not match the automatic task")
+
+        effective_learning_mode = learning_mode
+        if (evaluator is not None or evaluator_bridge is not None) and effective_learning_mode == "off":
+            effective_learning_mode = "online"
+        if effective_learning_mode != "off" and evaluator is None and evaluator_bridge is None:
+            raise BrainRunError(
+                "automatic decision-cycle learning requires evaluator or evaluator_bridge"
+            )
+
+        # A persisted semantic route is a private provider boundary.  Do not silently issue a
+        # second classifier request on restart; callers must supply the reviewed route, opt into a
+        # deliberate retry, or use the lower-level rehydration API.
+        if (
+            resume_decision_cycle
+            and semantic_routing
+            and route_override is None
+            and not retry_semantic_routing_on_restart
+            and decision_cycle_store is not None
+            and decision_cycle_store.load(decision_cycle_id) is not None  # type: ignore[arg-type]
+        ):
+            raise BrainRunError(
+                "restart resume of provider-assisted semantic routing requires route_override or "
+                "retry_semantic_routing_on_restart=True"
+            )
+
+        def route_mode(value: AutonomousRouteProposal) -> str | None:
+            if value.abstained:
+                return None
+            return "cross_domain" if value.cross_domain and len(value.selected_domains) > 1 else "single_domain"
+
+        def explicit_domain_route(value: str) -> AutonomousRouteProposal:
+            if value not in AUTONOMOUS_DOMAINS:
+                raise BrainRunError(
+                    "domain must be one of: " + ", ".join(AUTONOMOUS_DOMAINS)
+                )
+            routed = self.route(
+                task=task,
+                hints=(value,),
+                min_confidence=0.0,
+                min_margin=0.0,
+                max_domains=1,
+                allow_cross_domain=False,
+            )
+            candidate = next((item for item in routed.candidates if item.domain == value), None)
+            if candidate is None:
+                profile = self.orchestrator.registry.resolve(value)
+                workflow = self.orchestrator.workflow_registry.resolve(value)
+                candidate = AutonomousRouteCandidate(
+                    domain=value,
+                    score=1.0,
+                    matched_terms=("explicit_domain",),
+                    capability=profile.default_capability,
+                    risk_class=profile.risk_class,
+                    workflow_id=workflow.workflow_id,
+                )
+            return AutonomousRouteProposal(
+                task_digest=routed.task_digest,
+                candidates=(candidate,),
+                selected_domains=(value,),
+                confidence=max(1.0, candidate.score),
+                abstained=False,
+                reason="routed",
+                cross_domain=False,
+                source=routed.source,
+            )
+
+        semantic_route: AutonomousSemanticRouteResult | None = None
+        if route_override is not None:
+            route = route_override
+        elif semantic_routing:
+            domain_policy_mode = kwargs.get("domain_policy_mode", "audit")
+            semantic_route = self.route_with_provider(
+                task=task,
+                credentials=credentials,
+                model_candidates=model_candidates,
+                hints=hints,
+                context=kwargs.get("context"),
+                min_confidence=min_confidence,
+                min_margin=min_margin,
+                max_domains=max_domains,
+                allow_cross_domain=allow_cross_domain,
+                semantic_weight=semantic_weight,
+                bandit_state=semantic_bandit_state,
+                contextual_observations=semantic_contextual_observations,
+                selection_overrides=semantic_selection_overrides,
+                selection_weights=semantic_selection_weights,
+                selection_observations=semantic_selection_observations,
+                input_tokens=semantic_input_tokens,
+                requested_output_tokens=semantic_requested_output_tokens,
+                max_cost_per_million_tokens=semantic_max_cost_per_million_tokens,
+                max_latency_ms=semantic_max_latency_ms,
+                min_quality=semantic_min_quality,
+                approve_provider_call=bool(kwargs.get("approve_provider_call", False)),
+                run_id=semantic_run_id,
+                max_output_tokens=semantic_max_output_tokens,
+                temperature=semantic_temperature,
+                domain_policy_mode=domain_policy_mode,
+                domain_policy_evidence_ready=kwargs.get("domain_policy_evidence_ready"),
+                domain_policy_evaluator_configured=kwargs.get("domain_policy_evaluator_configured"),
+                domain_policy_effects_requested=kwargs.get("domain_policy_effects_requested"),
+                domain_policy_effects_approved=kwargs.get("domain_policy_effects_approved"),
+            )
+            route = semantic_route.route
+            if semantic_route.status != "completed":
+                return AutonomousAutoDecisionCycleResult(
+                    status=semantic_route.status,
+                    mode=route_mode(route),
+                    route=route,
+                    semantic_route=semantic_route,
+                )
+        elif domain is not None:
+            route = explicit_domain_route(domain)
+        else:
+            route = self.route(
+                task=task,
+                hints=hints,
+                min_confidence=min_confidence,
+                min_margin=min_margin,
+                max_domains=max_domains,
+                allow_cross_domain=allow_cross_domain,
+            )
+
+        call_options = dict(kwargs)
+        call_options.update(
+            {
+                "route_override": route,
+                "semantic_routing": False,
+                "learning_mode": effective_learning_mode,
+                "decision_cycle_id": decision_cycle_id,
+                "decision_cycle_store": decision_cycle_store,
+                "resume_decision_cycle": resume_decision_cycle,
+                "decision_cycle_rehydrate_result": decision_cycle_rehydrate_result,
+            }
+        )
+        if evaluator_bridge is not None:
+            call_options["evaluator_bridge"] = evaluator_bridge
+        if evaluator is not None:
+            if route_mode(route) == "cross_domain":
+                call_options["cross_domain_evaluator"] = evaluator
+            elif isinstance(evaluator, DomainEvaluatorRegistry):
+                call_options["evaluator_registry"] = evaluator
+            else:
+                call_options["evaluator"] = evaluator
+
+        final = self.run_auto(
+            task=task,
+            credentials=credentials,
+            model_candidates=model_candidates,
+            **call_options,
+        )
+        status = _autonomous_decision_cycle_public_status(
+            final.execution_status if final.status == "completed" else final.status
+        )
+        episode_ids: tuple[str, ...] = ()
+        settlement_digests: tuple[str, ...] = ()
+        if final.result is not None:
+            episode_ids, settlement_digests = _decision_cycle_learning_metadata(final.result)
+        inner = AutonomousDecisionCycleResult(
+            status=status,
+            route=route,
+            semantic_route=semantic_route,
+            run=final.result if final.status == "completed" else None,
+            plan_refinement=final.planning,
+            learning_episode_id=episode_ids[0] if episode_ids else None,
+            evaluation=(
+                _autonomous_decision_cycle_evaluation_projection(final.result)
+                if final.result is not None
+                else None
+            ),
+            settlement=(
+                {
+                    "settlement_digests": list(settlement_digests),
+                    "retention": "value_only_settlement_identity;provider_result_caller_owned",
+                }
+                if settlement_digests
+                else None
+            ),
+        )
+        return AutonomousAutoDecisionCycleResult(
+            status=status,
+            mode=route_mode(route),
+            route=route,
+            semantic_route=semantic_route,
+            cycle=inner,
+            private_result=final,
+        )
+
+    def run_auto_cycle_with_launch_admission(
+        self,
+        *,
+        task: str,
+        launch_admission: Mapping[str, Any],
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        **kwargs: Any,
+    ) -> AutonomousAutoDecisionCycleResult:
+        """Run one automatic decision cycle only after a provider-free launch review.
+
+        The wrapper compiles the exact route that the cycle will use, checks every selected
+        domain against the caller-owned launch admission, and then passes that route back as a
+        digest-verified override.  This preserves the cycle's single-route invariant while
+        ensuring that launch admission is checked before credential normalization, provider
+        invocation, evaluator settlement, tool execution, or effects.  Provider-assisted
+        semantic routing remains a separate boundary and is rejected here until its classifier
+        call has its own explicit admission.
+
+        ``kwargs`` accepts the ordinary :meth:`run_auto_cycle` controls, including an explicit
+        ``domain`` and route/learning/persistence settings.  The wrapper owns ``route_override``
+        and rejects it so a caller cannot review one route and execute another.
+        """
+
+        if not isinstance(task, str) or not task.strip():
+            raise BrainRunError("launch-admitted automatic decision-cycle task must be non-empty text")
+        if "route_override" in kwargs:
+            raise BrainRunError(
+                "run_auto_cycle_with_launch_admission owns the route override; pass routing controls instead"
+            )
+        semantic_routing = kwargs.pop("semantic_routing", False)
+        if not isinstance(semantic_routing, bool):
+            raise BrainRunError("semantic_routing must be a boolean")
+        if semantic_routing:
+            raise BrainRunError(
+                "launch-admitted automatic decision-cycle execution requires provider-free routing; "
+                "admit semantic routing separately before enabling it"
+            )
+
+        domain = kwargs.pop("domain", None)
+        route_options = self._automatic_route_options(kwargs)
+        if domain is not None:
+            if not isinstance(domain, str) or domain not in AUTONOMOUS_DOMAINS:
+                raise BrainRunError(
+                    "domain must be one of: " + ", ".join(AUTONOMOUS_DOMAINS)
+                )
+            # Match run_auto_cycle's explicit-domain route construction exactly.  The route is
+            # intentionally made from the domain alone so unrelated lexical hints cannot cause
+            # the admission preview and execution route to diverge.
+            route_options.update(
+                {
+                    "hints": (domain,),
+                    "min_confidence": 0.0,
+                    "min_margin": 0.0,
+                    "max_domains": 1,
+                    "allow_cross_domain": False,
+                }
+            )
+
+        blueprint = self.prepare_auto(task=task, **route_options)
+        route = blueprint.route
+        cycle_options = dict(kwargs)
+        cycle_options["route_override"] = route
+        cycle_options["semantic_routing"] = False
+        if route.abstained:
+            # No domain was selected, so there is no launch scope to authorize.  Returning the
+            # normal review result keeps route abstention value-free and provider-free.
+            return self.run_auto_cycle(
+                task=task,
+                credentials=credentials,
+                model_candidates=model_candidates,
+                **cycle_options,
+            )
+
+        from .autonomous_launch_admission import authorize_autonomous_launch_domains
+
+        authorize_autonomous_launch_domains(launch_admission, route.selected_domains)
+        return self.run_auto_cycle(
+            task=task,
+            credentials=credentials,
+            model_candidates=model_candidates,
+            **cycle_options,
+        )
+
+    def run_auto_replan_cycle(
+        self,
+        *,
+        task: str,
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        evaluator: BrainOutcomeEvaluator | DomainEvaluatorRegistry,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        max_replans: int = 1,
+        route_override: AutonomousRouteProposal | None = None,
+        hints: Sequence[str] = (),
+        min_confidence: float = 0.25,
+        min_margin: float = 0.10,
+        max_domains: int = 3,
+        allow_cross_domain: bool = True,
+        semantic_routing: bool = False,
+        decision_cycle_id: str | None = None,
+        decision_cycle_store: AutonomousDecisionCycleStateStore | None = None,
+        **kwargs: Any,
+    ) -> AutonomousAutoReplanResult:
+        """Run one route-frozen evaluator/learning/replan cycle.
+
+        The route is resolved once before execution (or once by the provider-assisted semantic
+        intake path), then every bounded retry reuses that route.  A caller-owned
+        :class:`BrainOutcomeEvaluator` sees only the existing value-only evaluation projection;
+        its reward updates the next bandit state through the ordinary online learner.  Replan
+        feedback is screened and added as transient context by the existing brain kernel.  The
+        method therefore makes the complete automatic loop easy to use without weakening the
+        lower-level provider, credential, tool, effect, evidence, or evaluator boundaries.
+
+        ``decision_cycle_store`` and ``decision_cycle_id`` opt into the existing hash-chained
+        metadata checkpoint.  Private route/run/evaluator values remain caller-owned and must be
+        supplied through the normal ``resume_decision_cycle`` rehydration callback when a process
+        restarts after a provider boundary.
+        """
+
+        if not isinstance(task, str) or not task.strip():
+            raise BrainRunError("automatic replan task must be non-empty text")
+        if not isinstance(evaluator, (BrainOutcomeEvaluator, DomainEvaluatorRegistry)):
+            raise BrainRunError("automatic replan evaluator must be a BrainOutcomeEvaluator or DomainEvaluatorRegistry")
+        if isinstance(max_replans, bool) or not isinstance(max_replans, int) or not 0 <= max_replans <= MAX_AUTONOMOUS_REPLAN_CYCLE_REPLANS:
+            raise BrainRunError(
+                f"automatic replan max_replans must be within [0, {MAX_AUTONOMOUS_REPLAN_CYCLE_REPLANS}]"
+            )
+        if decision_cycle_store is None and decision_cycle_id is not None and self.decision_cycle_persistence is not None:
+            decision_cycle_store = self.decision_cycle_persistence.store
+        if (decision_cycle_id is None) != (decision_cycle_store is None):
+            raise BrainRunError("decision_cycle_id and decision_cycle_store must be supplied together")
+        if route_override is not None and not isinstance(route_override, AutonomousRouteProposal):
+            raise BrainRunError("route_override must be an AutonomousRouteProposal")
+        if route_override is not None and semantic_routing:
+            raise BrainRunError("route_override cannot be combined with semantic_routing")
+
+        semantic_route: AutonomousSemanticRouteResult | None = None
+        if route_override is None and not semantic_routing:
+            route = self.route(
+                task=task,
+                hints=hints,
+                min_confidence=min_confidence,
+                min_margin=min_margin,
+                max_domains=max_domains,
+                allow_cross_domain=allow_cross_domain,
+            )
+            if route.abstained:
+                final = AutonomousAutoResult(status="route_review_required", route=route)
+                return AutonomousAutoReplanResult(
+                    status="route_review_required",
+                    mode=None,
+                    route=route,
+                    final=final,
+                )
+        elif route_override is None:
+            semantic_route = self.route_with_provider(
+                task=task,
+                credentials=credentials,
+                model_candidates=model_candidates,
+                hints=hints,
+                context=kwargs.get("context"),
+                min_confidence=min_confidence,
+                min_margin=min_margin,
+                max_domains=max_domains,
+                allow_cross_domain=allow_cross_domain,
+                semantic_weight=kwargs.pop("semantic_weight", 0.65),
+                bandit_state=kwargs.pop("semantic_bandit_state", None) or self.learning_state(),
+                contextual_observations=kwargs.pop("semantic_contextual_observations", ()),
+                selection_overrides=kwargs.pop("semantic_selection_overrides", None),
+                input_tokens=kwargs.pop("semantic_input_tokens", 4_096),
+                requested_output_tokens=kwargs.pop("semantic_requested_output_tokens", 1_024),
+                max_cost_per_million_tokens=kwargs.pop("semantic_max_cost_per_million_tokens", None),
+                max_latency_ms=kwargs.pop("semantic_max_latency_ms", None),
+                min_quality=kwargs.pop("semantic_min_quality", None),
+                approve_provider_call=kwargs.get("approve_provider_call", False),
+                run_id=kwargs.pop("semantic_run_id", None),
+                max_output_tokens=kwargs.pop("semantic_max_output_tokens", 1_024),
+                temperature=kwargs.pop("semantic_temperature", None),
+                domain_policy_mode=kwargs.get("domain_policy_mode", "audit"),
+                domain_policy_evidence_ready=kwargs.get("domain_policy_evidence_ready"),
+                domain_policy_evaluator_configured=kwargs.get("domain_policy_evaluator_configured"),
+                domain_policy_effects_requested=kwargs.get("domain_policy_effects_requested"),
+                domain_policy_effects_approved=kwargs.get("domain_policy_effects_approved"),
+            )
+            route = semantic_route.route
+            if semantic_route.status != "completed":
+                return AutonomousAutoReplanResult(
+                    status=semantic_route.status,
+                    mode=(
+                        "cross_domain"
+                        if route.cross_domain and len(route.selected_domains) > 1
+                        else "single_domain"
+                    ) if not route.abstained else None,
+                    route=route,
+                    semantic_route=semantic_route,
+                )
+            # The provider classifier has already been approved and reconciled. Hand its exact
+            # route to the ordinary execution path so evaluator retries cannot classify again.
+            semantic_routing = False
+        else:
+            route = route_override
+
+        call_options = dict(kwargs)
+        if "evaluator" in call_options or "cross_domain_evaluator" in call_options:
+            raise BrainRunError("run_auto_replan_cycle reserves evaluator and cross_domain_evaluator")
+        call_options.update(
+            {
+                "hints": hints,
+                "min_confidence": min_confidence,
+                "min_margin": min_margin,
+                "max_domains": max_domains,
+                "allow_cross_domain": allow_cross_domain,
+                "semantic_routing": False,
+                "route_override": route,
+                "decision_cycle_id": decision_cycle_id,
+                "decision_cycle_store": decision_cycle_store,
+                "approve_provider_call": call_options.get("approve_provider_call", False),
+            }
+        )
+        if call_options.get("bandit_state") is None:
+            call_options["bandit_state"] = self.learning_state()
+
+        if route is not None and route.cross_domain and len(route.selected_domains) > 1:
+            call_options.update(
+                {
+                    "cross_domain_replan_learning": True,
+                    "cross_domain_replan_max_replans": max_replans,
+                    "cross_domain_evaluator": evaluator,
+                    "learning_mode": "off",
+                }
+            )
+        else:
+            call_options.update(
+                {
+                    "learning_mode": "online",
+                    "evaluator": evaluator if isinstance(evaluator, BrainOutcomeEvaluator) else None,
+                    "evaluator_registry": evaluator if isinstance(evaluator, DomainEvaluatorRegistry) else None,
+                    "max_replans": max_replans,
+                }
+            )
+            if call_options["evaluator"] is None:
+                call_options.pop("evaluator")
+            if call_options["evaluator_registry"] is None:
+                call_options.pop("evaluator_registry")
+
+        final = self.run_auto(
+            task=task,
+            credentials=credentials,
+            model_candidates=model_candidates,
+            **call_options,
+        )
+        if route is None:
+            route = final.route
+        inner = final.result
+        if final.status != "completed":
+            status = final.status
+            attempts: tuple[Any, ...] = ()
+            evaluations: tuple[Mapping[str, Any], ...] = ()
+            replan_count = 0
+        elif isinstance(inner, (AutonomousLearningResult, AutonomousCrossDomainReplanResult)):
+            status = inner.status
+            attempts = tuple(getattr(inner, "attempts", ()))
+            if isinstance(inner, AutonomousCrossDomainReplanResult):
+                evaluations = tuple(
+                    evaluation
+                    for attempt in attempts
+                    for evaluation in getattr(attempt, "evaluations", ())
+                )
+            else:
+                evaluations = tuple(getattr(inner, "evaluations", ()))
+            replan_count = int(getattr(inner, "replan_count", max(0, len(attempts) - 1)))
+        else:
+            status = final.execution_status
+            attempts = (inner,) if inner is not None else ()
+            evaluations = ()
+            replan_count = 0
+
+        return AutonomousAutoReplanResult(
+            status=status,
+            mode=(
+                "cross_domain"
+                if final.route.cross_domain and len(final.route.selected_domains) > 1
+                else "single_domain"
+            ) if not final.route.abstained else None,
+            route=final.route,
+            final=final,
+            attempt_results=attempts,
+            evaluations=evaluations,
+            replan_count=replan_count,
+            semantic_route=semantic_route if semantic_route is not None else final.semantic_route,
+        )
+
     def run_cross_domain_learning(
         self,
         *,
@@ -19412,7 +29122,7 @@ class AutonomousAgent:
     ) -> AutonomousCrossDomainLearningResult:
         """Run fan-out and synthesis while adapting routing between completed episodes."""
 
-        options = dict(kwargs)
+        options = self._prompt_learning_options(kwargs)
         options["bandit_state"] = self.learning_state() if bandit_state is None else bandit_state
         candidates, resolved_credentials, options, execution_controller = self._execution_inputs(
             credentials=credentials,
@@ -19447,6 +29157,64 @@ class AutonomousAgent:
         self._finish_execution(execution_controller, result=result)
         return result
 
+    def run_cross_domain_learning_with_launch_admission(
+        self,
+        *,
+        task: str,
+        subtasks: Sequence[Mapping[str, Any]],
+        launch_admission: Mapping[str, Any],
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        bandit_state: Mapping[str, Any] | None = None,
+        execution_id: str | None = None,
+        resume_execution: bool = False,
+        **kwargs: Any,
+    ) -> AutonomousCrossDomainLearningResult:
+        """Run adaptive fan-out/fan-in only after every specialist domain is admitted."""
+
+        from .autonomous_launch_admission import authorize_autonomous_launch_domains
+
+        requested_domains = _cross_domain_subtask_domains_for_launch_admission(subtasks)
+        authorize_autonomous_launch_domains(launch_admission, requested_domains)
+        return self.run_cross_domain_learning(
+            task=task,
+            subtasks=subtasks,
+            credentials=credentials,
+            model_candidates=model_candidates,
+            bandit_state=bandit_state,
+            execution_id=execution_id,
+            resume_execution=resume_execution,
+            **kwargs,
+        )
+
+    def run_cross_domain_with_launch_admission(
+        self,
+        *,
+        task: str,
+        subtasks: Sequence[Mapping[str, Any]],
+        launch_admission: Mapping[str, Any],
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        execution_id: str | None = None,
+        resume_execution: bool = False,
+        **kwargs: Any,
+    ) -> AutonomousCrossDomainResult:
+        """Run a fan-out/fan-in task only when admission covers every specialist domain."""
+
+        from .autonomous_launch_admission import authorize_autonomous_launch_domains
+
+        requested_domains = _cross_domain_subtask_domains_for_launch_admission(subtasks)
+        authorize_autonomous_launch_domains(launch_admission, requested_domains)
+        return self.run_cross_domain(
+            task=task,
+            subtasks=subtasks,
+            credentials=credentials,
+            model_candidates=model_candidates,
+            execution_id=execution_id,
+            resume_execution=resume_execution,
+            **kwargs,
+        )
+
     def run_cross_domain_trajectory_learning(
         self,
         *,
@@ -19461,7 +29229,7 @@ class AutonomousAgent:
     ) -> AutonomousCrossDomainTrajectoryLearningResult:
         """Run fan-out and synthesis with one delayed, discounted trajectory update."""
 
-        options = dict(kwargs)
+        options = self._prompt_learning_options(kwargs)
         options["bandit_state"] = self.learning_state() if bandit_state is None else bandit_state
         candidates, resolved_credentials, options, execution_controller = self._execution_inputs(
             credentials=credentials,
@@ -19497,6 +29265,36 @@ class AutonomousAgent:
         self._finish_execution(execution_controller, result=result)
         return result
 
+    def run_cross_domain_trajectory_learning_with_launch_admission(
+        self,
+        *,
+        task: str,
+        subtasks: Sequence[Mapping[str, Any]],
+        launch_admission: Mapping[str, Any],
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        bandit_state: Mapping[str, Any] | None = None,
+        execution_id: str | None = None,
+        resume_execution: bool = False,
+        **kwargs: Any,
+    ) -> AutonomousCrossDomainTrajectoryLearningResult:
+        """Run trajectory learning only after every specialist domain is admitted."""
+
+        from .autonomous_launch_admission import authorize_autonomous_launch_domains
+
+        requested_domains = _cross_domain_subtask_domains_for_launch_admission(subtasks)
+        authorize_autonomous_launch_domains(launch_admission, requested_domains)
+        return self.run_cross_domain_trajectory_learning(
+            task=task,
+            subtasks=subtasks,
+            credentials=credentials,
+            model_candidates=model_candidates,
+            bandit_state=bandit_state,
+            execution_id=execution_id,
+            resume_execution=resume_execution,
+            **kwargs,
+        )
+
     def run_cross_domain_replan_learning(
         self,
         *,
@@ -19511,7 +29309,7 @@ class AutonomousAgent:
     ) -> AutonomousCrossDomainReplanResult:
         """Run bounded evaluator-guided cross-domain replans with delayed credit per attempt."""
 
-        options = dict(kwargs)
+        options = self._prompt_learning_options(kwargs)
         options["bandit_state"] = self.learning_state() if bandit_state is None else bandit_state
         candidates, resolved_credentials, options, execution_controller = self._execution_inputs(
             credentials=credentials,
@@ -19547,6 +29345,36 @@ class AutonomousAgent:
         self._finish_execution(execution_controller, result=result)
         return result
 
+    def run_cross_domain_replan_learning_with_launch_admission(
+        self,
+        *,
+        task: str,
+        subtasks: Sequence[Mapping[str, Any]],
+        launch_admission: Mapping[str, Any],
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        bandit_state: Mapping[str, Any] | None = None,
+        execution_id: str | None = None,
+        resume_execution: bool = False,
+        **kwargs: Any,
+    ) -> AutonomousCrossDomainReplanResult:
+        """Run bounded cross-domain replanning only after every domain is admitted."""
+
+        from .autonomous_launch_admission import authorize_autonomous_launch_domains
+
+        requested_domains = _cross_domain_subtask_domains_for_launch_admission(subtasks)
+        authorize_autonomous_launch_domains(launch_admission, requested_domains)
+        return self.run_cross_domain_replan_learning(
+            task=task,
+            subtasks=subtasks,
+            credentials=credentials,
+            model_candidates=model_candidates,
+            bandit_state=bandit_state,
+            execution_id=execution_id,
+            resume_execution=resume_execution,
+            **kwargs,
+        )
+
     def run_workflow(
         self,
         *,
@@ -19559,10 +29387,11 @@ class AutonomousAgent:
     ) -> AutonomousWorkflowRun:
         """Run a staged workflow with the agent's catalogue, health, and durable state."""
 
+        run_options = self._prompt_learning_options(kwargs)
         candidates, resolved_credentials, options, execution_controller = self._execution_inputs(
             credentials=credentials,
             model_candidates=model_candidates,
-            options=kwargs,
+            options=run_options,
             tool_domains=(blueprint.spec.domain,),
             task=blueprint.spec.task,
             resume_learning=True,
@@ -19582,6 +29411,31 @@ class AutonomousAgent:
             raise
         self._finish_execution(execution_controller, result=result)
         return result
+
+    def run_workflow_with_launch_admission(
+        self,
+        *,
+        blueprint: AutonomousTaskBlueprint,
+        launch_admission: Mapping[str, Any],
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        execution_id: str | None = None,
+        resume_execution: bool = False,
+        **kwargs: Any,
+    ) -> AutonomousWorkflowRun:
+        """Run a reviewed workflow only after its blueprint domain is admitted."""
+
+        from .autonomous_launch_admission import authorize_autonomous_launch_domains
+
+        authorize_autonomous_launch_domains(launch_admission, (blueprint.spec.domain,))
+        return self.run_workflow(
+            blueprint=blueprint,
+            credentials=credentials,
+            model_candidates=model_candidates,
+            execution_id=execution_id,
+            resume_execution=resume_execution,
+            **kwargs,
+        )
 
     def run_workflow_with_trace(
         self,
@@ -19633,6 +29487,31 @@ class AutonomousAgent:
             raise
         return AutonomousTracedRunResult(result=result, trace=session.summary())
 
+    def run_workflow_with_trace_and_launch_admission(
+        self,
+        *,
+        blueprint: AutonomousTaskBlueprint,
+        launch_admission: Mapping[str, Any],
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        trace_store: AutonomousRunTraceStore,
+        run_id: str | None = None,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        **kwargs: Any,
+    ) -> AutonomousTracedRunResult:
+        """Trace a workflow only after its blueprint domain is launch-admitted."""
+
+        from .autonomous_launch_admission import authorize_autonomous_launch_domains
+
+        authorize_autonomous_launch_domains(launch_admission, (blueprint.spec.domain,))
+        return self.run_workflow_with_trace(
+            blueprint=blueprint,
+            credentials=credentials,
+            trace_store=trace_store,
+            run_id=run_id,
+            model_candidates=model_candidates,
+            **kwargs,
+        )
+
     def run_workflow_learning(
         self,
         *,
@@ -19646,7 +29525,7 @@ class AutonomousAgent:
     ) -> AutonomousWorkflowLearningResult:
         """Run staged workflow learning, resuming the latest value-only bandit state by default."""
 
-        options = dict(kwargs)
+        options = self._prompt_learning_options(kwargs)
         options["bandit_state"] = self.learning_state() if bandit_state is None else bandit_state
         candidates, resolved_credentials, options, execution_controller = self._execution_inputs(
             credentials=credentials,
@@ -19672,6 +29551,33 @@ class AutonomousAgent:
         self._finish_execution(execution_controller, result=result)
         return result
 
+    def run_workflow_learning_with_launch_admission(
+        self,
+        *,
+        blueprint: AutonomousTaskBlueprint,
+        launch_admission: Mapping[str, Any],
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        bandit_state: Mapping[str, Any] | None = None,
+        execution_id: str | None = None,
+        resume_execution: bool = False,
+        **kwargs: Any,
+    ) -> AutonomousWorkflowLearningResult:
+        """Run workflow learning only after its blueprint domain is launch-admitted."""
+
+        from .autonomous_launch_admission import authorize_autonomous_launch_domains
+
+        authorize_autonomous_launch_domains(launch_admission, (blueprint.spec.domain,))
+        return self.run_workflow_learning(
+            blueprint=blueprint,
+            credentials=credentials,
+            model_candidates=model_candidates,
+            bandit_state=bandit_state,
+            execution_id=execution_id,
+            resume_execution=resume_execution,
+            **kwargs,
+        )
+
     def run_workflow_cycle(
         self,
         *,
@@ -19690,7 +29596,7 @@ class AutonomousAgent:
         same execution controller used by ordinary workflow calls.
         """
 
-        options = dict(kwargs)
+        options = self._prompt_learning_options(kwargs)
         options["bandit_state"] = self.learning_state() if bandit_state is None else bandit_state
         candidates, resolved_credentials, options, execution_controller = self._execution_inputs(
             credentials=credentials,
@@ -19716,6 +29622,33 @@ class AutonomousAgent:
         self._finish_execution(execution_controller, result=result)
         return result
 
+    def run_workflow_cycle_with_launch_admission(
+        self,
+        *,
+        blueprint: AutonomousTaskBlueprint,
+        launch_admission: Mapping[str, Any],
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        bandit_state: Mapping[str, Any] | None = None,
+        execution_id: str | None = None,
+        resume_execution: bool = False,
+        **kwargs: Any,
+    ) -> "AutonomousWorkflowCycleResult":
+        """Run a workflow recovery cycle only after its domain is launch-admitted."""
+
+        from .autonomous_launch_admission import authorize_autonomous_launch_domains
+
+        authorize_autonomous_launch_domains(launch_admission, (blueprint.spec.domain,))
+        return self.run_workflow_cycle(
+            blueprint=blueprint,
+            credentials=credentials,
+            model_candidates=model_candidates,
+            bandit_state=bandit_state,
+            execution_id=execution_id,
+            resume_execution=resume_execution,
+            **kwargs,
+        )
+
     def run_workflow_trajectory_learning(
         self,
         *,
@@ -19729,7 +29662,7 @@ class AutonomousAgent:
     ) -> AutonomousWorkflowTrajectoryLearningResult:
         """Run a staged workflow and apply one delayed, discounted trajectory update."""
 
-        options = dict(kwargs)
+        options = self._prompt_learning_options(kwargs)
         options["bandit_state"] = self.learning_state() if bandit_state is None else bandit_state
         candidates, resolved_credentials, options, execution_controller = self._execution_inputs(
             credentials=credentials,
@@ -19755,6 +29688,33 @@ class AutonomousAgent:
         self._finish_execution(execution_controller, result=result)
         return result
 
+    def run_workflow_trajectory_learning_with_launch_admission(
+        self,
+        *,
+        blueprint: AutonomousTaskBlueprint,
+        launch_admission: Mapping[str, Any],
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        bandit_state: Mapping[str, Any] | None = None,
+        execution_id: str | None = None,
+        resume_execution: bool = False,
+        **kwargs: Any,
+    ) -> AutonomousWorkflowTrajectoryLearningResult:
+        """Run workflow trajectory learning only after its domain is launch-admitted."""
+
+        from .autonomous_launch_admission import authorize_autonomous_launch_domains
+
+        authorize_autonomous_launch_domains(launch_admission, (blueprint.spec.domain,))
+        return self.run_workflow_trajectory_learning(
+            blueprint=blueprint,
+            credentials=credentials,
+            model_candidates=model_candidates,
+            bandit_state=bandit_state,
+            execution_id=execution_id,
+            resume_execution=resume_execution,
+            **kwargs,
+        )
+
     def run_cross_domain(
         self,
         *,
@@ -19768,10 +29728,11 @@ class AutonomousAgent:
     ) -> AutonomousCrossDomainResult:
         """Run specialist fan-out and synthesis through the shared safety/learning envelope."""
 
+        run_options = self._prompt_learning_options(kwargs)
         candidates, resolved_credentials, options, execution_controller = self._execution_inputs(
             credentials=credentials,
             model_candidates=model_candidates,
-            options=kwargs,
+            options=run_options,
             tool_domains=tuple(
                 dict.fromkeys(
                     ["cross_domain"]
@@ -19811,16 +29772,29 @@ class AutonomousBrainBatchJobController:
     application-facing boundary: startup restoration is explicit, concurrent runs are rejected,
     every persisted value is parsed and re-serialized as a metadata-only checkpoint, and caller
     tasks, prompts, provider values, connector observations, and credentials remain transient.
-    It supports the domain, route-first, and cross-domain batch modes through one API.
+    It supports the domain, route-first, automatic, and cross-domain batch modes through one API.
     """
 
-    def __init__(self, agent: "AutonomousAgent", persistence: Any) -> None:
+    def __init__(
+        self,
+        agent: "AutonomousAgent",
+        persistence: Any,
+        *,
+        protected_rehydration: AutonomousBatchProtectedRehydration | None = None,
+        automatic_protected_rehydration: AutonomousAutomaticBatchProtectedRehydration | None = None,
+    ) -> None:
         if not isinstance(agent, AutonomousAgent):
             raise BrainRunError("autonomous brain batch controller requires an AutonomousAgent")
         if not all(callable(getattr(persistence, name, None)) for name in ("read", "write")):
             raise BrainRunError("autonomous brain batch checkpoint store is malformed")
         self.agent = agent
         self.persistence = persistence
+        if protected_rehydration is not None and not isinstance(protected_rehydration, AutonomousBatchProtectedRehydration):
+            raise BrainRunError("autonomous brain batch controller protected_rehydration is malformed")
+        if automatic_protected_rehydration is not None and not isinstance(automatic_protected_rehydration, AutonomousAutomaticBatchProtectedRehydration):
+            raise BrainRunError("autonomous brain batch controller automatic_protected_rehydration is malformed")
+        self.protected_rehydration = protected_rehydration
+        self.automatic_protected_rehydration = automatic_protected_rehydration
         self._checkpoint: AutonomousBatchCheckpoint | None = None
         self._expected_checkpoint_digest: str | None = None
         self._restored = False
@@ -19902,6 +29876,7 @@ class AutonomousBrainBatchJobController:
         job_id: str,
         credentials: Mapping[str, CredentialHandle] | CredentialSession,
         mode: str = "domain",
+        launch_admission: Mapping[str, Any] | None = None,
         model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
         options_factory: Callable[[Mapping[str, Any], int], Mapping[str, Any]] | None = None,
         max_parallelism: int = 4,
@@ -19915,19 +29890,31 @@ class AutonomousBrainBatchJobController:
                 raise BrainRunError("autonomous brain batch controller already has a run in progress")
             self._running = True
         try:
-            result = self.agent.run_resumable_batch(
-                requests,
-                job_id=job_id,
-                mode=mode,
-                credentials=credentials,
-                model_candidates=model_candidates,
-                options_factory=options_factory,
-                max_parallelism=max_parallelism,
-                stop_on_error=stop_on_error,
-                checkpoint=None if self._checkpoint is None else self._checkpoint.to_dict(),
-                checkpoint_sink=self._persist,
-                rehydrate_result=rehydrate_result,
-            )
+            effective_rehydrator = rehydrate_result
+            if effective_rehydrator is None and mode == "auto" and self.automatic_protected_rehydration is not None:
+                effective_rehydrator = self.automatic_protected_rehydration.resolve
+            if effective_rehydrator is None and self.protected_rehydration is not None:
+                effective_rehydrator = self.protected_rehydration.resolve
+            run_kwargs = {
+                "job_id": job_id,
+                "mode": mode,
+                "credentials": credentials,
+                "model_candidates": model_candidates,
+                "options_factory": options_factory,
+                "max_parallelism": max_parallelism,
+                "stop_on_error": stop_on_error,
+                "checkpoint": None if self._checkpoint is None else self._checkpoint.to_dict(),
+                "checkpoint_sink": self._persist,
+                "rehydrate_result": effective_rehydrator,
+            }
+            if launch_admission is None:
+                result = self.agent.run_resumable_batch(requests, **run_kwargs)
+            else:
+                result = self.agent.run_resumable_batch_with_launch_admission(
+                    requests,
+                    launch_admission=launch_admission,
+                    **run_kwargs,
+                )
             return {"controller": self._projection(result.status, total_items=len(requests), job_id=job_id), "batch": result}
         finally:
             with self._lock:
@@ -19938,6 +29925,8 @@ __all__ = [
     "AUTONOMY_SCHEMA",
     "AUTONOMOUS_AGENT_BATCH_SCHEMA",
     "AUTONOMOUS_BATCH_CHECKPOINT_SCHEMA",
+    "AUTONOMOUS_AUTOMATIC_BATCH_POLICY_SCHEMA",
+    "AUTONOMOUS_TRACED_AUTO_BATCH_SCHEMA",
     "AUTONOMOUS_BATCH_CONTROLLER_SCHEMA",
     "MAX_AUTONOMOUS_AGENT_BATCH",
     "MAX_AUTONOMOUS_AGENT_PARALLELISM",
@@ -19947,12 +29936,18 @@ __all__ = [
     "AUTONOMOUS_LEARNING_MODES",
     "AUTONOMOUS_MODEL_SELECTION_PREVIEW_SCHEMA",
     "MAX_AUTONOMOUS_MODEL_SELECTION_PREVIEW_BYTES",
+    "AUTONOMOUS_TASK_CLARIFICATION_RECOMPILE_SCHEMA",
     "AUTONOMOUS_CROSS_DOMAIN_LEARNING_SCHEMA",
     "AUTONOMOUS_CROSS_DOMAIN_TRAJECTORY_LEARNING_SCHEMA",
     "AUTONOMOUS_CROSS_DOMAIN_REPLAN_SCHEMA",
     "AUTONOMOUS_CROSS_DOMAIN_REPLAN_CONTEXT_SCHEMA",
     "AUTONOMOUS_CROSS_DOMAIN_REPLAN_CHECKPOINT_SCHEMA",
     "AUTONOMOUS_CROSS_DOMAIN_PLAN_REFINEMENT_SCHEMA",
+    "AUTONOMOUS_ORDERED_STEP_PLAN_REFINEMENT_SCHEMA",
+    "AUTONOMOUS_REPLAN_CYCLE_SCHEMA",
+    "AUTONOMOUS_DECISION_CYCLE_SCHEMA",
+    "AUTONOMOUS_AUTO_DECISION_CYCLE_SCHEMA",
+    "AUTONOMOUS_REPLAN_CONTEXT_SCHEMA",
     "AUTONOMOUS_PLANNING_QUALITY_SETTLEMENT_SCHEMA",
     "AUTONOMOUS_PROVISIONED_RUN_SCHEMA",
     "AUTONOMOUS_CROSS_DOMAIN_CHECKPOINT_SCHEMA",
@@ -19971,8 +29966,10 @@ __all__ = [
     "AUTONOMOUS_CAPABILITY_PORTFOLIO_SCHEMA",
     "AUTONOMOUS_TOOL_SELECTION_STATE_SCHEMA",
     "AUTONOMOUS_TOOL_SELECTION_POLICY",
+    "AUTONOMOUS_TOOL_RISK_ORDER",
     "MAX_AUTONOMOUS_TOOL_SELECTION_ARMS",
     "MAX_AUTONOMOUS_TOOL_SELECTION_CREDITS",
+    "MAX_AUTONOMOUS_TOOL_SELECTION_CANDIDATES_PER_STAGE",
     "AUTONOMOUS_WORKFLOW_STAGE_PLAN_SCHEMA",
     "AUTONOMOUS_CAPABILITY_PLAN_STATUSES",
     "MAX_AUTONOMOUS_CAPABILITY_CONTRACTS",
@@ -19985,6 +29982,8 @@ __all__ = [
     "MAX_AUTONOMOUS_ROUTE_DOMAINS",
     "MAX_AUTONOMOUS_CROSS_DOMAIN_CHILDREN",
     "MAX_AUTONOMOUS_CROSS_DOMAIN_REPLANS",
+    "MAX_AUTONOMOUS_REPLAN_CYCLE_REPLANS",
+    "MAX_AUTONOMOUS_REPLAN_CYCLE_EVALUATIONS",
     "MAX_AUTONOMOUS_CROSS_DOMAIN_REPLAN_CHECKPOINT_BYTES",
     "MAX_AUTONOMOUS_CROSS_DOMAIN_CHECKPOINT_BYTES",
     "AUTONOMOUS_WORKFLOW_SCHEMA",
@@ -19996,17 +29995,21 @@ __all__ = [
     "AUTONOMOUS_WORKFLOW_STAGE_STATUSES",
     "AutonomousDomainProfile",
     "AutonomousDomainTaskLens",
+    "validate_autonomous_domain_task_lens",
+    "validate_autonomous_domain_policy",
     "AutonomousDomainRegistry",
     "AutonomousDomainPack",
     "AutonomousDomainPackRegistry",
     "AutonomousCapabilityContract",
     "AutonomousWorkflowStageExecutionPlan",
     "compile_autonomous_workflow_stage_execution_plan",
+    "validate_autonomous_workflow_stage_execution_plan",
     "compile_autonomous_domain_execution_plan",
     "AutonomousRouteCandidate",
     "AutonomousRouteProposal",
     "AutonomousTaskRouter",
     "AutonomousTaskIntent",
+    "validate_autonomous_task_intent",
     "infer_autonomous_task_intent",
     "AutonomousTaskDecision",
     "infer_autonomous_task_decision",
@@ -20017,11 +30020,16 @@ __all__ = [
     "normalize_autonomous_tool_selection_state",
     "autonomous_tool_selection_arm_id",
     "settle_autonomous_tool_selection_outcome",
+    "AutonomousToolSelectionSnapshot",
+    "AutonomousToolSelectionSnapshotPersistence",
+    "AutonomousToolSelectionPersistenceCoordinator",
+    "validate_autonomous_tool_selection_snapshot",
     "AutonomousCapabilityActivation",
     "AutonomousCapabilityActivationStore",
     "AutonomousCrossDomainBlueprint",
     "AutonomousCrossDomainResult",
     "AutonomousCrossDomainPlanRefinementResult",
+    "AutonomousOrderedStepPlanRefinementResult",
     "AutonomousCrossDomainCheckpoint",
     "AutonomousCrossDomainStepResult",
     "AutonomousCrossDomainLearningResult",
@@ -20031,10 +30039,36 @@ __all__ = [
     "AutonomousCrossDomainReplanCheckpoint",
     "AutonomousAutoBlueprint",
     "AutonomousAutoResult",
+    "AutonomousClarificationRecompile",
+    "AutonomousDecisionCycleResult",
+    "AutonomousAutoDecisionCycleResult",
+    "AutonomousAutoReplanResult",
+    "AUTONOMOUS_MISSION_REPLAN_SCHEMA",
+    "AUTONOMOUS_MISSION_REPLAN_CHECKPOINT_SCHEMA",
+    "AUTONOMOUS_MISSION_REPLAN_STATE_SCHEMA",
+    "AUTONOMOUS_MISSION_REPLAN_SNAPSHOT_SCHEMA",
+    "AUTONOMOUS_MISSION_REPLAN_MAX_REPLANS",
+    "AUTONOMOUS_MISSION_REPLAN_MAX_ATTEMPTS",
+    "AUTONOMOUS_MISSION_REPLAN_MAX_INSTRUCTION_BYTES",
+    "AutonomousMissionReplanAttempt",
+    "AutonomousMissionReplanCheckpoint",
+    "AutonomousMissionReplanState",
+    "AutonomousMissionReplanSnapshot",
+    "AutonomousMissionReplanStateStore",
+    "AutonomousMissionReplanSnapshotPersistence",
+    "AutonomousMissionReplanTextStore",
+    "InMemoryAutonomousMissionReplanStateStore",
+    "JsonAutonomousMissionReplanSnapshotPersistence",
+    "AutonomousMissionReplanPersistenceCoordinator",
+    "AutonomousMissionReplanResult",
+    "AutonomousMissionReplanRehydrationContext",
+    "run_autonomous_mission_replan_cycle",
     "AutonomousProvisionedRun",
     "AutonomousBatchItem",
     "AutonomousBatchResult",
     "AutonomousBatchRehydrationContext",
+    "AutonomousBatchProtectedRehydration",
+    "AutonomousAutomaticBatchProtectedRehydration",
     "AutonomousBatchCheckpoint",
     "AutonomousBatchCheckpointTextStore",
     "InMemoryAutonomousBatchCheckpointStore",
@@ -20044,6 +30078,11 @@ __all__ = [
     "AutonomousBrainBatchJobController",
     "AutonomousLearningResult",
     "AutonomousAgent",
+    "AutonomousRunAnalyticsController",
+    "AutonomousAuthorizationLedger",
+    "AutonomousAuthorizationGate",
+    "AutonomousRunTraceRegistryController",
+    "AutonomousRunObservabilityController",
     "AutonomousWorkflowCheckpoint",
     "AutonomousWorkflowExecutionReceipt",
     "AutonomousWorkflowEvaluator",

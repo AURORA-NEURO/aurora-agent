@@ -9,6 +9,7 @@
 //! selection still supports the correct decision, which [`crate::compare`] measures by running the
 //! deterministic oracle over each selection and comparing verdicts.
 
+use crate::index::PanelIndex;
 use bioprism_fiber::Query;
 use bioprism_world::World;
 use std::collections::BTreeSet;
@@ -41,7 +42,31 @@ pub trait ContextStrategy {
     /// strawman without reading the implementation.
     fn method(&self) -> String;
 
-    fn select(&self, world: &World, query: &Query) -> Selection;
+    /// The selection, given the intermediates [`crate::compare::compare`] built once for the whole
+    /// panel.
+    ///
+    /// This is the only method an implementor writes, and the reason it is the indexed one rather
+    /// than the plainer [`ContextStrategy::select`] is that a [`PanelIndex`] can always be built
+    /// from a world and a query, while the reverse — recovering a shared index from a bare pair —
+    /// is exactly the rebuilding this trait exists to avoid. A strategy that reads no cell pays
+    /// nothing for the index it was handed, because the cells are lazy.
+    ///
+    /// The pair was briefly defaulted the other way, each in terms of the other: `select_indexed`
+    /// fell back to `select`, and every shipped strategy defined `select` as `select_indexed` over
+    /// a private index of one. That compiles, and an implementor who wrote neither — or only the
+    /// one that already had a default — got infinite recursion at run time instead of a missing
+    /// method at compile time. With one required method the cycle has no way to exist.
+    fn select_indexed(&self, index: &PanelIndex<'_>) -> Selection;
+
+    /// The same selection for a caller holding only a world and a query.
+    ///
+    /// Builds a private index of one, which is the pre-sharing behaviour and the thing
+    /// `tests/shared_index.rs` compares the shared path against. Not intended to be overridden:
+    /// there is only ever one implementation of the selection, so the two entry points cannot
+    /// drift apart.
+    fn select(&self, world: &World, query: &Query) -> Selection {
+        self.select_indexed(&PanelIndex::new(world, query))
+    }
 }
 
 /// Every fact in the world. The upper bound on recall and the thing to beat on cost.
@@ -56,9 +81,10 @@ impl ContextStrategy for FullContext {
         "expose every fact in the world".into()
     }
 
-    fn select(&self, world: &World, _query: &Query) -> Selection {
+    fn select_indexed(&self, index: &PanelIndex<'_>) -> Selection {
         Selection::new(
-            world
+            index
+                .world()
                 .facts
                 .iter()
                 .map(|fact| fact.id.as_str().to_string())
@@ -80,8 +106,8 @@ impl ContextStrategy for FiberCompiled {
         "protected closure, then backward dependency slice, then temporal cut".into()
     }
 
-    fn select(&self, world: &World, query: &Query) -> Selection {
-        match bioprism_fiber::compile(world, query) {
+    fn select_indexed(&self, index: &PanelIndex<'_>) -> Selection {
+        match bioprism_fiber::compile(index.world(), index.query()) {
             Ok(out) => Selection::new(out.certificate.selected_facts.into_iter().collect()),
             Err(error) => Selection::new(BTreeSet::new())
                 .noting(format!("compile failed, selection is empty: {error}")),

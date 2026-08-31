@@ -122,10 +122,6 @@ impl Request {
     pub fn is_notification(&self) -> bool {
         self.id.is_none()
     }
-
-    pub fn param_str(&self, name: &str) -> Option<&str> {
-        self.params.get(name).and_then(Value::as_str)
-    }
 }
 
 fn response_id(value: &Value) -> Option<Value> {

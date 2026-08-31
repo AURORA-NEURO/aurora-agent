@@ -1,5 +1,338 @@
 # Remaining backlog
 
+The authorization rollout now covers the complete execution substrate rather than only provider
+and effect calls. Planning, provider invocation, evidence acquisition, connector dispatch, tool
+execution, effect dispatch, evaluator callbacks, bandit writes, episodic memory reads/writes,
+metadata-only trace appends, and analytics ingestion all have explicit operation checks in both
+SDKs. Cross-domain paths retain exact domain scopes, replay/duplicate paths remain non-mutating,
+and typed authorization refusals are preserved instead of being downgraded to provider or storage
+failures. Boundary regressions exercise the twelve-domain portfolio without using credentials or
+network access.
+
+The Python runtime now has aggregate cost-budget parity with TypeScript. `AutonomousCostBudget`
+provides atomic, snapshot-able estimate admission across provider failover, lazy streams,
+tool-loop turns, workflows, missions, cross-domain fan-out/synthesis, and evaluator-driven
+retries, while preserving the distinction between local pre-dispatch release and post-dispatch
+charge retention. The remaining deployment work is caller-owned persistence/reconciliation,
+distributed lease coordination, billing truth, and provider-side quota integration.
+
+The high-level learning surfaces now share those checks all the way through their final sinks.
+Workflow and mission learning, immediate and delayed trajectory settlement, cross-domain
+specialist/synthesis fan-out, replan retries, automatic decision cycles, and consolidated lesson
+recall forward the caller context into nested runs and authorize each memory read, episode write,
+and evaluation write immediately before persistence or prompt assembly. TypeScript semantic routing
+also forwards the context into its classifier invocation. This closes the convenience-facade gap
+where a low-level boundary could be correct while a composed learning path still called a store or
+provider directly; focused Python and TypeScript regressions verify fail-closed refusal behavior.
+
+The high-level TypeScript facade now exposes evaluator-calibration registration, validation,
+per-domain learning admission, aggregate querying, and caller-owned restore/flush controls. The
+integration coverage builds a valid calibration report across all twelve domains, verifies that
+raw calibration cases and evidence never cross the persistence projection, checks restart recovery,
+and proves sparse coverage holds learning. This makes calibration an explicit online-learning gate
+at the application boundary; it does not invoke providers, assign rewards, or persist caller data.
+
+The facade now also exposes the complete explicit adaptive-state handoff: evaluator reward
+recording, prompt-choice extraction and settlement, tool-bandit inspection and settlement, and
+individual restart controls for model, prompt, tool, and decision-cycle stores. A twelve-domain
+integration test proves each substrate can learn from caller feedback, flush through its own
+caller-owned CAS boundary, restore after restart, and remain redacted. Provider transport success
+still cannot become reward implicitly, and missing or foreign persistence configuration fails closed.
+
+The high-level facade now also exposes the automatic evaluator-backed decision and replan kernels
+through request-oriented methods. `executeAutoCycle()` and `executeAutoReplanCycle()` bind route
+identity exactly once from the validated request, dispatch single-domain or bounded cross-domain
+execution, and return the lower-level evaluator/learning projection without weakening provider,
+planning, effect, or restart gates. Launch-admitted variants authorize the frozen provider-free
+route before execution and refuse semantic classifier calls until separately admitted. The
+integration suite covers all built-in domains, cross-domain fan-out, bounded evaluator replanning,
+launch admission, route-override tampering, and semantic-routing refusal; connector-bearing input
+continues through the connector-aware facade boundary. Batch digests contain only task/result
+digests and cycle status metadata; nested execution values remain explicitly caller-owned and
+transient rather than being treated as durable learning or audit state.
+
+The facade now also supports bounded automatic cycle and automatic replan batches. Per-item policy
+factories preserve request-owned route binding, evaluator identity, replan ceilings, learning
+settlement, and deterministic input ordering while `stopOnError` makes unstarted work explicit.
+Admission-aware batches union the complete provider-free route scope before dispatch and keep
+semantic classifier approval separate. All twelve built-in domains, per-item route conflicts,
+cross-domain selection, held admission, bounded omissions, and metadata-only batch digests are
+covered offline. The cycle boundary now also has metadata-only trace and restart-safe checkpoint
+variants. Trace events compose provider/model-selection lifecycle metadata for the whole batch while
+cycle values remain non-enumerable caller-owned properties. Checkpoints bind the explicit
+automatic-cycle or automatic-replan mode, every request/result digest, bounded controls, and a
+policy-set digest; restart callers must rehydrate settled cycle results and the facade verifies
+route task identity and result digests before skipping provider work. Launch-admitted trace/resume
+variants union and re-review the full provider-free route scope before rehydration or dispatch.
+Typed protected receipt adapters now cover both cycle checkpoint modes as well: each adapter fences
+the exact `automatic_cycle` or `automatic_replan` identity before releasing a transient result, and
+cannot be substituted for direct or ordinary automatic batch rehydration. Durable checkpoint
+stores and application-specific receipt issuance remain caller-owned rather than implicit SDK
+persistence. The batch job controller now exposes these modes directly, preserving one active run,
+restore-before-execution, callback-over-protected-receipt precedence, and CAS-fenced checkpoint
+writes for worker processes.
+
+The safe TypeScript `AutonomousBrainFacade` now owns the provider-free task-clarification loop
+already available on the lower-level agent. It can derive a bounded questionnaire for every
+single-domain profile (or accept only an unambiguous deterministic route when the domain is
+omitted), resolve answers into digest-only receipts, validate those receipts after restart, and
+recompile a clarified task into a fresh transient blueprint. Connector-bearing requests,
+cross-domain/abstained intake, stale task identities, and tampered receipts fail closed before any
+provider, source, tool, evaluator, learner, credential, or effect boundary. All twelve domains are
+covered by redaction, replay, auto-route, and tamper tests; this improves application usability
+without turning clarification or recompilation into execution authority.
+
+The TypeScript contextual-selector bridge now preserves the complete value-only selection contract
+across the remote boundary. Caller-supplied global observations reach the base selector as
+fallback history, contextual observations retain overlay precedence, and remote ranking rows are
+validated against the exact local candidate catalogue before any provider dispatch. Optional base
+scores, exploration bonuses, and observed-pulls evidence survive the runtime projection for audit
+and replay. All twelve built-in domains exercise the forwarding path, while adversarial coverage
+rejects unknown remote model rows without contacting a provider. This closes a data-loss and
+authority-boundary gap; the bridge remains provider-free and does not make remote selection an
+authorization to invoke.
+
+The TypeScript local online learner now composes model metadata and evaluator feedback instead of
+discarding the canonical utility after eligibility filtering. Each eligible arm receives a
+deterministic four-pull prior from quality, reliability, cost, and latency; request-supplied
+observations are honored, contextual/global precedence remains explicit, and UCB/epsilon/Thompson
+adaptation is still bounded by failure penalties and replay-safe evaluator state. Selector
+confidence floors are applied after a caller selector returns, allowing learned evidence to break
+a cold-start tie while preserving fail-closed abstention for genuinely ambiguous decisions. The
+new all-domain and adversarial TypeScript coverage verifies cold-start ranking, supplied
+observations, negative-reward promotion, and post-selector confidence gating. This remains
+provider-free and does not claim task correctness or authorize a provider call.
+
+The TypeScript autonomous inventory now exposes the standalone live-readiness projection that
+Python already provides. `AutonomousAgent.modelInventoryReadiness()` and the high-level facade
+cover all twelve domains, enforce capability/capacity compatibility, join provider registration,
+opaque credential readiness, and circuit state into eligibility, and return a canonical
+digest-bound artifact that can be validated after restart. The projection is provider-free and
+does not mutate the catalogue, invoke a model, or treat operational readiness as evaluator truth;
+the existing authenticated discovery snapshot remains a separate lifecycle.
+
+The canonical TypeScript agent readiness report now embeds that same inventory readiness artifact
+and binds its nested digest into the outer readiness digest. Deployment readiness and launch
+preflight therefore consume one coherent model gate, including transient candidate overrides,
+without introducing provider discovery or invocation into startup audits.
+
+The TypeScript `AutonomousBrainFacade` now exposes the protected BYOK model path: session-bound
+model discovery, candidate normalization, and digest-bound all-domain inventory reconciliation.
+This closes the user-facing bridge between credential collection and actual model selection
+readiness while preserving separate approval/evaluator gates. Raw keys, catalogues, and provider
+responses remain outside the facade's serialized projections.
+
+The TypeScript `AutonomousBrainFacade` now exposes the coordinated persistence lifecycle already
+implemented by `AutonomousAgent`: typed `restorePersistedState()` and `flushPersistedState()`
+forward caller-owned stores, deterministic dependency ordering, strict failure reports, and
+metadata-only restart evidence. The public package barrel also exports the facade's recent
+acquisition, integrity, capability-learning, and lifecycle type aliases; applications no longer
+need an internal-module import to type these controls. This increment does not claim cross-store
+atomicity, distributed CAS, credential persistence, or deployment-owned startup authorization.
+
+The TypeScript `AutonomousBrainFacade` now closes its integrity-aware acquisition seam. It
+exposes provider-free information planning/replanning, transient claim-integrity assessment and
+reassessment, digest-validated bridge and request binding, reviewed source execution, launch
+admission, and restart-safe resumable execution across all twelve built-in domains. The new
+integration matrix verifies evaluator separation, metadata-only projections, approval gating,
+held-admission refusal, and the intentional `awaiting_evaluation` state when available evidence
+has coverage but not accepted evaluator decisions. This is a high-level application composition
+increment; provider credentials, source truth, durable persistence, evaluator authority, and
+external-effect reconciliation remain deployment responsibilities.
+
+The TypeScript `AutonomousBrainFacade` now closes the post-run reliance seam as well. Applications
+can project direct or cross-domain outcomes, bind claims to exact output/response digests, assess
+reliance, validate persisted assessments, and gate/replay cross-domain specialist alignment. The
+all-domain lower-kernel contracts remain unchanged; this increment makes the final claim and
+synthesis gates available at the same application boundary as execution and acquisition. It
+continues to keep truth, evaluator authority, provider credentials, learning settlement, and
+external effects outside the facade's automatic authority.
+
+The TypeScript `AutonomousBrainFacade` now exposes the reviewed capability plane and its learning
+loop: single and batch capability execution, exact tool-call dispatch, launch-admission variants,
+metadata-only capability/tool receipts, explicit capability/tool/provider evaluator settlement, and
+capability journal restore/flush. All twelve domains share the same workflow-context and launch
+scope checks. This closes another application composition seam without turning adapter success into
+truth or reward; activation, effect approval, evaluator authority, persistence, credentials, and
+external reconciliation remain explicit deployment boundaries.
+
+The provider runtime now enforces one terminal boundary across both SDKs. A stream that ends
+without a `done` event is rejected as an `invalid_response`, post-terminal events are refused,
+and provider finish frames plus `[DONE]` sentinels are normalized without duplicate completion.
+Finalized tool calls are delivered before the terminal event. This prevents partial provider
+responses from being reported as successful and gives every autonomous domain the same
+provider-neutral completion contract. Offline regression coverage exercises missing terminals,
+terminal tool calls, collection, and the existing live effect boundary.
+
+The TypeScript and Python provider bridges now expose a first-class autonomous live-stream
+contract. TypeScript performs one authoritative model selection, compacts the exact dispatch
+request, and opens a fixed continuation ladder; Python accepts the already-ranked arm order from
+the Rust/MCP brain so it cannot silently replace that decision. Both bridges forward transient
+provider-neutral deltas, require a terminal `done` event, permit retryable failover only before
+the first observed event, refuse partial-output replay, enforce single-consumer ownership, and
+return metadata-only completion receipts. Offline fixtures cover context compaction, pre-event
+recovery, partial-stream refusal, abandonment, redaction, and all twelve domains. The bridge does
+not provide provider credentials, distributed stream recovery, remote reconciliation, or semantic
+summarization; those remain deployment responsibilities. See
+[`AUTONOMOUS_STREAMING.md`](AUTONOMOUS_STREAMING.md).
+
+The TypeScript cross-domain fan-in now applies real asynchronous backpressure at its bounded
+queue. A burst-producing specialist suspends at capacity until the single consumer drains events,
+instead of turning ordinary consumer slowness into a synthetic provider failure or evicting a
+caller-visible delta. An offline stress fixture exercises more events than the queue capacity
+while deliberately pausing the consumer; the completion remains complete with exact event and
+UTF-8 byte accounting across both specialists.
+
+The Python application façade now reaches that transport boundary without requiring callers to
+rebuild selection and prompt assembly. `AutonomousAgent.run_stream()` performs the ordinary
+domain blueprint and adaptive-selection preflight with provider approval forced off, then lazily
+dispatches the exact selected arm through the existing synchronous stream runtime after explicit
+approval. `run_auto_stream()` adds deterministic routing and bounded multi-domain fan-out, while
+`run_cross_domain_stream()` exposes explicit specialist lifecycle events, bounded concurrent
+children, partial-result policy, and transient synthesis. Semantic classifier calls, provider
+planning, evaluator settlement, mission/tool-loop continuations, and durable execution
+controllers remain explicit authority boundaries. Completion receipts remain digest- and
+metadata-only.
+
+The TypeScript and Python autonomous provider boundaries now expose an explicit, deterministic
+context-window budget. Before selection and invocation, callers can cap estimated input tokens
+and message count; system/developer instructions, the latest user task, recent turns, and the
+newest assistant/tool continuation are protected, while older tool turns are dropped atomically.
+The metadata-only plan records counts, indexes, shapes, and digests without prompt content, and
+protected overflow fails closed as `invalid_request`. Tool loops re-apply the same budget after
+each approved result, and mission proposals use it before the provider decision as well. This is
+an operational transcript bound, not an LLM summarizer or a claim of semantic preservation;
+deployments that need richer compression should provide and review a separate caller-owned
+summarization policy.
+
+The provider runtime now has a shared, cross-language `ProviderQuotaController` seam. It admits
+every `LLMRuntime.invoke`, live stream, collected stream, and native tool-loop turn against
+provider-wide and provider/model fixed-window policies before transport, reserves concurrency,
+releases pre-dispatch refusals, and settles one request after dispatch using provider usage when it
+is available. TypeScript and Python expose the same metadata-only schema, retryable
+`quota_exceeded` failure, canonical digest-checked JSON persistence, and optional compare-and-swap
+adapter. Because the controller is attached to the shared runtime, all twelve autonomous domains
+and cross-domain fan-out consume the same ceiling without duplicating policy code. The controller
+is process-local and does not claim billing truth, tenant isolation, distributed quota consensus,
+provider-side rate-limit authority, encryption, or credential management; those remain deployment
+responsibilities.
+
+The provider runtime now consumes the shared tenant-scoped authorization contract at the actual
+provider boundary in both SDKs. `AutonomousAuthorizationContext` mints a fresh digest-bound
+request for each invocation attempt, stream, collected stream, failover arm, and native tool-loop
+turn. The gate runs before credential resolution, quota reservation, observer/effect dispatch, or
+transport, and high-level brain, stream, mission, and orchestrator paths forward the same context.
+Denied scope and exhausted grants are therefore side-effect-free, while successful calls consume
+bounded uses with replay-safe request identities. Cross-language tests cover domain refusal before
+credential/transport access, exact stream authorization without double charging, fresh invocation
+budget accounting, tool-loop turns, context construction, and nullable request metadata parity.
+This closes the in-process authorization-consumption seam; identity authentication, grant issuance,
+encrypted/distributed storage, and external reconciliation remain deployment-owned.
+
+The shared `bioprism-brain` planner now emits deterministic, dependency-closed execution waves
+alongside its serial topological order. `max_parallelism`, critical-path cost, estimated rounds,
+and peak width are bounded and digest-bound in the Rust/MCP contract; duplicate dependencies and
+invalid parallelism fail closed. TypeScript's all-domain workflow compiler exposes the same wave
+metadata, while caller-owned executors remain responsible for approval, leases, provider quotas,
+idempotency, checkpoints, and effect reconciliation. This is a scheduling contract, not a claim
+that the planning kernel itself dispatches work or provides distributed exactly-once delivery.
+
+Both TypeScript high-level brain workers now support bounded parallel draining with explicit
+`maxParallelism` and `continueOnNonTerminal` controls. The conservative serial default remains
+unchanged; opted-in claims preserve per-job approval, lease heartbeat, protected credential,
+trace, digest, retry, and reconciliation boundaries. Batch projections report requested work,
+parallelism, and whether backpressure stopped new claims, with offline all-domain coverage for
+local and remote workers. This improves throughput for deployments with independent capacity;
+it does not provide distributed scheduling, provider quotas, external authorization, or durable
+multi-host lease consensus.
+
+Python's synchronous and asynchronous remote brain workers now expose the same bounded-drain
+contract as well. Their finite `max_parallelism` controls use independent leases and retain the
+same metadata-only, approval-safe, protected-credential, heartbeat, retry, and reconciliation
+boundaries, with `requested_count`, `max_parallelism`, and `stopped_on_non_terminal` in the batch
+projection. Sync and async tests cover concurrent all-domain-compatible execution and redaction;
+deployment-owned distributed queue semantics, provider quotas, and external authorization remain
+explicit.
+
+The TypeScript `AutonomousBrainFacade` now exposes a reusable `providerSetup` onboarding boundary
+for the normal user-key lifecycle: provider registration, redacted instructions, short-lived
+credential sessions, opaque handles, readiness projection, and revocation. Offline coverage
+confirms that credentials remain out of readiness and serialized metadata and that no network call
+is made during onboarding. The facade also exposes one-call provisioned direct, closed-loop, and
+adaptive execution wrappers, the automatic route/planning envelope, launch-admitted variants,
+and traced provisioned variants for every core execution mode. The traced path keeps the
+credential resolver transient, emits only metadata/digests, and checks launch admission before
+opening a session. Offline all-domain coverage verifies session closure, trace integrity,
+redaction, and direct/automatic/cycle/adaptive admission composition.
+Persisted direct, cycle, and adaptive plan replay now has the same canonical revalidation and
+launch-admission boundary, including protected provisioned and traced forms; tampered route
+identity, task drift, held admission, and current-contract drift fail before session opening.
+Secret-manager integration, encryption, tenant authorization, and production UI remain deployment
+responsibilities.
+
+The TypeScript `AutonomousBrainFacade` now exposes `createGoalAgentRuntime()`, binding the
+long-horizon scheduler/worker/evaluator/bandit runtime to the exact facade agent and injecting the
+facade for reviewed action-handoff replay. Factory coverage exercises task rehydration, adaptive
+settlement, metadata-only traces, protected task receipts, and reviewed handoffs across all twelve
+autonomous domains, including the explicit cross-domain route. Remaining work is deployment
+hardening and external authority; the factory does not make the project complete or provide
+credentials, source truth, durable storage, or effect reconciliation. A matching
+`runGoalControlLoop({ runtime, run })` convenience call keeps construction and restart controls
+explicit while matching Python's one-call control-loop entry point.
+
+The TypeScript connector mission composition boundary is now implemented and tested across all
+twelve autonomous domains. The new bridge combines metadata-only provider ordering, protected
+mission-contract replay, explicit plan acceptance, connector approval, durable mission execution,
+and launch admission. Remaining work below is deployment hardening, external authority, and the
+other explicitly enumerated gaps; this addition is not a claim that the whole product is complete.
+
+The high-level TypeScript `AutonomousBrainFacade` now exposes the same direct, launch-admitted,
+provider-planned, and launch-admitted provider-planned connector mission lifecycle as
+`AutonomousAgent`. Facade tests cover all twelve domains, accepted-plan replay without a second
+planner call, independent connector approval, metadata-only planned projections, semantic-route
+refusal on launch-admitted execution, and launch holds before planner or connector dispatch.
+
+The high-level TypeScript facade now also exposes reviewed adapter evidence, digest-bound domain
+evidence catalogues, provider-free launch admission for both source paths, and restart-safe
+evidence execution through caller-owned checkpoint stores and serialized controllers. Tests cover
+all twelve domains through both facade evidence paths, source/provider approval separation,
+provider-assisted routing refusal before source dispatch, metadata-only result projections,
+checkpoint emission, and controller completion. Provider resume, source truth, credentials,
+durable storage, and external-effect reconciliation remain explicit deployment authorities.
+
+The TypeScript brain facade now traces reviewed adapter and domain-catalogue evidence lifecycles
+through the existing hash-chained run-trace contract. Traced variants cover plan compilation,
+selection, provider invocation, evidence/reconciliation settlement, conservative terminal status,
+launch-admission refusal, and all-domain reviewed adapter execution while keeping raw source
+values, prompt chunks, provider output, and credentials out of trace events and projections.
+
+Restart-safe evidence now has a first-class traced facade path as well. The wrapper composes
+caller checkpoint persistence, emits status/digest-only checkpoint lifecycle events, captures
+provider receipts through the existing observer, preserves explicit pending/reconciliation
+states, and refuses to turn restored state into implicit provider replay. Focused coverage verifies
+checkpoint ordering, terminal completion, trace integrity, and redaction.
+
+Provider-assisted planning now has a symmetric failure contract across Python and TypeScript.
+Single-domain, ordered-step, cross-domain, automatic, and direct plan-and-run entrypoints convert
+credential-boundary and operational provider failures into metadata-only `provider_failed`
+proposals, while malformed structured responses remain `provider_invalid`. The projection is
+limited to error class/code, retryability, safe status code, circuit state, and fixed retention
+markers; exception text, prompts, tasks, credentials, provider responses, and wire payloads are
+never retained. Missing credentials are detected before transport, and the model selector only
+classifies a no-candidate outcome as a credential failure when credential gating is the sole
+cause. Legacy Python failure envelopes without a code are normalized to the canonical code.
+Caller-owned retry, credential collection, provider reconciliation, and durable protected logs
+remain deployment responsibilities.
+
+The autonomous provider boundary now compiles a digest-bound model continuation plan in both SDKs.
+It preserves the exact eligible fallback ladder, separates model-scoped timeout recovery from
+provider-scoped outages, and exposes an independently sealed cursor for restart/resume without
+reselection. Adaptive provider, tool-loop, and mission paths consume the same plan before their
+existing approval and effect gates; projections retain only model/provider metadata, candidate
+digests, statuses, and bounded failure codes. This improves deterministic execution continuity,
+but does not claim distributed exactly-once delivery, provider truth, evaluator correctness, or
+replace caller-owned durable encrypted storage and external-effect reconciliation.
+
 48 code-bearing blueprint modules are not yet cited by any crate or design note,
 across 9 sections. This is the enumerated form of `docs/COVERAGE.md`'s
 percentage: a percentage says how far there is to go, a list says what is actually left.
@@ -9,6 +342,79 @@ are excluded from the coverage denominator — they specify no behaviour.
 
 A module leaves this list when a crate cites it, which is the same weak criterion coverage
 uses. This file tracks *attention*, not completeness.
+
+The SDK trace boundary now has an explicit operator projection in both languages through
+`AutonomousRunTraceRegistry`. It imports only a validated source snapshot, indexes every run by
+status/domain/provider/model, provides deterministic cursor pages and retained-event inspection,
+and supports summary-only retention when event metadata should be discarded. Retention evicts
+only the oldest eligible terminal runs; active/partial/paused/unknown runs are protected by
+default, and an over-capacity import fails atomically when no safe eviction exists. Registry
+snapshots and records are digest-bound, canonical JSON, and CAS-fenced. This is a local/caller-owned
+query and retention projection, not distributed consensus, external authorization, trace truth,
+provider replay, or effect reconciliation.
+
+Automatic batch execution now has a shared metadata-only trace boundary in both SDKs. The
+TypeScript facade exposes `executeAutoBatchWithTrace()` and its launch-admitted variant; Python
+exposes `run_auto_batch_with_trace()` and the corresponding admission wrapper. The trace covers
+all twelve reviewed domains, item planning, nested provider/connector/model phases, refusals,
+omissions, and aggregate completion while persisting only digests and bounded failure metadata.
+Resumable checkpoint recovery remains a separate explicit boundary so restoring observability can
+never authorize provider, tool, source, learner, or effect work.
+
+The long-horizon goal-agent bridge now has matching TypeScript/Python `runWithTrace`/
+`run_with_trace` controls. One trace covers the bounded goal plan, per-goal execution identity,
+selector/provider lifecycle, evaluator settlement, online-learning summary, and terminal control
+status across the twelve-domain catalogue. It composes caller observers, propagates cross-domain
+coverage, supports run IDs and recovery-compatible checkpoints, and keeps task text, prompts,
+parameters, credentials, responses, evidence, and live results out of serialized output. Remaining
+deployment work is trace-store durability/CAS across hosts, operator query and retention policy,
+evaluator/source authority, and external effect reconciliation.
+
+The TypeScript application-facing brain now exposes the durable mission replanning kernel through
+`AutonomousBrainFacade.runMissionReplanCycle()`, with provider-free launch-admission checks and
+metadata-only traced variants. The facade validates all mission step domains and exact tool
+identities, composes model selection, prompt learning, provider invocation, evaluator feedback,
+checkpoint/replan state, and caller-owned result storage, and covers the same twelve-domain
+surface. Its traced result keeps raw mission values available only through a direct caller-owned
+property; JSON logging and persistence receive trace digests, lifecycle status, route/plan
+identity, learning counts, and bounded failure metadata. Remaining deployment work is still
+external authorization, credential provisioning, durable multi-host storage, evaluator/source
+truth, and effect reconciliation.
+
+The same trace seam now spans restart-safe automatic batches: TypeScript exposes
+`executeAutoBatchResumableWithTrace()` and Python exposes
+`run_resumable_auto_batch_with_trace()`, with launch-admitted variants that re-check the full route
+union before rehydration. Rehydrated successes, fresh resumed work, checkpoint-driven omissions,
+and terminal aggregate status remain distinguishable metadata events; raw restored results and
+checkpoint values remain caller-owned.
+
+Both high-level SDK agents now also expose a coordinated persistence lifecycle. Restore and flush
+compose model inventory, runtime health, provider/model health when a coordinator exists, redacted
+activation, selection-promotion authority, evaluator calibration, memory, online learning, prompt
+learning, capability replay journals, route/planning/evaluation decision-cycle checkpoints, and
+long-horizon execution checkpoints in a fixed dependency order, then return one digest-bound
+component report. Strict
+failures preserve the typed redacted report; non-strict passes expose unconfigured and
+not-attempted components, while `require_all`/`requireAll` makes missing coordinators fail closed.
+Activation restore preserves revocation, identity, and monotonic revision fences, while a supplied
+selection store requires a configured selection lifecycle. Model inventory flush re-commits its
+last validated image only after a live catalogue digest check and never rediscoveries a provider.
+The lifecycle explicitly retains per-component CAS/atomic-store semantics rather than claiming a
+distributed cross-store transaction; deployment identity, approval ordering, encryption, and crash
+recovery between independent writes remain caller-owned. Capability-journal restore also
+rehydrates only metadata-only replay identities, and execution restore precedes admission so a
+restarted worker cannot resume with its duplicate-call barrier empty. Decision-cycle restore now
+precedes execution admission and flushes before capability replay state, while keeping all route,
+planning, evaluation, learning, and settlement values digest-only. Neither checkpoint restores
+prompts, provider responses, credentials, tool arguments, effect authority, or raw values;
+cross-store interruption remains an explicit reconciliation case.
+
+The TypeScript workflow path now reaches stage-contract parity with Python through
+`AutonomousWorkflowStageExecutionPlan`: every blueprint carries digest-bound capability,
+evidence, evaluator, and selected-tool metadata; staged dispatch rejects stale contracts and
+unselected tools; and checkpoint/receipt projections retain the stage-plan digest. The remaining
+deployment work is intentionally caller-owned: durable multi-host storage, provider/source
+availability, evaluator authority, credential provisioning, and effect reconciliation.
 
 The TypeScript autonomous facade now also has a digest-bound workflow portfolio compiler and
 bounded executor. It composes explicit per-domain blueprints into a dependency-checked portfolio,
@@ -56,6 +462,21 @@ worker renews its lease while private resolution/provider execution is in flight
 falls into the existing typed transport/reconciliation path. Production deployments still own
 the actual queue transport, distributed lease clock, approval authorization, and secret manager.
 
+The action-admission controller now has a complete keyless Python operator process in addition to
+the TypeScript/Python library surfaces: provider-free action-plan compilation (including an
+all-twelve-domain matrix), durable submit/status/review/handoff commands, exact-record optimistic
+concurrency, canonical atomic file persistence, and downstream-only handoffs. It still does not
+pretend that a reviewer digest is a credential or that a local file is distributed authorization;
+deployment-owned identity, queue transport, encryption, worker rehydration, provider/source/tool
+authority, evaluator truth, and effect approval remain explicit integration responsibilities.
+
+The downstream action handoff now has a public replay verifier in both SDKs. Workers can
+rehydrate a handoff and prove plan/admission continuity, admitted status, all-domain selected
+and requested-domain closure, fixed downstream-gate identity, and the outer digest before
+opening any later gate. The verifier intentionally does not promote a reviewer digest into
+authorization or claim provider/source/evaluator/effect readiness; those deployment boundaries
+remain explicit.
+
 The TypeScript runtime now includes a keyless provider protocol conformance gate. It runs all seven
 built-in provider presets through the actual request, credential, response, model-discovery, and SSE
 stream boundaries using an intercepted fetch fixture, and refuses missing credentials before any
@@ -63,6 +484,89 @@ fixture dispatch. Reports are bounded, digest-addressed, and metadata-only; no A
 request, response, or header is persisted. This validates protocol wiring in CI without claiming
 live quota, model availability, provider uptime, or user credential readiness, which remain
 deployment/runtime checks.
+
+Python now has protocol-conformance parity through `run_provider_protocol_conformance()` and
+`assert_provider_protocol_conformance(report)`. The gate runs all seven built-in provider families
+through the real `LLMRuntime` using an ephemeral local loopback fixture, covering credential
+refusal, provider-specific request/header policy, response normalization, model discovery, and
+SSE streaming. Its 56 checks and per-provider call counts are metadata-only; the synthetic
+credential and all request/response material are discarded before the digest is emitted. This is
+still a local protocol gate, not live provider availability, quota, permission, or user-key
+verification.
+
+Python now also has a digest-bound workflow portfolio compiler. `AutonomousAgent.plan_workflow_portfolio`
+composes explicit requests across all twelve reviewed domains, preserves dependency waves and
+cycle/partial/required-domain coverage, and projects each task's workflow, evidence, model-capability,
+and route identities without retaining task text or making provider/tool calls. The matching
+`verify_workflow_portfolio` replay catches task, dependency, workflow, evidence, policy, and
+catalogue drift after restart. Python now also exposes a bounded executor that replays the plan
+before dispatch, schedules ready items in deterministic dependency waves, propagates failed and
+approval states to dependents, and persists a metadata-only checkpoint after each wave. Restart
+requires a caller-owned rehydration callback that proves each successful result digest before
+dependent work resumes. Durable multi-host queues, lease ownership, and external authorization
+are still deployment work.
+
+Python portfolio admission now has parity with that boundary. `AutonomousAgent.admit_workflow_portfolio`
+replays a reviewed plan, projects keyless readiness, model capability/constraint eligibility, optional
+tool/evidence/calibration holds, and dependency-closed remediation into a bounded digest. It never
+resolves credentials or dispatches a provider, tool, connector, source, learner, or effect. Passing
+the admission image to `execute_workflow_portfolio` binds its digest into checkpoint identity, so a
+restart without the same reviewed gate fails closed before rehydration or new work. Live model health,
+approval UX, persistence encryption, distributed leases, and external authorization remain deployment
+responsibilities.
+
+Python now also has portfolio-level evidence supervision parity. `execute_workflow_portfolio_evidence`
+composes the existing evidence runtime across provider dependency waves, enforces item-domain and
+request-plan alignment, carries direct predecessor evidence digests, and keeps provider failure,
+pending evaluation, reconciliation, and dependency omission explicit. The resumable variant binds
+provider execution, evidence plan, request digests, evaluator identity, runtime policy, and item
+metadata into metadata-only checkpoints; journals and value rehydration are required for replay,
+so source adapters are never silently reacquired after a completed item. Local in-memory/JSON/CAS
+storage and controller seams are included; distributed transactions, source retention, and
+tenant-level authorization remain embedding-deployment work.
+
+Python now closes the next operational gap with a lease-fenced portfolio evidence work queue.
+`admit_autonomous_workflow_portfolio_evidence_work_items()` binds every item to the reviewed
+portfolio, optional admission, provider execution, evidence plan, request digest, checkpoint, and
+dependency wave. The local and CAS-backed queues enforce dependency closure, provider-status
+holds, lease ownership/renewal, expiry reconciliation, bounded retry/backoff, evaluator-pending
+requeue, cancellation, and metadata-only snapshots. JSON, transactional JSON, SQLite, local
+flush, atomic reload/CAS coordination, and caller-owned workers are exported and exercised over
+all twelve domains. The queue still does not provide distributed consensus, source/evaluator
+authority, credential storage, or effect authorization; those remain deployment responsibilities.
+
+Python evaluator calibration is now wired to the same learning gate. The provider-free
+`calibrate_autonomous_evaluators()` harness normalizes caller-owned evidence through the reviewed
+domain registry, uses deterministic calibration/holdout splits, computes bounded reliability bins,
+Brier/ECE/MCE and coverage metrics, and returns aggregate-only digests. Replay detects evaluator
+catalogue and case-set drift, while `admit_autonomous_evaluator_calibration()` is the explicit
+domain-scoped `admit_learning`/`hold_learning` decision. `AutonomousAgent.readiness()` and
+portfolio `readiness_options` accept the report so `require_calibrated_learning` cannot mistake
+observed bandit pulls for calibrated evaluator quality. Canonical JSON, CAS JSON, SQLite, registry,
+and restore/flush seams are included; labels, evidence, prompts, credentials, and provider values
+remain caller-owned and are never persisted by the calibration subsystem.
+
+Python delayed learning now has a single operational controller in
+`autonomous_learning_controller.py`. `AutonomousLearningController` enforces calibration
+admission before immediate episode/trajectory settlement, and again at queued-command dispatch,
+so direct low-level calls cannot bypass the all-domain gate. Its value-only feedback outbox has
+idempotent command digests, worker leases, stale-lease reconciliation, bounded retry/terminal
+failure states, and explicit applied result digests. `AutonomousLearningFeedbackWorker` settles
+precomputed evaluator decisions without provider replay; prompt/response/credential/tool/evidence
+payloads are rejected before enqueue. In-memory, canonical JSON, CAS JSON, SQLite, and restore/
+flush coordinator seams are exported and tested, including stale-writer fencing and lease
+recovery. Durable encryption, distributed consensus/scheduling, evaluator truth, and external
+authorization remain deployment responsibilities.
+
+Python now also has deployment-readiness parity with the TypeScript façade. The
+`AutonomousDeploymentReadinessAuditor` joins keyless agent readiness with credential-provisioning
+metadata and caller-owned persistence, queue, approval, external-auth, and telemetry assertions.
+It emits digest-bound capability and twelve-domain rows with explicit model, provider, credential,
+tool, evidence, and learning blockers, while refusing secret-shaped input and performing no
+provider, source, tool, queue, credential, or learning mutation. `agent.deployment_readiness()`
+provides the application entrypoint and canonical report validator; deployment initialization,
+encryption, distributed scheduling, external authorization, and source/evaluator authority remain
+deployment responsibilities.
 
 Online learner state now has a first-class TypeScript restart seam. The snapshot validator binds the
 bandit state digest and outer snapshot digest, rejects unsupported or credential-shaped fields, and
@@ -133,6 +637,10 @@ acquisition. Dependency-aware evidence work-queue items also carry the admission
 remote workers to verify plan → admission → provider execution → evidence continuity from
 metadata alone. Queue storage, leases, approval, and source/evaluator authority remain caller
 responsibilities.
+
+The worker adapters now also accept the verified action dispatch handoff as the rehydration
+boundary: the handoff digest is bound into the durable job identity, and sync/async workers
+refuse domain, plan, admission, gate-list, or outer-digest drift before runner invocation.
 
 Domain evidence adapters now also have a digest-bound selector. It supports deterministic
 lexicographic routing, caller-supplied health/success/reward/latency/cost scoring, conservative
@@ -231,6 +739,33 @@ project raw values transiently, and the returned digest projection excludes thos
 provider response. Unsettled evidence blocks invocation unless the caller opts into the bounded
 incomplete-evidence mode; offline tests cover the default, refusal, and all-domain paths.
 
+The Python façade now exposes the same source-to-brain composition through
+`AutonomousAgent.run_with_reviewed_evidence(...)`. It accepts a reviewed domain set, bounded
+acquisition requests, caller-owned `acquirer`/`projector`/`evaluator` adapters, an optional
+`AutonomousEvidenceRuntimeJournal`, and opaque credential/model handles. Three decisions remain
+independent: `approve_source_dispatch` gates source calls, accepted evaluator settlement gates
+the provider unless `allow_incomplete_evidence=True`, and `approve_provider_call` is forwarded to
+the normal model-selection/provider boundary. `run_mode="domain"` gives deterministic single
+domain execution, `run_mode="cross_domain"` binds 2--8 reviewed specialists, and the default
+`run_mode="auto"` reuses route-first intake. `to_dict()` retains only digests, statuses, route
+metadata, and retention posture; raw evidence values, prompt projections, and provider responses
+remain transient caller-owned objects. Journal replay requires `rehydrate_value`, and missing
+values become `reconciliation_required` rather than silently reacquiring a source. Credentialless
+tests cover refusal, replay, redaction, and provider-backed execution across all twelve domain
+plans, bringing the Python and TypeScript source-to-brain contracts into parity.
+
+Python evidence-backed execution now also has the restart boundary that previously existed only
+in the TypeScript façade. `run_resumable_evidence_backed(...)` and
+`AutonomousEvidenceBackedController` persist a digest-bound checkpoint immediately before the
+provider boundary, retain only plan/request/policy/result digests, and require the caller-owned
+evidence journal for replay. `InMemoryAutonomousEvidenceBackedCheckpointStore`, canonical JSON
+persistence, and transactional compare-and-swap persistence are available for local, browser,
+and service adapters. A restored provider result must pass the exact checkpoint digest through
+`rehydrate_provider_run`; otherwise the run remains `provider_reconciliation_required` until the
+caller explicitly opts into `resume_provider=True`. All twelve domain plans are exercised
+credentiallessly, including source replay, provider-pending recovery, tamper rejection, and the
+no-duplicate-dispatch invariant.
+
 The evidence-backed brain operation now has a restart-safe controller and checkpoint boundary.
 `runAutonomousEvidenceBackedResumable()` and `AutonomousEvidenceBackedController` bind the task,
 request set, run policy, evidence plan, prompt projection, and provider result to a bounded
@@ -328,6 +863,32 @@ drift and delegates to bounded reconciliation. Offline tests cover all twelve do
 profiles, required metadata, capability scope, approval, dissent, typed failures, secret rejection,
 and restart drift. This closes the practical domain-to-source composition gap while leaving source
 clients, credential sessions, evaluators, and truth authority caller-owned.
+
+The TypeScript catalogue now also has a digest-bound `AutonomousEvidenceNormalizerRegistry`, with
+`identity/1` and `builtin.<domain>.claim-projection/1` entries for all twelve domains. Default
+catalogue execution resolves the registry rather than requiring an ad hoc callback, and prepared
+plans fail closed when the registry changes. Claim projections retain only operation, bounded
+shape/count/byte metadata, transient value and shape digests, and explicit limitations; unsafe
+normalizer output and same-spec callback replacement are rejected before quorum.
+
+The catalogue is now a first-class brain input through TypeScript
+`AutonomousAgent.runWithDomainEvidenceCatalogue()`. It composes all selected workflow evidence
+requirements into digest-bound catalogue reconciliations, applies bounded parallel source
+dispatch, uses the built-in normalizer registry, and feeds a metadata-only evidence context into
+the ordinary routing/prompt/model/provider path. Source approval, evidence settlement, provider
+approval, and optional learning remain independent. A caller-owned prompt builder may explicitly
+bridge transient values, while the result projection remains digest-only and rejects catalogue,
+route, profile, or normalizer drift before dispatch.
+
+The Python façade now provides the matching `AutonomousAgent.run_with_domain_evidence_catalogue(...)`
+composition. It prepares every requirement for the selected domains, executes bounded catalogue
+fan-out, carries plan/catalogue/normalizer digests into the result, and routes settled evidence
+through domain, cross-domain, or automatic provider invocation. Source dispatch, evidence
+settlement, and provider approval remain independent; the default prompt is metadata-only and an
+explicit prompt builder is the sole opt-in for transient raw values. The Python result is also
+metadata-only when serialized and preserves the existing memory/learning options at the provider
+boundary. Offline parity tests cover all twelve domains, approval pauses, dissent blocking, raw
+value retention, and catalogue drift.
 
 The TypeScript SDK now also exposes `registerAutonomousDomainHttpEvidenceSource`, which composes
 the bounded HTTP transport with a typed domain source profile and catalogue route. It binds optional
@@ -1238,6 +1799,19 @@ surfaces. All twelve domains are covered by local and HTTP restart tests; duplic
 events, evaluations for unknown episodes, malformed normalized packets, broken chain/head/event
 digests, raw-content fields, and stale writers fail closed.
 
+The Python `AutonomousAgent` now composes the three restart-sensitive selection inputs at its
+application boundary: evaluator/bandit learning, episodic memory, provider/model health, and
+restart-safe runtime circuit/transport health.
+Each coordinator must be bound to the exact ledger/store used by the agent, and each restore or
+flush remains explicit so deployments can order evaluator feedback, health observations, and
+memory writes inside their own transaction. The façade exposes aliases for online learning and
+provider health, while all-domain restart tests verify CAS fencing, secret/task redaction, and
+misconfiguration refusal. The runtime-health coordinator is identity-bound to the exact
+`LLMRuntime`, snapshots only bounded transport metadata, and uses canonical digest validation plus
+CAS fencing. This closes the local integration gap without turning historical health into
+authorization or treating provider success as task reward; storage, identity, approval,
+encryption, and external reconciliation remain deployment-owned.
+
 Python objective state now has the matching goal handoff boundary. `AutonomousGoalLedger` snapshots
 carry the sorted current objective records and full lifecycle event chain with strict sequence,
 state-binding, retention, head, and outer digest checks. Restore rebuilds the SQLite current-state
@@ -1250,3 +1824,929 @@ provider/model observations can be snapshotted, restored atomically, and handed 
 conditional-write/HTTP adapter with stale-writer fencing. Its all-domain tests cover restart and
 tamper refusal while keeping request messages, response text, headers, credential handles, and
 model prompts outside historical transport evidence.
+
+The Python reviewed-evidence surface now also has a provider-backed LLM acquisition seam. The
+`AutonomousLLMEvidenceAdapter` binds a reviewed requirement to the existing `LLMRuntime`, supports
+static or context-selected models, structured response parsing, caller-owned prompt builders,
+credential handles or explicitly credentialless local providers, and metadata-only projections.
+`AutonomousLLMEvidenceAdapterRouter` requires an explicit per-domain mapping for cross-domain runs,
+and `AutonomousAgent.run_with_llm_evidence` / `run_resumable_llm_evidence` compose that mapping with
+source approval, evidence evaluation, provider approval, journaling, and restart checkpoints.
+The adapter rejects secret-shaped response fields and malformed provider output; no credential,
+prompt, or provider response is placed in durable evidence state. This closes the Python gap with
+the TypeScript LLM evidence adapter while leaving provider registration, credential onboarding,
+model selection policy, and external network authorization caller-owned.
+
+The next Python increment makes that seam an explicit autonomous decision boundary rather than a
+caller-owned callback convention. `AutonomousLLMEvidenceAdapterRegistry` freezes bounded,
+digest-addressed adapter manifests across all twelve built-in domains; a registry replacement
+invalidates prior selection plans instead of silently redirecting a run.
+`AutonomousLLMEvidenceAdapterSelector` supports deterministic lexicographic selection for
+reproducible operation and weighted adaptive selection from a validated health signal projection.
+`InMemoryAutonomousLLMEvidenceAdapterHealthStore` records a hash-chained acquisition/evaluation
+ledger, derives bounded success-quality-latency signals, and opens failing adapter circuits
+without persisting prompts, provider payloads, credentials, or raw error text. JSON and
+conditional-write coordinators provide restart recovery with compare-and-swap fencing.
+`AutonomousLLMEvidenceAdapterFailoverAcquirer` verifies the selection digest before every run,
+retries only bounded retryable provider failures, fails closed on malformed prompts or credential
+errors, records fallback metadata, and exposes explicit evaluator reward credit for online
+adaptation. The failover adapter implements the existing `acquire`/`project` contract, so it can
+be passed directly to `AutonomousAgent.acquire_evidence`, `run_with_llm_evidence`, or the
+resumable evidence boundary without widening durable state.
+
+Python now closes the adjacent operational-readiness gap with
+`AutonomousLLMEvidenceReadinessAuditor`. It projects coverage, the exact registry and selection
+digests, selected-manifest health, open-circuit state, bounded failover policy, and explicit
+`ready`/`degraded`/`blocked`/`missing` rows for every requested domain. Strict default policy
+requires observed health and a minimum success rate; `require_health=False` is an explicit
+degraded startup posture rather than an authorization shortcut. The canonical report supports
+strict round-trip validation and is composed into `AutonomousAgent.readiness()` through the
+caller-owned `evidence_readiness` configuration. No source, provider, model discovery, credential,
+or learner mutation occurs during the audit, and the report excludes prompts, requests, values,
+responses, keys, and raw errors.
+
+The next Python evidence increment now makes provider and source assumptions executable. Each
+`AutonomousEvidenceProviderContract` is digest-bound to one adapter manifest and declares the
+provider protocol, operations, domains, capabilities, source kinds, auth posture, freshness,
+pagination, and required request metadata. The registry verifies those bindings immediately before
+each selected failover candidate is invoked, so stale manifests, undeclared capabilities, and
+missing operations fail closed without entering the provider boundary. The source admission layer
+adds a caller-owned descriptor contract for source identity, digest, authority, status, observation
+time, expiry, citation, and limitations; its freshness/authority policy records accepted and
+refused decisions in a metadata-only hash chain. Canonical JSON and compare-and-swap persistence
+support process restart and stale-writer rejection. All twelve domains are covered by offline
+tests for contract coverage, failover, refusal, secret-shaped values, tamper resistance, and
+restart recovery. This remains an admission and provenance boundary—not provider authentication,
+source authenticity, or truth validation—and retains no credentials, prompts, responses, source
+values, or locators.
+
+The Python failover path now closes the retry-versus-failover distinction. A typed
+`AutonomousEvidenceRetryPolicy` classifies bounded transient failures, retries one exact reviewed
+route with capped exponential backoff, and emits attempt number, status, failure class, delay, and
+latency without persisting error text or values. `AutonomousLLMEvidenceSourceBoundary` composes the
+provider contract and metadata-only source admission inside every candidate route, including each
+retry, while the separate failover budget advances only for classifications permitted by the retry
+policy. Readiness serialization now round-trips the nested retry policy, and all-domain tests cover
+recovery, source receipts, refusal boundaries, no-raw projections, and retry telemetry.
+
+Python now adds the missing multi-source evidence adjudication layer. `AutonomousEvidenceSourceReconciler`
+creates a request-free, digest-bound plan for up to sixteen caller-owned routes, explicit quorum,
+bounded concurrency, parent evidence lineage, and a named normalizer version. Execution is approval-
+gated and produces deterministic `consensus`, `consensus_with_dissent`, `disagreement`,
+`insufficient_evidence`, or `failed` status without converting provider agreement into truth. Source
+acquisition and normalization failures become value-free per-route metadata, while transient source
+and normalized values remain available only to the caller. Strict plan/result round trips reject
+route drift, normalizer drift, tampering, credential-shaped metadata, oversized values, and missing
+approval. All twelve domains are covered by consensus/dissent, disagreement, failure, and bounded
+fan-out tests.
+
+The next autonomous brain increment closes the final implicit prompt boundary in both SDKs.
+`AutonomousPromptTemplate` binds a caller-owned renderer to a versioned domain/stage/capability
+manifest, template digest, optional output-contract digest, message bound, and byte bound.
+`AutonomousPromptRegistry` produces deterministic, digest-addressed selection plans with exact
+stage preference, capability-fit ordering, candidate identities, and registry-drift refusal.
+Rendering verifies the plan before executing the transient renderer, validates provider-neutral
+message roles and JSON safety, rejects credential-shaped fields, and exposes only a prompt digest
+and bounded metadata in its projection. Python and TypeScript LLM evidence adapters accept the
+registry/selection boundary and bind the rendered-prompt digest into provider idempotency. The
+all-domain tests cover selection, stale replacement, tampered plans, secret-shaped messages,
+metadata redaction, and offline invocation. This is still not provider authorization: provider
+credentials, model dispatch, source acquisition, tool execution, effects, evaluator credit, and
+online learning remain separate explicit gates.
+
+The built-in prompt pack now turns the generic prompt control plane into an immediately useful
+cross-domain starting point. `builtin_autonomous_prompt_registry()` and
+`builtinAutonomousPromptRegistry()` provide one content-addressed specialist renderer for every
+autonomous domain, with domain-specific reasoning, provenance, safety, coordination, multimodal,
+operations, governance, or evaluation guidance and capability labels. Built-in rendering accepts
+only a bounded reviewed objective, returns transient system/user messages, and remains behind an
+explicit registry selection plan; no provider, key, tool, effect, or learner authority is
+implicit. Python and TypeScript tests cover complete twelve-domain coverage, capability-bound
+selection, subset construction, duplicate/unsupported/missing-objective refusal, and projection
+redaction.
+
+Provider-assisted planning now uses the versioned prompt control plane as well. Single-domain,
+cross-domain, ordered-step, and plan-and-run planner calls accept prompt template/registry/
+selection controls at the explicit `planning` stage, verify stale selections before dispatch,
+and bind the transient planner prompt digest into the planner outcome identity. Planner messages
+remain transient and all result projections remain digest-only; offline Python and TypeScript
+coverage exercises approval gating, specialist prompt delivery, and all-domain planner parity.
+
+The next autonomous brain increment adds evaluator-driven prompt adaptation without turning
+provider output into self-authority. Python and TypeScript now expose a caller-owned
+`AutonomousPromptLearningState` containing only registry-bound prompt-arm identities, bounded
+pull/failure/reward statistics, and a capped replay ledger. `select_adaptive_autonomous_prompts`
+and `selectAdaptiveAutonomousPrompts` use deterministic UCB1 exploration: unobserved prompt
+variants are tried first, then the highest value-plus-exploration arm is selected with stable
+tie-breaking. `settle_autonomous_prompt_selection` and its TypeScript equivalent require an
+explicit evaluator id/version, bounded reward, pass signal, outcome digest, and optional
+settlement key; repeated keys replay without double credit. State and selection digests bind
+every choice to the current prompt registry and manifest, so replacement, stage drift,
+capability drift, malformed ledger fields, and stale plans fail closed. Direct and cross-domain
+execution plus provider-assisted planning accept the adaptive state and project only the
+selection digest, arm identity, generation, and policy; tasks, rendered messages, provider
+payloads, evaluator feedback, credentials, and secrets remain outside durable learning state.
+
+Durable workflow stages now consume the same adaptive prompt state. Python and TypeScript
+workflow executors forward state and exploration policy into every stage, child, and synthesis
+invocation, selecting against the actual stage/domain/capability request rather than one global
+answer arm. Workflow contract digests bind the prompt registry and exploration policy while
+allowing caller-settled reward state to advance between resumptions; registry replacement,
+exploration drift, stale state, stage drift, and malformed adaptive state still fail closed
+before provider dispatch. All-domain workflow coverage asserts adaptive selection metadata at
+the stage boundary, with no prompt text, task text, credentials, or provider payloads entering
+checkpoints or learning state.
+
+The prompt learner is now restart-safe at the SDK boundary. Python and TypeScript provide
+canonical, digest-bound JSON snapshots and registry-bound persistence coordinators. A plain
+adapter supports caller-owned durable storage; a transactional adapter requires compare-and-set
+semantics so concurrent workers cannot overwrite a newer learner generation. Restore, flush, and
+settlement are serialized, settlement generation advances happen only after persistence succeeds,
+and failed stale writes roll back the local state. Snapshots are value-only and bounded: they keep
+arm statistics, replay keys, registry identity, generation lineage, and retention markers, while
+rejecting prompt text, tasks, provider payloads, evaluator content, credentials, secrets, tampering,
+registry drift, malformed state, and oversized images. Focused Python and TypeScript coverage now
+exercises all-domain recovery, idempotent replay, stale-writer fencing, registry replacement, and
+tamper rejection.
+
+High-level application runs now consume the persistent prompt learner directly. Agent facades bind
+the coordinator's registry/state to direct and cross-domain execution, expose a bounded
+registry-verified `adaptive_selection` receipt in each result, and provide explicit selection
+extraction plus evaluator settlement helpers. Python and TypeScript coverage exercises all twelve
+domains, specialist fan-out, synthesis, generation persistence, restart recovery, secret/task
+redaction, and refusal of external state overrides. Provider success still cannot credit a prompt
+arm: only the caller's evaluator settlement advances the CAS-fenced learner.
+
+Provider planning is now settlement-visible at the same boundary. Single-domain, cross-domain,
+ordered-step, and automatic planning results expose the exact adaptive selection metadata used to
+render the transient planner prompt. Direct planning methods and automatic runs bind the configured
+persistent coordinator, including planning-specific option aliases, and reject registry/state
+replacement attempts. This closes the planning-to-learning handoff without persisting prompts,
+tasks, credentials, provider transcripts, or evaluator payloads; the remaining production work is
+caller integration of explicit evaluator signals and durable storage policy for each deployment.
+
+Python connector missions now close the same planning-to-execution gap for caller-owned DAGs.
+`run_connector_mission_with_provider_planning()` exposes a redacted ordered-step planning phase,
+an order-independent protected mission digest, exact dependency-preserving acceptance, and a
+separate connector approval phase. Review-required proposals stop before connector setup, and
+`accepted_plan_refinement` provides a caller-owned replay path after restart. The launch-admitted
+variant authorizes every mission domain before planner credential resolution; neither launch
+admission nor plan acceptance replaces the provider or connector approval gates.
+
+The TypeScript facade now has the same high-level automatic entrypoint as Python. `runAuto()` can
+route and execute any built-in domain or a bounded cross-domain fan-out, while preserving the
+provider-free blueprint boundary and returning a typed next action for route, plan, provider, or
+effect review. Its provider mode reuses the shared aggregate budget and existing plan-acceptance
+bridge, so callers do not get a second implicit planning or invocation path. The remaining
+deployment responsibility is still explicit credential, evaluator, effect, and durable-store
+integration rather than hidden SDK authority.
+
+The next TypeScript brain increment closes the remaining high-level automatic-cycle parity gap.
+`runAutoCycle()` and `runAutonomousAutoDecisionCycle()` resolve one deterministic or explicitly
+approved semantic route, choose the matching single-domain or cross-domain decision-cycle kernel,
+and pass the route back as a digest-verified override. The result retains the nested cycle,
+evaluator settlement, online learner/bandit updates, provider-planning review, and restart cursor
+without duplicating route logic or making provider success into reward. A shared cost budget spans
+semantic routing, planning, fan-out, synthesis, and execution. All built-in single-domain profiles,
+cross-domain execution, and semantic approval refusal are covered by offline TypeScript tests;
+credentials, evaluator evidence, effects, and durable stores remain explicit application
+responsibilities.
+
+Python now reaches the same application-facing automatic-cycle boundary through
+`run_auto_cycle()`, `AutonomousDecisionCycleResult`, and
+`AutonomousAutoDecisionCycleResult`. It route-freezes explicit, deterministic, or approved
+semantic intake, selects single-domain versus cross-domain execution, projects evaluator and
+settlement identities without provider payloads, and exposes protected in-process rehydration for
+caller-owned restart storage. Focused offline tests exercise all twelve domains, cross-domain
+online learning, semantic approval refusal, route tamper rejection, and no-duplicate-call resume.
+
+The automatic decision-cycle launch handoff is now complete in both SDKs. Python
+`run_auto_cycle_with_launch_admission()` and TypeScript
+`runAutoCycleWithLaunchAdmission()` compile the exact provider-free route, require every selected
+domain to be covered by the caller's reviewed admission, and then pass that route as a verified
+override into the normal evaluator/learning cycle. Matching replan wrappers are exposed in both
+runtimes. They refuse provider-assisted semantic routing until that classifier boundary is
+separately admitted, reject caller-supplied route overrides, preserve route abstention as a
+provider-free review result, and perform the admission check before credentials or provider work.
+The admission remains a metadata-only caller review and never authorizes a provider, source, tool,
+learner, credential, or effect.
+
+That automatic-cycle parity gap is now closed for evaluator-guided replanning as well. The
+TypeScript `runAutoReplanCycle()` / `runAutonomousAutoReplanCycle()` facade resolves the route
+once, dispatches to the matching replan kernel, preserves evaluator-driven bounded attempts,
+and forwards learning, provider planning, shared budgets, and restart rehydration. Coverage now
+includes all built-in single-domain profiles, a real bounded replan, cross-domain fan-out,
+semantic approval refusal, and terminal replay without a second provider call.
+
+The next depth layer remains deployment integration rather than hidden authority: connect these
+facades to caller-owned evaluator evidence, durable result/rehydration stores, effect
+reconciliation, credential provisioning, and production observability. Those integrations must
+continue to preserve the existing route, approval, secret, and value-only learning boundaries.
+
+The cycle evaluator bridge now closes the callback-plumbing gap between those built-in evaluator
+contracts and live TypeScript decision/replan cycles. `createAutonomousCycleEvaluatorBridge()`
+supports every built-in domain, ordinary and adaptive single-domain runs, and specialist/synthesis
+cross-domain credit while exposing only metadata to the caller's evidence factory. The registry,
+evaluator catalogue digest, policy digest, and explicit evidence boundary are covered offline;
+source acquisition, evaluator truth, and durable evidence storage remain caller-owned.
+
+Python now has the same reusable evidence boundary through
+`create_autonomous_cycle_evaluator_bridge()`. The bridge validates all twelve autonomous profiles,
+preserves exact single-domain evaluator identity, routes cross-domain specialist/synthesis steps
+through their exact profiles, exposes catalogue/policy digests, rejects inline evidence, and keeps
+provider completion outside reward. Caller-owned evidence acquisition, truth authority, durable
+evidence storage, and production evaluator operations remain deployment work.
+
+Python now also closes the all-domain pre-dispatch contract-audit parity gap.
+`agent.domain_audit()` and `audit_autonomous_domain_contracts()` verify profile/workflow
+registries, default-capability closure, stage DAG/evidence/evaluator contracts, exact tool
+binding posture, and caller-owned evidence coverage for every built-in domain. Reports are row-
+and aggregate-digest-bound and perform no provider/source/tool/credential/queue/learning activity.
+The seven Python profiles whose default capability was previously absent from their declared
+catalogue are now closed over that capability. Runtime availability, source truth, authorization,
+and deployment observability remain explicit external gates.
+
+The Python execution controller now matches the TypeScript accounting contract for the remaining
+runtime boundary: persisted provider-failover counters, explicit digest-only replan events,
+retryability-aware provider receipts, stop-on-error halting, approval pause semantics, and direct
+input validation all survive restart through the hash-chained journal. Fallback sessions charge
+one failover transition on their first turn and only provider-call budget on later continuation
+turns. Adversarial and all-domain coverage is included in the SDK test suites; production
+credential resolution, evaluator truth, external effects, and durable storage remain caller-owned.
+
+Shared execution-controller transitions are now linearizable in Python as well as TypeScript.
+Concurrent specialist workers cannot race provider/tool/cost counters or bypass a failover/replan
+ceiling; the lock protects only metadata state and does not add provider, credential, tool, or
+effect authority. Offline coverage exercises concurrent admissions and preserves the existing
+metadata-only restart contract.
+
+Python now closes the cross-SDK control-plane supervision gap. `AutonomousBrainControlPlaneMonitor`
+and its async counterpart build on `BrainControlClient` to provide bounded status fan-out across
+all twelve domains, hash-chain event cursor validation, explicit approval routing, and bounded
+reached/timed-out polling. Unsafe projection fields are refused before return, and task text,
+prompts, credentials, provider responses, tool arguments, and effect values remain outside the
+monitor. This is operator lifecycle infrastructure, not a provider worker or authorization oracle.
+
+Python now adds the unified `agent.launch_preflight()` handoff. It composes the all-domain
+structural contract audit, model/provider/evidence readiness, and deployment capability gates into
+one digest-bound report with per-domain combined state, source-report digests, blocker/warning
+counts, bounded remediation, and an explicit zero-dispatch ledger. The default posture remains
+blocked or partial until caller-owned inventories and deployment gates are supplied; a
+`ready_for_review` row still does not grant provider, source, tool, effect, credential, or learner
+authority.
+
+TypeScript now closes the corresponding facade gap with `AutonomousBrainFacade.launchPreflight()`.
+It composes the existing domain audit, keyless readiness projection, and deployment audit for all
+twelve domains, validates the aggregate digest and zero-dispatch posture, and refuses secret-shaped
+capability metadata before any provider/source/tool boundary.
+
+The next handoff now records explicit review decisions as well. Python's
+`agent.launch_admission()` and TypeScript's `brain.admitLaunchPreflight()` bind `approve`/`hold`
+to the exact preflight digest, retain all twelve domain admission states, require an external
+authorization digest for approval, and never turn the record into provider, source, tool, learner,
+credential, queue, or effect authority. Deployment-owned schedulers still decide whether and how
+to bind that review record to execution.
+
+Launch admission is now executable at the high-level boundary as well. TypeScript direct,
+decision-cycle, and adaptive-cycle facade entrypoints validate the admission after provider-free
+route planning and before connector/provider dispatch; Python direct and cross-domain wrappers do
+the same, and `run_auto_with_launch_admission` covers automatic single/cross-domain routing. The
+automatic paths reject provider-assisted semantic routing until that classifier boundary is
+separately reviewed, preventing a provider call from occurring before a domain-scoped launch
+decision. Provider, source, tool, learner, queue, credential, and effect authority remain
+independent deployment controls.
+
+The next-action handoff is now executable as metadata as well. Python `agent.action_plan(...)` and
+TypeScript `brain.actionPlan(...)` project the existing route, evidence plan, domain policy, task
+intent, and task decision into one digest-bound single-domain or cross-domain action plan. The
+plan deterministically prioritizes route review, policy resolution, evidence acquisition, plan
+acceptance, effect review, provider approval, and evaluator settlement, and round-trips with
+candidate-level tamper checks across all twelve domains. It remains provider/source/tool/effect
+free; production deployments still own the caller-controlled admission, credential, evaluator,
+queue, observability, and reconciliation integrations.
+
+The action-plan boundary now has an explicit admission/execution handoff. Python
+`agent.admit_action_plan(...)` / `agent.execute_action_plan(...)` and TypeScript
+`brain.executeActionPlan(...)` replay the plan from transient task and route inputs, bind review
+gates to the plan digest, and return before dispatch when any gate is missing. An admitted plan
+selects the existing provider, evidence-first, workflow, planning, or cross-domain kernel while
+leaving credentials, evidence, evaluator settlement, connector execution, effects, and durable
+authorization caller-owned. Remaining deployment work is to connect these handoffs to an
+application-owned authorization store and operator UI, then exercise them in the live worker
+and release environments.
+
+The action-plan deployment seam is now implemented as a durable review ledger in both SDKs.
+`InMemoryAutonomousActionAdmissionLedger` stores revisioned plan/admission records, reviewer
+authorization digests, reason digests, and predecessor links; a review derives a fresh admission
+from the exact stored plan instead of mutating approval state in place. Canonical JSON snapshot
+adapters, generation links, and transactional compare-and-set fencing support restart and
+multi-writer recovery. All twelve domains and cross-domain plans are covered, and the ledger
+remains metadata-only. The remaining production responsibility is wiring the caller's identity
+provider/operator UI and secret/effect/evaluator systems to these explicit records.
+
+The operator review surface now sits directly above the ledger in both SDKs. The controller
+projects all twelve domains, requires an external authorization digest plus an expected record
+digest for review, rejects held/blocked records at the dispatch-handoff boundary, and returns
+separate downstream credential, provider/source, tool/effect, and evaluator gates. It remains a
+projection and handoff API rather than an execution or authorization oracle; deployment identity
+verification and the actual UI remain caller-owned.
+
+The high-level brain façades now consume that verified handoff directly as well. Python
+`execute_action_handoff()` and TypeScript `executeActionHandoff()` replay the transient request,
+reproduce the admitted gate set, and delegate to the existing route/model/provider boundary for
+all twelve built-in domains plus cross-domain plans. Handoff continuity still does not replace
+credentials, provider/source readiness, evaluator evidence, tool/effect authority, or durable
+deployment authorization.
+
+Long-horizon goals now have the same reviewed execution seam. Both goal-agent runtimes accept a
+caller-owned `action_handoff_resolver`; it can return a plain handoff or a `{handoff, request}`
+binding for transient cross-domain routing inputs. The worker validates the handoff before claim
+and the runtime revalidates it at execution, then invokes the high-level handoff method rather than
+falling back to an unreviewed raw run. The binding is excluded from goal/schedule/control-loop
+projections, while the existing caller-owned credentials, provider/source, evaluator, tool/effect,
+and deployment authorization responsibilities remain explicit. Remaining production work is still
+application wiring: persist protected task/request rehydrators, connect real identity/approval
+stores, and exercise restart/reconciliation behavior against the deployment's durable worker.
+
+The goal worker/restart seam is now stricter. Both SDKs verify that protected task rehydration
+matches the immutable goal `task_digest` before claim, and journal prepared/claimed/dispatch/settled
+events can carry only a task digest plus an `execution_binding_digest` for transient parameters
+(including action handoffs). Raw task text, handoffs, credentials, prompts, provider values, and
+results remain excluded. `activeFor`/`active_for` plus `assertNoActive`/`assert_no_active` fence a
+new worker pass until active pre- or post-dispatch events are recovered/reconciled, so a restart
+cannot silently substitute a different task or handoff. Tests cover drift refusal, digest propagation,
+metadata-only persistence, ordered coordinator recovery, tamper rejection, and the all-domain
+worker path. `AutonomousGoalRecoveryCoordinator` now composes journal and control-loop startup in
+both SDKs: it restores the journal first, reconciles active boundaries, flushes that reconciliation
+through the journal CAS fence, and only then exposes the loop checkpoint. Its sealed report and
+guarded resume helper preserve the metadata-only boundary and make post-dispatch uncertainty
+explicit. Remaining production work is application wiring: durable protected rehydrators, real
+identity/approval stores, deployment-level ledger/journal atomicity, and external resolution of
+genuinely uncertain provider/effect outcomes.
+
+Capability-level automatic intake is now also shared by both SDKs. After domain routing, a
+provider-free vocabulary router proposes a more specific reviewed capability for every built-in
+domain, including debugging versus implementation, lineage versus analysis, rollback versus
+observability, biomedical safety versus provenance, multimodal alignment, specialist synthesis,
+and evaluation replay. Confidence and margin thresholds abstain instead of guessing, explicit
+caller capabilities remain authoritative, and the selected value flows into task intent,
+model-selection context, learning identity, and tool planning. The proposal is digest-bound and
+metadata-only; task text, prompts, credentials, provider payloads, tool arguments, and effects
+remain caller-owned. The remaining production responsibility is still to connect those reviewed
+capabilities to deployment-specific adapters and evidence sources rather than treating a lexical
+classification as execution or domain truth.
+
+Cross-domain capability propagation is now aligned across SDKs: each specialist child resolves
+its own capability before tool-portfolio ranking, and the selected/default value is bound into its
+task intent, model-selection context, learning identity, and compiled workflow-step arguments.
+The open deployment work is to bind these reviewed child contracts to caller-owned tool/source
+catalogues, evaluator evidence, and approval records; the deterministic route remains neither
+provider authority nor effect authority.
+
+TypeScript now exposes provider invocation and failover receipts on autonomous execution results,
+matching the existing Python provider-audit seam. The records are ordered, digest-bound,
+metadata-only projections of provider/model attempts, turns, token and cost counters, latency,
+failure classification, request-id digests, and bounded failover strategy; direct runs, tool loops,
+all twelve built-in domains, and cross-domain child aggregation are covered by tests. This closes
+the SDK result-observability gap without treating transport success as task correctness. Remaining
+deployment work is to connect these receipts to caller-owned evaluator settlement, durable trace
+stores, provider cost ledgers, and operator policy surfaces; credentials, raw payloads, reward, and
+effect authority remain explicitly outside the SDK receipt boundary.
+
+Both SDKs now also expose conservative run-trace analytics above the verified metadata journal.
+`analyze_autonomous_run_trace()` / `analyzeAutonomousRunTrace()` aggregate all twelve reviewed
+domains plus observed provider and model dimensions into digest-bound reports with terminal
+coverage, status/phase counts, failure codes, measured latency quantiles, token observation
+counts, tool-call counts, attribution gaps, and deterministic threshold alerts. Missing metrics
+remain explicitly `null`/`unmeasured`; the layer does not infer cost, provider health, task
+correctness, or domain truth. Reports retain only metadata and carry explicit authority and
+retention markers. A bounded `AutonomousRunAnalyticsLedger` now provides longitudinal ingestion,
+retained-window deduplication/conflict classification, all-domain/provider/model rollups,
+eviction accounting, digest-verified restore, canonical JSON persistence, and optional CAS
+fencing in both SDKs. It still does not become an evaluator, provider-health oracle, billing
+ledger, or alert delivery service. Remaining deployment work is to connect the ledger to
+caller-owned tenant authorization, durable placement/backup, evaluator settlement, provider
+billing, and external health sources without weakening the value-free boundary. The new
+run-observability controllers close the alert-routing seam as a caller-owned, digest-keyed sink:
+delivery remains explicitly at-least-once and downstream idempotency is keyed by the emitted
+`alert_id`; exactly-once notification is not claimed by the SDK.
+
+The TypeScript facade now also exposes `createRunAnalyticsController()`, which composes the
+verified trace analytics function with the bounded longitudinal ledger. It requires restore before
+reads or ingestion, persists accepted reports through caller-owned JSON/CAS storage, classifies
+duplicates and source conflicts explicitly, and separates in-memory acceptance from persistence
+failure. Summary/history/snapshot/integrity projections retain only all-domain/provider/model
+metadata; prompts, responses, evidence, tool payloads, credentials, and cost claims remain out of
+the ledger.
+
+The Python SDK now closes the corresponding effect-safety gap. `AutonomousEffectBoundary` gives
+approved non-read-only domain tools a deterministic effect identity, caller-visible idempotency
+key, hash-chained `prepared`/`dispatching`/`dispatched` markers, conservative uncertain-failure
+handling, resolver-gated replay, and canonical compare-and-set snapshots. `AutonomousAgent` and
+`AutonomousDomainToolRuntime` accept the boundary, while an optional three-argument
+`effect_executor` receives the transient idempotency context. The boundary is metadata-only and
+never stores arguments, outputs, prompts, tasks, provider payloads, credentials, or raw errors;
+all twelve built-in domains are covered by integration tests. The remaining deployment work is
+still caller-owned effect-store/resolver wiring, external idempotency enforcement, durable ledger
+placement, and operator reconciliation policy; exactly-once execution is not claimed by the SDK.
+
+Evaluator-gated memory now closes its high-level prompt loop in both SDKs. Direct, automatic,
+workflow, and cross-domain runs can query stable consolidated lessons per routed domain and resolve
+their digest through an explicit caller-owned callback immediately before prompt assembly. Local
+lessons remain domain-scoped, explicitly portable lessons are deduplicated across fan-out, and
+candidate/stale/conflicted rows are excluded. The prompt receives transient advisory text with
+non-authority/non-effect framing, while run projections and selection/request identity retain only
+lesson IDs, lesson digests, and a consolidated retrieval digest. Required mode fails closed when
+the index or resolver is unavailable; default mode preserves advisory memory failure semantics.
+All twelve built-in domains have approval-only integration coverage without API keys or provider
+dispatch. This increment adds the context-aware resolver bridge, canonical bounded JSON/in-memory
+lesson-text adapters, and a restart-safe evaluator-to-consolidator scheduler in both SDKs. Resolver
+authorization now sees lesson scope, eligible domains, capabilities, risk classes, confidence, and
+requested domain/capability before text is read; the consolidation and scheduler snapshots remain
+text-free, and every queue lease/job/report identity is tamper-detected. Scheduling is explicit,
+priority/age deterministic, retry-bounded, quarantined after exhaustion, and projected across all
+twelve domains. Remaining deployment work is to supply encryption, tenant identity/access control,
+protected rehydration, and external exactly-once effect reconciliation; the SDK does not invent
+those authorities.
+
+Protected rehydration is now implemented as a shared SDK boundary in both runtimes. A caller can
+bind an opaque reference to tenant, actor, session, authorization, purpose, domain, expiry, and
+the digest of a value held in caller-owned storage. Resolvers and optional authorizers are invoked
+only after context and replay checks; one-time references are consumed only after the returned
+value matches its expected digest, failures are bounded and quarantineable, and snapshots contain
+no protected value. The memory-consolidation scheduler now optionally binds its durable policy,
+claims, and worker results to the same execution-context digest, so a restored queue cannot be
+loaded under another tenant or authorization context. This closes the SDK contract gap while
+leaving vault encryption, identity issuance, authorization decisions, and external effect
+ reconciliation explicitly deployment-owned.
+
+The shared protected boundary now also has a receipt adapter in both SDKs. Evidence runtimes
+and connector-backed workflow/mission executors can derive an opaque, context-bound reference
+from a metadata-only receipt and rehydrate a caller-owned value without requiring every caller
+to implement a separate resolver callback. Explicit legacy callbacks remain supported and take
+precedence; the protected adapter is a deterministic fallback that binds purpose, domain, and
+the receipt's value/payload digest. All twelve domains are covered by cross-SDK adapter tests,
+and the TypeScript domain catalog is isolated into a dependency-leaf module so importing the
+public barrel cannot trigger an autonomous-facade module cycle. The vault, identity provider,
+authorization authority, encryption, and external effect reconciliation remain deployment-owned.
+
+The same fallback now reaches the long-horizon goal agent. When an application omits a bespoke
+task resolver, each goal is reconstructed through a caller-owned protected `goal_task` receipt
+just before dispatch, while an explicit resolver still takes precedence. Goal identities are raw
+UTF-8 task SHA-256 digests, so the adapter now supports bounded `canonical_json` and `utf8_sha256`
+schemes and binds the selected scheme into the opaque reference. This closes the goal-runtime
+rehydration seam without putting task text, private runtime handles, credentials, or provider
+payloads into the ledger, journal, snapshot, or result. Production deployment still owns the
+resolver store, authorization context, rotation, and uncertain external-effect reconciliation.
+
+The restart-safe high-level brain batch controller now consumes the same protected receipt
+boundary. `AutonomousBatchProtectedRehydration` / `AutonomousBrainBatchProtectedRehydrator`
+receives only batch identity digests, resolves a caller-owned protected result, optionally decodes
+it into a typed runtime value, and lets the batch engine perform its final successful-status and
+metadata-only item-digest checks. Explicit batch rehydrators remain authoritative. Receipt identity
+drift, tenant/authorization mismatch, expiry, replay, digest mismatch, and invalid decoded results
+fail closed before new provider work. Python and TypeScript tests cover partial restart, explicit
+callback precedence, protected result lookup, tampering, and all twelve built-in domains. The
+remaining deployment responsibility is still the encrypted result store, identity/authorization
+authority, retention/rotation policy, and reconciliation of genuinely uncertain external effects.
+
+The protected receipt boundary now reaches the durable high-level brain workers. Python sync/async
+remote workers and the TypeScript durable worker can reconstruct private job resolutions from
+caller-owned receipts bound to job/spec/domain/capability/attempt/approval identity, with explicit
+resolver precedence and async lookup support. Focused tests cover all domains, tampering, approval
+gates, and metadata-only persistence. Deployment work remains the caller-owned receipt/vault,
+authorization, rotation, and external-effect reconciliation integration.
+
+The TypeScript remote control-plane worker now shares this path with the local worker: callers may
+provide `protectedRehydration` without implementing a bespoke `resolve` callback. Remote tests
+rehydrate every built-in domain through the queue, verify approval-gated restart behavior, reject
+tampered spec identity before dispatch, and prove explicit resolver precedence. The remaining
+deployment work is still intentionally external: receipt storage, encryption, identity and
+authorization issuance, retention/rotation, and reconciliation of uncertain effects.
+
+Protected provider-effect reconciliation is now implemented in both SDKs. A caller-owned receipt
+resolver can rehydrate provider status through the shared tenant-bound protected boundary while
+the journal retains only effect identity digests and lifecycle metadata. The receipt is bound to
+effect/call/provider/operation/attempt identity, raw idempotency keys remain transient, and all
+built-in domains are covered by tamper and replay tests. Remaining deployment work is the actual
+provider status authority, encrypted receipt storage, identity/authorization issuance, rotation,
+and operator policy for genuinely uncertain external effects.
+
+Python now also provides `SQLiteAutonomousEffectJournal` as a local durable event ledger for that
+boundary. WAL/full-sync transactions allocate contiguous sequences and hash-chain predecessors
+atomically across processes, while strict reopen validation detects non-canonical event JSON,
+index drift, digest tampering, and chain forks before dispatch recovery. The adapter persists no
+effect arguments, results, prompts, credentials, or provider envelopes; distributed leases,
+idempotent external APIs, and status reconciliation remain deployment-owned.
+
+Generic provider-neutral evidence adapter orchestration is now at parity across the SDKs. Python
+exposes `AutonomousEvidenceAdapterRegistry`, digest-bound deterministic/weighted selection plans,
+metadata-only health observations with hash-chained JSON/CAS restart persistence, an adaptive
+health controller, and explicitly budgeted retry/failover over reviewed candidates. The surface
+covers all twelve built-in domains and rejects registry/selection drift, open circuits, tampered
+snapshots, unsupported signals, and secret-shaped metadata before source dispatch. The existing
+LLM-specific orchestration remains available for prompt/model-backed evidence; the generic layer
+is for caller-owned file, browser, database, scientific, enterprise, and connector adapters.
+Deployment responsibilities remain unchanged: source truth, credentials, approval, encrypted
+storage, distributed leases, external network authorization, and evaluator authority stay outside
+the SDK.
+
+Generic evidence execution is now composed in Python as well as TypeScript. The reviewed execution
+controller gates source dispatch, rechecks readiness, enforces provider/source contracts, and
+drives the existing runtime through bounded failover. The resumable controller adds canonical
+checkpoint/CAS persistence and append-only replay revisions, so the all-domain facade can recover
+without issuing an implicit duplicate source call. Remaining deployment work is still caller-owned:
+credential storage and rotation, source truth, identity and authorization, distributed leasing,
+encrypted raw-value retention, and reconciliation of uncertain external effects.
+
+The high-level TypeScript agent now composes the same restart-safe LLM transport-health boundary
+already available in Python. `runtimeHealthPersistence` must be bound to the exact `LLMRuntime`,
+and `restoreRuntimeHealth()` / `flushRuntimeHealth()` (plus transport-health aliases) explicitly
+restore and CAS-flush provider/model counters and circuit continuity. This keeps provider
+availability recovery aligned across SDKs without restoring credentials, prompts, responses,
+evaluator rewards, or authorization; provider registration and deployment checkpoint ordering
+remain caller-owned.
+
+The TypeScript `AutonomousAgent` now also retains one lazy, serialized
+`AutonomousModelInventoryCoordinator` for its lifetime. Repeated high-level inventory refreshes
+reuse the last successful CAS expectation, and `restoreModelInventory()` rehydrates the validated
+metadata-only catalogue while preserving that fence for the next refresh. This removes the false
+stale-writer failure caused by constructing a fresh coordinator for every refresh and covers the
+same all-domain model-discovery/restart boundary without restoring credentials, provider payloads,
+or evaluator quality claims.
+
+Evaluator calibration is now a first-class lifecycle on both high-level agents. Python and
+TypeScript can register validated aggregate reports, restore them through a registry-bound
+coordinator, and flush them with the last snapshot digest retained for CAS fencing. Readiness can
+resolve a specific report by digest after restart, while rejecting missing reports, conflicting
+inline/digest inputs, and cross-registry persistence bindings. The lifecycle deliberately persists
+only evaluator metrics, report digests, and registry metadata; calibration cases, labels, evidence,
+prompts, responses, credentials, and evaluator authority remain caller-owned. Learning admission
+continues to fail closed until the explicitly selected report is validated and admitted.
+
+Python model inventory now matches the TypeScript restart lifecycle. The high-level agent lazily
+retains one store-bound persistence coordinator, persists refreshes with the last successful
+snapshot digest, restores the metadata-only catalogue in place, and fences stale writers with
+compare-and-swap. A failed refresh persistence operation rolls the live catalogue back to its
+pre-refresh image. All-domain coverage remains provider-discovery metadata only: credentials,
+circuits, quality priors, evaluator evidence, and selection authority are not restored from the
+inventory snapshot.
+
+Both SDKs now expose a bounded recovery planner for the failure path that sits after route,
+provider, tool, response-quality, and mission decisions. `planAutonomousRecovery()` /
+`plan_autonomous_recovery()` converts an explicit value-only status observation into ordered next
+actions, stable reason codes, retry-budget state, and domain-specific escalation guardrails for
+all twelve domains. Reconciliation outranks retry, missing credentials remain a collection step,
+and exhausted/unclassified failures stop and escalate. The plan is digest- and retention-validated
+and contains no task text, prompts, provider values, credentials, tool arguments, or effect data;
+it is a guidance handoff only and does not execute recovery or grant authority.
+
+The recovery path now also has a durable review process in both SDKs. `AutonomousRecoveryHandoffLedger`
+accepts idempotent plan/run-digest/attempt submissions, retains only bounded metadata, and exposes
+revision-fenced decisions for retry approval, uncertain-effect reconciliation, escalation, and
+closure. Credential collection cannot be bypassed by retry approval, reconciliation cannot be
+downgraded into a provider retry, and all transitions are independently digest-bound. Canonical
+snapshot persistence and optional compare-and-swap coordinators restore the queue without replaying
+provider work. The control plane remains intentionally non-executing: deployment-owned request
+rehydration, provider/source/tool/effect authority, external reconciliation, reviewer identity,
+encryption, tenant isolation, retention, leases, and evaluator settlement are still required.
+
+Outcome-integrity reliance gating is now implemented in both SDKs. `assess_outcome_integrity()` /
+`assessOutcomeIntegrity()` joins exact run/output identity, explicit claim bindings, claim/evidence
+fusion, and optional cross-domain synthesis alignment into one provider-free contract. It rejects
+output/response drift, incomplete or unbound claims, missing required synthesis review, and
+cross-domain assessment drift, while retaining only digests, counts, statuses, and deterministic
+next actions. It does not extract claims from prose, establish external truth, authorize source,
+provider, tool, effect, or evaluator work, or retain raw values. Remaining production work is to
+connect this final reliance projection to caller-owned review/admission surfaces and domain-specific
+claim/evidence adapters without turning the SDK into a truth oracle.
+
+The TypeScript high-level agent now has launch-admitted direct and automatic execution parity with
+Python. `runWithLaunchAdmission()` and `runAutoWithLaunchAdmission()` compile the deterministic
+route before credentials, provider planning, model selection, prompts, tools, or effects are
+reachable, require admission for every selected domain, and reuse that exact route at dispatch.
+`authorizeAutoLaunchAdmission()` exposes the same provider-free handoff for deployments that need
+to collect credentials only after operator approval. Confidence, margin, maximum-domain, hint,
+and cross-domain controls now propagate through TypeScript run, automatic, blueprint, and launch
+gate paths. Semantic routing and caller route overrides remain separately reviewable provider
+boundaries. This closes the SDK execution-admission gap; deployment identity, credential storage,
+and external approval authority remain caller-owned.
+
+Evidence-first execution now composes that admission model with the TypeScript provider boundary.
+Both reviewed evidence facades accept `runMode: "domain" | "cross_domain" | "auto"`; automatic
+and cross-domain modes bind execution to an exact provider-free evidence-scope route, preserve
+source/provider/evaluator/tool/effect approval separation, and expose richer transient result
+handles without leaking them into metadata projections. Cross-domain evidence is bounded to eight
+non-synthesis children, and catalogue-backed execution has the same route and mode semantics as
+adapter-registry execution. Tests exercise every built-in domain, exact coding+data fan-out,
+catalogue parity, and semantic-rerouting refusal. Remaining work is still deployment-owned:
+distributed leases, encrypted raw-value retention, and caller-owned source/evaluator truth
+adapters.
+
+The evidence-backed restart controller now understands all three TypeScript handoff modes. It
+hash-binds automatic envelopes and cross-domain fan-out results in the existing provider-result
+checkpoint, and accepts them only through caller-owned `rehydrateAutomaticRun` or
+`rehydrateCrossDomainRun` callbacks whose results match the task route and checkpoint digest.
+Completed automatic planning, specialists, and synthesis therefore do not replay after restart;
+direct-mode provider rehydration remains backward compatible. The remaining deployment-owned
+boundary is protected storage and retrieval of those raw result envelopes.
+
+Launch admission now reaches the evidence boundary in TypeScript as well: registry-backed and
+catalogue-backed `...WithLaunchAdmission()` facades authorize every declared source domain before
+preparation or acquisition, while retaining independent source-dispatch and provider-call
+approvals. The all-domain test matrix confirms that denied scopes make zero source calls and that
+provider approval can still pause after approved evidence. Deployment identity, external approval,
+and source credentials remain caller-owned.
+
+The high-level TypeScript and Python agents now also own an optional persistent adaptive
+tool-selection state. Evaluator-approved domain/capability/tool rewards can be restored and flushed
+through canonical digest-chained JSON with optional CAS fencing, and the lifecycle includes this
+component when configured. The projection is deliberately metadata-only; raw tool arguments,
+outputs, prompts, tasks, credentials, and evaluator prose remain caller-owned. Future deployment
+Portfolio planning now adds a caller-provided risk ceiling and a bounded, deterministic decision
+audit: each stage retains its best eligible tool plus a prioritized rejected alternative with typed
+reasons for risk, approval, allow-list, read-only, or learning gates. The ceiling propagates through
+direct, automatic, and cross-domain plans in both SDKs without becoming authorization. Remaining
+deployment work is to bind this adapter to encrypted tenant-scoped storage and operational
+retention policies.
+
+The Python direct cross-domain runtime now closes its bounded fan-out gap. `max_parallelism` can
+overlap independent specialist provider calls up to the shared eight-worker ceiling while keeping
+accepted child order deterministic, waiting for every child before synthesis, and charging one
+linearizable execution controller for aggregate provider/tool/failover/step/cost budgets. The
+result exposes the ceiling as metadata only. Evaluator credit, bandit updates, and replanning stay
+ordered because their delayed-credit semantics depend on deterministic settlement. Remaining
+deployment work is still caller-owned worker placement, durable result rehydration, and external
+provider/effect reconciliation.
+
+Python execution snapshots now also have a first-class `SQLiteAutonomousExecutionSnapshotPersistence`
+backend. It combines canonical JSON validation with WAL/full-sync SQLite transactions and atomic
+digest compare-and-swap, allowing local multi-process workers to fence stale flushes and reopen
+metadata-only state safely. It does not claim distributed leases, encryption, tenant isolation,
+or external provider/effect truth; those remain deployment integrations. The TypeScript runtime
+continues to consume the portable text-store contract so cross-SDK snapshot semantics remain
+unchanged.
+
+The Python evidence work queue now closes the equivalent stale-writer gap in its SQLite adapter.
+`SQLiteAutonomousEvidenceWorkQueuePersistence` uses WAL/full-sync transactions, bounded busy waits,
+and an atomic digest compare-and-swap operation exposed to the queue persistence coordinator. A
+competing restart can therefore win or receive an explicit conflict; it cannot silently erase a
+newer lease, retry, or reconciliation state. This remains local process fencing, not distributed
+consensus, and does not persist source values, prompts, credentials, or evaluator payloads.
+
+The same Python backend now supports `SQLiteAutonomousExecutionJournal`, which transactionally
+allocates event sequences and hash-chain predecessors for direct multi-process appenders while
+preserving the JSONL journal interface and portable snapshot format. This closes metadata-history
+forking, not task-lease or policy-counter coordination: deployment-owned leases must still fence
+duplicate rehydrated work, and ambiguous provider/effect outcomes still require external
+reconciliation.
+
+Cross-domain provider-failure isolation is now symmetric across Python and TypeScript. A provider
+or credential boundary exception raised by a specialist or synthesis leg becomes a bounded
+metadata-only result, preserving error class/code, retryability, circuit state, and status code
+while excluding exception text, prompts, credentials, provider responses, and wire payloads.
+Partial fan-out keeps healthy siblings available for synthesis; strict fan-out returns an explicit
+`child_failed` result without synthesis, and evaluator-driven Python learning does not settle
+rewards or memory for failed items. Malformed input, programming, and configuration failures
+still propagate as hard failures. This closes the runtime gap between the documented
+`allow_partial` contract and actual provider outages; external retry orchestration, protected
+raw-result storage, distributed leases, and provider reconciliation remain deployment-owned.
+
+Evaluator-driven TypeScript cross-domain learning now follows the same partial settlement rule as
+Python: `children_partial` runs evaluate and settle only completed specialist and synthesis
+episodes, preserve execution order, and return `partially_settled` without creating credit for a
+failed leg. `children_completed` fan-out without synthesis is also eligible; route, approval,
+response-review, and hard-failure states remain ineligible. This closes the SDK learning mismatch
+without turning provider availability into task correctness or retaining raw diagnostics.
+
+Python delayed cross-domain trajectory settlement now applies the same result-level admission at
+both entry points: `run_cross_domain_trajectory_learning(...)` and the caller-owned durable
+`settle_cross_domain_trajectory_learning(...)` filter trajectories to `completed*` specialist
+and synthesis results in accepted execution order. With `allow_partial=True`, healthy legs can
+still receive delayed credit after a provider outage; failed, approval-pending, route-review,
+and other incomplete legs receive no episode, reward, evaluator receipt, or memory write. Strict
+runs fail before evaluator invocation when any leg is incomplete. This closes the remaining
+Python delayed-credit path where typed failure envelopes could otherwise be admitted by the
+generic trajectory preparer; distributed retry and reconciliation remain deployment-owned.
+
+TypeScript cross-domain fan-out now also isolates credential-boundary failures. Missing, expired,
+revoked, or provider-mismatched opaque handles become the same redacted child failure envelope as
+provider transport failures, with only `CredentialError`, `credential`, and bounded retry/circuit
+metadata retained. Partial fan-out can therefore preserve healthy work without contacting a
+credentialed provider, while strict fan-out stops before synthesis and leaves credential
+collection/retry authority with the caller.
+
+Cross-domain fan-in now also rejects zero-evidence partial runs in both SDKs. When every specialist
+is blocked, incomplete, or fails at the provider/credential boundary, `allow_partial` returns the
+typed blocking result with no synthesis call. Structured-response assessment likewise ignores
+incomplete child envelopes, preventing a failed child from being treated as missing structured
+evidence that aborts otherwise healthy sibling work.
+
+The long-horizon goal control plane now exposes a provider-free admission preview in both SDKs.
+`AutonomousGoalControlLoop.preview()` and the high-level goal runtime compute the exact next
+metadata-only schedule without invoking task rehydration, action handoffs, evaluators, learner
+updates, journals, providers, connectors, tools, or effects. The digest-bound projection includes
+admission status, eligible count, decision/reason histograms, lifecycle counts,
+dependency-blocked goal IDs, selected-domain coverage, and the current built-in bandit state
+digest without mutating its generation. This gives operator and UI layers an explainable
+pre-execution decision surface; it is not an authorization and `run()` still repeats revision
+and claim checks. The remaining deployment work is caller-owned preview storage/retention,
+operator identity, policy approval, and reconciliation of state changes between preview and run.
+
+The next control-plane increment closes the durable preview-decision seam. Python and TypeScript
+now expose bounded, metadata-only goal admission receipts with requester/reviewer identity
+digests, issue/expiry times, immutable preview digests, monotonic ledger revisions, predecessor
+fences, canonical JSON persistence, and transactional compare-and-swap restore/flush. An approved
+receipt is accepted only after live preview recomputation and expiry validation immediately before
+goal claim/resolution; it cannot authorize providers, credentials, connectors, tools, evaluators,
+learners, sources, or effects. The remaining deployment responsibilities are external operator
+authentication, encrypted/shared storage, distributed leases, and approval UX.
+
+The next preview-admission hardening increment is complete: approved receipts can now be revoked
+through an immutable hash-linked revision, and a goal control loop can bind execution to a live
+in-memory admission ledger so copied or stale approved JSON cannot bypass a later revocation or
+replacement. Receipt-authorized runs are also fenced to one scheduler cycle; each continuation
+must be previewed and approved again. Deployment-owned work remains operator authentication,
+encrypted/shared persistence, distributed leases, and an approval UX that surfaces revocation and
+staleness clearly.
+
+The goal-control learner now uses contextual value estimates. Capability and risk-class metadata
+derive independent content-addressed arms within each domain, while metadata-free goals preserve
+the legacy domain arm. Both SDKs validate contextual arm identity, preserve value-only retention,
+restore legacy snapshots, and share deterministic cross-language state digests. Remaining
+deployment-owned work is unchanged: operator authentication, encrypted/shared persistence,
+distributed leases, and approval UX.
+
+The goal-agent execution bridge now forwards durable `capability` and `risk_class` context into the
+transient model/planner invocation for every domain and cross-domain goal. Caller factories may
+restate the context but cannot override it; conflicting values fail before dispatch. This closes
+the gap between contextual admission learning and the execution contract while keeping task text,
+credentials, prompts, and provider values outside durable state.
+
+Evidence-plan graph integrity is now enforced in both SDKs. Planner compilation rejects unknown
+stage edges, self-dependencies, cycles, inconsistent workflow identity on requirements, and
+completed-stage IDs absent from the reviewed workflow before emitting readiness or next-stage
+metadata. Valid plans retain the existing canonical digest and cross-language wire shape; the
+change only removes false-ready states from malformed or stale workflow graphs.
+
+The task-intake interaction boundary is now implemented in both SDKs. `clarification_plan()` /
+`clarificationPlan()` compile a bounded, deterministic questionnaire from the exact task intent,
+domain lens, policy, and decision artifacts that would shape execution. The planner asks for an
+action, output contract, evidence boundary, authority scope, accountable reviewer, specialist
+handoff, success criterion, or review scope only when the corresponding reviewed signal exists,
+and it covers every built-in domain. Blocked policy decisions produce no bypass questions.
+
+`resolve_clarification()` / `resolveClarification()` accept transient answers only after checking
+the original task digest, question IDs, answer bounds, and choice membership. The durable result
+contains answer digests bound to the clarification plan, never answer values. A resolved receipt
+is explicitly interaction guidance and must be followed by intent/decision recompilation before
+execution; it does not authorize a provider, source, credential, tool, evaluator, learner, or
+effect. Cross-language plan and answer identities are canonical and covered by parity, tamper,
+partial-answer, blocked-effect, all-domain, and high-level-facade tests. Further work remains on
+caller-owned UI, persistence, operator identity, and deployment-specific answer rehydration.
+
+Clarification receipts now have an independent restart/replay validator in both SDKs. It checks
+canonical receipt digests and retention markers, rejects answer-count/status inconsistencies,
+cross-plan question IDs, answered-and-unanswered overlap, and blocked/resolved invariant drift.
+Because answer values are deliberately absent, validation proves metadata integrity only; it never
+promotes an answer digest into evidence or truth. This closes the persisted UI/worker handoff seam
+while leaving encrypted storage, operator identity, and caller-owned answer rehydration outside the
+SDK boundary.
+
+The high-level Python and TypeScript agents now expose matching `validate_clarification()` /
+`validateClarification()` methods for this restart path. They require the persisted plan and
+receipt together, reject cross-plan or tampered metadata before resuming a worker, and preserve
+the existing requirement to recompile intent and decision artifacts after answer values are
+rehydrated by the caller.
+
+The recompile handoff is now first-class as `recompile_clarification()` /
+`recompileClarification()`. It checks the original task digest and complete receipt, fixes the
+new blueprint to the plan's reviewed domain, and returns a fresh intent/decision/prompt/plan
+bundle for the ordinary downstream gates. The result keeps the live clarified blueprint
+caller-owned while serializing only receipt, task, workflow, intent, decision, and execution-plan
+digests. All built-in domains are covered, and partial, blocked, drifted, and answer-containing
+projection paths fail closed or redact their values.
+
+Task-decision replay is now independently validated in both SDKs. The validator checks canonical
+digest integrity, bounded fields, approval vocabulary, posture/path/effect enums, and retention
+markers, then optionally recomputes the decision against the live intent, domain lens, and policy
+to reject stale guidance before a resumed execution boundary. High-level agents expose the same
+check. This is still guidance validation, not authorization: provider/source/tool/evaluator/
+learner/effect approvals and caller-owned persistence remain separate deployment responsibilities.
+
+Task-intent and domain-lens replay is now independently validated in both SDKs. Persisted lenses
+and intents are reconstructed from allow-listed metadata, their canonical digests are checked,
+retention markers and bounded fields are enforced, and optional task/lens bindings reject
+cross-domain or stale intake artifacts before decision replay. High-level agents expose matching
+validation methods, and decision replay runs these checks before recomputation. This closes the
+remaining intake-object integrity seam without retaining task text or turning classification
+metadata into provider, source, tool, evaluator, learner, credential, or effect authority.
+
+Domain-policy replay is now covered by the same integrity boundary. Both SDKs reconstruct
+allow-listed policy metadata, recompute the canonical digest over limits and safety modes, reject
+marker/shape/tampering drift, and optionally bind the policy to the resumed domain. Decision replay
+normalizes this policy before recomputing approval posture, and high-level agents expose matching
+policy validation helpers. This prevents a stale or modified budget/effect/evidence policy from
+crossing a restart boundary under an otherwise valid digest.
+
+Workflow stage execution packets now have an independent restart validator in both SDKs. The
+validator reconstructs the allow-listed stage handoff, verifies the packet digest and every nested
+capability-contract digest, checks exact credential/authority markers, rejects selected/active/
+withheld tool inconsistencies, and optionally binds the packet to the live blueprint and reviewed
+stage. The compiler returns only validated packets, and Python stage-result construction validates
+caller-rehydrated packets before checkpointing. All twelve domains are covered by replay, tamper,
+marker, contract, workflow-drift, and stage-dispatch tests. The packet remains metadata-only: it
+contains no task text, provider output, credentials, arguments, or effect authority.
+
+The TypeScript durable workflow executor now validates the persisted stage packet at the final
+attempt admission boundary, before constructing provider/tool context or invoking a custom stage
+executor. The validated packet is also exposed on the stage-execution context so connector and
+local-worker adapters consume the same normalized identity rather than reaching back into the raw
+rehydrated blueprint. Invalid packets fail into the existing redacted stage-failure checkpoint,
+without recording an unadmitted digest or dispatching a provider/connector call. The remaining
+deployment work is caller-owned durable blueprint storage and operator-visible recovery UX.
+
+The TypeScript `AutonomousBrainFacade` now exposes the durable workflow lifecycle directly through
+`runWorkflow()` / `resumeWorkflow()` and their launch-admitted variants. Applications can start or
+continue the same bounded, structured, checkpointed stage execution without reaching below the
+facade to construct an executor. The checkpoint store, task and credential rehydration, model
+policy, provider approval, and operator recovery remain caller-owned. Launch admission resolves
+the route provider-free and checks the exact selected domains before dispatch; provider-assisted
+semantic routing is rejected until its separate classifier boundary is reviewed. Integration
+coverage runs real structured provider fixtures across all twelve built-in domains, verifies
+restart completion and checkpoint redaction, and proves held admission prevents dispatch. Future
+deployment work remains persistence adapters, operator-facing recovery UX, and richer caller-owned
+workflow settlement/export integrations for long-running workers.
+
+The TypeScript high-level facade now also exposes evaluator-guided workflow cycles through
+`runWorkflowCycle()` and `runWorkflowCycleWithLaunchAdmission()`. The cycle binds a fresh durable
+workflow executor to the facade's exact agent, requires caller-declared stage evidence, bounds
+evaluator-guided retries, and forwards optional learning/trajectory state through the existing
+value-only controller. Its workflow checkpoint store and evaluator/settlement state store remain
+separate caller-owned persistence surfaces, so a restart can rehydrate private task/provider
+outcomes only through explicit callbacks. All twelve domains run through the same facade cycle
+contract; provider completion is never treated as task reward, and launch admission still gates
+the first provider or planner boundary. Future work remains deployment-owned trace export,
+operator identity, and production persistence adapters.
+
+The TypeScript facade now adds `runWorkflowWithTrace()` / `resumeWorkflowWithTrace()` and their
+launch-admitted variants. These bind provider and selection observers to a metadata-only trace
+session while leaving task text, prompts, structured stage responses, evaluator values, tool
+payloads, and credentials caller-owned. Restart traces use a fresh trace run identity and report
+only the current invocation's bounded lifecycle, so a resumed worker cannot accidentally rewrite
+or replay an earlier trace. Remaining work is durable trace export, operator identity, and
+deployment-specific trace retention policy.
+
+Cycle observability is now available at the same facade boundary through
+`runWorkflowCycleWithTrace()` and `runWorkflowCycleWithLaunchAdmissionAndTrace()`. These methods
+attach metadata-only provider and selection observers to evaluator-guided execution, publish the
+final cycle route/plan/checkpoint identity, and map bounded cycle statuses without promoting
+evaluator evidence or learning values into durable trace state. Future work is limited to
+deployment-owned trace export, operator identity, and retention policy rather than missing SDK
+execution coverage.
+
+The TypeScript `AutonomousBrainFacade` now exposes the full workflow portfolio lifecycle to match
+the lower-level agent and Python surface. `planWorkflowPortfolio()` and
+`verifyWorkflowPortfolio()` provide provider-free composition and restart replay across every
+built-in domain; `executeWorkflowPortfolio()` and
+`executeWorkflowPortfolioResumable()` provide bounded dependency-wave execution and settled-item
+rehydration. Portfolio execution launch-admission variants verify the exact request/plan identity
+before requiring all planned domains to pass the existing provider-free launch gate.
+
+The same facade boundary now exposes portfolio evidence supervision and its resumable form,
+including launch-admitted variants. Evidence execution reuses successful provider results without
+replay, scopes acquisition to each item domain, propagates only predecessor evidence digests, and
+keeps raw acquisition values, source credentials, projectors, evaluators, and journals caller
+owned. This closes the high-level application composition gap; remaining work is deployment-owned
+portfolio persistence, operator identity, and external trace/retention integration.
+
+The tenant/authority seam is now explicit in both SDKs through `AutonomousAuthorizationLedger`
+and `AutonomousAuthorizationGate`. Caller-issued grants can scope all twelve domains and the
+full planning/provider/evidence/connector/tool/effect/evaluation/learning/memory/observability
+operation surface, with tenant/actor/session binding, expiry, revocation, bounded use counts,
+request-digest replay protection, hash-linked audit events, and canonical CAS snapshots. The
+high-level Python agent and TypeScript facade expose factories for the ledger and gate. This
+reduces duplicated authorization glue without claiming identity authentication or external
+effect authority. Remaining deployment work is to connect the contract to the real identity
+provider, encrypted/shared persistence, distributed lease authority, grant rotation, and
+operator approval UX.
+
+The authorization context now covers the full live external-dispatch path in both SDKs. Connector
+dispatch checks `connector_dispatch` immediately before a fresh registered executor, domain-tool
+execution distinguishes `tool_execution` from `effect_dispatch`, and the durable effect boundary
+applies its check before journal transitions and user code, including streams. Refusals are
+reported as `authorization_required` at the domain-tool boundary; executors are never entered.
+Parent and `for_domain()`/`forDomain()` child contexts share a monotonic request sequence, while
+connector replay remains uncharged because it does not perform a new external dispatch. The
+cross-language regression matrix covers all twelve domains, blocked grants, replay behavior, and
+Python/TypeScript high-level propagation. Remaining deployment work is still caller-owned
+identity authentication, encrypted/shared grant persistence, distributed leasing, key/session
+rotation, and operator approval UX.
+
+Evidence source and evaluator callbacks are now also covered by the authorization context. Both
+SDKs authorize `evidence_acquisition` and `evaluation` at the final callback boundary, bind each
+decision to metadata-only request/receipt digests, preserve uncharged journal replay, and fail
+closed before denied callbacks. High-level reviewed and Python facade paths forward the same
+context and the cross-domain runtime tests cover the full built-in portfolio. Deployment-owned
+identity verification, encrypted/shared persistence, leasing, rotation, and approval UX remain
+outside the SDK contract.

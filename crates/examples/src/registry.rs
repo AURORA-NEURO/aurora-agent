@@ -141,6 +141,7 @@ impl Default for SliceRegistry {
 
 /// Which claims are exercised, and which are only claimed.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CoverageReport {
     pub demonstrated: Vec<PropertyClaim>,
     /// Properties the architecture asserts that no registered slice runs.
@@ -211,6 +212,7 @@ impl CoverageReport {
 
 /// The result of running every registered slice.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RegistryReport {
     pub slices: Vec<SliceReport>,
     pub coverage: CoverageReport,

@@ -10,12 +10,17 @@ owned by their existing callers.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Sequence
+from typing import Any, Mapping, Sequence
 
 from .authoring import content_digest
-from .autonomous_domain_policy import AutonomousDomainPolicy
-from .autonomous_task_intent import AutonomousTaskIntent, AUTONOMOUS_TASK_INTENT_EFFECTS
-from .autonomous_task_lens import AutonomousDomainTaskLens
+from .autonomous_domain_policy import AutonomousDomainPolicy, validate_autonomous_domain_policy
+from .autonomous_task_intent import (
+    AUTONOMOUS_TASK_INTENT_DOMAINS,
+    AUTONOMOUS_TASK_INTENT_EFFECTS,
+    AutonomousTaskIntent,
+    validate_autonomous_task_intent,
+)
+from .autonomous_task_lens import AutonomousDomainTaskLens, validate_autonomous_domain_task_lens
 from .errors import ArgumentError
 
 
@@ -36,6 +41,7 @@ AUTONOMOUS_TASK_DECISION_APPROVALS = (
     "effect_approval",
     "evaluator_settlement",
 )
+AUTONOMOUS_TASK_DECISION_EVIDENCE_POSTURES = ("optional", "required_before_provider")
 MAX_AUTONOMOUS_TASK_DECISION_ITEMS = 12
 MAX_AUTONOMOUS_TASK_DECISION_TEXT_BYTES = 512
 
@@ -92,6 +98,8 @@ class AutonomousTaskDecision:
     decision_version: str = AUTONOMOUS_TASK_DECISION_VERSION
 
     def __post_init__(self) -> None:
+        if self.domain not in AUTONOMOUS_TASK_INTENT_DOMAINS:
+            raise ArgumentError(f"unsupported task-decision domain: {self.domain}")
         for name, value in (
             ("domain", self.domain),
             ("workflow_id", self.workflow_id),
@@ -114,7 +122,8 @@ class AutonomousTaskDecision:
             raise ArgumentError("task decision recommended_path is unsupported")
         if self.requested_effect not in AUTONOMOUS_TASK_INTENT_EFFECTS:
             raise ArgumentError("task decision requested_effect is unsupported")
-        _bounded_text("task decision evidence_posture", self.evidence_posture)
+        if self.evidence_posture not in AUTONOMOUS_TASK_DECISION_EVIDENCE_POSTURES:
+            raise ArgumentError("task decision evidence_posture is unsupported")
         for name, value in (
             ("required_model_capabilities", self.required_model_capabilities),
             ("preferred_model_capabilities", self.preferred_model_capabilities),
@@ -293,13 +302,112 @@ def infer_autonomous_task_decision(
     )
 
 
+def validate_autonomous_task_decision(
+    value: AutonomousTaskDecision | Mapping[str, Any],
+    *,
+    intent: AutonomousTaskIntent | Mapping[str, Any] | None = None,
+    lens: AutonomousDomainTaskLens | Mapping[str, Any] | None = None,
+    policy: AutonomousDomainPolicy | Mapping[str, Any] | None = None,
+    required_model_capabilities: Sequence[str] | None = None,
+) -> AutonomousTaskDecision:
+    """Validate a persisted decision and optionally replay it against live task artifacts.
+
+    A serialized decision is guidance metadata, not an authorization token.  Structural
+    validation checks its digest, markers, bounded fields, and enum values.  When the original
+    intent, lens, and policy are available, the deterministic decision is recomputed and every
+    descriptor field must match.  This prevents stale or tampered decisions from crossing a
+    restart boundary into provider, source, tool, evaluator, or effect execution.
+    """
+
+    if isinstance(value, AutonomousTaskDecision):
+        decision = value
+    else:
+        if not isinstance(value, Mapping):
+            raise ArgumentError("task decision must be an object")
+        allowed = {
+            "schema", "decision_version", "domain", "workflow_id", "task_digest", "intent_id",
+            "intent_digest", "lens_digest", "policy_digest", "decision_id", "posture",
+            "recommended_path", "requested_effect", "evidence_posture",
+            "required_model_capabilities", "preferred_model_capabilities", "approval_requirements",
+            "review_reasons", "blocking_reasons", "next_actions", "decision_digest",
+            "authorization", "retention", "secret_material",
+        }
+        if set(value).difference(allowed):
+            raise ArgumentError("task decision contains unsupported fields")
+        if (
+            value.get("schema") != AUTONOMOUS_TASK_DECISION_SCHEMA
+            or value.get("authorization") != "guidance_only;provider_source_tool_and_effect_authority_remain_separate"
+            or value.get("retention") != "value_only_decision_metadata;task_text_not_retained"
+            or value.get("secret_material") != "never_returned"
+        ):
+            raise ArgumentError("task decision markers are invalid")
+
+        def items(name: str) -> tuple[str, ...]:
+            raw = value.get(name)
+            if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes)):
+                raise ArgumentError(f"task decision {name} must be a sequence")
+            return tuple(raw)
+
+        try:
+            decision = AutonomousTaskDecision(
+                domain=value.get("domain"),
+                workflow_id=value.get("workflow_id"),
+                task_digest=value.get("task_digest"),
+                intent_id=value.get("intent_id"),
+                intent_digest=value.get("intent_digest"),
+                lens_digest=value.get("lens_digest"),
+                policy_digest=value.get("policy_digest"),
+                decision_id=value.get("decision_id"),
+                posture=value.get("posture"),
+                recommended_path=value.get("recommended_path"),
+                requested_effect=value.get("requested_effect"),
+                evidence_posture=value.get("evidence_posture"),
+                required_model_capabilities=items("required_model_capabilities"),
+                preferred_model_capabilities=items("preferred_model_capabilities"),
+                approval_requirements=items("approval_requirements"),
+                review_reasons=items("review_reasons"),
+                blocking_reasons=items("blocking_reasons"),
+                next_actions=items("next_actions"),
+                decision_version=value.get("decision_version"),
+            )
+        except (TypeError, ValueError) as error:
+            raise ArgumentError("task decision fields are malformed") from error
+        if value.get("decision_digest") != decision.decision_digest:
+            raise ArgumentError("task decision digest does not match its metadata")
+
+    bindings = (intent, lens, policy)
+    if any(item is not None for item in bindings):
+        if not all(item is not None for item in bindings):
+            raise ArgumentError("task decision replay requires intent, lens, and policy together")
+        reviewed_lens = validate_autonomous_domain_task_lens(lens)
+        reviewed_intent = validate_autonomous_task_intent(intent, lens=reviewed_lens)
+        reviewed_policy = validate_autonomous_domain_policy(policy, expected_domain=reviewed_intent.domain)
+        replay = infer_autonomous_task_decision(
+            intent=reviewed_intent,
+            lens=reviewed_lens,
+            policy=reviewed_policy,
+            required_model_capabilities=(
+                decision.required_model_capabilities
+                if required_model_capabilities is None
+                else required_model_capabilities
+            ),
+        )
+        if replay._descriptor() != decision._descriptor():
+            raise ArgumentError("task decision does not match the supplied intent, lens, and policy")
+    elif required_model_capabilities is not None:
+        raise ArgumentError("task decision replay capabilities require intent, lens, and policy")
+    return decision
+
+
 __all__ = [
     "AUTONOMOUS_TASK_DECISION_SCHEMA",
     "AUTONOMOUS_TASK_DECISION_VERSION",
     "AUTONOMOUS_TASK_DECISION_POSTURES",
     "AUTONOMOUS_TASK_DECISION_PATHS",
     "AUTONOMOUS_TASK_DECISION_APPROVALS",
+    "AUTONOMOUS_TASK_DECISION_EVIDENCE_POSTURES",
     "MAX_AUTONOMOUS_TASK_DECISION_ITEMS",
     "AutonomousTaskDecision",
     "infer_autonomous_task_decision",
+    "validate_autonomous_task_decision",
 ]

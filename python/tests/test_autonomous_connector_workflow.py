@@ -73,6 +73,12 @@ def test_connector_workflow_executes_every_domain_without_model_credentials(tmp_
         assert all(stage.execution_status == "completed" for stage in result.stage_results), domain
         assert all(stage.declared_status == "completed" for stage in result.stage_results), domain
         assert all(stage.result is None for stage in result.stage_results), domain
+        assert all(stage.stage_execution_plan is not None for stage in result.stage_results), domain
+        assert all(stage.stage_execution_metadata is not None for stage in result.stage_results), domain
+        assert all(
+            stage.stage_execution_metadata["connector_value_retained"] is False
+            for stage in result.stage_results
+        ), domain
         assert len(result.checkpoint.completed_stage_ids) == len(blueprint.workflow.stages), domain
         serialized = json.dumps(result.to_dict())
         assert "offline fixture" not in serialized

@@ -271,11 +271,6 @@ impl FailureAxes {
         }
     }
 
-    pub fn with_recurrence(mut self, recurrence: usize) -> Self {
-        self.recurrence = recurrence;
-        self
-    }
-
     pub fn with_component(mut self, component: impl Into<String>) -> Self {
         self.architecture_component = Some(component.into());
         self

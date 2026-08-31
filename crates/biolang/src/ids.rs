@@ -12,6 +12,13 @@ use crate::error::IrError;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
+/// Crate-private, and deliberately not [`bioprism_ids::validated_string_id`].
+///
+/// The shared macro rejects a value with a two-variant `bioprism_ids::IdError` that carries only a
+/// kind. These identifiers reject one as [`IrError::MalformedId`], which additionally names the
+/// *field* the bad identifier arrived in and states the reason in prose — the diagnostic §25 asks
+/// an IR to give, and the reason the two expansions differ in more than their error type. Folding
+/// them together would lose that field, so they stay separate.
 macro_rules! typed_id {
     ($(#[$meta:meta])* $name:ident, $kind:literal) => {
         $(#[$meta])*

@@ -10,6 +10,7 @@ import {
   builtinAutonomousDomainProfiles,
   builtinAutonomousDomainTaskLenses,
   compileAutonomousPlan,
+  validateAutonomousDomainTaskLens,
 } from "../dist/index.js";
 
 test("built-in task lenses cover all domains with canonical cross-runtime digests", () => {
@@ -54,4 +55,33 @@ test("task lenses bind to prompts and provider plans without changing authority"
   const prompt = await assembleAutonomousPrompt(profile, "Implement and verify the change.", { maxInputTokens: 4_096 });
   assert.ok(prompt.messages.some((message) => message.content.includes(lens.lens_id)));
   assert.ok(prompt.messages.some((message) => message.content.includes(lens.lens_digest)));
+});
+
+test("every built-in domain plan exposes deterministic bounded execution waves", async () => {
+  const profiles = await builtinAutonomousDomainProfiles();
+  for (const profile of profiles) {
+    const plan = await compileAutonomousPlan(profile, `Exercise ${profile.domain} planning.`, {
+      taskDigest: "a".repeat(64),
+      maxParallelism: 2,
+    });
+    assert.equal(plan.max_parallelism, 2, profile.domain);
+    assert.equal(plan.execution, "not_started", profile.domain);
+    assert.equal(plan.estimated_parallel_rounds, plan.execution_waves.length, profile.domain);
+    assert.ok(plan.peak_parallelism <= 2, profile.domain);
+    assert.deepEqual(plan.execution_waves.flat(), plan.ordered_step_ids, profile.domain);
+    assert.equal(new Set(plan.execution_waves.flat()).size, plan.steps.length, profile.domain);
+    assert.ok(plan.critical_path_cost <= plan.estimated_cost, profile.domain);
+    const waveById = new Map(plan.execution_waves.flatMap((wave, index) => wave.map((id) => [id, index])));
+    for (const step of plan.steps) {
+      for (const dependency of step.depends_on) assert.ok(waveById.get(dependency) < waveById.get(step.id), `${profile.domain}: dependency wave`);
+    }
+  }
+});
+
+test("task lens replay validation rejects tampering and cross-domain use", () => {
+  const coding = autonomousDomainTaskLens("coding");
+  assert.deepEqual(validateAutonomousDomainTaskLens(coding, "coding"), coding);
+  assert.throws(() => validateAutonomousDomainTaskLens({ ...coding, objective: "silently widen the change surface" }));
+  assert.throws(() => validateAutonomousDomainTaskLens(coding, "science"));
+  assert.throws(() => validateAutonomousDomainTaskLens({ ...coding, unexpected: true }));
 });

@@ -17,7 +17,7 @@ pub mod transport;
 pub mod throughput_federated_evidence_control_plane;
 pub mod federated_commons_interoperability_gateway;
 
-pub use class::{DimensionRegistry, ScopeClass};
+pub use class::{DimensionRegistry, ScopeClass, DIMENSIONS_SCHEMA_VERSION};
 pub use error::{ScopeError, TimeError};
 pub use key::{ScopeKey, ScopeValue};
 pub use meet::{meet, EmptyReason, Meet};

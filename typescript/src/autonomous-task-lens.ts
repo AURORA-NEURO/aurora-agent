@@ -1,4 +1,4 @@
-import { ArgumentError } from "./errors.js";
+import { ArgumentError, isObject } from "./errors.js";
 import type { AutonomousDomainName } from "./autonomous.js";
 import { digestJsonSync } from "./tooling.js";
 import type { JsonObject } from "./types.js";
@@ -42,7 +42,48 @@ function items(name: string, value: unknown): string[] {
   return result;
 }
 
+function digest(name: string, value: unknown): string {
+  if (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value)) throw new ArgumentError(`${name} must be a lowercase SHA-256 digest`);
+  return value;
+}
+
 type LensSeed = Omit<AutonomousDomainTaskLens, "schema" | "domain" | "lens_version" | "lens_digest" | "retention" | "secret_material">;
+
+/** Validate a persisted lens before it is used to classify or plan a task. */
+export function validateAutonomousDomainTaskLens(value: unknown, expectedDomain?: AutonomousDomainName): AutonomousDomainTaskLens {
+  if (!isObject(value)) throw new ArgumentError("task lens must be an object");
+  const allowed = new Set([
+    "schema", "domain", "lens_id", "lens_version", "objective", "planning_dimensions", "decision_checks",
+    "evidence_priorities", "evaluator_signals", "model_capability_hints", "output_sections", "failure_modes",
+    "lens_digest", "retention", "secret_material",
+  ]);
+  if (Object.keys(value).some((key) => !allowed.has(key))) throw new ArgumentError("task lens contains unsupported fields");
+  if (Object.keys(value).length !== allowed.size || [...allowed].some((key) => !(key in value))) throw new ArgumentError("task lens is missing required fields");
+  if (value.schema !== AUTONOMOUS_TASK_LENS_SCHEMA || value.lens_version !== AUTONOMOUS_TASK_LENS_VERSION) throw new ArgumentError("task lens schema or version is invalid");
+  if (value.retention !== "value_only_strategy_metadata" || value.secret_material !== "never_returned") throw new ArgumentError("task lens retention markers are invalid");
+  if (typeof value.domain !== "string" || !AUTONOMOUS_TASK_LENS_DOMAINS.includes(value.domain as AutonomousDomainName)) throw new ArgumentError("task lens domain is unsupported");
+  if (expectedDomain !== undefined && value.domain !== expectedDomain) throw new ArgumentError("task lens domain does not match the expected domain");
+  const domain = value.domain as AutonomousDomainName;
+  const descriptor = {
+    schema: AUTONOMOUS_TASK_LENS_SCHEMA,
+    domain,
+    lens_id: text("task lens lens_id", value.lens_id),
+    lens_version: AUTONOMOUS_TASK_LENS_VERSION,
+    objective: text("task lens objective", value.objective),
+    planning_dimensions: items("task lens planning_dimensions", value.planning_dimensions),
+    decision_checks: items("task lens decision_checks", value.decision_checks),
+    evidence_priorities: items("task lens evidence_priorities", value.evidence_priorities),
+    evaluator_signals: items("task lens evaluator_signals", value.evaluator_signals),
+    model_capability_hints: items("task lens model_capability_hints", value.model_capability_hints),
+    output_sections: items("task lens output_sections", value.output_sections),
+    failure_modes: items("task lens failure_modes", value.failure_modes),
+    retention: "value_only_strategy_metadata" as const,
+    secret_material: "never_returned" as const,
+  };
+  const lensDigest = digest("task lens lens_digest", value.lens_digest);
+  if (lensDigest !== digestJsonSync(descriptor)) throw new ArgumentError("task lens digest does not match its metadata");
+  return Object.freeze({ ...descriptor, lens_digest: lensDigest }) as AutonomousDomainTaskLens;
+}
 
 const SEEDS: Record<AutonomousDomainName, LensSeed> = {
   coding: { lens_id: "coding-change-verification", objective: "make the smallest verifiable change that satisfies the requested behavior", planning_dimensions: ["scope", "dependency_impact", "implementation", "verification"], decision_checks: ["reproduce_or_localize_before_changing", "minimize_change_surface", "preserve_existing_contracts", "run_relevant_checks"], evidence_priorities: ["repository_state", "diff_impact", "test_or_ci_output"], evaluator_signals: ["correctness", "regression_safety", "scope_discipline"], model_capability_hints: ["code", "reasoning", "tool_use"], output_sections: ["diagnosis", "change_plan", "implementation", "verification", "limitations"], failure_modes: ["unreproduced_failure", "unverified_fix", "scope_creep"] },
@@ -82,29 +123,29 @@ export function autonomousDomainTaskLens(domain: AutonomousDomainName): Autonomo
 }
 
 export function autonomousTaskLensPromptContract(lens: AutonomousDomainTaskLens, compact = false): JsonObject {
-  if (!lens || lens.schema !== AUTONOMOUS_TASK_LENS_SCHEMA) throw new ArgumentError("task lens prompt contract requires a valid lens");
+  const reviewedLens = validateAutonomousDomainTaskLens(lens);
   if (compact) {
     return {
       schema: AUTONOMOUS_TASK_LENS_SCHEMA,
-      domain: lens.domain,
-      lens_id: lens.lens_id,
-      lens_digest: lens.lens_digest,
+      domain: reviewedLens.domain,
+      lens_id: reviewedLens.lens_id,
+      lens_digest: reviewedLens.lens_digest,
       execution: "guidance_only; provider_and_effect_boundaries_remain_separate",
     };
   }
   return {
     schema: AUTONOMOUS_TASK_LENS_SCHEMA,
-    domain: lens.domain,
-    lens_id: lens.lens_id,
-    lens_digest: lens.lens_digest,
-    objective: lens.objective,
-    planning_dimensions: [...lens.planning_dimensions],
-    decision_checks: [...lens.decision_checks],
-    evidence_priorities: [...lens.evidence_priorities],
-    evaluator_signals: [...lens.evaluator_signals],
-    model_capability_hints: [...lens.model_capability_hints],
-    output_sections: [...lens.output_sections],
-    failure_modes: [...lens.failure_modes],
+    domain: reviewedLens.domain,
+    lens_id: reviewedLens.lens_id,
+    lens_digest: reviewedLens.lens_digest,
+    objective: reviewedLens.objective,
+    planning_dimensions: [...reviewedLens.planning_dimensions],
+    decision_checks: [...reviewedLens.decision_checks],
+    evidence_priorities: [...reviewedLens.evidence_priorities],
+    evaluator_signals: [...reviewedLens.evaluator_signals],
+    model_capability_hints: [...reviewedLens.model_capability_hints],
+    output_sections: [...reviewedLens.output_sections],
+    failure_modes: [...reviewedLens.failure_modes],
     model_hints_are: "preferences_only; they do not authorize or hard-gate a model",
     execution: "guidance_only; provider_and_effect_boundaries_remain_separate",
     secret_material: "never_returned",

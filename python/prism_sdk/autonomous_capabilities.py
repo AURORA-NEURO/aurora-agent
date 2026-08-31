@@ -728,27 +728,41 @@ class AutonomousCapabilityJournalPersistenceCoordinator:
         self.store = store
         self.persistence = persistence
         self._expected_snapshot_digest: str | None = None
+        self._lock = threading.RLock()
 
     def flush(self) -> dict[str, Any]:
-        snapshot = self.store.snapshot()
-        write_if_unchanged = getattr(self.persistence, "write_if_unchanged", None)
-        if callable(write_if_unchanged):
-            if not write_if_unchanged(self._expected_snapshot_digest, snapshot):
-                raise ArgumentError("capability journal persistence compare-and-swap conflict")
-        else:
-            self.persistence.write(snapshot.to_dict())
-        self._expected_snapshot_digest = snapshot.snapshot_digest
-        return {"schema": AUTONOMOUS_CAPABILITY_JOURNAL_SNAPSHOT_SCHEMA, "bytes": _json_bytes(snapshot.to_dict()), "snapshot_digest": snapshot.snapshot_digest, "retention": "metadata_only"}
+        with self._lock:
+            snapshot = self.store.snapshot()
+            write_if_unchanged = getattr(self.persistence, "write_if_unchanged", None)
+            if callable(write_if_unchanged):
+                if not write_if_unchanged(self._expected_snapshot_digest, snapshot):
+                    raise ArgumentError("capability journal persistence compare-and-swap conflict")
+            else:
+                self.persistence.write(snapshot.to_dict())
+            self._expected_snapshot_digest = snapshot.snapshot_digest
+            return {
+                "schema": AUTONOMOUS_CAPABILITY_JOURNAL_SNAPSHOT_SCHEMA,
+                "bytes": _json_bytes(snapshot.to_dict()),
+                "snapshot_digest": snapshot.snapshot_digest,
+                "snapshot_generation": snapshot.snapshot_generation,
+                "retention": "metadata_only",
+            }
 
     def restore(self) -> dict[str, Any]:
-        raw = self.persistence.read()
-        if raw is None:
-            self._expected_snapshot_digest = None
-            return {"restored": False, "entry_count": 0, "snapshot_digest": None}
-        snapshot = validate_autonomous_capability_journal_snapshot(raw)
-        self.store.restore(snapshot)
-        self._expected_snapshot_digest = snapshot.snapshot_digest
-        return {"restored": True, "entry_count": len(snapshot.entries), "snapshot_digest": snapshot.snapshot_digest}
+        with self._lock:
+            raw = self.persistence.read()
+            if raw is None:
+                self._expected_snapshot_digest = None
+                return {"restored": False, "entry_count": 0, "snapshot_digest": None, "snapshot_generation": None}
+            snapshot = validate_autonomous_capability_journal_snapshot(raw)
+            self.store.restore(snapshot)
+            self._expected_snapshot_digest = snapshot.snapshot_digest
+            return {
+                "restored": True,
+                "entry_count": len(snapshot.entries),
+                "snapshot_digest": snapshot.snapshot_digest,
+                "snapshot_generation": snapshot.snapshot_generation,
+            }
 
 
 class AutonomousCapabilityRuntime:

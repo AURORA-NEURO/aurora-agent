@@ -3,6 +3,7 @@ import { test } from "node:test";
 
 import {
   AutonomousAgent,
+  createAutonomousBrainFacade,
   AutonomousLearningController,
   AutonomousOnlineLearner,
   AutonomousMemoryPersistenceCoordinator,
@@ -200,6 +201,39 @@ test("episodic memory JSON persistence is canonical, restart-safe, serialized, a
   textStore.write(JSON.stringify(JSON.parse(canonical), null, 2));
   await assert.rejects(() => persistence.read(), /not canonical/);
   textStore.write(canonical);
+});
+
+test("AutonomousAgent and the brain facade compose restart-safe memory across every built-in domain", async () => {
+  const textStore = transactionalMemoryTextStore();
+  const memory = new InMemoryAutonomousEpisodicMemory({ clock: () => 20 });
+  const persistence = new AutonomousMemoryPersistenceCoordinator(memory, new TransactionalJsonAutonomousMemoryPersistence(textStore));
+  const agent = new AutonomousAgent(new LLMRuntime(), { memoryStore: memory, memoryPersistence: persistence });
+  const brain = createAutonomousBrainFacade({ agent });
+  const profiles = await builtinAutonomousDomainProfiles();
+
+  for (const [index, profile] of profiles.entries()) {
+    await memory.recordEpisode(await episodeInput(profile.domain, `agent-memory-${index}`));
+  }
+
+  const flushed = await brain.flushMemory();
+  assert.equal(flushed.episodes.length, profiles.length);
+  assert.equal(flushed.events.length, profiles.length);
+  assert.equal((await memory.verifyIntegrity()).episodes, profiles.length);
+  assert.equal(JSON.stringify(flushed).includes("private task"), false);
+  assert.equal(JSON.stringify(flushed).includes("api_key"), false);
+
+  const restartedMemory = new InMemoryAutonomousEpisodicMemory({ clock: () => 21 });
+  const restartedPersistence = new AutonomousMemoryPersistenceCoordinator(restartedMemory, new TransactionalJsonAutonomousMemoryPersistence(textStore));
+  const restartedAgent = new AutonomousAgent(new LLMRuntime(), { memoryStore: restartedMemory, memoryPersistence: restartedPersistence });
+  const restored = await createAutonomousBrainFacade({ agent: restartedAgent }).restoreMemory();
+  assert.deepEqual(restored, flushed);
+  assert.equal((await restartedMemory.verifyIntegrity()).episodes, profiles.length);
+  assert.deepEqual(await restartedMemory.retrieve({ domain: "biomedical" }), [restartedMemory.get("agent-memory-4")]);
+
+  const foreignMemory = new InMemoryAutonomousEpisodicMemory();
+  const foreignPersistence = new AutonomousMemoryPersistenceCoordinator(foreignMemory, new TransactionalJsonAutonomousMemoryPersistence(transactionalMemoryTextStore()));
+  assert.throws(() => new AutonomousAgent(new LLMRuntime(), { memoryStore: memory, memoryPersistence: foreignPersistence }), /bound to the supplied memoryStore/);
+  await assert.rejects(() => new AutonomousAgent(new LLMRuntime()).flushMemory(), /no episodic memory store/);
 });
 
 test("decision cycles recall memory into the next prompt and persist only digest metadata", async () => {

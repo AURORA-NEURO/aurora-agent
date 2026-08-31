@@ -38,10 +38,15 @@ import {
   LLMRuntime,
   ToolCatalogue,
   builtinAutonomousDomainProfiles,
+  builtinAutonomousPromptRegistry,
+  AutonomousPromptLearningState,
+  AutonomousPromptLearningPersistenceCoordinator,
+  TransactionalJsonAutonomousPromptLearningSnapshotPersistence,
   builtinAutonomousValueEvaluatorProfiles,
   assembleAutonomousPrompt,
   compileAutonomousPlan,
   digestCanonicalJsonTextSync,
+  digestJsonSync,
   digestJson,
   createAutonomousApiToolExecutor,
   openaiCompatibleProvider,
@@ -80,6 +85,18 @@ const learningContextDigest = (context) => digestCanonicalJsonTextSync(JSON.stri
   risk_class: context.risk_class,
   task_family: context.task_family ?? null,
 }));
+
+class PromptLearningCasTextStore {
+  value = null;
+  read() { return this.value; }
+  write(value) { this.value = value; }
+  writeIfUnchanged(expectedSnapshotDigest, value) {
+    const observed = this.value === null ? null : JSON.parse(this.value).snapshot_digest;
+    if (observed !== expectedSnapshotDigest) return false;
+    this.value = value;
+    return true;
+  }
+}
 
 function readinessCalibrationReport({ weak = false } = {}) {
   const profiles = builtinAutonomousValueEvaluatorProfiles();
@@ -289,11 +306,13 @@ test("provider planning is approval-gated, dependency-closed, and domain-neutral
     (error) => error instanceof AutonomousCostBudgetError,
   );
   assert.equal(calls.length, 0, "a zero planning budget refuses before provider dispatch");
-  const planned = await agent.planWithProvider(blueprint.blueprint, { approveProviderCall: true, costBudget: planningBudget });
+  const planningPrompts = builtinAutonomousPromptRegistry();
+  const planned = await agent.planWithProvider(blueprint.blueprint, { approveProviderCall: true, costBudget: planningBudget, promptRegistry: planningPrompts });
   assert.equal(planned.status, "completed");
   assert.deepEqual(planned.priority_stage_ids, blueprint.blueprint.workflow.stages.map((stage) => stage.id));
   assert.equal(planned.focus_stage_ids.length, 1);
   assert.equal(planned.planner_prompt_digest.length, 64);
+  assert.match(calls[0].messages.find((message) => message.role === "system").content, /coding specialist/);
   assert.equal(planned.selection_digest.length, 64);
   assert.deepEqual(planned.planner_context, {
     domain: "coding",
@@ -336,10 +355,10 @@ test("provider planning is approval-gated, dependency-closed, and domain-neutral
     const domainBudget = new AutonomousCostBudget(1);
     let result;
     if (routed.cross_domain_blueprint) {
-      result = await agent.planCrossDomainWithProvider(routed.cross_domain_blueprint, { approveProviderCall: true, costBudget: domainBudget });
+      result = await agent.planCrossDomainWithProvider(routed.cross_domain_blueprint, { approveProviderCall: true, costBudget: domainBudget, promptRegistry: planningPrompts });
     } else {
       assert.ok(routed.blueprint, domain);
-      result = await agent.planWithProvider(routed.blueprint, { approveProviderCall: true, costBudget: domainBudget });
+      result = await agent.planWithProvider(routed.blueprint, { approveProviderCall: true, costBudget: domainBudget, promptRegistry: planningPrompts });
     }
     assert.equal(result.status, "completed", domain);
     assert.equal(result.cost_budget.max_cost_units, 1, domain);
@@ -386,6 +405,7 @@ test("planAndRun requires explicit planning acceptance and binds the accepted pr
   const reviewBudget = new AutonomousCostBudget(2);
   const review = await agent.planAndRun("Debug this coding repository and report verified tests.", {
     domain: "coding",
+    promptRegistry: builtinAutonomousPromptRegistry(),
     planning: { approveProviderCall: true, costBudget: reviewBudget },
     costBudget: reviewBudget,
     approveProviderCall: true,
@@ -394,6 +414,7 @@ test("planAndRun requires explicit planning acceptance and binds the accepted pr
   assert.equal(review.plan_refinement.status, "completed");
   assert.equal(review.result, null);
   assert.equal(calls.length, 1, "planning acceptance pauses before execution dispatch");
+  assert.match(calls[0].messages.find((message) => message.role === "system").content, /coding specialist/);
 
   const executeBudget = new AutonomousCostBudget(2);
   const executed = await agent.planAndRun("Debug this coding repository and report verified tests.", {
@@ -825,6 +846,92 @@ test("provider planning converts malformed structured output into a digest-only 
   assert.doesNotMatch(JSON.stringify(result), /provider_private_text/);
 });
 
+test("provider planning preserves credential and transport failures as redacted review outcomes", async () => {
+  let credentialFetchCalls = 0;
+  const credentialedLlm = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async () => {
+      credentialFetchCalls += 1;
+      throw new Error("credential planner diagnostic must never escape");
+    },
+  });
+  credentialedLlm.registerProvider(openaiCompatibleProvider("credentialed-planner", "https://credentialed-planner.invalid", { requiresCredential: true }));
+  const credentialedAgent = new AutonomousAgent(credentialedLlm);
+  const allCapabilities = ["reasoning", "code", "web", "data", "science", "biomedical", "neuroscience", "coordination", "operations", "enterprise", "multimodal", "evaluation", "structured_output"];
+  const credentialedModel = candidate("credentialed-planner", "planner-model", allCapabilities);
+  credentialedAgent.registerModel(credentialedModel);
+
+  const singleBlueprint = await credentialedAgent.blueprint("Debug this coding repository.", { domain: "coding" });
+  const single = await credentialedAgent.planWithProvider(singleBlueprint.blueprint, {
+    candidates: [credentialedModel],
+    approveProviderCall: true,
+  });
+  assert.equal(single.status, "provider_failed");
+  assert.equal(single.failure?.error_class, "CredentialError");
+  assert.equal(single.failure?.code, "credential");
+  assert.equal(single.failure?.retryable, false);
+  assert.equal(single.failure?.status_code, null);
+  assert.equal(single.failure?.circuit_open, false);
+  assert.equal(JSON.stringify(single).includes("credential planner diagnostic"), false);
+
+  const ordered = await credentialedAgent.planOrderedStepsWithProvider({
+    task: "Order the existing coding steps.",
+    domain: "coding",
+    steps: [
+      { id: "scope", domain: "coding", capability: "planning", objective: "Bound the task.", depends_on: [] },
+      { id: "verify", domain: "coding", capability: "planning", objective: "Define verification.", depends_on: ["scope"] },
+    ],
+  }, { candidates: [credentialedModel], approveProviderCall: true });
+  assert.equal(ordered.status, "provider_failed");
+  assert.equal(ordered.failure?.error_class, "CredentialError");
+  assert.equal(ordered.failure?.code, "credential");
+
+  const crossEnvelope = await credentialedAgent.blueprint("Write Python code for this dataset pipeline.");
+  assert.ok(crossEnvelope.cross_domain_blueprint);
+  const cross = await credentialedAgent.planCrossDomainWithProvider(crossEnvelope.cross_domain_blueprint, {
+    candidates: [credentialedModel],
+    approveProviderCall: true,
+  });
+  assert.equal(cross.status, "provider_failed");
+  assert.equal(cross.failure?.error_class, "CredentialError");
+  assert.equal(cross.failure?.code, "credential");
+  assert.equal(credentialFetchCalls, 0, "credential failures stop before transport");
+
+  let transportFetchCalls = 0;
+  const transportLlm = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async () => {
+      transportFetchCalls += 1;
+      throw new Error("sensitive planner transport diagnostic");
+    },
+  });
+  transportLlm.registerProvider(openaiCompatibleProvider("failing-planner", "https://failing-planner.invalid", { requiresCredential: false }));
+  const transportAgent = new AutonomousAgent(transportLlm);
+  const transportModel = candidate("failing-planner", "planner-model", ["reasoning", "code", "structured_output"]);
+  transportAgent.registerModel(transportModel);
+  const transportBlueprint = await transportAgent.blueprint("Debug this coding repository.", { domain: "coding" });
+  const transport = await transportAgent.planWithProvider(transportBlueprint.blueprint, {
+    candidates: [transportModel],
+    approveProviderCall: true,
+  });
+  assert.equal(transport.status, "provider_failed");
+  assert.equal(transport.failure?.error_class, "ProviderRuntimeError");
+  assert.equal(transport.failure?.retryable, true);
+  assert.equal(JSON.stringify(transport).includes("sensitive planner transport diagnostic"), false);
+  assert.equal(transportFetchCalls, 1);
+
+  const automatic = await transportAgent.planAndRun("Debug this coding repository.", {
+    domain: "coding",
+    planning: { candidates: [transportModel], approveProviderCall: true },
+    approveProviderCall: true,
+  });
+  assert.equal(automatic.status, "provider_failed");
+  assert.equal(automatic.plan_refinement?.status, "provider_failed");
+  assert.equal(automatic.plan_refinement?.failure?.error_class, "ProviderRuntimeError");
+  assert.equal(automatic.result, null);
+  assert.equal(transportFetchCalls, 2, "automatic planning performs only its bounded planner attempt");
+});
+
 test("provider planning rejects a broken blueprint dependency closure before dispatch", async () => {
   const agent = new AutonomousAgent(new LLMRuntime({ credentials: new CredentialStore() }));
   const blueprint = await agent.blueprint("Debug this coding repository.", { domain: "coding" });
@@ -959,6 +1066,10 @@ test("adaptive tool-arm selection is deterministic, value-only, and bounded acro
   assert.equal(plan.selected_tool_order.length, plan.selected_tool_names.length);
   assert.equal(new Set(plan.coverage.map((row) => row.domain)).size, 12);
   assert.ok(plan.coverage.some((row) => row.selected_arm_id === state.arms[0].arm_id));
+  assert.equal(plan.selection_constraints.max_risk_class, "high_impact_effect");
+  assert.ok(plan.coverage.every((row) => Array.isArray(row.candidate_ranking)));
+  assert.ok(plan.coverage.some((row) => row.candidate_ranking.some((candidate) => candidate.eligible && candidate.rank === 1)));
+  assert.ok(plan.coverage.every((row) => typeof row.selection_rationale === "string"));
   assert.deepEqual(settleAutonomousToolSelectionOutcome(repeatedState, {
     domain: "coding",
     capability: "repository_inspection",
@@ -998,6 +1109,16 @@ test("adaptive tool-arm selection is deterministic, value-only, and bounded acro
   assert.equal(disabledPlan.selected_tool_names.includes("repository_catalog"), false);
   assert.ok(disabledPlan.coverage.some((row) => row.status === "learning_disabled"));
   assert.ok(disabledPlan.omissions.some((row) => row.reason === "learning_disabled"));
+  const readOnlyPlan = await registry.planForTask("inspect the repository", {
+    domains: ["coding"],
+    maxTools: 128,
+    maxRiskClass: "read_only",
+  });
+  assert.equal(readOnlyPlan.selection_constraints.max_risk_class, "read_only");
+  assert.ok(readOnlyPlan.selected_bindings.every((binding) => binding.risk_class === "read_only"));
+  assert.ok(readOnlyPlan.coverage.some((row) => row.candidate_ranking.some((candidate) => candidate.reason === "risk_budget_exceeded")));
+  assert.doesNotMatch(JSON.stringify(readOnlyPlan), /inspect the repository/);
+  await assert.rejects(() => registry.planForTask("inspect the repository", { domains: ["coding"], maxRiskClass: "unsafe" }), /maxRiskClass is unsupported/);
   assert.throws(() => settleAutonomousToolSelectionOutcome(undefined, {
     domain: "coding",
     capability: "repository_inspection",
@@ -1476,11 +1597,12 @@ test("AutonomousAgent performs a real selected-provider tool loop with domain po
     toolExecutor: async (tool) => ({ tool: tool.name, files: ["README.md"] }),
   });
   agent.registerModel(candidate("local", "local-model"));
-  const result = await agent.run("Debug this Rust repository and report the tests", { domain: "coding", approveProviderCall: true });
+  const result = await agent.run("Debug this Rust repository and report the tests", { domain: "coding", promptRegistry: builtinAutonomousPromptRegistry(), approveProviderCall: true });
   assert.equal(result.status, "completed");
   assert.equal(result.route.primary_domain, "coding");
   assert.equal(result.tool_loop.toolCalls, 1);
   assert.equal(result.response.text, "repository inspected");
+  assert.equal(result.prompt.mode, "registry_selection");
   assert.equal(bodies[1].messages.at(-1).role, "tool");
   assert.equal(bodies[1].messages.at(-1).content, JSON.stringify({ tool: "repository_catalog", files: ["README.md"] }));
 });
@@ -1642,6 +1764,61 @@ test("cross-domain structured output propagates through specialists and synthesi
   assert.deepEqual(bodies.map((body) => body.response_format), [{ type: "json_object" }, { type: "json_object" }, { type: "json_object" }]);
 });
 
+function structuredFixtureFromSchema(schema, index = 0) {
+  if (!schema || typeof schema !== "object") return "bounded fixture";
+  if (Object.hasOwn(schema, "const")) return schema.const;
+  if (Array.isArray(schema.enum) && schema.enum.length) return schema.enum[0];
+  if (schema.type === "object") return Object.fromEntries(Object.entries(schema.properties ?? {}).map(([key, value]) => [key, key === "stage_id" && Array.isArray(value.enum) && value.enum.length ? value.enum[index % value.enum.length] : structuredFixtureFromSchema(value, index)]));
+  if (schema.type === "array") return Array.from({ length: Number.isSafeInteger(schema.minItems) ? schema.minItems : 1 }, (_, itemIndex) => structuredFixtureFromSchema(schema.items, itemIndex));
+  if (schema.type === "boolean") return true;
+  if (schema.type === "number" || schema.type === "integer") return 1;
+  return "bounded fixture";
+}
+
+test("cross-domain structured response admission stops synthesis until pairwise review is complete", async () => {
+  let calls = 0;
+  const llm = new LLMRuntime({ credentials: new CredentialStore() });
+  llm.registerInMemoryProvider("structured-gate", (request) => {
+    calls += 1;
+    return { text: "bounded structured fixture", structured: structuredFixtureFromSchema(request.responseSchema) };
+  });
+  const agent = new AutonomousAgent(llm);
+  const model = candidate("structured-gate", "structured-gate-model", ["reasoning", "coordination", "biomedical", "neuroscience", "science", "structured_output"]);
+  agent.registerModel(model);
+  const task = "Research a biomedical neuroscience experiment with EEG patient evidence";
+  const subtasks = [
+    { id: "bio", domain: "biomedical", task: "Review the biomedical evidence." },
+    { id: "neuro", domain: "neuroscience", task: "Review the neuroscience signal limits." },
+  ];
+  const blocked = await agent.runCrossDomain(task, {
+    candidates: [model],
+    approveProviderCall: true,
+    structuredDomainResponse: true,
+    requireResponseAlignment: true,
+    subtasks,
+  });
+  assert.equal(blocked.status, "response_review_required");
+  assert.equal(blocked.synthesis, null);
+  assert.equal(blocked.response_assessment?.status, "needs_alignment_review");
+  assert.ok(blocked.response_assessment?.gate_reasons.includes("pairwise_alignment_incomplete"));
+  assert.equal(calls, 2, "the response gate must prevent the synthesis provider call");
+  assert.equal(blocked.execution_receipt.next_action, "review_response_gate");
+  assert.equal(blocked.execution_receipt.safe_to_synthesize, false);
+  assert.equal(JSON.stringify(blocked.response_assessment).includes("bounded structured fixture"), false);
+
+  const completed = await agent.runCrossDomain(task, {
+    candidates: [model],
+    approveProviderCall: true,
+    structuredDomainResponse: true,
+    subtasks,
+  });
+  assert.equal(completed.status, "completed");
+  assert.equal(completed.response_assessment?.status, "completed");
+  assert.equal(completed.response_assessment?.rows.length, 3);
+  assert.equal(calls, 5);
+  assert.equal(completed.execution_receipt.next_action, "complete");
+});
+
 test("cross-domain fan-out uses bounded concurrency and preserves deterministic child order", async () => {
   let active = 0;
   let maximumActive = 0;
@@ -1795,6 +1972,90 @@ test("online learner adapts only from explicit evaluator rewards", async () => {
   assert.equal(constrained.ranking.every((row) => row.eligible === false), true);
   assert.match(constrained.ranking[0].reasons.join(";"), /latency exceeds the caller bound/);
   assert.throws(() => learner.select({ ...request, min_quality: 2 }), /min_quality is outside its bounds/);
+});
+
+test("online learner warm-starts every domain from model utility and consumes supplied observations", () => {
+  const domains = ["coding", "browser", "data", "science", "biomedical", "neuroscience", "operations", "enterprise", "multi_agent", "multimodal", "cross_domain", "evaluation"];
+  for (const domain of domains) {
+    const learner = new AutonomousOnlineLearner({ policy: { strategy: "ucb1", exploration: 0, seed: 31 } });
+    const baseRequest = {
+      task: `choose a model for ${domain}`,
+      domain,
+      capability: "reasoning",
+      risk_class: "review_required",
+      required_capabilities: ["reasoning"],
+      estimated_input_tokens: 10,
+      requested_output_tokens: 50,
+      candidates: [
+        { ...candidate("a", "quality"), quality: 0.95, reliability: 0.95, cost_per_million_tokens: 2, latency_ms: 20 },
+        { ...candidate("b", "cheap"), quality: 0.55, reliability: 0.55, cost_per_million_tokens: 20, latency_ms: 200 },
+      ],
+      provider_health: {
+        a: { provider: "a", circuit: "closed", credential_required: false, credential_ready: true },
+        b: { provider: "b", circuit: "closed", credential_required: false, credential_ready: true },
+      },
+      model_health: {},
+    };
+    const coldStart = learner.select(baseRequest);
+    assert.deepEqual(coldStart.selected_model, { provider: "a", model: "quality" }, domain);
+    assert.ok(coldStart.ranking[0].reasons.some((reason) => reason.startsWith("static_prior_reward=")), domain);
+    assert.equal(coldStart.ranking[0].observed_pulls, 0, domain);
+  }
+
+  const requestWithObservation = {
+    task: "honor a caller-owned evaluator observation",
+    domain: "coding",
+    capability: "reasoning",
+    risk_class: "review_required",
+    required_capabilities: ["reasoning"],
+    estimated_input_tokens: 10,
+    requested_output_tokens: 50,
+    candidates: [candidate("a", "one"), candidate("b", "two")],
+    provider_health: {
+      a: { provider: "a", circuit: "closed", credential_required: false, credential_ready: true },
+      b: { provider: "b", circuit: "closed", credential_required: false, credential_ready: true },
+    },
+    model_health: {},
+    observations: [{ arm_id: "b/two", pulls: 4, reward_sum: 4, failures: 0 }],
+  };
+  const observed = new AutonomousOnlineLearner({ policy: { strategy: "ucb1", exploration: 0, seed: 31 } }).select(requestWithObservation);
+  assert.deepEqual(observed.selected_model, { provider: "b", model: "two" });
+  assert.ok(observed.ranking.find((row) => row.model === "two").reasons.includes("history=request"));
+
+  const adapting = new AutonomousOnlineLearner({ policy: { strategy: "ucb1", exploration: 0, seed: 31 } });
+  for (let index = 0; index < 8; index += 1) {
+    adapting.update({ arm_id: "a/quality", reward: -1, failed: true, outcome_digest: index.toString(16).padStart(64, "0") });
+  }
+  const promoted = adapting.select({ ...requestWithObservation, observations: [], candidates: [
+    { ...candidate("a", "quality"), quality: 0.95, reliability: 0.95, cost_per_million_tokens: 2, latency_ms: 20 },
+    { ...candidate("b", "cheap"), quality: 0.55, reliability: 0.55, cost_per_million_tokens: 20, latency_ms: 200 },
+  ], provider_health: {
+    a: { provider: "a", circuit: "closed", credential_required: false, credential_ready: true },
+    b: { provider: "b", circuit: "closed", credential_required: false, credential_ready: true },
+  } });
+  assert.deepEqual(promoted.selected_model, { provider: "b", model: "cheap" });
+});
+
+test("runtime evaluates the confidence floor after learner evidence", async () => {
+  const llm = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async () => jsonResponse({ choices: [{ message: { role: "assistant", content: "learner-selected" }, finish_reason: "stop" }] }),
+  });
+  llm.registerProvider(openaiCompatibleProvider("a", "https://confidence-a.test", { requiresCredential: false }));
+  llm.registerProvider(openaiCompatibleProvider("b", "https://confidence-b.test", { requiresCredential: false }));
+  const learner = new AutonomousOnlineLearner({ policy: { strategy: "ucb1", exploration: 0, seed: 41 } });
+  const agent = new AutonomousAgent(llm, { learner });
+  agent.registerModel(candidate("a", "one"));
+  agent.registerModel(candidate("b", "two"));
+  learner.update({ arm_id: "a/one", reward: 0, outcome_digest: "a".repeat(64) });
+  learner.update({ arm_id: "b/two", reward: 1, outcome_digest: "b".repeat(64) });
+  const result = await agent.run("Select using evaluator evidence despite a tied cold-start prior.", {
+    domain: "coding",
+    minSelectionConfidence: 0.09,
+    approveProviderCall: true,
+  });
+  assert.deepEqual(result.selection.selected_model, { provider: "b", model: "two" });
+  assert.ok(result.selection.selection_confidence >= 0.09);
 });
 
 test("selection confidence abstains on ambiguous ranking across every built-in domain", () => {
@@ -2045,6 +2306,101 @@ test("contextual selector bridge sends only model and health metadata to the con
   assert.equal(received.base.models[0].authorization, undefined);
 });
 
+test("contextual selector forwards global observations and preserves remote ranking across every domain", async () => {
+  const profiles = await builtinAutonomousDomainProfiles();
+  const capabilities = [...new Set(profiles.flatMap((profile) => profile.required_model_capabilities))];
+  const received = [];
+  const apiClient = {
+    async brainModelSelectContextual(args) {
+      received.push(args);
+      return {
+        ok: true,
+        mcp: {
+          result: {
+            structuredContent: {
+              selection: {
+                selected_model_id: "remote/model-b",
+                selection_status: "selected",
+                selection_confidence: 0.8,
+                ranking: [
+                  { model_id: "remote/model-b", eligible: true, reasons: ["global_history"], base_score: 0.75, exploration_bonus: 0.05, score: 0.8, observed_pulls: 8 },
+                  { model_id: "remote/model-a", eligible: true, reasons: ["static_prior"], base_score: 0.4, exploration_bonus: 0.1, score: 0.5, observed_pulls: 0 },
+                ],
+              },
+            },
+          },
+        },
+      };
+    },
+  };
+  const llm = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async () => jsonResponse({ choices: [{ message: { role: "assistant", content: "remote contextual answer" }, finish_reason: "stop" }] }),
+  });
+  llm.registerProvider(openaiCompatibleProvider("remote", "https://remote.test", { requiresCredential: false }));
+  const agent = new AutonomousAgent(llm, { apiClient });
+  agent.registerModel(candidate("remote", "model-a", capabilities));
+  agent.registerModel(candidate("remote", "model-b", capabilities));
+  const observation = { arm_id: "remote/model-b", pulls: 8, reward_sum: 7.2, failures: 0 };
+
+  for (const domain of AUTONOMOUS_DOMAIN_NAMES) {
+    const result = await agent.run(`Run a bounded ${domain} task through contextual selection.`, {
+      domain,
+      approveProviderCall: true,
+      selectionObservations: [observation],
+    });
+    assert.equal(result.status, "completed", domain);
+    assert.equal(result.selection.selected_model.model, "model-b", domain);
+    assert.equal(result.selection.selection_confidence, 0.8, domain);
+    assert.deepEqual(result.selection.ranking.map((row) => row.model), ["model-b", "model-a"], domain);
+    assert.equal(result.selection.ranking[0].observed_pulls, 8, domain);
+  }
+
+  assert.equal(received.length, AUTONOMOUS_DOMAIN_NAMES.length);
+  for (const [index, args] of received.entries()) {
+    assert.equal(args.context.domain, AUTONOMOUS_DOMAIN_NAMES[index]);
+    assert.deepEqual(args.base.observations, [observation], AUTONOMOUS_DOMAIN_NAMES[index]);
+    assert.equal(args.base.observations[0].arm_id, "remote/model-b", AUTONOMOUS_DOMAIN_NAMES[index]);
+  }
+});
+
+test("contextual selector rejects an unknown remote ranking row before provider dispatch", async () => {
+  let providerCalls = 0;
+  const apiClient = {
+    async brainModelSelectContextual() {
+      return {
+        ok: true,
+        mcp: {
+          result: {
+            structuredContent: {
+              selection: {
+                selected_model_id: "remote/known",
+                selection_status: "selected",
+                ranking: [{ model_id: "remote/not-registered", eligible: true, reasons: [], score: 1 }],
+              },
+            },
+          },
+        },
+      };
+    },
+  };
+  const llm = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async () => {
+      providerCalls += 1;
+      return jsonResponse({ choices: [{ message: { role: "assistant", content: "must not dispatch" }, finish_reason: "stop" }] });
+    },
+  });
+  llm.registerProvider(openaiCompatibleProvider("remote", "https://remote.test", { requiresCredential: false }));
+  const agent = new AutonomousAgent(llm, { apiClient });
+  agent.registerModel(candidate("remote", "known"));
+  await assert.rejects(
+    agent.run("Reject a malformed contextual selection.", { domain: "coding", approveProviderCall: true }),
+    /unknown model/,
+  );
+  assert.equal(providerCalls, 0);
+});
+
 test("contextual selector abstains on an ambiguous model-only id without dispatch", async () => {
   let calls = 0;
   const apiClient = {
@@ -2090,6 +2446,10 @@ test("keyless readiness audits every built-in domain without contacting provider
   assert.equal(new Set(report.domains.map((row) => row.domain)).size, 12);
   assert.ok(report.domains.every((row) => row.state === "ready_for_caller_approval"));
   assert.equal(report.readiness_state, "ready_for_caller_approval");
+  assert.equal(report.model_inventory_readiness.readiness, "ready");
+  assert.equal(report.model_inventory_readiness.domains.length, AUTONOMOUS_DOMAIN_NAMES.length);
+  assert.ok(report.model_inventory_readiness.domains.every((row) => row.coverage_state === "complete" && row.eligible_model_count === 1));
+  assert.match(report.model_inventory_readiness.readiness_digest, /^[0-9a-f]{64}$/);
   assert.deepEqual(report.models[0].compatible_domains, profiles.map((profile) => profile.domain));
   assert.deepEqual(report.models[0].eligible_domains, profiles.map((profile) => profile.domain));
   assert.equal(report.learning.configured, false);
@@ -2100,6 +2460,255 @@ test("keyless readiness audits every built-in domain without contacting provider
   assert.match(JSON.stringify(report), /attach AutonomousOnlineLearner/);
   assert.doesNotMatch(JSON.stringify(report), /api_key|Bearer|sk-|test-secret/i);
   assert.equal(fetchCalls, 0);
+});
+
+test("high-level runs use verified prompt registry messages and prompt-bound request identity", async () => {
+  const requests = [];
+  let calls = 0;
+  const llm = new LLMRuntime({ credentials: new CredentialStore() });
+  llm.registerInMemoryProvider("prompt-high-level", (request) => {
+    requests.push(request);
+    calls += 1;
+    return { text: `prompt-answer-${calls}` };
+  });
+  const agent = new AutonomousAgent(llm);
+  const model = candidate("prompt-high-level", "prompt-model", ["reasoning", "science", "biomedical", "neuroscience", "coordination"]);
+  agent.registerModel(model);
+  const registry = builtinAutonomousPromptRegistry();
+  const direct = await agent.run("Review a bounded neuroscience experiment.", {
+    domain: "neuroscience",
+    candidates: [model],
+    promptRegistry: registry,
+    promptLearningState: new AutonomousPromptLearningState(registry.registryDigest),
+    approveProviderCall: true,
+  });
+  assert.equal(direct.status, "completed");
+  assert.equal(direct.prompt.mode, "registry_selection");
+  assert.match(direct.prompt.adaptive_selection_digest, /^[0-9a-f]{64}$/);
+  assert.equal(direct.prompt.selection_policy, "ucb1_explicit_evaluator_v1");
+  assert.match(requests[0].messages[0].content, /neuroscience specialist/);
+  assert.match(requests[0].idempotencyKey, /^[0-9a-f]{64}$/);
+
+  const cross = await agent.runCrossDomain("Research a biomedical neuroscience experiment with EEG patient evidence", {
+    candidates: [model],
+    promptRegistry: registry,
+    approveProviderCall: true,
+    subtasks: [
+      { id: "bio", domain: "biomedical", task: "Review the biomedical safety evidence." },
+      { id: "neuro", domain: "neuroscience", task: "Review the neuroscience signal limits." },
+    ],
+  });
+  assert.equal(cross.status, "completed");
+  assert.equal(cross.child_runs.length, 2);
+  assert.ok(cross.child_runs.every((child) => child.result.prompt?.mode === "registry_selection"));
+  assert.equal(cross.synthesis.prompt.mode, "registry_selection");
+  assert.equal(calls, 4);
+});
+
+test("persistent prompt learning binds every high-level domain and exposes settleable receipts", async () => {
+  const llm = new LLMRuntime({ credentials: new CredentialStore() });
+  let calls = 0;
+  llm.registerInMemoryProvider("prompt-persistent", () => ({ text: `persistent-answer-${++calls}` }));
+  const model = candidate("prompt-persistent", "persistent-model", ["reasoning", "code", "science", "biomedical", "neuroscience", "coordination", "data", "web", "operations", "enterprise", "multimodal", "evaluation"]);
+  const registry = builtinAutonomousPromptRegistry();
+  const store = new PromptLearningCasTextStore();
+  const persistence = new TransactionalJsonAutonomousPromptLearningSnapshotPersistence(store);
+  const coordinator = new AutonomousPromptLearningPersistenceCoordinator(registry, { persistence });
+  const agent = new AutonomousAgent(llm, { promptLearningCoordinator: coordinator });
+  agent.registerModel(model);
+
+  for (const domain of AUTONOMOUS_DOMAIN_NAMES) {
+    const result = await agent.run(`Review a bounded ${domain} task for evaluator settlement.`, { domain, approveProviderCall: true });
+    const selections = agent.promptLearningSelections(result);
+    assert.equal(selections.length, 1, domain);
+    const selection = selections[0];
+    assert.equal(selection.plan.rows[0].domain, domain);
+    assert.equal(result.prompt?.adaptive_selection?.selection_digest, selection.selectionDigest);
+    const settlement = await agent.settlePromptLearning(selection, {
+      armId: selection.armIds[0],
+      evaluatorId: `${domain}-rubric`,
+      evaluatorVersion: "1",
+      reward: 0.8,
+      passed: true,
+      outcomeDigest: digestJsonSync({ domain, run: result.prompt?.final_prompt_digest }),
+    });
+    assert.equal(settlement.status, "settled");
+  }
+
+  const cross = await agent.runCrossDomain("Review a bounded biomedical neuroscience task.", {
+    approveProviderCall: true,
+    subtasks: [
+      { id: "bio", domain: "biomedical", task: "Review safety evidence." },
+      { id: "neuro", domain: "neuroscience", task: "Review signal limitations." },
+    ],
+  });
+  const crossSelections = agent.promptLearningSelections(cross);
+  assert.deepEqual(new Set(crossSelections.map((selection) => selection.plan.rows[0].domain)), new Set(["biomedical", "neuroscience", "cross_domain"]));
+  for (const selection of crossSelections) {
+    await agent.settlePromptLearning(selection, {
+      armId: selection.armIds[0],
+      evaluatorId: "cross-domain-rubric",
+      evaluatorVersion: "1",
+      reward: 0.7,
+      passed: true,
+      outcomeDigest: digestJsonSync({ selection: selection.selectionDigest }),
+    });
+  }
+  assert.equal(coordinator.state.generation, AUTONOMOUS_DOMAIN_NAMES.length + crossSelections.length);
+  assert.ok(store.value);
+  assert.doesNotMatch(store.value, /Review a bounded|persistent-prompt-learning/);
+
+  const recovered = new AutonomousPromptLearningPersistenceCoordinator(registry, { persistence });
+  assert.ok(await recovered.restore());
+  assert.equal(recovered.state.stateDigest, coordinator.state.stateDigest);
+  await assert.rejects(
+    () => agent.run("Reject an external prompt state.", { domain: "coding", promptLearningState: new AutonomousPromptLearningState(registry.registryDigest) }),
+    /cannot override/,
+  );
+});
+
+test("adaptive prompt receipts survive direct, ordered-step, and automatic provider planning", async () => {
+  const calls = [];
+  const llm = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async (_url, init) => {
+      const body = JSON.parse(String(init.body));
+      calls.push(body);
+      const planningMessage = body.messages.find((message) => message.content.startsWith("Context planning-contract:\n"));
+      if (!planningMessage) return jsonResponse({ choices: [{ message: { role: "assistant", content: "provider execution" }, finish_reason: "stop" }] });
+      const contract = JSON.parse(planningMessage.content.slice("Context planning-contract:\n".length));
+      const catalogue = contract.stage_catalogue ?? contract.child_catalogue ?? contract.step_catalogue;
+      const ids = catalogue.map((row) => row.id);
+      const focusField = contract.stage_catalogue ? "focus_stage_ids" : contract.child_catalogue ? "focus_child_ids" : "focus_step_ids";
+      return jsonResponse({ choices: [{ message: { role: "assistant", content: JSON.stringify({ priority_order: ids, [focusField]: ids.slice(0, 1), review_required: false, confidence: 0.92, abstain: false }) }, finish_reason: "stop" }] });
+    },
+  });
+  llm.registerProvider(openaiCompatibleProvider("planning-persistent", "https://planning-persistent.test", { requiresCredential: false, structuredOutputMode: "json_schema" }));
+  const registry = builtinAutonomousPromptRegistry();
+  const store = new PromptLearningCasTextStore();
+  const persistence = new TransactionalJsonAutonomousPromptLearningSnapshotPersistence(store);
+  const coordinator = new AutonomousPromptLearningPersistenceCoordinator(registry, { persistence });
+  const agent = new AutonomousAgent(llm, { promptLearningCoordinator: coordinator });
+  agent.registerModel(candidate("planning-persistent", "planning-model", ["reasoning", "code", "science", "biomedical", "neuroscience", "coordination", "data", "web", "operations", "enterprise", "multimodal", "evaluation", "structured_output"]));
+
+  const blueprint = await agent.blueprint("Review this coding workflow before execution.", { domain: "coding" });
+  const plan = await agent.planWithProvider(blueprint.blueprint, { approveProviderCall: true, costBudget: new AutonomousCostBudget(10) });
+  assert.equal(plan.status, "completed");
+  assert.equal(plan.adaptive_selection.plan.rows[0].stage, "planning");
+  const planSelections = agent.promptLearningSelections(plan);
+  assert.equal(planSelections.length, 1);
+  assert.equal(planSelections[0].selectionDigest, plan.adaptive_selection.selection_digest);
+  assert.doesNotMatch(JSON.stringify(plan), /Review this coding workflow|Context planning-contract|provider execution/);
+  await agent.settlePromptLearning(planSelections[0], { armId: planSelections[0].armIds[0], evaluatorId: "planning-rubric", evaluatorVersion: "1", reward: 0.75, passed: true, outcomeDigest: digestJsonSync({ selection: planSelections[0].selectionDigest }) });
+
+  const ordered = await agent.planOrderedStepsWithProvider({
+    task: "Order the reviewed coding steps.",
+    domain: "coding",
+    steps: [{ id: "scope", domain: "coding", capability: "implementation", objective: "Inspect the reviewed change." }],
+  }, { approveProviderCall: true, costBudget: new AutonomousCostBudget(10) });
+  assert.equal(ordered.status, "completed");
+  const orderedSelections = agent.promptLearningSelections(ordered);
+  assert.equal(orderedSelections.length, 1);
+  assert.equal(orderedSelections[0].plan.rows[0].stage, "planning");
+  await agent.settlePromptLearning(orderedSelections[0], { armId: orderedSelections[0].armIds[0], evaluatorId: "ordered-rubric", evaluatorVersion: "1", reward: 0.7, passed: true, outcomeDigest: digestJsonSync({ selection: orderedSelections[0].selectionDigest }) });
+
+  const automaticBudget = new AutonomousCostBudget(10);
+  const automatic = await agent.planAndRun("Review this coding workflow end to end.", {
+    domain: "coding",
+    planning: { approveProviderCall: true, costBudget: automaticBudget },
+    acceptPlan: true,
+    approveProviderCall: true,
+    costBudget: automaticBudget,
+  });
+  assert.equal(automatic.status, "completed");
+  assert.equal(automatic.plan_refinement.adaptive_selection.plan.rows[0].stage, "planning");
+  const automaticSelections = agent.promptLearningSelections(automatic);
+  const automaticPlanning = automaticSelections.find((selection) => selection.plan.rows[0].stage === "planning");
+  assert.ok(automaticPlanning);
+  await agent.settlePromptLearning(automaticPlanning, { armId: automaticPlanning.armIds[0], evaluatorId: "automatic-rubric", evaluatorVersion: "1", reward: 0.65, passed: true, outcomeDigest: digestJsonSync({ selection: automaticPlanning.selectionDigest }) });
+  assert.equal(coordinator.state.generation, 3);
+  assert.equal(calls.length >= 3, true);
+  assert.doesNotMatch(store.value, /Review this coding workflow|Context planning-contract|provider execution/);
+});
+
+test("runAuto routes every domain and preserves the single/cross-domain approval boundary", async () => {
+  let providerCalls = 0;
+  const llm = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async () => {
+      providerCalls += 1;
+      throw new Error("runAuto approval gate must stop before provider dispatch");
+    },
+  });
+  llm.registerProvider(openaiCompatibleProvider("auto-local", "https://auto-local.test", { requiresCredential: false }));
+  const allCapabilities = ["reasoning", "code", "web", "data", "science", "biomedical", "coordination", "operations", "enterprise", "multimodal", "evaluation", "structured_output"];
+  const agent = new AutonomousAgent(llm);
+  agent.registerModel(candidate("auto-local", "auto-model", allCapabilities));
+  const tasks = {
+    coding: "debug this Rust repository",
+    browser: "navigate the browser and compare sources",
+    data: "validate this parquet dataset lineage",
+    science: "design a hypothesis experiment",
+    biomedical: "review this patient treatment evidence",
+    neuroscience: "analyze EEG preprocessing",
+    operations: "plan a rollback after an outage",
+    enterprise: "review governance compliance ownership",
+    multi_agent: "delegate this subtask to a specialist agent",
+    multimodal: "inspect this image and transcript",
+    cross_domain: "perform an interdisciplinary synthesis",
+    evaluation: "run a benchmark holdout replay",
+  };
+  for (const domain of AUTONOMOUS_DOMAIN_NAMES) {
+    const result = await agent.runAuto(tasks[domain], { domain, approveProviderCall: false });
+    assert.equal(result.route.primary_domain, domain, domain);
+    assert.equal(result.route.cross_domain, false, domain);
+    assert.ok(result.blueprint?.blueprint, domain);
+    assert.equal(result.blueprint.blueprint.domain_profile.domain, domain, domain);
+    assert.equal(result.status, "approval_required", domain);
+    assert.equal(result.next_action, "review_provider_or_effect_approval", domain);
+    assert.equal(result.result?.status, "approval_required", domain);
+    assert.equal(result.planning, null, domain);
+  }
+  const cross = await agent.runAuto("research a biomedical neuroscience experiment with EEG patient evidence", { approveProviderCall: false });
+  assert.equal(cross.route.cross_domain, true);
+  assert.ok(cross.blueprint?.cross_domain_blueprint);
+  assert.equal(cross.blueprint.cross_domain_blueprint.child_blueprints.length, cross.route.selected_domains.length);
+  assert.equal(cross.planning, null);
+  assert.equal(cross.next_action, "review_provider_or_effect_approval");
+  assert.ok(cross.result);
+  assert.equal(providerCalls, 0);
+
+  const planningCalls = [];
+  const planningLlm = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async (_url, init) => {
+      const body = JSON.parse(String(init.body));
+      planningCalls.push(body);
+      const planningMessage = body.messages.find((message) => message.content.startsWith("Context planning-contract:\n"));
+      if (!planningMessage) return jsonResponse({ choices: [{ message: { role: "assistant", content: "automatic provider execution" }, finish_reason: "stop" }] });
+      const contract = JSON.parse(planningMessage.content.slice("Context planning-contract:\n".length));
+      const ids = contract.stage_catalogue.map((row) => row.id);
+      return jsonResponse({ choices: [{ message: { role: "assistant", content: JSON.stringify({ priority_order: ids, focus_stage_ids: ids.slice(0, 1), review_required: false, confidence: 0.95, abstain: false }) }, finish_reason: "stop" }] });
+    },
+  });
+  planningLlm.registerProvider(openaiCompatibleProvider("auto-planner", "https://auto-planner.test", { requiresCredential: false, structuredOutputMode: "json_schema" }));
+  const planningAgent = new AutonomousAgent(planningLlm);
+  planningAgent.registerModel(candidate("auto-planner", "auto-planner-model", allCapabilities));
+  const planningBudget = new AutonomousCostBudget(5);
+  const planned = await planningAgent.runAuto("debug this Rust repository", {
+    domain: "coding",
+    planningMode: "provider",
+    planning: { approveProviderCall: true, costBudget: planningBudget },
+    acceptPlan: true,
+    approveProviderCall: true,
+    costBudget: planningBudget,
+  });
+  assert.equal(planned.planning_mode, "provider");
+  assert.equal(planned.status, "completed");
+  assert.equal(planned.planning?.status, "completed");
+  assert.equal(planned.result?.status, "completed");
+  assert.equal(planned.next_action, "complete");
+  assert.equal(planningCalls.length, 2);
 });
 
 test("keyless readiness composes all-domain evidence routing posture without source dispatch", async () => {
@@ -2378,5 +2987,135 @@ test("agent activation refreshes keylessly and blocks unapproved custom tool cal
   assert.equal(results.find((row) => row.callId === "approved").approved, true);
   assert.equal(results.find((row) => row.callId === "blocked").content.status, "activation_required");
   assert.equal(executions, 1);
+  assert.equal(fetchCalls, 0);
+});
+
+test("cross-domain provider failures become redacted child results and respect partial policy", async () => {
+  let calls = 0;
+  const llm = new LLMRuntime({ credentials: new CredentialStore() });
+  llm.registerInMemoryProvider("failure-isolation", (request) => {
+    calls += 1;
+    const promptText = JSON.stringify(request.messages);
+    if (promptText.includes("FAIL_CHILD") || promptText.includes("FAIL_SYNTHESIS")) throw new Error("sensitive provider diagnostic must not cross the child boundary");
+    return { text: "healthy bounded specialist or synthesis output" };
+  });
+  const agent = new AutonomousAgent(llm);
+  const model = candidate("failure-isolation", "failure-model", [
+    "reasoning", "coordination", "biomedical", "neuroscience", "science", "structured_output",
+  ]);
+  agent.registerModel(model);
+  const task = "Coordinate a biomedical and neuroscience review with one failing specialist.";
+  const subtasks = [
+    { id: "failing-specialist", domain: "biomedical", task: "FAIL_CHILD review the biomedical evidence." },
+    { id: "healthy-specialist", domain: "neuroscience", task: "Review the neuroscience signal limits." },
+  ];
+
+  const partial = await agent.runCrossDomain(task, {
+    candidates: [model],
+    subtasks,
+    approveProviderCall: true,
+    allowPartial: true,
+    maxParallelChildren: 2,
+  });
+  assert.equal(partial.status, "children_partial");
+  assert.equal(partial.completed_children, 1);
+  assert.equal(partial.synthesis?.status, "completed");
+  assert.deepEqual(partial.child_runs.map((child) => child.result.status), ["child_failed", "completed"]);
+  assert.equal(partial.child_runs[0].result.failure?.error_class, "ProviderRuntimeError");
+  assert.equal(partial.child_runs[0].result.failure?.code, "provider_error");
+  assert.equal(partial.child_runs[0].result.failure?.status_code, null);
+  assert.equal(JSON.stringify(partial).includes("sensitive provider diagnostic"), false);
+  assert.equal(calls, 3, "the failure is isolated while the healthy child and synthesis still run");
+
+  const blocked = await agent.runCrossDomain(task, {
+    candidates: [model],
+    subtasks,
+    approveProviderCall: true,
+    allowPartial: false,
+    synthesize: true,
+    maxParallelChildren: 1,
+  });
+  assert.equal(blocked.status, "child_failed");
+  assert.equal(blocked.synthesis, null);
+  assert.equal(blocked.child_runs.length, 1);
+  assert.equal(blocked.child_runs[0].result.status, "child_failed");
+
+  const synthesisFailed = await agent.runCrossDomain("Coordinate a biomedical and neuroscience review with FAIL_SYNTHESIS at fan-in.", {
+    candidates: [model],
+    subtasks: [
+      { id: "biomedical-specialist", domain: "biomedical", task: "Review the biomedical evidence." },
+      { id: "neuroscience-specialist", domain: "neuroscience", task: "Review the neuroscience signal limits." },
+    ],
+    approveProviderCall: true,
+    allowPartial: true,
+    maxParallelChildren: 2,
+  });
+  assert.equal(synthesisFailed.status, "child_failed");
+  assert.deepEqual(synthesisFailed.child_runs.map((child) => child.result.status), ["completed", "completed"]);
+  assert.equal(synthesisFailed.synthesis?.status, "child_failed");
+  assert.equal(synthesisFailed.synthesis?.failure?.error_class, "ProviderRuntimeError");
+  assert.equal(JSON.stringify(synthesisFailed).includes("sensitive provider diagnostic"), false);
+});
+
+test("cross-domain credential failures become redacted child results without contacting the provider", async () => {
+  let fetchCalls = 0;
+  const llm = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async () => {
+      fetchCalls += 1;
+      throw new Error("credential failure must stop before transport");
+    },
+  });
+  llm.registerProvider(openaiCompatibleProvider("credentialed-cross", "https://credentialed-cross.invalid", { requiresCredential: true }));
+  const agent = new AutonomousAgent(llm);
+  // Keep the target provider readiness gate open, then deliberately pass a handle owned by a
+  // different provider. The runtime must reject the mismatch before the fetch implementation.
+  llm.credentials.register("credentialed-cross", "local-fixture-credential");
+  const mismatchedCredential = llm.credentials.register("different-provider", "other-local-fixture");
+  const model = candidate("credentialed-cross", "credential-model", [
+    "reasoning", "coordination", "biomedical", "neuroscience", "science", "structured_output",
+  ]);
+  agent.registerModel(model);
+  const task = "Coordinate a biomedical and neuroscience review when one credential is unavailable.";
+  const subtasks = [
+    { id: "credentialed-biomedical", domain: "biomedical", task: "Review the biomedical evidence." },
+    { id: "credentialed-neuroscience", domain: "neuroscience", task: "Review the neuroscience signal limits." },
+  ];
+
+  const partial = await agent.runCrossDomain(task, {
+    candidates: [model],
+    subtasks,
+    credential: mismatchedCredential,
+    approveProviderCall: true,
+    allowPartial: true,
+    maxParallelChildren: 2,
+  });
+  assert.equal(partial.status, "child_failed");
+  assert.equal(partial.completed_children, 0);
+  assert.equal(partial.synthesis, null);
+  assert.deepEqual(partial.child_runs.map((child) => child.result.status), ["child_failed", "child_failed"]);
+  for (const child of partial.child_runs) {
+    assert.equal(child.result.failure?.error_class, "CredentialError");
+    assert.equal(child.result.failure?.code, "credential");
+    assert.equal(child.result.failure?.retryable, false);
+    assert.equal(child.result.failure?.status_code, null);
+    assert.equal(child.result.failure?.circuit_open, false);
+  }
+  assert.equal(JSON.stringify(partial).includes("credential failure must stop before transport"), false);
+  assert.equal(fetchCalls, 0);
+
+  const strict = await agent.runCrossDomain(task, {
+    candidates: [model],
+    subtasks,
+    credential: mismatchedCredential,
+    approveProviderCall: true,
+    allowPartial: false,
+    synthesize: true,
+    maxParallelChildren: 1,
+  });
+  assert.equal(strict.status, "child_failed");
+  assert.equal(strict.synthesis, null);
+  assert.equal(strict.child_runs.length, 1);
+  assert.equal(strict.child_runs[0].result.failure?.error_class, "CredentialError");
   assert.equal(fetchCalls, 0);
 });

@@ -84,6 +84,67 @@ are never sent to it. A sink failure fails closed instead of turning a completed
 unobserved success. The adapter and sink contract are exercised across all twelve built-in domain
 profiles, including refusal, malformed-response, transport, schema, and no-discovery paths.
 
+For post-run operations, `AutonomousAgent.analyze_run_trace()` produces a digest-bound,
+metadata-only analytics report without invoking a provider. For longitudinal operator state,
+create an `AutonomousRunAnalyticsLedger` and bind it with
+`agent.create_run_analytics_controller(ledger, persistence)`. The controller requires
+`restore()` before reads, offers `analyze_and_ingest()` and `ingest()` with explicit
+accepted/duplicate/conflict results, persists through caller-owned JSON/CAS storage, and returns
+persistence failures separately from in-memory acceptance. Its summaries cover all twelve domains,
+observed providers, and provider/model pairs while retaining no task text, prompts, responses,
+tool payloads, credentials, or effect values. For an application worker that needs both operator
+indexing and analytics, `agent.create_trace_registry_controller(...)` plus
+`agent.create_run_observability_controller(...)` provide restore-before-read lifecycle,
+single-snapshot publication/analysis, explicit partial-persistence outcomes, and restart-safe
+all-domain projections without replaying the run.
+An optional alert sink receives only digest-keyed threshold metadata and must treat `alert_id` as
+its downstream idempotency key; sink failures are returned separately from trace and analytics
+results.
+
+For deployment-owned authority, `AutonomousAuthorizationLedger` binds caller-issued grants to a
+tenant, actor, session, authorization digest, domain set, operation, capability, risk class,
+expiry, and bounded use count. `AutonomousAuthorizationGate` performs the final fail-closed check
+before a caller-owned provider/source/tool/effect callback. The ledger supports hash-linked
+metadata events, request-digest replay protection, canonical restore, and optional CAS persistence
+across all twelve domains; it never receives prompts, task text, credentials, headers, payloads,
+arguments, or results. Identity authentication, grant issuance, encryption, and distributed
+coordination remain deployment responsibilities.
+evidence, tool payloads, credentials, or cost claims.
+
+For actual provider execution, bind an `AutonomousAuthorizationContext` (constructed from the
+caller-issued grant) to `LLMRuntime.invoke()`, `invoke_stream()`, `collect_stream()`, or
+`invoke_tool_loop()`, or pass it through the high-level brain/orchestrator options. The runtime
+mints a fresh metadata-only request immediately before each provider attempt and each tool-loop
+turn. Authorization is checked before credential resolution, quota reservation, observers, effect
+journaling, and transport, so a denied scope or exhausted grant cannot contact a provider. The
+context carries no key, prompt, message, response, or tool result; credentials remain caller-owned
+opaque handles.
+
+Pass the same context into connector dispatch and domain-tool/effect execution as well. Connector
+dispatch checks `connector_dispatch` after the reviewed selection and approval checks but before
+the registered executor; read-only domain tools check `tool_execution`; effectful tools and
+`AutonomousEffectBoundary.execute()`/`execute_stream()` check `effect_dispatch` before journal
+transitions and before user code. The requests contain only exact domains, capability/risk
+metadata, call identity, and a SHA-256 resource digest. Refused tool calls return the explicit
+`authorization_required` status and never invoke the executor. Connector replay remains a
+metadata-only replay and does not consume a fresh authorization allowance.
+
+```python
+scoped_tools = tool_runtime.scoped(
+    execution_id="run-1",
+    domain="coding",
+    authorization_context=authorization_context,
+)
+tool_results = scoped_tools((provider_tool_call,))
+```
+
+Use `context.for_domain("coding")` / `context.forDomain("coding")` for workers narrowed from a
+multi-domain grant. Parent and child contexts share one monotonic request sequence, preventing a
+fan-out child from reusing a request ID already minted by its parent. The authorization context
+is optional for legacy local adapters, but once a deployment relies on caller-issued grants it
+must be forwarded to every connector, tool, and effect boundary; registration and approval alone
+do not establish authority.
+
 For provider-backed evidence, `AutonomousConnectorRegistry` and `AutonomousConnectorRuntime`
 provide the corresponding caller-owned connector process. Register a typed
 `DomainEvidenceProviderConnectorManifest` and an executor that may close over a short-lived
@@ -162,9 +223,238 @@ capability-gated, prompts and mission plans are bounded, and external effects re
 approval. `BrainEpisodicMemory` provides optional restart-safe, hash-chained metadata memory.
 Automatic task runs derive bounded digest-only task facets for related-lesson retrieval, never
 persisting task text; explicit evaluator rewards remain the only learning authority.
+Adaptive provider, native tool-loop, and mission-proposal calls compile a
+`bioprism-autonomous-model-continuation/0.1` plan from the first selection. It keeps the complete
+bounded eligible ladder in deterministic order, records candidate metadata digests, and separates
+model-scoped timeout recovery from provider-scoped failures. A provider outage may skip several
+sibling arms without spending multiple failover transitions. `BrainRunResult.continuation_plan`
+exposes the plan, failover receipts include its digest, and
+`create_model_continuation_state()`, `advance_model_continuation_state()`, and
+`complete_model_continuation_state()` provide a digest-fenced restart cursor. Health updates still
+inform later runs but cannot silently reorder the current run; task text, prompts, credentials,
+arguments, evaluator bodies, and provider responses remain transient.
 `AutonomousGoalLedger` adds the restart-safe objective layer above that memory: bounded attempts,
 criterion/evidence digests, blockers, optimistic revisions, and a hash-chained lifecycle work for
 every built-in domain without retaining goal text or provider payloads.
+`AutonomousGoalScheduler` adds deterministic multi-goal admission above the ledger. It applies
+explicit priority/urgency/deadline signals, aging fairness, dependency closure, retry policy,
+concurrency/cost budgets, per-domain quotas, and required-domain coverage, then returns a
+digest-bound metadata-only schedule. `claim_autonomous_goals()` rechecks every expected revision
+before moving admitted goals to `running`; stale schedules and dependency cycles fail closed.
+The Python schedule digest is portable with the TypeScript scheduler for the same goal projection.
+`AutonomousGoalWorker` closes the execution loop: it preflights caller-owned task rehydration,
+claims the admitted rows, invokes a caller-owned executor, and settles result status, criterion
+updates, evaluator digests, and retry-safe failure state. Rehydrated task text and executor output
+remain transient; `AutonomousGoalWorkerBatch.to_dict()` contains only the schedule, claim, outcome
+digests, bounded error classes, and aggregate counts. The worker supports all twelve catalogue
+domains, including `cross_domain`, and its single-attempt digest is portable with TypeScript.
+For process-loss recovery at the executor boundary, pass an `AutonomousGoalWorkerJournal` and a
+stable `batch_id`. Its bounded hash chain records only prepared/claimed/dispatch/settlement
+metadata. `recover()` pauses a claim that died before dispatch so it can be retried, but blocks a
+claim that reached dispatch with `goal-reconciliation-review`; it never replays an uncertain
+provider effect. `JsonAutonomousGoalWorkerJournalPersistence` and
+`AutonomousGoalWorkerJournalPersistenceCoordinator` provide canonical caller-owned snapshot
+storage with optional compare-and-swap fencing. Journal snapshots exclude task text, prompts,
+parameters, credentials, and executor results just like the goal ledger.
+The worker also verifies `goal_task_digest(resolved_task)` against the immutable ledger identity
+before it claims anything, so a stale or mis-keyed protected queue cannot execute a different task.
+When parameters are present, each journal event carries only an `execution_binding_digest`; this
+binds transient action handoffs and other executor inputs across prepared/claimed/dispatch/settled
+phases without serializing them. `active_for()` and `assert_no_active()` expose a fail-closed
+restart fence: the caller must recover or explicitly reconcile an in-flight boundary before a new
+worker pass can resolve or dispatch that goal.
+`AutonomousGoalControlLoop` continues those bounded worker passes until every goal is terminal,
+no safe work is admissible, or an explicit cycle/run budget is exhausted. Its optional
+`options_factory(context)` receives only prior cycle metadata and ledger counts, so a caller can
+refresh priorities, urgency, dependencies, retry policy, and required-domain coverage without
+reintroducing task payloads. Paused objectives can be re-admitted on a later cycle, while failed,
+blocked, or concurrently running objectives produce an explicit `no_admissible_work` stop rather
+than being reported as success. The result contains cycle digests, domain/status counts, and live
+executor values only on the initiating process.
+Pass `evaluator(cycle)` to close the loop with explicit quality credit. The callback must return one
+metadata-only reward packet per run; rewards are finite values in `[-1, 1]`, bound to the goal's
+attempt and worker outcome digest, and never inferred from transport or executor status. With no
+custom learner, `AutonomousGoalBanditLearner` updates domain admission priorities using a bounded
+UCB-style value state. Custom learners can return only validated scheduling signals and a learning
+state digest. Goal records receive evaluator/learning digests through an optimistic revision fence;
+raw evidence, evaluator values, tasks, prompts, credentials, and live results stay transient.
+`AutonomousGoalAgentRuntime` connects this loop to the real autonomous facade. Prefer
+`agent.goal_agent_runtime(...)` or `agent.run_goal_control_loop(...)`: Python now binds the
+worker to the complete `AutonomousAgent`, just like the TypeScript runtime, so each claimed goal
+uses the same credential-session, model-inventory, prompt, routing, provider, connector/tool,
+evaluator, and learning boundaries as a direct run. A caller-owned task resolver rehydrates each
+goal's text only after admission, and a run-options factory supplies transient model candidates,
+opaque credential handles, approval callbacks, memory, tools, and policy at execution time. All
+twelve domains, including `cross_domain`, use the same facade path; no resolver or provider value
+is copied into goal or loop metadata.
+
+For one ceiling across a composed run, create an `AutonomousCostBudget` and pass its
+`reserve` callback through the agent options. The same callback covers semantic/planning calls,
+provider failover, tool-loop turns, workflow stages, cross-domain fan-out, synthesis, and
+evaluator-driven retries. Reservations are atomic for local concurrent workers; only a refusal
+before provider dispatch releases one. Streams reserve on first iteration, while an already
+dispatched or transport-ambiguous attempt remains charged. Use `budget.snapshot()` and
+`AutonomousCostBudget.from_snapshot(...)` for caller-owned restart handoff; this is estimate
+accounting, not billing truth, and never stores prompts, responses, credentials, or keys.
+
+For one metadata-only observability record across the complete batch, call
+`runtime.run_with_trace(trace_store=trace_store, run_id="goal-batch-001", ...)`. The trace spans
+goal planning, rehydrated worker execution, selector/provider lifecycle, evaluator settlement,
+learning metadata, and the final loop status across all twelve domains. The returned
+`AutonomousGoalAgentTracedRunResult.result` stays live in the initiating process; its
+`to_dict()` projection, trace summary, and trace snapshot retain only digests, counters, bounded
+identifiers, and failure metadata. Task text, prompts, parameters, credentials, provider
+responses, and live results are never serialized, and caller observers/callbacks remain composed.
+
+For an operator index across many runs, import validated snapshots into
+`AutonomousRunTraceRegistry`. It provides deterministic cursor pages and filters for run, domain,
+status, provider, and model, plus separate retained-event inspection. Set `retain_events=False`
+to keep summary counters and provider/model identities without retaining event rows. The bounded
+`max_runs`/`max_events`/`max_bytes` policy evicts only the oldest eligible terminal records and
+protects running, partial, paused, and unknown work by default; if no safe eviction exists, the
+import fails without mutating the registry. JSON and transactional-CAS persistence adapters are
+available, and restoration is an observability operation only—it never resumes provider work or
+authorizes a tool or effect.
+
+```python
+from prism_sdk import AutonomousRunTraceRegistry
+
+registry = AutonomousRunTraceRegistry({"max_runs": 2_000, "max_events": 100_000, "max_bytes": 20_000_000})
+registry.import_snapshot(trace_store.snapshot())
+page = registry.query({"domain": "biomedical", "status": "completed", "limit": 100})
+events = registry.events({"run_id": page.records[0].run_id, "phase": "provider_invocation_finished"})
+```
+
+The high-level traced bridge can publish the projection as part of the same boundary with
+`runtime.run_with_trace(trace_store=trace_store, trace_registry=registry, run_id=...)`.
+`traced.trace_registry` reports imported/replaced/unchanged state, source and registry digests,
+eviction count, or a sanitized failure. Publication is idempotent and best-effort, so an index
+outage never changes provider settlement or causes an already-dispatched goal to retry.
+
+`AutonomousProviderEffectReconciliationCoordinator` provides the corresponding restart admission.
+Pass it to `BrainWorker`, `RemoteBrainJobWorker`, or `AsyncRemoteBrainJobWorker` as
+`effect_reconciliation`; the lifecycle runs one bounded status pass before claiming work, caches
+the result for concurrent stages, and blocks fresh provider dispatch while any external effect is
+uncertain or reconciliation errors remain. After caller-owned resolution, call
+`reset_effect_reconciliation()`. Only bounded counts, statuses, and digests cross the worker
+boundary.
+
+For deployments that already have an operator-approved action record, add an
+`action_handoff_resolver(goal, row, task)` to the runtime (or to
+`run_goal_control_loop`). It may return the verified handoff directly, or
+`{"handoff": handoff, "request": {"domain": ..., "hints": ..., "allow_cross_domain": ...}}`
+when replay needs routing inputs that are not encoded in the handoff. The runtime validates the
+handoff during rehydration and again after the scheduler claim, then calls
+`agent.execute_action_handoff(...)`; a goal cannot silently fall back to the raw run path when
+this resolver is configured. Handoff metadata is transient worker input, while credentials,
+callbacks, provider options, and effect authority remain supplied by `run_options_factory`.
+
+```python
+result = agent.run_goal_control_loop(
+    ledger,
+    task_resolver=lambda goal, _row: protected_queue.read(goal.goal_id),
+    run_options_factory=lambda _goal, _row: {
+        "credentials": session,
+        "model_candidates": agent.models(enabled_only=True),
+        "approve_provider_call": True,
+    },
+    evaluator=evaluate_goal_cycle,
+    schedule_options={"max_selected": 12, "max_concurrent": 4},
+)
+```
+
+The callbacks and their values remain process-local; the ledger and control-loop checkpoint
+retain only digests, statuses, counts, and value-only bandit state.
+For long-running loops, pass a stable `run_id` and a `checkpoint(snapshot)` callback. The sealed
+checkpoint records contiguous cycle summaries, aggregate counters, evaluator digests, learned
+signals, and the built-in bandit's value-only arm state; it never records task text, prompts,
+parameters, credentials, callbacks, provider output, or evaluator evidence. The
+`JsonAutonomousGoalControlLoopSnapshotPersistence` adapter canonicalizes that projection, while
+`TransactionalJsonAutonomousGoalControlLoopSnapshotPersistence` adds stale-writer fencing through
+`write_if_unchanged`. `AutonomousGoalControlLoopPersistenceCoordinator.flush` is directly usable
+as the callback:
+
+```python
+coordinator = AutonomousGoalControlLoopPersistenceCoordinator(
+    TransactionalJsonAutonomousGoalControlLoopSnapshotPersistence(store),
+)
+loop.run(run_id="research-mission-001", checkpoint=coordinator.flush, max_cycles=128, max_total_runs=8192)
+
+# In a new process, restore the digest-bound image before supplying fresh transient callbacks.
+snapshot = coordinator.restore()
+fresh_loop.run(run_id="research-mission-001", resume_snapshot=snapshot, checkpoint=coordinator.flush, max_cycles=128, max_total_runs=8192)
+```
+Resume continues at the next cycle and restores the built-in bandit generation without replaying
+the completed worker batch. The caller still rehydrates task text, model candidates, opaque
+credentials, tools, memory, and approval policy after each new claim. Checkpoint generations are
+content-addressed and linked to their predecessor; a tampered image, non-contiguous cycle, changed
+run identity, or compare-and-swap conflict fails closed before execution.
+
+For provider-backed evidence that must choose and recover across multiple approved adapters, use
+`AutonomousLLMEvidenceAdapterRegistry` with `AutonomousLLMEvidenceAdapterSelector`. The selector
+returns a digest-bound plan that can be persisted alongside a run;
+`select_adaptive_for_domains` accepts only metadata-only health signals and can promote a
+provider/model route after explicit evaluator credit. `InMemoryAutonomousLLMEvidenceAdapterHealthStore`
+is a hash-chained learning ledger for acquisition outcomes and evaluator rewards, while
+`JsonAutonomousLLMEvidenceAdapterHealthPersistence` and its transactional coordinator provide
+restart-safe conditional persistence. Pass the plan, registry, and
+`AutonomousLLMEvidenceFailoverAcquirer` created by
+`create_autonomous_llm_evidence_adapter_failover_acquirer` to the existing evidence runtime or
+agent façade. Failover is bounded and retries only retryable provider transport failures;
+malformed prompt, argument, and credential failures stop immediately. Health snapshots and
+failover events contain adapter/model manifest digests, statuses, bounded timings, and error
+classes only—never keys, prompts, requests, provider responses, or raw error messages.
+
+`AutonomousLLMEvidenceReadinessAuditor` adds the provider-free operational audit for that route.
+It evaluates coverage, the exact selection-plan digest, selected-manifest health, circuit state,
+and the caller's `AutonomousLLMEvidenceReadinessPolicy` across all twelve domains. Strict startup
+policy reports unobserved or below-threshold routes as `blocked`; a caller can explicitly use
+`require_health=False` to show the same routes as `degraded` for onboarding. A healthy route is
+reported `ready`, while absent adapter coverage is `missing`. The report is canonical,
+digest-addressed, byte-bounded, and restorable with strict field/aggregate checks. Pass
+`evidence_readiness={"registry": registry, "health_store": health, "options": {...}}` to
+`AutonomousAgent.readiness()` to compose those rows with model, credential, tool, and learning
+readiness. This remains a projection only: it never dispatches a source, invokes an LLM, or
+converts route health into evidence truth.
+
+The provider-contract boundary makes that route executable without making the SDK a provider
+client. `AutonomousEvidenceProviderContractRegistry` binds each approved adapter to its provider,
+protocol, operation vocabulary, domain, capability, source kind, authentication posture, freshness,
+pagination mode, and required request metadata. `create_acquirer_for_adapter()` verifies the
+registry and contract immediately before invocation, so a changed adapter manifest, missing
+operation, unsupported capability, or stale registry fails closed before a provider call. The
+contract projection contains only digests and bounded metadata; credentials, prompts, requests,
+and responses remain caller-owned.
+
+`create_autonomous_evidence_source_acquirer()` adds the provenance admission boundary around that
+contract acquirer. A caller supplies a source descriptor callback that returns only source identity,
+source digest, authority, status, observation time, expiry, citation digest, and bounded limitations.
+`AutonomousEvidenceSourcePolicy` evaluates freshness, future skew, authority, partial status, and
+digest requirements, while `AutonomousEvidenceSourceLedger` records a metadata-only hash chain of
+accepted and refused observations. JSON and compare-and-swap persistence coordinators support
+restart recovery without retaining raw source values or locators. The contract/source tests exercise
+all twelve domains, failover, refusal, secret-shaped output rejection, canonical round trips, and
+stale-writer protection.
+
+`AutonomousEvidenceRetryPolicy` separates bounded same-route retry from candidate failover. The
+retry wrapper classifies only typed transient failures, applies capped exponential backoff, and
+emits attempt number, status, failure class, delay, and latency as value-free telemetry. The
+failover acquirer now applies that policy to every selected candidate and can compose the source
+boundary inside each retry route, so a successful source receipt is admitted only after the exact
+provider contract and source policy pass. Credential, argument, source-admission, and malformed
+response failures do not get retried or silently promoted to another provider.
+
+For explicit multi-source adjudication, `AutonomousEvidenceSourceReconciler` prepares a
+digest-bound `AutonomousEvidenceReconciliationPlan` from caller-owned routes. Execution requires
+`approve_source_dispatch=True`, fans out at a bounded concurrency, optionally normalizes values
+under a named/versioned callback, and classifies the result as `consensus`,
+`consensus_with_dissent`, `disagreement`, `insufficient_evidence`, or `failed`. The returned
+`AutonomousEvidenceReconciliationResult` keeps source values and normalized values transient while
+its canonical projection retains route/request/value/normalization digests, failure classes,
+quorum, and disagreement metadata. Plan and result projections round-trip strictly and reject
+route drift, normalizer drift, tampering, secret-shaped metadata, and oversized values. The
+all-domain tests exercise consensus, dissent, disagreement, explicit approval, and bounded fan-out.
+
 `AutonomousTaskOrchestrator.run_goal_step(...)` wires one bounded objective attempt into the normal
 route, planning, model-selection, provider, evaluator, and approval lifecycle, returning raw
 runtime output only transiently and persisting a value-only settlement.
@@ -196,6 +486,177 @@ can feed `BrainModelHealthStore` into future model selection. `BrainReplayEngine
 caller-rehydrated evidence across every built-in domain and optionally advances a caller-owned
 bandit updater without replaying provider calls.
 
+Provider invocation receipts can be evaluated through the same explicit model-learning boundary.
+`AutonomousProviderOutcomeEvaluator` accepts only redacted provider metadata, digests, and
+bounded caller evidence; prompt/response text, messages, request bodies, headers, credentials,
+and raw provider errors are rejected. The transport status is never treated as task quality. The
+default `agent.evaluate_provider_receipts(...)` updater applies the evaluator's bounded reward to
+the existing `provider/model` contextual bandit state, while deployments may provide a custom
+updater and persist `next_learning_state` through their own snapshot/CAS boundary. Reusing that
+state makes a repeated receipt idempotent and does not rerun a provider. This bridge is an
+evaluation and adaptation mechanism, not a factual, clinical, scientific, or operational truth
+oracle.
+
+`create_autonomous_cycle_evaluator_bridge()` closes the callback-plumbing seam for the automatic
+learning paths. It validates a complete twelve-domain autonomous evaluator registry, exposes
+stable catalogue and policy digests, and returns exact-domain evaluators for single-domain
+learning plus a routed composite for cross-domain specialists and synthesis:
+
+```python
+from prism_sdk import create_autonomous_cycle_evaluator_bridge
+
+bridge = create_autonomous_cycle_evaluator_bridge(
+    lambda context: {
+        "domain": context["domain"],
+        "capability": "caller_review",
+        "risk_class": "read_only",
+        "signals": {signal: 1.0 for signal in context["required_signals"]},
+    }
+)
+single_evaluator = bridge.evaluator_for_domain("coding")
+cross_evaluator = bridge.evaluator_for_cross_domain(("coding", "data"))
+```
+
+The evidence factory receives only bounded run/status/digest metadata, the selected role, and
+the evaluator's required signal contract. Task text, prompts, provider responses, tool values,
+credentials, and evidence bodies never enter that context. Evidence is generated transiently and
+validated by the existing domain adapters; provider completion is never treated as reward. Pass
+`single_evaluator` to `run_learning()` or pass the bridge itself as `evaluator_bridge=` to
+`run_auto()`'s automatic learning path; use `cross_evaluator` for direct cross-domain
+learning/replan settlement. Inline evidence is rejected by the bridge so callers cannot
+accidentally bypass the independent evidence boundary.
+
+Deployments with explicit source and evaluator governance can make those decisions mandatory at
+the same boundary:
+
+```python
+gated = create_autonomous_cycle_evaluator_bridge(
+    evidence_for=caller_owned_value_evidence,
+    source_receipt_for=lambda context: source_ledger_receipt_for(context),
+    evaluator_calibration_for=lambda context: calibration_report_for(context["domain"]),
+)
+```
+
+`source_receipt_for` must return a validated accepted observation with a source digest and
+non-`caller_declared` authority. `evaluator_calibration_for` must return a validated report whose
+exact routed evaluator is ready on calibration/holdout evidence. Both callbacks run before the
+evidence callback and reward settlement; missing, stale, refused, tampered, or mismatched
+metadata fails closed. Only receipt/report digests and bounded source labels enter the context;
+the SDK still does not decide external truth, provision credentials, or infer reward from provider
+completion.
+
+### Digest-bound next-action handoff
+
+When a caller needs an approval screen or scheduler input without executing the task, use
+`agent.action_plan(...)`. It composes the provider-free route, evidence plan, domain policy,
+task intent, and task decision into a metadata-only projection with candidate workflows,
+approval requirements, policy/review reasons, and one deterministic `next_action`:
+
+```python
+action = agent.action_plan(
+    task="coordinate a reproducible data and neuroscience review",
+    hints=("data", "neuroscience"),
+    allow_cross_domain=True,
+)
+print(action["status"], action["next_action"], action["plan_digest"])
+```
+
+Pass `domain="data"` when the caller has already selected a domain; this still creates an
+explicit route digest and uses the same domain policy, evidence plan, workflow, and task-decision
+contract. `AutonomousActionPlan.from_dict()` verifies the plan and every candidate digest for
+restart replay. The projection never contains task text, prompts, provider values, credential
+handles, source observations, tool arguments, or authorization. It is a review handoff, not a
+replacement for the explicit provider, evidence, connector, tool, evaluator, launch-admission,
+queue, or effect boundary.
+
+For the final caller-owned handoff, `agent.admit_action_plan(...)` records explicit approvals
+against the plan digest and `agent.execute_action_plan(...)` replays the transient task and route
+inputs before delegating to `run_auto()`. Missing review, evidence, plan, effect, evaluator, or
+provider gates return an `AutonomousActionExecution` with no credential or provider access. An
+admitted plan maps `workflow`, `planning`, `evidence_first`, and `cross_domain` decisions to the
+existing execution controls; credentials and all external authority remain caller-owned:
+
+```python
+plan = agent.action_plan(task="analyze a bounded dataset", domain="data")
+execution = agent.execute_action_plan(
+    task="analyze a bounded dataset",
+    plan=plan,
+    domain="data",
+    approvals={gate: True for gate in plan["required_approvals"]},
+    reviewed=True,
+    credentials=caller_credentials,
+)
+if execution.status != "completed":
+    print(execution.admission.next_action)
+```
+
+When the operator process has emitted a verified dispatch handoff, use
+`agent.execute_action_handoff(...)` instead of manually unpacking its plan and admission. The
+method revalidates the outer digest and embedded identities, replays the transient task/domain
+against the plan, reproduces the approved gate set, and delegates to the same `run_auto()`
+boundary. It does not turn the handoff into a credential or bypass provider, evidence, tool,
+evaluator, or effect controls.
+
+The execution method rejects a changed task or route-options digest and refuses tampered
+admission records before dispatch. Its metadata projections retain only plan/admission identity,
+selected domains, gate state, and bounded next actions; task text, prompts, credentials, source
+values, tool arguments, provider responses, and secret material remain transient.
+
+For a restart-safe operator workflow, persist the handoff through
+`InMemoryAutonomousActionAdmissionLedger` and
+`TransactionalJsonAutonomousActionAdmissionSnapshotPersistence`. Submit revision one, then call
+`ledger.review(...)` with the exact predecessor digest, an explicit reviewer authorization digest,
+and the gate approvals. The ledger derives a new admission from the stored plan, increments the
+revision, and retains the predecessor link. It refuses stale reviewers, plan/admission mismatch,
+tampered status, missing reviewer identity, and admitted records without an operator digest.
+Snapshots contain only the redacted plan/admission projections and their digests; the caller still
+owns task rehydration, credentials, provider invocation, evaluator truth, and effect authority.
+
+`AutonomousActionAdmissionController` adds the operator view above the ledger. `queue()` projects
+all domains and gate state without task text, `review()` requires the deployment's authorization
+digest plus the expected current record digest, and `dispatch_handoff()` refuses held/blocked
+records while returning the redacted plan/admission projections and downstream gates. It is a
+review controller, not an execution or authorization oracle.
+
+For a complete keyless operator process, the CLI now composes planning, durable submission,
+optimistic-concurrency review, and downstream handoff:
+
+```bash
+python -m prism_sdk action-plan --task "review a bounded dataset" --all-domains > plan.json
+python -m prism_sdk action-admission-submit \
+  --admission-store action-admissions.json --plan-file plan.json --action-id dataset-review-42
+python -m prism_sdk action-admission-status --admission-store action-admissions.json
+python -m prism_sdk action-admission-review \
+  --admission-store action-admissions.json --action-id dataset-review-42 \
+  --authorization-digest "$REVIEW_AUTHORIZATION_DIGEST" \
+  --expected-record-digest "$CURRENT_RECORD_DIGEST" --reviewed \
+  --approve-gate provider_call
+python -m prism_sdk action-admission-handoff \
+  --admission-store action-admissions.json --action-id dataset-review-42
+```
+
+`action-plan` is provider-free and `--all-domains` compiles the same metadata-only contract for
+all twelve domains. The CLI never accepts a key as an argument, restores and validates the
+canonical action ledger before each operation, uses atomic compare-and-set persistence, and
+persists only plan/admission/reviewer digests. The authorization digest is an external reviewer
+identity, not a provider credential. The final handoff lists downstream gates but does not invoke
+a provider, source, tool, evaluator, learner, connector, or effect.
+
+Workers should call `validate_autonomous_action_dispatch_handoff()` after loading a handoff from
+the queue or another process. It rehydrates the plan and admission, checks their exact digests,
+admitted status, selected/requested-domain closure, downstream-gate list, and outer handoff
+digest. It proves metadata continuity only; external reviewer authorization, credential and
+provider readiness, source truth, evaluator quality, and effect approval remain independent.
+
+The remote worker can bind that verified object directly to a durable job. Prefer
+`submit_handoff()` when the action admission is the worker's dispatch boundary: it validates the
+handoff, derives `action_plan_digest`, `action_admission_digest`, and `action_handoff_digest`,
+and includes all three in the opaque job identity. The resolver may then return only
+`action_handoff`; the worker revalidates it after the process boundary, checks domain coverage,
+and refuses stale or swapped metadata before it calls a runner. `AsyncRemoteBrainJobWorker`
+provides the same `await submit_handoff(...)` path. The handoff digest is continuity metadata,
+not a provider credential, reviewer authorization, or execution token.
+
 ### One-call deployment-managed execution
 
 When an application has already registered an environment source or secret-manager resolver,
@@ -217,6 +678,15 @@ run = agent.run_auto_with_provisioned_credentials(
 answer = run.result                 # transient caller-owned provider result
 safe_event = run.to_dict()          # no result text, keys, or handles
 ```
+
+For a provider-free model gate view, `agent.model_inventory_readiness()` joins the current
+catalogue with every built-in domain's reviewed model capabilities, requested token capacity,
+provider registration, opaque-credential readiness, and live circuit state. It returns a
+digest-bound `ready`/`partial`/`missing` report with compatible and eligible `provider/model` arms
+for each domain. This is an operator projection only: it performs no discovery or invocation,
+keeps ineligible metadata visible for diagnosis, and does not replace evaluator evidence, launch
+admission, or effect approval. The existing `0.1` persisted discovery snapshot remains
+backward-compatible; the readiness projection is additive.
 
 For domain-aware structured answers, Python exposes the same twelve-domain response contract as
 the TypeScript SDK through `structured_domain_response=True` on `prepare()`, `run()`,
@@ -241,6 +711,45 @@ quality, source, or external-effect oracle. `evaluate_autonomous_domain_response
 `replay_autonomous_domain_response_evaluation()` provide deterministic offline scoring and drift
 detection; no provider call or credential is needed for those operations. Credential-shaped fields
 and values are refused before the response can cross into durable learning metadata.
+
+Direct structured execution defaults to admission control: when the response is structurally valid
+but its value-only composition score is below the reviewed threshold, the result is returned with
+`status="response_review_required"` instead of being projected as completed. The provider response
+and evaluation remain available to the caller for review, but transport success is not promoted to
+an accepted autonomous answer. Set `require_response_review=False` only when an application needs
+the legacy `completed` projection; the failed evaluation remains visible and is not converted into
+task-quality reward. Cross-domain children and synthesis defer to the parent fan-in gate.
+
+The same boundary applies when `learn=True`: a weak structured response can update only the
+separate value-only response-composition arm, while task-quality evaluation, episodic memory
+receipts, and evaluator-guided replanning remain pending behind review. This prevents parseable
+JSON from receiving task credit. `require_response_review=False` explicitly restores the legacy
+learning projection.
+
+Cross-domain structured runs automatically apply a second fan-in gate before synthesis. The gate
+revalidates every specialist against its reviewed response contract and returns a digest-only
+`response_assessment` with structural scores, domain coverage, alignment metadata, and bounded
+next actions. Provider text and structured values remain on the caller-owned child/synthesis
+results; they are not copied into the assessment or execution receipt. Structural admission is
+enabled by `structured_domain_response=True` and does not fabricate semantic agreement. Set
+`require_response_alignment=True` to require explicit caller/reviewer-owned pairwise alignment
+records before synthesis. A missing pair, high-confidence contradiction, unresolved alignment,
+low-confidence alignment, weak response, or missing domain coverage returns
+`status="response_review_required"`, `execution_receipt.next_action="review_response_gate"`,
+and no synthesis result. The thresholds `minimum_response_reward`,
+`minimum_response_alignment_confidence`, and `response_contradiction_confidence_threshold` are
+bounded fractions for deployments with a stricter review policy. With alignment disabled, the
+gate still performs structural admission and includes a third synthesis row after fan-in.
+
+The durable `BrainWorker` applies the same contract at both sides of the fan-in boundary.
+`response_review_required` is the pre-synthesis checkpoint and retains only the specialist
+assessment digest. If synthesis returns a structurally blocked or otherwise non-complete
+response, the worker creates `synthesis_response_review_required`, binding the synthesis outcome
+digest and the post-synthesis assessment digest while keeping the result caller-owned. A resolver
+must return that exact `completed_synthesis_result` for review-based continuation, or the caller
+must set `retry_synthesis_after_response_review=True` to record an explicit retry authorization
+before a new provider call. The worker never marks the job complete from a stale or unreviewed
+synthesis value, and tampering with either digest fails before dispatch or settlement.
 
 Workflow stages receive the same value-only treatment. A valid structured stage response is
 scored by `evaluate_autonomous_workflow_stage_response()` for contract integrity only—stage
@@ -279,6 +788,35 @@ decision, settlement = agent.settle_structured_response(
 )
 ```
 
+For long-running transcripts, the same agent entry point accepts an explicit context budget:
+
+```python
+run = agent.run(
+    task="compare the reviewed evidence and produce the next bounded action",
+    domain="research",
+    model_candidates=model_candidates,
+    credentials=credentials,
+    approve_provider_call=True,
+    context_budget={
+        "max_input_tokens": 12_000,
+        "preserve_recent_messages": 10,
+        "max_messages": 96,
+    },
+)
+```
+
+The budget is applied before selection and after each approved tool result. System/developer
+instructions, the latest user task, recent turns, and the newest assistant/tool continuation are
+protected; older tool turns are removed only as complete atomic units. The `context_budget` result projection contains
+only counts, dropped indexes, structural digests, and retention metadata. Protected overflow
+fails closed with `invalid_request`, and no summarization model is called.
+
+For live UI or worker consumption, `AutonomousStreamRuntime.open()` (also available through
+`AutonomousBrain.open_stream()`) exposes the same transient provider-neutral event contract with
+pre-event-only failover, required terminal `done` events, explicit abandonment, and a
+metadata-only completion receipt. See
+[`docs/AUTONOMOUS_STREAMING.md`](../docs/AUTONOMOUS_STREAMING.md) for the cross-language contract.
+
 After a restart, rehydrate only `episode.to_dict()` and the value-only
 `response_evaluation`; omit `contract` when the provider response is no longer retained. The
 settlement refuses altered evaluation digests, mismatched episode/run identities, duplicate
@@ -294,6 +832,11 @@ task. Inventory failure is raised instead of silently executing against a stale 
 workflow/cross-domain learning, evaluator, and checkpoint options through the same `run_auto`
 surface. `AutonomousProvisionedRun.to_dict()` is metadata-only; `.result` is deliberately not a
 durable payload.
+
+Provider planning results carry `planner_context` and `planner_context_digest`, the exact
+`{domain, capability, risk_class, task_family}` identity used for contextual model selection.
+`AutonomousAgent.settle_planning_quality()` verifies and credits that embedded identity; legacy
+planning results without the fields use the explicit settlement arguments for compatibility.
 
 `RemoteBrainJobWorker` is the Python high-level queue adapter when the durable job authority is
 remote (HTTP, MCP, or `DurableBrainControlPlaneAdapter`) rather than a local `BrainJobStore`.
@@ -314,6 +857,14 @@ remote boundary. If a resolver returns the corresponding private `blueprint` or 
 rehashes it before dispatch and refuses a changed plan or route. Both bindings are optional, and
 omitting them preserves the pre-extension job digest for existing callers.
 
+The remote worker also accepts `action_plan_digest` and `action_admission_digest`. The resolver
+returns the matching metadata-only `action_plan` and `action_admission`; both are parsed and
+rehashed before a claim can invoke a runner. The admission must be `admitted`, must reference the
+exact plan digest, and must reproduce the composite job digest. This is enforced identically by
+the synchronous and asynchronous workers. A stale or swapped plan is rejected in preflight with
+zero runner calls, while generic durable provider approval remains a separate gate. Existing
+remote jobs omit these fields and retain their original digest behavior.
+
 The remote worker uses the same approval, retry, and uncertainty contract as the local worker. It
 parks provider or route approval before dispatch, forces the provider approval bit on the
 rehydrated retry, renews leases during long calls, retries only typed preflight failures when
@@ -327,6 +878,36 @@ helpers provide the optional reviewed-identity bindings without serializing thos
 offloads a synchronous `AutonomousBrain` runner to a worker thread (or awaits a native async
 runner), so async HTTP/MCP hosts retain responsive event loops without creating a second lifecycle
 implementation.
+
+Modern `brain_plan` responses also carry deterministic `execution_waves`, a bounded
+`max_parallelism`, `critical_path_cost`, and round/peak-width estimates. Use
+`validate_brain_plan_schedule()` or `BrainPlanSchedule.from_plan()` to validate this metadata
+before handing it to a caller-owned executor. The validator checks that waves preserve the exact
+topological order, dependencies never share or follow an invalid wave, costs agree with the step
+graph, and no scheduling field was tampered with. It does not authorize provider/tool work or
+provide distributed leases; older projections without these fields remain readable.
+
+Both remote worker variants support bounded draining with `max_parallelism` and
+`continue_on_non_terminal`. The default remains serial (`max_parallelism=1`) and the requested
+limit is always finite. Increasing the bound claims independent jobs concurrently while each job
+keeps its own lease heartbeat, approval gate, protected credential session, result digest, and
+post-dispatch reconciliation boundary. The batch projection reports `requested_count`,
+`max_parallelism`, and `stopped_on_non_terminal`; approval, retry, or reconciliation backpressure
+stops new claims by default after already-started leases settle. Set
+`continue_on_non_terminal=True` only when the deployment deliberately wants to continue through
+other queued jobs:
+
+```python
+batch = worker.run(
+    limit=32,
+    max_parallelism=8,
+    continue_on_non_terminal=False,
+)
+```
+
+The async worker uses the same controls with `await worker.run(...)`. Parallel scheduling never
+places task text, prompts, provider responses, evaluator values, credentials, or tool payloads in
+the remote job or batch metadata.
 Contextual model adaptation is shared with the Rust and TypeScript contracts: the canonical
 domain/capability/risk/task-family digest selects a nested contextual arm ledger, while global arms
 remain only a cold-start prior. Evaluator settlement sends the digest and bounded context identity
@@ -347,6 +928,19 @@ tool and never grants authority. Automatic `run()`, workflow, and cross-domain p
 the caller has not supplied explicit provider tools, while custom tools remain a compatibility
 fallback when no reviewed candidate is available. Missing catalogue entries and activation-gated
 stages are explicit rather than optimistic.
+
+The proposal can also enforce a caller-selected risk ceiling with
+`max_risk_class="read_only" | "reversible_effect" | "external_effect" | "high_impact_effect"`.
+Risk, read-only, approval, allow-list, and learning-disabled checks are separate eligibility
+gates. Each coverage row exposes a bounded `candidate_ranking` with the best eligible choice and
+the highest-priority rejected alternative, plus `selection_rationale` and
+`selection_constraints`. Candidate rows retain only reviewed tool identity, posture, deterministic
+relevance/utility metadata, value-only pull/failure counters, and typed rejection reasons such as
+`risk_budget_exceeded` or `approval_required`; task text, prompts, arguments, outputs, credentials,
+and evaluator prose remain absent. The two-candidate stage window preserves the existing 128 KiB
+all-domain plan bound while making risk-budget decisions auditable. `run()`, automatic workflows,
+and cross-domain child/synthesis blueprints propagate the same ceiling without turning selection
+into authorization.
 
 `AutonomousAgent.execute_capability(...)` is the deterministic application seam for a capability
 already selected by a plan, workflow, queue, or operator. It rechecks the exact registered tool
@@ -431,6 +1025,28 @@ keeps authoring/notebook sessions, stale digests, capability holes, release post
 CI planning in one evidence-bearing response; it does not pretend to execute a hosted UI or GitHub
 runner. The registry helpers retain structurally valid workbench reports behind bounded digest
 queries and restart-safe checkpoints; they never execute or re-evaluate the retained report.
+The high-level agent also exposes `plan_ordered_steps_with_provider()` for mission and scheduler
+graphs that are not represented by an `AutonomousWorkflow`. It validates a bounded graph before
+provider contact, derives a stable task/plan identity, selects through the contextual model and
+credential gates, and returns only a digest-bound `AutonomousOrderedStepPlanRefinementResult`.
+The provider may reorder existing IDs and choose a focus subset, but cannot add steps, alter
+dependencies, authorize tools, or create effects; caller acceptance and mission preflight remain
+separate gates. Provider, credential, malformed-response, abstention, and policy outcomes stay
+explicit and safe to persist, while step objectives and provider messages remain transient.
+Completed ordered-step proposals can be passed to `AutonomousAgent.settle_planning_quality()`
+with the same evaluator and contextual-bandit contract as workflow and cross-domain proposals.
+The protected graph-contract digest is included in the planning learning identity, so evaluator
+credit cannot replay across two different caller-owned graphs; transport success alone still earns
+no reward.
+For a typed connector `MissionRequest`, `AutonomousAgent.run_connector_mission_with_provider_planning()`
+provides the corresponding two-phase bridge: the provider receives only the redacted step
+catalogue, a completed non-review proposal must match the order-independent protected mission
+digest and dependency graph, and `accept_plan=True` is still separate from connector
+`approved=True`. Review-required proposals return without connector calls. On restart, callers can
+pass the previously retained `accepted_plan_refinement` to avoid replaying the planner provider;
+the connector checkpoint and output rehydration rules remain unchanged.
+`run_connector_mission_with_provider_planning_and_launch_admission()` performs the same two-phase
+handoff only after all mission domains pass the process-boundary launch admission.
 The provider-evidence registry helpers extend the same retention contract to provider-observed CI
 artifacts, logs, and attestations. They re-audit before import, preserve failed/unknown runs, expose
 digest-ordered provider/run/plan queries and exact lookup, and carry separate record-family digests
@@ -625,5 +1241,103 @@ notebook-side distribution and paired-contrast ergonomics across agent, biologic
 operations, and coordination domains. They keep unmeasured evidence out of arithmetic and make
 bootstrap seed, confidence, resampling unit, and limitations explicit; they do not perform
 significance testing or causal inference.
+
+`agent.domain_audit()` (or `audit_autonomous_domain_contracts()`) is the provider-free
+pre-dispatch gate for the reviewed autonomous surface. It checks every built-in domain's profile
+schema, default capability, workflow identity and DAG, stage evidence/evaluator contracts, exact
+tool binding posture, and caller-owned evidence coverage. Supplying live tool names and evidence
+identifiers upgrades runtime status from `unassessed` to `ready_for_review` or `partial`; the
+audit never resolves credentials, invokes a model, acquires a source, executes a tool, or mutates
+learning. Rows and the aggregate report are SHA-256 digest-bound metadata only.
+
+```python
+report = agent.domain_audit(
+    available_tool_names=["repository_catalog", "engineering_manifest_audit"],
+    available_evidence=["scope", "acceptance_criteria"],
+)
+validate_autonomous_domain_audit_report(report)
+```
+
+`agent.launch_preflight()` composes that structural audit with the agent's model/provider
+readiness and deployment-owned capability gates into one twelve-domain review artifact. Each row
+has a combined `blocked`, `partial`, or `ready_for_review` state and bounded next actions; the
+report also includes source-report digests and an explicit zero-dispatch ledger. It is useful for
+startup dashboards and approval UX, but it never authorizes a provider, source, tool, effect, or
+learning update.
+
+`agent.launch_admission(preflight, decision="approve", authorization_digest=...)` records the
+next explicit caller review boundary against that exact preflight digest. It projects an admission
+state for every domain (`approved`, `held`, `blocked`, or `not_selected`) and stores only the
+authorization/reason digests, bounded actions, and gate identities. A blocked or partial preflight
+cannot become approved through this method, and the admission record still does not grant provider,
+source, tool, queue, learner, credential, or effect authority; the deployment-owned executor must
+bind it to its own authorization and dispatch policy.
+
+For an execution-bound check, use `authorize_autonomous_launch_domains(...)` or the facade methods
+`run_with_launch_admission(...)` and `run_cross_domain_with_launch_admission(...)`. They enforce
+approval before credential resolution/orchestration and still require the ordinary provider,
+tool, learner, and effect approvals.
+The focused and workflow facades expose the same ordering through
+`run_capability_with_launch_admission(...)`,
+`run_workflow_with_launch_admission(...)`,
+`run_workflow_with_trace_and_launch_admission(...)`, and their learning/cycle/trajectory
+variants. Cross-domain learning and replanning variants validate every specialist domain before
+they enter the shared credential or execution controller.
+The same process gate is available for direct learning, traced runs, evidence-backed and
+resumable evidence execution, connector workflows/missions, and reviewed capability dispatch:
+`run_learning_with_launch_admission(...)`,
+`run_with_trace_and_launch_admission(...)`,
+`run_cross_domain_with_trace_and_launch_admission(...)`, the
+`run_with_*_evidence_with_launch_admission(...)` and
+`run_resumable_*_evidence_with_launch_admission(...)` variants,
+`run_connector_workflow_with_launch_admission(...)`,
+`run_connector_mission_with_launch_admission(...)`, and
+`execute_capability_with_launch_admission(...)`/`execute_capability_batch_with_launch_admission(...)`.
+They authorize before trace, evidence, connector, tool, learner, credential, or provider setup;
+omitted evidence domains are conservatively treated as the complete twelve-domain scope.
+Provisioned credential execution, approved model-arm invocation, direct connector dispatch, and
+workflow portfolio/evidence execution have corresponding gates:
+`run_with_provisioned_credentials_with_launch_admission(...)`,
+`run_auto_with_provisioned_credentials_with_launch_admission(...)`,
+`run_approved_model_selection_with_launch_admission(...)`,
+`dispatch_connector_with_launch_admission(...)`, and the
+`execute_workflow_portfolio*_with_launch_admission(...)` variants. They check the reviewed
+domain set before opening credentials or entering the provider, connector, tool, or evidence
+runtime.
+`run_auto_with_launch_admission(...)` provides the same gate for automatic single/cross-domain
+routing and refuses provider-assisted semantic routing until that classifier boundary is separately
+reviewed.
+The batch counterparts (`run_batch_with_launch_admission(...)`,
+`run_auto_batch_with_launch_admission(...)`, `run_cross_domain_batch_with_launch_admission(...)`,
+and `run_resumable_batch_with_launch_admission(...)`) preview every item route first and bind one
+admission to the complete selected-domain union before credential resolution, checkpoint
+rehydration, or provider dispatch. Per-item option factories are evaluated once and replayed after
+admission; automatic batches reject semantic routing unless it is separately reviewed.
+
+`run_resumable_batch(..., mode="auto")` now binds an automatic-execution policy digest into its
+metadata-only checkpoint. The digest covers normalized model candidates, route controls, planning,
+prompt and learning controls, connector/tool/structured-output options, domain-policy gates,
+approval, workflow, and decision-cycle settings without persisting their values. Changed
+automatic controls fail closed before protected-result rehydration or a new provider call.
+`AutonomousAutomaticBatchProtectedRehydration` is the strict auto-mode receipt adapter, and
+`AutonomousBrainBatchJobController(..., automatic_protected_rehydration=...)` uses it for restart
+recovery while explicit `rehydrate_result` callbacks retain precedence.
+
+The CLI exposes the same handoff with `--launch-admission-file` on `run` and `batch-run`. The file
+must be a bounded, digest-verified `agent.launch_admission(...)` record. The CLI checks its status
+and route coverage with an offline agent before collecting a user credential or opening MCP, then
+passes the same record into the SDK execution gate. Batch mode previews each request and verifies
+the union of explicit, automatic, or cross-domain domains; tampering, held/blocked status, and
+under-scoped approval fail closed. The returned CLI projection contains only admission identity,
+status, digest, and approved-domain metadata. It never exposes the approval reason, task text,
+prompt, credential, or provider value.
+
+`AutonomousBrainControlPlaneMonitor` and `AsyncAutonomousBrainControlPlaneMonitor` provide the
+operator-side lifecycle for jobs returned by `BrainControlClient`. They fan out bounded status
+reads across the twelve domains, validate hash-chained event cursors, issue explicit approval
+requests/decisions, and wait with bounded polling and restart cursors. Remote projections are
+validated as metadata-only before being returned; task text, prompts, credentials, provider
+responses, tool arguments, and effect values are refused at the monitor boundary.
+
 See
 [`docs/PYTHON_SDK.md`](../docs/PYTHON_SDK.md) for the full authoring contract.

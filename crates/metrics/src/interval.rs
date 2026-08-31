@@ -287,16 +287,8 @@ impl Interval {
         self.high - self.low
     }
 
-    pub fn midpoint(&self) -> f64 {
-        (self.low + self.high) / 2.0
-    }
-
     pub fn contains(&self, value: f64) -> bool {
         value >= self.low && value <= self.high
-    }
-
-    pub fn overlaps(&self, other: &Interval) -> bool {
-        self.low <= other.high && other.low <= self.high
     }
 
     /// Whether the interval excludes a reference value entirely.

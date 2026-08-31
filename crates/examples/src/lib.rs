@@ -19,6 +19,13 @@
 //! # Ok::<(), bioprism_examples::ExampleError>(())
 //! ```
 //!
+//! # Reading a report back
+//!
+//! [`SliceReport`] and [`RegistryReport`], and every struct they are made of, refuse a field they
+//! do not declare. Both digests are recomputed by re-serialising the *parsed* report, so a key the
+//! reader dropped would be outside the seal by construction: the recomputation never sees it, the
+//! claimed digest still agrees, and a report carrying content nobody hashed reads as intact.
+//!
 //! # The two halves of the catalogue
 //!
 //! [`SliceRegistry::run_all`] reports which of [`Property::ALL`] the registered slices exercise

@@ -538,6 +538,7 @@ fn parse_attributes(raw: Option<&Value>, path: &str, loss: &mut OtelLoss) -> Vec
         return Vec::new();
     };
     let mut attributes = Vec::with_capacity(values.len());
+    let mut seen_keys: BTreeSet<&str> = BTreeSet::new();
     for (index, raw_attribute) in values.iter().enumerate() {
         let attribute_path = format!("{path}[{index}]");
         let Some(attribute) = raw_attribute.as_object() else {
@@ -560,7 +561,7 @@ fn parse_attributes(raw: Option<&Value>, path: &str, loss: &mut OtelLoss) -> Vec
             &format!("{attribute_path}.value"),
             loss,
         );
-        if attributes.iter().any(|item: &Attribute| item.key == key) {
+        if !seen_keys.insert(key) {
             loss.duplicate_attributes.push(OtelFieldLoss {
                 path: format!("{path}.{key}"),
                 detail: "duplicate OTLP attribute key retained in source order".into(),

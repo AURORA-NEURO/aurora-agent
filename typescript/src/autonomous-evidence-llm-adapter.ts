@@ -19,6 +19,12 @@ import {
 import { AutonomousEvidenceAcquisitionError } from "./autonomous-evidence-retry.js";
 import { digestJson } from "./tooling.js";
 import type { JsonObject, JsonValue } from "./types.js";
+import {
+  AutonomousPromptRegistry,
+  AutonomousPromptSelectionPlan,
+  AutonomousPromptTemplate,
+  type AutonomousPromptSelectionPlanJSON,
+} from "./autonomous-prompt-registry.js";
 
 /** Provider-backed evidence adapter bridge over the existing provider-neutral LLM runtime. */
 export const AUTONOMOUS_LLM_EVIDENCE_ADAPTER_SCHEMA = "bioprism-typescript-autonomous-llm-evidence-adapter/0.1" as const;
@@ -96,13 +102,17 @@ function defaultParser(response: ProviderResponse): JsonValue {
   return response.text;
 }
 
-function requestIdentity(context: AutonomousEvidenceAcquisitionContext): Promise<string> {
-  return digestJson({
+function requestIdentity(context: AutonomousEvidenceAcquisitionContext, renderedPromptDigest?: string): Promise<string> {
+  const identity = {
     schema: AUTONOMOUS_LLM_EVIDENCE_ADAPTER_SCHEMA,
     plan_digest: context.plan_digest,
     requirement_id: context.requirement.requirement_id,
     source_id: context.request.source_id,
     request_id: context.request.request_id ?? null,
+    ...(renderedPromptDigest === undefined ? {} : { rendered_prompt_digest: renderedPromptDigest }),
+  };
+  return digestJson({
+    ...identity,
   });
 }
 
@@ -118,7 +128,10 @@ export interface AutonomousLLMEvidenceAdapterOptions {
   sourceKinds?: readonly string[];
   credential?: CredentialHandle;
   credentialFor?: CredentialResolver;
-  promptForContext: PromptResolver;
+  promptForContext?: PromptResolver;
+  promptTemplate?: AutonomousPromptTemplate;
+  promptRegistry?: AutonomousPromptRegistry;
+  promptSelection?: AutonomousPromptSelectionPlan | AutonomousPromptSelectionPlanJSON;
   parseResponse?: JsonParser;
   project?: AutonomousEvidenceProjector["project"];
   maxOutputTokens?: number;
@@ -136,7 +149,16 @@ export function createAutonomousLLMEvidenceAdapterRegistration(
 ): Omit<EvidenceAdapterRegistrationInput, "domains"> & { domains: [AutonomousDomainName] } {
   if (!options || typeof options !== "object") throw new ArgumentError("LLM evidence adapter options are malformed");
   if (!(options.runtime instanceof LLMRuntime)) throw new ArgumentError("LLM evidence adapter requires an LLMRuntime");
-  if (typeof options.promptForContext !== "function") throw new ArgumentError("LLM evidence adapter promptForContext is required");
+  if (options.promptForContext !== undefined && typeof options.promptForContext !== "function") throw new ArgumentError("LLM evidence adapter promptForContext is malformed");
+  if (options.promptTemplate !== undefined && !(options.promptTemplate instanceof AutonomousPromptTemplate)) throw new ArgumentError("LLM evidence adapter promptTemplate is malformed");
+  if (options.promptTemplate !== undefined && options.promptTemplate.domain !== options.domain) throw new ArgumentError("LLM evidence adapter promptTemplate domain does not match adapter domain");
+  if (options.promptRegistry !== undefined && !(options.promptRegistry instanceof AutonomousPromptRegistry)) throw new ArgumentError("LLM evidence adapter promptRegistry is malformed");
+  if (options.promptSelection !== undefined && !(options.promptSelection instanceof AutonomousPromptSelectionPlan) && (!options.promptSelection || typeof options.promptSelection !== "object")) throw new ArgumentError("LLM evidence adapter promptSelection is malformed");
+  if (options.promptTemplate !== undefined && (options.promptRegistry !== undefined || options.promptSelection !== undefined)) throw new ArgumentError("LLM evidence adapter cannot combine promptTemplate with prompt registry selection");
+  if ((options.promptRegistry === undefined) !== (options.promptSelection === undefined)) throw new ArgumentError("LLM evidence adapter promptRegistry and promptSelection must be supplied together");
+  if (options.promptForContext !== undefined && (options.promptTemplate !== undefined || options.promptRegistry !== undefined)) throw new ArgumentError("LLM evidence adapter cannot combine promptForContext with a prompt registry template");
+  if (options.promptForContext === undefined && options.promptTemplate === undefined && options.promptRegistry === undefined) throw new ArgumentError("LLM evidence adapter requires promptForContext or a verified prompt template selection");
+  if (options.promptRegistry !== undefined) options.promptRegistry.verifySelection(options.promptSelection!);
   if (options.parseResponse !== undefined && typeof options.parseResponse !== "function") throw new ArgumentError("LLM evidence adapter parseResponse is malformed");
   if (options.project !== undefined && typeof options.project !== "function") throw new ArgumentError("LLM evidence adapter project is malformed");
   if (options.credential !== undefined && options.credentialFor !== undefined) throw new ArgumentError("LLM evidence adapter cannot configure both credential and credentialFor");
@@ -161,7 +183,12 @@ export function createAutonomousLLMEvidenceAdapterRegistration(
     acquire: async (context) => {
       try {
         const model = safeModel("LLM evidence adapter resolved model", staticModel ?? await options.modelForContext!(context));
-        const messages = await options.promptForContext(context);
+        let renderedPrompt: Awaited<ReturnType<AutonomousPromptTemplate["renderTransient"]>> | undefined;
+        const messages = options.promptForContext !== undefined
+          ? await options.promptForContext(context)
+          : options.promptTemplate !== undefined
+            ? (renderedPrompt = await options.promptTemplate.renderTransient(context), renderedPrompt.messages)
+            : (renderedPrompt = await options.promptRegistry!.render(options.promptSelection!, context), renderedPrompt.messages);
         if (!Array.isArray(messages) || messages.length < 1 || messages.length > MAX_AUTONOMOUS_LLM_EVIDENCE_PROMPT_MESSAGES) throw new ArgumentError("LLM evidence adapter prompt must contain between 1 and 64 messages");
         const request: ProviderRequest = {
           model,
@@ -170,7 +197,7 @@ export function createAutonomousLLMEvidenceAdapterRegistration(
           ...(options.temperature === undefined ? {} : { temperature: options.temperature }),
           ...(options.requireJson === undefined ? {} : { requireJson: options.requireJson }),
           ...(options.responseSchema === undefined ? {} : { responseSchema: options.responseSchema }),
-          idempotencyKey: await requestIdentity(context),
+          idempotencyKey: await requestIdentity(context, renderedPrompt?.metadata.rendered_prompt_digest),
         };
         const response = await options.runtime.invoke(provider, request, {
           ...(options.credential === undefined ? {} : { credential: options.credential }),

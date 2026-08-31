@@ -16,7 +16,6 @@ dependencies = [
  "bioprism-ids",
  "bioprism-scope",
  "bioprism-world",
- "bioprism-worldgen",
  "serde",
  "serde_json",
  "thiserror",
@@ -29,7 +28,6 @@ dependencies = [
  "bioprism-foundation",
  "bioprism-ids",
  "bioprism-section",
- "bioprism-worldgen",
  "serde",
  "serde_json",
  "thiserror",
@@ -92,6 +90,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "bioprism-autopilot"
+version = "0.1.0"
+dependencies = [
+ "bioprism-devplat",
+ "bioprism-ids",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "bioprism-backends"
 version = "0.1.0"
 dependencies = [
@@ -114,7 +123,7 @@ dependencies = [
  "bioprism-ids",
  "bioprism-section",
  "bioprism-world",
- "serde",
+ "bioprism-worldgen",
  "serde_json",
  "thiserror",
 ]
@@ -180,7 +189,6 @@ dependencies = [
  "bioprism-ids",
  "bioprism-scope",
  "bioprism-world",
- "bioprism-worldgen",
  "serde",
  "serde_json",
  "thiserror",
@@ -263,14 +271,21 @@ dependencies = [
 name = "bioprism-cli"
 version = "0.1.0"
 dependencies = [
+ "bioprism-adapter",
+ "bioprism-autopilot",
  "bioprism-baseline",
  "bioprism-devplat",
+ "bioprism-domain",
  "bioprism-fiber",
+ "bioprism-figures",
  "bioprism-foundation",
  "bioprism-ids",
  "bioprism-mcp",
  "bioprism-mutation",
  "bioprism-prism",
+ "bioprism-project",
+ "bioprism-repair",
+ "bioprism-research",
  "bioprism-scope",
  "bioprism-section",
  "bioprism-store",
@@ -364,6 +379,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "bioprism-domain"
+version = "0.1.0"
+dependencies = [
+ "bioprism-fiber",
+ "bioprism-ids",
+ "bioprism-scope",
+ "bioprism-section",
+ "bioprism-world",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "bioprism-epistemic"
 version = "0.1.0"
 dependencies = [
@@ -447,12 +475,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "bioprism-figures"
+version = "0.1.0"
+dependencies = [
+ "bioprism-ids",
+ "serde_json",
+ "sha2",
+ "thiserror",
+]
+
+[[package]]
 name = "bioprism-foundation"
 version = "0.1.0"
 dependencies = [
  "bioprism-ids",
  "bioprism-scope",
- "bioprism-world",
  "serde",
  "serde_json",
  "thiserror",
@@ -628,6 +665,7 @@ dependencies = [
  "bioprism-devplat",
  "bioprism-devx",
  "bioprism-docgraph",
+ "bioprism-domain",
  "bioprism-epistemic",
  "bioprism-evalengine",
  "bioprism-fabric",
@@ -658,7 +696,9 @@ dependencies = [
  "bioprism-packs",
  "bioprism-policy",
  "bioprism-prism",
+ "bioprism-project",
  "bioprism-registry",
+ "bioprism-repair",
  "bioprism-routing",
  "bioprism-runtime",
  "bioprism-safety",
@@ -803,7 +843,6 @@ dependencies = [
  "bioprism-ids",
  "bioprism-section",
  "bioprism-world",
- "bioprism-worldgen",
  "serde",
  "serde_json",
  "thiserror",
@@ -866,6 +905,48 @@ dependencies = [
 ]
 
 [[package]]
+name = "bioprism-project"
+version = "0.1.0"
+dependencies = [
+ "bioprism-adapter",
+ "bioprism-domain",
+ "bioprism-fiber",
+ "bioprism-ids",
+ "bioprism-scope",
+ "bioprism-section",
+ "bioprism-world",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "bioprism-receipts-audit"
+version = "0.1.0"
+dependencies = [
+ "bioprism-autopilot",
+ "bioprism-bioworlds",
+ "bioprism-conformance",
+ "bioprism-cookbook",
+ "bioprism-devplat",
+ "bioprism-domain",
+ "bioprism-examples",
+ "bioprism-fiber",
+ "bioprism-ids",
+ "bioprism-mutation",
+ "bioprism-prism",
+ "bioprism-project",
+ "bioprism-registry",
+ "bioprism-repair",
+ "bioprism-research",
+ "bioprism-section",
+ "bioprism-world",
+ "bioprism-worldgen",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
 name = "bioprism-registry"
 version = "0.1.0"
 dependencies = [
@@ -874,6 +955,38 @@ dependencies = [
  "bioprism-mutation",
  "bioprism-prism",
  "bioprism-section",
+ "bioprism-worldgen",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "bioprism-repair"
+version = "0.1.0"
+dependencies = [
+ "bioprism-domain",
+ "bioprism-fiber",
+ "bioprism-ids",
+ "bioprism-project",
+ "bioprism-section",
+ "bioprism-world",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "bioprism-research"
+version = "0.1.0"
+dependencies = [
+ "bioprism-baseline",
+ "bioprism-fiber",
+ "bioprism-figures",
+ "bioprism-ids",
+ "bioprism-mutation",
+ "bioprism-prism",
+ "bioprism-section",
+ "bioprism-world",
  "bioprism-worldgen",
  "serde",
  "serde_json",
@@ -976,7 +1089,6 @@ dependencies = [
  "bioprism-ids",
  "serde",
  "serde_json",
- "thiserror",
 ]
 
 [[package]]
@@ -1029,7 +1141,6 @@ dependencies = [
  "bioprism-fiber",
  "bioprism-foundation",
  "bioprism-ids",
- "bioprism-scope",
  "bioprism-section",
  "bioprism-world",
  "bioprism-worldgen",
@@ -1298,9 +1409,9 @@ checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
 
 [[package]]
 name = "indexmap"
-version = "2.14.0"
+version = "2.14.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d466e9454f08e4a911e14806c24e16fba1b4c121d1ea474396f396069cf949d9"
+checksum = "07aa2048142242915a31d35844fb311e0e53fcca590c3a0a40dcf1b841fa09eb"
 dependencies = [
  "equivalent",
  "hashbrown",
@@ -1403,7 +1514,7 @@ checksum = "e7a5d71263a5a7d47b41f6b3f06ba276f10cc18b0931f1799f710578e2309348"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.3",
+ "syn 3.0.4",
 ]
 
 [[package]]
@@ -1469,9 +1580,9 @@ dependencies = [
 
 [[package]]
 name = "syn"
-version = "3.0.3"
+version = "3.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "53e9bae58849f64dfa4f5d5ae372c8341f7305f82a3868709269343628b659a3"
+checksum = "e6275cddf4610d1775e6d1fe9469b2e77d0f39fd98fb7450901b821e0c53649f"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1495,7 +1606,7 @@ checksum = "43cbfe0cf76104d42a574802844187e84a305e531ed54455f11fbde0f10541cd"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.3",
+ "syn 3.0.4",
 ]
 
 [[package]]

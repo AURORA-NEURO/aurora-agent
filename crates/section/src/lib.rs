@@ -62,6 +62,7 @@ pub use interpretation_assurance::{
 };
 pub use layers::{Layer, RenderContext};
 pub use omission::{InfluenceClass, OmissionGroup, OmissionManifest};
+pub use omission::{InformativeBound, OmissionAccountingError, ProvenUnreachable};
 pub use plan::{Backend, Fallback, FallbackReason, PlanDescriptor};
 pub use section::{
     DecisionSection, EvidenceCapsule, RefinementOption, UnresolvedObligation,

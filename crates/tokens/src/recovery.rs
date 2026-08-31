@@ -59,10 +59,7 @@ pub enum ContextFailure {
     StaleCache { context_id: String, detail: String },
     /// A node was dropped for size, and it turned out to matter. Distinct from an ordinary
     /// omission: the ledger recorded it, and the recording was not enough.
-    BudgetInducedOmission {
-        node_id: String,
-        obligation: String,
-    },
+    BudgetInducedOmission { node_id: String, obligation: String },
     /// A role filter removed something the role needed. The opposite failure to a leak, and just as
     /// real: an over-redacted context produces a confident answer from a partial picture.
     RoleOverRedaction { role: String, node_id: String },
@@ -182,10 +179,6 @@ impl Escalation {
             }
         }
     }
-
-    pub fn is_selective(&self) -> bool {
-        matches!(self, Escalation::RaiseResolution { .. })
-    }
 }
 
 /// A recovery attempt, with the failed artifact preserved.
@@ -275,7 +268,10 @@ impl RecoveryRecord {
 #[serde(tag = "policy_action", rename_all = "snake_case")]
 pub enum PolicyAction {
     /// Below the threshold. Keep the policy and keep counting.
-    Continue { consecutive: usize, threshold: usize },
+    Continue {
+        consecutive: usize,
+        threshold: usize,
+    },
     /// At or past the threshold. 39.24's fourth invariant.
     Rollback {
         policy_id: String,
@@ -386,7 +382,12 @@ mod tests {
     #[test]
     fn a_recovery_that_discards_the_failed_artifact_is_refused() {
         assert!(matches!(
-            RecoveryRecord::propose(omission_failure(), "  ", selective(&["n/mgmt"]), &holdouts()),
+            RecoveryRecord::propose(
+                omission_failure(),
+                "  ",
+                selective(&["n/mgmt"]),
+                &holdouts()
+            ),
             Err(RecoveryError::FailedArtifactNotPreserved(_))
         ));
     }

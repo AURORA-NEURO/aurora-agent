@@ -355,11 +355,22 @@ function digestOrNull(name: string, value: unknown): string | null {
 
 function normalizeWorkflowContext(value: unknown): AutonomousWorkflowToolContext {
   if (!isObject(value)) throw new ArgumentError("capability workflow_context must be an object");
+  const selectedToolNames = value.selected_tool_names === undefined
+    ? undefined
+    : (() => {
+      if (!Array.isArray(value.selected_tool_names) || value.selected_tool_names.length > 512) throw new ArgumentError("capability workflow_context selected_tool_names exceed their bound");
+      const names = value.selected_tool_names.map((name, index) => boundedIdentifier(`capability workflow_context selected_tool_names[${index}]`, name));
+      if (new Set(names).size !== names.length) throw new ArgumentError("capability workflow_context selected_tool_names contain duplicates");
+      return names;
+    })();
   return {
     domain: boundedIdentifier("capability workflow_context domain", value.domain) as AutonomousWorkflowToolContext["domain"],
     workflow_id: boundedIdentifier("capability workflow_context workflow_id", value.workflow_id),
     workflow_digest: digestOrNull("capability workflow_context workflow_digest", value.workflow_digest) as string,
     stage_id: boundedIdentifier("capability workflow_context stage_id", value.stage_id),
+    ...(value.stage_plan_digest === undefined ? {} : { stage_plan_digest: digestOrNull("capability workflow_context stage_plan_digest", value.stage_plan_digest) as string }),
+    ...(value.stage_contract_digest === undefined ? {} : { stage_contract_digest: digestOrNull("capability workflow_context stage_contract_digest", value.stage_contract_digest) as string }),
+    ...(selectedToolNames === undefined ? {} : { selected_tool_names: selectedToolNames }),
   };
 }
 

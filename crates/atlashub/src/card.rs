@@ -412,7 +412,9 @@ impl HealthCheck {
 #[serde(rename_all = "snake_case", tag = "currency")]
 pub enum Currency {
     Fresh,
-    Stale { by: u64 },
+    Stale {
+        by: u64,
+    },
     /// No reference epoch was supplied. This crate has no clock, and an absent reference is not
     /// evidence of currency — the same rule `bioprism_hubapi::mirror::Freshness::Undetermined`
     /// encodes for mirrors.
@@ -439,11 +441,6 @@ pub struct CardLinks {
 impl CardLinks {
     pub fn new() -> CardLinks {
         CardLinks::default()
-    }
-
-    pub fn to_world(mut self, world: WorldId) -> CardLinks {
-        self.worlds.push(world);
-        self
     }
 
     pub fn to_cell(mut self, cell: impl Into<String>) -> CardLinks {
@@ -645,7 +642,8 @@ impl WorldCardDraft {
                 ),
                 ClaimKind::EvidenceSelection => String::new(),
             };
-            self.not_suitable_for.push(Unsuitability::new(claim, because));
+            self.not_suitable_for
+                .push(Unsuitability::new(claim, because));
         }
         self
     }
@@ -933,9 +931,7 @@ mod tests {
             .disclaiming_what_the_rung_cannot_support()
             .publish()
             .unwrap();
-        assert!(card
-            .permits(ClaimKind::InjectedStructureRecovery)
-            .is_some());
+        assert!(card.permits(ClaimKind::InjectedStructureRecovery).is_some());
     }
 
     #[test]
@@ -944,9 +940,7 @@ mod tests {
             .disclaiming_what_the_rung_cannot_support()
             .publish()
             .unwrap();
-        assert!(card
-            .permits(ClaimKind::InjectedStructureRecovery)
-            .is_none());
+        assert!(card.permits(ClaimKind::InjectedStructureRecovery).is_none());
     }
 
     #[test]
@@ -955,7 +949,10 @@ mod tests {
             .disclaiming_what_the_rung_cannot_support()
             .not_suitable_for(Unsuitability::new(ClaimKind::EvidenceSelection, "   "))
             .publish();
-        assert!(err.is_ok(), "evidence selection is supported, so a blank reason for it is merely unused");
+        assert!(
+            err.is_ok(),
+            "evidence selection is supported, so a blank reason for it is merely unused"
+        );
 
         let mut d = draft(observed());
         d.not_suitable_for = ClaimKind::ALL

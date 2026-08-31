@@ -72,11 +72,6 @@ impl SpecimenRef {
         }
     }
 
-    pub fn with_lesion(mut self, lesion: impl Into<String>) -> Self {
-        self.lesion = Some(lesion.into());
-        self
-    }
-
     pub fn label(&self) -> String {
         match &self.lesion {
             Some(lesion) => format!(

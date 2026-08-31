@@ -57,7 +57,9 @@ pub enum Operator {
     /// `A ▷ B`
     Sequential,
     /// `A ∥ B`
-    Parallel { justification: ParallelJustification },
+    Parallel {
+        justification: ParallelJustification,
+    },
     /// `A ⊗χ B`
     ChoreographedFusion { choreography_digest: String },
     /// `A ⊕r B`
@@ -85,8 +87,12 @@ pub enum ParallelJustification {
     /// The caller asserts the writes commute. An assertion, recorded as one: 23.41's own warning is
     /// that "two agents writing the same repository branch are not commutative merely because both
     /// return patches", so this variant names who asserted it.
-    DeclaredCommutative { asserted_by: String },
-    MergeContract { contract: String },
+    DeclaredCommutative {
+        asserted_by: String,
+    },
+    MergeContract {
+        contract: String,
+    },
 }
 
 /// A composite: the operator, its parts, and the contract the whole exposes.
@@ -244,7 +250,10 @@ pub fn write_set_overlap(a: &AgentContract, b: &AgentContract) -> Vec<Effect> {
                 continue;
             }
             match (l.scope.contains(&r.scope), r.scope.contains(&l.scope)) {
-                (crate::effect::Containment::DoesNotContain, crate::effect::Containment::DoesNotContain) => {}
+                (
+                    crate::effect::Containment::DoesNotContain,
+                    crate::effect::Containment::DoesNotContain,
+                ) => {}
                 _ => {
                     out.insert(l.clone());
                     out.insert(r.clone());
@@ -271,8 +280,7 @@ pub fn fuse(
         .roles()
         .map(|role| role.as_str().to_string())
         .collect();
-    let participants: BTreeSet<String> =
-        parts.iter().map(|p| p.id.as_str().to_string()).collect();
+    let participants: BTreeSet<String> = parts.iter().map(|p| p.id.as_str().to_string()).collect();
     let unfilled: BTreeSet<String> = roles.difference(&participants).cloned().collect();
     if !unfilled.is_empty() {
         return Err(CompositionError::UnfilledRoles { roles: unfilled });
@@ -585,9 +593,13 @@ pub enum Violation {
 #[serde(rename_all = "snake_case", tag = "outcome")]
 pub enum LawOutcome {
     Holds,
-    Fails { violations: Vec<Violation> },
+    Fails {
+        violations: Vec<Violation>,
+    },
     /// The law's premise does not apply to these arguments at all. Not the same as holding.
-    Inapplicable { reason: String },
+    Inapplicable {
+        reason: String,
+    },
 }
 
 impl LawOutcome {
@@ -917,7 +929,10 @@ impl ProvenanceState {
 /// Retraction is therefore an *addition* to `retracted`, never a removal from `claims_made`. This
 /// is the same monotonicity `bioprism-weave`'s epistemic ledger enforces on events; here it is
 /// stated over the derived provenance state so a composition can be checked without a ledger.
-pub fn check_epistemic_monotonicity(before: &ProvenanceState, after: &ProvenanceState) -> LawReport {
+pub fn check_epistemic_monotonicity(
+    before: &ProvenanceState,
+    after: &ProvenanceState,
+) -> LawReport {
     let mut violations = Vec::new();
     for claim in &before.claims_made {
         if !after.claims_made.contains(claim) {
@@ -972,11 +987,15 @@ impl EquivalenceDimension {
 #[serde(rename_all = "snake_case", tag = "verdict")]
 pub enum DimensionVerdict {
     Equivalent,
-    Differs { detail: String },
+    Differs {
+        detail: String,
+    },
     /// Nothing in a contract determines this dimension, so no answer is available from contracts
     /// alone. Reported rather than defaulted, because defaulting to `Equivalent` would make the
     /// report say two agents match on a dimension nobody examined.
-    NotComparable { reason: String },
+    NotComparable {
+        reason: String,
+    },
 }
 
 /// Per-dimension equivalence.
@@ -994,14 +1013,6 @@ impl EquivalenceReport {
         self.dimensions
             .iter()
             .filter(|(_, v)| matches!(v, DimensionVerdict::Differs { .. }))
-            .map(|(d, _)| *d)
-            .collect()
-    }
-
-    pub fn dimensions_not_comparable(&self) -> Vec<EquivalenceDimension> {
-        self.dimensions
-            .iter()
-            .filter(|(_, v)| matches!(v, DimensionVerdict::NotComparable { .. }))
             .map(|(d, _)| *d)
             .collect()
     }
@@ -1316,17 +1327,11 @@ pub fn substitute(
         Operator::PolicyChoice { router } => choose(&parts[0], &parts[1], router.clone()),
         Operator::VerifiedRace { verifier } => race_verified(&parts, verifier.clone()),
         Operator::Fallback { predicate } => fallback(&parts[0], &parts[1], predicate.clone()),
-        Operator::AttenuatingDelegation { grant } => {
-            delegate(&parts[0], grant.clone(), &parts[1])
-        }
+        Operator::AttenuatingDelegation { grant } => delegate(&parts[0], grant.clone(), &parts[1]),
         Operator::ChoreographedFusion {
             choreography_digest,
         } => Ok(Composition {
-            contract: fold_parts(
-                &parts,
-                &composition.contract.output,
-                choreography_digest,
-            )?,
+            contract: fold_parts(&parts, &composition.contract.output, choreography_digest)?,
             operator: composition.operator.clone(),
             parts,
         }),

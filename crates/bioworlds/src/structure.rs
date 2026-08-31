@@ -68,10 +68,7 @@ impl Neighbourhood {
         for factor in &world.factors {
             let node = Node::Factor(factor.id.as_str().to_string());
             for variable in factor.inputs.iter().chain(factor.outputs.iter()) {
-                link(
-                    node.clone(),
-                    Node::Variable(variable.as_str().to_string()),
-                );
+                link(node.clone(), Node::Variable(variable.as_str().to_string()));
             }
         }
         for fact in &world.facts {
@@ -105,12 +102,6 @@ impl Neighbourhood {
     pub fn fact_distance(&self, fact_id: &str) -> Option<usize> {
         self.distances
             .get(&Node::Fact(fact_id.to_string()))
-            .copied()
-    }
-
-    pub fn variable_distance(&self, variable: &str) -> Option<usize> {
-        self.distances
-            .get(&Node::Variable(variable.to_string()))
             .copied()
     }
 
@@ -177,6 +168,7 @@ impl DependencyClosure {
 /// and the second is everything, which is precisely why an early cut there cannot withhold
 /// evidence without also breaking the closure.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct TemporalSplit {
     pub decision_time: String,
     pub event_managed: Vec<String>,
@@ -203,6 +195,7 @@ impl TemporalSplit {
 
 /// Everything this crate can say about a world's structure without compiling anything.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct StructuralProfile {
     pub world_id: String,
     pub target: String,
@@ -320,8 +313,7 @@ pub fn profile(
         .filter(|fact| distractor_fact_ids.contains(fact.id.as_str()))
         .filter(|fact| {
             fact.tags.iter().any(|tag| {
-                !query.protects(tag)
-                    && tag.split('_').any(|token| protected_tokens.contains(token))
+                !query.protects(tag) && tag.split('_').any(|token| protected_tokens.contains(token))
             })
         })
         .count();

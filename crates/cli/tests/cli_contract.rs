@@ -682,6 +682,230 @@ fn workbench_verify_replays_a_retained_report_without_execution() {
     assert_eq!(report["network_access"], "not_started");
 }
 
+/// Instantiate a one-step documentation workflow through the CLI itself and retain the
+/// instantiation artifact, so autopilot tests drive exactly what an operator would.
+fn instantiated_workflow(directory: &Path, mission_id: &str) -> PathBuf {
+    let steps = directory.join("steps.json");
+    std::fs::write(
+        &steps,
+        r#"[{"id": "capability", "tool": "workspace_capabilities", "arguments": {}}]"#,
+    )
+    .expect("write steps");
+    let output = run(&[
+        "--json",
+        "workflow",
+        "instantiate",
+        "--workflow",
+        "documentation_and_knowledge",
+        "--mission-id",
+        mission_id,
+        "--goal",
+        "drive the bounded capability handoff",
+        "--steps",
+        &steps.display().to_string(),
+    ]);
+    assert_eq!(
+        code(&output),
+        0,
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let instantiation = directory.join("instantiation.json");
+    std::fs::write(&instantiation, stdout(&output)).expect("retain instantiation");
+    instantiation
+}
+
+fn autopilot_grant(directory: &Path, allowed_tool: &str) -> PathBuf {
+    let grant = directory.join("grant.json");
+    std::fs::write(
+        &grant,
+        format!(r#"{{"allowed_tools": ["{allowed_tool}"], "max_attempts": 2}}"#),
+    )
+    .expect("write grant");
+    grant
+}
+
+#[test]
+fn help_documents_every_autopilot_subcommand_and_names_the_grant_as_the_only_authority() {
+    let text = stdout(&run(&["--help"]));
+    for expected in [
+        "autopilot grant-template",
+        "autopilot run     --instantiation <path> --grant <path> [--report-out <path>] [--dry-run]",
+        "autopilot verify  --report <path>",
+        "comes only from an explicit grant document",
+        "Exit 1 reports a completed drive",
+        "Exit 1 if the report does not verify",
+    ] {
+        assert!(text.contains(expected), "help must document {expected:?}");
+    }
+}
+
+#[test]
+fn autopilot_grant_template_json_mode_emits_exactly_one_bare_grant_document() {
+    let output = run(&["--json", "autopilot", "grant-template"]);
+    assert_eq!(code(&output), 0);
+    let text = stdout(&output);
+    let template: Value = serde_json::from_str(&text)
+        .unwrap_or_else(|e| panic!("stdout was not a single JSON document: {e}\n{text}"));
+    assert!(
+        template.get("ok").is_none(),
+        "the --json template is the bare grant object, directly usable as --grant"
+    );
+    serde_json::from_value::<bioprism_autopilot::AutonomyGrant>(template)
+        .expect("the emitted template must satisfy the grant validator unedited");
+    assert!(
+        output.stderr.is_empty(),
+        "json mode must not write to stderr on success"
+    );
+
+    let human = stdout(&run(&["autopilot", "grant-template"]));
+    assert!(human.contains("\nNext: bioprism "));
+    assert!(
+        human.contains("never re-sent"),
+        "the commented template must explain the terminal-retry posture"
+    );
+}
+
+#[test]
+fn autopilot_run_dry_run_dispatches_nothing_writes_nothing_and_labels_itself_no_dispatch() {
+    let directory = scratch("autopilot-dry-run");
+    let instantiation = instantiated_workflow(&directory, "autopilot-dry");
+    let grant = autopilot_grant(&directory, "workspace_capabilities");
+    let report_out = directory.join("autopilot-report.json");
+    let files_before = std::fs::read_dir(&directory).unwrap().count();
+
+    let output = run(&[
+        "--json",
+        "autopilot",
+        "run",
+        "--instantiation",
+        &instantiation.display().to_string(),
+        "--grant",
+        &grant.display().to_string(),
+        "--report-out",
+        &report_out.display().to_string(),
+        "--dry-run",
+    ]);
+    assert_eq!(
+        code(&output),
+        0,
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let parsed: Value = serde_json::from_str(&stdout(&output)).expect("dry-run JSON");
+    assert_eq!(parsed["ok"], Value::Bool(true));
+    assert_eq!(parsed["dry_run"], Value::Bool(true));
+    assert_eq!(parsed["no_dispatch"], Value::Bool(true));
+    assert_eq!(parsed["dispatch"], "not_started");
+    assert_eq!(parsed["writes"], "none");
+    assert_eq!(parsed["planned_first_action"]["action"], "dispatch_full");
+    assert_eq!(parsed["planned_first_action"]["attempt_index"], 1);
+    assert_eq!(
+        parsed["planned_first_action"]["mission"]["policy"]["execute"],
+        Value::Bool(true),
+        "the previewed mission must show the policy the grant would apply"
+    );
+    assert!(!report_out.exists(), "--dry-run must not write the report");
+    assert_eq!(
+        std::fs::read_dir(&directory).unwrap().count(),
+        files_before,
+        "--dry-run left files behind"
+    );
+}
+
+#[test]
+fn autopilot_run_with_a_grant_that_does_not_cover_the_mission_tool_exits_seven() {
+    let directory = scratch("autopilot-denied");
+    let instantiation = instantiated_workflow(&directory, "autopilot-denied");
+    let grant = autopilot_grant(&directory, "some_other_tool");
+    let output = run(&[
+        "--json",
+        "autopilot",
+        "run",
+        "--instantiation",
+        &instantiation.display().to_string(),
+        "--grant",
+        &grant.display().to_string(),
+        "--dry-run",
+    ]);
+    assert_eq!(
+        code(&output),
+        7,
+        "a well-formed mission the grant does not authorise is a policy refusal"
+    );
+    let parsed: Value = serde_json::from_str(&stdout(&output)).unwrap();
+    assert_eq!(parsed["ok"], Value::Bool(false));
+    assert_eq!(parsed["error"]["kind"], Value::String("policy_denied".into()));
+}
+
+#[test]
+fn autopilot_run_drives_a_real_mission_to_success_and_verify_rejects_a_tampered_report() {
+    let directory = scratch("autopilot-run");
+    let instantiation = instantiated_workflow(&directory, "autopilot-live");
+    let grant = autopilot_grant(&directory, "workspace_capabilities");
+    let report_out = directory.join("autopilot-report.json");
+
+    let output = run(&[
+        "--json",
+        "autopilot",
+        "run",
+        "--instantiation",
+        &instantiation.display().to_string(),
+        "--grant",
+        &grant.display().to_string(),
+        "--report-out",
+        &report_out.display().to_string(),
+    ]);
+    assert_eq!(
+        code(&output),
+        0,
+        "stdout: {}\nstderr: {}",
+        stdout(&output),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let parsed: Value = serde_json::from_str(&stdout(&output)).expect("run JSON");
+    assert_eq!(parsed["ok"], Value::Bool(true));
+    assert_eq!(parsed["final_status"], "succeeded");
+    assert_eq!(parsed["attempts_used"], 1);
+    assert_eq!(
+        parsed["report"]["attempts"][0]["reconciliation_status"]["completion"],
+        "complete",
+        "success must rest on a retained reconciliation, never inference"
+    );
+    assert!(report_out.exists(), "the run must retain its report artifact");
+
+    let good = run(&[
+        "autopilot",
+        "verify",
+        "--report",
+        &report_out.display().to_string(),
+    ]);
+    assert_eq!(code(&good), 0, "{}", stdout(&good));
+
+    let mut document: Value =
+        serde_json::from_str(&std::fs::read_to_string(&report_out).unwrap()).unwrap();
+    document["base_mission_id"] = Value::String("smuggled".into());
+    let tampered = directory.join("tampered.json");
+    std::fs::write(&tampered, serde_json::to_string_pretty(&document).unwrap()).unwrap();
+
+    let bad = run(&[
+        "--json",
+        "autopilot",
+        "verify",
+        "--report",
+        &tampered.display().to_string(),
+    ]);
+    assert_eq!(
+        code(&bad),
+        1,
+        "a tampered autopilot report must fail the assertion"
+    );
+    let parsed: Value = serde_json::from_str(&stdout(&bad)).unwrap();
+    assert_eq!(parsed["ok"], Value::Bool(false));
+    assert_eq!(parsed["valid"], Value::Bool(false));
+    assert_eq!(parsed["digest_match"], Value::Bool(false));
+}
+
 #[test]
 fn the_extended_profile_is_selectable_and_reports_sufficiency() {
     let output = run(&[
@@ -704,4 +928,170 @@ fn the_extended_profile_is_selectable_and_reports_sufficiency() {
         Value::String("c0da17ffc80465258345c8a538171bfd868100cd883e9a20780a0dc5477e7ea4".into()),
         "the extended profile hashes different bytes"
     );
+}
+
+fn write_research_request(directory: &Path, points: &str, extras: &str) -> PathBuf {
+    let request = directory.join("request.json");
+    let body = format!(
+        r#"{{
+  "research_id": "cli-contract-run",
+  "question": "Does the compiled section stay admissible under fifty distractors?",
+  "family": "discriminating",
+  "distractor_points": [{points}],
+  "seed": 7{extras}
+}}"#
+    );
+    std::fs::write(&request, body).expect("request written");
+    request
+}
+
+#[test]
+fn research_template_json_emits_one_bare_document_that_validates_as_a_request() {
+    let output = run(&["--json", "research", "template"]);
+    assert_eq!(code(&output), 0);
+    let text = stdout(&output);
+    let parsed: Value = serde_json::from_str(&text)
+        .unwrap_or_else(|e| panic!("stdout was not a single JSON document: {e}\n{text}"));
+    assert!(
+        parsed.get("ok").is_none() && parsed.get("workflow").is_none(),
+        "--json must print the bare request object, not an envelope: {parsed}"
+    );
+    assert_eq!(parsed["family"], Value::String("discriminating".into()));
+    let request: bioprism_research::ResearchRequest = serde_json::from_value(parsed)
+        .expect("the printed template must itself pass request validation");
+    assert_eq!(request.distractor_points(), &[50, 250, 750]);
+}
+
+#[test]
+fn research_dry_run_prints_the_planned_protocol_and_writes_nothing() {
+    let directory = scratch("research-dry-run");
+    let request = write_research_request(
+        &directory,
+        "50, 250",
+        ",\n  \"run_sweep\": true,\n  \"run_mutation\": true,\n  \"run_minimize\": true",
+    );
+    let out_dir = directory.join("out");
+    let output = run(&[
+        "--json",
+        "research",
+        "run",
+        "--request",
+        &request.display().to_string(),
+        "--out-dir",
+        &out_dir.display().to_string(),
+        "--dry-run",
+    ]);
+    assert_eq!(code(&output), 0, "{}", String::from_utf8_lossy(&output.stderr));
+    let parsed: Value = serde_json::from_str(&stdout(&output)).unwrap();
+    assert_eq!(parsed["dry_run"], Value::Bool(true));
+    assert_eq!(parsed["no_dispatch"], Value::Bool(true));
+    assert_eq!(parsed["writes"], Value::String("none".into()));
+    assert_eq!(
+        parsed["step_count"],
+        Value::Number(10.into()),
+        "anchor + 2 x (generate, compile, compare) + sweep + mutate + minimize"
+    );
+    assert_eq!(
+        parsed["planned_protocol"]["steps"][0]["kind"],
+        Value::String("anchor_reference_fixture".into())
+    );
+    assert!(!out_dir.exists(), "--dry-run must not create the out-dir");
+    assert_eq!(
+        std::fs::read_dir(&directory).unwrap().count(),
+        1,
+        "--dry-run left files beside the request"
+    );
+}
+
+#[test]
+fn an_invalid_research_request_exits_three_naming_the_rule() {
+    let directory = scratch("research-invalid");
+    let request = write_research_request(&directory, "", "");
+    let output = run(&[
+        "research",
+        "run",
+        "--request",
+        &request.display().to_string(),
+        "--out-dir",
+        &directory.join("out").display().to_string(),
+    ]);
+    assert_eq!(code(&output), 3);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("at least one point"),
+        "the refusal must name the rule, not just the field: {stderr}"
+    );
+}
+
+#[test]
+fn research_run_writes_a_verifiable_dossier_and_a_tampered_one_exits_one() {
+    let directory = scratch("research-run");
+    let request = write_research_request(&directory, "50", "");
+    let out_dir = directory.join("out");
+    let output = run(&[
+        "--json",
+        "research",
+        "run",
+        "--request",
+        &request.display().to_string(),
+        "--out-dir",
+        &out_dir.display().to_string(),
+    ]);
+    assert_eq!(code(&output), 0, "{}", String::from_utf8_lossy(&output.stderr));
+    let parsed: Value = serde_json::from_str(&stdout(&output)).unwrap();
+    assert_eq!(parsed["ok"], Value::Bool(true));
+    assert!(
+        parsed["findings_total"].as_u64().unwrap_or(0) >= 2,
+        "a completed run derives at least the anchor and comparison findings: {parsed}"
+    );
+
+    let dossier = out_dir.join("dossier.json");
+    let report = out_dir.join("REPORT.md");
+    assert!(dossier.is_file(), "run must write dossier.json");
+    assert!(report.is_file(), "run must write REPORT.md");
+    let figures: Vec<_> = std::fs::read_dir(out_dir.join("figures"))
+        .expect("run must write a figures directory")
+        .map(|entry| entry.expect("figure entry").file_name())
+        .collect();
+    assert_eq!(
+        figures.len() as u64,
+        parsed["figures"].as_u64().expect("figures count"),
+        "every rendered figure lands in figures/"
+    );
+    let report_text = std::fs::read_to_string(&report).expect("report readable");
+    for figure in &figures {
+        assert!(
+            report_text.contains(&format!("./figures/{}", figure.to_string_lossy())),
+            "REPORT.md must link {figure:?} under ./figures/"
+        );
+    }
+    assert!(
+        report_text.contains("## Limitations"),
+        "the report must carry its limitations block"
+    );
+
+    let verified = run(&["research", "verify", "--dossier", &dossier.display().to_string()]);
+    assert_eq!(
+        code(&verified),
+        0,
+        "{}",
+        String::from_utf8_lossy(&verified.stdout)
+    );
+
+    let text = std::fs::read_to_string(&dossier).expect("dossier readable");
+    let tampered_text = text.replacen("fifty", "sixty", 1);
+    assert_ne!(text, tampered_text, "the tamper must actually change a byte");
+    std::fs::write(&dossier, tampered_text).expect("tampered dossier written");
+    let tampered = run(&[
+        "--json",
+        "research",
+        "verify",
+        "--dossier",
+        &dossier.display().to_string(),
+    ]);
+    assert_eq!(code(&tampered), 1, "a tampered dossier must exit 1");
+    let verdict: Value = serde_json::from_str(&stdout(&tampered)).unwrap();
+    assert_eq!(verdict["ok"], Value::Bool(false));
+    assert_eq!(verdict["valid"], Value::Bool(false));
+    assert_eq!(verdict["digest_match"], Value::Bool(false));
 }

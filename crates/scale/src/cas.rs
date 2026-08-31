@@ -121,10 +121,6 @@ impl ObjectStore {
         self.objects.len()
     }
 
-    pub fn stored_bytes(&self) -> usize {
-        self.objects.values().map(Vec::len).sum()
-    }
-
     /// Rehashes every object and reports the first that does not match its address.
     ///
     /// 35.12 lists corruption detection as an operational metric; content addressing makes it a
@@ -422,7 +418,8 @@ pub fn put_world_release(
 ) -> Result<WorldRelease, CacheError> {
     let manifest = bioprism_store::build(world, directory)
         .map_err(|error| CacheError::Store(error.to_string()))?;
-    let bytes = serde_json::to_vec(&manifest).map_err(|error| CacheError::Store(error.to_string()))?;
+    let bytes =
+        serde_json::to_vec(&manifest).map_err(|error| CacheError::Store(error.to_string()))?;
     Ok(WorldRelease {
         manifest_address: store.put(bytes),
         world_sha256: manifest.world_sha256,

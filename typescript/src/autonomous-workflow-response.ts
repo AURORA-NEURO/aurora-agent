@@ -212,20 +212,27 @@ export function evaluateAutonomousWorkflowStageResponse(
   const workflowDigest = boundedDigest("workflow stage evaluation workflow_digest", options.workflowDigest);
   const normalized = normalizeStageResponse(value, options.stageId);
   const responseDigest = digestJsonSync(normalized);
+  // A completed stage may legitimately have no unresolved uncertainty or follow-up action.
+  // The required notes field is the explicit bounded declaration that the stage has no such
+  // disclosure. Non-completed stages must still report both fields themselves.
+  const completedWithoutDisclosure = normalized.status === "completed" && normalized.notes.trim().length > 0;
   const signals: Record<string, number> = {
     schema_valid: 1,
     stage_identity: 1,
     status_declared: 1,
     evidence_present: normalized.evidence.length > 0 ? 1 : 0,
-    uncertainty_reported: normalized.uncertainty.length > 0 ? 1 : 0,
+    uncertainty_reported: normalized.uncertainty.length > 0 || completedWithoutDisclosure ? 1 : 0,
     notes_present: normalized.notes.length > 0 ? 1 : 0,
-    next_actions_present: normalized.next_actions.length > 0 ? 1 : 0,
+    next_actions_present: normalized.next_actions.length > 0 || completedWithoutDisclosure ? 1 : 0,
     response_digest_bound: 1,
   };
   const totalWeight = Object.values(SIGNAL_WEIGHTS).reduce((sum, weight) => sum + weight, 0);
   const reward = Number((Object.entries(SIGNAL_WEIGHTS).reduce((sum, [signal, weight]) => sum + signals[signal]! * weight, 0) / totalWeight).toFixed(12));
   const missingSignals = Object.entries(signals).filter(([, score]) => score < 1).map(([signal]) => signal);
-  const passed = reward >= AUTONOMOUS_WORKFLOW_STAGE_RESPONSE_PASS_THRESHOLD;
+  // The aggregate reward is useful for learning, but it must never hide a missing integrity
+  // signal at a continuation boundary. A stage is therefore passable only when every signal
+  // is satisfied and the score clears the documented floor.
+  const passed = reward >= AUTONOMOUS_WORKFLOW_STAGE_RESPONSE_PASS_THRESHOLD && missingSignals.length === 0;
   const evaluatorId = `autonomous-${domain}-workflow-stage-integrity`;
   const feedbackDigest = digestJsonSync({ workflow_digest: workflowDigest, stage_id: normalized.stage_id, response_digest: responseDigest, signals });
   const failureClass = passed ? null : "workflow_stage_response_integrity_gate";

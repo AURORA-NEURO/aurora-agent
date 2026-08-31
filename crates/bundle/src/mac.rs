@@ -57,6 +57,7 @@
 //! message is a slice. No truncated-tag policy beyond the RFC 4231 test vector that specifies one.
 //! No algorithm agility: the scheme is HMAC-SHA256 and nothing negotiates it.
 
+use crate::hex::hex_lower;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fmt;
@@ -358,16 +359,6 @@ pub enum MacError {
     MissingAlgorithmPrefix { text: String },
     #[error("tag `{text}` is not `hmac-sha256:` followed by 64 lowercase hex digits")]
     MalformedTag { text: String },
-}
-
-fn hex_lower(bytes: &[u8]) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut out = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        out.push(HEX[(byte >> 4) as usize] as char);
-        out.push(HEX[(byte & 0x0f) as usize] as char);
-    }
-    out
 }
 
 fn hex_value(byte: u8) -> Option<u8> {

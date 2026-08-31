@@ -105,3 +105,26 @@ pub fn write_artifact(path: &Path, document: &Value, dry_run: bool) -> CliResult
         written: !dry_run,
     })
 }
+
+/// Writes a non-JSON artifact (Markdown, SVG) under the same `--dry-run` contract as
+/// [`write_artifact`].
+///
+/// The bytes are the caller's exactly, with no re-encoding and no appended newline: the research
+/// report and figure renderers are byte-stable pure functions of the dossier, and any touch here
+/// would break the byte-for-byte reproducibility their digest footers promise.
+pub fn write_text_artifact(path: &Path, body: &str, dry_run: bool) -> CliResult<WrittenArtifact> {
+    if !dry_run {
+        if let Some(parent) = path.parent() {
+            if !parent.as_os_str().is_empty() {
+                std::fs::create_dir_all(parent).map_err(|e| CliError::io(parent, e))?;
+            }
+        }
+        std::fs::write(path, body).map_err(|e| CliError::io(path, e))?;
+    }
+
+    Ok(WrittenArtifact {
+        path: path.to_path_buf(),
+        bytes: body.len(),
+        written: !dry_run,
+    })
+}

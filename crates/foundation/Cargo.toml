@@ -10,7 +10,6 @@ description = "BioPRISM foundation objects: the executable-biology thesis made t
 [dependencies]
 bioprism-ids = { workspace = true }
 bioprism-scope = { workspace = true }
-bioprism-world = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

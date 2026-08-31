@@ -1,8 +1,8 @@
 use bioprism_section::{
     Backend, CertificateProfile, CertificateVerification, ContextCertificate, DecisionSection,
-    EvidenceCapsule, InfluenceClass, LeakageWitness, OmissionGroup, OmissionManifest, OracleStatus,
-    OracleVerdict, PlanDescriptor, ReferenceOmissions, RefinementOption, SourceHashes,
-    UnresolvedObligation,
+    EvidenceCapsule, InfluenceClass, InformativeBound, LeakageWitness, OmissionAccountingError,
+    OmissionGroup, OmissionManifest, OracleStatus, OracleVerdict, PlanDescriptor,
+    ProvenUnreachable, ReferenceOmissions, RefinementOption, SourceHashes, UnresolvedObligation,
 };
 use serde_json::{json, Value};
 

@@ -4,32 +4,86 @@
     "name": "AURORA-NEURO"
   },
   "metadata": {
-    "description": "The AURORA Agent (bioprism) plugin marketplace. Install aurora-agent for the full backend — the FIBER decision-context compiler, 259 MCP tools, missions, and operations evidence — plus optional discipline and workspace skill packs.",
+    "description": "The AURORA Agent (bioprism) plugin marketplace: the FIBER decision-context compiler, MCP tools, mission orchestration, operations evidence, SDK integration, and reusable engineering disciplines.",
     "version": "0.2.0"
   },
   "plugins": [
     {
       "name": "aurora-agent",
       "source": "./plugins/aurora-agent",
-      "description": "THE plugin: bioprism MCP server (259 tools), FIBER compile/explain/compare/validate/verify commands, mission preflight, ops-auditor subagent, and setup/workflow/SDK skills. Requires a built aurora-agent checkout.",
+      "description": "The full AURORA Agent integration: bioprism MCP server, FIBER compile/explain/compare/validate/verify commands, mission preflight, ops-auditor, setup, workflow, and SDK skills.",
       "version": "0.1.0",
       "license": "Apache-2.0",
       "keywords": ["mcp", "fiber", "decision-context", "missions", "operations"],
       "category": "integration"
     },
     {
+      "name": "aurora-backend",
+      "source": "./plugins/aurora-backend",
+      "description": "Wires the bioprism MCP server into Claude Code with a root-resolving launcher and setup skill. Requires a built aurora-agent checkout.",
+      "version": "0.1.0",
+      "license": "Apache-2.0",
+      "keywords": ["mcp", "fiber", "decision-context"],
+      "category": "integration"
+    },
+    {
+      "name": "aurora-context",
+      "source": "./plugins/aurora-context",
+      "description": "FIBER compiler workflow with compile, explain, compare, validate, and verify commands, the decision-context skill, and a faithfulness eval.",
+      "version": "0.1.0",
+      "license": "Apache-2.0",
+      "keywords": ["fiber", "cli", "certificates"],
+      "category": "workflow"
+    },
+    {
+      "name": "aurora-missions",
+      "source": "./plugins/aurora-missions",
+      "description": "Mission DAG authoring and lifecycle: preflight, fail-closed gate acceptance, and sync versus async execution guidance.",
+      "version": "0.1.0",
+      "license": "Apache-2.0",
+      "keywords": ["missions", "orchestration", "gates"],
+      "category": "workflow"
+    },
+    {
+      "name": "aurora-integrate",
+      "source": "./plugins/aurora-integrate",
+      "description": "Integration guidance for the bioprism HTTP gateway, TypeScript and Python SDKs, and MCP wiring test harnesses.",
+      "version": "0.1.0",
+      "license": "Apache-2.0",
+      "keywords": ["sdk", "http", "typescript", "python"],
+      "category": "integration"
+    },
+    {
+      "name": "aurora-ops",
+      "source": "./plugins/aurora-ops",
+      "description": "Operations evidence with the ops-auditor subagent and health command over snapshots, capability gates, and recovery posture.",
+      "version": "0.1.0",
+      "license": "Apache-2.0",
+      "keywords": ["operations", "gates", "recovery"],
+      "category": "operations"
+    },
+    {
       "name": "aurora-honesty",
       "source": "./plugins/aurora-honesty",
-      "description": "Optional: the honest-labelling discipline for any codebase (honest-labelling creed, keep-a-claim-honest, prove-a-scanner-fires, windows-test-truth).",
+      "description": "The honest-labelling discipline for codebases: claim hygiene, scanner proof, and Windows test truth.",
       "version": "0.1.0",
       "license": "Apache-2.0",
       "keywords": ["honesty", "review", "testing"],
       "category": "discipline"
     },
     {
+      "name": "aurora-science",
+      "source": "./plugins/aurora-science",
+      "description": "Measurement-science methodology for evaluation: equal engineering baselines, discriminating experiments, certificates, metamorphic evaluation, figures, and research dossiers.",
+      "version": "0.1.0",
+      "license": "Apache-2.0",
+      "keywords": ["methodology", "benchmarking", "evaluation", "reproducibility"],
+      "category": "discipline"
+    },
+    {
       "name": "aurora-workspace",
       "source": "./plugins/aurora-workspace",
-      "description": "Optional: engineering skills for working inside the aurora-agent repo itself (add-module, check-parity, verify-crate, classify-blueprint-modules, measure-section-boilerplate).",
+      "description": "Engineering skills for working inside the aurora-agent repository: module authoring, SDK parity, crate verification, and blueprint analysis.",
       "version": "0.1.0",
       "license": "Apache-2.0",
       "keywords": ["workspace", "rust"],

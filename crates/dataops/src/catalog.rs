@@ -311,7 +311,9 @@ pub struct OutboxEvent {
 /// Held by the consumer, not the catalog. A catalog that tracked its own consumers' cursors would
 /// be able to answer "am I current" without asking them, which is the failure this type exists to
 /// prevent.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Serialize, Deserialize,
+)]
 #[serde(transparent)]
 pub struct OutboxCursor(u64);
 
@@ -322,10 +324,6 @@ impl OutboxCursor {
 
     pub const fn consumed(self) -> u64 {
         self.0
-    }
-
-    pub const fn advanced_by(self, count: u64) -> Self {
-        OutboxCursor(self.0.saturating_add(count))
     }
 }
 
@@ -482,19 +480,19 @@ impl Catalog {
         target: &RevisionId,
         at: Epoch,
     ) -> Result<(), CatalogError> {
-        let revision = self
-            .revisions
-            .get(target)
-            .ok_or_else(|| CatalogError::DanglingReference {
-                reference: alias.to_string(),
-                target: target.to_string(),
-            })?;
-        let header = self
-            .objects
-            .get(revision.object())
-            .ok_or_else(|| CatalogError::UnknownObject {
-                object: revision.object().to_string(),
-            })?;
+        let revision =
+            self.revisions
+                .get(target)
+                .ok_or_else(|| CatalogError::DanglingReference {
+                    reference: alias.to_string(),
+                    target: target.to_string(),
+                })?;
+        let header =
+            self.objects
+                .get(revision.object())
+                .ok_or_else(|| CatalogError::UnknownObject {
+                    object: revision.object().to_string(),
+                })?;
         if &header.namespace != scope {
             return Err(CatalogError::AliasCrossesNamespace {
                 alias: alias.to_string(),

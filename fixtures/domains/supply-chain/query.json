@@ -1,0 +1,11 @@
+{
+  "schema_version": "fiber-query/0.2",
+  "query_id": "audit-release-2025-05-v1",
+  "goal": "Decide whether release candidate 2025.05 meets the supply-chain integrity bar.",
+  "targets": ["release_integrity_status"],
+  "protected_tags": ["identity", "time", "protected"],
+  "decision_time": "2025-05-21T00:00:00Z",
+  "budgets": {
+    "max_facts": 16
+  }
+}

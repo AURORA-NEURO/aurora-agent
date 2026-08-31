@@ -130,9 +130,9 @@ impl EffectKind {
             | EffectKind::ArtifactRead
             | EffectKind::FilesystemRead
             | EffectKind::NetworkRead => Irreversibility::E0,
-            EffectKind::ArtifactWrite | EffectKind::FilesystemWrite | EffectKind::ProcessExecute => {
-                Irreversibility::E1
-            }
+            EffectKind::ArtifactWrite
+            | EffectKind::FilesystemWrite
+            | EffectKind::ProcessExecute => Irreversibility::E1,
             EffectKind::MessageSend
             | EffectKind::AgentSpawn
             | EffectKind::AgentDelegate
@@ -395,9 +395,13 @@ pub struct EffectSet {
 pub enum Inclusion {
     Holds,
     /// At least one effect on the inner side is permitted by nothing on the outer side.
-    Fails { witnesses: Vec<Effect> },
+    Fails {
+        witnesses: Vec<Effect>,
+    },
     /// No effect definitively escapes, but at least one comparison involved an undeclared scope.
-    Undecided { witnesses: Vec<Effect> },
+    Undecided {
+        witnesses: Vec<Effect>,
+    },
 }
 
 impl Inclusion {
@@ -434,10 +438,6 @@ impl EffectSet {
 
     pub fn is_empty(&self) -> bool {
         self.effects.is_empty()
-    }
-
-    pub fn contains_kind(&self, kind: EffectKind) -> bool {
-        self.effects.iter().any(|e| e.kind == kind)
     }
 
     /// The highest irreversibility class in the set, or [`Irreversibility::E0`] when empty.
@@ -576,16 +576,23 @@ pub struct ComposedPolicy {
 pub enum Gate {
     Permitted,
     /// A layer prohibits it outright.
-    Prohibited { by: PolicySource, rule: Effect },
+    Prohibited {
+        by: PolicySource,
+        rule: Effect,
+    },
     /// No layer prohibits it and at least one layer does not allow it. Deny-by-default.
-    NotAllowed { by: PolicySource },
+    NotAllowed {
+        by: PolicySource,
+    },
     /// Allowed by every layer but its class needs an approval transition.
     ApprovalRequired {
         by: PolicySource,
         threshold: Irreversibility,
     },
     /// Every comparison that could refuse it was undecided.
-    Undecided { by: PolicySource },
+    Undecided {
+        by: PolicySource,
+    },
 }
 
 impl ComposedPolicy {
@@ -603,7 +610,9 @@ impl ComposedPolicy {
     /// naming different sources for the same refusal is impossible.
     pub fn gate(&self, effect: &Effect) -> Gate {
         for layer in &self.layers {
-            if let Inclusion::Holds = layer.prohibited.includes(&EffectSet::new().with(effect.clone()))
+            if let Inclusion::Holds = layer
+                .prohibited
+                .includes(&EffectSet::new().with(effect.clone()))
             {
                 if let Some(rule) = layer
                     .prohibited
@@ -619,7 +628,10 @@ impl ComposedPolicy {
         }
         let mut undecided: Option<PolicySource> = None;
         for layer in &self.layers {
-            match layer.allowed.includes(&EffectSet::new().with(effect.clone())) {
+            match layer
+                .allowed
+                .includes(&EffectSet::new().with(effect.clone()))
+            {
                 Inclusion::Holds => {}
                 Inclusion::Undecided { .. } => {
                     if undecided.is_none() {

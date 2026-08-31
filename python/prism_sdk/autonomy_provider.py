@@ -82,6 +82,7 @@ class AutonomousProviderInvocationReceipt:
     request_id_digest: str | None = None
     failure_class: str | None = None
     status_code: int | None = None
+    retryable: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         result: dict[str, Any] = {
@@ -104,6 +105,7 @@ class AutonomousProviderInvocationReceipt:
             "request_id_digest": self.request_id_digest,
             "failure_class": self.failure_class,
             "status_code": self.status_code,
+            "retryable": self.retryable,
             "retention": "metadata_only_no_provider_payloads_or_credentials",
         }
         return result
@@ -164,6 +166,7 @@ class AutonomousProviderInvocationSession:
             turn=self._turn,
             selection_digest=self.selection_digest,
             estimated_cost_units=estimated_cost,
+            failover=self.attempt > 0 and self._turn == 0,
         )
         del admission
         self._pending.append((metadata, estimated_cost, self._turn))
@@ -197,9 +200,11 @@ class AutonomousProviderInvocationSession:
         outcome = "success" if success else "failure"
         failure_class: str | None = None
         status_code: int | None = None
+        retryable = False
         if isinstance(error, ProviderError):
             failure_class = "circuit_open" if error.circuit_open else "provider_error"
             status_code = error.status_code
+            retryable = error.retryable
         elif error is not None:
             failure_class = "provider_error"
         request_id_digest = None
@@ -219,6 +224,7 @@ class AutonomousProviderInvocationSession:
                 "status_code": status_code,
                 "failure_class": failure_class,
                 "request_id_digest": request_id_digest,
+                "retryable": retryable,
             }
         )
         self.controller.record_provider_outcome(
@@ -239,6 +245,7 @@ class AutonomousProviderInvocationSession:
             request_id_digest=request_id_digest,
             failure_class=failure_class,
             status_code=status_code,
+            retryable=retryable,
         )
         self._receipts.append(
             AutonomousProviderInvocationReceipt(
@@ -260,6 +267,7 @@ class AutonomousProviderInvocationSession:
                 request_id_digest=request_id_digest,
                 failure_class=failure_class,
                 status_code=status_code,
+                retryable=retryable,
             )
         )
 

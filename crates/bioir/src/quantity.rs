@@ -35,10 +35,6 @@ impl Quantity {
         }
     }
 
-    pub fn is_exhausted(&self) -> bool {
-        self.amount <= 0.0
-    }
-
     /// Adds `other` to `self`, refusing to add across units.
     ///
     /// `subject` names the material being summed so that a mass-balance failure points at a

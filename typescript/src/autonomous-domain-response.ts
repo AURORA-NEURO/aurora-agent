@@ -6,6 +6,11 @@ import type {
 import { digestJson, digestJsonSync } from "./tooling.js";
 import type { AutonomousEvaluatorRewardInput } from "./autonomous-learning.js";
 import type { JsonObject } from "./types.js";
+import {
+  autonomousDomainQualityPolicy,
+  autonomousDomainQualityPrompt,
+  evaluateAutonomousDomainResponseQuality,
+} from "./autonomous-domain-quality.js";
 
 /** Stable contract for opt-in structured answers emitted by every built-in domain workflow. */
 export const AUTONOMOUS_DOMAIN_RESPONSE_SCHEMA = "bioprism-typescript-autonomous-domain-response/0.1" as const;
@@ -17,7 +22,7 @@ export const MAX_AUTONOMOUS_DOMAIN_RESPONSE_ITEMS = 64;
 export const MAX_AUTONOMOUS_DOMAIN_RESPONSE_ITEM_BYTES = 8_192;
 export const MAX_AUTONOMOUS_DOMAIN_RESPONSE_ANSWER_BYTES = 64_000;
 export const MAX_AUTONOMOUS_DOMAIN_RESPONSE_CONTRACT_BYTES = 1_000_000;
-export const AUTONOMOUS_DOMAIN_RESPONSE_EVALUATOR_VERSION = "1" as const;
+export const AUTONOMOUS_DOMAIN_RESPONSE_EVALUATOR_VERSION = "2" as const;
 export const AUTONOMOUS_DOMAIN_RESPONSE_PASS_THRESHOLD = 0.8;
 
 export type AutonomousDomainResponseStatus = typeof AUTONOMOUS_DOMAIN_RESPONSE_STATUSES[number];
@@ -198,12 +203,14 @@ function responseSchema(profile: AutonomousDomainProfile, ids: readonly string[]
 }
 
 function promptContract(profile: AutonomousDomainProfile, ids: readonly string[], fields: readonly string[]): string {
+  const quality = autonomousDomainQualityPolicy(profile.domain);
   return [
     `Return only one JSON object matching the ${AUTONOMOUS_DOMAIN_RESPONSE_SCHEMA} contract for domain ${profile.domain}.`,
     `Use workflow ${profile.workflow.workflow_id} and include exactly one stage row for every stage, in reviewed order: ${ids.join(", ")}.`,
     `Each stage must report status, evidence, findings, uncertainty, and open_questions. Populate every domain_details field: ${fields.join(", ")}.`,
     "Separate observations from inferences, mark missing evidence and uncertainty explicitly, and put proposed work in next_actions.",
     "Never claim that a provider response, tool dispatch, simulation, or plan proves an external-world effect.",
+    autonomousDomainQualityPrompt(quality),
   ].join(" ");
 }
 
@@ -364,6 +371,7 @@ export function evaluateAutonomousDomainResponse(
   contract: AutonomousDomainResponseContract,
 ): AutonomousDomainResponseEvaluation {
   const response = validateAutonomousDomainResponse(value, contract);
+  const quality = evaluateAutonomousDomainResponseQuality(response, contract);
   const responseDigest = digestJsonSync(response);
   const stageReporting = response.stages.map((stage) => Number(
     [stage.evidence, stage.findings, stage.uncertainty, stage.open_questions].some((items) => items.length > 0),
@@ -379,6 +387,7 @@ export function evaluateAutonomousDomainResponse(
     uncertainty_disclosed: hasEntries(response.uncertainty),
     evidence_gaps_disclosed: hasEntries(response.evidence_gaps),
     next_actions_present: hasEntries(response.next_actions),
+    ...quality.signals,
   };
   const weights: Record<string, number> = {
     answer_present: 1,
@@ -390,17 +399,20 @@ export function evaluateAutonomousDomainResponse(
     uncertainty_disclosed: 1.5,
     evidence_gaps_disclosed: 1,
     next_actions_present: 1,
+    ...quality.weights,
   };
   const totalWeight = Object.values(weights).reduce((sum, weight) => sum + weight, 0);
   const reward = Number((Object.entries(weights).reduce((sum, [signal, weight]) => sum + (signals[signal] ?? 0) * weight, 0) / totalWeight).toFixed(12));
   const missingSignals = Object.entries(signals).filter(([, score]) => score < 1).map(([signal]) => signal);
-  const passed = reward >= AUTONOMOUS_DOMAIN_RESPONSE_PASS_THRESHOLD;
+  const passed = reward >= AUTONOMOUS_DOMAIN_RESPONSE_PASS_THRESHOLD && quality.passed;
   const evaluatorId = `autonomous-${contract.domain}-response-integrity`;
   const feedbackDigest = digestJsonSync({ contract_digest: contract.contract_digest, response_digest: responseDigest, signals });
+  // Keep the stable outer failure class for callers while the quality-prefixed signals and
+  // recommendations explain the domain-specific reason for the replan.
   const failureClass = passed ? null : "response_integrity_gate";
   const replanInstruction = passed
     ? null
-    : `Improve bounded ${contract.domain} response composition: ${missingSignals.join(", ") || "the response integrity score"}.`;
+    : `Improve bounded ${contract.domain} response composition: ${[...missingSignals, ...quality.recommendations].join("; ") || "the response integrity score"}.`;
   const rewardInput: AutonomousEvaluatorRewardInput = {
     evaluator_id: evaluatorId,
     evaluator_version: AUTONOMOUS_DOMAIN_RESPONSE_EVALUATOR_VERSION,

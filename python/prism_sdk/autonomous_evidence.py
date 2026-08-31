@@ -72,6 +72,49 @@ def _stage_field(stage: Any, field_name: str, default: Any = None) -> Any:
     return getattr(stage, field_name, default)
 
 
+def _validate_stage_graph(*, domain: str, stages: Sequence[Any]) -> tuple[str, ...]:
+    """Validate reviewed stage edges before projecting readiness."""
+
+    stage_ids: list[str] = []
+    dependencies_by_stage: dict[str, tuple[str, ...]] = {}
+    for stage in stages:
+        stage_id = _bounded_identifier("autonomous evidence stage id", _stage_field(stage, "id"))
+        if stage_id in dependencies_by_stage:
+            raise ArgumentError("autonomous evidence workflow stage IDs must be unique")
+        dependencies = _bounded_list(
+            "autonomous evidence stage dependencies",
+            _stage_field(stage, "depends_on", ()),
+            maximum=64,
+        )
+        if stage_id in dependencies:
+            raise ArgumentError(f"autonomous evidence stage {domain}:{stage_id} cannot depend on itself")
+        stage_ids.append(stage_id)
+        dependencies_by_stage[stage_id] = dependencies
+    known = set(stage_ids)
+    unknown = sorted({dependency for values in dependencies_by_stage.values() for dependency in values if dependency not in known})
+    if unknown:
+        raise ArgumentError(
+            f"autonomous evidence workflow {domain} has unknown stage dependencies: {', '.join(unknown)}"
+        )
+    indegree = {stage_id: len(values) for stage_id, values in dependencies_by_stage.items()}
+    dependents: dict[str, list[str]] = {stage_id: [] for stage_id in stage_ids}
+    for stage_id, values in dependencies_by_stage.items():
+        for dependency in values:
+            dependents[dependency].append(stage_id)
+    ready = [stage_id for stage_id in stage_ids if indegree[stage_id] == 0]
+    visited = 0
+    while ready:
+        current = ready.pop(0)
+        visited += 1
+        for dependent in dependents[current]:
+            indegree[dependent] -= 1
+            if indegree[dependent] == 0:
+                ready.append(dependent)
+    if visited != len(stage_ids):
+        raise ArgumentError(f"autonomous evidence workflow {domain} contains a dependency cycle")
+    return tuple(stage_ids)
+
+
 @dataclass(frozen=True, slots=True)
 class AutonomousEvidenceRequirement:
     """One evidence output required by a reviewed workflow stage."""
@@ -167,6 +210,13 @@ class AutonomousEvidencePlan:
         ids = tuple(item.requirement_id for item in requirements)
         if len(set(ids)) != len(ids):
             raise ArgumentError("evidence plan requirement IDs must be unique")
+        workflow_by_id = dict(zip(workflows, domains))
+        digest_by_workflow = dict(zip(workflows, digests))
+        for item in requirements:
+            if item.workflow_id not in workflow_by_id:
+                raise ArgumentError("evidence plan requirement references an unknown workflow")
+            if item.domain != workflow_by_id[item.workflow_id] or item.workflow_digest != digest_by_workflow[item.workflow_id]:
+                raise ArgumentError("evidence plan requirement workflow identity is inconsistent")
         available = _bounded_list("evidence plan available_evidence", self.available_evidence, maximum=MAX_AUTONOMOUS_EVIDENCE_REQUIREMENTS)
         covered = _bounded_list("evidence plan covered_requirement_ids", self.covered_requirement_ids, maximum=MAX_AUTONOMOUS_EVIDENCE_REQUIREMENTS)
         missing = _bounded_list("evidence plan missing_requirement_ids", self.missing_requirement_ids, maximum=MAX_AUTONOMOUS_EVIDENCE_REQUIREMENTS)
@@ -313,12 +363,9 @@ def build_autonomous_evidence_plan(
         domains.append(domain)
         workflow_ids.append(workflow_id)
         workflow_digests.append(workflow_digest)
-        stage_ids: set[str] = set()
+        stage_ids = _validate_stage_graph(domain=domain, stages=stages)
         for stage in stages:
             stage_id = _bounded_identifier("autonomous evidence stage id", _stage_field(stage, "id"))
-            if stage_id in stage_ids:
-                raise ArgumentError("autonomous evidence workflow stage IDs must be unique")
-            stage_ids.add(stage_id)
             outputs = _bounded_list("autonomous evidence stage outputs", _stage_field(stage, "evidence_outputs", ()), maximum=64)
             capabilities = _bounded_list("autonomous evidence stage capabilities", _stage_field(stage, "required_capabilities", ()), maximum=64)
             signals = _bounded_list("autonomous evidence stage evaluator signals", _stage_field(stage, "evaluator_signals", ()), maximum=64)
@@ -367,6 +414,15 @@ def build_autonomous_evidence_plan(
         domain = _bounded_identifier("autonomous evidence workflow domain", _workflow_field(workflow, "domain"))
         stages = _workflow_field(workflow, "stages")
         done = completed_by_domain.get(domain, set())
+        known_stage_ids = {
+            _bounded_identifier("autonomous evidence stage id", _stage_field(stage, "id"))
+            for stage in stages
+        }
+        unknown_completed = sorted(done.difference(known_stage_ids))
+        if unknown_completed:
+            raise ArgumentError(
+                f"completed stages for {domain} reference unknown stages: {', '.join(unknown_completed)}"
+            )
         for stage in stages:
             stage_id = _bounded_identifier("autonomous evidence stage id", _stage_field(stage, "id"))
             dependencies = set(_bounded_list("autonomous evidence stage dependencies", _stage_field(stage, "depends_on", ()), maximum=64))

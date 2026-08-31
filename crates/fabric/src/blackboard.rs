@@ -261,11 +261,15 @@ impl Blackboard {
             }
             match &entry.kind {
                 EntryKind::Observation { value } => {
-                    live.entry(entry.id.clone()).or_default().insert(value.clone());
+                    live.entry(entry.id.clone())
+                        .or_default()
+                        .insert(value.clone());
                 }
                 EntryKind::Supersession { target, value } => {
                     retracted.insert(target.clone());
-                    live.entry(entry.id.clone()).or_default().insert(value.clone());
+                    live.entry(entry.id.clone())
+                        .or_default()
+                        .insert(value.clone());
                 }
                 EntryKind::Retraction { target } => {
                     retracted.insert(target.clone());
@@ -358,11 +362,6 @@ impl Subscription {
             topic_prefix: topic_prefix.into(),
             authors: None,
         }
-    }
-
-    pub fn from_authors(mut self, authors: impl IntoIterator<Item = impl Into<String>>) -> Self {
-        self.authors = Some(authors.into_iter().map(Into::into).collect());
-        self
     }
 
     fn matches(&self, entry: &Entry) -> bool {
@@ -483,8 +482,5 @@ pub enum BlackboardError {
     NoReducerForEpistemicTopic { topic: Topic },
 
     #[error("moving memory from {from:?} to {to:?} widens its scope and needs an explicit policy")]
-    ScopeWideningWithoutPolicy {
-        from: MemoryScope,
-        to: MemoryScope,
-    },
+    ScopeWideningWithoutPolicy { from: MemoryScope, to: MemoryScope },
 }

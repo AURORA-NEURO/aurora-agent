@@ -22,6 +22,7 @@ import threading
 from typing import Any, Callable, Mapping, Sequence
 
 from .authoring import content_digest
+from .autonomous_authorization import AutonomousAuthorizationContext
 from .domain_evidence_source import (
     DomainEvidenceSourceExecutionRequest,
     DomainEvidenceSourcePlanRequest,
@@ -1277,11 +1278,17 @@ class AutonomousConnectorRuntime:
         request: AutonomousConnectorDispatchRequest,
         *,
         trace_event_callback: Callable[..., Any] | None = None,
+        authorization_context: AutonomousAuthorizationContext | None = None,
+        authorization_domain: str | None = None,
+        authorization_capability: str | None = None,
+        authorization_risk_class: str | None = None,
     ) -> AutonomousConnectorDispatchResult:
         if not isinstance(request, AutonomousConnectorDispatchRequest):
             raise ArgumentError("autonomous connector dispatch requires a typed request")
         if trace_event_callback is not None and not callable(trace_event_callback):
             raise ArgumentError("autonomous connector trace_event_callback must be callable or None")
+        if authorization_context is not None and not isinstance(authorization_context, AutonomousAuthorizationContext):
+            raise ArgumentError("autonomous connector authorization_context must be an AutonomousAuthorizationContext or None")
         registration = self.registry.resolve(request.connector_id)
         request_digest = request.request_digest
         replay = self._find_replay(request, registration, request_digest)
@@ -1360,6 +1367,10 @@ class AutonomousConnectorRuntime:
                 registration,
                 request_digest,
                 trace_event_callback=trace_event_callback,
+                authorization_context=authorization_context,
+                authorization_domain=authorization_domain,
+                authorization_capability=authorization_capability,
+                authorization_risk_class=authorization_risk_class,
             )
             with self._lock:
                 pending.outcome = outcome
@@ -1380,6 +1391,10 @@ class AutonomousConnectorRuntime:
         request: AutonomousConnectorDispatchRequest,
         *,
         trace_event_callback: Callable[..., Any] | None = None,
+        authorization_context: AutonomousAuthorizationContext | None = None,
+        authorization_domain: str | None = None,
+        authorization_capability: str | None = None,
+        authorization_risk_class: str | None = None,
     ) -> AutonomousConnectorDispatchResult:
         """Dispatch only when a reviewed selection plan still matches the live registry."""
 
@@ -1399,7 +1414,14 @@ class AutonomousConnectorRuntime:
             row = rows.get(domain)
             if row is None or row.status != "selected" or row.connector_id != request.connector_id:
                 raise ArgumentError("autonomous connector planned dispatch does not select the requested connector")
-        return self.dispatch(request, trace_event_callback=trace_event_callback)
+        return self.dispatch(
+            request,
+            trace_event_callback=trace_event_callback,
+            authorization_context=authorization_context,
+            authorization_domain=authorization_domain,
+            authorization_capability=authorization_capability,
+            authorization_risk_class=authorization_risk_class,
+        )
 
     def _dispatch_fresh(
         self,
@@ -1408,6 +1430,10 @@ class AutonomousConnectorRuntime:
         request_digest: str,
         *,
         trace_event_callback: Callable[..., Any] | None = None,
+        authorization_context: AutonomousAuthorizationContext | None = None,
+        authorization_domain: str | None = None,
+        authorization_capability: str | None = None,
+        authorization_risk_class: str | None = None,
     ) -> AutonomousConnectorDispatchResult:
         manifest = registration.manifest
         self._emit_trace(
@@ -1444,6 +1470,15 @@ class AutonomousConnectorRuntime:
                 failure_class="approval_required",
                 request_digest=request_digest,
                 trace_event_callback=trace_event_callback,
+            )
+        if authorization_context is not None:
+            authorization_context.authorize_operation(
+                operation="connector_dispatch",
+                domains=request.domains if authorization_domain is None else None,
+                domain=authorization_domain,
+                capability=request.capability if authorization_capability is None else authorization_capability,
+                risk_class=(authorization_context.risk_class if authorization_risk_class is None else authorization_risk_class),
+                resource_digest=request_digest,
             )
         try:
             raw = registration.executor(manifest, request.request)

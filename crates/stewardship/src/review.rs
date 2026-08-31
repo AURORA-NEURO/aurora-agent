@@ -429,10 +429,6 @@ impl ReviewRecord {
         Ok(self)
     }
 
-    pub fn finding_for(&self, dimension: ReviewDimension) -> Option<&Finding> {
-        self.findings.get(&dimension)
-    }
-
     /// Issue the approval, or say which rule stopped it.
     ///
     /// The order of checks is the order of severity, so the error a caller sees is the worst thing

@@ -27,6 +27,7 @@ import time
 from typing import Any, Callable, Mapping, Protocol, Sequence
 
 from .authoring import canonical_json, content_digest
+from .autonomous_authorization import AutonomousAuthorizationContext
 from .domain_tools import AUTONOMOUS_DOMAIN_NAMES
 from .errors import ArgumentError
 
@@ -723,13 +724,14 @@ def _terminal_phase(status: str) -> str:
 class AutonomousRunTraceSession:
     """Lifecycle helper for one run; it never accepts provider payloads."""
 
-    def __init__(self, store: AutonomousRunTraceStore, *, run_id: str, task_digest: str, domains: Sequence[str]) -> None:
+    def __init__(self, store: AutonomousRunTraceStore, *, run_id: str, task_digest: str, domains: Sequence[str], authorization_context: AutonomousAuthorizationContext | None = None) -> None:
         if not all(callable(getattr(store, name, None)) for name in ("append", "events")):
             raise ArgumentError("autonomous run trace session requires a trace store")
         self.store = store
         self.run_id = _identifier("autonomous run trace run_id", run_id)
         self.task_digest = _digest("autonomous run trace task_digest", task_digest, allow_none=False)
         self.domains = _domains(domains)
+        self.authorization_context = authorization_context
         self._terminal = False
 
     def _events(self) -> tuple[AutonomousRunTraceEvent, ...]:
@@ -764,6 +766,24 @@ class AutonomousRunTraceSession:
             "status": status,
             **metadata,
         }
+        if self.authorization_context is not None:
+            event_domains = tuple(event["domains"])
+            self.authorization_context.authorize_operation(
+                operation="trace_write",
+                domains=event_domains,
+                resource_digest=content_digest({
+                    "schema": "bioprism-autonomous-trace-authorization-resource/0.1",
+                    "run_id": self.run_id,
+                    "task_digest": self.task_digest,
+                    "domains": list(event_domains),
+                    "phase": phase,
+                    "status": status,
+                    "detail_digest": metadata.get("detail_digest"),
+                    "route_digest": metadata.get("route_digest"),
+                    "plan_digest": metadata.get("plan_digest"),
+                    "selection_digest": metadata.get("selection_digest"),
+                }),
+            )
         return self.store.append(event)
 
     def provider_observer(self) -> Any:
@@ -848,8 +868,7 @@ class AutonomousRunTraceSession:
             raise ArgumentError("autonomous run trace session is already terminal")
         if status not in AUTONOMOUS_RUN_TRACE_STATUSES:
             raise ArgumentError("autonomous run trace completion status is invalid")
-        self._terminal = True
-        return self.store.append({
+        event = {
             "run_id": self.run_id,
             "task_digest": self.task_digest,
             "domains": self.domains if domains is None else domains,
@@ -861,7 +880,28 @@ class AutonomousRunTraceSession:
             "detail_digest": detail_digest,
             "failure_class": failure_class,
             "failure_code": failure_code,
-        })
+        }
+        if self.authorization_context is not None:
+            event_domains = tuple(event["domains"])
+            self.authorization_context.authorize_operation(
+                operation="trace_write",
+                domains=event_domains,
+                resource_digest=content_digest({
+                    "schema": "bioprism-autonomous-trace-authorization-resource/0.1",
+                    "run_id": self.run_id,
+                    "task_digest": self.task_digest,
+                    "domains": list(event_domains),
+                    "phase": event["phase"],
+                    "status": status,
+                    "detail_digest": detail_digest,
+                    "route_digest": route_digest,
+                    "plan_digest": plan_digest,
+                    "selection_digest": selection_digest,
+                    "failure_code": failure_code,
+                }),
+            )
+        self._terminal = True
+        return self.store.append(event)
 
     def fail(self, *, failure_class: str | None = None, failure_code: str | None = None, detail_digest: str | None = None) -> AutonomousRunTraceEvent:
         return self.complete(status="failed", failure_class=failure_class, failure_code=failure_code, detail_digest=detail_digest)

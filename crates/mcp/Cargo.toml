@@ -37,6 +37,7 @@ bioprism-evalengine = { workspace = true }
 bioprism-epistemic = { workspace = true }
 bioprism-fabric = { workspace = true }
 bioprism-factory = { workspace = true }
+bioprism-domain = { workspace = true }
 bioprism-fiber = { workspace = true }
 bioprism-foundation = { workspace = true }
 bioprism-docgraph = { workspace = true }
@@ -64,7 +65,9 @@ bioprism-oraclex = { workspace = true }
 bioprism-policy = { workspace = true }
 bioprism-packs = { workspace = true }
 bioprism-prism = { workspace = true }
+bioprism-project = { workspace = true }
 bioprism-registry = { workspace = true }
+bioprism-repair = { workspace = true }
 bioprism-routing = { workspace = true }
 bioprism-runtime = { workspace = true }
 bioprism-scale = { workspace = true }

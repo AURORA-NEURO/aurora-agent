@@ -51,7 +51,10 @@ fn deferred_compile() -> bioprism_fiber::CompileOutput {
         Query::from_json(reference_example("deferred_evidence_query.json")).expect("query loads");
     let out = compile(&world, &query).expect("compiles");
     assert_eq!(
-        out.certificate.omissions.inaccessible_selected_before_cut.len(),
+        out.certificate
+            .omissions
+            .inaccessible_selected_before_cut
+            .len(),
         2,
         "this fixture must withhold evidence at the cut or the checks below prove nothing"
     );
@@ -67,10 +70,16 @@ fn the_reference_world_withholds_nothing_so_the_split_is_empty() {
 
     assert!(out.trace.withheld_influence.attempted.is_empty());
     assert_eq!(out.trace.withheld_influence.promoted(), 0);
-    assert_eq!(out.certificate.manifest.count_in(InfluenceClass::Bounded), 0);
+    assert_eq!(
+        out.certificate.manifest.count_in(InfluenceClass::Bounded),
+        0
+    );
     assert_eq!(out.certificate.manifest.count_in(InfluenceClass::Zero), 750);
     assert_eq!(
-        out.certificate.digest(CertificateProfile::Reference).unwrap().as_str(),
+        out.certificate
+            .digest(CertificateProfile::Reference)
+            .unwrap()
+            .as_str(),
         "c0da17ffc80465258345c8a538171bfd868100cd883e9a20780a0dc5477e7ea4"
     );
 }
@@ -121,7 +130,11 @@ fn a_withheld_fact_outside_the_compiled_region_is_not_analysable_rather_than_zer
         .expect("the withheld aside was analysed");
 
     assert!(analysis.subject_factors.is_empty());
-    match analysis.outcome.as_ref().expect_err("no question was posable") {
+    match analysis
+        .outcome
+        .as_ref()
+        .expect_err("no question was posable")
+    {
         NotPosable::OutsideCompiledRegion { variable } => assert_eq!(variable, "aside_marker"),
         other => panic!("expected an outside-region refusal, got {other:?}"),
     }
@@ -177,12 +190,18 @@ fn a_withheld_fact_stays_deferred_and_keeps_its_refinement_frontier_entry() {
             .count_in(InfluenceClass::DeferredAcquisition),
         2
     );
-    assert_eq!(out.certificate.manifest.count_in(InfluenceClass::Bounded), 0);
+    assert_eq!(
+        out.certificate.manifest.count_in(InfluenceClass::Bounded),
+        0
+    );
     assert!(!out.certificate.manifest.supports_sufficiency_claim());
 
     let frontier = &out.section.refinement_frontier;
     assert_eq!(frontier.len(), 1);
-    assert_eq!(frontier[0].action, "advance_time_cut_or_use_retrospective_mode");
+    assert_eq!(
+        frontier[0].action,
+        "advance_time_cut_or_use_retrospective_mode"
+    );
     assert_eq!(frontier[0].facts, vec!["fact.aside", "fact.future_marker"]);
 }
 
@@ -214,4 +233,135 @@ fn the_certificate_still_declares_that_it_carries_no_formal_influence_bound() {
     let out = deferred_compile();
     assert_eq!(out.certificate.limitations.len(), 1);
     assert!(out.certificate.limitations[0].contains("formal influence bounds"));
+}
+
+fn shadowed_compile() -> bioprism_fiber::CompileOutput {
+    let world =
+        World::from_json(reference_example("shadowed_evidence_world.json")).expect("world loads");
+    let query =
+        Query::from_json(reference_example("shadowed_evidence_query.json")).expect("query loads");
+    compile(&world, &query).expect("compiles")
+}
+
+/// The defect this fixture exists for: a shadowed fact used to be published as provably irrelevant.
+///
+/// `fact.risk_score_provisional` provides `risk_score`, which `factor.claim_support` consumes on
+/// the way to the target, so a backward dependency path from it to the decision exists. It is
+/// omitted only because `fact.risk_score_final` provides the same variable later in document order
+/// and [`bioprism_world::WorldSource::fact_providing`] keeps the last. Nobody bounded what the
+/// provisional value would have done to the verdict.
+///
+/// Before the zero group was a proof rather than a remainder, that fact fell out of
+/// `omitted - deferred - policy` into [`InfluenceClass::Zero`] with `bound: Some(0.0)` — a
+/// published claim that its exclusion could not have changed the decision, resting on nothing.
+#[test]
+fn a_shadowed_fact_is_not_classified_as_structurally_zero() {
+    let out = shadowed_compile();
+    let manifest = &out.certificate.manifest;
+
+    assert!(
+        !out.certificate
+            .selected_facts
+            .contains(&"fact.risk_score_provisional".to_string()),
+        "the fixture must actually shadow a fact or this test proves nothing"
+    );
+
+    let shadowed = manifest
+        .groups
+        .iter()
+        .find(|group| {
+            group
+                .examples
+                .contains(&"fact.risk_score_provisional".to_string())
+        })
+        .expect("the shadowed fact is named on the manifest rather than folded into a count");
+    assert_eq!(
+        shadowed.influence,
+        InfluenceClass::Unknown,
+        "a fact with a backward dependency path was never proved irrelevant"
+    );
+    assert_eq!(shadowed.count, 1);
+    assert_eq!(
+        shadowed.bound, None,
+        "a bound of zero here would assert a measurement nobody took"
+    );
+    assert!(shadowed.reason.contains("shadowed by a later fact"));
+
+    assert_eq!(
+        manifest.count_in(InfluenceClass::Zero),
+        1,
+        "fact.aside provides a variable no factor consumes, and that omission really is proved"
+    );
+    assert!(
+        !manifest.supports_sufficiency_claim(),
+        "an unexamined competing value for a needed variable voids the sufficiency claim"
+    );
+}
+
+/// The two omissions in this world are opposite claims and must not be merged into one group.
+///
+/// `fact.aside` provides `aside_marker`, which the backward slice never needs, so no factor chain
+/// carries it to the target and its omission is proved by the declared factor graph.
+/// `fact.risk_score_provisional` provides a variable the slice does need. Sharing a class would be
+/// the exact collapse `AGENTS.md` forbids, in the direction that costs the reader the most: the
+/// unproven omission would inherit the proven one's `bound: 0.0`.
+#[test]
+fn an_unreachable_omission_and_a_shadowed_one_are_different_groups_with_different_classes() {
+    let out = shadowed_compile();
+    let manifest = &out.certificate.manifest;
+
+    assert_eq!(manifest.groups.len(), 2);
+    assert_eq!(manifest.total_omitted(), 2);
+    assert_eq!(out.certificate.omissions.total_facts, 2);
+
+    let zero = manifest
+        .groups
+        .iter()
+        .find(|group| group.influence == InfluenceClass::Zero)
+        .expect("the unreachable group survives");
+    assert_eq!(zero.count, 1);
+    assert_eq!(zero.bound, Some(0.0));
+    assert!(zero.reason.contains("no backward dependency path"));
+    assert!(
+        !zero.has_informative_bound(),
+        "the zero on a structural group restates the class and is not a measurement"
+    );
+
+    let extended = out
+        .certificate
+        .to_json(CertificateProfile::Extended)
+        .expect("certificate serialises");
+    assert_eq!(
+        extended["supports_sufficiency_claim"],
+        serde_json::json!(false)
+    );
+}
+
+/// A world with nothing shadowed keeps the whole omitted population in the proven class.
+///
+/// The new group must be empty rather than merely small on the shipped reference world, because
+/// the 750-member zero group there is the workspace's headline honest-labelling claim and a pass
+/// that quietly moved members out of it would be a regression dressed as a fix.
+#[test]
+fn a_world_with_no_shadowed_variable_keeps_every_omission_in_the_proven_zero_group() {
+    let world = World::from_json(fixture("radiogenomic_world.json")).expect("world loads");
+    let query = Query::from_json(fixture("leakage_query.json")).expect("query loads");
+    let out = compile(&world, &query).expect("compiles");
+
+    assert_eq!(out.certificate.manifest.count_in(InfluenceClass::Zero), 750);
+    assert_eq!(
+        out.certificate.manifest.count_in(InfluenceClass::Unknown),
+        0
+    );
+    assert!(out.certificate.manifest.supports_sufficiency_claim());
+    assert_eq!(
+        out.trace.unproven_remainder, None,
+        "the headline group is minted from a balanced accounting, not from a refusal that \
+         happened to leave the count alone"
+    );
+    assert_eq!(
+        out.certificate.manifest.total_omitted(),
+        out.certificate.omissions.total_facts,
+        "all 750 omissions are in the manifest, so the proven group is a remainder over a partition"
+    );
 }

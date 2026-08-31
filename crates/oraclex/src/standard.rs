@@ -196,11 +196,6 @@ impl SourceObservation {
             adequacy: None,
         }
     }
-
-    pub fn with_adequacy(mut self, adequacy: impl Into<String>) -> Self {
-        self.adequacy = Some(adequacy.into());
-        self
-    }
 }
 
 /// What a reference standard says the class is.

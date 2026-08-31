@@ -13,6 +13,9 @@ from prism_sdk import (
     AUTONOMOUS_CONNECTOR_RECEIPT_ENTRY_SCHEMA,
     AUTONOMOUS_CONNECTOR_REGISTRY_SCHEMA,
     AUTONOMOUS_DOMAINS,
+    AutonomousAuthorizationContext,
+    AutonomousAuthorizationGate,
+    AutonomousAuthorizationLedger,
     AutonomousAgent,
     AutonomousConnectorDispatchRequest,
     AutonomousConnectorObservation,
@@ -376,6 +379,70 @@ def test_connector_runtime_keeps_approval_scope_and_executor_errors_explicit() -
 
     wrong_capability = runtime.dispatch(_request("coding", capability="evidence_write"))
     assert wrong_capability.receipt.failure_class == "capability_scope"
+
+
+def test_connector_runtime_enforces_context_before_executor_across_all_domains() -> None:
+    calls: list[str] = []
+    registry = AutonomousConnectorRegistry(
+        [_registration(domain, lambda _manifest, _request, domain=domain: calls.append(domain) or {"domain": domain}, approval_required=False) for domain in AUTONOMOUS_DOMAINS]
+    )
+    runtime = AutonomousConnectorRuntime(registry)
+    ledger = AutonomousAuthorizationLedger(max_grants=4, max_events=64)
+    grant = ledger.issue(
+        grant_id="connector-runtime-grant",
+        tenant_id="tenant-a",
+        actor_id="actor-a",
+        session_id="session-a",
+        authorization_digest="a" * 64,
+        allowed_domains=AUTONOMOUS_DOMAINS,
+        allowed_operations=("connector_dispatch",),
+        issued_at=1_000,
+        expires_at=2_000,
+        max_uses=len(AUTONOMOUS_DOMAINS),
+    )
+    context = AutonomousAuthorizationContext(
+        gate=AutonomousAuthorizationGate(ledger),
+        grant_id=grant.grant_id,
+        tenant_id=grant.tenant_id,
+        actor_id=grant.actor_id,
+        session_id=grant.session_id,
+        authorization_digest=grant.authorization_digest,
+        domains=AUTONOMOUS_DOMAINS,
+        clock=lambda: 1_200,
+    )
+
+    for domain in AUTONOMOUS_DOMAINS:
+        result = runtime.dispatch(_request(domain), authorization_context=context)
+        assert result.receipt.status == "observed", domain
+    assert calls == list(AUTONOMOUS_DOMAINS)
+    assert ledger.get(grant.grant_id).used_count == len(AUTONOMOUS_DOMAINS)  # type: ignore[union-attr]
+
+    blocked_ledger = AutonomousAuthorizationLedger(max_grants=2, max_events=8)
+    blocked = blocked_ledger.issue(
+        grant_id="blocked-connector-grant",
+        tenant_id="tenant-a",
+        actor_id="actor-a",
+        session_id="session-a",
+        authorization_digest="a" * 64,
+        allowed_domains=("coding",),
+        allowed_operations=("tool_execution",),
+        issued_at=1_000,
+        expires_at=2_000,
+        max_uses=1,
+    )
+    blocked_context = AutonomousAuthorizationContext(
+        gate=AutonomousAuthorizationGate(blocked_ledger),
+        grant_id=blocked.grant_id,
+        tenant_id=blocked.tenant_id,
+        actor_id=blocked.actor_id,
+        session_id=blocked.session_id,
+        authorization_digest=blocked.authorization_digest,
+        domains=("coding",),
+        clock=lambda: 1_200,
+    )
+    with pytest.raises(ArgumentError, match="authorization was refused"):
+        runtime.dispatch(replace(_request("coding"), dispatch_id="dispatch-blocked", execution_id="execution-blocked", call_id="call-blocked"), authorization_context=blocked_context)
+    assert calls == list(AUTONOMOUS_DOMAINS)
 
 
 def test_connector_request_and_registration_reject_secrets_and_unsupported_domains() -> None:

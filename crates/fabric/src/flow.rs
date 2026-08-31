@@ -185,11 +185,6 @@ impl FlowLabel {
         self
     }
 
-    pub fn with_legal_basis(mut self, basis: impl Into<String>) -> Self {
-        self.legal_basis = Some(basis.into());
-        self
-    }
-
     /// The join of two labels: the least label that dominates both.
     ///
     /// Compartments union (more restrictive), purposes intersect, residency intersects, retention
@@ -200,11 +195,18 @@ impl FlowLabel {
         } else if other.residency.is_empty() {
             self.residency.clone()
         } else {
-            self.residency.intersection(&other.residency).cloned().collect()
+            self.residency
+                .intersection(&other.residency)
+                .cloned()
+                .collect()
         };
         FlowLabel {
             sensitivity: self.sensitivity.max(other.sensitivity),
-            compartments: self.compartments.union(&other.compartments).cloned().collect(),
+            compartments: self
+                .compartments
+                .union(&other.compartments)
+                .cloned()
+                .collect(),
             purpose: match (&self.purpose, &other.purpose) {
                 (PurposeRestriction::Unrestricted, p) | (p, PurposeRestriction::Unrestricted) => {
                     p.clone()
@@ -215,7 +217,10 @@ impl FlowLabel {
             },
             residency,
             retention: self.retention.meet(&other.retention),
-            legal_basis: self.legal_basis.clone().or_else(|| other.legal_basis.clone()),
+            legal_basis: self
+                .legal_basis
+                .clone()
+                .or_else(|| other.legal_basis.clone()),
         }
     }
 
@@ -372,12 +377,20 @@ pub enum FlowRefusal {
 #[serde(rename_all = "snake_case", tag = "kind")]
 pub enum Declassifier {
     /// Refuses below a minimum cohort, because an aggregate over one row is that row.
-    Aggregate { min_cohort: u32 },
-    RedactDirectIdentifiers { fields: BTreeSet<String> },
-    SummariseWithoutSensitiveFields { excluded: BTreeSet<String> },
+    Aggregate {
+        min_cohort: u32,
+    },
+    RedactDirectIdentifiers {
+        fields: BTreeSet<String>,
+    },
+    SummariseWithoutSensitiveFields {
+        excluded: BTreeSet<String>,
+    },
     Tokenize,
     SyntheticExample,
-    HumanReviewedRelease { reviewer: String },
+    HumanReviewedRelease {
+        reviewer: String,
+    },
 }
 
 impl Declassifier {
@@ -414,10 +427,14 @@ pub struct Declassification {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "verifier")]
 pub enum VerifierResult {
-    Passed { method: String },
+    Passed {
+        method: String,
+    },
     /// A declassifier that ran but whose output nobody checked. Recorded rather than treated as a
     /// pass, so a bundle can be audited for declassifications nothing verified.
-    Unverified { reason: String },
+    Unverified {
+        reason: String,
+    },
 }
 
 /// Apply a declassifier, refusing an unlabelled source outright.
@@ -592,11 +609,7 @@ impl Projection {
 ///
 /// Order is preserved from the input, so two runs over the same inputs produce byte-identical
 /// projections.
-pub fn project_for(
-    recipient: &Principal,
-    items: &[Item],
-    policy: ResidualPolicy,
-) -> Projection {
+pub fn project_for(recipient: &Principal, items: &[Item], policy: ResidualPolicy) -> Projection {
     let mut released = Vec::new();
     let mut withheld = Vec::new();
     let mut withheld_count = 0usize;

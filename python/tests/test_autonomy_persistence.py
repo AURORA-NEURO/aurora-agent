@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 import json
+import sqlite3
 
 import pytest
 
@@ -15,7 +17,10 @@ from prism_sdk import (
     AutonomousExecutionPolicy,
     TransactionalJsonAutonomousExecutionSnapshotPersistence,
     AutonomyPersistenceError,
+    AutonomyPolicyError,
     ProviderToolCall,
+    SQLiteAutonomousExecutionJournal,
+    SQLiteAutonomousExecutionSnapshotPersistence,
 )
 
 
@@ -96,6 +101,10 @@ def test_journal_is_restart_safe_hash_chained_and_resume_is_explicit(tmp_path) -
     )
     resumed.complete()
     assert resumed.state.status == "completed"
+    latest = journal.state("execution-1")
+    assert latest is not None
+    assert resumed.state.journal_sequence == latest.journal_sequence
+    assert resumed.state.checkpoint_digest == latest.checkpoint_digest
     with pytest.raises(AutonomyPersistenceError):
         AutonomousExecutionController(
             execution_id="execution-1",
@@ -126,6 +135,110 @@ def test_journal_rejects_tampering_and_transient_metadata(tmp_path) -> None:
     path.write_text(json.dumps(row) + "\n", encoding="utf-8")
     with pytest.raises(AutonomyPersistenceError):
         journal.verify_integrity()
+
+
+def test_execution_budget_persists_failovers_and_replans_across_restart(tmp_path) -> None:
+    path = tmp_path / "bounded-recovery.jsonl"
+    policy = AutonomousExecutionPolicy(
+        max_steps=8,
+        max_provider_calls=4,
+        max_provider_failovers=1,
+        max_replans=1,
+    )
+    controller = AutonomousExecutionController(
+        execution_id="bounded-recovery",
+        domain="coding",
+        capability="implementation_review",
+        risk_class="read_only",
+        policy=policy,
+        journal=AutonomousExecutionJournal(path),
+    )
+    controller.admit_provider_call(
+        provider="primary",
+        model="model-a",
+        invocation_kind="answer",
+        attempt=0,
+        turn=0,
+    )
+    assert controller.state.provider_failovers == 0
+    controller.admit_provider_call(
+        provider="fallback",
+        model="model-b",
+        invocation_kind="answer",
+        attempt=1,
+        turn=0,
+        failover=True,
+    )
+    assert controller.state.provider_failovers == 1
+    controller.replan(
+        instruction_digest="c" * 64,
+        reason="evaluator_requested_revision",
+        attempt=1,
+    )
+    assert controller.state.replans == 1
+    serialized = path.read_text(encoding="utf-8")
+    assert "evaluator_requested_revision" in serialized
+    assert "raw replan instruction" not in serialized
+    assert {row["event"]["kind"] for row in AutonomousExecutionJournal(path).events()} >= {"replan"}
+
+    resumed = AutonomousExecutionController(
+        execution_id="bounded-recovery",
+        domain="coding",
+        capability="implementation_review",
+        risk_class="read_only",
+        policy=policy,
+        journal=AutonomousExecutionJournal(path),
+        resume=True,
+    )
+    assert resumed.state.provider_failovers == 1
+    assert resumed.state.replans == 1
+    with pytest.raises(AutonomyPolicyError, match="max_provider_failovers"):
+        resumed.admit_provider_call(
+            provider="second-fallback",
+            model="model-c",
+            invocation_kind="answer",
+            attempt=2,
+            turn=0,
+            failover=True,
+        )
+    with pytest.raises(AutonomyPolicyError, match="max_replans"):
+        resumed.replan(instruction_digest="d" * 64, reason="second_revision")
+
+
+def test_shared_controller_serializes_concurrent_domain_transitions(tmp_path) -> None:
+    path = tmp_path / "concurrent-execution.jsonl"
+    controller = AutonomousExecutionController(
+        execution_id="concurrent-execution",
+        domain="operations",
+        capability="observability",
+        risk_class="read_only",
+        policy=AutonomousExecutionPolicy(
+            max_steps=16,
+            max_provider_calls=16,
+            max_cost_units=16,
+        ),
+        journal=AutonomousExecutionJournal(path),
+    )
+
+    def admit(index: int) -> int:
+        return controller.admit_provider_call(
+            provider="local",
+            model=f"model-{index}",
+            invocation_kind="parallel_domain_worker",
+            attempt=0,
+            turn=0,
+        ).provider_calls
+
+    with ThreadPoolExecutor(max_workers=8) as workers:
+        observed = list(workers.map(admit, range(16)))
+
+    assert sorted(observed) == list(range(1, 17))
+    assert controller.state.step_index == 16
+    assert controller.state.provider_calls == 16
+    rows = AutonomousExecutionJournal(path).events(execution_id="concurrent-execution")
+    assert len(rows) == 17
+    assert [row["sequence"] for row in rows] == list(range(1, 18))
+    assert len({row["event"]["state"]["provider_calls"] for row in rows}) == 17
 
 
 def test_execution_snapshot_persistence_rehydrates_all_domains_and_fences_stale_writers(tmp_path) -> None:
@@ -178,6 +291,161 @@ def test_execution_snapshot_persistence_rehydrates_all_domains_and_fences_stale_
     store.value = json.dumps(tampered)
     with pytest.raises(AutonomyPersistenceError):
         AutonomousExecutionPersistenceCoordinator(AutonomousExecutionJournal(tmp_path / "tampered.jsonl"), persistence).restore()
+
+
+def test_sqlite_execution_snapshot_persistence_reopens_and_fences_concurrent_writers(tmp_path) -> None:
+    database = tmp_path / "execution-snapshots.sqlite3"
+    policy = AutonomousExecutionPolicy(max_steps=8, max_tool_calls=4)
+    journal = AutonomousExecutionJournal(tmp_path / "initial.jsonl")
+    controller = AutonomousExecutionController(
+        execution_id="sqlite-execution",
+        domain="operations",
+        capability="observability",
+        risk_class="read_only",
+        policy=policy,
+        journal=journal,
+    )
+    controller.checkpoint(status="paused", reason="sqlite_initial_checkpoint")
+
+    with SQLiteAutonomousExecutionSnapshotPersistence(database) as persistence:
+        coordinator = AutonomousExecutionPersistenceCoordinator(journal, persistence)
+        initial = coordinator.flush()
+        assert persistence.read() == initial
+
+    reopened = SQLiteAutonomousExecutionSnapshotPersistence(database)
+    try:
+        restored_journal = AutonomousExecutionJournal(tmp_path / "reopened.jsonl")
+        restored = AutonomousExecutionPersistenceCoordinator(restored_journal, reopened).restore()
+        assert restored is not None
+        assert restored["snapshot_digest"] == initial["snapshot_digest"]
+        assert restored_journal.verify_integrity()["verified"] is True
+
+        def candidate(name: str) -> dict[str, object]:
+            candidate_journal = AutonomousExecutionJournal(tmp_path / f"{name}.jsonl")
+            candidate_journal.restore(initial)
+            candidate_controller = AutonomousExecutionController(
+                execution_id="sqlite-execution",
+                domain="operations",
+                capability="observability",
+                risk_class="read_only",
+                policy=policy,
+                journal=candidate_journal,
+                resume=True,
+            )
+            candidate_controller.checkpoint(status="paused", reason=name)
+            return candidate_journal.snapshot()
+
+        candidates = (candidate("sqlite-writer-a"), candidate("sqlite-writer-b"))
+    finally:
+        reopened.close()
+
+    writer_a = SQLiteAutonomousExecutionSnapshotPersistence(database)
+    writer_b = SQLiteAutonomousExecutionSnapshotPersistence(database)
+    try:
+        expected = initial["snapshot_digest"]
+
+        def compare_and_swap(args: tuple[SQLiteAutonomousExecutionSnapshotPersistence, dict[str, object]]) -> bool:
+            writer, snapshot = args
+            return writer.write_if_unchanged(expected, snapshot)
+
+        with ThreadPoolExecutor(max_workers=2) as workers:
+            outcomes = list(workers.map(compare_and_swap, ((writer_a, candidates[0]), (writer_b, candidates[1]))))
+        assert sorted(outcomes) == [False, True]
+        winner = writer_a.read() if outcomes[0] else writer_b.read()
+        assert winner is not None
+        assert winner["snapshot_digest"] == candidates[0 if outcomes[0] else 1]["snapshot_digest"]
+    finally:
+        writer_a.close()
+        writer_b.close()
+
+    with pytest.raises(AutonomyPersistenceError, match="incompatible schema"):
+        connection = sqlite3.connect(database)
+        try:
+            connection.execute(
+                "UPDATE autonomy_execution_snapshot_meta SET value = 'wrong-schema' WHERE key = 'schema'"
+            )
+            connection.commit()
+        finally:
+            connection.close()
+        SQLiteAutonomousExecutionSnapshotPersistence(database)
+
+
+def test_sqlite_execution_journal_serializes_hash_chain_across_workers(tmp_path) -> None:
+    database = tmp_path / "execution-journal.sqlite3"
+    policy = AutonomousExecutionPolicy(max_steps=64, max_provider_calls=64)
+    journal = SQLiteAutonomousExecutionJournal(database, max_events=64)
+    controller = AutonomousExecutionController(
+        execution_id="sqlite-journal-execution",
+        domain="operations",
+        capability="observability",
+        risk_class="read_only",
+        policy=policy,
+        journal=journal,
+    )
+    controller.checkpoint(status="paused", reason="sqlite_journal_initial")
+    state = controller.state.to_dict()
+    journal.close()
+
+    writers = [SQLiteAutonomousExecutionJournal(database, max_events=64) for _ in range(4)]
+    try:
+        def append_checkpoint(index: int) -> dict[str, object]:
+            return writers[index % len(writers)].append(
+                {
+                    "execution_id": "sqlite-journal-execution",
+                    "kind": "checkpoint",
+                    "domain": "operations",
+                    "capability": "observability",
+                    "risk_class": "read_only",
+                    "status": "paused",
+                    "policy_digest": policy.digest,
+                    "state": state,
+                    "reason": f"sqlite_worker_{index}",
+                }
+            )
+
+        with ThreadPoolExecutor(max_workers=8) as workers_pool:
+            receipts = list(workers_pool.map(append_checkpoint, range(32)))
+        assert sorted(receipt["sequence"] for receipt in receipts) == list(range(3, 35))
+        rows = writers[0].events(execution_id="sqlite-journal-execution", limit=64)
+        assert len(rows) == 34
+        assert [row["sequence"] for row in rows] == list(range(1, 35))
+        assert writers[0].verify_integrity()["verified"] is True
+        assert writers[0].snapshot()["head_digest"] == rows[-1]["event_digest"]
+    finally:
+        for writer in writers:
+            writer.close()
+
+    with SQLiteAutonomousExecutionJournal(database, max_events=64) as reopened:
+        resumed = AutonomousExecutionController(
+            execution_id="sqlite-journal-execution",
+            domain="operations",
+            capability="observability",
+            risk_class="read_only",
+            policy=policy,
+            journal=reopened,
+            resume=True,
+        )
+        assert resumed.state.status == "resumed"
+        resumed.complete()
+        final_state = reopened.state("sqlite-journal-execution")
+        assert final_state is not None
+        assert final_state.status == "completed"
+
+    connection = sqlite3.connect(database)
+    try:
+        connection.execute(
+            "UPDATE autonomy_execution_journal_events SET event_digest = ? WHERE sequence = 1",
+            ("a" * 64,),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+    corrupted = SQLiteAutonomousExecutionJournal(database, max_events=64)
+    try:
+        with pytest.raises(AutonomyPersistenceError, match="event digest"):
+            corrupted.verify_integrity()
+    finally:
+        corrupted.close()
 
 
 def test_runtime_session_enforces_policy_and_journals_read_only_outcomes(tmp_path) -> None:

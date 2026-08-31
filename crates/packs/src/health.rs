@@ -270,10 +270,6 @@ impl PackHealth {
         }
     }
 
-    pub fn is_reportable(&self) -> bool {
-        self.verdict() != HealthVerdict::Unreportable
-    }
-
     pub fn blocking(&self) -> Vec<&HealthFinding> {
         self.findings
             .iter()

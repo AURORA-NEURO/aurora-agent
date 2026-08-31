@@ -1,12 +1,12 @@
 ---
 name: aurora-setup
-description: Set up, build, or troubleshoot the AURORA Agent (bioprism) MCP server used by the aurora-backend plugin. Use when the aurora-agent MCP server fails to start, when its tools are missing from a session, when asked to install or build the aurora-agent backend, or when a bioprism build or test behaves strangely on Windows.
+description: Set up, build, or troubleshoot the AURORA Agent (bioprism) MCP server used by the aurora-agent plugin. Use when the aurora-agent MCP server fails to start, when its tools are missing from a session, when asked to install or build the aurora-agent backend, or when a bioprism build or test behaves strangely on Windows.
 ---
 
 # AURORA backend setup
 
-The `aurora-backend` plugin launches `bioprism-mcp`, the MCP server of the
-AURORA Agent workspace (259 tools; JSON-RPC 2.0 over newline-delimited stdio;
+The `aurora-agent` plugin launches `bioprism-mcp`, the MCP server of the
+AURORA Agent workspace (264 tools; JSON-RPC 2.0 over newline-delimited stdio;
 stdout is JSON-RPC only, diagnostics go to stderr).
 
 ## Where the backend lives

@@ -12,6 +12,7 @@
 
 use crate::attestation::{AttestationPurpose, ClaimedProducer, KeyHolderAuthenticated};
 use crate::error::BundleError;
+use crate::hex::hex_lower;
 use crate::mac::{AuthenticationScheme, KeyIdentity, Repudiability};
 use bioprism_ids::ContentHash;
 use ed25519_dalek::{Signer, Verifier};
@@ -592,16 +593,6 @@ fn parse_hex<const N: usize>(hex: &str, text: &str) -> Result<[u8; N], Signature
         *byte = (high << 4) | low;
     }
     Ok(bytes)
-}
-
-fn hex_lower(bytes: &[u8]) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut out = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        out.push(HEX[(byte >> 4) as usize] as char);
-        out.push(HEX[(byte & 0x0f) as usize] as char);
-    }
-    out
 }
 
 fn hex_value(byte: u8) -> u8 {

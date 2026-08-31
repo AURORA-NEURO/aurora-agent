@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 from prism_sdk import (
     AUTONOMOUS_DOMAINS,
+    AutonomousAgent,
     AutonomousBatchCheckpoint,
     AutonomousBatchItem,
     AutonomousBatchResult,
@@ -20,6 +21,7 @@ from prism_sdk import (
     ModelCatalogue,
     ProviderModelDescriptor,
     SQLiteBrainLearningLedger,
+    LLMRuntime,
 )
 from prism_sdk.authoring import content_digest
 from prism_sdk.autonomy import _batch_digest
@@ -62,6 +64,99 @@ def test_route_is_provider_free_and_secret_safe() -> None:
     assert errors == ""
     assert payload["route"]["selected_domains"]
     assert payload["authorization"] == "routing_evidence_only; no_tools_or_effects_authorized"
+
+
+def test_action_process_compiles_all_domains_persists_reviews_and_emits_only_downstream_handoff(tmp_path: Path) -> None:
+    task = "review a private task that must never be retained"
+    code, planned, errors = _invoke("action-plan", "--task", task, "--all-domains")
+    assert code == 0
+    assert errors == ""
+    assert planned["plan_count"] == len(AUTONOMOUS_DOMAINS)
+    assert all(len(plan["plan_digest"]) == 64 for plan in planned["plans"])
+    assert task not in json.dumps(planned)
+
+    plan_path = tmp_path / "action-plan.json"
+    store_path = tmp_path / "action-admissions.json"
+    plan_path.write_text(json.dumps(planned["plans"][0]), encoding="utf-8")
+    code, submitted, errors = _invoke(
+        "action-admission-submit",
+        "--admission-store", str(store_path),
+        "--plan-file", str(plan_path),
+        "--action-id", "cli-coding-action",
+    )
+    assert code == 0
+    assert errors == ""
+    assert submitted["row"]["status"] == "pending_review"
+    assert submitted["snapshot_digest"]
+    expected_record_digest = submitted["row"]["record_digest"]
+    required = submitted["row"]["required_approvals"]
+
+    review_args = [
+        "action-admission-review",
+        "--admission-store", str(store_path),
+        "--action-id", "cli-coding-action",
+        "--authorization-digest", "a" * 64,
+        "--expected-record-digest", expected_record_digest,
+        "--reviewed",
+    ]
+    for gate in required:
+        review_args.extend(("--approve-gate", gate))
+    code, reviewed, errors = _invoke(*review_args)
+    assert code == 0
+    assert errors == ""
+    assert reviewed["row"]["status"] == "admitted"
+    assert reviewed["row"]["revision"] == 2
+    assert task not in json.dumps(reviewed)
+
+    stale_code, stale_payload, stale_errors = _invoke(
+        "action-admission-review",
+        "--admission-store", str(store_path),
+        "--action-id", "cli-coding-action",
+        "--authorization-digest", "b" * 64,
+        "--expected-record-digest", expected_record_digest,
+        "--reviewed",
+    )
+    assert stale_code == 2
+    assert stale_payload is None
+    assert "command failed" in stale_errors
+
+    code, handoff, errors = _invoke(
+        "action-admission-handoff",
+        "--admission-store", str(store_path),
+        "--action-id", "cli-coding-action",
+        "--domain", "coding",
+    )
+    assert code == 0
+    assert errors == ""
+    assert handoff["handoff"]["status"] == "ready_for_downstream_gates"
+    assert handoff["handoff"]["requested_domains"] == ["coding"]
+    assert "credential_scope" in handoff["handoff"]["downstream_gates"]
+    assert task not in json.dumps(handoff)
+
+    code, default_handoff, errors = _invoke(
+        "action-admission-handoff",
+        "--admission-store", str(store_path),
+        "--action-id", "cli-coding-action",
+    )
+    assert code == 0
+    assert errors == ""
+    assert default_handoff["handoff"]["requested_domains"] == ["coding"]
+
+    code, status, errors = _invoke("action-admission-status", "--admission-store", str(store_path))
+    assert code == 0
+    assert errors == ""
+    assert status["queue"]["counts"]["admitted"] == 1
+    assert set(status["queue"]["domain_counts"]) == set(AUTONOMOUS_DOMAINS)
+
+    tampered = json.loads(store_path.read_text(encoding="utf-8"))
+    tampered["records"][0]["status"] = "blocked"
+    store_path.write_text(json.dumps(tampered), encoding="utf-8")
+    tamper_code, tamper_payload, tamper_errors = _invoke(
+        "action-admission-status", "--admission-store", str(store_path)
+    )
+    assert tamper_code == 2
+    assert tamper_payload is None
+    assert "command failed" in tamper_errors
 
 
 def test_provider_status_never_collects_or_returns_a_key() -> None:
@@ -544,6 +639,94 @@ def test_batch_request_file_rejects_credential_shaped_fields_before_provider_acc
     assert code == 2
     assert payload is None
     assert "command failed" in errors
+
+
+def _write_held_launch_admission(tmp_path: Path) -> Path:
+    admission = AutonomousAgent(None, LLMRuntime()).launch_admission(
+        decision="hold",
+        reason="operator review is still pending",
+    )
+    path = tmp_path / "held-launch-admission.json"
+    path.write_text(json.dumps(admission), encoding="utf-8")
+    return path
+
+
+def test_run_launch_admission_rejects_before_prompt_or_mcp_start(tmp_path) -> None:
+    admission_path = _write_held_launch_admission(tmp_path)
+    prompted = False
+    client_started = False
+
+    def reader(_prompt: str) -> str:
+        nonlocal prompted
+        prompted = True
+        return "must-not-be-collected"
+
+    def client_factory(*_args: object, **_kwargs: object):
+        nonlocal client_started
+        client_started = True
+        raise AssertionError("MCP must not start for a held launch admission")
+
+    code, payload, errors = _invoke(
+        "run",
+        "--mcp-command", "python server.py",
+        "--task", "review the coding workspace",
+        "--domain", "coding",
+        "--provider", "local",
+        "--model", "local-model",
+        "--launch-admission-file", str(admission_path),
+        reader=reader,
+        client_factory=client_factory,
+    )
+    assert code == 2
+    assert payload is None
+    assert "command failed" in errors
+    assert prompted is False
+    assert client_started is False
+
+
+def test_batch_launch_admission_rejects_before_prompt_or_mcp_start(tmp_path) -> None:
+    admission_path = _write_held_launch_admission(tmp_path)
+    requests_path = tmp_path / "requests.json"
+    requests_path.write_text(
+        json.dumps(
+            {
+                "schema": "aurora-autonomous-batch-requests/0.1",
+                "mode": "domain",
+                "job_id": "held-batch-001",
+                "requests": [{"task": "review the coding workspace", "domain": "coding"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    prompted = False
+    client_started = False
+
+    def reader(_prompt: str) -> str:
+        nonlocal prompted
+        prompted = True
+        return "must-not-be-collected"
+
+    def client_factory(*_args: object, **_kwargs: object):
+        nonlocal client_started
+        client_started = True
+        raise AssertionError("MCP must not start for a held launch admission")
+
+    code, payload, errors = _invoke(
+        "batch-run",
+        "--mcp-command", "python server.py",
+        "--requests-file", str(requests_path),
+        "--job-id", "held-batch-001",
+        "--provider", "local",
+        "--model", "local-model",
+        "--launch-admission-file", str(admission_path),
+        reader=reader,
+        client_factory=client_factory,
+    )
+    assert code == 2
+    assert payload is None
+    assert "command failed" in errors
+    assert prompted is False
+    assert client_started is False
     assert "must-never-enter-the-request" not in errors
 
 
@@ -1527,6 +1710,8 @@ def test_cli_persists_and_rehydrates_redacted_domain_activation(tmp_path) -> Non
     )
     assert stale_code == 0
     assert stale_errors == ""
+    assert stale["result"]["status"] == "activation_stale"
+    assert stale["result"]["provider_call"] is False
     assert stale["tool_surface"]["domain_binding"]["registered_tools"] == []
     assert stale["tool_surface"]["domain_binding"]["activation_status"] == "stale"
 

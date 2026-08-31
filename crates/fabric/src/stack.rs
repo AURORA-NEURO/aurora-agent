@@ -352,11 +352,6 @@ impl SessionCapabilities {
         self
     }
 
-    pub fn resuming_at(mut self, fidelity: impl Into<String>) -> Self {
-        self.continuation_fidelities.insert(fidelity.into());
-        self
-    }
-
     pub fn with_payload_limit(mut self, bytes: u64) -> Self {
         self.max_payload_bytes = bytes;
         self
@@ -396,14 +391,15 @@ pub fn negotiate_session(
         .intersection(&right.weave_ir_versions)
         .cloned()
         .collect();
-    let version = versions
-        .iter()
-        .next_back()
-        .cloned()
-        .ok_or_else(|| StackError::NoCommonIrVersion {
-            left: left.participant.clone(),
-            right: right.participant.clone(),
-        })?;
+    let version =
+        versions
+            .iter()
+            .next_back()
+            .cloned()
+            .ok_or_else(|| StackError::NoCommonIrVersion {
+                left: left.participant.clone(),
+                right: right.participant.clone(),
+            })?;
     let acts: BTreeSet<String> = left.acts.intersection(&right.acts).cloned().collect();
     if acts.is_empty() {
         return Err(StackError::NoCommonActs {
@@ -446,11 +442,17 @@ pub fn negotiate_session(
 /// 23.01's A2A mapping table, recorded and unconsumed.
 pub const A2A_MAPPING: [(&str, &str); 6] = [
     ("Agent Card", "imported participant capability declaration"),
-    ("Message", "transport container for a Weave act or opaque fallback"),
+    (
+        "Message",
+        "transport container for a Weave act or opaque fallback",
+    ),
     ("Task", "Weave work item or commitment execution handle"),
     ("Artifact", "content-addressed Weave artifact"),
     ("task status", "execution lifecycle event"),
-    ("extension", "location for Weave metadata where protocol-safe"),
+    (
+        "extension",
+        "location for Weave metadata where protocol-safe",
+    ),
 ];
 
 /// 23.01's MCP mapping table, recorded and unconsumed.
@@ -459,7 +461,10 @@ pub const MCP_MAPPING: [(&str, &str); 5] = [
     ("resource", "readable artifact or stream"),
     ("prompt/app", "optional user interface or instruction asset"),
     ("asynchronous task handle", "long-running execution binding"),
-    ("authorization metadata", "input to the Weave authority gate"),
+    (
+        "authorization metadata",
+        "input to the Weave authority gate",
+    ),
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]

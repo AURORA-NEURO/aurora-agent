@@ -15,6 +15,7 @@ import {
 import type { AutonomousWorkflowExecutionResult } from "./workflow-execution.js";
 import type { AutonomousCrossDomainCheckpoint, AutonomousCrossDomainExecutionResult } from "./cross-domain-execution.js";
 import type { AutonomousEpisodicMemoryStore } from "./autonomous-memory.js";
+import { AutonomousAuthorizationError, type AutonomousAuthorizationContext } from "./autonomous-authorization.js";
 import { replayAutonomousDomainResponseEvaluation } from "./autonomous-domain-response.js";
 import type { AutonomousDomainResponseEvaluation } from "./autonomous-domain-response.js";
 import type { AutonomousWorkflowStageResponseEvaluation } from "./autonomous-workflow-response.js";
@@ -553,7 +554,8 @@ export interface AutonomousEvaluatedRunResult {
  */
 export interface AutonomousEvaluatedCrossDomainRunResult {
   schema: typeof AUTONOMOUS_EVALUATED_CROSS_DOMAIN_RUN_SCHEMA;
-  status: "settled" | "not_eligible";
+  /** A partial fan-out may settle every completed specialist/synthesis episode that exists. */
+  status: "settled" | "partially_settled" | "not_eligible";
   run: AutonomousCrossDomainRunResult;
   rewards: Record<string, AutonomousEvaluatorRewardInput>;
   /** Value-only trajectory projection; the transient cross-domain result is available in `run`. */
@@ -642,6 +644,8 @@ export interface AutonomousLearningControllerOptions {
   runEvaluator?: AutonomousEvaluatorMesh;
   apiClient?: ApiClient;
   memoryStore?: AutonomousEpisodicMemoryStore;
+  /** Optional caller-issued grant used for evaluator, learning, and memory-write boundaries. */
+  authorizationContext?: AutonomousAuthorizationContext;
   /** Optional metadata-only evaluator calibration report used by the learning admission gate. */
   calibrationReport?: AutonomousEvaluatorCalibrationReport;
   /** When true, every settlement refuses before bandit mutation unless its domain is admitted. */
@@ -1926,6 +1930,7 @@ export class AutonomousLearningController {
   readonly feedbackOutbox: AutonomousLearningFeedbackOutboxStore;
   /** Optional caller-owned memory sink used to attach explicit evaluator feedback to recallable episodes. */
   readonly memoryStore?: AutonomousEpisodicMemoryStore;
+  readonly authorizationContext?: AutonomousAuthorizationContext;
   readonly evaluator: AutonomousWorkflowEvaluator;
   /** Optional evaluator mesh for the high-level runLearning and runCrossDomainLearning helpers. */
   readonly runEvaluator?: AutonomousEvaluatorMesh;
@@ -1961,6 +1966,7 @@ export class AutonomousLearningController {
     )) throw new ArgumentError("learning feedbackOutbox is malformed");
     this.feedbackOutbox = options.feedbackOutbox ?? new InMemoryAutonomousLearningFeedbackOutboxStore();
     this.memoryStore = options.memoryStore ?? agent.memoryStore;
+    this.authorizationContext = options.authorizationContext;
     this.evaluator = options.evaluator ?? new AutonomousWorkflowEvaluator();
     if (options.runEvaluator !== undefined && typeof options.runEvaluator.evaluate !== "function") throw new ArgumentError("learning controller runEvaluator is malformed");
     this.runEvaluator = options.runEvaluator;
@@ -2024,6 +2030,20 @@ export class AutonomousLearningController {
   }
 
   async evaluateWorkflow(execution: AutonomousWorkflowExecutionResult, input: AutonomousWorkflowEvaluationInput): Promise<AutonomousWorkflowEvaluation> {
+    if (this.authorizationContext) {
+      const domain = execution.blueprint?.domain_profile.domain;
+      if (!domain) throw new ArgumentError("workflow evaluation requires a blueprint domain for authorization");
+      await this.authorizationContext.authorizeOperation({
+        operation: "evaluation",
+        domain,
+        resourceDigest: await digestJson({
+          schema: "bioprism-autonomous-evaluation-authorization-resource/0.1",
+          domain,
+          workflow_digest: execution.blueprint!.workflow.workflow_digest,
+          evidence_digest: input.evidence_digest ?? null,
+        }),
+      });
+    }
     return this.evaluator.evaluate(execution, input);
   }
 
@@ -2035,6 +2055,22 @@ export class AutonomousLearningController {
     if (!result || typeof result !== "object") throw new ArgumentError("run evaluation requires an autonomous run result");
     const evaluate = evaluator ?? (this.runEvaluator ? (candidate: AutonomousRunResult) => this.runEvaluator!.evaluate(candidate) : undefined);
     if (!evaluate) throw new ArgumentError("run evaluation requires an evaluator callback or configured runEvaluator");
+    if (this.authorizationContext) {
+      const domain = result.blueprint?.domain_profile.domain ?? result.route.primary_domain ?? "cross_domain";
+      await this.authorizationContext.authorizeOperation({
+        operation: "evaluation",
+        domain,
+        resourceDigest: await digestJson({
+          schema: "bioprism-autonomous-evaluation-authorization-resource/0.1",
+          task_digest: result.route.task_digest,
+          status: result.status,
+          domain,
+          route_digest: result.route.route_digest,
+          selection_digest: result.selection?.decision_digest ?? null,
+          plan_refinement_digest: result.plan_refinement_digest,
+        }),
+      });
+    }
     return normalizeRewardInput(await evaluate(result));
   }
 
@@ -2110,7 +2146,21 @@ export class AutonomousLearningController {
     const plannerEvaluation = options.plannerEvaluation
       ? normalizeRewardInput(options.plannerEvaluation)
       : options.plannerEvaluator
-        ? normalizeRewardInput(await options.plannerEvaluator(plan))
+        ? normalizeRewardInput(await (async () => {
+          if (this.authorizationContext) {
+            const domain = options.plannerDomain ?? (plan.planner_context?.domain as AutonomousDomainName | undefined) ?? "cross_domain";
+            await this.authorizationContext.authorizeOperation({
+              operation: "evaluation",
+              domain,
+              resourceDigest: await digestJson({
+                schema: "bioprism-autonomous-evaluation-authorization-resource/0.1",
+                domain,
+                outcome_digest: plan.outcome_digest,
+              }),
+            });
+          }
+          return options.plannerEvaluator!(plan);
+        })())
         : null;
     if (!plannerEvaluation) return empty("not_eligible", "planner_evaluator_not_provided");
     const execution = planAndRun.result;
@@ -2128,7 +2178,23 @@ export class AutonomousLearningController {
       if (!evaluate) throw new ArgumentError("plan-and-run learning requires an execution evaluator callback or configured runEvaluator");
       const candidates = [...crossDomain.child_runs.map((child) => child.result), ...(crossDomain.synthesis ? [crossDomain.synthesis] : [])].filter((candidate) => candidate.status === "completed");
       if (candidates.length !== crossDomain.learning_episode_ids.length) throw new ArgumentError("plan-and-run learning episode order does not match completed specialist and synthesis results");
-      for (const [index, candidate] of candidates.entries()) rewards[crossDomain.learning_episode_ids[index]!] = normalizeRewardInput(await evaluate(candidate));
+      for (const [index, candidate] of candidates.entries()) {
+        if (this.authorizationContext) {
+          const domain = candidate.blueprint?.domain_profile.domain ?? candidate.route.primary_domain ?? "cross_domain";
+          await this.authorizationContext.authorizeOperation({
+            operation: "evaluation",
+            domain,
+            resourceDigest: await digestJson({
+              schema: "bioprism-autonomous-evaluation-authorization-resource/0.1",
+              domain,
+              task_digest: candidate.route.task_digest,
+              route_digest: candidate.route.route_digest,
+              status: candidate.status,
+            }),
+          });
+        }
+        rewards[crossDomain.learning_episode_ids[index]!] = normalizeRewardInput(await evaluate(candidate));
+      }
       const crossSettlement = await this.settleCrossDomain(crossDomain, rewards, {
         trajectoryId: options.trajectoryId,
         discount: options.discount,
@@ -2236,6 +2302,19 @@ export class AutonomousLearningController {
     const planningOutcomeDigest = await digestJson({ kind: "planning_quality", plan_outcome_digest: plan.outcome_digest, selection_digest: plan.selection_digest ?? null, planner_plan_digest: plan.planner_plan_digest ?? null });
     let nextState: BrainBanditState | null = null;
     const remote = options.remote === true;
+    if (this.authorizationContext && (this.agent.learner || this.agent.modelHealthController)) {
+      await this.authorizationContext.authorizeOperation({
+        operation: "learning",
+        domain: options.domain,
+        resourceDigest: await digestJson({
+          schema: "bioprism-autonomous-learning-authorization-resource/0.1",
+          domain: options.domain,
+          planner_outcome_digest: plan.outcome_digest,
+          selection_digest: plan.selection_digest ?? null,
+          evaluation_digest: await digestJson(evaluation),
+        }),
+      });
+    }
     if (this.agent.learner) {
       nextState = await this.agent.recordEvaluatorReward(`${provider}/${model}`, evaluation.reward, {
         failed: evaluation.failed,
@@ -2312,7 +2391,13 @@ export class AutonomousLearningController {
     const runOptions: Omit<AutonomousCrossDomainRunOptions, "learning" | "learningEpisodeId"> = options.run === undefined ? {} : { ...options.run };
     if (!options.evaluator && !this.runEvaluator) throw new ArgumentError("runCrossDomainLearning requires an evaluator callback or configured runEvaluator");
     const run = await this.agent.runCrossDomain(task, { ...runOptions, learning: this });
-    if (run.status !== "completed") return { schema: AUTONOMOUS_EVALUATED_CROSS_DOMAIN_RUN_SCHEMA, status: "not_eligible", run, rewards: {}, settlement: null, response_settlements: [], reason: "run_not_completed", retention: "run_caller_owned; rewards_and_settlement_value_only" };
+    // `children_partial` is still an eligible learning boundary when synthesis completed: the
+    // failed specialist has no episode, while healthy specialists and synthesis have independent
+    // completed episodes. `children_completed` is the same contract for an intentional
+    // no-synthesis fan-out. Do not admit approval, route-review, response-review, or hard-failure
+    // states because they do not establish a complete provider result for the missing work.
+    const learningEligible = run.status === "completed" || run.status === "children_completed" || run.status === "children_partial";
+    if (!learningEligible) return { schema: AUTONOMOUS_EVALUATED_CROSS_DOMAIN_RUN_SCHEMA, status: "not_eligible", run, rewards: {}, settlement: null, response_settlements: [], reason: "run_not_completed", retention: "run_caller_owned; rewards_and_settlement_value_only" };
     if (!run.learning_episode_ids.length) return { schema: AUTONOMOUS_EVALUATED_CROSS_DOMAIN_RUN_SCHEMA, status: "not_eligible", run, rewards: {}, settlement: null, response_settlements: [], reason: "learning_episodes_not_prepared", retention: "run_caller_owned; rewards_and_settlement_value_only" };
     const evaluate = options.evaluator ?? (this.runEvaluator ? (candidate: AutonomousRunResult) => this.runEvaluator!.evaluate(candidate) : undefined);
     if (!evaluate) throw new ArgumentError("cross-domain learning requires an evaluator callback or configured runEvaluator");
@@ -2320,7 +2405,23 @@ export class AutonomousLearningController {
       .filter((candidate) => candidate.status === "completed");
     if (candidates.length !== run.learning_episode_ids.length) throw new ArgumentError("cross-domain learning episode order does not match completed specialist and synthesis results");
     const rewards: Record<string, AutonomousEvaluatorRewardInput> = {};
-    for (const [index, candidate] of candidates.entries()) rewards[run.learning_episode_ids[index]!] = normalizeRewardInput(await evaluate(candidate));
+    for (const [index, candidate] of candidates.entries()) {
+      if (this.authorizationContext) {
+        const domain = candidate.blueprint?.domain_profile.domain ?? candidate.route.primary_domain ?? "cross_domain";
+        await this.authorizationContext.authorizeOperation({
+          operation: "evaluation",
+          domain,
+          resourceDigest: await digestJson({
+            schema: "bioprism-autonomous-evaluation-authorization-resource/0.1",
+            domain,
+            task_digest: candidate.route.task_digest,
+            route_digest: candidate.route.route_digest,
+            status: candidate.status,
+          }),
+        });
+      }
+      rewards[run.learning_episode_ids[index]!] = normalizeRewardInput(await evaluate(candidate));
+    }
     const missing = run.learning_episode_ids.filter((episodeId) => !rewards[episodeId]);
     if (missing.length) throw new ArgumentError(`cross-domain learning evaluator did not cover ${missing.length} prepared episode(s)`);
     const settlement = await this.settleCrossDomain(run, rewards, {
@@ -2330,15 +2431,17 @@ export class AutonomousLearningController {
       idempotencyKey: options.idempotencyKey,
       outbox: options.outbox,
     });
-    return { schema: AUTONOMOUS_EVALUATED_CROSS_DOMAIN_RUN_SCHEMA, status: "settled", run, rewards, settlement: settlement.trajectory, response_settlements: settlement.response_settlements, reason: null, retention: "run_caller_owned; rewards_and_settlement_value_only" };
+    return { schema: AUTONOMOUS_EVALUATED_CROSS_DOMAIN_RUN_SCHEMA, status: run.partial ? "partially_settled" : "settled", run, rewards, settlement: settlement.trajectory, response_settlements: settlement.response_settlements, reason: null, retention: "run_caller_owned; rewards_and_settlement_value_only" };
   }
 
-  async prepareRun(result: AutonomousRunResult, options: { episodeId: string; runId?: string; stageId?: string; parentJobId?: string; planRefinementDigest?: string | null; memoryEpisodeId?: string | null }): Promise<AutonomousLearningEpisode> {
+  async prepareRun(result: AutonomousRunResult, options: { episodeId: string; runId?: string; stageId?: string; parentJobId?: string; planRefinementDigest?: string | null; memoryEpisodeId?: string | null; responseOnly?: boolean }): Promise<AutonomousLearningEpisode> {
     if (!isObject(options)) throw new ArgumentError("learning episode options must be an object");
     const episodeId = boundedIdentifier("episodeId", options.episodeId);
     const planRefinementDigest = options.planRefinementDigest === undefined ? null : boundedDigest("planRefinementDigest", options.planRefinementDigest, true);
     const memoryEpisodeId = options.memoryEpisodeId === undefined || options.memoryEpisodeId === null ? null : boundedIdentifier("memoryEpisodeId", options.memoryEpisodeId);
-    if (result.status !== "completed" || !result.blueprint || !result.selection?.selected_model) throw new ArgumentError("learning episode requires a completed autonomous run");
+    if (options.responseOnly !== undefined && typeof options.responseOnly !== "boolean") throw new ArgumentError("learning episode responseOnly must be boolean");
+    const responseOnly = options.responseOnly === true;
+    if ((!responseOnly && result.status !== "completed") || (responseOnly && result.status !== "response_review_required") || !result.blueprint || !result.selection?.selected_model || (responseOnly && !result.response_evaluation)) throw new ArgumentError(responseOnly ? "response learning episode requires a reviewed structured response" : "learning episode requires a completed autonomous run");
     const runId = boundedIdentifier("runId", options.runId ?? episodeId);
     const selectionDigest = await digestJson(result.selection);
     const outcomeDigest = await digestJson({ status: result.status, route_digest: result.route.route_digest, selection: result.selection, response: result.response });
@@ -2567,9 +2670,22 @@ export class AutonomousLearningController {
     };
     const evaluationDigest = await digestJson(normalized);
     try {
+      if (this.authorizationContext) {
+        await this.authorizationContext.authorizeOperation({
+          operation: "memory_write",
+          domain: episode.domain,
+          resourceDigest: await digestJson({
+            schema: "bioprism-autonomous-memory-authorization-resource/0.1",
+            memory_episode_id: episode.memory_episode_id,
+            episode_id: episode.episode_id,
+            evaluation_digest: evaluationDigest,
+          }),
+        });
+      }
       await store.recordEvaluation(episode.memory_episode_id, normalized);
       return { status: "recorded", memory_episode_id: episode.memory_episode_id, evaluation_digest: evaluationDigest, error_class: null };
     } catch (error) {
+      if (error instanceof AutonomousAuthorizationError) throw error;
       return {
         status: "failed",
         memory_episode_id: episode.memory_episode_id,
@@ -2822,6 +2938,20 @@ export class AutonomousLearningController {
     if (contextDigest !== null) {
       if (!/^[0-9a-f]{64}$/.test(contextDigest)) throw new ArgumentError("learning episode context_digest is malformed");
       if (!learningContext) throw new ArgumentError("contextual learning episode is missing its bounded context");
+    }
+    if (this.authorizationContext) {
+      await this.authorizationContext.authorizeOperation({
+        operation: "learning",
+        domain: episode.domain,
+        resourceDigest: await digestJson({
+          schema: "bioprism-autonomous-learning-authorization-resource/0.1",
+          episode_id: id,
+          run_id: episode.run.run_id,
+          outcome_digest: creditedOutcomeDigest,
+          evaluation_digest: await digestJson(assessment),
+          credited_reward: creditedReward,
+        }),
+      });
     }
     if (options.remote === true) {
       if (!this.apiClient || typeof this.apiClient.brainOutcomeRecord !== "function") throw new ArgumentError("remote learning settlement requires an ApiClient with brainOutcomeRecord");

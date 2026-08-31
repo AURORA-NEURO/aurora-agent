@@ -10,6 +10,7 @@ from prism_sdk import (
     autonomous_domain_task_lens,
     content_digest,
     infer_autonomous_task_intent,
+    validate_autonomous_task_intent,
 )
 from prism_sdk.errors import ArgumentError
 
@@ -97,3 +98,40 @@ def test_task_intent_rejects_malformed_or_duplicate_input_items() -> None:
         infer_autonomous_task_intent(**kwargs, constraints=("schema", "schema"))
     with pytest.raises(ArgumentError):
         infer_autonomous_task_intent(**kwargs, desired_outputs=("",))
+
+
+def test_task_intent_replay_validation_binds_task_and_lens() -> None:
+    task = "analyze the dataset lineage"
+    lens = autonomous_domain_task_lens("data")
+    intent = infer_autonomous_task_intent(
+        task=task,
+        task_digest=content_digest({"task": task}),
+        domain="data",
+        capability="data_analysis",
+        risk_class="read_only",
+        workflow_id="data_analysis",
+        lens=lens,
+        desired_outputs=("lineage findings",),
+    )
+    restored = validate_autonomous_task_intent(
+        intent.to_dict(),
+        lens=lens,
+        expected_task_digest=content_digest({"task": task}),
+    )
+    assert restored == intent
+
+    tampered = intent.to_dict()
+    tampered["action_mode"] = "modify"
+    with pytest.raises(ArgumentError):
+        validate_autonomous_task_intent(tampered)
+
+    with pytest.raises(ArgumentError):
+        validate_autonomous_task_intent(
+            intent.to_dict(),
+            lens=autonomous_domain_task_lens("science"),
+        )
+    with pytest.raises(ArgumentError):
+        validate_autonomous_task_intent(
+            intent.to_dict(),
+            expected_task_digest=content_digest({"task": "a different task"}),
+        )

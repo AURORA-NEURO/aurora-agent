@@ -78,8 +78,15 @@ members = [
     "crates/megafactory",
     "crates/interweave",
     "crates/residue",
+    "crates/domain",
+    "crates/project",
+    "crates/repair",
     "crates/brain",
+    "crates/autopilot",
     "crates/cli",
+    "crates/figures",
+    "crates/research",
+    "crates/receipts-audit",
 ]
 
 [workspace.package]
@@ -128,6 +135,9 @@ bioprism-trace = { path = "crates/trace" }
 bioprism-factory = { path = "crates/factory" }
 bioprism-bioeval = { path = "crates/bioeval" }
 bioprism-ledger = { path = "crates/ledger" }
+bioprism-domain = { path = "crates/domain" }
+bioprism-project = { path = "crates/project" }
+bioprism-repair = { path = "crates/repair" }
 bioprism-sdk = { path = "crates/sdk" }
 bioprism-governance = { path = "crates/governance" }
 bioprism-standards = { path = "crates/standards" }
@@ -174,6 +184,10 @@ bioprism-examples = { path = "crates/examples" }
 bioprism-hub = { path = "crates/hub" }
 bioprism-evalengine = { path = "crates/evalengine" }
 bioprism-brain = { path = "crates/brain" }
+bioprism-autopilot = { path = "crates/autopilot" }
+bioprism-figures = { path = "crates/figures" }
+bioprism-research = { path = "crates/research" }
+bioprism-receipts-audit = { path = "crates/receipts-audit" }
 
 [profile.release]
 lto = "thin"

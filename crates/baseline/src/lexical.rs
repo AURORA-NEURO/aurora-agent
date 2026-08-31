@@ -11,6 +11,7 @@
 //! whose decisive facts are literally tagged `identity`, `split` and `site`, a lexical retriever
 //! that reads tags is a genuinely hard baseline to beat on recall.
 
+use crate::index::PanelIndex;
 use crate::strategy::{ContextStrategy, Selection};
 use bioprism_fiber::Query;
 use bioprism_ids::to_canonical_string;
@@ -24,14 +25,20 @@ pub struct LexicalTopK {
     pub k: usize,
 }
 
-fn tokenize(text: &str) -> Vec<String> {
+/// Shared with [`crate::embedding`], so the two retrieval baselines provably score the same
+/// searchable text and differ only in how they score it.
+pub(crate) fn tokenize(text: &str) -> Vec<String> {
     text.split(|c: char| !c.is_ascii_alphanumeric())
         .filter(|token| !token.is_empty())
         .map(|token| token.to_ascii_lowercase())
         .collect()
 }
 
-fn fact_tokens(world: &World, position: usize) -> Vec<String> {
+/// The searchable text of one fact: id, provided variable, tags and serialised value.
+///
+/// Also shared with [`crate::embedding`] for the reason above — an embedding baseline that read
+/// different fields would make any divergence in results unattributable to the scoring method.
+pub(crate) fn fact_tokens(world: &World, position: usize) -> Vec<String> {
     let fact = &world.facts[position];
     let mut text = String::new();
     text.push_str(fact.id.as_str());
@@ -48,6 +55,29 @@ fn fact_tokens(world: &World, position: usize) -> Vec<String> {
     tokenize(&text)
 }
 
+/// The searchable corpus: [`fact_tokens`] for every fact, in world order.
+///
+/// Hoisted out of [`LexicalTopK::select`] because it is a function of the world alone, so the two
+/// shipped `k` budgets and both [`crate::embedding::EmbeddingTopK`] budgets were each paying to
+/// canonically serialise every fact value again. [`PanelIndex`] now builds it once per comparison.
+pub(crate) fn documents(world: &World) -> Vec<Vec<String>> {
+    (0..world.facts.len())
+        .map(|position| fact_tokens(world, position))
+        .collect()
+}
+
+/// The query-side tokens both retrieval baselines score against: targets and protected tags.
+pub(crate) fn query_tokens(query: &Query) -> BTreeSet<String> {
+    let mut tokens: Vec<String> = Vec::new();
+    for target in &query.targets {
+        tokens.extend(tokenize(target.as_str()));
+    }
+    for tag in &query.protected_tags {
+        tokens.extend(tokenize(tag));
+    }
+    tokens.into_iter().collect()
+}
+
 impl ContextStrategy for LexicalTopK {
     fn name(&self) -> String {
         format!("lexical-top-{}", self.k)
@@ -62,62 +92,9 @@ impl ContextStrategy for LexicalTopK {
         )
     }
 
-    fn select(&self, world: &World, query: &Query) -> Selection {
-        let documents: Vec<Vec<String>> = (0..world.facts.len())
-            .map(|position| fact_tokens(world, position))
-            .collect();
-
-        let total = documents.len() as f64;
-        let average_length = if documents.is_empty() {
-            1.0
-        } else {
-            documents.iter().map(|d| d.len()).sum::<usize>() as f64 / total
-        };
-
-        let mut document_frequency: BTreeMap<&str, usize> = BTreeMap::new();
-        for document in &documents {
-            for token in document.iter().collect::<BTreeSet<_>>() {
-                *document_frequency.entry(token.as_str()).or_default() += 1;
-            }
-        }
-
-        let mut query_tokens: Vec<String> = Vec::new();
-        for target in &query.targets {
-            query_tokens.extend(tokenize(target.as_str()));
-        }
-        for tag in &query.protected_tags {
-            query_tokens.extend(tokenize(tag));
-        }
-        let query_tokens: BTreeSet<String> = query_tokens.into_iter().collect();
-
-        let mut scored: Vec<(usize, f64)> = documents
-            .iter()
-            .enumerate()
-            .map(|(position, document)| {
-                let length = document.len() as f64;
-                let mut score = 0.0;
-                for token in &query_tokens {
-                    let frequency =
-                        document.iter().filter(|t| t.as_str() == token.as_str()).count() as f64;
-                    if frequency == 0.0 {
-                        continue;
-                    }
-                    let df = *document_frequency.get(token.as_str()).unwrap_or(&0) as f64;
-                    let idf = ((total - df + 0.5) / (df + 0.5) + 1.0).ln();
-                    let saturated = (frequency * (K1 + 1.0))
-                        / (frequency + K1 * (1.0 - B + B * length / average_length));
-                    score += idf * saturated;
-                }
-                (position, score)
-            })
-            .filter(|(_, score)| *score > 0.0)
-            .collect();
-
-        scored.sort_by(|a, b| {
-            b.1.partial_cmp(&a.1)
-                .unwrap_or(std::cmp::Ordering::Equal)
-                .then_with(|| world.facts[a.0].id.as_str().cmp(world.facts[b.0].id.as_str()))
-        });
+    fn select_indexed(&self, index: &PanelIndex<'_>) -> Selection {
+        let world = index.world();
+        let scored = index.lexical_ranking();
 
         let facts: BTreeSet<String> = scored
             .iter()
@@ -130,4 +107,65 @@ impl ContextStrategy for LexicalTopK {
             scored.len()
         ))
     }
+}
+
+/// Every fact scoring above zero under BM25, best first, ties broken by fact id.
+///
+/// The whole ranking rather than one budget's slice, because `k` enters only at the final
+/// `take`: the two shipped budgets were scoring the same corpus against the same query twice to
+/// read different depths of the same list.
+pub(crate) fn rank(world: &World, query: &Query, documents: &[Vec<String>]) -> Vec<(usize, f64)> {
+    let total = documents.len() as f64;
+    let average_length = if documents.is_empty() {
+        1.0
+    } else {
+        documents.iter().map(|d| d.len()).sum::<usize>() as f64 / total
+    };
+
+    let mut document_frequency: BTreeMap<&str, usize> = BTreeMap::new();
+    for document in documents {
+        for token in document.iter().collect::<BTreeSet<_>>() {
+            *document_frequency.entry(token.as_str()).or_default() += 1;
+        }
+    }
+
+    let query_tokens = query_tokens(query);
+
+    let mut scored: Vec<(usize, f64)> = documents
+        .iter()
+        .enumerate()
+        .map(|(position, document)| {
+            let length = document.len() as f64;
+            let mut score = 0.0;
+            for token in &query_tokens {
+                let frequency = document
+                    .iter()
+                    .filter(|t| t.as_str() == token.as_str())
+                    .count() as f64;
+                if frequency == 0.0 {
+                    continue;
+                }
+                let df = *document_frequency.get(token.as_str()).unwrap_or(&0) as f64;
+                let idf = ((total - df + 0.5) / (df + 0.5) + 1.0).ln();
+                let saturated = (frequency * (K1 + 1.0))
+                    / (frequency + K1 * (1.0 - B + B * length / average_length));
+                score += idf * saturated;
+            }
+            (position, score)
+        })
+        .filter(|(_, score)| *score > 0.0)
+        .collect();
+
+    scored.sort_by(|a, b| {
+        b.1.partial_cmp(&a.1)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| {
+                world.facts[a.0]
+                    .id
+                    .as_str()
+                    .cmp(world.facts[b.0].id.as_str())
+            })
+    });
+
+    scored
 }

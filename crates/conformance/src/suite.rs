@@ -579,6 +579,11 @@ impl ConformanceCertificate {
     }
 
     /// Recomputes the embedded digest, the way a registry ingesting a bundle must.
+    ///
+    /// The shape of the claimed digest is checked first and answered separately. A registry that
+    /// reported a malformed `certificate_sha256` as a mismatch would tell its operators that a
+    /// certified implementation had rewritten its results, when all it saw was a field that never
+    /// held a digest.
     pub fn verify(document: &Value) -> Result<(), ConformanceError> {
         let map = document.as_object().ok_or_else(|| {
             ConformanceError::MalformedSuite("certificate is not an object".to_string())
@@ -591,6 +596,11 @@ impl ConformanceCertificate {
                     "certificate has no certificate_sha256".to_string(),
                 )
             })?;
+        if ContentHash::parse(claimed.to_string()).is_err() {
+            return Err(ConformanceError::CertificateDigestMalformed {
+                claimed: claimed.to_string(),
+            });
+        }
         let mut body = map.clone();
         body.remove("certificate_sha256");
         let recomputed = ContentHash::of_value(&Value::Object(body))

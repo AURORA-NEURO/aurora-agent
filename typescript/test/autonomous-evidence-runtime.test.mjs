@@ -4,6 +4,10 @@ import { test } from "node:test";
 import {
   AUTONOMOUS_DOMAIN_NAMES,
   ArgumentError,
+  AutonomousAuthorizationContext,
+  AutonomousAuthorizationError,
+  AutonomousAuthorizationGate,
+  AutonomousAuthorizationLedger,
   AutonomousEvidenceRuntime,
   InMemoryAutonomousEvidenceRuntimeJournal,
   builtinAutonomousDomainProfiles,
@@ -43,12 +47,47 @@ function fixtureAdapters(calls = []) {
   };
 }
 
+function authorizationContext(plan, operations = ["evidence_acquisition", "evaluation"]) {
+  const ledger = new AutonomousAuthorizationLedger(4, 256);
+  const grant = ledger.issue({
+    grant_id: "evidence-runtime-grant",
+    tenant_id: "tenant-a",
+    actor_id: "actor-a",
+    session_id: "session-a",
+    authorization_digest: "a".repeat(64),
+    allowed_domains: [...plan.domains],
+    allowed_operations: operations,
+    allowed_capabilities: ["analysis"],
+    allowed_risk_classes: ["read_only"],
+    issued_at: 1000,
+    expires_at: 2000,
+    max_uses: null,
+  });
+  return {
+    ledger,
+    context: new AutonomousAuthorizationContext(
+      new AutonomousAuthorizationGate(ledger),
+      grant.grant_id,
+      grant.tenant_id,
+      grant.actor_id,
+      grant.session_id,
+      grant.authorization_digest,
+      [...plan.domains],
+      "analysis",
+      "read_only",
+      "evidence",
+      () => 1200,
+    ),
+  };
+}
+
 test("evidence runtime acquires and evaluates every built-in domain without retaining raw values in JSON", async () => {
   const profiles = await builtinAutonomousDomainProfiles();
   const plan = await buildAutonomousEvidencePlan(profiles.map((profile) => profile.workflow));
   const calls = [];
   const runtime = new AutonomousEvidenceRuntime({ plan });
-  const result = await runtime.execute(plan.requirements.map(requestFor), fixtureAdapters(calls));
+  const authorization = authorizationContext(plan);
+  const result = await runtime.execute(plan.requirements.map(requestFor), { ...fixtureAdapters(calls), authorizationContext: authorization.context });
 
   assert.equal(new Set(plan.domains).size, AUTONOMOUS_DOMAIN_NAMES.length);
   assert.ok(plan.requirements.length > 40);
@@ -61,6 +100,59 @@ test("evidence runtime acquires and evaluates every built-in domain without reta
   assert.equal(Object.hasOwn(result.toJSON(), "values"), false);
   assert.equal(result.json.retention, "metadata_only;raw_values_caller_owned");
   assert.ok(result.values[Object.keys(result.values)[0]]);
+  assert.equal(authorization.ledger.events().filter((event) => event.event_type === "request_allowed").length, plan.requirements.length * 2);
+});
+
+test("evidence runtime authorization denies before acquisition and does not record a failure", async () => {
+  const profile = (await builtinAutonomousDomainProfiles()).find((item) => item.domain === "science");
+  const plan = await buildAutonomousEvidencePlan([profile.workflow]);
+  const authorization = authorizationContext(plan, ["evaluation"]);
+  let calls = 0;
+  await assert.rejects(
+    () => new AutonomousEvidenceRuntime({ plan }).execute([requestFor(plan.requirements[0])], {
+      acquirer: { acquire: () => { calls += 1; return { should_not: "run" }; } },
+      authorizationContext: authorization.context,
+    }),
+    (error) => error instanceof AutonomousAuthorizationError && /operation authorization was refused/.test(error.message),
+  );
+  assert.equal(calls, 0);
+  assert.deepEqual(authorization.ledger.events().map((event) => event.event_type), ["grant_issued"]);
+});
+
+test("evidence runtime authorization denies evaluation before the callback while replay skips acquisition authorization", async () => {
+  const profile = (await builtinAutonomousDomainProfiles()).find((item) => item.domain === "science");
+  const plan = await buildAutonomousEvidencePlan([profile.workflow]);
+  const journal = new InMemoryAutonomousEvidenceRuntimeJournal();
+  const adapters = fixtureAdapters();
+  const acquisitionAuthorization = authorizationContext(plan, ["evidence_acquisition"]);
+  const first = await new AutonomousEvidenceRuntime({ plan, journal }).execute([requestFor(plan.requirements[0])], {
+    acquirer: adapters.acquirer,
+    projector: adapters.projector,
+    authorizationContext: acquisitionAuthorization.context,
+  });
+  assert.equal(first.json.status, "awaiting_evaluation");
+  assert.equal(acquisitionAuthorization.ledger.events().length, 2);
+
+  const evaluationAuthorization = authorizationContext(plan, ["evidence_acquisition"]);
+  let evaluatorCalls = 0;
+  const restored = new AutonomousEvidenceRuntime({ plan, journal });
+  await restored.rehydrate();
+  await assert.rejects(
+    () => restored.execute([requestFor(plan.requirements[0])], {
+      acquirer: { acquire: () => { throw new Error("pending reconciliation must not reacquire"); } },
+      evaluator: {
+        evaluator_id: "fixture-evaluator",
+        evaluator_version: "2026.08",
+        evaluate: () => { evaluatorCalls += 1; return { evaluator_id: "fixture-evaluator", evaluator_version: "2026.08", verdict: "accepted", score: 1 }; },
+      },
+      rehydrateValue: () => ({ fixture: "metadata-only-test-value", requirement: plan.requirements[0].requirement_id }),
+      reevaluatePending: true,
+      authorizationContext: evaluationAuthorization.context,
+    }),
+    (error) => error instanceof AutonomousAuthorizationError && /operation authorization was refused/.test(error.message),
+  );
+  assert.equal(evaluatorCalls, 0);
+  assert.deepEqual(evaluationAuthorization.ledger.events().map((event) => event.event_type), ["grant_issued"]);
 });
 
 test("evidence runtime makes evaluation and acquisition failures explicit", async () => {

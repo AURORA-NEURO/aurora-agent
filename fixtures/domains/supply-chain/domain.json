@@ -1,0 +1,41 @@
+{
+  "schema_version": "bioprism-domain/0.1",
+  "name": "supply-chain-release",
+  "description": "Software release-integrity review: decides whether a release candidate ships with unsigned artifacts, provenance gaps, or a stale SBOM.",
+  "goal": "Decide whether release candidate 2025.05 meets the supply-chain integrity bar.",
+  "protected_tags": ["identity", "time", "protected"],
+  "scope_dimensions": {
+    "schema_version": "bioprism-scope-dimensions/0.1",
+    "dimensions": {
+      "artifact": "identity",
+      "registry": "region",
+      "pipeline": "ontology",
+      "build_window": "time"
+    }
+  },
+  "oracle": {
+    "kind": "rule/supply-chain-release-v1",
+    "require": ["unsigned_artifacts", "build_provenance_gaps", "sbom_generated_at"],
+    "checks": [
+      {
+        "name": "unsigned_artifact",
+        "description": "an artifact in the release candidate carries no valid signature",
+        "when": { "kind": "nonempty", "variable": "unsigned_artifacts" }
+      },
+      {
+        "name": "provenance_gap",
+        "description": "a build step has no attested provenance record",
+        "when": { "kind": "count_at_least", "variable": "build_provenance_gaps", "minimum": 1 }
+      },
+      {
+        "name": "stale_sbom",
+        "description": "the SBOM predates the freeze window and cannot describe the shipped artifacts (lexicographic timestamp comparison, as the reference oracle's)",
+        "when": {
+          "kind": "string_before",
+          "variable": "sbom_generated_at",
+          "than": "2025-05-01T00:00:00Z"
+        }
+      }
+    ]
+  }
+}

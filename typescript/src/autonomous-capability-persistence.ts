@@ -368,22 +368,34 @@ export class InMemoryAutonomousCapabilityJournalStore implements AutonomousCapab
 
 /** Flushes or restores a journal through caller-owned durable storage. */
 export class AutonomousCapabilityJournalPersistenceCoordinator {
+  private operationTail: Promise<void> = Promise.resolve();
+
   constructor(readonly store: AutonomousCapabilityJournalSnapshotStore, readonly persistence: AutonomousCapabilityJournalSnapshotPersistence) {
     if (!store || typeof store.snapshot !== "function" || typeof store.restore !== "function") throw new AutonomousCapabilityPersistenceError("capability journal persistence requires a snapshot-capable store");
     if (!persistence || typeof persistence.read !== "function" || typeof persistence.write !== "function") throw new AutonomousCapabilityPersistenceError("capability journal persistence requires readable and writable storage");
   }
 
-  async flush(): Promise<{ schema: AutonomousCapabilityJournalSnapshot["schema"]; bytes: number; snapshot_digest: string; retention: "metadata_only" }> {
-    const snapshot = await this.store.snapshot();
-    await this.persistence.write(snapshot);
-    return { schema: snapshot.schema, bytes: jsonBytes(snapshot), snapshot_digest: snapshot.snapshot_digest, retention: "metadata_only" };
+  async flush(): Promise<{ schema: AutonomousCapabilityJournalSnapshot["schema"]; bytes: number; snapshot_digest: string; snapshot_generation?: number; retention: "metadata_only" }> {
+    return this.enqueue(async () => {
+      const snapshot = await this.store.snapshot();
+      await this.persistence.write(snapshot);
+      return { schema: snapshot.schema, bytes: jsonBytes(snapshot), snapshot_digest: snapshot.snapshot_digest, snapshot_generation: snapshot.snapshot_generation, retention: "metadata_only" };
+    });
   }
 
-  async restore(): Promise<{ restored: boolean; entry_count: number; snapshot_digest: string | null }> {
-    const snapshot = await this.persistence.read();
-    if (snapshot === null) return { restored: false, entry_count: 0, snapshot_digest: null };
-    const validated = await validateAutonomousCapabilityJournalSnapshot(snapshot);
-    await this.store.restore(validated);
-    return { restored: true, entry_count: validated.entries.length, snapshot_digest: validated.snapshot_digest };
+  async restore(): Promise<{ restored: boolean; entry_count: number; snapshot_digest: string | null; snapshot_generation?: number }> {
+    return this.enqueue(async () => {
+      const snapshot = await this.persistence.read();
+      if (snapshot === null) return { restored: false, entry_count: 0, snapshot_digest: null, snapshot_generation: undefined };
+      const validated = await validateAutonomousCapabilityJournalSnapshot(snapshot);
+      await this.store.restore(validated);
+      return { restored: true, entry_count: validated.entries.length, snapshot_digest: validated.snapshot_digest, snapshot_generation: validated.snapshot_generation };
+    });
+  }
+
+  private enqueue<T>(operation: () => Promise<T>): Promise<T> {
+    const queued = this.operationTail.then(() => operation());
+    this.operationTail = queued.then(() => undefined, () => undefined);
+    return queued;
   }
 }

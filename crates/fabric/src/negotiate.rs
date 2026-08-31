@@ -174,9 +174,7 @@ pub enum DiscountedEstimate {
     },
     /// No calibration history. Carries no adjusted number, deliberately: a router that needs one
     /// must decide what an unmeasured provider is worth rather than be handed the claim back.
-    Unmeasured {
-        claimed_bp: u32,
-    },
+    Unmeasured { claimed_bp: u32 },
 }
 
 /// Apply calibration to a self-estimate.
@@ -272,6 +270,12 @@ impl ContractNet {
         self
     }
 
+    /// Refuse offers whose terms reserve the right to subcontract.
+    ///
+    /// The only writer of `subcontracting_permitted`, which [`ContractNet::open`] sets to `true`.
+    /// Without this builder the field is pinned open and [`ContractNet::screen`] can never emit
+    /// [`Rejection::SubcontractingForbidden`], so a coordinator that must keep the work with the
+    /// provider it screened would silently award it to one that may hand the work on.
     pub fn forbidding_subcontracting(mut self) -> Self {
         self.subcontracting_permitted = false;
         self
@@ -351,12 +355,12 @@ impl ContractNet {
             });
         }
         let amount = offer.terms.max_cost_minor;
-        self.budget
-            .split(Resource::Tokens, amount)
-            .map_err(|e| NegotiationError::ReservationRefused {
+        self.budget.split(Resource::Tokens, amount).map_err(|e| {
+            NegotiationError::ReservationRefused {
                 id: offer_id.to_string(),
                 detail: e.to_string(),
-            })?;
+            }
+        })?;
         self.reserved.insert(offer_id.to_string(), amount);
         if !self.steps.contains(&ContractNetStep::Probe) {
             self.steps.push(ContractNetStep::Probe);
@@ -400,12 +404,12 @@ impl ContractNet {
 
     /// Close the deal and release what was not spent.
     pub fn settle(&mut self, spent_minor: u64) -> Result<Settlement, NegotiationError> {
-        let offer_id = self
-            .accepted
-            .clone()
-            .ok_or_else(|| NegotiationError::SettleWithoutAward {
-                call: self.call.clone(),
-            })?;
+        let offer_id =
+            self.accepted
+                .clone()
+                .ok_or_else(|| NegotiationError::SettleWithoutAward {
+                    call: self.call.clone(),
+                })?;
         let reserved = self.reserved[&offer_id];
         if spent_minor > reserved {
             return Err(NegotiationError::SpentBeyondReservation {

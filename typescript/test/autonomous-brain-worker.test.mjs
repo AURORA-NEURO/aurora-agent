@@ -6,14 +6,29 @@ import {
   AutonomousAgent,
   AutonomousBrainFacade,
   AutonomousBrainJobWorker,
+  AutonomousBrainJobProtectedRehydrator,
   InMemoryAutonomousBrainJobScheduler,
   InMemoryAutonomousBrainJobSchedulerPersistence,
   InMemoryAutonomousModelHealthStore,
   InMemoryAutonomousRunTraceStore,
+  AutonomousRunTraceRegistry,
   LLMRuntime,
   AutonomousBrainJobSchedulerPersistenceCoordinator,
+  AutonomousActionAdmissionController,
+  InMemoryAutonomousActionAdmissionLedger,
   ProviderRuntimeError,
+  admitAutonomousActionPlan,
   autonomousBrainJobSpecDigest,
+  autonomousBrainJobSpecDigestForHandoff,
+  AutonomousProtectedRehydrationAdapter,
+  AutonomousProtectedRehydrationBoundary,
+  AutonomousProtectedRehydrationContext,
+  protectedValueDigest,
+  AutonomousEffectBoundary,
+  InMemoryAutonomousEffectJournal,
+  AutonomousProviderEffectResolver,
+  AutonomousProviderEffectReconciliationWorker,
+  AutonomousProviderEffectReconciliationCoordinator,
 } from "../dist/index.js";
 
 const tasks = {
@@ -57,6 +72,25 @@ function makeBrain(onRequest = () => {}, modelHealthStore = undefined) {
   return { runtime, agent, brain: new AutonomousBrainFacade({ agent }) };
 }
 
+function makeDelayedBrain(delayMs = 15) {
+  let active = 0;
+  let maxActive = 0;
+  const runtime = new LLMRuntime({ fetch: async () => { throw new Error("network must not be reached"); } });
+  runtime.registerInMemoryProvider("worker-offline", async () => {
+    active += 1;
+    maxActive = Math.max(maxActive, active);
+    try {
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+      return { output_text: "worker delayed bounded result" };
+    } finally {
+      active -= 1;
+    }
+  });
+  const agent = new AutonomousAgent(runtime);
+  agent.registerModel(model);
+  return { runtime, brain: new AutonomousBrainFacade({ agent }), get active() { return active; }, get maxActive() { return maxActive; } };
+}
+
 function policyDigest(letter = "p") {
   return letter.repeat(64);
 }
@@ -83,6 +117,13 @@ test("durable brain worker preserves approval gates and completes every domain t
   const { runtime, brain } = makeBrain(() => { providerCalls += 1; }, healthStore);
   const scheduler = new InMemoryAutonomousBrainJobScheduler({ maxJobs: 32, clock: () => 1_000 });
   const traces = new InMemoryAutonomousRunTraceStore();
+  const traceRegistry = new AutonomousRunTraceRegistry({ max_runs: 64, max_events: 4_096, max_bytes: 2_000_000 });
+  const effectReconciliation = new AutonomousProviderEffectReconciliationCoordinator(
+    new AutonomousProviderEffectReconciliationWorker(
+      new AutonomousEffectBoundary({ journal: new InMemoryAutonomousEffectJournal() }),
+      new AutonomousProviderEffectResolver(() => ({ status: "not_found", retry_safe: true })),
+    ),
+  );
   const policies = new Map();
   for (let index = 0; index < AUTONOMOUS_DOMAIN_NAMES.length; index += 1) {
     const domain = AUTONOMOUS_DOMAIN_NAMES[index];
@@ -96,6 +137,8 @@ test("durable brain worker preserves approval gates and completes every domain t
     scheduler,
     workerId: "worker-a",
     traceStore: traces,
+    traceRegistry,
+    effectReconciliation,
     resolve: ({ job }) => {
       const domain = job.domain;
       const request = requestFor(domain);
@@ -125,6 +168,10 @@ test("durable brain worker preserves approval gates and completes every domain t
     assert.equal(completed.status, "succeeded", jobId);
     assert.equal(completed.execution.run.status, "completed", jobId);
     assert.equal(completed.trace.status, "completed", jobId);
+    assert.equal(completed.trace_registry.status, "published", jobId);
+    assert.equal(completed.trace_registry.run_import_state, "imported", jobId);
+    assert.equal(completed.effect_reconciliation.status, "allowed", jobId);
+    assert.equal(completed.effect_reconciliation.reason, "no_pending_effects", jobId);
     assert.ok(completed.trace.provider_invocations >= 1, jobId);
     assert.ok(completed.trace.plan_digest, jobId);
     assert.equal(JSON.stringify(completed.trace).includes(tasks[domain]), false, jobId);
@@ -138,8 +185,154 @@ test("durable brain worker preserves approval gates and completes every domain t
   assert.equal(health[0].failures, 0);
   assert.equal((await healthStore.verifyIntegrity()).events, AUTONOMOUS_DOMAIN_NAMES.length);
   assert.equal(traces.verifyIntegrity().verified, true);
+  assert.equal(traceRegistry.verifyIntegrity().runs, AUTONOMOUS_DOMAIN_NAMES.length);
   assert.equal(JSON.stringify(scheduler.snapshot()).includes("private-task-never-retained"), false);
   assert.equal(scheduler.inventory({ limit: 32 }).every((job) => job.state === "succeeded"), true);
+});
+
+test("brain worker refuses to claim fresh work while an external effect is unresolved", async () => {
+  let providerCalls = 0;
+  const { brain } = makeBrain(() => { providerCalls += 1; });
+  const effectBoundary = new AutonomousEffectBoundary({ journal: new InMemoryAutonomousEffectJournal() });
+  await assert.rejects(
+    () => effectBoundary.execute({ execution_id: "worker-gate", tool: "provider.offline.invoke", call_id: "worker-gate-call", risk_class: "provider_invocation", arguments: {} }, async () => { throw new Error("uncertain provider outcome"); }, { cacheResult: false }),
+  );
+  const effectReconciliation = new AutonomousProviderEffectReconciliationCoordinator(
+    new AutonomousProviderEffectReconciliationWorker(effectBoundary, new AutonomousProviderEffectResolver(() => ({ status: "unknown" }))),
+  );
+  const scheduler = new InMemoryAutonomousBrainJobScheduler({ maxJobs: 2, clock: () => 5_000 });
+  const request = requestFor("coding");
+  scheduler.submit(jobFor(900, request, "execute", policyDigest("c")), 5_000);
+  const worker = new AutonomousBrainJobWorker({
+    brain,
+    scheduler,
+    workerId: "blocked-worker",
+    effectReconciliation,
+    resolve: ({ job }) => ({
+      specDigest: job.spec_digest,
+      policyDigest: policyDigest("c"),
+      request,
+      mode: "execute",
+      execute: { approveProviderCall: true, run: { candidates: [model] } },
+    }),
+  });
+  await assert.rejects(() => worker.runOnce("worker-job-900", 5_000), /effect reconciliation admission is blocked/);
+  assert.equal(scheduler.get("worker-job-900").state, "queued");
+  assert.equal(providerCalls, 0);
+  assert.equal((await worker.reconcileEffects()).status, "blocked");
+});
+
+test("durable brain worker rehydrates protected private resolutions and preserves explicit resolver precedence", async () => {
+  let providerCalls = 0;
+  const { brain } = makeBrain(() => { providerCalls += 1; });
+  const scheduler = new InMemoryAutonomousBrainJobScheduler({ maxJobs: 8, clock: () => 2_000 });
+  const request = requestFor("coding");
+  const policy = policyDigest("a");
+  const job = jobFor(10, request, "execute", policy);
+  scheduler.submit(job, 2_000);
+  const values = new Map();
+  const boundary = new AutonomousProtectedRehydrationBoundary(
+    new AutonomousProtectedRehydrationContext({ tenantId: "tenant-worker", actorId: "worker", sessionId: "protected", authorizationDigest: "a".repeat(64) }),
+    (reference) => values.get(reference.value_digest),
+    { authorizer: () => true, clock: () => 100 },
+  );
+  const resolution = {
+    specDigest: job.specDigest,
+    policyDigest: policy,
+    request,
+    mode: "execute",
+    execute: { approveProviderCall: true, run: { candidates: [model] } },
+  };
+  const resolutionDigest = protectedValueDigest(resolution);
+  values.set(resolutionDigest, resolution);
+  const protectedRehydration = new AutonomousBrainJobProtectedRehydrator({
+    adapter: new AutonomousProtectedRehydrationAdapter(boundary),
+    receiptResolver: (context) => ({
+      job_id: context.jobId,
+      spec_digest: context.specDigest,
+      domain: context.domain,
+      capability: context.capability,
+      attempt: context.attempt,
+      approval_released: context.approvalReleased,
+      value_digest: resolutionDigest,
+    }),
+  });
+  const worker = new AutonomousBrainJobWorker({ brain, scheduler, workerId: "protected-worker", protectedRehydration });
+  const waiting = await worker.runOnce(job.jobId, 2_000);
+  assert.equal(waiting.status, "waiting_approval");
+  assert.equal(providerCalls, 0);
+  assert.doesNotMatch(JSON.stringify(scheduler.snapshot()), /debug and verify a bounded repository change|private-task-never-retained/);
+  scheduler.resumeApproval(job.jobId, "operator", "protected scope reviewed", 2_001);
+  const completed = await worker.runOnce(job.jobId, 2_002);
+  assert.equal(completed.status, "succeeded");
+  assert.equal(providerCalls, 1);
+
+  const explicitScheduler = new InMemoryAutonomousBrainJobScheduler({ maxJobs: 2, clock: () => 3_000 });
+  const explicitJob = jobFor(11, request, "execute", policy);
+  explicitScheduler.submit(explicitJob, 3_000);
+  let explicitCalls = 0;
+  let fallbackCalls = 0;
+  const explicitWorker = new AutonomousBrainJobWorker({
+    brain,
+    scheduler: explicitScheduler,
+    workerId: "explicit-worker",
+    protectedRehydration: new AutonomousBrainJobProtectedRehydrator({
+      adapter: new AutonomousProtectedRehydrationAdapter(boundary),
+      receiptResolver: () => { fallbackCalls += 1; throw new Error("fallback must remain dormant"); },
+    }),
+    resolve: ({ job: explicitClaim }) => {
+      explicitCalls += 1;
+      return { ...resolution, specDigest: explicitClaim.spec_digest };
+    },
+  });
+  await explicitWorker.runOnce(explicitJob.jobId, 3_000);
+  explicitScheduler.resumeApproval(explicitJob.jobId, "operator", "explicit resolver reviewed", 3_001);
+  assert.equal((await explicitWorker.runOnce(explicitJob.jobId, 3_002)).status, "succeeded");
+  assert.equal(explicitCalls, 2);
+  assert.equal(fallbackCalls, 0);
+});
+
+test("protected durable brain worker receipts cover every domain and fail closed on identity drift", async () => {
+  const values = new Map();
+  const boundary = new AutonomousProtectedRehydrationBoundary(
+    new AutonomousProtectedRehydrationContext({ tenantId: "tenant-all-worker", actorId: "worker", sessionId: "all-domains", authorizationDigest: "b".repeat(64) }),
+    (reference) => values.get(reference.value_digest),
+    { authorizer: () => true, clock: () => 200 },
+  );
+  const rehydrator = new AutonomousBrainJobProtectedRehydrator({
+    adapter: new AutonomousProtectedRehydrationAdapter(boundary),
+    receiptResolver: (context) => ({
+      job_id: context.jobId,
+      spec_digest: context.specDigest,
+      domain: context.domain,
+      capability: context.capability,
+      attempt: context.attempt,
+      approval_released: context.approvalReleased,
+      value_digest: protectedValueDigest(values.get(context.domain)),
+    }),
+  });
+  for (let index = 0; index < AUTONOMOUS_DOMAIN_NAMES.length; index += 1) {
+    const domain = AUTONOMOUS_DOMAIN_NAMES[index];
+    const specDigest = `${index % 10}`.repeat(64);
+    const value = { specDigest, request: { task: `task-${domain}`, domain }, mode: "execute" };
+    values.set(domain, value);
+    values.set(protectedValueDigest(value), value);
+    const resolved = await rehydrator.resolve({ jobId: `protected-${domain}`, specDigest, domain, capability: "bounded", attempt: 1, approvalReleased: false });
+    assert.equal(resolved.request.domain, domain);
+  }
+  const tampered = new AutonomousBrainJobProtectedRehydrator({
+    adapter: new AutonomousProtectedRehydrationAdapter(boundary),
+    receiptResolver: (context) => ({
+      job_id: context.jobId,
+      spec_digest: "0".repeat(64),
+      domain: context.domain,
+      capability: context.capability,
+      attempt: context.attempt,
+      approval_released: context.approvalReleased,
+      value_digest: protectedValueDigest(values.get(context.domain)),
+    }),
+  });
+  await assert.rejects(tampered.resolve({ jobId: "protected-coding", specDigest: "1".repeat(64), domain: "coding", capability: "bounded", attempt: 1, approvalReleased: false }), /spec_digest/);
 });
 
 test("worker traces closed-loop cycle and evaluator-guided cross-domain learning without replaying the provider", async () => {
@@ -215,6 +408,128 @@ test("worker traces closed-loop cycle and evaluator-guided cross-domain learning
   assert.ok(adaptive.trace.provider_invocations >= 2);
   assert.ok(adaptive.trace.event_count >= 7);
   assert.equal(runtime.providerStatus("worker-offline").attempts >= 3, true);
+});
+
+test("durable worker binds action admission before credential or provider dispatch and rejects stale metadata", async () => {
+  let providerCalls = 0;
+  const { brain } = makeBrain(() => { providerCalls += 1; });
+  const scheduler = new InMemoryAutonomousBrainJobScheduler({ maxJobs: 4, clock: () => 10_000 });
+  const request = requestFor("data");
+  const policy = policyDigest("a");
+  const actionPlan = await brain.actionPlan(request);
+  const actionAdmission = admitAutonomousActionPlan(actionPlan, {
+    approvals: Object.fromEntries(actionPlan.required_approvals.map((approval) => [approval, true])),
+    reviewed: true,
+  });
+  scheduler.submit({
+    jobId: "worker-action-admission",
+    idempotencyKey: "worker-action-admission-private-task",
+    specDigest: autonomousBrainJobSpecDigest({ request, mode: "execute", policyDigest: policy, actionPlanDigest: actionPlan.plan_digest, actionAdmissionDigest: actionAdmission.admission_digest }),
+    domain: request.domain,
+    capability: request.capability,
+    riskClass: "review",
+    maxAttempts: 3,
+  }, 10_000);
+  const staleRequest = requestFor("data");
+  const staleActionPlan = await brain.actionPlan({ ...staleRequest, task: "profile a different dataset schema and missingness" });
+  const staleAdmission = admitAutonomousActionPlan(staleActionPlan, {
+    approvals: Object.fromEntries(staleActionPlan.required_approvals.map((approval) => [approval, true])),
+    reviewed: true,
+  });
+  scheduler.submit({
+    jobId: "worker-action-admission-stale",
+    idempotencyKey: "worker-action-admission-stale-private-task",
+    specDigest: autonomousBrainJobSpecDigest({ request, mode: "execute", policyDigest: policy, actionPlanDigest: actionPlan.plan_digest, actionAdmissionDigest: actionAdmission.admission_digest }),
+    domain: request.domain,
+    capability: request.capability,
+    riskClass: "review",
+    maxAttempts: 3,
+  }, 10_000);
+  const worker = new AutonomousBrainJobWorker({
+    brain,
+    scheduler,
+    workerId: "worker-action-admission",
+    resolve: ({ job }) => job.job_id === "worker-action-admission"
+      ? {
+        specDigest: job.spec_digest,
+        policyDigest: policy,
+        request,
+        mode: "execute",
+        actionPlan: actionPlan.toJSON(),
+        actionAdmission: actionAdmission.toJSON(),
+        execute: { approveProviderCall: true, run: { candidates: [model] } },
+      }
+      : {
+        specDigest: job.spec_digest,
+        policyDigest: policy,
+        request,
+        mode: "execute",
+        actionPlan: staleActionPlan.toJSON(),
+        actionAdmission: staleAdmission.toJSON(),
+        execute: { approveProviderCall: true, run: { candidates: [model] } },
+      },
+  });
+
+  const waiting = await worker.runOnce("worker-action-admission", 10_000);
+  assert.equal(waiting.status, "waiting_approval");
+  assert.equal(providerCalls, 0);
+  scheduler.resumeApproval("worker-action-admission", "operator-action", "action admission reviewed", 10_001);
+  const completed = await worker.runOnce("worker-action-admission", 10_002);
+  assert.equal(completed.status, "succeeded");
+  assert.equal(providerCalls, 1);
+
+  const stale = await worker.runOnce("worker-action-admission-stale", 10_003);
+  assert.equal(stale.status, "failed");
+  assert.equal(providerCalls, 1);
+  assert.equal(scheduler.get("worker-action-admission-stale").state, "failed");
+});
+
+test("durable worker derives action identity from a verified single-domain handoff", async () => {
+  let providerCalls = 0;
+  const { brain } = makeBrain(() => { providerCalls += 1; });
+  const ledger = new InMemoryAutonomousActionAdmissionLedger({ maxRecords: 8 });
+  const controller = new AutonomousActionAdmissionController(ledger);
+  const request = requestFor("science");
+  const actionPlan = await brain.actionPlan(request);
+  controller.submit("worker-verified-handoff", actionPlan, {
+    approvals: Object.fromEntries(actionPlan.required_approvals.map((approval) => [approval, true])),
+    reviewed: true,
+    authorizationDigest: "a".repeat(64),
+  });
+  const handoff = controller.dispatchHandoff("worker-verified-handoff");
+  const scheduler = new InMemoryAutonomousBrainJobScheduler({ maxJobs: 4, clock: () => 20_000 });
+  scheduler.submit({
+    jobId: "worker-verified-handoff",
+    idempotencyKey: "worker-verified-handoff-private-task",
+    specDigest: autonomousBrainJobSpecDigestForHandoff({ request, mode: "execute", policyDigest: policyDigest("a"), actionHandoff: handoff }),
+    domain: "science",
+    capability: request.capability,
+    riskClass: "review",
+    maxAttempts: 3,
+  }, 20_000);
+  const worker = new AutonomousBrainJobWorker({
+    brain,
+    scheduler,
+    workerId: "worker-verified-handoff",
+    resolve: ({ job }) => ({
+      specDigest: job.spec_digest,
+      policyDigest: policyDigest("a"),
+      request,
+      mode: "execute",
+      actionHandoff: handoff,
+      execute: { approveProviderCall: true, run: { candidates: [model] } },
+    }),
+  });
+  const waiting = await worker.runOnce("worker-verified-handoff", 20_000);
+  assert.equal(waiting.status, "waiting_approval");
+  assert.equal(providerCalls, 0);
+  scheduler.resumeApproval("worker-verified-handoff", "operator-handoff", "handoff released", 20_001);
+  const completed = await worker.runOnce("worker-verified-handoff", 20_002);
+  assert.equal(completed.status, "succeeded");
+  assert.equal(providerCalls, 1);
+
+  const tampered = { ...handoff, downstream_gates: ["credential_scope"] };
+  assert.throws(() => autonomousBrainJobSpecDigestForHandoff({ request, mode: "execute", actionHandoff: tampered }), /handoff/);
 });
 
 test("worker rejects spec drift before dispatch and quarantines uncertain provider failures", async () => {
@@ -347,6 +662,51 @@ test("worker batch reports retry backpressure without hot-looping a queued job",
   assert.equal(batch.failed_count, 0);
   assert.equal(calls, 1);
   assert.equal(scheduler.get("worker-job-50").state, "queued");
+});
+
+test("worker batch drains approved jobs with bounded parallelism across the domain catalogue", async () => {
+  const delayed = makeDelayedBrain();
+  const scheduler = new InMemoryAutonomousBrainJobScheduler({ maxJobs: 32, clock: () => 13_500 });
+  const domains = AUTONOMOUS_DOMAIN_NAMES.filter((domain) => domain !== "cross_domain").slice(0, 6);
+  const policies = new Map();
+  for (const [index, domain] of domains.entries()) {
+    const request = requestFor(domain);
+    const selectedPolicy = policyDigest("abcdef"[index]);
+    const jobId = `worker-job-${index}`;
+    policies.set(jobId, selectedPolicy);
+    scheduler.submit(jobFor(index, request, "execute", selectedPolicy), 13_500 + index);
+  }
+  const worker = new AutonomousBrainJobWorker({
+    brain: delayed.brain,
+    scheduler,
+    workerId: "worker-parallel",
+    resolve: ({ job }) => ({
+      specDigest: job.spec_digest,
+      policyDigest: policies.get(job.job_id),
+      request: requestFor(job.domain),
+      mode: "execute",
+      execute: { run: { candidates: [model] } },
+    }),
+  });
+
+  for (const [index] of domains.entries()) {
+    const jobId = `worker-job-${index}`;
+    assert.equal((await worker.runOnce(jobId, 13_600 + index)).status, "waiting_approval");
+    scheduler.resumeApproval(jobId, "parallel-operator", "approved bounded parallel run", 13_700 + index);
+  }
+
+  const batch = await worker.run({ limit: domains.length, maxParallelism: 3 });
+  assert.equal(batch.status, "completed");
+  assert.equal(batch.requested_count, domains.length);
+  assert.equal(batch.max_parallelism, 3);
+  assert.equal(batch.stopped_on_non_terminal, false);
+  assert.equal(batch.runs.length, domains.length);
+  assert.equal(batch.succeeded_count, domains.length);
+  assert.ok(delayed.maxActive >= 2, `expected overlapping provider calls, saw ${delayed.maxActive}`);
+  assert.ok(delayed.maxActive <= 3, `parallelism exceeded bound: ${delayed.maxActive}`);
+  assert.equal(delayed.active, 0);
+  assert.equal(scheduler.inventory({ limit: 32 }).every((job) => job.state === "succeeded"), true);
+  assert.equal(JSON.stringify(batch).includes("private-task-never-retained"), false);
 });
 
 test("worker restores a metadata-only scheduler and persists approval recovery across every domain", async () => {

@@ -5,6 +5,7 @@
 //! all three exactly specified and keeps the binary dependency-free.
 
 use crate::exit::{CliError, CliResult, ExitCode, Retryability};
+use bioprism_figures::FigureKind;
 use std::fmt::Write;
 use std::path::PathBuf;
 
@@ -46,10 +47,16 @@ USAGE
   bioprism [--json] <command> <subcommand> [options]
 
 COMMANDS
-  world validate    --world <path>
-                    Report structural diagnostics. Exit 1 if any are errors.
+  world validate    --world <path> [--dimensions <path>]
+                    Report structural diagnostics. Exit 1 if any are errors. --dimensions loads
+                    a bioprism-scope-dimensions/0.1 document so domain scope dimensions are
+                    classified instead of reported as unclassified.
   world show        --world <path>
                     Summarise facts, factors, events, tags and factor kinds.
+  world sweep       [--distractors <n,n,...>] [--seed <n>] [--markdown]
+                    Generate the structural family grid (attachment x relay depth x tag style x
+                    distractor count, 43.39) and run the full baseline panel over every cell.
+                    Ranking is on admissibility only. Exit 1 if FIBER is inadmissible anywhere.
   world index       --world <path> --store <dir> [--dry-run]
                     Build a content-addressed index so compile cost tracks the compiled region
                     rather than the corpus. Afterwards --world accepts the store directory.
@@ -57,19 +64,24 @@ COMMANDS
                     [--world-out <path>] [--query-out <path>] [--dry-run]
                     Generate a synthetic structural family (43.39) and its matching query.
 
-  context explain   --world <path> --query <path>
+  context explain   --world <path> --query <path> [--domain <path>]
                     Show the compile plan: passes run, passes deferred, selection ratios and
                     omissions grouped by influence class. Writes nothing.
-  context compile   --world <path> --query <path>
+  context compile   --world <path> --query <path> [--domain <path>]
                     [--certificate-out <path>] [--section-out <path>]
                     [--profile reference|extended] [--dry-run] [--fail-on-invalid]
-                    Compile and optionally write artifacts.
+                    Compile and optionally write artifacts. --domain loads a bioprism-domain/0.1
+                    pack and judges the compile with its rule oracle instead of the reference
+                    split-integrity oracle; the output then carries the pack's advisories.
   context verify    --certificate <path>
                     Recompute the certificate digest. Exit 1 if it does not verify.
   context compare   --world <path> --query <path> [--markdown]
                     Run the equal-engineering baseline panel (full-context, graph k-hop,
-                    hypergraph component, query-graph, lexical top-k, FIBER) and report which
-                    strategies preserve the reference verdict and at what cost.
+                    hypergraph component, query-graph, lexical top-k, embedding top-k, directed
+                    walk, FIBER) and report which strategies preserve the reference verdict and
+                    at what cost. --domain is not supported here: the harness judges every
+                    strategy against the reference oracle directly, so a pack oracle cannot yet
+                    be applied to the whole panel.
 
   prism fork        --world <path> --query <path> [--bundle-out <path>] [--minimize]
                     Run every architecture from one frozen Decision Cell and report which
@@ -81,6 +93,37 @@ COMMANDS
   mutate family     --world <path> [--out-dir <dir>]
                     Apply the standard metamorphic suite, validate every postcondition against
                     the oracle, deduplicate by content, and report effective diversity.
+
+  project ingest    --root <dir> [--issues <path>] [--decision-time <rfc3339>]
+                    --world-out <path> --pack-out <path> --dimensions-out <path>
+                    [--queries-out <dir or .json path>] [--dry-run]
+                    Scan a software project tree into a fiber-world/0.1 document, its
+                    bioprism-scope-dimensions/0.1 classification, the release-readiness pack
+                    and the generated fiber-query/0.2 documents. Static scan only: nothing is
+                    executed or resolved, and every skipped byte ships as declared loss.
+                    --queries-out ending in .json writes one document carrying the release query
+                    and every issue query; otherwise a directory of release.json plus
+                    issue-<id>.json.
+  project audit     --root <dir> [--issues <path>] [--decision-time <rfc3339>]
+                    Scan, assemble and judge the project under the release-readiness pack's
+                    rule oracle. Exit 1 when the verdict is invalid. With --issues, also
+                    compiles and prints each issue's declared evidence region.
+  project plan      --root <dir> --issues <path> --issue <id> [--decision-time <rfc3339>]
+                    [--criteria <path>] --out <path> [--dry-run]
+                    Derive a repair plan for one declared issue from its compiled evidence
+                    region and write it as a bioprism-repair-plan/0.1 document. --criteria loads
+                    a bioprism-repair-declarations/0.1 file whose criteria, obligations and
+                    falsifiers are recorded as declared by their author; the generator's own
+                    items are recorded as derived and the two never merge. Nothing is edited,
+                    built or run: the plan is a declaration of what would count as evidence.
+  project verify    --root <dir> --plan <path> [--issues <path>] [--decision-time <rfc3339>]
+                    Re-scan the tree and report which of the plan's declared criteria held,
+                    each with its own three-valued status and the obstruction that stopped it.
+                    Never reports that the issue is fixed. Exit 1 when the outcome is not_met
+                    or falsified, 8 when a criterion or falsifier could not be evaluated, and 9
+                    when the plan is bound to a different world — a stale plan evaluates
+                    nothing, so it is not a failed verification. Obligations are reported on
+                    their own admissibility axis and never move the exit code.
 
   evidence verify   --bundle <path>
                     Verify a portable mission evidence bundle's schema, retention claims and
@@ -167,6 +210,72 @@ COMMANDS
                     [--after <digest>] [--limit <n>] [--include-records]
                     Query a local reconciliation registry without executing a mission.
 
+  autopilot grant-template
+                    Print a template autonomy grant to stdout (with --json, the bare grant
+                    object, directly usable as --grant). Authority for autonomous dispatch
+                    comes only from an explicit grant document; there is no default grant, and
+                    nothing is written.
+  autopilot run     --instantiation <path> --grant <path> [--report-out <path>] [--dry-run]
+                    Drive an instantiated workflow's mission under an explicit autonomy grant:
+                    dispatch, classify each failure by its 40.36 retry class, repair what the
+                    grant authorises, and chain every mission report and reconciliation digest
+                    into one autopilot report. --dry-run plans attempt 1 only, no-dispatch:
+                    nothing runs and nothing is written. Exit 1 reports a completed drive whose
+                    final status is exhausted or refused rather than succeeded.
+  autopilot verify  --report <path>
+                    Recompute an autopilot report's digest and require its stated limitations.
+                    Exit 1 if the report does not verify.
+
+  research template
+                    Print a template research request to stdout (with --json, the bare request
+                    object, directly usable as --request). The question field is recorded
+                    verbatim and never interpreted: the runner executes the protocol the other
+                    fields declare, over synthetic decision worlds only.
+  research run      --request <path> --out-dir <dir> [--dry-run]
+                    Plan and execute the research protocol: anchor to the pinned reference
+                    certificate, then generate, compile and compare each declared distractor
+                    point, with optional sweep, mutation and minimization steps. Writes
+                    dossier.json, REPORT.md and figures/*.svg into --out-dir. --dry-run prints
+                    the planned protocol, no-dispatch: nothing runs and nothing is written.
+                    A completed run exits 0 even when every finding is negative; a tie is a
+                    first-class result, not a failure. Exit 3 for an invalid request, 5 when
+                    an artifact cannot be written.
+  research verify   --dossier <path>
+                    Recompute a research dossier's digest and check its structural contract
+                    (request digest, required limitations, step outcomes, finding support).
+                    Exit 1 if the dossier does not verify.
+
+  figure list       --input <path>
+                    Report what is drawable in a JSON artifact and where, without writing
+                    anything. Recognition is structural — required key sets and declared schema
+                    strings, never the filename — so the answer does not change when a file is
+                    renamed. A document holding nothing this builder draws is reported as such
+                    and still exits 0: listing succeeded, and an empty list is the answer.
+  figure render     --input <path> [--out-dir <dir>] [--kind <kind>] [--pointer <json-pointer>]
+                    [--dry-run]
+                    Render every drawable region of one document to SVG, or just the ones
+                    --kind and --pointer select. Each figure's footer carries the canonical
+                    digest of the exact value it was drawn from: that hex identifies the
+                    artifact, it does not attest that the artifact is correct. --out-dir
+                    defaults to ./figures. --dry-run reports what would be written and writes
+                    nothing. Exit 1 when the selection is empty — the document holds nothing
+                    drawable, or --kind/--pointer matched none of what it holds. That is a
+                    verdict about the input, not a failure of this command. Exit 3 for a
+                    document that is not readable JSON or that no figure can be drawn from,
+                    and exit 5 when a figure cannot be written.
+  figure batch      --input-dir <dir> [--out-dir <dir>] [--dry-run]
+                    Render every drawable region of every *.json file directly inside a
+                    directory (non-recursive: subdirectories are not walked) and write a
+                    manifest.json naming every figure produced and every input skipped, with
+                    the reason. A skip never moves the exit code by itself: the code follows
+                    whether any figure was produced at all. Figures land in
+                    --out-dir/<input file stem>/, so two inputs cannot overwrite each other's
+                    output. Exit 1 when nothing in the directory was drawable — the manifest is
+                    still written, because it is the answer.
+
+  figure kinds: baseline-panel, selection-ratio, omission-accounting, sweep-grid,
+                mutation-diversity, autopilot-drive.
+
 GLOBAL OPTIONS
   --json            Emit exactly one JSON document on stdout and nothing else.
   -h, --help        Show this help.
@@ -206,13 +315,20 @@ pub struct Invocation {
 pub enum Command {
     WorldValidate {
         world: PathBuf,
+        dimensions: Option<PathBuf>,
     },
     WorldShow {
         world: PathBuf,
     },
+    WorldSweep {
+        distractors: Option<Vec<usize>>,
+        seed: Option<u64>,
+        markdown: bool,
+    },
     ContextExplain {
         world: PathBuf,
         query: PathBuf,
+        domain: Option<PathBuf>,
     },
     ContextCompile(CompileOptions),
     ContextVerify {
@@ -241,6 +357,19 @@ pub enum Command {
     MutateFamily {
         world: PathBuf,
         out_dir: Option<PathBuf>,
+    },
+    ProjectIngest(ProjectIngestOptions),
+    ProjectAudit {
+        root: PathBuf,
+        issues: Option<PathBuf>,
+        decision_time: Option<String>,
+    },
+    ProjectPlan(ProjectPlanOptions),
+    ProjectVerify {
+        root: PathBuf,
+        plan: PathBuf,
+        issues: Option<PathBuf>,
+        decision_time: Option<String>,
     },
     EvidenceBundleVerify {
         bundle: PathBuf,
@@ -397,7 +526,49 @@ pub enum Command {
         limit: usize,
         include_records: bool,
     },
+    AutopilotGrantTemplate,
+    AutopilotRun {
+        instantiation: PathBuf,
+        grant: PathBuf,
+        report_out: Option<PathBuf>,
+        dry_run: bool,
+    },
+    AutopilotVerify {
+        report: PathBuf,
+    },
+    ResearchTemplate,
+    ResearchRun {
+        request: PathBuf,
+        out_dir: PathBuf,
+        dry_run: bool,
+    },
+    ResearchVerify {
+        dossier: PathBuf,
+    },
+    FigureList {
+        input: PathBuf,
+    },
+    FigureRender {
+        input: PathBuf,
+        out_dir: PathBuf,
+        kind: Option<FigureKind>,
+        pointer: Option<String>,
+        dry_run: bool,
+    },
+    FigureBatch {
+        input_dir: PathBuf,
+        out_dir: PathBuf,
+        dry_run: bool,
+    },
 }
+
+/// Where `figure render` and `figure batch` write when the caller names no directory.
+///
+/// A default rather than a required flag because the overwhelmingly common invocation is "draw
+/// this file", and `research run` already writes its SVGs into a `figures/` directory beside the
+/// dossier — a caller who has seen one layout should not have to learn a second. Stated in
+/// `--help` rather than left to be discovered by finding the files.
+const DEFAULT_FIGURE_OUT_DIR: &str = "figures";
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct GenerateOptions {
@@ -415,9 +586,45 @@ pub enum Family {
 }
 
 #[derive(Debug, PartialEq, Eq)]
+pub struct ProjectIngestOptions {
+    pub root: PathBuf,
+    pub issues: Option<PathBuf>,
+    /// Already validated as RFC 3339 by the parser; kept as the caller's exact string so the
+    /// emitted world carries their bytes, not a re-rendering.
+    pub decision_time: Option<String>,
+    pub world_out: PathBuf,
+    pub pack_out: PathBuf,
+    pub dimensions_out: PathBuf,
+    pub queries_out: Option<PathBuf>,
+    pub dry_run: bool,
+}
+
+/// `project plan`'s parsed invocation.
+///
+/// `issues` is required here although `project ingest` and `project audit` both take it
+/// optionally. Those two commands have something to say about a tree with no declared issues; a
+/// plan is *for* one issue, so an invocation naming none has no subject, and defaulting to an
+/// empty issue list would turn that into "issue not found in the world" — a diagnostic pointing
+/// at the tree rather than at the missing flag.
+#[derive(Debug, PartialEq, Eq)]
+pub struct ProjectPlanOptions {
+    pub root: PathBuf,
+    pub issues: PathBuf,
+    pub issue: String,
+    /// Already validated as RFC 3339 by the parser; kept as the caller's exact string.
+    pub decision_time: Option<String>,
+    /// A `bioprism-repair-declarations/0.1` document, or nothing: a plan with no declared items
+    /// carries only what the generator could derive, and says so in its own limitations.
+    pub criteria: Option<PathBuf>,
+    pub out: PathBuf,
+    pub dry_run: bool,
+}
+
+#[derive(Debug, PartialEq, Eq)]
 pub struct CompileOptions {
     pub world: PathBuf,
     pub query: PathBuf,
+    pub domain: Option<PathBuf>,
     pub certificate_out: Option<PathBuf>,
     pub section_out: Option<PathBuf>,
     pub profile: Profile,
@@ -453,9 +660,35 @@ pub fn parse<I: IntoIterator<Item = String>>(arguments: I) -> CliResult<Parsed> 
     let command = match (group.as_str(), subcommand.as_str()) {
         ("world", "validate") => Command::WorldValidate {
             world: options.take_path("--world")?,
+            dimensions: options.take_optional_path("--dimensions"),
         },
         ("world", "show") => Command::WorldShow {
             world: options.take_path("--world")?,
+        },
+        ("world", "sweep") => Command::WorldSweep {
+            distractors: match options.take_optional("--distractors") {
+                None => None,
+                Some(text) => Some(
+                    text.split(',')
+                        .map(|part| {
+                            part.trim().parse::<usize>().map_err(|_| {
+                                usage(format!(
+                                    "--distractors must be a comma-separated list of numbers, \
+                                     got {text:?}"
+                                ))
+                            })
+                        })
+                        .collect::<CliResult<Vec<usize>>>()?,
+                ),
+            },
+            seed: match options.take_optional("--seed") {
+                None => None,
+                Some(text) => Some(
+                    text.parse()
+                        .map_err(|_| usage(format!("--seed must be a number, got {text:?}")))?,
+                ),
+            },
+            markdown: options.take_switch("--markdown"),
         },
         ("world", "index") => Command::WorldIndex {
             world: options.take_path("--world")?,
@@ -485,10 +718,12 @@ pub fn parse<I: IntoIterator<Item = String>>(arguments: I) -> CliResult<Parsed> 
         ("context", "explain") => Command::ContextExplain {
             world: options.take_path("--world")?,
             query: options.take_path("--query")?,
+            domain: options.take_optional_path("--domain"),
         },
         ("context", "compile") => Command::ContextCompile(CompileOptions {
             world: options.take_path("--world")?,
             query: options.take_path("--query")?,
+            domain: options.take_optional_path("--domain"),
             certificate_out: options.take_optional_path("--certificate-out"),
             section_out: options.take_optional_path("--section-out"),
             profile: match options.take_optional("--profile").as_deref() {
@@ -519,11 +754,59 @@ pub fn parse<I: IntoIterator<Item = String>>(arguments: I) -> CliResult<Parsed> 
         ("prism", "minimize") => Command::PrismMinimize {
             world: options.take_path("--world")?,
         },
-        ("context", "compare") => Command::ContextCompare {
-            world: options.take_path("--world")?,
-            query: options.take_path("--query")?,
-            markdown: options.take_switch("--markdown"),
+        ("project", "ingest") => Command::ProjectIngest(ProjectIngestOptions {
+            root: options.take_path("--root")?,
+            issues: options.take_optional_path("--issues"),
+            decision_time: take_decision_time(&mut options)?,
+            world_out: options.take_path("--world-out")?,
+            pack_out: options.take_path("--pack-out")?,
+            dimensions_out: options.take_path("--dimensions-out")?,
+            queries_out: options.take_optional_path("--queries-out"),
+            dry_run: options.take_switch("--dry-run"),
+        }),
+        ("project", "audit") => Command::ProjectAudit {
+            root: options.take_path("--root")?,
+            issues: options.take_optional_path("--issues"),
+            decision_time: take_decision_time(&mut options)?,
         },
+        ("project", "plan") => Command::ProjectPlan(ProjectPlanOptions {
+            root: options.take_path("--root")?,
+            issues: options.take_path("--issues")?,
+            issue: options
+                .take_optional("--issue")
+                .ok_or_else(|| usage("--issue is required and takes a declared issue id"))?,
+            decision_time: take_decision_time(&mut options)?,
+            criteria: options.take_optional_path("--criteria"),
+            out: options.take_path("--out")?,
+            dry_run: options.take_switch("--dry-run"),
+        }),
+        ("project", "verify") => Command::ProjectVerify {
+            root: options.take_path("--root")?,
+            plan: options.take_path("--plan")?,
+            issues: options.take_optional_path("--issues"),
+            decision_time: take_decision_time(&mut options)?,
+        },
+        // `--domain` is refused here rather than silently accepted-and-ignored. The comparison
+        // harness (`bioprism_baseline::compare`) judges every strategy's selection against the
+        // reference split-integrity oracle directly, not through the injectable
+        // `DecisionOracle`, so a pack oracle cannot yet be applied to the whole panel — and a
+        // table whose reference verdict came from a different oracle than the flag named would
+        // be a half-truth, not a comparison.
+        ("context", "compare") => {
+            if options.take_optional("--domain").is_some() {
+                return Err(usage(
+                    "--domain is not supported on context compare: the comparison harness judges \
+                     every strategy against the reference split-integrity oracle directly, so a \
+                     pack oracle cannot yet be applied to the whole panel; compile under the pack \
+                     with `context compile --domain` instead",
+                ));
+            }
+            Command::ContextCompare {
+                world: options.take_path("--world")?,
+                query: options.take_path("--query")?,
+                markdown: options.take_switch("--markdown"),
+            }
+        }
         ("evidence", "verify") => Command::EvidenceBundleVerify {
             bundle: options.take_path("--bundle")?,
         },
@@ -755,11 +1038,109 @@ pub fn parse<I: IntoIterator<Item = String>>(arguments: I) -> CliResult<Parsed> 
             },
             include_records: options.take_switch("--include-records"),
         },
+        ("autopilot", "grant-template") => Command::AutopilotGrantTemplate,
+        ("autopilot", "run") => Command::AutopilotRun {
+            instantiation: options.take_path("--instantiation")?,
+            grant: options.take_path("--grant")?,
+            report_out: options.take_optional_path("--report-out"),
+            dry_run: options.take_switch("--dry-run"),
+        },
+        ("autopilot", "verify") => Command::AutopilotVerify {
+            report: options.take_path("--report")?,
+        },
+        ("research", "template") => Command::ResearchTemplate,
+        ("research", "run") => Command::ResearchRun {
+            request: options.take_path("--request")?,
+            out_dir: options.take_path("--out-dir")?,
+            dry_run: options.take_switch("--dry-run"),
+        },
+        ("research", "verify") => Command::ResearchVerify {
+            dossier: options.take_path("--dossier")?,
+        },
+        ("figure", "list") => Command::FigureList {
+            input: options.take_path("--input")?,
+        },
+        ("figure", "render") => Command::FigureRender {
+            input: options.take_path("--input")?,
+            out_dir: take_figure_out_dir(&mut options),
+            kind: take_figure_kind(&mut options)?,
+            pointer: take_figure_pointer(&mut options)?,
+            dry_run: options.take_switch("--dry-run"),
+        },
+        ("figure", "batch") => Command::FigureBatch {
+            input_dir: options.take_path("--input-dir")?,
+            out_dir: take_figure_out_dir(&mut options),
+            dry_run: options.take_switch("--dry-run"),
+        },
         _ => return Err(usage(format!("unknown command {group:?} {subcommand:?}"))),
     };
 
     options.reject_leftovers()?;
     Ok(Parsed::Run(Invocation { json, command }))
+}
+
+fn take_figure_out_dir(options: &mut Options) -> PathBuf {
+    options
+        .take_optional_path("--out-dir")
+        .unwrap_or_else(|| PathBuf::from(DEFAULT_FIGURE_OUT_DIR))
+}
+
+/// Takes `--kind`, refusing any name outside `bioprism-figures`' own registry.
+///
+/// Validated here rather than after the document is read, because an unrecognised kind is a
+/// mistyped flag and not a defect in the artifact: accepted and matched later, it would surface
+/// as "nothing drawable selected" (exit 1) and send the caller to inspect a file that is fine.
+/// The registry is quantified over rather than restated, so a figure added to the crate becomes
+/// typeable here without an edit.
+fn take_figure_kind(options: &mut Options) -> CliResult<Option<FigureKind>> {
+    match options.take_optional("--kind") {
+        None => Ok(None),
+        Some(text) => match FigureKind::from_slug(&text) {
+            Some(kind) => Ok(Some(kind)),
+            None => Err(usage(format!(
+                "--kind must be one of {}, got {text:?}",
+                FigureKind::ALL
+                    .iter()
+                    .map(|kind| kind.slug())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ))),
+        },
+    }
+}
+
+/// Takes `--pointer`, refusing anything that is not an RFC 6901 JSON pointer.
+///
+/// `--pointer report` names nothing under RFC 6901, and a pointer that names nothing selects no
+/// figure — which the command would otherwise report as "the document holds nothing at that
+/// pointer" when the real fault is the missing leading slash. The empty string is accepted and
+/// means the document root, exactly as `figure list` prints it.
+fn take_figure_pointer(options: &mut Options) -> CliResult<Option<String>> {
+    match options.take_optional("--pointer") {
+        None => Ok(None),
+        Some(text) if text.is_empty() || text.starts_with('/') => Ok(Some(text)),
+        Some(text) => Err(usage(format!(
+            "--pointer must be an RFC 6901 JSON pointer: either empty for the document root, or \
+             beginning with `/`; got {text:?}"
+        ))),
+    }
+}
+
+/// Takes `--decision-time`, refusing anything the workspace's own RFC 3339 parser refuses.
+///
+/// Validated here rather than deep inside assembly, because there the malformed string would
+/// surface as the emitted world failing the reference validator — which reads as a bug in this
+/// binary, when in fact the flag value is the thing that needs editing. The caller's exact
+/// string is kept: the parse is a gate, not a normalisation.
+fn take_decision_time(options: &mut Options) -> CliResult<Option<String>> {
+    match options.take_optional("--decision-time") {
+        None => Ok(None),
+        Some(text) => {
+            bioprism_scope::Timestamp::parse(&text)
+                .map_err(|error| usage(format!("--decision-time must be RFC 3339: {error}")))?;
+            Ok(Some(text))
+        }
+    }
 }
 
 fn extract_flag(tokens: &mut Vec<String>, flag: &str) -> bool {
@@ -837,7 +1218,7 @@ impl Options {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse, Command, Parsed};
+    use super::{parse, Command, FigureKind, Parsed};
     use std::path::PathBuf;
 
     #[test]
@@ -862,6 +1243,308 @@ mod tests {
     #[test]
     fn help_documents_evidence_bundle_verification() {
         assert!(super::help().contains("evidence verify   --bundle <path>"));
+    }
+
+    #[test]
+    fn help_documents_the_domain_flag_where_it_works_and_where_it_is_refused() {
+        let text = super::help();
+        assert!(text.contains("context compile   --world <path> --query <path> [--domain <path>]"));
+        assert!(text.contains("context explain   --world <path> --query <path> [--domain <path>]"));
+        assert!(
+            text.contains("--domain is not supported here"),
+            "compare's help must state the refusal rather than imply support"
+        );
+        assert!(text.contains("world validate    --world <path> [--dimensions <path>]"));
+        assert!(
+            text.contains("world sweep       [--distractors <n,n,...>] [--seed <n>] [--markdown]")
+        );
+    }
+
+    #[test]
+    fn help_documents_both_project_commands_and_every_flag_they_parse() {
+        let text = super::help();
+        assert!(text.contains("project ingest    --root <dir>"));
+        assert!(text.contains("project audit     --root <dir>"));
+        for flag in [
+            "--issues",
+            "--decision-time",
+            "--world-out",
+            "--pack-out",
+            "--dimensions-out",
+            "--queries-out",
+        ] {
+            assert!(
+                text.contains(flag),
+                "a flag the project parser accepts must be documented: {flag}"
+            );
+        }
+        assert!(
+            text.contains("Exit 1 when the verdict is invalid"),
+            "the audit's exit contract is the reason to run it and must be stated"
+        );
+    }
+
+    #[test]
+    fn project_ingest_parses_every_declared_output_path_and_the_dry_run_switch() {
+        let parsed = parse(
+            [
+                "project",
+                "ingest",
+                "--root",
+                "tree",
+                "--issues",
+                "issues.json",
+                "--decision-time",
+                "2024-01-01T00:00:00Z",
+                "--world-out",
+                "world.json",
+                "--pack-out",
+                "pack.json",
+                "--dimensions-out",
+                "dimensions.json",
+                "--queries-out",
+                "queries",
+                "--dry-run",
+            ]
+            .into_iter()
+            .map(String::from),
+        )
+        .expect("parse project ingest");
+        assert_eq!(
+            parsed,
+            Parsed::Run(super::Invocation {
+                json: false,
+                command: Command::ProjectIngest(super::ProjectIngestOptions {
+                    root: PathBuf::from("tree"),
+                    issues: Some(PathBuf::from("issues.json")),
+                    decision_time: Some("2024-01-01T00:00:00Z".into()),
+                    world_out: PathBuf::from("world.json"),
+                    pack_out: PathBuf::from("pack.json"),
+                    dimensions_out: PathBuf::from("dimensions.json"),
+                    queries_out: Some(PathBuf::from("queries")),
+                    dry_run: true,
+                }),
+            })
+        );
+    }
+
+    #[test]
+    fn help_documents_the_repair_commands_and_the_exit_code_a_stale_plan_reports() {
+        let text = super::help();
+        assert!(text.contains("project plan      --root <dir>"));
+        assert!(text.contains("project verify    --root <dir>"));
+        for flag in ["--issue ", "--criteria", "--out ", "--plan "] {
+            assert!(
+                text.contains(flag),
+                "a flag the repair parser accepts must be documented: {flag:?}"
+            );
+        }
+        assert!(
+            text.contains("Exit 1 when the outcome is not_met")
+                && text.contains("a stale plan evaluates"),
+            "the three verdict-bearing exit codes are what a caller branches on and must be \
+             stated, staleness included:\n{text}"
+        );
+        assert!(
+            text.contains("Never reports that the issue is fixed"),
+            "the help must state the refusal the whole command exists for:\n{text}"
+        );
+    }
+
+    #[test]
+    fn project_plan_requires_the_issue_it_plans_for_rather_than_defaulting_to_none() {
+        let error = parse(
+            [
+                "project",
+                "plan",
+                "--root",
+                "tree",
+                "--issues",
+                "issues.json",
+                "--out",
+                "plan.json",
+            ]
+            .into_iter()
+            .map(String::from),
+        )
+        .expect_err("a plan with no subject must be refused");
+        assert_eq!(error.code, crate::exit::ExitCode::Usage);
+        assert!(
+            error.message.contains("--issue is required"),
+            "the message must name the flag the operator has to add: {}",
+            error.message
+        );
+
+        let without_issues = parse(
+            [
+                "project",
+                "plan",
+                "--root",
+                "tree",
+                "--issue",
+                "ISSUE-1",
+                "--out",
+                "plan.json",
+            ]
+            .into_iter()
+            .map(String::from),
+        )
+        .expect_err("planning against a tree with no declared issues must be refused");
+        assert!(
+            without_issues.message.contains("--issues"),
+            "an absent issues file must point at the flag, not at the tree: {}",
+            without_issues.message
+        );
+    }
+
+    #[test]
+    fn project_plan_parses_its_declaration_file_output_path_and_dry_run_switch() {
+        let parsed = parse(
+            [
+                "project",
+                "plan",
+                "--root",
+                "tree",
+                "--issues",
+                "issues.json",
+                "--issue",
+                "ISSUE-1",
+                "--decision-time",
+                "2024-01-01T00:00:00Z",
+                "--criteria",
+                "declared.json",
+                "--out",
+                "plan.json",
+                "--dry-run",
+            ]
+            .into_iter()
+            .map(String::from),
+        )
+        .expect("parse project plan");
+        assert_eq!(
+            parsed,
+            Parsed::Run(super::Invocation {
+                json: false,
+                command: Command::ProjectPlan(super::ProjectPlanOptions {
+                    root: PathBuf::from("tree"),
+                    issues: PathBuf::from("issues.json"),
+                    issue: "ISSUE-1".into(),
+                    decision_time: Some("2024-01-01T00:00:00Z".into()),
+                    criteria: Some(PathBuf::from("declared.json")),
+                    out: PathBuf::from("plan.json"),
+                    dry_run: true,
+                }),
+            })
+        );
+    }
+
+    #[test]
+    fn project_verify_parses_the_plan_it_checks_and_the_tree_it_checks_it_against() {
+        let parsed = parse(
+            [
+                "--json",
+                "project",
+                "verify",
+                "--root",
+                "tree",
+                "--plan",
+                "plan.json",
+                "--issues",
+                "issues.json",
+            ]
+            .into_iter()
+            .map(String::from),
+        )
+        .expect("parse project verify");
+        assert_eq!(
+            parsed,
+            Parsed::Run(super::Invocation {
+                json: true,
+                command: Command::ProjectVerify {
+                    root: PathBuf::from("tree"),
+                    plan: PathBuf::from("plan.json"),
+                    issues: Some(PathBuf::from("issues.json")),
+                    decision_time: None,
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn a_decision_time_that_is_not_rfc_3339_is_refused_at_the_flag_rather_than_inside_assembly() {
+        let error = parse(
+            [
+                "project",
+                "audit",
+                "--root",
+                "tree",
+                "--decision-time",
+                "yesterday",
+            ]
+            .into_iter()
+            .map(String::from),
+        )
+        .expect_err("a malformed decision time must be a usage error");
+        assert_eq!(error.code, crate::exit::ExitCode::Usage);
+        assert!(
+            error.message.contains("--decision-time must be RFC 3339"),
+            "the message must name the flag the operator has to edit: {}",
+            error.message
+        );
+    }
+
+    #[test]
+    fn context_compare_refuses_a_domain_pack_with_the_reason_in_the_message() {
+        let error = parse(
+            [
+                "context",
+                "compare",
+                "--world",
+                "w.json",
+                "--query",
+                "q.json",
+                "--domain",
+                "pack.json",
+            ]
+            .into_iter()
+            .map(String::from),
+        )
+        .expect_err("--domain on compare must be refused, not ignored");
+        assert_eq!(error.code, crate::exit::ExitCode::Usage);
+        assert!(
+            error.message.contains("not supported on context compare"),
+            "the refusal must say why: {}",
+            error.message
+        );
+    }
+
+    #[test]
+    fn world_sweep_parses_a_comma_separated_distractor_grid_and_rejects_a_non_numeric_one() {
+        let parsed = parse(
+            ["world", "sweep", "--distractors", "50,250", "--seed", "7"]
+                .into_iter()
+                .map(String::from),
+        )
+        .expect("parse world sweep");
+        assert_eq!(
+            parsed,
+            Parsed::Run(super::Invocation {
+                json: false,
+                command: Command::WorldSweep {
+                    distractors: Some(vec![50, 250]),
+                    seed: Some(7),
+                    markdown: false,
+                },
+            })
+        );
+
+        let error = parse(
+            ["world", "sweep", "--distractors", "50,many"]
+                .into_iter()
+                .map(String::from),
+        )
+        .expect_err("a non-numeric distractor count is a usage error");
+        assert_eq!(error.code, crate::exit::ExitCode::Usage);
     }
 
     #[test]
@@ -1412,6 +2095,103 @@ mod tests {
     }
 
     #[test]
+    fn autopilot_run_parses_instantiation_grant_report_out_and_dry_run() {
+        let parsed = parse(
+            [
+                "--json",
+                "autopilot",
+                "run",
+                "--instantiation",
+                "instantiation.json",
+                "--grant",
+                "grant.json",
+                "--report-out",
+                "autopilot-report.json",
+                "--dry-run",
+            ]
+            .into_iter()
+            .map(String::from),
+        )
+        .expect("parse autopilot run");
+        assert_eq!(
+            parsed,
+            Parsed::Run(super::Invocation {
+                json: true,
+                command: Command::AutopilotRun {
+                    instantiation: PathBuf::from("instantiation.json"),
+                    grant: PathBuf::from("grant.json"),
+                    report_out: Some(PathBuf::from("autopilot-report.json")),
+                    dry_run: true,
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn autopilot_run_refuses_an_invocation_without_a_grant() {
+        let refused = parse(
+            ["autopilot", "run", "--instantiation", "instantiation.json"]
+                .into_iter()
+                .map(String::from),
+        )
+        .expect_err("a run without a grant must be refused, never defaulted");
+        assert!(refused.message.contains("--grant"), "{}", refused.message);
+    }
+
+    #[test]
+    fn autopilot_grant_template_takes_no_options_and_verify_takes_a_report_path() {
+        let template = parse(
+            ["autopilot", "grant-template"]
+                .into_iter()
+                .map(String::from),
+        )
+        .expect("parse autopilot grant-template");
+        assert_eq!(
+            template,
+            Parsed::Run(super::Invocation {
+                json: false,
+                command: Command::AutopilotGrantTemplate,
+            })
+        );
+        parse(
+            ["autopilot", "grant-template", "--out", "grant.json"]
+                .into_iter()
+                .map(String::from),
+        )
+        .expect_err("grant-template writes nothing and accepts no options");
+
+        let verified = parse(
+            ["autopilot", "verify", "--report", "autopilot-report.json"]
+                .into_iter()
+                .map(String::from),
+        )
+        .expect("parse autopilot verify");
+        assert_eq!(
+            verified,
+            Parsed::Run(super::Invocation {
+                json: false,
+                command: Command::AutopilotVerify {
+                    report: PathBuf::from("autopilot-report.json"),
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn help_documents_every_autopilot_subcommand() {
+        let text = super::help();
+        assert!(text.contains("autopilot grant-template"));
+        assert!(text.contains(
+            "autopilot run     --instantiation <path> --grant <path> [--report-out <path>] [--dry-run]"
+        ));
+        assert!(text.contains("autopilot verify  --report <path>"));
+        assert!(
+            text.contains("only from an explicit grant document"),
+            "help must say where autonomous authority comes from"
+        );
+    }
+
+    #[test]
     fn workflow_reconciliation_registry_commands_parse_filters_and_dry_run() {
         let imported = parse(
             [
@@ -1482,5 +2262,323 @@ mod tests {
                 },
             })
         );
+    }
+
+    #[test]
+    fn research_run_parses_request_out_dir_and_dry_run() {
+        let parsed = parse(
+            [
+                "--json",
+                "research",
+                "run",
+                "--request",
+                "request.json",
+                "--out-dir",
+                "research-out",
+                "--dry-run",
+            ]
+            .into_iter()
+            .map(String::from),
+        )
+        .expect("parse research run");
+        assert_eq!(
+            parsed,
+            Parsed::Run(super::Invocation {
+                json: true,
+                command: Command::ResearchRun {
+                    request: PathBuf::from("request.json"),
+                    out_dir: PathBuf::from("research-out"),
+                    dry_run: true,
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn research_run_requires_both_the_request_and_the_out_dir() {
+        let without_request = parse(
+            ["research", "run", "--out-dir", "research-out"]
+                .into_iter()
+                .map(String::from),
+        )
+        .expect_err("a run without a request must be refused, never defaulted");
+        assert_eq!(without_request.code, crate::exit::ExitCode::Usage);
+        assert!(
+            without_request.message.contains("--request"),
+            "the message must name the flag the operator has to add: {}",
+            without_request.message
+        );
+
+        let without_out_dir = parse(
+            ["research", "run", "--request", "request.json"]
+                .into_iter()
+                .map(String::from),
+        )
+        .expect_err("a run without an out-dir has nowhere to put the dossier it promises");
+        assert!(
+            without_out_dir.message.contains("--out-dir"),
+            "{}",
+            without_out_dir.message
+        );
+    }
+
+    #[test]
+    fn research_template_takes_no_options_and_verify_takes_a_dossier_path() {
+        let template = parse(["research", "template"].into_iter().map(String::from))
+            .expect("parse research template");
+        assert_eq!(
+            template,
+            Parsed::Run(super::Invocation {
+                json: false,
+                command: Command::ResearchTemplate,
+            })
+        );
+        parse(
+            ["research", "template", "--out", "request.json"]
+                .into_iter()
+                .map(String::from),
+        )
+        .expect_err("research template writes nothing and accepts no options");
+
+        let verified = parse(
+            ["research", "verify", "--dossier", "dossier.json"]
+                .into_iter()
+                .map(String::from),
+        )
+        .expect("parse research verify");
+        assert_eq!(
+            verified,
+            Parsed::Run(super::Invocation {
+                json: false,
+                command: Command::ResearchVerify {
+                    dossier: PathBuf::from("dossier.json"),
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn help_documents_every_research_subcommand() {
+        let text = super::help();
+        assert!(text.contains("research template"));
+        assert!(text.contains("research run      --request <path> --out-dir <dir> [--dry-run]"));
+        assert!(text.contains("research verify   --dossier <path>"));
+        assert!(
+            text.contains("verbatim and never interpreted"),
+            "help must state that the question is recorded, not understood"
+        );
+        assert!(
+            text.contains("exits 0 even when every finding is negative"),
+            "help must state that a negative finding is a completed run, not a failure"
+        );
+    }
+
+    #[test]
+    fn figure_render_defaults_its_output_directory_rather_than_demanding_one() {
+        let parsed = parse(
+            ["figure", "render", "--input", "dossier.json"]
+                .into_iter()
+                .map(String::from),
+        )
+        .expect("parse figure render");
+        assert_eq!(
+            parsed,
+            Parsed::Run(super::Invocation {
+                json: false,
+                command: Command::FigureRender {
+                    input: PathBuf::from("dossier.json"),
+                    out_dir: PathBuf::from("figures"),
+                    kind: None,
+                    pointer: None,
+                    dry_run: false,
+                },
+            }),
+            "the default is `figures/`, the layout `research run` already writes"
+        );
+    }
+
+    #[test]
+    fn figure_render_carries_its_kind_pointer_and_dry_run_through_the_parser() {
+        let parsed = parse(
+            [
+                "--json",
+                "figure",
+                "render",
+                "--input",
+                "dossier.json",
+                "--out-dir",
+                "out",
+                "--kind",
+                "sweep-grid",
+                "--pointer",
+                "/steps/10/outputs/0/artifact",
+                "--dry-run",
+            ]
+            .into_iter()
+            .map(String::from),
+        )
+        .expect("parse a filtered figure render");
+        assert_eq!(
+            parsed,
+            Parsed::Run(super::Invocation {
+                json: true,
+                command: Command::FigureRender {
+                    input: PathBuf::from("dossier.json"),
+                    out_dir: PathBuf::from("out"),
+                    kind: Some(FigureKind::SweepGrid),
+                    pointer: Some("/steps/10/outputs/0/artifact".to_string()),
+                    dry_run: true,
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn a_kind_outside_the_figure_registry_is_refused_at_parse_time_naming_the_registry() {
+        let error = parse(
+            [
+                "figure",
+                "render",
+                "--input",
+                "x.json",
+                "--kind",
+                "pie-chart",
+            ]
+            .into_iter()
+            .map(String::from),
+        )
+        .expect_err("an unknown figure name is a mistyped flag, not a defect in the document");
+        assert_eq!(error.code, crate::exit::ExitCode::Usage);
+        for slug in FigureKind::ALL.iter().map(|kind| kind.slug()) {
+            assert!(
+                error.message.contains(slug),
+                "the refusal must name the whole registry, and is missing {slug}: {}",
+                error.message
+            );
+        }
+    }
+
+    #[test]
+    fn a_pointer_without_a_leading_slash_is_refused_but_the_empty_root_pointer_is_accepted() {
+        let error = parse(
+            [
+                "figure",
+                "render",
+                "--input",
+                "x.json",
+                "--pointer",
+                "report",
+            ]
+            .into_iter()
+            .map(String::from),
+        )
+        .expect_err("`report` names nothing under RFC 6901 and must not be silently accepted");
+        assert_eq!(error.code, crate::exit::ExitCode::Usage);
+        assert!(error.message.contains("RFC 6901"), "{}", error.message);
+
+        let root = parse(
+            ["figure", "render", "--input", "x.json", "--pointer="]
+                .into_iter()
+                .map(String::from),
+        )
+        .expect("the empty pointer is the document root and is a legitimate selection");
+        assert_eq!(
+            root,
+            Parsed::Run(super::Invocation {
+                json: false,
+                command: Command::FigureRender {
+                    input: PathBuf::from("x.json"),
+                    out_dir: PathBuf::from("figures"),
+                    kind: None,
+                    pointer: Some(String::new()),
+                    dry_run: false,
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn figure_list_takes_only_an_input_and_batch_takes_an_input_directory() {
+        let listed = parse(
+            ["figure", "list", "--input", "cert.json"]
+                .into_iter()
+                .map(String::from),
+        )
+        .expect("parse figure list");
+        assert_eq!(
+            listed,
+            Parsed::Run(super::Invocation {
+                json: false,
+                command: Command::FigureList {
+                    input: PathBuf::from("cert.json"),
+                },
+            })
+        );
+        parse(
+            ["figure", "list", "--input", "cert.json", "--out-dir", "out"]
+                .into_iter()
+                .map(String::from),
+        )
+        .expect_err("`figure list` writes nothing, so an output directory is meaningless");
+
+        let batched = parse(
+            [
+                "figure",
+                "batch",
+                "--input-dir",
+                "artifacts",
+                "--out-dir",
+                "out",
+                "--dry-run",
+            ]
+            .into_iter()
+            .map(String::from),
+        )
+        .expect("parse figure batch");
+        assert_eq!(
+            batched,
+            Parsed::Run(super::Invocation {
+                json: false,
+                command: Command::FigureBatch {
+                    input_dir: PathBuf::from("artifacts"),
+                    out_dir: PathBuf::from("out"),
+                    dry_run: true,
+                },
+            })
+        );
+        let missing = parse(["figure", "batch"].into_iter().map(String::from))
+            .expect_err("a batch without a directory has nothing to walk");
+        assert!(
+            missing.message.contains("--input-dir"),
+            "{}",
+            missing.message
+        );
+    }
+
+    #[test]
+    fn help_documents_the_figure_group_and_what_its_digests_do_not_prove() {
+        let text = super::help();
+        assert!(text.contains("figure list       --input <path>"));
+        assert!(text.contains("figure render     --input <path>"));
+        assert!(text.contains("figure batch      --input-dir <dir>"));
+        assert!(
+            text.contains("it does not attest that the artifact is correct"),
+            "help must say what the footer digest does not prove"
+        );
+        assert!(
+            text.contains("That is a\n                    verdict about the input"),
+            "help must state that an empty selection is a verdict rather than a failure"
+        );
+        assert!(
+            text.contains("non-recursive: subdirectories are not walked"),
+            "help must state the walk's boundary rather than leave it to be discovered"
+        );
+        for slug in FigureKind::ALL.iter().map(|kind| kind.slug()) {
+            assert!(
+                text.contains(slug),
+                "help must list every figure a caller can name with --kind, and is missing \
+                 {slug}"
+            );
+        }
     }
 }

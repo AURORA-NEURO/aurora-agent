@@ -310,11 +310,6 @@ impl QuorumRule {
         }
     }
 
-    pub fn vetoed_by(mut self, role: impl Into<Role>) -> Self {
-        self.veto_roles.insert(role.into());
-        self
-    }
-
     pub fn requiring(mut self, prerequisite: impl Into<String>) -> Self {
         self.prerequisites.push(prerequisite.into());
         self
@@ -571,7 +566,10 @@ impl Jury {
 
         let mut grouped: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
         for member in 0..count {
-            grouped.entry(find(&mut parent, member)).or_default().push(member);
+            grouped
+                .entry(find(&mut parent, member))
+                .or_default()
+                .push(member);
         }
 
         let clusters = grouped

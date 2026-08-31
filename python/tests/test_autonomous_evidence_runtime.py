@@ -7,6 +7,10 @@ import pytest
 
 from prism_sdk import (
     ArgumentError,
+    AutonomousAuthorizationContext,
+    AutonomousAuthorizationError,
+    AutonomousAuthorizationGate,
+    AutonomousAuthorizationLedger,
     InMemoryAutonomousEvidenceRuntimeJournal,
     AutonomousEvidenceRuntimePersistenceCoordinator,
     AutonomousEvidenceRuntime,
@@ -68,14 +72,47 @@ class _Adapters:
         }
 
 
+def _authorization_context(plan, *, operations=("evidence_acquisition", "evaluation")):
+    ledger = AutonomousAuthorizationLedger(max_grants=4, max_events=256)
+    grant = ledger.issue(
+        grant_id="evidence-runtime-grant",
+        tenant_id="tenant-a",
+        actor_id="actor-a",
+        session_id="session-a",
+        authorization_digest="a" * 64,
+        allowed_domains=plan.domains,
+        allowed_operations=operations,
+        allowed_capabilities=("analysis",),
+        allowed_risk_classes=("read_only",),
+        issued_at=1_000,
+        expires_at=2_000,
+        max_uses=None,
+    )
+    return ledger, AutonomousAuthorizationContext(
+        gate=AutonomousAuthorizationGate(ledger),
+        grant_id=grant.grant_id,
+        tenant_id=grant.tenant_id,
+        actor_id=grant.actor_id,
+        session_id=grant.session_id,
+        authorization_digest=grant.authorization_digest,
+        domains=tuple(plan.domains),
+        capability="analysis",
+        risk_class="read_only",
+        request_prefix="evidence",
+        clock=lambda: 1_200,
+    )
+
+
 def test_evidence_runtime_acquires_and_evaluates_every_builtin_domain_without_retaining_raw_values_in_wire() -> None:
     plan = build_autonomous_evidence_plan(builtin_autonomous_workflow_strategies())
     adapters = _Adapters()
+    ledger, authorization_context = _authorization_context(plan)
     result = AutonomousEvidenceRuntime(plan).execute(
         [_request(requirement, index) for index, requirement in enumerate(plan.requirements)],
         acquirer=adapters,
         projector=adapters,
         evaluator=adapters,
+        authorization_context=authorization_context,
     )
 
     assert len(plan.domains) == 12
@@ -89,6 +126,67 @@ def test_evidence_runtime_acquires_and_evaluates_every_builtin_domain_without_re
     assert "values" not in result.to_dict()
     assert result.to_dict()["retention"] == "metadata_only;raw_values_caller_owned"
     assert result.values
+    assert sum(event.event_type == "request_allowed" for event in ledger.events()) == len(plan.requirements) * 2
+
+
+def test_evidence_runtime_authorization_denies_before_acquisition_and_does_not_record_a_failure() -> None:
+    workflow = next(item for item in builtin_autonomous_workflow_strategies() if item.domain == "science")
+    plan = build_autonomous_evidence_plan((workflow,))
+    ledger, authorization_context = _authorization_context(plan, operations=("evaluation",))
+    calls = 0
+
+    def acquire(_context):
+        nonlocal calls
+        calls += 1
+        return {"should_not": "run"}
+
+    with pytest.raises(AutonomousAuthorizationError, match="operation authorization was refused"):
+        AutonomousEvidenceRuntime(plan).execute(
+            [_request(plan.requirements[0])],
+            acquirer=acquire,
+            authorization_context=authorization_context,
+        )
+    assert calls == 0
+    assert [event.event_type for event in ledger.events()] == ["grant_issued"]
+
+
+def test_evidence_runtime_authorization_denies_evaluation_before_callback_and_replay_reuses_without_acquisition_auth() -> None:
+    workflow = next(item for item in builtin_autonomous_workflow_strategies() if item.domain == "science")
+    plan = build_autonomous_evidence_plan((workflow,))
+    journal = InMemoryAutonomousEvidenceRuntimeJournal()
+    adapters = _Adapters()
+    acquisition_ledger, acquisition_context = _authorization_context(plan, operations=("evidence_acquisition",))
+    first = AutonomousEvidenceRuntime(plan, journal=journal).execute(
+        [_request(plan.requirements[0])],
+        acquirer=adapters,
+        projector=adapters,
+        authorization_context=acquisition_context,
+    )
+    assert first.status == "awaiting_evaluation"
+    assert len(acquisition_ledger.events()) == 2
+
+    evaluation_ledger, evaluation_context = _authorization_context(plan, operations=("evidence_acquisition",))
+    evaluator_calls = 0
+
+    class _Evaluator(_Adapters):
+        def evaluate(self, input_value):
+            nonlocal evaluator_calls
+            evaluator_calls += 1
+            return super().evaluate(input_value)
+
+    restored = AutonomousEvidenceRuntime(plan, journal=journal)
+    restored.rehydrate()
+    with pytest.raises(AutonomousAuthorizationError, match="operation authorization was refused"):
+        restored.execute(
+            [_request(plan.requirements[0])],
+            acquirer=lambda _context: (_ for _ in ()).throw(RuntimeError("must not reacquire")),
+            evaluator=_Evaluator(),
+            rehydrate_value=lambda _receipt: {"fixture": "metadata-only-test-value", "requirement": plan.requirements[0].requirement_id},
+            authorization_context=evaluation_context,
+            reevaluate_pending=True,
+        )
+    assert evaluator_calls == 0
+    assert [event.event_type for event in evaluation_ledger.events()] == ["grant_issued"]
 
 
 def test_evidence_runtime_makes_evaluation_and_acquisition_failures_explicit() -> None:

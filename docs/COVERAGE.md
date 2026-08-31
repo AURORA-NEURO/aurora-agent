@@ -488,6 +488,19 @@ claim prerequisite validation, duplicate-ID rejection, omission accounting, clai
 subaudits, and sync/async/HTTP transport helpers. TypeScript exposes the same top-level result
 projection. Rust remains authoritative for metric comparability, release posture, and nested
 scientific audits.
+The autonomous SDK layer now adds `assess_claim_integrity` / `assessClaimIntegrity` as a
+provider-free join above those focused contracts. It applies an explicit reference-time temporal
+firewall, source-independence counting, contradiction vetoes, modality requirements,
+reproducibility requirements, and bounded next-action proposals across all twelve autonomous
+domains. `reassess_claim_integrity` / `reassessClaimIntegrity` carries a prior assessment digest
+and generation for restart-safe continuation, while the JSON projection validator rejects tampered
+decision rows. This remains metadata fusion: it does not fetch evidence, resolve contradictions,
+reproduce an experiment, invoke a model, or grant authorization.
+The integrity-to-acquisition bridge compiles those action proposals into the existing candidate
+planner: affected domains and claim-linked capabilities receive bounded, digest-visible priority
+boosts, unmatched actions remain counted, and ready assessments produce an explicit no-action
+result. This closes the metadata-only planning handoff without dispatching sources or turning a
+proposal into authorization.
 The typed `BioAtlasPublicationAuditReport` and TypeScript `BioAtlasPublicationAuditResult` then
 preserve the next publication boundary: atlas aggregation, evidence-conditioned numeric scores,
 card disclosure, leaderboard ranking, ranked/unranked counts, and explicit target blockers remain
@@ -759,3 +772,9 @@ stamped many times, and the distinct-string count sees that directly.
 
 Use the distinguishing-lines-per-module column, and treat every percentage as a band with its method
 attached.
+
+The cross-domain structured-response gate is covered in both SDKs. It validates every built-in
+specialist contract, computes digest-only response rows, requires explicit pairwise alignment by
+default, blocks missing/weak/contradictory responses, accepts an optional validated synthesis row,
+and supports metadata validation plus replay drift detection. The gate is provider-free and its
+next actions remain review proposals rather than dispatch authority.

@@ -19,6 +19,7 @@ use serde_json::Value;
 
 /// One pass receipt from the compiler pipeline (43.16).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PassObservation {
     pub name: String,
     pub retained: usize,
@@ -31,6 +32,7 @@ pub struct PassObservation {
 /// reader to assume it is coming; "fiber-world/0.1 carries no abstract-domain registry" tells
 /// them what would have to change first.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DeferredPass {
     pub pass: String,
     pub reason: String,
@@ -38,6 +40,7 @@ pub struct DeferredPass {
 
 /// Everything the compiler produced on a slice that compiled.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CompiledObservation {
     pub status: OracleStatus,
     pub witness_kinds: Vec<String>,
@@ -104,6 +107,7 @@ pub enum RefusalCode {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RefusalObservation {
     pub code: RefusalCode,
     pub message: String,
@@ -115,6 +119,7 @@ pub struct RefusalObservation {
 
 /// One depth of the neighbourhood-walk probe.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DepthObservation {
     pub depth: usize,
     pub facts_selected: usize,
@@ -128,6 +133,7 @@ pub struct DepthObservation {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct GraphWalkObservation {
     pub max_depth: usize,
     pub depths: Vec<DepthObservation>,
@@ -143,6 +149,7 @@ pub struct GraphWalkObservation {
 /// reviewer who does hold it can mint the same bytes. A bundle observation carrying only the
 /// successful verification would read as third-party verifiability, which this workspace cannot do.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct BundleObservation {
     pub bundle_id: String,
     pub manifest_digest: String,
@@ -170,6 +177,7 @@ pub struct BundleObservation {
 
 /// Facts about the world a slice ran against, independent of any compile.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Observations {
     pub world_id: String,
     pub query_id: String,
@@ -192,6 +200,7 @@ pub struct Observations {
 /// `failures` being non-empty is not an error condition in the Rust sense — it is the finding —
 /// which is why running a slice returns `Ok` with a failing report rather than `Err`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SliceReport {
     pub slice_id: String,
     pub title: String,

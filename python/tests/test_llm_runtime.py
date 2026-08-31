@@ -8,6 +8,10 @@ from tempfile import TemporaryDirectory
 import threading
 import unittest
 
+import pytest
+
+from prism_sdk.errors import ArgumentError
+
 from prism_sdk.llm_runtime import (
     CredentialError,
     CredentialProvisioner,
@@ -52,7 +56,21 @@ from prism_sdk.brain import (
     BrainMissionResult,
     BrainToolLoopResult,
     build_brain_evaluation_input,
+    build_model_continuation_plan,
+    create_model_continuation_state,
+    validate_model_continuation_plan,
+    validate_model_continuation_state,
+    advance_model_continuation_state,
+    complete_model_continuation_state,
     MissionToolAuthorizer,
+)
+from prism_sdk import (
+    AutonomousEffectBoundary,
+    AutonomousEffectReconciliationRequiredError,
+    AutonomousAuthorizationContext,
+    AutonomousAuthorizationGate,
+    AutonomousAuthorizationLedger,
+    InMemoryAutonomousEffectJournal,
 )
 
 
@@ -61,6 +79,298 @@ def _context_digest(context: dict[str, object]) -> str:
     return hashlib.sha256(
         json.dumps(identity, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
+
+
+def _provider_authorization_context(*, max_uses: int = 2, domains: tuple[str, ...] = ("coding",)) -> tuple[AutonomousAuthorizationLedger, AutonomousAuthorizationContext]:
+    ledger = AutonomousAuthorizationLedger(max_grants=16, max_events=64)
+    grant = ledger.issue(
+        grant_id="runtime-grant",
+        tenant_id="tenant-a",
+        actor_id="actor-a",
+        session_id="session-a",
+        authorization_digest="a" * 64,
+        allowed_domains=domains,
+        allowed_operations=("provider_invocation",),
+        allowed_risk_classes=(),
+        issued_at=1_000,
+        expires_at=2_000,
+        max_uses=max_uses,
+    )
+    return ledger, AutonomousAuthorizationContext(
+        gate=AutonomousAuthorizationGate(ledger),
+        grant_id=grant.grant_id,
+        tenant_id=grant.tenant_id,
+        actor_id=grant.actor_id,
+        session_id=grant.session_id,
+        authorization_digest=grant.authorization_digest,
+        domains=domains,
+        clock=lambda: 1_200,
+    )
+
+
+def test_provider_invocation_effect_boundary_projects_transient_response() -> None:
+    journal = InMemoryAutonomousEffectJournal(clock=lambda: 10)
+    boundary = AutonomousEffectBoundary(journal=journal)
+    calls = 0
+    runtime = LLMRuntime(effect_boundary=boundary)
+
+    def handler(request: ProviderRequest) -> dict[str, object]:
+        nonlocal calls
+        calls += 1
+        return {"output_text": f"private answer for {request.model}", "request_id": "provider-request-1"}
+
+    runtime.register_in_memory_provider("offline", handler)
+    request = ProviderRequest(
+        model="offline-model",
+        messages=({"role": "user", "content": "private prompt"},),
+        idempotency_key="caller-owned-provider-key",
+    )
+    response = runtime.invoke("offline", request)
+    assert response.text == "private answer for offline-model"
+    assert calls == 1
+    encoded = json.dumps(journal.snapshot().to_dict(), sort_keys=True)
+    assert "private prompt" not in encoded
+    assert "private answer" not in encoded
+    assert "request_id" not in encoded
+    assert [row.event.status for row in journal.events()] == ["prepared", "dispatching", "dispatched", "completed"]
+    with pytest.raises(AutonomousEffectReconciliationRequiredError):
+        runtime.invoke("offline", request)
+    assert calls == 1
+
+
+def test_provider_authorization_rejects_before_credentials_or_transport() -> None:
+    runtime = LLMRuntime()
+    runtime.register_provider(openai_compatible_provider("credentialed", "https://credentialed.invalid"))
+    _ledger, context = _provider_authorization_context(domains=("coding",))
+    request = ProviderRequest(model="credentialed-model", messages=({"role": "user", "content": "safe"},))
+
+    with pytest.raises(ArgumentError, match="outside its context scope"):
+        runtime.invoke(
+            "credentialed",
+            request,
+            authorization_context=context,
+            authorization_domain="science",
+        )
+
+
+def test_provider_authorization_consumes_one_fresh_budget_entry_per_invocation_and_stream() -> None:
+    ledger, context = _provider_authorization_context(max_uses=2)
+    calls = {"invoke": 0, "stream": 0}
+    runtime = LLMRuntime()
+
+    def handler(request: ProviderRequest) -> str:
+        calls["invoke"] += 1
+        return f"answer-{request.model}"
+
+    def stream_handler(request: ProviderRequest):
+        calls["stream"] += 1
+        yield ProviderStreamEvent(
+            provider="authorized-offline",
+            model=request.model,
+            sequence=0,
+            event_type="done",
+            done=True,
+        )
+
+    runtime.register_in_memory_provider("authorized-offline", handler, stream_handler=stream_handler)
+    request = ProviderRequest(model="authorized-model", messages=({"role": "user", "content": "safe"},))
+    assert runtime.invoke("authorized-offline", request, authorization_context=context, authorization_domain="coding").text == "answer-authorized-model"
+    assert list(runtime.invoke_stream("authorized-offline", request, authorization_context=context, authorization_domain="coding"))[0].done is True
+
+    with pytest.raises(ArgumentError, match="exhausted"):
+        runtime.invoke("authorized-offline", request, authorization_context=context, authorization_domain="coding")
+    assert calls == {"invoke": 1, "stream": 1}
+    assert ledger.get("runtime-grant").used_count == 2  # type: ignore[union-attr]
+
+
+def test_provider_authorization_is_consumed_for_each_tool_loop_turn() -> None:
+    ledger, context = _provider_authorization_context(max_uses=2)
+    calls = 0
+    runtime = LLMRuntime()
+
+    def handler(request: ProviderRequest) -> ProviderResponse:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return ProviderResponse(
+                provider="authorized-loop",
+                model=request.model,
+                text="",
+                status_code=200,
+                request_id=None,
+                usage={},
+                raw={},
+                tool_calls=(ProviderToolCall("call-1", "lookup", {"query": "safe"}),),
+            )
+        return ProviderResponse(
+            provider="authorized-loop",
+            model=request.model,
+            text="done",
+            status_code=200,
+            request_id=None,
+            usage={},
+            raw={},
+        )
+
+    runtime.register_in_memory_provider("authorized-loop", handler)
+    result = runtime.invoke_tool_loop(
+        "authorized-loop",
+        ProviderRequest(
+            model="authorized-loop-model",
+            messages=({"role": "user", "content": "use lookup"},),
+            tools=(ProviderTool("lookup", parameters={"type": "object"}),),
+        ),
+        authorize_and_execute=lambda calls: [ProviderToolResult(calls[0].call_id, {"ok": True}, approved=True)],
+        max_turns=3,
+        authorization_context=context,
+        authorization_domain="coding",
+    )
+
+    assert result.status == "completed"
+    assert result.turns == 2
+    assert calls == 2
+    assert ledger.get("runtime-grant").used_count == 2  # type: ignore[union-attr]
+
+
+def test_provider_effect_boundary_keeps_definite_http_refusal_as_provider_error() -> None:
+    journal = InMemoryAutonomousEffectJournal(clock=lambda: 11)
+    runtime = LLMRuntime(effect_boundary=AutonomousEffectBoundary(journal=journal))
+    runtime.register_in_memory_provider(
+        "denied",
+        lambda _request: (_ for _ in ()).throw(ProviderError("denied", status_code=401)),
+    )
+    request = ProviderRequest(model="denied-model", messages=({"role": "user", "content": "safe"},), idempotency_key="denied-key")
+    with pytest.raises(ProviderError) as raised:
+        runtime.invoke("denied", request)
+    assert raised.value.status_code == 401
+    assert journal.events()[-1].event.status == "failed"
+
+
+def test_live_provider_stream_boundary_reconciles_partial_consumption_without_retaining_deltas() -> None:
+    journal = InMemoryAutonomousEffectJournal(clock=lambda: 12)
+    boundary = AutonomousEffectBoundary(journal=journal)
+    runtime = LLMRuntime(effect_boundary=boundary)
+
+    def stream_handler(request: ProviderRequest):
+        yield ProviderStreamEvent(
+            provider="offline-stream",
+            model=request.model,
+            sequence=0,
+            event_type="text",
+            text_delta="private delta",
+        )
+        raise RuntimeError("connection lost after first delta")
+
+    runtime.register_in_memory_provider("offline-stream", lambda _request: "unused", stream_handler=stream_handler)
+    request = ProviderRequest(
+        model="stream-model",
+        messages=({"role": "user", "content": "private prompt"},),
+        idempotency_key="stream-owner-key",
+    )
+    with pytest.raises(AutonomousEffectReconciliationRequiredError):
+        list(runtime.invoke_stream("offline-stream", request))
+    assert [row.event.status for row in journal.events()] == ["prepared", "dispatching", "dispatched", "uncertain"]
+    encoded = json.dumps(journal.snapshot().to_dict(), sort_keys=True)
+    assert "private prompt" not in encoded
+    assert "private delta" not in encoded
+
+
+def test_live_provider_stream_boundary_completes_only_after_exhaustion_and_blocks_replay() -> None:
+    journal = InMemoryAutonomousEffectJournal(clock=lambda: 13)
+    boundary = AutonomousEffectBoundary(journal=journal)
+    runtime = LLMRuntime(effect_boundary=boundary)
+
+    def stream_handler(request: ProviderRequest):
+        yield ProviderStreamEvent(
+            provider="offline-complete-stream",
+            model=request.model,
+            sequence=0,
+            event_type="text",
+            text_delta="bounded",
+        )
+        yield ProviderStreamEvent(
+            provider="offline-complete-stream",
+            model=request.model,
+            sequence=1,
+            event_type="done",
+            done=True,
+        )
+
+    runtime.register_in_memory_provider("offline-complete-stream", lambda _request: "unused", stream_handler=stream_handler)
+    request = ProviderRequest(
+        model="stream-model",
+        messages=({"role": "user", "content": "prompt"},),
+        idempotency_key="stream-complete-key",
+    )
+    events = list(runtime.invoke_stream("offline-complete-stream", request))
+    assert [event.text_delta for event in events] == ["bounded", ""]
+    assert [row.event.status for row in journal.events()] == ["prepared", "dispatching", "dispatched", "completed"]
+    with pytest.raises(AutonomousEffectReconciliationRequiredError):
+        list(runtime.invoke_stream("offline-complete-stream", request))
+
+
+def test_collected_provider_stream_requires_a_terminal_done_event() -> None:
+    runtime = LLMRuntime()
+
+    def stream_handler(request: ProviderRequest):
+        yield ProviderStreamEvent(
+            provider="offline-incomplete-stream",
+            model=request.model,
+            sequence=0,
+            event_type="text",
+            text_delta="partial output",
+        )
+
+    runtime.register_in_memory_provider("offline-incomplete-stream", lambda _request: "unused", stream_handler=stream_handler)
+    with pytest.raises(ProviderError, match="ended without a done event"):
+        runtime.collect_stream(
+            "offline-incomplete-stream",
+            ProviderRequest(model="stream-model", messages=({"role": "user", "content": "prompt"},)),
+        )
+
+
+def test_provider_stream_terminal_event_can_finalize_tool_calls_without_post_terminal_events() -> None:
+    runtime = LLMRuntime()
+
+    def stream_handler(request: ProviderRequest):
+        yield ProviderStreamEvent(
+            provider="offline-tool-stream",
+            model=request.model,
+            sequence=0,
+            event_type="tool.done",
+            tool_call=ProviderToolCall(call_id="call-1", name="lookup", arguments={"query": "safe"}),
+            done=True,
+        )
+
+    runtime.register_in_memory_provider("offline-tool-stream", lambda _request: "unused", stream_handler=stream_handler)
+    response = runtime.collect_stream(
+        "offline-tool-stream",
+        ProviderRequest(
+            model="stream-model",
+            messages=({"role": "user", "content": "prompt"},),
+            tools=(ProviderTool("lookup", description="lookup", parameters={"type": "object"}),),
+        ),
+    )
+    assert [call.name for call in response.tool_calls] == ["lookup"]
+
+
+def test_live_provider_stream_boundary_marks_abandoned_iterator_uncertain() -> None:
+    journal = InMemoryAutonomousEffectJournal(clock=lambda: 14)
+    boundary = AutonomousEffectBoundary(journal=journal)
+    runtime = LLMRuntime(effect_boundary=boundary)
+
+    def stream_handler(request: ProviderRequest):
+        yield ProviderStreamEvent(provider="offline-abandoned-stream", model=request.model, sequence=0, event_type="text", text_delta="first")
+        yield ProviderStreamEvent(provider="offline-abandoned-stream", model=request.model, sequence=1, event_type="text", text_delta="second")
+
+    runtime.register_in_memory_provider("offline-abandoned-stream", lambda _request: "unused", stream_handler=stream_handler)
+    iterator = runtime.invoke_stream(
+        "offline-abandoned-stream",
+        ProviderRequest(model="stream-model", messages=({"role": "user", "content": "prompt"},), idempotency_key="stream-abandoned-key"),
+    )
+    next(iterator)
+    iterator.close()
+    assert [row.event.status for row in journal.events()] == ["prepared", "dispatching", "dispatched", "uncertain"]
 
 
 class _ProviderHandler(BaseHTTPRequestHandler):
@@ -831,19 +1141,125 @@ class LlmRuntimeTests(unittest.TestCase):
             [event["attempt"] for event in trace_events if event["phase"] == "model_selection_finished"],
             [1, 2],
         )
-        self.assertGreaterEqual(len(selections), 4)
-        for retry_selection in selections[2:]:
-            retry_enabled = {
-                f"{model['provider']}/{model['model']}"
-                for model in retry_selection
-                if model.get("enabled", True)
-            }
-            self.assertEqual(retry_enabled, {"fallback/backup"})
+        # The selector is consulted once. Fallback consumes the sealed continuation ladder and
+        # must not ask a stateful selector to re-rank after transport health changes.
+        self.assertEqual(len(selections), 1)
+        self.assertEqual(
+            {f"{model['provider']}/{model['model']}" for model in selections[0]},
+            {"openai/primary", "openai/secondary", "fallback/backup"},
+        )
         attempt = result.provider_failover["attempts"][0]  # type: ignore[index]
         self.assertEqual(attempt["provider_circuit_after_failure"], "open")
         self.assertEqual(attempt["provider_health_gate"], "provider_disabled")
         self.assertNotIn("openai-circuit-secret", json.dumps(result.to_dict()))
         self.assertNotIn("fallback-circuit-secret", json.dumps(result.to_dict()))
+        self.assertEqual(len(result.continuation_plan["plan_digest"]), 64)  # type: ignore[index]
+        self.assertEqual(
+            [step["model_id"] for step in result.continuation_plan["steps"]],  # type: ignore[index]
+            ["openai/primary", "openai/secondary", "fallback/backup"],
+        )
+
+    def test_model_continuation_plan_is_digest_bound_and_failure_scoped(self) -> None:
+        candidates = [
+            {
+                "provider": "ladder",
+                "model": "primary",
+                "context_window_tokens": 8_000,
+                "max_output_tokens": 256,
+                "quality": 0.99,
+                "latency_ms": 10,
+                "cost_per_million_tokens": 1,
+                "reliability": 0.99,
+                "enabled": True,
+            },
+            {
+                "provider": "ladder",
+                "model": "sibling",
+                "context_window_tokens": 8_000,
+                "max_output_tokens": 256,
+                "quality": 0.8,
+                "latency_ms": 20,
+                "cost_per_million_tokens": 2,
+                "reliability": 0.9,
+                "enabled": True,
+            },
+            {
+                "provider": "backup",
+                "model": "last",
+                "context_window_tokens": 8_000,
+                "max_output_tokens": 256,
+                "quality": 0.7,
+                "latency_ms": 30,
+                "cost_per_million_tokens": 3,
+                "reliability": 0.8,
+                "enabled": True,
+            },
+        ]
+        selection = {
+            "selected_model": {"provider": "ladder", "model": "primary"},
+            "decision_digest": "a" * 64,
+            "ranking": [
+                {"model_id": "ladder/primary", "eligible": True},
+                {"model_id": "ladder/sibling", "eligible": True},
+                {"model_id": "backup/last", "eligible": True},
+            ],
+        }
+        plan = build_model_continuation_plan(selection, candidates, max_failovers=1)
+        validate_model_continuation_plan(plan)
+        self.assertEqual([step["model_id"] for step in plan["steps"]], ["ladder/primary", "ladder/sibling", "backup/last"])
+        state = create_model_continuation_state(plan)
+        validate_model_continuation_state(plan, state)
+        after_timeout = advance_model_continuation_state(
+            plan,
+            state,
+            provider="ladder",
+            model="primary",
+            failure_scope="model",
+            failure_code="timeout",
+        )
+        validate_model_continuation_state(plan, after_timeout)
+        self.assertEqual(after_timeout["next_step_index"], 1)
+        self.assertEqual(after_timeout["excluded_models"], ["ladder/primary"])
+        completed = complete_model_continuation_state(
+            plan,
+            after_timeout,
+            provider="ladder",
+            model="sibling",
+            status_code=200,
+        )
+        self.assertEqual(completed["status"], "completed")
+        tampered = dict(plan)
+        tampered["steps"] = [dict(plan["steps"][0]), dict(plan["steps"][2]), dict(plan["steps"][1])]
+        with self.assertRaisesRegex(BrainRunError, "digest mismatch"):
+            validate_model_continuation_plan(tampered)
+
+        def reseal(value: dict[str, object], digest_field: str) -> dict[str, object]:
+            body = {key: item for key, item in value.items() if key != digest_field}
+            value[digest_field] = hashlib.sha256(
+                json.dumps(
+                    body,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    allow_nan=False,
+                ).encode("utf-8")
+            ).hexdigest()
+            return value
+
+        invalid_policy = dict(plan)
+        invalid_policy["steps"] = [
+            {**plan["steps"][0], "failure_policy": {"timeout_with_closed_circuit": "retry"}},
+            *plan["steps"][1:],
+        ]
+        reseal(invalid_policy, "plan_digest")
+        with self.assertRaisesRegex(BrainRunError, "failure policy"):
+            validate_model_continuation_plan(invalid_policy)
+
+        invalid_attempt = dict(after_timeout)
+        invalid_attempt["attempts"] = [{**after_timeout["attempts"][0], "provider": "other"}]
+        reseal(invalid_attempt, "state_digest")
+        with self.assertRaisesRegex(BrainRunError, "attempt identity"):
+            validate_model_continuation_state(plan, invalid_attempt)
 
     def test_credential_session_groups_handles_and_revokes_on_expiry(self) -> None:
         store = CredentialStore()
@@ -3177,7 +3593,7 @@ class LlmRuntimeTests(unittest.TestCase):
 
         self.assertEqual(result.status, "mission_dispatched")
         self.assertEqual(workspace.route_calls, 1)
-        self.assertEqual(len(workspace.selection_contexts), 2)
+        self.assertEqual(len(workspace.selection_contexts), 1)
         self.assertEqual(workspace.selection_contexts[0]["domain"], "cross_domain:engineering")
         self.assertEqual(len(workspace.missions), 2)
         self.assertFalse(workspace.missions[0]["policy"]["execute"])  # type: ignore[index]

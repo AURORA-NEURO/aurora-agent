@@ -23,9 +23,7 @@ fn bound(value: f64) -> InfluenceBound {
 
 #[test]
 fn an_uncomputable_bound_is_unknown_and_not_infinity() {
-    let estimate = InfluenceEstimate::Unknown(UnknownReason::NoFactorTable {
-        factor: "f".into(),
-    });
+    let estimate = InfluenceEstimate::Unknown(UnknownReason::NoFactorTable { factor: "f".into() });
     assert!(estimate.bound().is_none());
     assert!(manifest::certificate_bound(&estimate).is_none());
     assert!(!estimate.supports_sufficiency());
@@ -71,14 +69,20 @@ fn an_unknown_group_carries_no_numeric_bound_on_the_certificate() {
 #[test]
 fn a_computed_zero_maps_to_bounded_rather_than_to_zero() {
     let estimate = InfluenceEstimate::Bounded(bound(0.0));
-    let group = manifest::omission_group("a path exists and this perturbation did not use it", 1, &estimate, Vec::new());
+    let group = manifest::omission_group(
+        "a path exists and this perturbation did not use it",
+        1,
+        &estimate,
+        Vec::new(),
+    );
     assert_eq!(group.influence, InfluenceClass::Bounded);
     assert_eq!(group.bound, Some(0.0));
 }
 
 #[test]
 fn a_structural_zero_maps_to_influence_class_zero() {
-    let estimate = InfluenceEstimate::Bounded(structural_zero("no path reaches the target").unwrap());
+    let estimate =
+        InfluenceEstimate::Bounded(structural_zero("no path reaches the target").unwrap());
     let group = manifest::omission_group("unreached", 750, &estimate, Vec::new());
     assert_eq!(group.influence, InfluenceClass::Zero);
     assert_eq!(group.bound, Some(0.0));
@@ -128,12 +132,14 @@ fn a_tie_between_two_bounds_keeps_the_first_so_the_winner_is_deterministic() {
 }
 
 #[test]
-fn a_vacuous_bound_is_flagged_even_though_it_is_formally_sufficient() {
+fn a_vacuous_bound_is_refused_admission_rather_than_flagged_as_sufficient() {
     let estimate = InfluenceEstimate::Bounded(bound(1.0));
     let group = manifest::omission_group("everything", 5, &estimate, Vec::new());
-    assert_eq!(group.influence, InfluenceClass::Bounded);
-    assert!(group.influence.supports_sufficiency());
+    assert_eq!(group.influence, InfluenceClass::Unknown);
+    assert!(!group.influence.supports_sufficiency());
     assert!(!manifest::is_informative(&group));
+    assert_eq!(group.bound, None);
+    assert!(group.reason.contains("permits every answer"));
     assert!(estimate.bound().unwrap().is_vacuous());
 }
 
@@ -151,10 +157,10 @@ fn a_summary_separates_informative_bounds_from_vacuous_ones() {
         ),
     ];
     let summary = manifest::summarise(&groups);
-    assert_eq!(summary.bounded_groups, 3);
+    assert_eq!(summary.bounded_groups, 2);
     assert_eq!(summary.informative_groups, 2);
-    assert_eq!(summary.vacuous_groups, 1);
-    assert_eq!(summary.unknown_groups, 1);
+    assert_eq!(summary.vacuous_groups, 0);
+    assert_eq!(summary.unknown_groups, 2);
     assert_eq!(summary.worst_informative_bound, Some(0.4));
 }
 

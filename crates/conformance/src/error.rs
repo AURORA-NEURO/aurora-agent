@@ -128,4 +128,10 @@ pub enum ConformanceError {
         "conformance certificate digest mismatch: claims {claimed}, recomputes to {recomputed}"
     )]
     CertificateDigestMismatch { claimed: String, recomputed: String },
+
+    /// The claimed digest is not a canonical lowercase SHA-256 value.
+    #[error(
+        "conformance certificate digest is malformed: {claimed:?} is not a 64-character lowercase hex digest"
+    )]
+    CertificateDigestMalformed { claimed: String },
 }

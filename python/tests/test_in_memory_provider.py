@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from types import SimpleNamespace
 from typing import Any, Mapping
 
 import pytest
@@ -12,8 +13,15 @@ from prism_sdk import (
     AutonomousAgent,
     AutonomousBatchResult,
     AutonomousBatchCheckpoint,
+    AutonomousBatchRehydrationContext,
+    AutonomousBatchProtectedRehydration,
+    AutonomousAutomaticBatchProtectedRehydration,
     AutonomousBrainBatchJobController,
+    AutonomousProtectedRehydrationAdapter,
+    AutonomousProtectedRehydrationBoundary,
+    AutonomousProtectedRehydrationContext,
     InMemoryAutonomousBatchCheckpointStore,
+    InMemoryAutonomousRunTraceStore,
     TransactionalJsonAutonomousBatchCheckpointPersistence,
     BrainRunError,
     AutonomousDomainRegistry,
@@ -27,6 +35,7 @@ from prism_sdk import (
     ProviderStreamEvent,
     ProviderTool,
     ProviderToolResult,
+    protected_value_digest,
 )
 
 
@@ -276,7 +285,7 @@ class _OfflineWorkspace:
                     {"role": "system", "content": str(args.get("system"))},
                     {"role": "user", "content": str(args.get("task"))},
                 ],
-                "prompt_digest": "p" * 64,
+                "prompt_digest": "a" * 64,
             }
         if name == "brain_plan":
             return {
@@ -512,6 +521,142 @@ def test_agent_run_auto_batch_routes_without_preselecting_domains_and_preserves_
     assert result.items[1].result.status == "route_review_required"
 
 
+def test_agent_run_auto_batch_with_trace_preserves_one_redacted_all_domain_lifecycle() -> None:
+    runtime = LLMRuntime()
+    runtime.register_in_memory_provider(
+        "offline",
+        lambda _request: {"output_text": "offline traced routed answer"},
+    )
+    required = {
+        capability
+        for profile in AutonomousDomainRegistry.with_builtin_profiles().catalogue()
+        for capability in profile["required_model_capabilities"]
+    }
+    required.update({"tool_calling", "structured_output"})
+    agent = AutonomousAgent(
+        _OfflineWorkspace(),
+        runtime,
+        model_catalogue=ModelCatalogue(
+            [
+                {
+                    "provider": "offline",
+                    "model": "offline-model",
+                    "capabilities": sorted(required),
+                    "context_window_tokens": 32_000,
+                    "max_output_tokens": 2_048,
+                    "quality": 0.9,
+                    "latency_ms": 1,
+                    "cost_per_million_tokens": 0,
+                    "reliability": 0.99,
+                }
+            ]
+        ),
+    )
+    requests = tuple(
+        {"task": f"perform a bounded {domain} review", "domain": domain}
+        for domain in AUTONOMOUS_DOMAINS
+    )
+    trace_store = InMemoryAutonomousRunTraceStore()
+    traced = agent.run_auto_batch_with_trace(
+        requests,
+        credentials={},
+        trace_store=trace_store,
+        run_id="automatic-batch-trace",
+        max_parallelism=1,
+        options_factory=lambda _request, _index: {"approve_provider_call": True},
+    )
+    assert traced.result.status == "completed"
+    assert traced.result.completed_count == len(AUTONOMOUS_DOMAINS)
+    assert traced.trace.status == "completed"
+    assert traced.trace.event_count >= 2 * len(AUTONOMOUS_DOMAINS) + 2
+    assert traced.trace.provider_invocations >= len(AUTONOMOUS_DOMAINS)
+    assert len(traced.trace.trace_digest) == 64
+    phases = [
+        event.phase
+        for event in trace_store.events({"run_id": "automatic-batch-trace"})
+    ]
+    assert phases[0] == "started"
+    assert phases[-1] == "completed"
+    assert phases.count("plan_compiled") >= len(AUTONOMOUS_DOMAINS)
+    serialized = json.dumps(traced.to_dict(), sort_keys=True)
+    assert "offline traced routed answer" not in serialized
+    assert "perform a bounded coding review" not in serialized
+
+
+def test_agent_run_resumable_auto_batch_with_trace_rehydrates_without_provider_replay() -> None:
+    runtime = LLMRuntime()
+    runtime.register_in_memory_provider(
+        "offline",
+        lambda _request: {"output_text": "offline resumable traced answer"},
+    )
+    required = {
+        capability
+        for profile in AutonomousDomainRegistry.with_builtin_profiles().catalogue()
+        for capability in profile["required_model_capabilities"]
+    }
+    required.update({"tool_calling", "structured_output"})
+    agent = AutonomousAgent(
+        _OfflineWorkspace(),
+        runtime,
+        model_catalogue=ModelCatalogue(
+            [
+                {
+                    "provider": "offline",
+                    "model": "offline-model",
+                    "capabilities": sorted(required),
+                    "context_window_tokens": 32_000,
+                    "max_output_tokens": 2_048,
+                    "quality": 0.9,
+                    "latency_ms": 1,
+                    "cost_per_million_tokens": 0,
+                    "reliability": 0.99,
+                }
+            ]
+        ),
+    )
+    requests = (
+        {"task": "perform a bounded coding review"},
+        {"task": "profile a bounded data dataset"},
+    )
+    first_checkpoints: list[AutonomousBatchCheckpoint] = []
+    first_trace = agent.run_resumable_auto_batch_with_trace(
+        requests,
+        job_id="resumable-traced-auto-batch",
+        credentials={},
+        trace_store=InMemoryAutonomousRunTraceStore(),
+        run_id="resumable-traced-first",
+        max_parallelism=1,
+        options_factory=lambda _request, _index: {"approve_provider_call": True},
+        checkpoint_sink=first_checkpoints.append,
+    )
+    assert first_trace.result.status == "completed"
+    assert first_checkpoints[-1].status == "completed"
+
+    rehydrated = 0
+
+    def rehydrate(context: AutonomousBatchRehydrationContext) -> Any:
+        nonlocal rehydrated
+        rehydrated += 1
+        return first_trace.result.items[context.index].result
+
+    second_trace = agent.run_resumable_auto_batch_with_trace(
+        requests,
+        job_id="resumable-traced-auto-batch",
+        credentials={},
+        trace_store=InMemoryAutonomousRunTraceStore(),
+        run_id="resumable-traced-second",
+        max_parallelism=1,
+        options_factory=lambda _request, _index: {"approve_provider_call": True},
+        checkpoint=first_checkpoints[-1].to_dict(),
+        rehydrate_result=rehydrate,
+    )
+    assert second_trace.result.status == "completed"
+    assert second_trace.trace.status == "completed"
+    assert rehydrated == len(requests)
+    assert runtime.provider_status("offline")["attempts"] == len(requests)
+    assert "offline resumable traced answer" not in json.dumps(second_trace.to_dict(), sort_keys=True)
+
+
 def test_agent_run_cross_domain_batch_preserves_child_order_and_shared_approval_boundary() -> None:
     runtime = LLMRuntime()
 
@@ -655,6 +800,143 @@ def test_agent_run_resumable_batch_rehydrates_successes_and_rejects_tampering() 
         )
 
 
+def test_agent_run_resumable_auto_batch_binds_semantic_policy_and_rejects_drift() -> None:
+    runtime = LLMRuntime()
+    domains = tuple(AUTONOMOUS_DOMAINS)
+
+    def handler(request: ProviderRequest) -> Mapping[str, Any]:
+        if request.require_json:
+            return {
+                "output_text": json.dumps({
+                    "candidates": [
+                        {"domain": domain, "score": 0.95 if domain == "coding" else 0.01}
+                        for domain in domains
+                    ],
+                    "selected_domains": ["coding"],
+                    "confidence": 0.95,
+                    "abstain": False,
+                })
+            }
+        return {"output_text": "offline semantic batch answer"}
+
+    runtime.register_in_memory_provider("offline", handler)
+    required = {
+        capability
+        for profile in AutonomousDomainRegistry.with_builtin_profiles().catalogue()
+        for capability in profile["required_model_capabilities"]
+    }
+    required.update({"tool_calling", "structured_output"})
+    agent = AutonomousAgent(
+        _OfflineWorkspace(),
+        runtime,
+        model_catalogue=ModelCatalogue(
+            [{
+                "provider": "offline",
+                "model": "offline-model",
+                "capabilities": sorted(required),
+                "context_window_tokens": 32_000,
+                "max_output_tokens": 2_048,
+                "quality": 0.9,
+                "latency_ms": 1,
+                "cost_per_million_tokens": 0,
+                "reliability": 0.99,
+            }]
+        ),
+    )
+    requests = (
+        {"task": "perform a bounded coding review"},
+        {"task": "perform another bounded coding review"},
+    )
+    fail_second = True
+    semantic_weight = 0.65
+    checkpoints: list[AutonomousBatchCheckpoint] = []
+
+    def options_factory(_request: Mapping[str, Any], index: int) -> Mapping[str, Any]:
+        return {
+            "approve_provider_call": True,
+            "semantic_routing": True,
+            "semantic_weight": semantic_weight,
+            "max_steps": 0 if fail_second and index == 1 else 32,
+        }
+
+    first = agent.run_resumable_batch(
+        requests,
+        job_id="semantic-policy-batch",
+        mode="auto",
+        credentials={},
+        max_parallelism=1,
+        options_factory=options_factory,
+        checkpoint_sink=checkpoints.append,
+    )
+    assert first.status == "partial"
+    assert first.items[0].status == "succeeded"
+    assert checkpoints[-1].semantic_routing_policy_digest is not None
+    assert checkpoints[-1].automatic_execution_policy_digest is not None
+    public = json.dumps(checkpoints[-1].to_dict())
+    assert "perform a bounded coding review" not in public
+    assert "offline semantic batch answer" not in public
+    missing_policy = checkpoints[-1].to_dict()
+    del missing_policy["automatic_execution_policy_digest"]
+    with pytest.raises(BrainRunError, match="automatic.*policy"):
+        AutonomousBatchCheckpoint.from_dict(missing_policy)
+
+    semantic_weight = 0.85
+    with pytest.raises(BrainRunError, match="semantic-routing policy|execution policy|checkpoint"):
+        agent.run_resumable_batch(
+            requests,
+            job_id="semantic-policy-batch",
+            mode="auto",
+            credentials={},
+            max_parallelism=1,
+            options_factory=options_factory,
+            checkpoint=checkpoints[-1].to_dict(),
+            rehydrate_result=lambda context: first.items[context.index].result,
+        )
+
+    semantic_weight = 0.65
+    with pytest.raises(BrainRunError, match="automatic execution policy|execution policy|checkpoint"):
+        agent.run_resumable_batch(
+            requests,
+            job_id="semantic-policy-batch",
+            mode="auto",
+            credentials={},
+            max_parallelism=1,
+            options_factory=lambda _request, _index: {
+                "approve_provider_call": True,
+                "semantic_routing": True,
+                "semantic_weight": semantic_weight,
+                "max_domains": 1,
+                "max_steps": 32,
+            },
+            checkpoint=checkpoints[-1].to_dict(),
+            rehydrate_result=lambda context: first.items[context.index].result,
+        )
+
+    legacy_checkpoints: list[AutonomousBatchCheckpoint] = []
+    legacy = agent.run_resumable_batch(
+        ({"task": "legacy deterministic review"},),
+        job_id="legacy-semantic-policy-batch",
+        mode="auto",
+        credentials={},
+        options_factory=lambda _request, _index: {"approve_provider_call": False},
+        checkpoint_sink=legacy_checkpoints.append,
+    )
+    assert legacy.status == "failed"
+    assert legacy_checkpoints[-1].semantic_routing_policy_digest is None
+    with pytest.raises(BrainRunError, match="legacy.*semantic-routing|checkpoint"):
+        agent.run_resumable_batch(
+            ({"task": "legacy deterministic review"},),
+            job_id="legacy-semantic-policy-batch",
+            mode="auto",
+            credentials={},
+            options_factory=lambda _request, _index: {
+                "approve_provider_call": True,
+                "semantic_routing": True,
+            },
+            checkpoint=legacy_checkpoints[-1].to_dict(),
+        )
+
+
 def test_autonomous_brain_batch_controller_owns_restore_persistence_restart_and_tamper_rejection() -> None:
     runtime = LLMRuntime()
     runtime.register_in_memory_provider("offline", lambda _request: {"output_text": "offline controller answer"})
@@ -769,6 +1051,156 @@ def test_batch_checkpoint_json_cas_is_bounded_and_tamper_evident_across_all_doma
         persistence.read()
 
 
+def test_batch_controller_rehydrates_completed_results_through_protected_receipts_and_preserves_callback_precedence() -> None:
+    runtime = LLMRuntime()
+    runtime.register_in_memory_provider("offline", lambda _request: {"output_text": "offline protected batch answer"})
+    required = {
+        capability
+        for profile in AutonomousDomainRegistry.with_builtin_profiles().catalogue()
+        for capability in profile["required_model_capabilities"]
+    }
+    required.update({"tool_calling", "structured_output"})
+    agent = AutonomousAgent(
+        _OfflineWorkspace(),
+        runtime,
+        model_catalogue=ModelCatalogue([{
+            "provider": "offline",
+            "model": "offline-model",
+            "capabilities": sorted(required),
+            "context_window_tokens": 32_000,
+            "max_output_tokens": 2_048,
+            "quality": 0.9,
+            "latency_ms": 1,
+            "cost_per_million_tokens": 0,
+            "reliability": 0.99,
+        }]),
+    )
+    requests = (
+        {"task": "rehydrate a protected coding result", "domain": "coding"},
+        {"task": "force a restartable protected batch failure", "domain": "data"},
+    )
+    fail_second = True
+    protected_values: dict[str, Mapping[str, Any]] = {}
+    protected_calls: list[int] = []
+    protected_receipt_calls: list[int] = []
+    boundary = AutonomousProtectedRehydrationBoundary(
+        AutonomousProtectedRehydrationContext("tenant-batch", "worker-batch", "session-batch", "a" * 64),
+        lambda reference, _context: protected_values[reference.value_digest],
+        authorizer=lambda _reference, _context: True,
+        clock=lambda: 100,
+    )
+
+    def options_factory(_request: Mapping[str, Any], index: int) -> Mapping[str, Any]:
+        return {"approve_provider_call": True, "max_steps": 0 if fail_second and index == 1 else 32}
+
+    def receipt_for(context: AutonomousBatchRehydrationContext) -> Mapping[str, Any]:
+        protected_receipt_calls.append(context.index)
+        return {
+            "job_id": context.job_id,
+            "index": context.index,
+            "mode": context.mode,
+            "request_digest": context.request_digest,
+            "task_digest": context.task_digest,
+            "expected_result_digest": context.expected_result_digest,
+            "domain": "coding",
+            "value_digest": next(iter(protected_values)),
+        }
+
+    protected = AutonomousBatchProtectedRehydration(
+        AutonomousProtectedRehydrationAdapter(boundary),
+        receipt_for,
+        value_decoder=lambda value: SimpleNamespace(status=value["status"]),
+    )
+    store = InMemoryAutonomousBatchCheckpointStore()
+    first_controller = AutonomousBrainBatchJobController(agent, store, protected_rehydration=protected)
+    assert first_controller.restore()["status"] == "empty"
+    first = first_controller.run(
+        requests,
+        job_id="protected-batch-job",
+        credentials={},
+        max_parallelism=1,
+        stop_on_error=True,
+        options_factory=options_factory,
+    )
+    assert first["batch"].status == "partial"
+    assert first["batch"].items[0].result is not None
+    raw_value = first["batch"].items[0].result.to_dict()
+    protected_values[protected_value_digest(raw_value)] = raw_value
+    first_checkpoint = store.read()
+    assert first_checkpoint is not None
+    assert "rehydrate a protected coding result" not in json.dumps(store.read(), sort_keys=True)
+
+    fail_second = False
+    restarted = AutonomousBrainBatchJobController(agent, store, protected_rehydration=protected)
+    assert restarted.restore()["status"] == "restored"
+    completed = restarted.run(
+        requests,
+        job_id="protected-batch-job",
+        credentials={},
+        max_parallelism=1,
+        stop_on_error=True,
+        options_factory=options_factory,
+    )
+    assert completed["batch"].status == "completed"
+    assert completed["batch"].items[0].result.status.startswith("completed")
+
+    explicit_store = InMemoryAutonomousBatchCheckpointStore(first_checkpoint)
+    explicit = AutonomousBrainBatchJobController(agent, explicit_store, protected_rehydration=protected)
+    assert explicit.restore()["status"] == "restored"
+    protected_calls_before_explicit = len(protected_receipt_calls)
+    completed_again = explicit.run(
+        requests,
+        job_id="protected-batch-job",
+        credentials={},
+        max_parallelism=1,
+        stop_on_error=True,
+        options_factory=options_factory,
+        rehydrate_result=lambda context: (protected_calls.append(context.index) or first["batch"].items[context.index].result),
+    )
+    assert completed_again["batch"].status == "completed"
+    assert protected_calls == [0]
+    assert len(protected_receipt_calls) == protected_calls_before_explicit
+
+
+def test_batch_protected_rehydration_receipts_are_identity_bound_across_all_domains() -> None:
+    values: dict[str, Mapping[str, Any]] = {}
+    receipts: dict[int, Mapping[str, Any]] = {}
+    boundary = AutonomousProtectedRehydrationBoundary(
+        AutonomousProtectedRehydrationContext("tenant-all", "worker-all", "session-all", "b" * 64),
+        lambda reference, _context: values[reference.value_digest],
+        authorizer=lambda _reference, _context: True,
+        clock=lambda: 200,
+    )
+    contexts: list[AutonomousBatchRehydrationContext] = []
+    for index, domain in enumerate(AUTONOMOUS_DOMAINS):
+        request_digest = hashlib.sha256(f"request-{domain}".encode()).hexdigest()
+        task_digest = hashlib.sha256(f"task-{domain}".encode()).hexdigest()
+        expected_result_digest = hashlib.sha256(f"result-{domain}".encode()).hexdigest()
+        context = AutonomousBatchRehydrationContext("all-domain-protected-job", index, "domain", request_digest, task_digest, expected_result_digest)
+        value = {"status": "completed", "domain": domain}
+        value_digest = protected_value_digest(value)
+        values[value_digest] = value
+        receipts[index] = {
+            "job_id": context.job_id,
+            "index": context.index,
+            "mode": context.mode,
+            "request_digest": context.request_digest,
+            "task_digest": context.task_digest,
+            "expected_result_digest": context.expected_result_digest,
+            "domain": domain,
+            "value_digest": value_digest,
+        }
+        contexts.append(context)
+    rehydrator = AutonomousBatchProtectedRehydration(
+        AutonomousProtectedRehydrationAdapter(boundary),
+        lambda context: receipts[context.index],
+    )
+    assert [rehydrator.resolve(context)["domain"] for context in contexts] == list(AUTONOMOUS_DOMAINS)
+    receipts[0] = {**receipts[0], "request_digest": "0" * 64}
+    with pytest.raises(BrainRunError, match="request_digest"):
+        rehydrator.resolve(contexts[0])
+
+
 def test_agent_run_resumable_batch_supports_route_first_and_cross_domain_modes() -> None:
     runtime = LLMRuntime()
     runtime.register_in_memory_provider("offline", lambda _request: {"output_text": "offline route"})
@@ -806,6 +1238,56 @@ def test_agent_run_resumable_batch_supports_route_first_and_cross_domain_modes()
     assert auto.items[0].result is not None
     assert auto.items[0].result.status == "completed"
     assert auto_checkpoints[-1].mode == "auto"
+    assert auto_checkpoints[-1].automatic_execution_policy_digest is not None
+
+    protected_values: dict[str, Mapping[str, Any]] = {}
+    protected_value = auto.items[0].result.to_dict()
+    protected_digest = protected_value_digest(protected_value)
+    protected_values[protected_digest] = protected_value
+    boundary = AutonomousProtectedRehydrationBoundary(
+        AutonomousProtectedRehydrationContext("tenant-auto", "worker-auto", "session-auto", "c" * 64),
+        lambda reference, _context: protected_values[reference.value_digest],
+        authorizer=lambda _reference, _context: True,
+        clock=lambda: 100,
+    )
+    automatic_protected = AutonomousAutomaticBatchProtectedRehydration(
+        AutonomousProtectedRehydrationAdapter(boundary),
+        lambda context: {
+            "job_id": context.job_id,
+            "index": context.index,
+            "mode": context.mode,
+            "request_digest": context.request_digest,
+            "task_digest": context.task_digest,
+            "expected_result_digest": context.expected_result_digest,
+            "domain": "coding",
+            "value_digest": protected_digest,
+        },
+        value_decoder=lambda value: SimpleNamespace(status=value["status"]),
+    )
+    with pytest.raises(BrainRunError, match="auto checkpoint context"):
+        automatic_protected.resolve(
+            AutonomousBatchRehydrationContext(
+                "route-first-batch", 0, "domain", auto_checkpoints[-1].request_digests[0],
+                auto.items[0].task_digest, auto_checkpoints[-1].completed_result_digests[0],
+            )
+        )
+    auto_store = InMemoryAutonomousBatchCheckpointStore(auto_checkpoints[-1].to_dict())
+    auto_controller = AutonomousBrainBatchJobController(
+        agent,
+        auto_store,
+        automatic_protected_rehydration=automatic_protected,
+    )
+    assert auto_controller.restore()["status"] == "restored"
+    recovered = auto_controller.run(
+        ({"task": "perform a bounded coding review"},),
+        job_id="route-first-batch",
+        mode="auto",
+        credentials={},
+        max_parallelism=1,
+        options_factory=options,
+    )
+    assert recovered["batch"].status == "completed"
+    assert recovered["batch"].items[0].status == "succeeded"
 
     cross_checkpoints: list[AutonomousBatchCheckpoint] = []
     cross = agent.run_resumable_batch(

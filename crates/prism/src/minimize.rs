@@ -48,8 +48,7 @@ use bioprism_fiber::{oracle, FiberError};
 use bioprism_section::{OracleStatus, OracleVerdict};
 use bioprism_world::World;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 /// Why no minimization exists to report.
 ///
@@ -161,18 +160,17 @@ impl Preservation {
 }
 
 fn verdict_for(world: &World, facts: &BTreeSet<String>) -> Result<OracleVerdict, FiberError> {
-    let values: BTreeMap<String, Value> = facts
-        .iter()
-        .filter_map(|id| world.fact(id))
-        .map(|fact| (fact.provides.as_str().to_string(), fact.value.clone()))
-        .collect();
-    oracle::evaluate(&values)
+    oracle::evaluate_selected(world, facts)
 }
 
 fn signature(verdict: &OracleVerdict) -> (OracleStatus, BTreeSet<String>) {
     (
         verdict.status,
-        verdict.witness_kinds().into_iter().map(str::to_string).collect(),
+        verdict
+            .witness_kinds()
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
     )
 }
 
@@ -198,35 +196,91 @@ fn signature(verdict: &OracleVerdict) -> (OracleStatus, BTreeSet<String>) {
 /// `Err` on the seventh of eleven removals would throw away six proven reductions to report one
 /// fact nobody could test. The fact is kept, the refusal is recorded in [`Minimization::unjudged`],
 /// and [`Minimization::guarantee`] narrows to the facts that were actually judged.
+///
+/// # One working set, restored on every rejection
+///
+/// A removal used to be tried on a *copy* of the surviving set: a fresh `BTreeSet<String>` with
+/// every surviving id heap-allocated again, once per attempted removal. That is quadratic in the
+/// corpus, and reducing the 761-fact reference world spent about 290 000 string copies to discard
+/// all but six facts. `kept` is now mutated in place instead.
+///
+/// What the copy bought was a trial that could simply be dropped, and in-place mutation has to buy
+/// that back by hand: `kept` *is* the live answer, so every route out of the match that does not
+/// accept the removal must put the id back before the next iteration reads it. The match has three
+/// arms and exactly two of them are such routes: the `Ok` arm whose signature differs from the
+/// target, and the `Err` arm. Each restores in its own body rather than through a shared tail,
+/// because the failure this shape invites is silent — a missed restore drops a load-bearing fact
+/// and the minimization still reports itself as preserving the target signature.
+///
+/// Which test covers which restore was established by deleting each one and reading off what
+/// broke, rather than by reasoning about it:
+///
+/// - The `Ok` restore is covered by `minimization_reduces_the_world_and_preserves_the_signature`
+///   and by `a_minimal_set_the_oracle_refuses_is_unverified_rather_than_refuted`; those two fail
+///   and nothing else does. `every_fact_in_the_minimal_set_is_load_bearing` was named here as the
+///   test a missed restore fails and is not: it re-minimizes each one-fact-shorter subset and asks
+///   only that the signature changed, which a set that has already lost load-bearing facts still
+///   satisfies.
+/// - The `Err` restore is covered by
+///   `an_oracle_that_refuses_a_removal_leaves_the_working_set_intact`, which reaches the arm
+///   through the crate-private `minimize_with`. Nothing reaches it through this function: the
+///   shipped oracle is monotone under key removal, as the module header explains, so a refusal a
+///   larger set did not already have cannot occur, and the arm was uncovered until the seam
+///   existed.
+///
+/// The loop cannot exit early: no `?` and no `return` stands between a removal and its restore, so
+/// a partially-restored set is unreachable. That is a property of this function's control flow
+/// rather than of the type, and it is the invariant to check first if a step is ever added here.
 pub fn minimize(
     world: &World,
     candidate: &BTreeSet<String>,
 ) -> Result<Minimization, MinimizeError> {
-    let reference = verdict_for(world, candidate).map_err(|error| {
-        MinimizeError::OracleRefusedCandidate {
+    minimize_with(candidate, |facts| verdict_for(world, facts))
+}
+
+/// [`minimize`] over an injected oracle.
+///
+/// Crate-private, and a seam rather than a feature: the public entry point is the one that runs
+/// `bioprism_fiber::oracle`, and a caller free to supply its own judge could minimize against
+/// anything at all while the result still called itself a preserved oracle signature.
+///
+/// It exists because the `Err` arm of the removal loop is unreachable through [`minimize`]. The
+/// shipped split-integrity oracle refuses only on evidence that is present and inconsistent, so
+/// removing keys cannot introduce a refusal, so no world can be written that drives a shipped run
+/// into that arm. Deleting the restore inside it changed no test result at all. A refusing oracle
+/// injected here reaches it directly, which is what turns [`UnjudgedRemoval`] and its restore from
+/// asserted behaviour into tested behaviour.
+pub(crate) fn minimize_with(
+    candidate: &BTreeSet<String>,
+    verdict_of: impl Fn(&BTreeSet<String>) -> Result<OracleVerdict, FiberError>,
+) -> Result<Minimization, MinimizeError> {
+    let reference =
+        verdict_of(candidate).map_err(|error| MinimizeError::OracleRefusedCandidate {
             facts: candidate.len(),
             detail: error.to_string(),
-        }
-    })?;
+        })?;
     let target = signature(&reference);
     let mut kept = candidate.clone();
     let mut evaluations = 1usize;
     let mut unjudged: Vec<UnjudgedRemoval> = Vec::new();
 
-    let ordered: Vec<String> = candidate.iter().cloned().collect();
-    for id in ordered {
-        let mut attempt = kept.clone();
-        if !attempt.remove(&id) {
+    for id in candidate {
+        if !kept.remove(id) {
             continue;
         }
         evaluations += 1;
-        match verdict_for(world, &attempt) {
-            Ok(verdict) if signature(&verdict) == target => kept = attempt,
-            Ok(_) => {}
-            Err(error) => unjudged.push(UnjudgedRemoval {
-                fact: id,
-                detail: error.to_string(),
-            }),
+        match verdict_of(&kept) {
+            Ok(verdict) if signature(&verdict) == target => {}
+            Ok(_) => {
+                kept.insert(id.clone());
+            }
+            Err(error) => {
+                kept.insert(id.clone());
+                unjudged.push(UnjudgedRemoval {
+                    fact: id.clone(),
+                    detail: error.to_string(),
+                });
+            }
         }
     }
 
@@ -294,6 +348,103 @@ pub fn preserves(world: &World, minimization: &Minimization) -> Preservation {
         Preservation::Diverged {
             status: verdict.status.as_str().to_string(),
             witnesses: observed.into_iter().collect(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cell::RefCell;
+
+    fn ids(names: &[&str]) -> BTreeSet<String> {
+        names.iter().map(|name| (*name).to_string()).collect()
+    }
+
+    /// The `Err` arm restores the id it could not judge, and every later step sees it.
+    ///
+    /// Reached only through the seam: the shipped oracle cannot refuse a set it accepted a
+    /// superset of, so no fixture drives a run into this arm. Deleting the restore inside it left
+    /// all of the crate's tests passing before this one existed.
+    ///
+    /// The stub refuses exactly one removal and accepts every other, so the reduction ought to eat
+    /// the world down to the one fact nobody could rule out. Asserting only that `minimal` still
+    /// holds `fact.b` would prove the id came back; the log of what the oracle was asked proves the
+    /// working set it came back *into* was the live one, which is the property a shared-tail
+    /// refactor would break without changing the result.
+    #[test]
+    fn an_oracle_that_refuses_a_removal_leaves_the_working_set_intact() {
+        let candidate = ids(&["fact.a", "fact.b", "fact.c"]);
+        let asked: RefCell<Vec<BTreeSet<String>>> = RefCell::new(Vec::new());
+
+        let result = minimize_with(&candidate, |facts| {
+            asked.borrow_mut().push(facts.clone());
+            if !facts.contains("fact.b") {
+                return Err(FiberError::UnorderableSplitGroups {
+                    alias: "ALT-77".to_string(),
+                    present: vec!["train".to_string()],
+                });
+            }
+            Ok(OracleVerdict::new("split-integrity", Vec::new()))
+        })
+        .expect("the stub judges the candidate itself");
+
+        assert_eq!(result.minimal, vec!["fact.b".to_string()]);
+        assert_eq!(result.removed, 2);
+        assert_eq!(
+            result.unjudged,
+            vec![UnjudgedRemoval {
+                fact: "fact.b".to_string(),
+                detail: FiberError::UnorderableSplitGroups {
+                    alias: "ALT-77".to_string(),
+                    present: vec!["train".to_string()],
+                }
+                .to_string(),
+            }]
+        );
+        assert!(!result.is_fully_judged());
+        assert!(result.guarantee.contains("unjudged is not load-bearing"));
+
+        let asked = asked.into_inner();
+        assert_eq!(
+            asked.len(),
+            result.evaluations,
+            "the reported evaluation count must be the number of questions actually asked"
+        );
+        let refusal = asked
+            .iter()
+            .position(|facts| !facts.contains("fact.b"))
+            .expect("the stub was driven into its refusal");
+        assert!(
+            asked[refusal + 1..]
+                .iter()
+                .all(|facts| facts.contains("fact.b")),
+            "a set the oracle refused must be restored before the next question is asked"
+        );
+    }
+
+    /// A candidate the injected oracle refuses outright is an error, not an empty minimization.
+    ///
+    /// The same rule [`MinimizeError::OracleRefusedCandidate`] states for the shipped oracle, held
+    /// at the seam so that a future caller of `minimize_with` cannot reintroduce the swallow by
+    /// supplying a judge that declines everything.
+    #[test]
+    fn an_oracle_that_refuses_the_candidate_itself_yields_no_minimization() {
+        let candidate = ids(&["fact.a", "fact.b"]);
+
+        let error = minimize_with(&candidate, |_| {
+            Err(FiberError::UnorderableSplitGroups {
+                alias: "ALT-77".to_string(),
+                present: vec!["train".to_string()],
+            })
+        })
+        .expect_err("a refused candidate has no signature to preserve");
+
+        match error {
+            MinimizeError::OracleRefusedCandidate { facts, detail } => {
+                assert_eq!(facts, 2);
+                assert!(detail.contains("ALT-77"), "{detail}");
+            }
         }
     }
 }

@@ -13,6 +13,10 @@ from prism_sdk import (
     BrainRunResult,
     InMemoryAutonomousRunTraceStore,
     InMemoryAutonomousRunTraceTextStore,
+    AutonomousRunTraceRegistry,
+    AutonomousRunTraceRegistryPersistenceCoordinator,
+    TransactionalJsonAutonomousRunTraceRegistryPersistence,
+    publish_autonomous_run_trace_registry_snapshot,
     TransactionalJsonAutonomousRunTracePersistence,
     autonomous_run_trace_status,
     validate_autonomous_run_trace_snapshot,
@@ -217,3 +221,118 @@ def test_agent_trace_facade_returns_live_result_and_metadata_summary() -> None:
 )
 def test_trace_status_mapping_is_conservative(provider_status: str, trace_status: str) -> None:
     assert autonomous_run_trace_status(provider_status) == trace_status
+
+
+def test_trace_registry_indexes_every_domain_paginates_and_enforces_retention() -> None:
+    clock_value = 900
+
+    def clock() -> int:
+        nonlocal clock_value
+        current = clock_value
+        clock_value += 1
+        return current
+
+    source = InMemoryAutonomousRunTraceStore(clock=clock)
+    for index, domain in enumerate(AUTONOMOUS_DOMAIN_NAMES):
+        session = AutonomousRunTraceSession(
+            source,
+            run_id=f"registry-{domain}",
+            task_digest=hashlib.sha256(str(index + 1).encode()).hexdigest(),
+            domains=(domain,),
+        )
+        session.started()
+        session.record(phase="plan_compiled", status="running", plan_digest="a" * 64)
+        session.record(
+            phase="provider_invocation_finished",
+            status="running",
+            provider="registry-provider",
+            model="registry-model",
+            input_tokens=4,
+            output_tokens=3,
+            tool_count=1,
+        )
+        session.complete(status="completed", route_digest="b" * 64, plan_digest="a" * 64)
+
+    registry = AutonomousRunTraceRegistry({"max_runs": 32, "max_events": 512, "max_bytes": 2_000_000})
+    imported = registry.import_snapshot(source.snapshot())
+    assert imported.imported_run_ids == tuple(sorted(f"registry-{domain}" for domain in AUTONOMOUS_DOMAIN_NAMES))
+    assert registry.size == len(AUTONOMOUS_DOMAIN_NAMES)
+    assert registry.query({"domain": "biomedical"}).records[0].run_id == "registry-biomedical"
+    assert registry.query({"provider": "registry-provider"}).total_matches == len(AUTONOMOUS_DOMAIN_NAMES)
+    first_page = registry.query({"limit": 5})
+    assert len(first_page.records) == 5
+    assert first_page.total_matches == len(AUTONOMOUS_DOMAIN_NAMES)
+    assert first_page.next_after_run_id is not None
+    second_page = registry.query({"after_run_id": first_page.next_after_run_id, "limit": 20})
+    assert len(second_page.records) == len(AUTONOMOUS_DOMAIN_NAMES) - 5
+    assert len({record.run_id for record in first_page.records + second_page.records}) == len(AUTONOMOUS_DOMAIN_NAMES)
+    assert len(registry.events({"phase": "provider_invocation_finished"})) == len(AUTONOMOUS_DOMAIN_NAMES)
+    assert registry.verify_integrity()["verified"] is True
+
+    text_store = InMemoryAutonomousRunTraceTextStore()
+    persistence = TransactionalJsonAutonomousRunTraceRegistryPersistence(text_store, max_bytes=2_000_000)
+    coordinator = AutonomousRunTraceRegistryPersistenceCoordinator(registry, persistence)
+    persisted = coordinator.flush()
+    restored = AutonomousRunTraceRegistry({"max_runs": 32, "max_events": 512, "max_bytes": 2_000_000})
+    restored_coordinator = AutonomousRunTraceRegistryPersistenceCoordinator(restored, persistence)
+    assert restored_coordinator.restore() is not None
+    assert restored.snapshot().to_dict() == persisted.to_dict()
+    assert not any(secret in text_store.read() for secret in ("private provider output", "bounded offline result", "sk-"))
+
+    stale_registry = AutonomousRunTraceRegistry({"max_runs": 32, "max_events": 512, "max_bytes": 2_000_000})
+    stale_coordinator = AutonomousRunTraceRegistryPersistenceCoordinator(stale_registry, persistence)
+    assert stale_coordinator.restore() is not None
+    fresh_session = AutonomousRunTraceSession(source, run_id="registry-fresh", task_digest="e" * 64, domains=("evaluation",))
+    fresh_session.started()
+    fresh_session.complete(status="completed")
+    registry.import_snapshot(source.snapshot())
+    coordinator.flush()
+    with pytest.raises(ArgumentError, match="compare-and-swap conflict"):
+        stale_coordinator.flush()
+
+    summary_only = AutonomousRunTraceRegistry({"max_runs": 32, "max_events": 512, "max_bytes": 2_000_000, "retain_events": False})
+    summary_only.import_snapshot(source.snapshot())
+    assert summary_only.query({"model": "registry-model"}).total_matches == len(AUTONOMOUS_DOMAIN_NAMES)
+    assert summary_only.events() == ()
+    assert summary_only.get("registry-coding").retained_event_count == 0
+
+    retained = AutonomousRunTraceRegistry({"max_runs": 2, "max_events": 512, "max_bytes": 2_000_000})
+    retained_report = retained.import_snapshot(source.snapshot())
+    assert retained.size == 2
+    assert len(retained_report.evicted_run_ids) == len(AUTONOMOUS_DOMAIN_NAMES) + 1 - 2
+    assert retained.verify_integrity()["runs"] == 2
+
+    active_source = InMemoryAutonomousRunTraceStore(clock=lambda: 1_200)
+    active_a = AutonomousRunTraceSession(active_source, run_id="active-a", task_digest="a" * 64, domains=("coding",))
+    active_a.started()
+    active_b = AutonomousRunTraceSession(active_source, run_id="active-b", task_digest="b" * 64, domains=("data",))
+    active_b.started()
+    active_registry = AutonomousRunTraceRegistry({"max_runs": 1, "max_events": 32, "max_bytes": 100_000})
+    with pytest.raises(ArgumentError, match="cannot evict an eligible terminal run"):
+        active_registry.import_snapshot(active_source.snapshot())
+    assert active_registry.size == 0
+
+
+def test_trace_registry_publication_is_bounded_idempotent_and_isolated_from_source_failures() -> None:
+    source = InMemoryAutonomousRunTraceStore(clock=lambda: 2_000)
+    session = AutonomousRunTraceSession(source, run_id="publication-run", task_digest="f" * 64, domains=AUTONOMOUS_DOMAIN_NAMES)
+    session.started()
+    session.complete(status="completed")
+    registry = AutonomousRunTraceRegistry({"max_runs": 8, "max_events": 64, "max_bytes": 100_000})
+    first = publish_autonomous_run_trace_registry_snapshot(registry, source, "publication-run")
+    assert first.status == "published"
+    assert first.run_import_state == "imported"
+    assert first.evicted_run_count == 0
+    assert registry.query({"run_id": "publication-run"}).total_matches == 1
+    second = publish_autonomous_run_trace_registry_snapshot(registry, source, "publication-run")
+    assert second.status == "published"
+    assert second.run_import_state == "unchanged"
+
+    class BrokenStore:
+        def snapshot(self):
+            raise RuntimeError("source unavailable")
+
+    failed = publish_autonomous_run_trace_registry_snapshot(registry, BrokenStore(), "publication-run")
+    assert failed.status == "failed"
+    assert failed.failure_code == "trace_registry_publication_failed"
+    assert registry.query({"run_id": "publication-run"}).total_matches == 1

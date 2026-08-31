@@ -7,6 +7,16 @@
 //! * `--dry-run` performs no filesystem writes;
 //! * every command prints a reproducible follow-up command in human mode;
 //! * every failure maps to a documented exit code (see [`exit::ExitCode`]).
+//!
+//! # Not implemented
+//!
+//! * **`--domain` on `context compare`.** The comparison harness judges every strategy against
+//!   the reference split-integrity oracle directly rather than through the injectable
+//!   [`DecisionOracle`], so a pack oracle cannot yet be applied to the whole panel. The flag is
+//!   refused with that reason (exit 2) rather than accepted and half-applied.
+//! * **`world sweep` sweeps only the structural axes** (attachment, relay depth, tag style,
+//!   distractor count, seed). The decision-defining knobs are deliberately fixed, as
+//!   `bioprism_baseline::sweep` documents.
 
 mod args;
 mod exit;
@@ -22,7 +32,16 @@ mod quality_control_inference_engine;
 mod interpretation_interoperability_gateway;
 mod mechanism_control_plane;
 mod experiment_design_assurance;
-use args::{Command, CompileOptions, Family, GenerateOptions, Invocation, Parsed, Profile};
+
+use args::{
+    Command, CompileOptions, Family, GenerateOptions, Invocation, Parsed, Profile,
+    ProjectIngestOptions, ProjectPlanOptions,
+};
+use bioprism_autopilot::{
+    drive::instantiation_mission, drive_instantiation, preview_first_action,
+    verify_autopilot_report, AutonomyGrant, AutonomyGrantDocument, FinalStatus, NextAction,
+    RetryPolicyDocument, RetryScheduleDocument,
+};
 use bioprism_devplat::{
     audit_domain_decision_readiness, build_domain_workflow_catalogue,
     build_domain_workflow_portfolio, instantiate_domain_workflow, reconcile_domain_workflow,
@@ -32,15 +51,28 @@ use bioprism_devplat::{
 use bioprism_devplat::{
     verify_mission_evidence_bundle, DomainWorkflowReconciliationRegistry, EvidenceBundleRegistry,
 };
-use bioprism_fiber::compile;
+use bioprism_domain::DomainPack;
+use bioprism_fiber::{compile, compile_with_oracle, DecisionOracle, Query};
 use bioprism_mcp::{tool_definitions, workspace_capabilities, Server};
+use bioprism_project::{
+    AssemblyOptions, AuditOptions, AuditReport, Issue, ProjectScan, ProjectWorld, ScanOptions,
+};
+use bioprism_repair::{
+    plan_for_issue, predicate_from_json, verify, AcceptanceReport, DeclaredItem, ItemStatus,
+    Outcome as RepairOutcome, PlanOptions, RepairPlan,
+};
+use bioprism_research::{
+    plan_protocol, render_report, run_research, verify_dossier, ProtocolStep, ResearchRequest,
+    ResearchRequestDocument, WorldFamily,
+};
 use bioprism_scope::DimensionRegistry;
-use bioprism_section::{CertificateProfile, ContextCertificate, OracleStatus};
+use bioprism_section::{CertificateProfile, ContextCertificate, LeakageWitness, OracleStatus};
 use bioprism_world::{validate, Severity};
 use exit::{CliError, CliResult, ExitCode};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::path::Path;
+use std::sync::atomic::AtomicBool;
 
 fn main() {
     std::thread::Builder::new()
@@ -134,12 +166,31 @@ impl Outcome {
         }
         self
     }
+
+    /// Reports a completed run under a code other than 0 or 1.
+    ///
+    /// [`Outcome::failing_if`] covers the two-valued case — the checked property held or it did
+    /// not — and every command before `project verify` had only that. Acceptance verification does
+    /// not: "a criterion could not be evaluated" and "the plan is bound to a different world" are
+    /// neither successes nor failed assertions, and folding either into exit 1 would tell a script
+    /// the criteria were adjudicated and came out against the tree. See [`verdict_code`].
+    fn under(mut self, code: ExitCode) -> Self {
+        self.code = code;
+        self
+    }
 }
 
 fn run(invocation: &Invocation) -> CliResult<Outcome> {
     match &invocation.command {
-        Command::WorldValidate { world } => world_validate(world),
+        Command::WorldValidate { world, dimensions } => {
+            world_validate(world, dimensions.as_deref())
+        }
         Command::WorldShow { world } => world_show(world),
+        Command::WorldSweep {
+            distractors,
+            seed,
+            markdown,
+        } => world_sweep(distractors.as_deref(), *seed, *markdown),
         Command::WorldGenerate(options) => world_generate(options),
         Command::WorldIndex {
             world,
@@ -154,7 +205,11 @@ fn run(invocation: &Invocation) -> CliResult<Outcome> {
         } => prism_fork(world, query, bundle_out.as_deref(), *minimize),
         Command::PrismMinimize { world } => prism_minimize(world),
         Command::MutateFamily { world, out_dir } => mutate_family(world, out_dir.as_deref()),
-        Command::ContextExplain { world, query } => context_explain(world, query),
+        Command::ContextExplain {
+            world,
+            query,
+            domain,
+        } => context_explain(world, query, domain.as_deref()),
         Command::ContextCompile(options) => context_compile(options),
         Command::ContextVerify { certificate } => context_verify(certificate),
         Command::ContextCompare {
@@ -162,6 +217,19 @@ fn run(invocation: &Invocation) -> CliResult<Outcome> {
             query,
             markdown,
         } => context_compare(world, query, *markdown),
+        Command::ProjectIngest(options) => project_ingest(options),
+        Command::ProjectAudit {
+            root,
+            issues,
+            decision_time,
+        } => project_audit(root, issues.as_deref(), decision_time.as_deref()),
+        Command::ProjectPlan(options) => project_plan(options),
+        Command::ProjectVerify {
+            root,
+            plan,
+            issues,
+            decision_time,
+        } => project_verify(root, plan, issues.as_deref(), decision_time.as_deref()),
         Command::EvidenceBundleVerify { bundle } => evidence_bundle_verify(bundle),
         Command::EvidenceBundleImport {
             bundle,
@@ -425,6 +493,34 @@ fn run(invocation: &Invocation) -> CliResult<Outcome> {
             *limit,
             *include_records,
         ),
+        Command::AutopilotGrantTemplate => autopilot_grant_template(),
+        Command::AutopilotRun {
+            instantiation,
+            grant,
+            report_out,
+            dry_run,
+        } => autopilot_run(instantiation, grant, report_out.as_deref(), *dry_run),
+        Command::AutopilotVerify { report } => autopilot_verify(report),
+        Command::ResearchTemplate => research_template(),
+        Command::ResearchRun {
+            request,
+            out_dir,
+            dry_run,
+        } => research_run(request, out_dir, *dry_run),
+        Command::ResearchVerify { dossier } => research_verify(dossier),
+        Command::FigureList { input } => figure_list(input),
+        Command::FigureRender {
+            input,
+            out_dir,
+            kind,
+            pointer,
+            dry_run,
+        } => figure_render(input, out_dir, *kind, pointer.as_deref(), *dry_run),
+        Command::FigureBatch {
+            input_dir,
+            out_dir,
+            dry_run,
+        } => figure_batch(input_dir, out_dir, *dry_run),
     }
 }
 
@@ -1343,6 +1439,7 @@ fn workflow_portfolio(
     Ok(Outcome::ok(report, human).failing_if(!valid))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn workflow_portfolio_verify(
     portfolio_path: &Path,
     replay_requests_path: Option<&Path>,
@@ -1745,6 +1842,7 @@ fn workflow_reconciliation_import(
     Ok(Outcome::ok(document, human))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn workflow_reconciliation_query(
     store_path: &Path,
     mission_id: Option<&str>,
@@ -1790,6 +1888,974 @@ fn workflow_reconciliation_query(
         store_path.display()
     );
     Ok(Outcome::ok(report, human))
+}
+
+/// The template autonomy grant, built from the typed document rather than a `json!` literal so a
+/// field renamed in the grant schema fails to compile here instead of drifting into a template
+/// that the validator would refuse.
+fn autopilot_template_document() -> CliResult<Value> {
+    let document = AutonomyGrantDocument {
+        allowed_tools: vec!["replace_with_an_allowed_tool_name".into()],
+        allow_side_effects: false,
+        max_attempts: 3,
+        retry: RetryPolicyDocument::default(),
+        schedule: RetryScheduleDocument::default(),
+        require_reconciliation_complete: true,
+        stop_on_first_success: true,
+    };
+    serde_json::to_value(document).map_err(|error| CliError::internal(error.to_string()))
+}
+
+/// The commented rendering of the template for human mode. Comments make it non-JSON on
+/// purpose: the machine-usable object comes from `--json`, and a document an operator can paste
+/// without reading is exactly what an authority template must not be.
+const GRANT_TEMPLATE_COMMENTED: &str = r#"{
+  // Tools the drive may let missions execute: bare tool names, at least one, at most 512.
+  // An absent or empty list grants nothing, and agent_mission is always refused.
+  "allowed_tools": ["replace_with_an_allowed_tool_name"],
+
+  // Permit caller-supplied confirmation flags to reach side-effecting tools.
+  "allow_side_effects": false,
+
+  // Total mission dispatches the drive may perform, full and repair combined (1..=16).
+  "max_attempts": 3,
+
+  // Which 40.36 retry classes may be re-dispatched. There is deliberately no knob for
+  // `terminal`: a refusal is policy behaving correctly and is never re-sent.
+  "retry": {
+    "retry_retryable_as_is": true,
+    "retry_retryable_after_change": false,
+    // An outcome that declared no retry decision is never re-sent unless this is true.
+    "retry_unknown": false
+  },
+
+  // Optional deterministic repair backoff in caller-defined logical clock ticks. Zero is
+  // immediate; a non-zero base requires a maximum at least as large as the base.
+  "schedule": {
+    "retry_base_delay": 0,
+    "retry_max_delay": 0
+  },
+
+  // Require a reconciliation record with `complete` status and valid integrity before the
+  // drive may report success; success is never inferred from a mission report alone.
+  "require_reconciliation_complete": true,
+
+  // Only true is supported; the field exists so the unsupported option fails loudly.
+  "stop_on_first_success": true
+}"#;
+
+fn autopilot_grant_template() -> CliResult<Outcome> {
+    let template = autopilot_template_document()?;
+    let mut human = String::from(
+        "autonomy grant template\n\
+         Authority for autonomous dispatch comes only from an explicit grant; there is no \
+         default grant.\nThe commented form below is for reading; `--json` prints the bare \
+         object, directly usable as --grant.\n\n",
+    );
+    human.push_str(GRANT_TEMPLATE_COMMENTED);
+    human.push_str(
+        "\n\nNext: bioprism --json autopilot grant-template > grant.json, edit allowed_tools, \
+         then bioprism autopilot run --instantiation <instantiation.json> --grant grant.json \
+         --dry-run\n",
+    );
+    Ok(Outcome::ok(template, human))
+}
+
+fn parse_autonomy_grant(grant_path: &Path) -> CliResult<AutonomyGrant> {
+    let raw = io::read_json(grant_path)?;
+    let document: AutonomyGrantDocument = serde_json::from_value(raw).map_err(|error| {
+        CliError::invalid(format!("invalid autonomy grant document: {error}"))
+            .about(grant_path.display().to_string())
+    })?;
+    AutonomyGrant::try_from(document)
+        .map_err(|error| CliError::from_grant(error).about(grant_path.display().to_string()))
+}
+
+fn autopilot_run(
+    instantiation_path: &Path,
+    grant_path: &Path,
+    report_out: Option<&Path>,
+    dry_run: bool,
+) -> CliResult<Outcome> {
+    let instantiation = io::read_json(instantiation_path)?;
+    let grant = parse_autonomy_grant(grant_path)?;
+    let grant_digest = grant.digest().map_err(CliError::from_autopilot)?;
+
+    if dry_run {
+        let mission = instantiation_mission(&instantiation).map_err(|error| {
+            CliError::from_autopilot(error).about(instantiation_path.display().to_string())
+        })?;
+        let action = preview_first_action(&grant, mission).map_err(|error| {
+            CliError::from_autopilot(error).about(instantiation_path.display().to_string())
+        })?;
+        let NextAction::DispatchFull {
+            mission: planned_mission,
+            authorization,
+        } = &action
+        else {
+            return Err(CliError::internal(format!(
+                "the planner answered an empty history with {action:?} instead of a first full \
+                 dispatch"
+            )));
+        };
+        let planned_mission_digest = bioprism_ids::ContentHash::of_value(planned_mission)
+            .map_err(|error| CliError::internal(error.to_string()))?
+            .to_string();
+        let step_count = planned_mission["steps"]
+            .as_array()
+            .map(Vec::len)
+            .unwrap_or_default();
+        let mission_id = planned_mission["mission_id"].as_str().unwrap_or("unknown");
+        let document = json!({
+            "ok": true,
+            "workflow": "autopilot_run",
+            "dry_run": true,
+            "no_dispatch": true,
+            "dispatch": "not_started",
+            "execution": "not_started",
+            "writes": "none",
+            "grant_digest": grant_digest,
+            "max_attempts": grant.max_attempts(),
+            "planned_first_action": {
+                "action": "dispatch_full",
+                "attempt_index": authorization.attempt_index(),
+                "mission_id": mission_id,
+                "step_count": step_count,
+                "planned_mission_digest": planned_mission_digest,
+                "allowed_tools": grant.allowed_tools(),
+                "allow_side_effects": grant.allow_side_effects(),
+                "mission": planned_mission,
+            },
+            "report_out": report_out
+                .map(|path| json!(path.display().to_string()))
+                .unwrap_or(Value::Null),
+        });
+        let human = format!(
+            "autopilot dry run (no-dispatch)\n  grant digest: {grant_digest}\n  planned attempt \
+             1: full mission dispatch\n  mission: {mission_id} ({step_count} steps)\n  attempt \
+             budget: {}\n  dispatch: not started\n  writes: none\n\nNext: bioprism autopilot run \
+             --instantiation {} --grant {} --report-out autopilot-report.json\n",
+            grant.max_attempts(),
+            instantiation_path.display(),
+            grant_path.display(),
+        );
+        return Ok(Outcome::ok(document, human));
+    }
+
+    let server = Server::new(
+        std::env::current_dir().map_err(|error| CliError::internal(error.to_string()))?,
+    );
+    let cancellation = AtomicBool::new(false);
+    let mut dispatcher = |mission: &Value| -> Result<Value, String> {
+        server.execute_agent_mission_with_cancellation(mission, &cancellation)
+    };
+    let outcome =
+        drive_instantiation(&grant, &instantiation, &mut dispatcher).map_err(|error| {
+            CliError::from_autopilot(error).about(instantiation_path.display().to_string())
+        })?;
+    let succeeded = outcome.final_status == FinalStatus::Succeeded;
+    let report = outcome.report;
+    let artifact = report_out
+        .map(|path| io::write_artifact(path, &report, false))
+        .transpose()?;
+    let final_status = report["final_status"]
+        .as_str()
+        .unwrap_or("unknown")
+        .to_string();
+    let attempts_used = report["totals"]["attempts_used"].as_u64().unwrap_or(0);
+    let max_attempts = report["totals"]["max_attempts"].as_u64().unwrap_or(0);
+    let report_sha256 = report["report_sha256"]
+        .as_str()
+        .unwrap_or("<missing>")
+        .to_string();
+    let base_mission_id = report["base_mission_id"]
+        .as_str()
+        .unwrap_or("unknown")
+        .to_string();
+    let document = json!({
+        "ok": succeeded,
+        "workflow": "autopilot_run",
+        "dry_run": false,
+        "final_status": final_status,
+        "attempts_used": attempts_used,
+        "max_attempts": max_attempts,
+        "grant_digest": grant_digest,
+        "report_sha256": report_sha256,
+        "artifact": artifact
+            .as_ref()
+            .map(|value| {
+                json!({
+                    "path": value.path.display().to_string(),
+                    "bytes": value.bytes,
+                    "written": value.written,
+                })
+            })
+            .unwrap_or(Value::Null),
+        "report": report,
+    });
+    let mut human = format!(
+        "autopilot drive: {final_status}\n  base mission: {base_mission_id}\n  grant digest: \
+         {grant_digest}\n  attempts used: {attempts_used} of {max_attempts}\n  report sha256: \
+         {report_sha256}\n",
+    );
+    if let Some(artifact) = &artifact {
+        human.push_str(&format!(
+            "  wrote {} ({} bytes)\n",
+            artifact.path.display(),
+            artifact.bytes
+        ));
+    }
+    match report_out {
+        Some(path) => human.push_str(&format!(
+            "\nNext: bioprism autopilot verify --report {}\n",
+            path.display()
+        )),
+        None => human.push_str(&format!(
+            "\nNext: bioprism autopilot run --instantiation {} --grant {} --report-out \
+             autopilot-report.json\n",
+            instantiation_path.display(),
+            grant_path.display()
+        )),
+    }
+    Ok(Outcome::ok(document, human).failing_if(!succeeded))
+}
+
+fn autopilot_verify(report_path: &Path) -> CliResult<Outcome> {
+    let report = io::read_json(report_path)?;
+    let mut verification = verify_autopilot_report(&report).map_err(|error| {
+        CliError::from_autopilot(error).about(report_path.display().to_string())
+    })?;
+    let valid = verification
+        .get("valid")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    verification["ok"] = json!(valid);
+    verification["report"] = json!(report_path.display().to_string());
+    let human = format!(
+        "autopilot report: {}\n  claimed sha256: {}\n  recomputed sha256: {}\n  digest match: \
+         {}\n  required limitations present: {}\n  final status known: {}\n\nNext: bioprism \
+         autopilot verify --report {}\n",
+        if valid { "verified" } else { "FAILED" },
+        verification["claimed_report_sha256"]
+            .as_str()
+            .unwrap_or("<missing>"),
+        verification["recomputed_report_sha256"]
+            .as_str()
+            .unwrap_or("<missing>"),
+        verification["digest_match"].as_bool().unwrap_or(false),
+        verification["limitations_present"]
+            .as_bool()
+            .unwrap_or(false),
+        verification["final_status_known"]
+            .as_bool()
+            .unwrap_or(false),
+        report_path.display(),
+    );
+    Ok(Outcome::ok(verification, human).failing_if(!valid))
+}
+
+/// The template research request, built from the typed document rather than a `json!` literal so
+/// a field renamed in the request schema fails to compile here instead of drifting into a
+/// template the validator would refuse. The seed matches the committed sweep grid's, so a pasted
+/// template measures at the same seed the repository's own benchmark uses.
+fn research_template_document() -> CliResult<Value> {
+    let document = ResearchRequestDocument {
+        research_id: "replace-with-a-research-id".into(),
+        question: "Replace with the question this run should record. It is carried verbatim \
+                   into the dossier and report and never interpreted; the protocol comes from \
+                   the fields below."
+            .into(),
+        family: WorldFamily::Discriminating,
+        distractor_points: vec![50, 250, 750],
+        seed: 20_260_823,
+        run_sweep: false,
+        run_mutation: false,
+        run_minimize: false,
+    };
+    serde_json::to_value(document).map_err(|error| CliError::internal(error.to_string()))
+}
+
+/// The commented rendering of the template for human mode. Comments make it non-JSON on
+/// purpose: the machine-usable object comes from `--json`, and a request an operator pastes
+/// without reading would defeat the point of a question field that is recorded but never
+/// interpreted.
+const RESEARCH_TEMPLATE_COMMENTED: &str = r#"{
+  // Names the run in every artifact: 1..=64 characters from [A-Za-z0-9._-].
+  "research_id": "replace-with-a-research-id",
+
+  // Recorded verbatim in the dossier and report, and NEVER interpreted: the runner executes
+  // the protocol the fields below declare; it does not understand the question.
+  "question": "Replace with the question this run should record.",
+
+  // One committed 43.39 world-family preset:
+  // reference_like | discriminating | external_confirmation | policy_restricted.
+  "family": "discriminating",
+
+  // Distractor counts to measure, in order: 1..=6 points, each <= 2000, no duplicates.
+  // The first point is the base world for the mutation and minimization steps.
+  "distractor_points": [50, 250, 750],
+
+  // Seed for every generated world. The optional sweep is the one exception: it runs the
+  // committed default grid at the grid's own seed, because that grid is the benchmark.
+  "seed": 20260823,
+
+  // Optional steps; each defaults to false when omitted.
+  "run_sweep": false,
+  "run_mutation": false,
+  "run_minimize": false
+}"#;
+
+fn research_template() -> CliResult<Outcome> {
+    let template = research_template_document()?;
+    let mut human = String::from(
+        "research request template\n\
+         The question is recorded verbatim and never interpreted; the protocol is planned from \
+         the other fields alone,\nover synthetic decision worlds (committed fixtures and seeded \
+         generators) only. The commented form below is\nfor reading; `--json` prints the bare \
+         object, directly usable as --request.\n\n",
+    );
+    human.push_str(RESEARCH_TEMPLATE_COMMENTED);
+    human.push_str(
+        "\n\nNext: bioprism --json research template > request.json, edit the fields, then \
+         bioprism research run --request request.json --out-dir research-out --dry-run\n",
+    );
+    Ok(Outcome::ok(template, human))
+}
+
+fn parse_research_request(request_path: &Path) -> CliResult<ResearchRequest> {
+    let raw = io::read_json(request_path)?;
+    let document: ResearchRequestDocument = serde_json::from_value(raw).map_err(|error| {
+        CliError::invalid(format!("invalid research request document: {error}"))
+            .about(request_path.display().to_string())
+    })?;
+    ResearchRequest::try_from(document)
+        .map_err(|error| CliError::from_research(error).about(request_path.display().to_string()))
+}
+
+fn research_run(request_path: &Path, out_dir: &Path, dry_run: bool) -> CliResult<Outcome> {
+    let request = parse_research_request(request_path)?;
+    let request_digest = request.digest().map_err(CliError::from_research)?;
+
+    if dry_run {
+        let protocol = plan_protocol(&request);
+        let step_count = protocol.steps.len();
+        let labels: Vec<String> = protocol.steps.iter().map(ProtocolStep::label).collect();
+        let protocol_value = serde_json::to_value(&protocol)
+            .map_err(|error| CliError::internal(error.to_string()))?;
+        let document = json!({
+            "ok": true,
+            "workflow": "research_run",
+            "dry_run": true,
+            "no_dispatch": true,
+            "execution": "not_started",
+            "writes": "none",
+            "research_id": request.research_id(),
+            "request_digest": request_digest,
+            "planned_protocol": protocol_value,
+            "step_count": step_count,
+            "out_dir": out_dir.display().to_string(),
+        });
+        let mut human = format!(
+            "research dry run (no-dispatch)\n  research id: {}\n  request digest: \
+             {request_digest}\n  planned protocol ({step_count} steps):\n",
+            request.research_id(),
+        );
+        for (index, label) in labels.iter().enumerate() {
+            human.push_str(&format!("    {index}. {label}\n"));
+        }
+        human.push_str("  execution: not started\n  writes: none\n");
+        human.push_str(&format!(
+            "\nNext: bioprism research run --request {} --out-dir {}\n",
+            request_path.display(),
+            out_dir.display(),
+        ));
+        return Ok(Outcome::ok(document, human));
+    }
+
+    let dossier = run_research(&request).map_err(|error| {
+        CliError::from_research(error).about(request_path.display().to_string())
+    })?;
+    let rendered = render_report(&dossier).map_err(CliError::from_research)?;
+
+    let dossier_path = out_dir.join("dossier.json");
+    let report_path = out_dir.join("REPORT.md");
+    let figures_dir = out_dir.join("figures");
+    let mut artifacts = vec![
+        io::write_artifact(&dossier_path, &dossier, false)?,
+        io::write_text_artifact(&report_path, &rendered.report_md, false)?,
+    ];
+    for (filename, svg) in &rendered.figures {
+        artifacts.push(io::write_text_artifact(
+            &figures_dir.join(filename),
+            svg,
+            false,
+        )?);
+    }
+
+    let dossier_sha256 = dossier["dossier_sha256"]
+        .as_str()
+        .unwrap_or("<missing>")
+        .to_string();
+    let steps_completed = dossier["steps"].as_array().map(Vec::len).unwrap_or(0);
+    let findings = dossier["findings"].as_array().cloned().unwrap_or_default();
+    let negative_findings = findings
+        .iter()
+        .filter(|finding| finding["negative"].as_bool() == Some(true))
+        .count();
+    let document = json!({
+        "ok": true,
+        "workflow": "research_run",
+        "dry_run": false,
+        "research_id": request.research_id(),
+        "request_digest": request_digest,
+        "dossier_sha256": dossier_sha256,
+        "steps_completed": steps_completed,
+        "findings": findings,
+        "findings_total": findings.len(),
+        "negative_findings": negative_findings,
+        "figures": rendered.figures.len(),
+        "artifacts": artifacts
+            .iter()
+            .map(|artifact| json!({
+                "path": artifact.path.display().to_string(),
+                "bytes": artifact.bytes,
+                "written": artifact.written,
+            }))
+            .collect::<Vec<Value>>(),
+    });
+    let mut human = format!(
+        "research run: completed\n  research id: {}\n  request digest: {request_digest}\n  \
+         dossier sha256: {dossier_sha256}\n  steps completed: {steps_completed}\n  findings: {} \
+         ({negative_findings} negative; a negative finding is a first-class result of a \
+         completed run)\n",
+        request.research_id(),
+        findings.len(),
+    );
+    for artifact in &artifacts {
+        human.push_str(&format!(
+            "  wrote {} ({} bytes)\n",
+            artifact.path.display(),
+            artifact.bytes
+        ));
+    }
+    human.push_str(&format!(
+        "\nNext: bioprism research verify --dossier {}\n",
+        dossier_path.display(),
+    ));
+    Ok(Outcome::ok(document, human))
+}
+
+fn research_verify(dossier_path: &Path) -> CliResult<Outcome> {
+    let dossier = io::read_json(dossier_path)?;
+    let mut verification = verify_dossier(&dossier).map_err(|error| {
+        CliError::from_research(error).about(dossier_path.display().to_string())
+    })?;
+    let valid = verification
+        .get("valid")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    verification["ok"] = json!(valid);
+    verification["dossier"] = json!(dossier_path.display().to_string());
+    let next = if valid {
+        match dossier_path.parent() {
+            Some(parent) if !parent.as_os_str().is_empty() => format!(
+                "Next: read {} — REPORT.md and figures/ sit beside the dossier\n",
+                parent.join("REPORT.md").display(),
+            ),
+            _ => "Next: read REPORT.md — it and figures/ sit beside the dossier\n".to_string(),
+        }
+    } else {
+        "Next: bioprism research run --request <request.json> --out-dir <dir> to regenerate the \
+         dossier; re-verifying this one cannot change the verdict\n"
+            .to_string()
+    };
+    let human = format!(
+        "research dossier: {}\n  claimed sha256: {}\n  recomputed sha256: {}\n  digest match: \
+         {}\n  request digest match: {}\n  required limitations present: {}\n  step outcomes \
+         known: {}\n  findings supported by carried artifacts: {}\n\n{next}",
+        if valid { "verified" } else { "FAILED" },
+        verification["claimed_dossier_sha256"]
+            .as_str()
+            .unwrap_or("<missing>"),
+        verification["recomputed_dossier_sha256"]
+            .as_str()
+            .unwrap_or("<missing>"),
+        verification["digest_match"].as_bool().unwrap_or(false),
+        verification["request_digest_match"]
+            .as_bool()
+            .unwrap_or(false),
+        verification["limitations_present"]
+            .as_bool()
+            .unwrap_or(false),
+        verification["outcomes_known"].as_bool().unwrap_or(false),
+        verification["findings_supported"]
+            .as_bool()
+            .unwrap_or(false),
+    );
+    Ok(Outcome::ok(verification, human).failing_if(!valid))
+}
+
+/// The comma-joined figure registry, quantified over rather than restated, so a figure added to
+/// `bioprism-figures` appears in every diagnostic here without an edit.
+fn figure_kind_registry() -> String {
+    bioprism_figures::FigureKind::ALL
+        .iter()
+        .map(|kind| kind.slug())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// The pointer as a caller reads it. `figure list` prints `(root)` for the empty pointer, because
+/// an empty column reads as a missing value rather than as "the document itself".
+fn pointer_display(pointer: &str) -> &str {
+    if pointer.is_empty() {
+        "(root)"
+    } else {
+        pointer
+    }
+}
+
+fn detect_figures(document: &Value, path: &Path) -> CliResult<Vec<bioprism_figures::Detected>> {
+    bioprism_figures::detect(document)
+        .map_err(|error| CliError::from_figure(error).about(path.display().to_string()))
+}
+
+/// One figure held in memory before anything is written.
+struct PendingFigure {
+    filename: String,
+    svg: String,
+    kind: bioprism_figures::FigureKind,
+    pointer: String,
+    source_sha256: String,
+}
+
+/// Render a selection of detected regions, writing nothing.
+///
+/// Every figure is rendered before any file is opened, so a document whose fifth artifact is
+/// refused leaves no directory holding its first four. A half-written figure directory looks
+/// exactly like a complete one, and the operator has no way to tell which figure is missing.
+fn render_selection(
+    document: &Value,
+    selection: &[&bioprism_figures::Detected],
+    path: &Path,
+) -> CliResult<Vec<PendingFigure>> {
+    let mut pending = Vec::with_capacity(selection.len());
+    for item in selection {
+        let svg = bioprism_figures::render_detected(document, item)
+            .map_err(|error| CliError::from_figure(error).about(path.display().to_string()))?;
+        let source = document.pointer(&item.pointer).ok_or_else(|| {
+            CliError::internal(format!(
+                "detection reported the pointer {:?}, which does not resolve in the document it \
+                 was detected in",
+                item.pointer
+            ))
+        })?;
+        let source_sha256 = bioprism_ids::ContentHash::of_value(source)
+            .map_err(|error| {
+                CliError::invalid(error.to_string()).about(path.display().to_string())
+            })?
+            .to_string();
+        pending.push(PendingFigure {
+            filename: item.suggested_filename.clone(),
+            svg,
+            kind: item.kind,
+            pointer: item.pointer.clone(),
+            source_sha256,
+        });
+    }
+    Ok(pending)
+}
+
+fn figure_list(input_path: &Path) -> CliResult<Outcome> {
+    let document = io::read_json(input_path)?;
+    let detected = detect_figures(&document, input_path)?;
+
+    let rows: Vec<Value> = detected
+        .iter()
+        .map(|item| {
+            json!({
+                "kind": item.kind.slug(),
+                "artifact": item.artifact.slug(),
+                "pointer": item.pointer,
+                "suggested_filename": item.suggested_filename,
+            })
+        })
+        .collect();
+    let document_out = json!({
+        "ok": true,
+        "input": input_path.display().to_string(),
+        "drawable": rows.len(),
+        "figures": rows,
+        "recognised_kinds": bioprism_figures::FigureKind::ALL
+            .iter()
+            .map(|kind| kind.slug())
+            .collect::<Vec<_>>(),
+    });
+
+    if detected.is_empty() {
+        let human = format!(
+            "{} — nothing drawable\n\nThis document carries no artifact this builder draws. \
+             Recognition is structural — required\nkey sets and declared schema strings — so \
+             renaming the file cannot change the answer.\nDrawable figures: {}\n\nNext: bioprism \
+             figure list --input <a comparison, certificate, sweep table, autopilot\nreport or \
+             research dossier>\n",
+            input_path.display(),
+            figure_kind_registry(),
+        );
+        return Ok(Outcome::ok(document_out, human));
+    }
+
+    let pointer_width = detected
+        .iter()
+        .map(|item| pointer_display(&item.pointer).chars().count())
+        .max()
+        .unwrap_or(0)
+        .max("pointer".len());
+    let mut human = format!(
+        "{} — {} drawable region(s)\n\n",
+        input_path.display(),
+        detected.len()
+    );
+    human.push_str(&format!(
+        "  {:<19}  {:<pointer_width$}  {}\n",
+        "figure", "pointer", "suggested filename"
+    ));
+    for item in &detected {
+        human.push_str(&format!(
+            "  {:<19}  {:<pointer_width$}  {}\n",
+            item.kind.slug(),
+            pointer_display(&item.pointer),
+            item.suggested_filename
+        ));
+    }
+    human.push_str(&format!(
+        "\nNothing was written. Each figure's footer will carry the canonical digest of the \
+         value at\nits pointer: that hex identifies the artifact, it does not attest that the \
+         artifact is\ncorrect.\n\nNext: bioprism figure render --input {} --out-dir figures\n",
+        input_path.display()
+    ));
+    Ok(Outcome::ok(document_out, human))
+}
+
+fn figure_render(
+    input_path: &Path,
+    out_dir: &Path,
+    kind: Option<bioprism_figures::FigureKind>,
+    pointer: Option<&str>,
+    dry_run: bool,
+) -> CliResult<Outcome> {
+    let document = io::read_json(input_path)?;
+    let detected = detect_figures(&document, input_path)?;
+    let selection: Vec<&bioprism_figures::Detected> = detected
+        .iter()
+        .filter(|item| kind.is_none_or(|wanted| item.kind == wanted))
+        .filter(|item| pointer.is_none_or(|wanted| item.pointer == wanted))
+        .collect();
+
+    let filtered = kind.is_some() || pointer.is_some();
+    if selection.is_empty() {
+        let reason = if detected.is_empty() {
+            "the document carries no artifact this builder draws".to_string()
+        } else {
+            format!(
+                "the document carries {} drawable region(s), and --kind/--pointer selected none \
+                 of them",
+                detected.len()
+            )
+        };
+        let document_out = json!({
+            "ok": false,
+            "input": input_path.display().to_string(),
+            "drawable": detected.len(),
+            "selected": 0,
+            "written": 0,
+            "dry_run": dry_run,
+            "reason": reason,
+            "figures": Vec::<Value>::new(),
+        });
+        let human = format!(
+            "figure render: nothing to draw\n  input: {}\n  drawable regions: {}\n  selected: \
+             0\n  {reason}\n\nThis is a verdict about the input, not a failure of the command: \
+             nothing was written and\nnothing here needs fixing. Drawable figures: {}\n\nNext: \
+             bioprism figure list --input {}\n",
+            input_path.display(),
+            detected.len(),
+            figure_kind_registry(),
+            input_path.display(),
+        );
+        return Ok(Outcome::ok(document_out, human).under(ExitCode::AssertionFailed));
+    }
+
+    let pending = render_selection(&document, &selection, input_path)?;
+    let mut artifacts = Vec::with_capacity(pending.len());
+    for figure in &pending {
+        artifacts.push((
+            figure,
+            io::write_text_artifact(&out_dir.join(&figure.filename), &figure.svg, dry_run)?,
+        ));
+    }
+
+    let document_out = json!({
+        "ok": true,
+        "input": input_path.display().to_string(),
+        "out_dir": out_dir.display().to_string(),
+        "drawable": detected.len(),
+        "selected": pending.len(),
+        "dry_run": dry_run,
+        "written": artifacts.iter().filter(|(_, written)| written.written).count(),
+        "figures": artifacts
+            .iter()
+            .map(|(figure, written)| json!({
+                "kind": figure.kind.slug(),
+                "pointer": figure.pointer,
+                "filename": figure.filename,
+                "path": written.path.display().to_string(),
+                "bytes": written.bytes,
+                "written": written.written,
+                "source_sha256": figure.source_sha256,
+            }))
+            .collect::<Vec<Value>>(),
+    });
+
+    let mut human = format!(
+        "figure render: {}\n  input: {}\n  drawable regions: {}{}\n",
+        if dry_run {
+            "planned (no writes)"
+        } else {
+            "completed"
+        },
+        input_path.display(),
+        detected.len(),
+        if filtered {
+            format!("\n  selected by filter: {}", pending.len())
+        } else {
+            String::new()
+        },
+    );
+    for (figure, written) in &artifacts {
+        human.push_str(&format!(
+            "  {} {} ({} bytes) — {} of {}, source sha256 {}\n",
+            if written.written {
+                "wrote"
+            } else {
+                "would write"
+            },
+            written.path.display(),
+            written.bytes,
+            figure.kind.slug(),
+            pointer_display(&figure.pointer),
+            figure.source_sha256,
+        ));
+    }
+    human.push_str(&format!(
+        "\nEach source sha256 is the canonical digest of the exact value drawn; it identifies \
+         the\nartifact and does not attest that the artifact is correct.\n\nNext: bioprism \
+         figure render --input {} --out-dir {}\n",
+        input_path.display(),
+        out_dir.display(),
+    ));
+    Ok(Outcome::ok(document_out, human))
+}
+
+/// Why one batch input produced no figures.
+///
+/// Carried into the manifest verbatim. A batch that dropped its skips would report a directory as
+/// fully drawn when part of it was never read, which is the one thing the manifest exists to stop.
+struct SkippedInput {
+    input: String,
+    reason: String,
+}
+
+/// The `*.json` files directly inside a directory, in sorted order.
+///
+/// Non-recursive by decision, not by omission: a recursive walk would descend into the `figures/`
+/// directory a previous run wrote and into store indexes, and an operator who wanted one
+/// directory drawn would have no way to say "not that one".
+fn figure_batch_inputs(input_dir: &Path) -> CliResult<Vec<std::path::PathBuf>> {
+    let mut inputs = Vec::new();
+    for entry in std::fs::read_dir(input_dir).map_err(|error| CliError::io(input_dir, error))? {
+        let entry = entry.map_err(|error| CliError::io(input_dir, error))?;
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        if path.extension().and_then(|extension| extension.to_str()) != Some("json") {
+            continue;
+        }
+        inputs.push(path);
+    }
+    inputs.sort();
+    Ok(inputs)
+}
+
+/// The subdirectory one input's figures are written into.
+///
+/// Per-input rather than flat, because two documents in one directory can carry the same artifact
+/// — the same world compiled twice — and their suggested filenames would then collide across
+/// inputs, silently overwriting one figure with another. Uniqueness within a document is the
+/// detector's job; uniqueness across documents is this.
+fn figure_batch_out_dir(out_dir: &Path, input: &Path) -> std::path::PathBuf {
+    let stem = input
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or("input");
+    out_dir.join(stem)
+}
+
+fn figure_batch(input_dir: &Path, out_dir: &Path, dry_run: bool) -> CliResult<Outcome> {
+    let inputs = figure_batch_inputs(input_dir)?;
+    let mut figures: Vec<Value> = Vec::new();
+    let mut skipped: Vec<SkippedInput> = Vec::new();
+    let mut written_artifacts: Vec<io::WrittenArtifact> = Vec::new();
+
+    for input in &inputs {
+        let label = input.display().to_string();
+        let text = match std::fs::read_to_string(input) {
+            Ok(text) => text,
+            Err(error) => {
+                skipped.push(SkippedInput {
+                    input: label,
+                    reason: format!("could not be read: {error}"),
+                });
+                continue;
+            }
+        };
+        let document: Value = match serde_json::from_str(&text) {
+            Ok(document) => document,
+            Err(error) => {
+                skipped.push(SkippedInput {
+                    input: label,
+                    reason: format!("not valid JSON: {error}"),
+                });
+                continue;
+            }
+        };
+        let detected = match bioprism_figures::detect(&document) {
+            Ok(detected) => detected,
+            Err(error) => {
+                skipped.push(SkippedInput {
+                    input: label,
+                    reason: error.to_string(),
+                });
+                continue;
+            }
+        };
+        if detected.is_empty() {
+            skipped.push(SkippedInput {
+                input: label,
+                reason: "no artifact this builder draws".to_string(),
+            });
+            continue;
+        }
+        let selection: Vec<&bioprism_figures::Detected> = detected.iter().collect();
+        let pending = match render_selection(&document, &selection, input) {
+            Ok(pending) => pending,
+            Err(error) => {
+                skipped.push(SkippedInput {
+                    input: label,
+                    reason: error.message,
+                });
+                continue;
+            }
+        };
+        let target = figure_batch_out_dir(out_dir, input);
+        for figure in &pending {
+            let written =
+                io::write_text_artifact(&target.join(&figure.filename), &figure.svg, dry_run)?;
+            figures.push(json!({
+                "input": label,
+                "kind": figure.kind.slug(),
+                "pointer": figure.pointer,
+                "filename": written.path.display().to_string(),
+                "source_sha256": figure.source_sha256,
+            }));
+            written_artifacts.push(written);
+        }
+    }
+
+    let manifest = json!({
+        "inputs": inputs
+            .iter()
+            .map(|input| input.display().to_string())
+            .collect::<Vec<String>>(),
+        "figures": figures,
+        "skipped": skipped
+            .iter()
+            .map(|entry| json!({ "input": entry.input, "reason": entry.reason }))
+            .collect::<Vec<Value>>(),
+    });
+    let manifest_path = out_dir.join("manifest.json");
+    let manifest_artifact = io::write_artifact(&manifest_path, &manifest, dry_run)?;
+
+    let drew_something = !figures.is_empty();
+    let document_out = json!({
+        "ok": drew_something,
+        "input_dir": input_dir.display().to_string(),
+        "out_dir": out_dir.display().to_string(),
+        "recursive": false,
+        "dry_run": dry_run,
+        "inputs_total": inputs.len(),
+        "figures_total": figures.len(),
+        "skipped_total": skipped.len(),
+        "manifest": manifest_path.display().to_string(),
+        "manifest_written": manifest_artifact.written,
+        "manifest_document": manifest,
+    });
+
+    let mut human = format!(
+        "figure batch: {}\n  input directory: {} (non-recursive)\n  inputs considered: {}\n  \
+         figures: {}\n  skipped: {}\n",
+        if dry_run {
+            "planned (no writes)"
+        } else {
+            "completed"
+        },
+        input_dir.display(),
+        inputs.len(),
+        figures.len(),
+        skipped.len(),
+    );
+    for entry in &skipped {
+        human.push_str(&format!("  skipped {} — {}\n", entry.input, entry.reason));
+    }
+    for written in &written_artifacts {
+        human.push_str(&format!(
+            "  {} {} ({} bytes)\n",
+            if written.written {
+                "wrote"
+            } else {
+                "would write"
+            },
+            written.path.display(),
+            written.bytes
+        ));
+    }
+    human.push_str(&format!(
+        "  {} {} ({} bytes)\n",
+        if manifest_artifact.written {
+            "wrote"
+        } else {
+            "would write"
+        },
+        manifest_artifact.path.display(),
+        manifest_artifact.bytes
+    ));
+    if !drew_something {
+        human.push_str(
+            "\nNothing in this directory was drawable. The manifest still names every input and \
+             why\neach was skipped, because that is the answer.\n",
+        );
+    }
+    let follow_up = figures
+        .first()
+        .and_then(|figure| figure["input"].as_str())
+        .map(str::to_string)
+        .or_else(|| inputs.first().map(|input| input.display().to_string()))
+        .unwrap_or_else(|| input_dir.join("<artifact>.json").display().to_string());
+    human.push_str(&format!(
+        "\nNext: bioprism figure list --input {follow_up}\n"
+    ));
+    Ok(Outcome::ok(document_out, human).failing_if(!drew_something))
 }
 
 fn evidence_bundle_verify(bundle_path: &Path) -> CliResult<Outcome> {
@@ -1929,9 +2995,24 @@ fn evidence_bundle_query(
     Ok(Outcome::ok(report, human))
 }
 
-fn world_validate(world_path: &Path) -> CliResult<Outcome> {
+/// Validates a world, classifying scope dimensions from `--dimensions` when one is given.
+///
+/// The default registry knows only the reference dimensions, so a domain world's own dimensions
+/// (`venue`, `account`, …) surface as `unclassified_scope_dimension` warnings — which is correct
+/// when nobody declared them and noise when a `bioprism-scope-dimensions/0.1` document exists.
+/// The registry source is echoed into both outputs, because a clean report means something
+/// different under a caller-supplied classification than under the default one.
+fn world_validate(world_path: &Path, dimensions_path: Option<&Path>) -> CliResult<Outcome> {
     let world = io::load_world(world_path)?;
-    let report = validate(&world, &DimensionRegistry::default());
+    let registry = match dimensions_path {
+        None => DimensionRegistry::default(),
+        Some(path) => {
+            let raw = io::read_json(path)?;
+            DimensionRegistry::from_json(&raw)
+                .map_err(|e| CliError::invalid(e).about(path.display().to_string()))?
+        }
+    };
+    let report = validate(&world, &registry);
     let errors = report
         .diagnostics
         .iter()
@@ -1950,6 +3031,10 @@ fn world_validate(world_path: &Path) -> CliResult<Outcome> {
         },
         "errors": errors,
         "warnings": warnings,
+        "dimensions_source": match dimensions_path {
+            Some(path) => path.display().to_string(),
+            None => "default".to_string(),
+        },
         "diagnostics": report.diagnostics,
     });
 
@@ -1962,6 +3047,12 @@ fn world_validate(world_path: &Path) -> CliResult<Outcome> {
         errors,
         warnings
     );
+    if let Some(path) = dimensions_path {
+        human.push_str(&format!(
+            "  scope dimensions classified by {}\n",
+            path.display()
+        ));
+    }
     for diagnostic in &report.diagnostics {
         let label = match diagnostic.severity {
             Severity::Error => "error",
@@ -2107,6 +3198,113 @@ Next: bioprism context compare --world <world.json> --query <query.json>
     Ok(Outcome::ok(document, human))
 }
 
+/// Routes a sweep failure to the code carrying its 40.36 class.
+///
+/// A generated world or query the loader rejects is this binary's fault — the generator and the
+/// loader ship together, so the operator supplied nothing that could be edited. A cell with no
+/// reference verdict defers to [`CliError::from_compare`], so the paths that surface the same
+/// oracle refusal cannot drift apart.
+fn sweep_error(error: bioprism_baseline::SweepError) -> CliError {
+    use bioprism_baseline::SweepError;
+    let message = error.to_string();
+    match error {
+        SweepError::WorldRejected { .. } | SweepError::QueryRejected { .. } => {
+            CliError::internal(message)
+        }
+        SweepError::NoReference { source, .. } => {
+            CliError::new(CliError::from_compare(source).code, message)
+        }
+    }
+}
+
+/// Runs the structural family sweep (43.39 grid, full baseline panel per cell).
+///
+/// `--distractors` and `--seed` override the default grid's distractor axis and seed; the other
+/// axes stay as declared, because varying the decision-defining knobs would compare strategies
+/// across different questions. Rows the oracle refused serialise with `judged: false` and no
+/// `sound` key at all, following `context compare`: an absent key cannot be read as a measured
+/// zero. Exit 1 applies the 43.41 stop rule — FIBER inadmissible in any cell blocks advancement.
+fn world_sweep(
+    distractors: Option<&[usize]>,
+    seed: Option<u64>,
+    markdown: bool,
+) -> CliResult<Outcome> {
+    use bioprism_baseline::sweep::{run_sweep, SweepGrid};
+    use bioprism_worldgen::{DistractorAttachment, TagStyle};
+
+    let mut grid = SweepGrid::default_grid();
+    if let Some(counts) = distractors {
+        grid.distractor_counts = counts.to_vec();
+    }
+    if let Some(seed) = seed {
+        grid.seed = seed;
+    }
+    let table = run_sweep(&grid).map_err(sweep_error)?;
+
+    let strategies: Vec<&str> = table
+        .cells
+        .first()
+        .map(|cell| cell.rows.iter().map(|row| row.strategy.as_str()).collect())
+        .unwrap_or_default();
+    let mut admissible_cells = serde_json::Map::new();
+    for strategy in &strategies {
+        admissible_cells.insert(
+            strategy.to_string(),
+            json!(table.admissible_cells(strategy)),
+        );
+    }
+    let fiber_admissible_everywhere = table
+        .cells
+        .iter()
+        .all(|cell| cell.row("fiber").is_some_and(|row| row.admissible));
+
+    let attachment_label = |attachment: DistractorAttachment| match attachment {
+        DistractorAttachment::Hub => "hub",
+        DistractorAttachment::NearTarget => "near_target",
+    };
+    let tag_label = |style: TagStyle| match style {
+        TagStyle::Distinct => "distinct",
+        TagStyle::Camouflaged => "camouflaged",
+    };
+
+    let document = json!({
+        "ok": fiber_admissible_everywhere,
+        "seed": table.seed,
+        "cells_total": table.cells.len(),
+        "admissible_cells": admissible_cells,
+        "cells": table.cells.iter().map(|cell| json!({
+            "world_id": cell.world_id,
+            "attachment": attachment_label(cell.attachment),
+            "relay_depth": cell.relay_depth,
+            "tag_style": tag_label(cell.tag_style),
+            "distractors": cell.distractors,
+            "total_facts": cell.total_facts,
+            "rows": cell.rows.iter().map(|row| {
+                let mut object = serde_json::Map::new();
+                object.insert("strategy".into(), json!(row.strategy));
+                object.insert("facts_selected".into(), json!(row.facts_selected));
+                object.insert("judged".into(), json!(row.sound.is_some()));
+                if let Some(sound) = row.sound {
+                    object.insert("sound".into(), json!(sound));
+                }
+                object.insert("protected_closure".into(), json!(row.protected_closure));
+                object.insert("admissible".into(), json!(row.admissible));
+                Value::Object(object)
+            }).collect::<Vec<_>>(),
+        })).collect::<Vec<_>>(),
+    });
+
+    let mut human = table.to_markdown();
+    if !markdown {
+        human.push_str(
+            "\nNext: bioprism world generate --family discriminating --world-out world.json \
+             --query-out query.json\n",
+        );
+    }
+
+    Ok(Outcome::ok(document, human).failing_if(!fiber_admissible_everywhere))
+}
+
 fn world_index(world_path: &Path, store_path: &Path, dry_run: bool) -> CliResult<Outcome> {
     let raw = io::read_json(world_path)?;
     io::refuse_to_rebind_store(store_path, &raw)?;
@@ -2154,6 +3352,63 @@ Next: bioprism context explain --world {} --query <query.json>
     Ok(Outcome::ok(document, human))
 }
 
+/// Loads and validates a domain pack, mapping a malformed document to `invalid_input`.
+///
+/// The pack is validated whole at this boundary (`DomainPack::from_json` consults nothing
+/// lazily), so a compile that proceeds past this call is judged by exactly the oracle the pack
+/// declared — a half-parsed pack cannot silently fall back to the reference oracle.
+fn load_domain_pack(path: &Path) -> CliResult<DomainPack> {
+    let raw = io::read_json(path)?;
+    DomainPack::from_json(&raw)
+        .map_err(|e| CliError::invalid(e.to_string()).about(path.display().to_string()))
+}
+
+/// What the pack declares that this query does not honour.
+///
+/// Advisories, not errors, because a pack cannot amend a query: the certificate binds the query's
+/// bytes by hash, so the query stays the sole author of its own contract and the pack can only
+/// point at the gap. An unprotected pack tag is the dangerous one — facts carrying it never enter
+/// protected closure, so nothing downstream will prove they were delivered.
+fn domain_advisories(pack: &DomainPack, query: &Query) -> Vec<String> {
+    let mut advisories = Vec::new();
+    for tag in pack.protected_tags() {
+        if !query.protected_tags.contains(tag) {
+            advisories.push(format!(
+                "the pack protects tag {tag:?} but the query does not, so facts tagged {tag:?} \
+                 never enter protected closure"
+            ));
+        }
+    }
+    if query.goal.is_none() {
+        match pack.goal() {
+            Some(goal) => advisories.push(format!(
+                "the query declares no goal; the pack declares the domain's: {goal:?}"
+            )),
+            None => advisories
+                .push("the query declares no goal, and the pack declares none either".to_string()),
+        }
+    }
+    advisories
+}
+
+/// The `domain` block both `--json` outputs carry when `--domain` was given.
+fn domain_block(pack: &DomainPack, advisories: &[String]) -> Value {
+    json!({
+        "name": pack.name(),
+        "oracle_kind": pack.oracle().kind(),
+        "advisories": advisories,
+    })
+}
+
+/// The human-mode rendering of the same block.
+fn render_domain(pack: &DomainPack, advisories: &[String]) -> String {
+    let mut text = format!("domain {} (oracle {})\n", pack.name(), pack.oracle().kind());
+    for advisory in advisories {
+        text.push_str(&format!("  advisory: {advisory}\n"));
+    }
+    text
+}
+
 fn context_compile(options: &CompileOptions) -> CliResult<Outcome> {
     let world = io::load_source(&options.world)?;
     let query = io::load_query(&options.query)?;
@@ -2162,7 +3417,16 @@ fn context_compile(options: &CompileOptions) -> CliResult<Outcome> {
         Profile::Extended => CertificateProfile::Extended,
     };
 
-    let out = compile(world.as_ref(), &query).map_err(CliError::from_compile)?;
+    let pack = options
+        .domain
+        .as_deref()
+        .map(load_domain_pack)
+        .transpose()?;
+    let out = match &pack {
+        Some(pack) => compile_with_oracle(world.as_ref(), &query, pack.oracle()),
+        None => compile(world.as_ref(), &query),
+    }
+    .map_err(CliError::from_compile)?;
 
     let certificate_document = out
         .certificate
@@ -2191,7 +3455,12 @@ fn context_compile(options: &CompileOptions) -> CliResult<Outcome> {
         .unwrap_or_default();
     let invalid = out.certificate.oracle.status == OracleStatus::Invalid;
 
-    let document = json!({
+    let advisories = pack
+        .as_ref()
+        .map(|pack| domain_advisories(pack, &query))
+        .unwrap_or_default();
+
+    let mut document = json!({
         "ok": true,
         "world_id": out.certificate.world_id,
         "query_id": out.certificate.query_id,
@@ -2221,6 +3490,12 @@ fn context_compile(options: &CompileOptions) -> CliResult<Outcome> {
             }))
             .collect::<Vec<_>>(),
     });
+    if let Some(pack) = &pack {
+        document
+            .as_object_mut()
+            .expect("compile document is an object")
+            .insert("domain".into(), domain_block(pack, &advisories));
+    }
 
     let mut human = format!(
         "compiled {} facts and {} factors, omitted {} facts\noracle {} → {}\ncertificate sha256 {}\n",
@@ -2231,6 +3506,9 @@ fn context_compile(options: &CompileOptions) -> CliResult<Outcome> {
         out.certificate.oracle.status.as_str(),
         digest
     );
+    if let Some(pack) = &pack {
+        human.push_str(&render_domain(pack, &advisories));
+    }
     for witness in out.certificate.oracle.witness_kinds() {
         human.push_str(&format!("  witness {witness}\n"));
     }
@@ -2253,20 +3531,37 @@ fn context_compile(options: &CompileOptions) -> CliResult<Outcome> {
         ));
     }
     human.push_str(&format!(
-        "\nNext: bioprism context explain --world {} --query {}\n",
+        "\nNext: bioprism context explain --world {} --query {}{}\n",
         options.world.display(),
-        options.query.display()
+        options.query.display(),
+        match &options.domain {
+            Some(path) => format!(" --domain {}", path.display()),
+            None => String::new(),
+        }
     ));
 
     Ok(Outcome::ok(document, human).failing_if(invalid && options.fail_on_invalid))
 }
 
-fn context_explain(world_path: &Path, query_path: &Path) -> CliResult<Outcome> {
+fn context_explain(
+    world_path: &Path,
+    query_path: &Path,
+    domain_path: Option<&Path>,
+) -> CliResult<Outcome> {
     let world = io::load_source(world_path)?;
     let query = io::load_query(query_path)?;
-    let out = compile(world.as_ref(), &query).map_err(CliError::from_compile)?;
+    let pack = domain_path.map(load_domain_pack).transpose()?;
+    let out = match &pack {
+        Some(pack) => compile_with_oracle(world.as_ref(), &query, pack.oracle()),
+        None => compile(world.as_ref(), &query),
+    }
+    .map_err(CliError::from_compile)?;
+    let advisories = pack
+        .as_ref()
+        .map(|pack| domain_advisories(pack, &query))
+        .unwrap_or_default();
 
-    let document = json!({
+    let mut document = json!({
         "ok": true,
         "world_id": out.certificate.world_id,
         "query_id": out.certificate.query_id,
@@ -2289,12 +3584,25 @@ fn context_explain(world_path: &Path, query_path: &Path) -> CliResult<Outcome> {
         "unmatched_protected_tags": out.trace.unmatched_protected_tags,
         "dropped_protected": out.trace.dropped_protected,
     });
+    if let Some(pack) = &pack {
+        document
+            .as_object_mut()
+            .expect("explain document is an object")
+            .insert("domain".into(), domain_block(pack, &advisories));
+    }
 
     let mut human = explain::render(&out);
+    if let Some(pack) = &pack {
+        human.push_str(&render_domain(pack, &advisories));
+    }
     human.push_str(&format!(
-        "\nNext: bioprism context compile --world {} --query {} --certificate-out cert.json\n",
+        "\nNext: bioprism context compile --world {} --query {} --certificate-out cert.json{}\n",
         world_path.display(),
-        query_path.display()
+        query_path.display(),
+        match domain_path {
+            Some(path) => format!(" --domain {}", path.display()),
+            None => String::new(),
+        }
     ));
 
     Ok(Outcome::ok(document, human))
@@ -2330,6 +3638,846 @@ Next: bioprism context explain --world {} --query {}
         .any(|r| r.name == "fiber" && !r.admissible());
 
     Ok(Outcome::ok(comparison.to_json(), human).failing_if(fiber_inadmissible))
+}
+
+/// The `project` scope label for a scanned tree: the root's last path segment.
+///
+/// A display name, never an identity claim — the world id is derived from the file listing's
+/// content, so the same tree reached by two different paths still assembles to the same world.
+/// Derived the way the MCP server's project tools derive it, so a world assembled through either
+/// surface binds the same value into its scopes.
+fn project_label(root: &Path) -> String {
+    root.components()
+        .filter_map(|component| match component {
+            std::path::Component::Normal(name) => name.to_str(),
+            _ => None,
+        })
+        .next_back()
+        .unwrap_or("project")
+        .to_string()
+}
+
+/// Reads the declared issues before anything walks the tree.
+///
+/// Read first because a malformed issues file is the operator's to edit: scanning first would
+/// spend the whole walk to arrive at the same refusal, and the diagnostic would name the file
+/// only after work nobody can use.
+fn project_issues(path: Option<&Path>) -> CliResult<Vec<Issue>> {
+    match path {
+        None => Ok(Vec::new()),
+        Some(path) => Issue::load(path)
+            .map_err(|error| CliError::from_project(error).about(path.display().to_string())),
+    }
+}
+
+/// Scans a project root and assembles its world, dimension document, pack and queries.
+///
+/// Nothing here is written or executed: the scan is static, and the assembled world already
+/// passed `bioprism_world::World::from_json` inside the crate before it is returned.
+fn project_assemble(
+    root: &Path,
+    issues: Vec<Issue>,
+    decision_time: Option<&str>,
+) -> CliResult<(ProjectScan, ProjectWorld)> {
+    let (scan, _ingestion) = ProjectScan::scan(root, &ScanOptions::new(project_label(root)))
+        .map_err(|error| CliError::from_project(error).about(root.display().to_string()))?;
+    let assembled = ProjectWorld::assemble(
+        &scan,
+        &AssemblyOptions {
+            decision_time: decision_time.unwrap_or_default().to_string(),
+            issues,
+            ..AssemblyOptions::default()
+        },
+    )
+    .map_err(CliError::from_project)?;
+    Ok((scan, assembled))
+}
+
+/// Writes the generated queries as one bundle document or as a directory of documents.
+///
+/// The single-file form is a *container* — `release` plus `issues` keyed by issue id — and each
+/// member of it is a `fiber-query/0.2` document. Keeping only the release query to make the one
+/// file fit would silently drop every issue region the caller asked to have generated, so the
+/// flag chooses where the queries go and never which of them survive.
+fn write_queries(
+    path: &Path,
+    assembled: &ProjectWorld,
+    dry_run: bool,
+) -> CliResult<Vec<io::WrittenArtifact>> {
+    if path.extension().and_then(std::ffi::OsStr::to_str) == Some("json") {
+        let bundle = json!({
+            "release": assembled.release_query,
+            "issues": assembled.issue_queries,
+        });
+        return Ok(vec![io::write_artifact(path, &bundle, dry_run)?]);
+    }
+
+    let mut written = vec![io::write_artifact(
+        &path.join("release.json"),
+        &assembled.release_query,
+        dry_run,
+    )?];
+    for (issue_id, query) in &assembled.issue_queries {
+        written.push(io::write_artifact(
+            &path.join(format!("issue-{issue_id}.json")),
+            query,
+            dry_run,
+        )?);
+    }
+    Ok(written)
+}
+
+/// Renders the scan's loss report: total entries and the count of each declared kind.
+///
+/// Printed on both project commands, because a project model is a lossy reading of a tree and a
+/// count of what the scan could not interpret is the only thing standing between "we read the
+/// project" and "we read the part of the project this scanner understands". Zero entries is a
+/// measured zero here — every skip is declared — so it is reported as a count like any other.
+fn render_losses(counts: &BTreeMap<String, u64>) -> String {
+    let total: u64 = counts.values().sum();
+    let detail = counts
+        .iter()
+        .map(|(kind, count)| format!("{kind} {count}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    if detail.is_empty() {
+        format!("  scan loss {total} entries\n")
+    } else {
+        format!("  scan loss {total} entries: {detail}\n")
+    }
+}
+
+fn project_ingest(options: &ProjectIngestOptions) -> CliResult<Outcome> {
+    let issues = project_issues(options.issues.as_deref())?;
+    let (scan, assembled) =
+        project_assemble(&options.root, issues, options.decision_time.as_deref())?;
+
+    let mut written = vec![
+        io::write_artifact(&options.world_out, &assembled.world, options.dry_run)?,
+        io::write_artifact(&options.pack_out, &assembled.pack, options.dry_run)?,
+        io::write_artifact(
+            &options.dimensions_out,
+            &assembled.dimensions,
+            options.dry_run,
+        )?,
+    ];
+    if let Some(path) = &options.queries_out {
+        written.extend(write_queries(path, &assembled, options.dry_run)?);
+    }
+
+    let facts = assembled.world["facts"].as_array().map_or(0, Vec::len);
+    let factors = assembled.world["factors"].as_array().map_or(0, Vec::len);
+    let components = assembled.world["facts"].as_array().map_or(0, |facts| {
+        facts
+            .iter()
+            .filter(|fact| {
+                fact["id"]
+                    .as_str()
+                    .is_some_and(|id| id.starts_with("fact.component."))
+            })
+            .count()
+    });
+    let losses = scan.loss_kind_counts();
+
+    let document = json!({
+        "ok": true,
+        "world_id": assembled.world_id,
+        "facts": facts,
+        "factors": factors,
+        "components": components,
+        "issue_queries": assembled.issue_queries.keys().collect::<Vec<_>>(),
+        "losses_by_kind": losses,
+        "dry_run": options.dry_run,
+        "artifacts": written
+            .iter()
+            .map(|a| json!({
+                "path": a.path.display().to_string(),
+                "bytes": a.bytes,
+                "written": a.written,
+            }))
+            .collect::<Vec<_>>(),
+        "limitations": [
+            "the scan is static: tests are counted never run, markers are case-sensitive \
+             substring proxies, and requirement strings are never resolved against a registry",
+            "every skipped or unread byte is declared in losses_by_kind; what the scan could \
+             not interpret is reported as absent, never as zero",
+        ],
+    });
+
+    let mut human = format!(
+        "scanned {} into {}\n  {} facts, {} factors, {} components, {} issue queries\n",
+        options.root.display(),
+        assembled.world_id,
+        facts,
+        factors,
+        components,
+        assembled.issue_queries.len(),
+    );
+    human.push_str(&render_losses(&losses));
+    for artifact in &written {
+        human.push_str(&format!(
+            "  {} {} ({} bytes)\n",
+            if artifact.written {
+                "wrote"
+            } else {
+                "would write"
+            },
+            artifact.path.display(),
+            artifact.bytes
+        ));
+    }
+    human.push_str(&format!(
+        "\nNext: bioprism world validate --world {} --dimensions {}\n",
+        options.world_out.display(),
+        options.dimensions_out.display()
+    ));
+
+    Ok(Outcome::ok(document, human))
+}
+
+/// One issue's compiled evidence region, and the declarations that defined it.
+///
+/// `declared` and `unresolved` travel with the region because an issue's relevance here is its
+/// declared components and nothing else: a region that looks deliberately small is a different
+/// thing from a region built from a component name that resolved to nothing, and a reader who
+/// cannot tell them apart will read the second as the first.
+struct IssueRegion {
+    query_id: String,
+    selected_facts: Vec<String>,
+    declared: Vec<String>,
+    unresolved: Vec<String>,
+}
+
+/// Compiles each declared issue's query against the assembled world.
+///
+/// This re-scans and re-assembles the tree. [`bioprism_project::audit`] returns the verdict and
+/// its witnesses but not the world it judged, and the issue queries only exist inside that
+/// assembly, so the alternative would be to re-implement the audit pipeline here and let the
+/// CLI's verdict drift from the crate's. Paying for a second deterministic walk is the cheaper
+/// mistake, and the world ids are compared afterwards so a tree that moved between the two
+/// walks is reported rather than papered over.
+fn project_issue_regions(
+    root: &Path,
+    issues: &[Issue],
+    decision_time: Option<&str>,
+    report: &AuditReport,
+) -> CliResult<BTreeMap<String, IssueRegion>> {
+    let mut regions = BTreeMap::new();
+    if issues.is_empty() {
+        return Ok(regions);
+    }
+
+    let (_scan, assembled) = project_assemble(root, issues.to_vec(), decision_time)?;
+    if assembled.world_id != report.world_id {
+        return Err(CliError::new(
+            ExitCode::Stale,
+            format!(
+                "the tree changed while it was being audited: the verdict is about world {} and \
+                 the issue regions would be about world {}; re-run to audit one tree",
+                report.world_id, assembled.world_id
+            ),
+        )
+        .about(root.display().to_string()));
+    }
+
+    let world = bioprism_world::World::from_json(assembled.world.clone())
+        .map_err(|error| CliError::internal(error.to_string()))?;
+    let pack = DomainPack::from_json(&assembled.pack)
+        .map_err(|error| CliError::internal(error.to_string()))?;
+
+    let declarations: BTreeMap<&str, &Issue> = issues
+        .iter()
+        .map(|issue| (issue.id.as_str(), issue))
+        .collect();
+
+    for (issue_id, document) in &assembled.issue_queries {
+        let query = Query::from_json(document.clone())
+            .map_err(|error| CliError::internal(format!("issue {issue_id:?} query: {error}")))?;
+        let compiled =
+            compile_with_oracle(&world, &query, pack.oracle()).map_err(CliError::from_compile)?;
+        let unresolved = world
+            .facts
+            .iter()
+            .find(|fact| fact.id.as_str() == format!("fact.issue.{issue_id}"))
+            .and_then(|fact| fact.value.get("unresolved_components"))
+            .and_then(Value::as_array)
+            .map(|entries| {
+                entries
+                    .iter()
+                    .filter_map(|entry| entry.as_str().map(str::to_string))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        regions.insert(
+            issue_id.clone(),
+            IssueRegion {
+                query_id: document["query_id"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string(),
+                selected_facts: compiled.certificate.selected_facts.clone(),
+                declared: declarations
+                    .get(issue_id.as_str())
+                    .map(|issue| issue.components.clone())
+                    .unwrap_or_default(),
+                unresolved,
+            },
+        );
+    }
+
+    Ok(regions)
+}
+
+/// Renders one oracle witness: the check that fired, the sentence declaring its mechanism, and
+/// the variable bindings it read.
+///
+/// The bindings are printed because a witness is a checkable object rather than a score — a
+/// reader must be able to re-run the check by hand against the values it saw.
+fn render_witness(witness: &LeakageWitness) -> String {
+    match witness {
+        LeakageWitness::DomainCheck {
+            check,
+            observed,
+            detail,
+        } => {
+            let mut text = format!("  witness {check}\n    {detail}\n");
+            for (variable, value) in observed {
+                text.push_str(&format!("    observed {variable} = {value}\n"));
+            }
+            text
+        }
+        other => format!("  witness {}\n", other.kind()),
+    }
+}
+
+/// Scans, assembles and judges a project under the emitted pack's rule oracle.
+///
+/// An invalid verdict exits 1 through [`Outcome::failing_if`], which is where `context compile`
+/// routes the same verdict: the command ran correctly and the property it checked does not hold.
+/// There is no `--fail-on-invalid` switch to gate it — compiling is useful whatever the oracle
+/// concludes, which is why that flag exists there, whereas a project audit *is* the verdict and a
+/// caller who did not want to hear it would not have run the command.
+fn project_audit(
+    root: &Path,
+    issues_path: Option<&Path>,
+    decision_time: Option<&str>,
+) -> CliResult<Outcome> {
+    let issues = project_issues(issues_path)?;
+    let report = bioprism_project::audit(
+        root,
+        &AuditOptions {
+            scan: Some(ScanOptions::new(project_label(root))),
+            assembly: AssemblyOptions {
+                decision_time: decision_time.unwrap_or_default().to_string(),
+                issues: issues.clone(),
+                ..AssemblyOptions::default()
+            },
+        },
+    )
+    .map_err(|error| CliError::from_project(error).about(root.display().to_string()))?;
+
+    let regions = project_issue_regions(root, &issues, decision_time, &report)?;
+    let invalid = report.status == OracleStatus::Invalid;
+    let witnesses = serde_json::to_value(&report.witnesses)
+        .map_err(|error| CliError::internal(error.to_string()))?;
+    let loss_total: u64 = report.loss_kind_counts.values().sum();
+
+    let document = json!({
+        "ok": true,
+        "world_id": report.world_id,
+        "verdict": {
+            "status": report.status.as_str(),
+            "oracle_kind": report.oracle_kind,
+            "witnesses": witnesses,
+        },
+        "facts": report.fact_count,
+        "selected_facts": report.selected_fact_count,
+        "loss": {
+            "total": loss_total,
+            "by_kind": report.loss_kind_counts,
+        },
+        "issues": regions
+            .iter()
+            .map(|(issue_id, region)| (issue_id.clone(), json!({
+                "query_id": region.query_id,
+                "declared_components": region.declared,
+                "unresolved_components": region.unresolved,
+                "region": region.selected_facts,
+                "region_facts": region.selected_facts.len(),
+            })))
+            .collect::<serde_json::Map<String, Value>>(),
+        "limitations": [
+            "every check is a static-scan proxy and says so in its own witness detail; nothing \
+             is executed, resolved or fetched",
+            "an issue's region comes from the components it declares, resolved syntactically; \
+             there is no semantic relevance search, and an unresolvable declaration is reported \
+             rather than guessed at",
+        ],
+    });
+
+    let mut human = format!(
+        "project world {} judged {} by {}\n  {} facts in the world, {} selected for the release \
+         query\n",
+        report.world_id,
+        report.status.as_str(),
+        report.oracle_kind,
+        report.fact_count,
+        report.selected_fact_count,
+    );
+    for witness in &report.witnesses {
+        human.push_str(&render_witness(witness));
+    }
+    human.push_str(&render_losses(&report.loss_kind_counts));
+    for (issue_id, region) in &regions {
+        human.push_str(&format!(
+            "  issue {issue_id} — {} facts in its declared region ({})\n",
+            region.selected_facts.len(),
+            if region.declared.is_empty() {
+                "no components declared".to_string()
+            } else {
+                format!("declared {}", region.declared.join(", "))
+            }
+        ));
+        for fact_id in &region.selected_facts {
+            human.push_str(&format!("      {fact_id}\n"));
+        }
+        if !region.unresolved.is_empty() {
+            human.push_str(&format!(
+                "      unresolved declarations: {}\n",
+                region.unresolved.join(", ")
+            ));
+        }
+    }
+    human.push_str(&format!(
+        "\nNext: bioprism project ingest --root {} --world-out world.json --pack-out pack.json \
+         --dimensions-out dimensions.json\n",
+        root.display()
+    ));
+
+    Ok(Outcome::ok(document, human).failing_if(invalid))
+}
+
+/// The schema of the document `project plan --criteria` reads.
+const DECLARATIONS_SCHEMA_VERSION: &str = "bioprism-repair-declarations/0.1";
+
+/// Reads a caller's declared criteria, obligations and falsifiers.
+///
+/// A separate document rather than a pile of flags, because a criterion is a name, a sentence and
+/// a predicate, and three of those on a command line would be positional in all but syntax.
+///
+/// Strict in the same way `bioprism_repair::RepairPlan::from_json` is strict: an undeclared key is
+/// refused rather than ignored, so a misspelled `falsifier` does not silently become a plan with
+/// no falsifier that the admissibility gate then blames on the author. An *absent* list, by
+/// contrast, is accepted and means the author declared none of that kind — which is what
+/// `Admissibility::Undeclared` already reports for obligations, and what the generated plan's own
+/// limitations already state.
+///
+/// A declared criterion must carry a `rationale`; an obligation and a falsifier need none. That
+/// asymmetry is the plan document's, not this reader's invention: `AcceptanceCriterion` is the one
+/// item type with a rationale field, and a criterion is the item a plan marks as
+/// `Origin::Declared` precisely to say somebody is accountable for it. An accountable claim with
+/// no stated reason is the shape of a criterion added to make a verification pass.
+fn read_declarations(path: &Path) -> CliResult<PlanOptions> {
+    let document = io::read_json(path)?;
+    let blame = |message: String| CliError::invalid(message).about(path.display().to_string());
+
+    let map = document.as_object().ok_or_else(|| {
+        blame(format!(
+            "a {DECLARATIONS_SCHEMA_VERSION} document is an object"
+        ))
+    })?;
+    let declared = [
+        "schema_version",
+        "criteria",
+        "obligations",
+        "falsifiers",
+        "limitations",
+    ];
+    if let Some(unknown) = map.keys().find(|key| !declared.contains(&key.as_str())) {
+        return Err(blame(format!(
+            "undeclared field {unknown:?} on the declarations document; the declared fields are \
+             {declared:?}"
+        )));
+    }
+    match map.get("schema_version").and_then(Value::as_str) {
+        Some(version) if version == DECLARATIONS_SCHEMA_VERSION => {}
+        Some(other) => {
+            return Err(blame(format!(
+                "declarations document declares schema_version {other:?}, expected \
+                 {DECLARATIONS_SCHEMA_VERSION:?}"
+            )))
+        }
+        None => {
+            return Err(blame(format!(
+                "declarations document needs a string \"schema_version\" of \
+                 {DECLARATIONS_SCHEMA_VERSION:?}"
+            )))
+        }
+    }
+
+    let items = |field: &str, with_rationale: bool| -> CliResult<Vec<DeclaredItem>> {
+        let entries = match map.get(field) {
+            None => return Ok(Vec::new()),
+            Some(value) => value
+                .as_array()
+                .ok_or_else(|| blame(format!("{field:?} must be an array")))?,
+        };
+        entries
+            .iter()
+            .map(|entry| {
+                let fields: &[&str] = if with_rationale {
+                    &["name", "statement", "predicate", "rationale"]
+                } else {
+                    &["name", "statement", "predicate"]
+                };
+                let entry = entry
+                    .as_object()
+                    .ok_or_else(|| blame(format!("every entry in {field:?} is an object")))?;
+                if let Some(unknown) = entry.keys().find(|key| !fields.contains(&key.as_str())) {
+                    return Err(blame(format!(
+                        "undeclared field {unknown:?} on an entry in {field:?}; the declared \
+                         fields are {fields:?}"
+                    )));
+                }
+                let text = |key: &str| -> CliResult<String> {
+                    entry
+                        .get(key)
+                        .and_then(Value::as_str)
+                        .map(str::to_string)
+                        .ok_or_else(|| {
+                            blame(format!("an entry in {field:?} needs a string {key:?}"))
+                        })
+                };
+                let predicate = predicate_from_json(entry.get("predicate").ok_or_else(|| {
+                    blame(format!("an entry in {field:?} declares no \"predicate\""))
+                })?)
+                .map_err(|error| {
+                    blame(format!(
+                        "an entry in {field:?} carries no predicate: {error}"
+                    ))
+                })?;
+                let item = DeclaredItem::new(text("name")?, text("statement")?, predicate);
+                Ok(if with_rationale {
+                    item.with_rationale(text("rationale")?)
+                } else {
+                    item
+                })
+            })
+            .collect()
+    };
+
+    let limitations = match map.get("limitations") {
+        None => Vec::new(),
+        Some(value) => value
+            .as_array()
+            .ok_or_else(|| blame("\"limitations\" must be an array of strings".to_string()))?
+            .iter()
+            .map(|entry| {
+                entry
+                    .as_str()
+                    .map(str::to_string)
+                    .ok_or_else(|| blame("\"limitations\" carries a non-string entry".to_string()))
+            })
+            .collect::<CliResult<Vec<String>>>()?,
+    };
+
+    Ok(PlanOptions {
+        declared_criteria: items("criteria", true)?,
+        declared_obligations: items("obligations", false)?,
+        declared_falsifiers: items("falsifiers", false)?,
+        limitations,
+    })
+}
+
+/// One `kind origin name` column block, so a reader can scan the origins down a single column.
+///
+/// The origin is on every line because a derived criterion is a proxy for something the release
+/// pack could see and a declared one is a claim someone is accountable for. Printing them in one
+/// undifferentiated list would let the tool's inferences borrow the author's authority.
+fn render_plan_items(plan: &RepairPlan) -> String {
+    let mut text = String::new();
+    for criterion in plan.criteria() {
+        text.push_str(&format!(
+            "    criterion  {:<8}  {}\n",
+            criterion.origin.as_str(),
+            criterion.name
+        ));
+    }
+    for obligation in plan.obligations() {
+        text.push_str(&format!(
+            "    obligation {:<8}  {}\n",
+            obligation.origin.as_str(),
+            obligation.name
+        ));
+    }
+    for falsifier in plan.falsifiers() {
+        text.push_str(&format!(
+            "    falsifier  {:<8}  {}\n",
+            falsifier.origin.as_str(),
+            falsifier.name
+        ));
+    }
+    text
+}
+
+/// `1 falsifier` / `2 falsifiers`.
+///
+/// A count line is the first thing a reader checks a plan against, and "1 criteria" is the kind of
+/// wrong that makes a reader wonder what else was assembled without being read.
+fn counted(n: usize, singular: &str, plural: &str) -> String {
+    format!("{n} {}", if n == 1 { singular } else { plural })
+}
+
+fn render_limitations(limitations: &[String]) -> String {
+    let mut text = String::from("  limitations:\n");
+    for line in limitations {
+        text.push_str(&format!("    - {line}\n"));
+    }
+    text
+}
+
+/// Derives a repair plan for one declared issue and writes it.
+///
+/// Nothing here edits a file in the scanned tree, applies a patch, builds, or runs a test. The one
+/// write is the plan document itself, and `--dry-run` suppresses it exactly as it does on
+/// `project ingest`.
+fn project_plan(options: &ProjectPlanOptions) -> CliResult<Outcome> {
+    let declared = match &options.criteria {
+        None => PlanOptions::default(),
+        Some(path) => read_declarations(path)?,
+    };
+    let issues = project_issues(Some(&options.issues))?;
+    let (_scan, assembled) =
+        project_assemble(&options.root, issues, options.decision_time.as_deref())?;
+
+    let query_document = assembled.issue_queries.get(&options.issue).ok_or_else(|| {
+        let declared_ids: Vec<&str> = assembled.issue_queries.keys().map(String::as_str).collect();
+        CliError::invalid(format!(
+            "no issue {:?} is declared in {}; it declares {}",
+            options.issue,
+            options.issues.display(),
+            if declared_ids.is_empty() {
+                "no issues at all".to_string()
+            } else {
+                declared_ids.join(", ")
+            }
+        ))
+        .about(options.issues.display().to_string())
+    })?;
+
+    let world = bioprism_world::World::from_json(assembled.world.clone())
+        .map_err(|error| CliError::internal(error.to_string()))?;
+    let pack = DomainPack::from_json(&assembled.pack)
+        .map_err(|error| CliError::internal(error.to_string()))?;
+    let query = Query::from_json(query_document.clone())
+        .map_err(|error| CliError::internal(format!("issue {:?} query: {error}", options.issue)))?;
+    let compiled =
+        compile_with_oracle(&world, &query, pack.oracle()).map_err(CliError::from_compile)?;
+
+    let plan = plan_for_issue(
+        &world,
+        &pack,
+        &options.issue,
+        &compiled.certificate,
+        &declared,
+    )
+    .map_err(CliError::from_repair)?;
+    let plan_document = plan.to_json().map_err(CliError::from_repair)?;
+    let written = io::write_artifact(&options.out, &plan_document, options.dry_run)?;
+
+    let document = json!({
+        "ok": true,
+        "plan_id": plan.plan_id(),
+        "issue_id": plan.issue_id(),
+        "world_id": plan.evidence_binding().world_id,
+        // `region_fact_ids`, not `region_facts`: PROJECT_MODELING records that on this surface
+        // `region_facts` is the *count* beside the `region` list, and `project audit` emits it that
+        // way three hundred lines up. One name meaning a number in one `project` document and a
+        // list of ids in the next is the kind of drift a caller only finds by indexing into it. The
+        // name here is the plan document's own field name, which is also what `repair_plan` returns.
+        "region_fact_ids": plan.evidence_binding().region_fact_ids,
+        "region_facts": plan.evidence_binding().region_fact_ids.len(),
+        "criteria": plan.criteria().len(),
+        "obligations": plan.obligations().len(),
+        "falsifiers": plan.falsifiers().len(),
+        "plan": plan_document,
+        "dry_run": options.dry_run,
+        "artifacts": [json!({
+            "path": written.path.display().to_string(),
+            "bytes": written.bytes,
+            "written": written.written,
+        })],
+        "limitations": [
+            "this command plans and never repairs: no file is edited, no patch is produced, \
+             nothing is built and no test is run",
+            "a derived criterion is a proxy for something the release pack could see, never for \
+             what the issue means; the plan's own limitations enumerate the rest",
+        ],
+    });
+
+    let mut human = format!(
+        "planned {} for issue {} in world {}\n  goal: {}\n  {}, {}, {} over an evidence region \
+         of {}\n",
+        plan.plan_id(),
+        plan.issue_id(),
+        plan.evidence_binding().world_id,
+        plan.goal(),
+        counted(plan.criteria().len(), "criterion", "criteria"),
+        counted(plan.obligations().len(), "obligation", "obligations"),
+        counted(plan.falsifiers().len(), "falsifier", "falsifiers"),
+        counted(
+            plan.evidence_binding().region_fact_ids.len(),
+            "fact",
+            "facts"
+        ),
+    );
+    human.push_str(&render_plan_items(&plan));
+    human.push_str(&render_limitations(plan.limitations()));
+    human.push_str(&format!(
+        "  {} {} ({} bytes)\n",
+        if written.written {
+            "wrote"
+        } else {
+            "would write"
+        },
+        written.path.display(),
+        written.bytes
+    ));
+    human.push_str(&format!(
+        "\nNext: bioprism project verify --root {} --plan {} --issues {}\n",
+        options.root.display(),
+        options.out.display(),
+        options.issues.display(),
+    ));
+
+    Ok(Outcome::ok(document, human))
+}
+
+/// The exit code one acceptance report lands on.
+///
+/// Four states, four codes, and the two that would be cheapest to collapse are the two that must
+/// not be:
+///
+/// * **Stale is not a failed verification.** Nothing was evaluated, so exit 1 — "the checked
+///   property does not hold" — would report a verdict the run never reached. Exit 9 is the one
+///   failure in the registry whose remedy touches nothing in the request: re-read the tree, or
+///   re-plan against it, and re-send.
+/// * **Underdetermined is not `not_met`.** Exit 1 invites the reader to conclude that clearing
+///   the listed failures is the whole remaining distance to a pass, and when a criterion never ran
+///   that conclusion is false. Exit 8 already means "ran correctly; the evidence does not decide",
+///   which is exactly what the report says.
+///
+/// `falsified` and `not_met` share exit 1 with `project audit`'s invalid verdict, because both are
+/// determinate adverse verdicts about a run that completed. Admissibility is deliberately absent
+/// from this function: an obligation asks whether the change was admissible *to make*, checked
+/// here only retrospectively, and letting a weaker check move the process status would contaminate
+/// it exactly as it would contaminate the outcome.
+fn verdict_code(report: &AcceptanceReport) -> ExitCode {
+    match report.outcome() {
+        None => ExitCode::Stale,
+        Some(RepairOutcome::Met) => ExitCode::Ok,
+        Some(RepairOutcome::Underdetermined) => ExitCode::Indeterminate,
+        Some(RepairOutcome::NotMet) | Some(RepairOutcome::Falsified) => ExitCode::AssertionFailed,
+    }
+}
+
+/// Re-scans the tree and reports which of a plan's declared criteria held.
+///
+/// # Not implemented here
+///
+/// **A repaired tree cannot be given a verdict on this surface.** A project world id is derived
+/// from the file listing, so any edit produces a different world and this command reports `stale`
+/// — correctly, and unhelpfully for the case the feature exists for.
+/// `bioprism_repair::verify_successor` exists for it and takes a `Succession`: a named person's
+/// assertion that the new world is the repaired successor of the planned one, recorded verbatim
+/// and never verified. No flag here mints one. That is a gap in this command, not in the crate,
+/// and it is stated rather than worked around by verifying against the new world and calling the
+/// difference immaterial.
+fn project_verify(
+    root: &Path,
+    plan_path: &Path,
+    issues_path: Option<&Path>,
+    decision_time: Option<&str>,
+) -> CliResult<Outcome> {
+    let plan = RepairPlan::from_json(&io::read_json(plan_path)?)
+        .map_err(|error| CliError::from_repair(error).about(plan_path.display().to_string()))?;
+    let issues = project_issues(issues_path)?;
+    let (_scan, assembled) = project_assemble(root, issues, decision_time)?;
+    let world = bioprism_world::World::from_json(assembled.world.clone())
+        .map_err(|error| CliError::internal(error.to_string()))?;
+
+    let report = verify(&plan, &world);
+    let code = verdict_code(&report);
+
+    let document = json!({
+        "ok": true,
+        "exit_code": code.as_i32(),
+        "report": report.to_json(),
+    });
+
+    let mut human = match &report {
+        AcceptanceReport::Stale {
+            plan_id,
+            issue_id,
+            expected_world_id,
+            found_world_id,
+            expected_world_sha256,
+            found_world_sha256,
+            ..
+        } => format!(
+            "{plan_id} for issue {issue_id}: STALE — nothing was evaluated\n  planned against \
+             world {expected_world_id} ({expected_world_sha256})\n  offered world \
+             {found_world_id} ({found_world_sha256})\n"
+        ),
+        AcceptanceReport::Evaluated {
+            plan_id,
+            issue_id,
+            goal,
+            world_id,
+            outcome,
+            admissibility,
+            missing_region_facts,
+            ..
+        } => {
+            let mut text = format!(
+                "{plan_id} for issue {issue_id}: {} (admissibility {})\n  goal: {goal}\n  world \
+                 {world_id}\n",
+                outcome.as_str(),
+                admissibility.as_str(),
+            );
+            if !missing_region_facts.is_empty() {
+                text.push_str(&format!(
+                    "  the plan binds {} that the verified world no longer carries: {}\n",
+                    counted(missing_region_facts.len(), "region fact", "region facts"),
+                    missing_region_facts.join(", ")
+                ));
+            }
+            text
+        }
+    };
+    for item in report.items() {
+        human.push_str(&format!(
+            "  {:<10} {:<8}  {:<13}  {}\n      {}\n",
+            item.kind.as_str(),
+            item.origin.as_str(),
+            item.status.as_str(),
+            item.name,
+            item.statement
+        ));
+        if let ItemStatus::NotEvaluable(obstruction) = &item.status {
+            human.push_str(&format!(
+                "      blocked: {} {}\n",
+                obstruction.variable, obstruction.reason
+            ));
+        }
+    }
+    human.push_str(&render_limitations(report.limitations()));
+    human.push_str(&format!(
+        "\nNext: bioprism project audit --root {}\n",
+        root.display()
+    ));
+
+    Ok(Outcome::ok(document, human).under(code))
 }
 
 fn prism_fork(
@@ -2630,4 +4778,26 @@ fn context_verify(path: &Path) -> CliResult<Outcome> {
     );
 
     Ok(Outcome::ok(document, human).failing_if(!ok))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_commented_grant_template_stays_in_lockstep_with_the_typed_template_document() {
+        let stripped = GRANT_TEMPLATE_COMMENTED
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let parsed: Value = serde_json::from_str(&stripped)
+            .expect("the commented template minus its comment lines must be valid JSON");
+        let typed =
+            autopilot_template_document().expect("the typed template document must serialize");
+        assert_eq!(
+            parsed, typed,
+            "the human-mode commented template and the --json template document have drifted"
+        );
+    }
 }

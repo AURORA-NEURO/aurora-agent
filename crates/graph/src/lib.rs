@@ -110,11 +110,11 @@ pub use graph::{
     EdgeGloss, GraphBody, GraphEdge, GraphNode, GraphProjection, MultiwayNote, NotEmitted,
 };
 pub use hypergraph::{
-    HypergraphBody, HypergraphProjection, HyperVertex, Hyperedge, Pin, PinRole, RENDERING_NOTE,
+    HyperVertex, Hyperedge, HypergraphBody, HypergraphProjection, Pin, PinRole, RENDERING_NOTE,
 };
 pub use lint::{lint_graph, GraphLint};
 pub use markers::{ConflictMarker, ObligationMarker};
-pub use provenance::{ProjectionSource, ProvenanceCheck};
+pub use provenance::{BoundSection, ProjectionSource, ProvenanceCheck};
 pub use roundtrip::{
     evidence_survives, obstructions_survive, project_all, HandleCoverage, ProjectionBundle,
 };
@@ -123,7 +123,7 @@ pub use timeline::{
     Availability, ClockAnomaly, OrderJustification, TimelineAxis, TimelineBody, TimelineEntry,
     TimelineProjection,
 };
-pub use view::{ProjectedBody, Projection, ProjectionKind, View};
+pub use view::{ProjectRegion, ProjectedBody, Projection, ProjectionKind, View};
 pub use vocabulary::{EdgeType, NodeKind, NodeStatus};
 pub use projection_integrity_support::*;
 pub use local_projection_integrity_inference::*;

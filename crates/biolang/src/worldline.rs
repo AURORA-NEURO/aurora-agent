@@ -156,11 +156,6 @@ impl Worldline {
         self
     }
 
-    pub fn transitioning(mut self, transition: Transition) -> Self {
-        self.transitions.push(transition);
-        self
-    }
-
     pub fn branching(mut self, branch: Branch) -> Self {
         self.branches.push(branch);
         self
@@ -168,16 +163,6 @@ impl Worldline {
 
     pub fn gated_by(mut self, gate: RevealGate) -> Self {
         self.reveals.push(gate);
-        self
-    }
-
-    pub fn revised_by(mut self, revision: Revision) -> Self {
-        self.revisions.push(revision);
-        self
-    }
-
-    pub fn followed_for(mut self, window: Interval) -> Self {
-        self.follow_up = window;
         self
     }
 

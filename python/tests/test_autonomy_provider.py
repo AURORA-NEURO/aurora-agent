@@ -55,7 +55,13 @@ class _FakeStreamRuntime(_FakeRuntime):
         )
 
 
-def _controller(tmp_path: Path, *, max_provider_calls: int = 4, max_cost_units: float = 10.0) -> AutonomousExecutionController:
+def _controller(
+    tmp_path: Path,
+    *,
+    max_provider_calls: int = 4,
+    max_provider_failovers: int = 2,
+    max_cost_units: float = 10.0,
+) -> AutonomousExecutionController:
     return AutonomousExecutionController(
         execution_id="provider-accounting",
         domain="coding",
@@ -64,6 +70,7 @@ def _controller(tmp_path: Path, *, max_provider_calls: int = 4, max_cost_units: 
         policy=AutonomousExecutionPolicy(
             max_steps=8,
             max_provider_calls=max_provider_calls,
+            max_provider_failovers=max_provider_failovers,
             max_cost_units=max_cost_units,
         ),
         journal=AutonomousExecutionJournal(tmp_path / "execution.jsonl"),
@@ -175,6 +182,41 @@ def test_tool_loop_accounts_each_continuation_turn_and_provider_failure(tmp_path
     assert all(receipt.kind == "tool_loop_turn" for receipt in observer.receipts)
 
 
+def test_provider_failover_is_counted_once_per_selected_attempt_not_each_turn(tmp_path: Path) -> None:
+    call = ProviderToolCall(call_id="fallback-call", name="status", arguments={})
+    runtime = _FakeRuntime([
+        _response(text="", tool_calls=(call,)),
+        _response(text="fallback complete"),
+    ])
+    controller = _controller(tmp_path, max_provider_failovers=1)
+    observer = AutonomousProviderInvocationSession(
+        controller=controller,
+        provider="local",
+        model="model-v1",
+        attempt=1,
+        kind="tool_loop_turn",
+    )
+    request = ProviderRequest(
+        model="model-v1",
+        messages=({"role": "user", "content": "fallback"},),
+        tools=(ProviderTool("status"),),
+    )
+    result = runtime.invoke_tool_loop(
+        "local",
+        request,
+        authorize_and_execute=lambda calls: [
+            ProviderToolResult(call.call_id, {"approved": True}, approved=True)
+            for call in calls
+        ],
+        invocation_observer=observer,
+    )
+
+    assert result.status == "completed"
+    assert controller.state.provider_calls == 2
+    assert controller.state.provider_failovers == 1
+    assert [row["event"].get("failover") for row in AutonomousExecutionJournal(tmp_path / "execution.jsonl").events() if row["event"]["kind"] == "provider_call" and row["event"].get("cost_units") is not None][-2:] == [True, False]
+
+
 def test_streaming_provider_receipt_closes_as_success(tmp_path: Path) -> None:
     runtime = _FakeStreamRuntime([])
     controller = _controller(tmp_path)
@@ -211,7 +253,13 @@ def test_provider_error_is_recorded_and_remains_failover_evidence(tmp_path: Path
     assert observer.receipts[0].outcome == "failure"
     assert observer.receipts[0].failure_class == "provider_error"
     assert observer.receipts[0].status_code == 503
+    assert observer.receipts[0].retryable is False
+    assert controller.state.status == "error"
     assert controller.state.provider_calls == 1
+    with pytest.raises(AutonomyPolicyError, match="terminal or halted"):
+        runtime.invoke("local", request, invocation_observer=observer)
+    controller.fail(reason="provider_refused")
+    assert controller.state.status == "failed"
 
 
 def test_execution_policy_caps_failover_attempts_before_transport(tmp_path: Path) -> None:

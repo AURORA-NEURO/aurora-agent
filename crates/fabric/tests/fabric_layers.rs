@@ -2,6 +2,7 @@
 
 mod common;
 
+use bioprism_choreography::{GlobalType, Label as ChoreoLabel, Role as ChoreoRole};
 use bioprism_fabric::algebra::{fuse, seq, SubstitutionContext};
 use bioprism_fabric::blackboard::{
     flow_between_scopes, Blackboard, BlackboardError, Entry, EntryKind, LeaseTable, MemoryScope,
@@ -32,7 +33,6 @@ use bioprism_fabric::synth::{
 use bioprism_fabric::topology::{
     Controller, DwellPolicy, Member, Pattern, ReasonCode, Topology, TopologyAction, TopologyError,
 };
-use bioprism_choreography::{GlobalType, Label as ChoreoLabel, Role as ChoreoRole};
 use bioprism_weave::Capability;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -200,9 +200,7 @@ fn a_blackboard_has_no_setter_and_a_retraction_leaves_history_in_place() {
             "e1",
             topic.clone(),
             "alice",
-            EntryKind::Observation {
-                value: "a".into(),
-            },
+            EntryKind::Observation { value: "a".into() },
         ))
         .unwrap();
     board
@@ -271,9 +269,7 @@ fn a_subscription_never_delivers_an_entry_outside_the_subscribers_clearance() {
                 "public",
                 topic.clone(),
                 "alice",
-                EntryKind::Observation {
-                    value: "v".into(),
-                },
+                EntryKind::Observation { value: "v".into() },
             )
             .labelled(Labelling::Labelled(FlowLabel::open_at(Sensitivity::Public))),
         )
@@ -284,9 +280,7 @@ fn a_subscription_never_delivers_an_entry_outside_the_subscribers_clearance() {
                 "secret",
                 topic.clone(),
                 "alice",
-                EntryKind::Observation {
-                    value: "v".into(),
-                },
+                EntryKind::Observation { value: "v".into() },
             )
             .labelled(Labelling::Labelled(
                 FlowLabel::open_at(Sensitivity::Restricted).in_compartment("site-7"),
@@ -308,9 +302,7 @@ fn a_local_note_is_not_promoted_to_verified_ground_without_independent_verificat
             "note",
             Topic::new("hypotheses/x"),
             "alice",
-            EntryKind::Observation {
-                value: "v".into(),
-            },
+            EntryKind::Observation { value: "v".into() },
         ))
         .unwrap();
     let self_only: BTreeSet<String> = ["alice".to_string()].into_iter().collect();
@@ -366,12 +358,7 @@ fn widening_a_memory_scope_without_an_explicit_policy_is_refused() {
         Some("publication-review@1")
     )
     .is_ok());
-    assert!(flow_between_scopes(
-        MemoryScope::PublicRegistry,
-        MemoryScope::TurnLocal,
-        None
-    )
-    .is_ok());
+    assert!(flow_between_scopes(MemoryScope::PublicRegistry, MemoryScope::TurnLocal, None).is_ok());
 }
 
 #[test]
@@ -454,7 +441,36 @@ fn an_infeasible_offer_is_eliminated_for_a_different_reason_than_a_losing_one() 
         rejections["offer:expensive"],
         Rejection::OverBudget { .. }
     ));
-    assert!(matches!(rejections["offer:stale"], Rejection::Expired { .. }));
+    assert!(matches!(
+        rejections["offer:stale"],
+        Rejection::Expired { .. }
+    ));
+}
+
+/// `forbidding_subcontracting` is the only writer of the flag `screen` reads.
+///
+/// The default is permissive, so the builder is what makes the refusal reachable at all. A reader
+/// deleting it as unused would leave `Rejection::SubcontractingForbidden` unreachable and every
+/// subcontracted offer silently feasible — which is why the same offer is screened twice here,
+/// once under each setting, rather than once under the restrictive one.
+#[test]
+fn only_forbidding_subcontracting_makes_a_subcontracted_offer_infeasible() {
+    let mut subcontracted = terms(60, 8_800);
+    subcontracted.subcontracting_allowed = true;
+
+    let mut permissive = ContractNet::open("verify-analysis", 500);
+    permissive.receive(Offer::new("offer:1", "a", subcontracted.clone(), 100));
+    assert!(
+        permissive.screen(LogicalTime(5)).is_empty(),
+        "the open default must accept a subcontracted offer, or the builder proves nothing"
+    );
+
+    let mut forbidding = ContractNet::open("verify-analysis", 500).forbidding_subcontracting();
+    forbidding.receive(Offer::new("offer:1", "a", subcontracted, 100));
+    assert!(matches!(
+        forbidding.screen(LogicalTime(5))["offer:1"],
+        Rejection::SubcontractingForbidden
+    ));
 }
 
 #[test]
@@ -536,7 +552,10 @@ fn a_participant_holding_an_open_commitment_cannot_retire_but_can_be_evicted() {
 #[test]
 fn fusion_does_not_create_a_new_source_of_authority() {
     let mut topology = team();
-    let members: BTreeSet<ComponentId> = ["lead", "worker"].into_iter().map(ComponentId::new).collect();
+    let members: BTreeSet<ComponentId> = ["lead", "worker"]
+        .into_iter()
+        .map(ComponentId::new)
+        .collect();
     let overreaching = TopologyAction::Fuse {
         members: members.clone(),
         molecule: ComponentId::new("molecule"),
@@ -556,7 +575,10 @@ fn fusion_does_not_create_a_new_source_of_authority() {
     };
     topology.apply(&legal).unwrap();
     assert_eq!(
-        topology.molecule_members(&ComponentId::new("molecule")).unwrap().len(),
+        topology
+            .molecule_members(&ComponentId::new("molecule"))
+            .unwrap()
+            .len(),
         2
     );
 }
@@ -583,8 +605,7 @@ fn a_promotion_may_not_grant_a_capability_nobody_in_the_topology_holds() {
 
 #[test]
 fn a_controller_refuses_a_removal_inside_the_minimum_dwell_window() {
-    let mut topology = Topology::new(Pattern::Mesh)
-        .with(Member::new("newcomer", "skeptic", 0));
+    let mut topology = Topology::new(Pattern::Mesh).with(Member::new("newcomer", "skeptic", 0));
     let mut controller = Controller::new(DwellPolicy::new(10, 3, 10, 100));
     let evict = TopologyAction::Evict {
         participant: ComponentId::new("newcomer"),
@@ -643,15 +664,18 @@ fn a_controller_enforces_a_cooldown_after_a_failed_spawn_and_a_change_budget() {
 }
 
 fn goal() -> Goal {
-    Goal::new("repair a duplicate-payment defect", "git-patch-with-evidence@1")
-        .unwrap()
-        .allowing(effects(&[
-            (EffectKind::ArtifactRead, "corpus/**"),
-            (EffectKind::FilesystemWrite, "repo/branch/**"),
-        ]))
-        .within(1_000, 1_000)
-        .labelled(Labelling::Labelled(FlowLabel::open_at(Sensitivity::Public)))
-        .at_rung(EvidenceLayer::PrismEvaluated)
+    Goal::new(
+        "repair a duplicate-payment defect",
+        "git-patch-with-evidence@1",
+    )
+    .unwrap()
+    .allowing(effects(&[
+        (EffectKind::ArtifactRead, "corpus/**"),
+        (EffectKind::FilesystemWrite, "repo/branch/**"),
+    ]))
+    .within(1_000, 1_000)
+    .labelled(Labelling::Labelled(FlowLabel::open_at(Sensitivity::Public)))
+    .at_rung(EvidenceLayer::PrismEvaluated)
 }
 
 fn role_graph() -> RoleGraph {
@@ -693,7 +717,10 @@ fn a_goal_must_name_the_expected_artifact_and_not_only_a_natural_language_intent
 #[test]
 fn a_candidate_with_no_terminal_state_is_rejected_with_its_commitments_named_as_orphans() {
     let candidate = Candidate::new("no-exit", role_graph())
-        .binding("producer", verifier("producer").committing(DeclaredCommitment::mandatory("c1")))
+        .binding(
+            "producer",
+            verifier("producer").committing(DeclaredCommitment::mandatory("c1")),
+        )
         .binding("verifier", verifier("verifier"));
     let reasons = bioprism_fabric::synth::reject(&goal(), &candidate, None);
     assert!(reasons
@@ -711,7 +738,9 @@ fn a_hard_constraint_failure_yields_no_score_at_all_rather_than_a_small_penalty(
         .binding("verifier", verifier("verifier"));
     match evaluate(&goal(), &candidate, None) {
         Candidacy::Rejected { reasons } => assert!(!reasons.is_empty()),
-        Candidacy::Admissible { .. } => panic!("a candidate with no terminal state is not admissible"),
+        Candidacy::Admissible { .. } => {
+            panic!("a candidate with no terminal state is not admissible")
+        }
     }
 }
 
@@ -807,14 +836,24 @@ fn a_dominated_candidate_is_off_the_frontier_and_incomparable_ones_stay_on_it() 
 
 #[test]
 fn an_adapter_is_never_simply_compatible_and_a_lossless_one_names_its_surface() {
-    let lossy = Adapter::new("a2a-v1", "weave-ir-v0", AdapterRung::A2AWithWeaveExtension, LossPolicy::RejectOrWrap)
-        .supporting(SemanticFeature::Messages)
-        .approximating(SemanticFeature::Commitments)
-        .not_supporting(SemanticFeature::ContinuationTransfer);
+    let lossy = Adapter::new(
+        "a2a-v1",
+        "weave-ir-v0",
+        AdapterRung::A2AWithWeaveExtension,
+        LossPolicy::RejectOrWrap,
+    )
+    .supporting(SemanticFeature::Messages)
+    .approximating(SemanticFeature::Commitments)
+    .not_supporting(SemanticFeature::ContinuationTransfer);
     assert!(matches!(lossy.compatibility(), Compatibility::Lossy { .. }));
 
-    let narrow = Adapter::new("local", "weave-ir-v0", AdapterRung::NativeWeaveSdk, LossPolicy::Reject)
-        .supporting(SemanticFeature::Messages);
+    let narrow = Adapter::new(
+        "local",
+        "weave-ir-v0",
+        AdapterRung::NativeWeaveSdk,
+        LossPolicy::Reject,
+    )
+    .supporting(SemanticFeature::Messages);
     match narrow.compatibility() {
         Compatibility::LosslessForDeclaredSurface { surface } => {
             assert_eq!(surface.len(), 1);
@@ -826,8 +865,13 @@ fn an_adapter_is_never_simply_compatible_and_a_lossless_one_names_its_surface() 
 
 #[test]
 fn a_bridge_fails_closed_on_a_feature_the_adapter_never_declared() {
-    let adapter = Adapter::new("cli", "weave-ir-v0", AdapterRung::CliPtyDriver, LossPolicy::Reject)
-        .supporting(SemanticFeature::Messages);
+    let adapter = Adapter::new(
+        "cli",
+        "weave-ir-v0",
+        AdapterRung::CliPtyDriver,
+        LossPolicy::Reject,
+    )
+    .supporting(SemanticFeature::Messages);
     let request = BridgeRequest::default()
         .requiring(SemanticFeature::Messages)
         .requiring(SemanticFeature::AuthorityDelegation);
@@ -869,8 +913,12 @@ fn a_session_agreement_is_pinned_by_intersection_and_records_what_each_side_conc
 
 #[test]
 fn two_participants_with_no_shared_ir_version_cannot_open_a_session() {
-    let left = SessionCapabilities::new("alice").speaking("0.1").acting("inform");
-    let right = SessionCapabilities::new("bob").speaking("0.9").acting("inform");
+    let left = SessionCapabilities::new("alice")
+        .speaking("0.1")
+        .acting("inform");
+    let right = SessionCapabilities::new("bob")
+        .speaking("0.9")
+        .acting("inform");
     assert!(matches!(
         negotiate_session(&left, &right).unwrap_err(),
         StackError::NoCommonIrVersion { .. }
@@ -918,10 +966,7 @@ fn specializing_with_a_participant_that_does_not_refine_the_role_is_refused() {
         &context,
     )
     .unwrap_err();
-    assert!(matches!(
-        error,
-        MoleculeError::SpecializationRefused { .. }
-    ));
+    assert!(matches!(error, MoleculeError::SpecializationRefused { .. }));
 }
 
 #[test]
@@ -930,7 +975,10 @@ fn a_nested_molecule_enters_an_outer_composition_as_one_contract() {
     let nested = bioprism_fabric::molecule::nest(&molecule);
     assert_eq!(nested.output, report());
     assert_eq!(nested.effects, molecule.composition.contract.effects);
-    assert!(nested.id.as_str().starts_with("scientific-reproducer@1.0.0"));
+    assert!(nested
+        .id
+        .as_str()
+        .starts_with("scientific-reproducer@1.0.0"));
 
     let outer = seq(&nested, &verifier("downstream"));
     assert!(

@@ -265,7 +265,7 @@ function entryDescriptor(entry: Omit<AutonomousEvidenceSourceLedgerEntryJSON, "e
   return { ...entry };
 }
 
-function validateReceipt(value: unknown): AutonomousEvidenceSourceReceiptJSON {
+export function validateAutonomousEvidenceSourceReceipt(value: unknown): AutonomousEvidenceSourceReceiptJSON {
   if (!isObject(value) || value.schema !== AUTONOMOUS_EVIDENCE_SOURCE_SCHEMA) throw new ArgumentError("source ledger receipt is malformed");
   const receipt = value as unknown as AutonomousEvidenceSourceReceiptJSON;
   digest("source ledger request_digest", receipt.request_digest);
@@ -304,7 +304,7 @@ function validateEntry(value: unknown): AutonomousEvidenceSourceLedgerEntryJSON 
   integer("source ledger entry sequence", entry.sequence, 1, MAX_AUTONOMOUS_EVIDENCE_SOURCE_RECORDS);
   digest("source ledger entry entry_digest", entry.entry_digest);
   digest("source ledger entry previous_entry_digest", entry.previous_entry_digest, false);
-  const receipt = validateReceipt(entry.receipt);
+  const receipt = validateAutonomousEvidenceSourceReceipt(entry.receipt);
   if (entry.retention !== "metadata_only;raw_source_values_excluded" || entry.secret_material !== "never_returned") throw new ArgumentError("source ledger entry retention is invalid");
   const { entry_digest: _entryDigest, ...descriptor } = entry;
   if (digestJsonSync(descriptor) !== entry.entry_digest) throw new ArgumentError("source ledger entry digest is invalid");

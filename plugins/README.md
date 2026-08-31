@@ -1,65 +1,70 @@
 # AURORA plugin marketplace
 
-This repo doubles as a Claude Code plugin marketplace: the manifest is
-`.claude-plugin/marketplace.json`, plugins live under `plugins/`.
+This repository doubles as a Claude Code plugin marketplace. The marketplace
+manifest is `.claude-plugin/marketplace.json`, and plugins live under
+`plugins/`.
 
 ```bash
-# local checkout
 claude plugin marketplace add /path/to/aurora-agent
 # once hosted
 claude plugin marketplace add AURORA-NEURO/aurora-agent
-
-claude plugin install aurora-agent@aurora
 ```
 
-## The plugin: `aurora-agent`
+## Plugin catalog
 
-Everything needed to use the backend from any project, in one install:
+| Plugin | Gives you | Needs a built checkout? |
+|---|---|---|
+| `aurora-agent` | Full backend integration, MCP, FIBER commands, mission preflight, operations audit, and SDK/workflow skills | yes |
+| `aurora-backend` | The bioprism MCP server and setup/troubleshooting launcher | yes |
+| `aurora-context` | FIBER compile/explain/compare/validate/verify commands, decision-context skill, and faithfulness eval | yes |
+| `aurora-missions` | Mission DAG authoring, preflight, gate acceptance, and execution lifecycle | gateway or backend |
+| `aurora-integrate` | HTTP gateway and TypeScript/Python SDK integration guidance | no |
+| `aurora-ops` | Operations health command and evidence-first ops-auditor | gateway |
+| `aurora-honesty` | Honest-labelling, claim hygiene, scanner proof, and Windows test truth | no |
+| `aurora-science` | Reproducible measurement and evaluation methodology | no |
+| `aurora-workspace` | In-repository module, parity, crate, and blueprint analysis skills | this repo |
 
-- **MCP server** — the bioprism server (259 tools) via a root-resolving
-  launcher (`scripts/aurora-mcp.mjs`: `AURORA_AGENT_ROOT` → `~/aurora-agent`
-  → `~/bioprism`; precise stderr with the build command if the binary is
-  missing).
-- **Commands** — `/aurora-agent:compile`, `:explain`, `:compare`,
-  `:validate`, `:verify` (FIBER CLI with the 10-exit-code retryability
-  matrix interpreted), `:preflight` (missions), `:health` (operations).
-- **Agent** — `ops-auditor`: control-plane evidence reported verbatim, never
-  collapsed into "ready".
-- **Skills** — `aurora-setup` (build + os error 4551 + boundary),
-  `fiber-decision-context` (workflow + faithful-rendering rules),
-  `mission-lifecycle` (DAG shape, fail-closed gates), `aurora-sdks`
-  (gateway + TS/Python SDKs).
-- **Eval** — `evals/compile-verdict/` (`prompt.md` + graders; `claude plugin
-  eval` is early-access-gated at the time of writing).
+Install the complete integration or a focused package as needed:
 
-Prerequisite: a built checkout — `cargo build --release --offline -p
-bioprism-cli -p bioprism-mcp` (add `-p bioprism-api` for the HTTP gateway).
+```bash
+claude plugin install aurora-agent@aurora
+# or, for focused installs:
+claude plugin install aurora-context@aurora
+claude plugin install aurora-missions@aurora
+```
 
-## Optional packs
+## Backend discovery
 
-| Plugin | Gives you |
-|---|---|
-| `aurora-honesty` | The honest-labelling discipline for **any** codebase (4 skills) |
-| `aurora-workspace` | Skills for working inside this repo itself (5 skills, scope-prefixed) |
+The backend launcher resolves the checkout from `AURORA_AGENT_ROOT`, then
+`~/aurora-agent`, then `~/bioprism`. It verifies the release binary before
+starting it and reports the exact local build command when it is missing. The
+context commands use the same resolution contract.
+
+Prerequisite for backend-backed plugins:
+
+```bash
+cargo build --release --offline -p bioprism-cli -p bioprism-mcp
+```
+
+Add `-p bioprism-api` when using the HTTP gateway.
 
 ## Maintaining
 
-- `.agents/skills/` is the **source of truth** for mirrored skills; after
-  editing run `python tools/sync_plugin_skills.py` (mirrors carry a
-  do-not-edit banner).
-- Validation gate: `claude plugin validate . --strict` (marketplace) and
-  `claude plugin validate plugins/<name> --strict` per plugin.
-- Releases: bump `version` in the plugin's `plugin.json` AND its marketplace
-  entry (they must agree), then `claude plugin tag plugins/<name>`.
-- `plugins/` is outside `tools/coverage.sh`'s walk (`crates/` + `docs/`
-  only) — nothing here can inflate the blueprint coverage figure. Keep
-  NN.MM-shaped tokens out of plugin text anyway.
+- `.agents/skills/` is the source of truth for mirrored workspace and honesty
+  skills. After editing, run `python tools/sync_plugin_skills.py`; generated
+  mirrors carry a do-not-edit banner.
+- Validate the marketplace and each plugin with
+  `claude plugin validate . --strict` and
+  `claude plugin validate plugins/<name> --strict`.
+- Keep each plugin's `plugin.json` version synchronized with its marketplace
+  entry before tagging a release.
+- `plugins/` is outside `tools/coverage.sh`'s crate/docs walk; plugin text
+  cannot inflate blueprint coverage.
 
-## Known limits (stated, not implied away)
+## Known limits
 
-- The plugin does not download binaries; it requires a locally built checkout.
-- The `conformance_run` MCP tool bakes a build-machine fixtures path and only
-  works when the checkout has not moved since it was built.
-- This marketplace redistributes research and developer infrastructure. It
-  does not diagnose an individual, recommend treatment, triage care, enroll
-  participants, or claim medical-device functionality.
+Plugins do not download binaries; backend-backed packages require a locally
+built checkout. The `conformance_run` MCP tool also requires the checkout path
+used when the binary was built. The project reports medical and operational
+boundaries explicitly and does not diagnose, recommend treatment, triage care,
+or claim medical-device functionality.

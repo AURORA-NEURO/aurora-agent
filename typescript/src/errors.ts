@@ -115,6 +115,7 @@ export type ProviderErrorCode =
   | "http_4xx"
   | "http_5xx"
   | "transport"
+  | "quota_exceeded"
   | "response_too_large"
   | "protocol"
   | "invalid_response";
@@ -132,7 +133,7 @@ export type ProviderFailureClass =
 
 /** A provider invocation failed at the bounded transport or protocol boundary. */
 export class ProviderRuntimeError extends PrismSdkError {
-  override readonly name = "ProviderRuntimeError";
+  override readonly name: string = "ProviderRuntimeError";
   readonly retryable: boolean;
   readonly statusCode?: number;
   readonly circuitOpen: boolean;

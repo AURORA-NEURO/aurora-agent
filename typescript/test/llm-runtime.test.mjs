@@ -5,12 +5,25 @@ import {
   CredentialError,
   CredentialProvisioner,
   CredentialStore,
+  AutonomousAuthorizationContext,
+  AutonomousAuthorizationError,
+  AutonomousAuthorizationGate,
+  AutonomousAuthorizationLedger,
   AutonomousAgent,
   AutonomousCostBudget,
   AutonomousCostBudgetError,
   AutonomousRuntime,
   AutonomousExecutionController,
+  advanceAutonomousModelContinuationState,
+  AutonomousEffectBoundary,
+  AutonomousEffectReconciliationRequiredError,
+  InMemoryAutonomousEffectJournal,
   InMemoryAutonomousExecutionJournal,
+  compileAutonomousModelContinuationPlan,
+  completeAutonomousModelContinuationState,
+  createAutonomousModelContinuationState,
+  validateAutonomousModelContinuationPlan,
+  validateAutonomousModelContinuationState,
   TransactionalJsonLLMRuntimeHealthSnapshotPersistence,
   LLMRuntime,
   LLMRuntimeHealthPersistenceCoordinator,
@@ -23,6 +36,9 @@ import {
   providerTextPart,
   providerImageUrlPart,
   providerImageBase64Part,
+  DEFAULT_AUTONOMOUS_SELECTION_WEIGHTS,
+  normalizeAutonomousSelectionWeights,
+  rankAutonomousModels,
   validateLLMRuntimeHealthSnapshot,
 } from "../dist/index.js";
 
@@ -43,6 +59,40 @@ function request(model = "test-model", overrides = {}) {
     messages: [{ role: "user", content: "Return a bounded answer." }],
     maxOutputTokens: 128,
     ...overrides,
+  };
+}
+
+function providerAuthorizationContext(maxUses = 2, domains = ["coding"]) {
+  const ledger = new AutonomousAuthorizationLedger(16, 64);
+  const issued = ledger.issue({
+    grant_id: "runtime-grant",
+    tenant_id: "tenant-a",
+    actor_id: "actor-a",
+    session_id: "session-a",
+    authorization_digest: "a".repeat(64),
+    allowed_domains: domains,
+    allowed_operations: ["provider_invocation"],
+    allowed_capabilities: [],
+    allowed_risk_classes: [],
+    issued_at: 1000,
+    expires_at: 2000,
+    max_uses: maxUses,
+  });
+  return {
+    ledger,
+    context: new AutonomousAuthorizationContext(
+      new AutonomousAuthorizationGate(ledger),
+      issued.grant_id,
+      issued.tenant_id,
+      issued.actor_id,
+      issued.session_id,
+      issued.authorization_digest,
+      [...domains],
+      null,
+      "provider_invocation",
+      "provider",
+      () => 1200,
+    ),
   };
 }
 
@@ -600,6 +650,203 @@ test("stream collection projects SSE deltas and bounded completion", async () =>
   assert.equal(response.statusCode, 200);
 });
 
+test("stream collection accepts a terminal sentinel at body EOF", async () => {
+  const sse = [
+    'data: {"choices":[{"delta":{"content":"complete"}}]}',
+    "data: [DONE]",
+  ].join("\n\n");
+  const runtime = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async () => new Response(sse, { headers: { "content-type": "text/event-stream" } }),
+  });
+  runtime.registerProvider(openaiCompatibleProvider("stream-eof-gateway", "https://stream-eof.test", { requiresCredential: false }));
+  const response = await runtime.collectStream("stream-eof-gateway", request());
+  assert.equal(response.text, "complete");
+});
+
+test("provider invocation effect boundary projects transient responses and blocks blind replay", async () => {
+  const journal = new InMemoryAutonomousEffectJournal();
+  let calls = 0;
+  const runtime = new LLMRuntime({ effectBoundary: new AutonomousEffectBoundary({ journal }) });
+  runtime.registerInMemoryProvider("offline-effect", (input) => {
+    calls += 1;
+    return { output_text: `private answer for ${input.model}`, request_id: "provider-request-1" };
+  });
+  const input = request("offline-effect-model", { idempotencyKey: "caller-owned-provider-key" });
+  const response = await runtime.invoke("offline-effect", input);
+  assert.equal(response.text, "private answer for offline-effect-model");
+  assert.equal(calls, 1);
+  const snapshot = await journal.snapshot();
+  const encoded = JSON.stringify(snapshot);
+  assert.equal(encoded.includes("Return a bounded answer."), false);
+  assert.equal(encoded.includes("private answer"), false);
+  assert.equal(encoded.includes("request_id"), false);
+  assert.deepEqual((await journal.events()).map((row) => row.event.status), ["prepared", "dispatching", "dispatched", "completed"]);
+  await assert.rejects(() => runtime.invoke("offline-effect", input), AutonomousEffectReconciliationRequiredError);
+  assert.equal(calls, 1);
+});
+
+test("provider authorization rejects before credential resolution or transport", async () => {
+  const runtime = new LLMRuntime({ fetch: async () => { throw new Error("transport must not run"); } });
+  runtime.registerProvider(openaiCompatibleProvider("credentialed", "https://credentialed.invalid"));
+  const { context } = providerAuthorizationContext(2, ["coding"]);
+  await assert.rejects(
+    () => runtime.invoke("credentialed", request("credentialed-model"), { authorizationContext: context, authorizationDomain: "science" }),
+    AutonomousAuthorizationError,
+  );
+});
+
+test("provider authorization consumes one fresh budget entry per invocation and stream", async () => {
+  const { ledger, context } = providerAuthorizationContext();
+  const calls = { invoke: 0, stream: 0 };
+  const runtime = new LLMRuntime();
+  runtime.registerInMemoryProvider("authorized-offline", (input) => {
+    calls.invoke += 1;
+    return `answer-${input.model}`;
+  }, {
+    stream: async function* (input) {
+      calls.stream += 1;
+      yield { provider: "authorized-offline", model: input.model, sequence: 0, eventType: "done", textDelta: "", requestId: null, usage: {}, done: true };
+    },
+  });
+  const input = request("authorized-model");
+  const response = await runtime.invoke("authorized-offline", input, { authorizationContext: context, authorizationDomain: "coding" });
+  assert.equal(response.text, "answer-authorized-model");
+  const events = [];
+  for await (const event of runtime.invokeStream("authorized-offline", input, { authorizationContext: context, authorizationDomain: "coding" })) events.push(event);
+  assert.equal(events[0].done, true);
+  await assert.rejects(
+    () => runtime.invoke("authorized-offline", input, { authorizationContext: context, authorizationDomain: "coding" }),
+    AutonomousAuthorizationError,
+  );
+  assert.deepEqual(calls, { invoke: 1, stream: 1 });
+  assert.equal(ledger.grants()[0].used_count, 2);
+});
+
+test("provider authorization is consumed for each tool-loop turn", async () => {
+  const { ledger, context } = providerAuthorizationContext();
+  let calls = 0;
+  const runtime = new LLMRuntime();
+  runtime.registerInMemoryProvider("authorized-loop", () => {
+    calls += 1;
+    return calls === 1
+      ? { output_text: "", tool_calls: [{ id: "call-1", name: "lookup", arguments: { query: "safe" } }] }
+      : { output_text: "done" };
+  });
+  const result = await runtime.invokeToolLoop("authorized-loop", {
+    ...request("authorized-loop-model"),
+    tools: [{ name: "lookup", description: "Look up a fact.", parameters: { type: "object" } }],
+  }, {
+    authorizeAndExecute: async (toolCalls) => toolCalls.map((call) => ({ callId: call.id, approved: true, content: { ok: true } })),
+    maxTurns: 3,
+    authorizationContext: context,
+    authorizationDomain: "coding",
+  });
+  assert.equal(result.status, "completed");
+  assert.equal(result.turns, 2);
+  assert.equal(calls, 2);
+  assert.equal(ledger.grants()[0].used_count, 2);
+});
+
+test("provider effect boundary preserves definite local provider refusals", async () => {
+  const journal = new InMemoryAutonomousEffectJournal();
+  const runtime = new LLMRuntime({ effectBoundary: new AutonomousEffectBoundary({ journal }) });
+  runtime.registerInMemoryProvider("denied-effect", () => {
+    throw new ProviderRuntimeError("denied", { statusCode: 401 });
+  });
+  await assert.rejects(
+    () => runtime.invoke("denied-effect", request("denied-model", { idempotencyKey: "denied-key" })),
+    (error) => error instanceof ProviderRuntimeError && error.statusCode === 401,
+  );
+  assert.equal((await journal.events()).at(-1).event.status, "failed");
+});
+
+test("live provider stream boundary reconciles partial consumption without retaining deltas", async () => {
+  const journal = new InMemoryAutonomousEffectJournal();
+  const runtime = new LLMRuntime({ effectBoundary: new AutonomousEffectBoundary({ journal }) });
+  runtime.registerInMemoryProvider("offline-stream", () => "unused", {
+    stream: async function* (input) {
+      yield { provider: "offline-stream", model: input.model, sequence: 0, eventType: "text", textDelta: "private delta", requestId: null, usage: {}, done: false };
+      throw new Error("connection lost after first delta");
+    },
+  });
+  const input = request("stream-model", { idempotencyKey: "stream-owner-key" });
+  await assert.rejects(async () => {
+    for await (const _event of runtime.invokeStream("offline-stream", input)) { /* consume */ }
+  }, AutonomousEffectReconciliationRequiredError);
+  assert.deepEqual((await journal.events()).map((row) => row.event.status), ["prepared", "dispatching", "dispatched", "uncertain"]);
+  const encoded = JSON.stringify(await journal.snapshot());
+  assert.doesNotMatch(encoded, /Return a bounded answer\.|private delta/);
+});
+
+test("live provider stream boundary completes only after exhaustion and blocks replay", async () => {
+  const journal = new InMemoryAutonomousEffectJournal();
+  const runtime = new LLMRuntime({ effectBoundary: new AutonomousEffectBoundary({ journal }) });
+  runtime.registerInMemoryProvider("offline-complete-stream", () => "unused", {
+    stream: async function* (input) {
+      yield { provider: "offline-complete-stream", model: input.model, sequence: 0, eventType: "text", textDelta: "bounded", requestId: null, usage: {}, done: false };
+      yield { provider: "offline-complete-stream", model: input.model, sequence: 1, eventType: "done", textDelta: "", requestId: null, usage: {}, done: true };
+    },
+  });
+  const input = request("stream-model", { idempotencyKey: "stream-complete-key" });
+  const events = [];
+  for await (const event of runtime.invokeStream("offline-complete-stream", input)) events.push(event);
+  assert.deepEqual(events.map((event) => event.textDelta), ["bounded", ""]);
+  assert.deepEqual((await journal.events()).map((row) => row.event.status), ["prepared", "dispatching", "dispatched", "completed"]);
+  await assert.rejects(async () => {
+    for await (const _event of runtime.invokeStream("offline-complete-stream", input)) { /* replay */ }
+  }, AutonomousEffectReconciliationRequiredError);
+});
+
+test("collected provider streams require a terminal done event", async () => {
+  const runtime = new LLMRuntime({ fetch: async () => { throw new Error("HTTP must not be reached"); } });
+  runtime.registerInMemoryProvider("offline-incomplete-stream", () => "unused", {
+    stream: (input) => [{ provider: "offline-incomplete-stream", model: input.model, sequence: 0, eventType: "text", textDelta: "partial output", requestId: null, usage: {}, done: false }],
+  });
+  await assert.rejects(
+    () => runtime.collectStream("offline-incomplete-stream", request("stream-model")),
+    (error) => error instanceof ProviderRuntimeError && error.code === "invalid_response" && error.message.includes("ended without a done event"),
+  );
+});
+
+test("provider stream terminal events may carry finalized tool calls", async () => {
+  const runtime = new LLMRuntime({ fetch: async () => { throw new Error("HTTP must not be reached"); } });
+  runtime.registerInMemoryProvider("offline-tool-stream", () => "unused", {
+    stream: (input) => [{
+      provider: "offline-tool-stream",
+      model: input.model,
+      sequence: 0,
+      eventType: "tool.done",
+      textDelta: "",
+      requestId: null,
+      usage: {},
+      done: true,
+      toolCall: { id: "call-1", name: "lookup", arguments: { query: "safe" } },
+    }],
+  });
+  const response = await runtime.collectStream("offline-tool-stream", {
+    ...request("stream-model"),
+    tools: [{ name: "lookup", description: "lookup", parameters: { type: "object" } }],
+  });
+  assert.deepEqual(response.toolCalls.map((call) => call.name), ["lookup"]);
+});
+
+test("closing a dispatched live provider stream records uncertainty", async () => {
+  const journal = new InMemoryAutonomousEffectJournal();
+  const runtime = new LLMRuntime({ effectBoundary: new AutonomousEffectBoundary({ journal }) });
+  runtime.registerInMemoryProvider("offline-abandoned-stream", () => "unused", {
+    stream: async function* (input) {
+      yield { provider: "offline-abandoned-stream", model: input.model, sequence: 0, eventType: "text", textDelta: "first", requestId: null, usage: {}, done: false };
+      yield { provider: "offline-abandoned-stream", model: input.model, sequence: 1, eventType: "text", textDelta: "second", requestId: null, usage: {}, done: false };
+    },
+  });
+  const iterator = runtime.invokeStream("offline-abandoned-stream", request("stream-model", { idempotencyKey: "stream-abandoned-key" }))[Symbol.asyncIterator]();
+  const first = await iterator.next();
+  assert.equal(first.done, false);
+  await iterator.return?.();
+  assert.deepEqual((await journal.events()).map((row) => row.event.status), ["prepared", "dispatching", "dispatched", "uncertain"]);
+});
+
 test("authorized tool loops append tool results and stop at the final answer", async () => {
   const bodies = [];
   let call = 0;
@@ -765,6 +1012,51 @@ test("LLM transport health JSON persistence is canonical, serialized, and CAS-fe
   textStore.write(canonical);
 });
 
+test("AutonomousAgent composes restart-safe transport health with exact runtime binding", async () => {
+  const config = openaiCompatibleProvider("agent-health", "https://agent-health.test", {
+    requiresCredential: false,
+    maxAttempts: 1,
+    circuitBreakerFailureThreshold: 1,
+    circuitBreakerResetMs: 60_000,
+  });
+  const source = new LLMRuntime({ fetch: async () => jsonResponse({ error: "busy" }, 503) });
+  source.registerProvider(config);
+  let persisted = null;
+  const persistence = {
+    read: () => persisted,
+    write: (snapshot) => { persisted = structuredClone(snapshot); },
+  };
+  const sourceAgent = new AutonomousAgent(source, {
+    runtimeHealthPersistence: new LLMRuntimeHealthPersistenceCoordinator(source, persistence),
+  });
+
+  await assert.rejects(source.invoke("agent-health", request("agent-model")), /503/);
+  const flushed = await sourceAgent.flushRuntimeHealth();
+  assert.equal(flushed.providers[0].attempts, 1);
+  assert.equal(flushed.providers[0].consecutive_failures, 1);
+  assert.deepEqual(await sourceAgent.flushTransportHealth(), flushed);
+  assert.equal(JSON.stringify(flushed).includes("authorization"), false);
+
+  let restartedCalls = 0;
+  const restarted = new LLMRuntime({ fetch: async () => { restartedCalls += 1; throw new Error("must not dispatch"); } });
+  restarted.registerProvider(config);
+  const restartedAgent = new AutonomousAgent(restarted, {
+    runtimeHealthPersistence: new LLMRuntimeHealthPersistenceCoordinator(restarted, persistence),
+  });
+  const restored = await restartedAgent.restoreTransportHealth();
+  assert.equal(restored?.snapshot_digest, flushed.snapshot_digest);
+  assert.equal(restarted.providerStatus("agent-health").circuit, "open");
+  await assert.rejects(restarted.invoke("agent-health", request("agent-model")), (error) => error instanceof ProviderRuntimeError && error.circuitOpen);
+  assert.equal(restartedCalls, 0);
+
+  const foreignRuntime = new LLMRuntime();
+  assert.throws(
+    () => new AutonomousAgent(foreignRuntime, { runtimeHealthPersistence: new LLMRuntimeHealthPersistenceCoordinator(source, persistence) }),
+    /bound to the supplied LLMRuntime/,
+  );
+  await assert.rejects(new AutonomousAgent(foreignRuntime).restoreRuntimeHealth(), /not configured/);
+});
+
 test("autonomous runtime gates candidates on provider readiness and feeds health back to selection", async () => {
   const calls = [];
   const runtime = new LLMRuntime({
@@ -785,9 +1077,9 @@ test("autonomous runtime gates candidates on provider readiness and feeds health
   const agent = new AutonomousRuntime(runtime);
   const local = await agent.invoke(plan, { feedback: async (_selection, outcome) => feedback.push(outcome) });
   assert.equal(local.selection.strategy, "deterministic_health_utility");
-  assert.equal(local.selection.selected_model.provider, "slow");
+  assert.equal(local.selection.selected_model.provider, "fast");
   assert.equal(feedback[0].success, true);
-  assert.equal(calls[0], "https://slow.test/v1/chat/completions");
+  assert.equal(calls[0], "https://fast.test/v1/chat/completions");
 
   let selectionInput;
   const delegated = new AutonomousRuntime(runtime, {
@@ -805,7 +1097,51 @@ test("autonomous runtime gates candidates on provider readiness and feeds health
   const gatedRuntime = new LLMRuntime({ credentials: new CredentialStore(), fetch: async () => jsonResponse({ output_text: "must not run" }) });
   gatedRuntime.registerProvider(openaiProvider({ baseUrl: "https://gated.test" }));
   const gatedAgent = new AutonomousRuntime(gatedRuntime);
-  await assert.rejects(gatedAgent.invoke({ ...plan, candidates: [{ ...candidates[0], provider: "openai", model: "gated-model", requires_credential: true }] }), ProviderRuntimeError);
+  await assert.rejects(
+    gatedAgent.invoke({ ...plan, candidates: [{ ...candidates[0], provider: "openai", model: "gated-model", requires_credential: true }] }),
+    CredentialError,
+  );
+});
+
+test("weighted model selection is deterministic, auditable, and learning-policy aware", () => {
+  const candidates = [
+    { provider: "lab", model: "quality", context_window_tokens: 16_000, max_output_tokens: 1_000, quality: 0.99, latency_ms: 800, cost_per_million_tokens: 100, reliability: 0.95 },
+    { provider: "lab", model: "efficient", context_window_tokens: 16_000, max_output_tokens: 1_000, quality: 0.78, latency_ms: 20, cost_per_million_tokens: 1, reliability: 0.9 },
+  ];
+  const base = {
+    task: "choose a bounded model",
+    domain: "evaluation",
+    capability: "reasoning",
+    risk_class: "review_required",
+    required_capabilities: [],
+    estimated_input_tokens: 100,
+    requested_output_tokens: 100,
+    candidates,
+    provider_health: {
+      lab: { provider: "lab", registered: true, circuit: "closed", credential_required: false, credential_ready: true, eligible: true, attempts: 0, successes: 0, failures: 0, success_rate: 0, mean_latency_ms: null, last_latency_ms: null, last_model: null, last_status_code: null },
+    },
+    model_health: {},
+  };
+  assert.deepEqual(normalizeAutonomousSelectionWeights(), DEFAULT_AUTONOMOUS_SELECTION_WEIGHTS);
+  assert.deepEqual(normalizeAutonomousSelectionWeights({ cost: 2 }), { quality: 0.55, reliability: 0.25, cost: 2, latency: 0.1, exploration: 0.15 });
+  assert.throws(() => normalizeAutonomousSelectionWeights({ quality: 0, reliability: 0, cost: 0, latency: 0, exploration: 0 }), /at least one positive/);
+
+  const qualityFirst = rankAutonomousModels({ ...base, weights: { quality: 1, reliability: 0, cost: 0, latency: 0, exploration: 0 } });
+  assert.equal(qualityFirst[0].model, "quality");
+  assert.equal(typeof qualityFirst[0].base_score, "number");
+  assert.equal(qualityFirst[0].observed_pulls, 0);
+
+  const costFirst = rankAutonomousModels({ ...base, weights: { quality: 0.1, reliability: 0, cost: 10, latency: 0, exploration: 0 } });
+  assert.equal(costFirst[0].model, "efficient");
+
+  const disabledByLearning = rankAutonomousModels({
+    ...base,
+    observations: [{ arm_id: "lab/efficient", pulls: 12, reward_sum: 10, failures: 0, disabled: true }],
+  });
+  const efficient = disabledByLearning.find((row) => row.model === "efficient");
+  assert.equal(efficient.eligible, false);
+  assert.match(efficient.reasons.join(";"), /learning policy/);
+  assert.equal(efficient.observed_pulls, 12);
 });
 
 test("autonomous runtime emits metadata-only selection lifecycle for selection and abstention", async () => {
@@ -1085,6 +1421,17 @@ test("autonomous runtime performs bounded provider failover and journals the adm
   }, { execution, selectionEventCallback: (event) => selectionEvents.push(event) });
   assert.equal(result.selection.selected_model.provider, "stable");
   assert.equal(result.response.text, "stable answer");
+  assert.equal(result.provider_invocations.length, 2);
+  assert.deepEqual(result.provider_invocations.map((receipt) => [receipt.attempt, receipt.provider, receipt.status, receipt.outcome]), [
+    [0, "unstable", "provider_refused", "failure"],
+    [1, "stable", "completed", "success"],
+  ]);
+  assert.equal(result.provider_invocations[0].execution_id, "autonomous-failover-1");
+  assert.equal(result.provider_failover.fallback_count, 1);
+  assert.equal(result.provider_failover.attempts.length, 2);
+  assert.equal(result.continuation_plan.steps.map((step) => step.model_id).join(","), "unstable/unstable-model,stable/stable-model");
+  assert.equal(result.provider_failover.continuation_plan_digest, result.continuation_plan.plan_digest);
+  assert.doesNotMatch(JSON.stringify({ provider_invocations: result.provider_invocations, provider_failover: result.provider_failover }), /stable answer|\"busy\"|provider body|api[_ -]?key/i);
   assert.equal(calls.length, 2);
   assert.equal(calls[0], "https://unstable.test/v1/chat/completions");
   assert.equal(calls[1], "https://stable.test/v1/chat/completions");
@@ -1094,6 +1441,76 @@ test("autonomous runtime performs bounded provider failover and journals the adm
   assert.deepEqual(selectionEvents.filter((event) => event.phase === "model_selection_finished").map((event) => [event.status, event.selected_provider, event.failover]), [["selected", "unstable", false], ["selected", "stable", true]]);
   assert.equal((await journal.verifyIntegrity()).verified, true);
   await execution.complete();
+});
+
+test("model continuation plans are immutable, failure-scoped, and resumable without reselection", async () => {
+  const runtime = new LLMRuntime({ credentials: new CredentialStore(), fetch: async () => jsonResponse({ output_text: "ok" }) });
+  runtime.registerProvider(openaiCompatibleProvider("ladder", "https://ladder.test", { requiresCredential: false }));
+  const agent = new AutonomousRuntime(runtime);
+  const plan = {
+    task: "Compile a reviewable model ladder.",
+    candidates: [
+      { provider: "ladder", model: "primary", context_window_tokens: 8_000, max_output_tokens: 256, quality: 0.99, latency_ms: 10, cost_per_million_tokens: 1, reliability: 0.99 },
+      { provider: "ladder", model: "sibling", context_window_tokens: 8_000, max_output_tokens: 256, quality: 0.8, latency_ms: 20, cost_per_million_tokens: 2, reliability: 0.9 },
+      { provider: "ladder", model: "last", context_window_tokens: 8_000, max_output_tokens: 256, quality: 0.7, latency_ms: 30, cost_per_million_tokens: 3, reliability: 0.8 },
+    ],
+    request: request("primary"),
+  };
+  const selection = await agent.select(plan);
+  const continuation = await compileAutonomousModelContinuationPlan(plan, selection, { maxFailovers: 2 });
+  assert.deepEqual(await validateAutonomousModelContinuationPlan(continuation), continuation);
+  assert.equal(continuation.steps.length, 3);
+  assert.deepEqual(continuation.steps.map((step) => step.model_id), ["ladder/primary", "ladder/sibling", "ladder/last"]);
+  const initialState = await createAutonomousModelContinuationState(continuation);
+  const afterTimeout = await advanceAutonomousModelContinuationState(continuation, initialState, { provider: "ladder", model: "primary", failureScope: "model", failureCode: "timeout", statusCode: null });
+  assert.deepEqual(await validateAutonomousModelContinuationState(continuation, afterTimeout), afterTimeout);
+  assert.equal(afterTimeout.next_step_index, 1, "a model timeout preserves a sibling on the same provider");
+  assert.deepEqual(afterTimeout.excluded_models, ["ladder/primary"]);
+  const completed = await completeAutonomousModelContinuationState(continuation, afterTimeout, { provider: "ladder", model: "sibling", statusCode: 200 });
+  assert.equal(completed.status, "completed");
+  assert.equal(completed.attempts.length, 2);
+  assert.deepEqual(await validateAutonomousModelContinuationState(continuation, completed), completed);
+  await assert.rejects(advanceAutonomousModelContinuationState(continuation, { ...initialState, plan_digest: "0".repeat(64) }, { provider: "ladder", model: "primary", failureScope: "provider" }), /state digest mismatch|not bound/);
+  await assert.rejects(compileAutonomousModelContinuationPlan({ ...plan, candidates: [...plan.candidates, { ...plan.candidates[0] }] }, selection, { maxFailovers: 2 }), /duplicate model/);
+
+  const invalidPolicy = structuredClone(continuation);
+  invalidPolicy.steps[0].failure_policy = { timeout_with_closed_circuit: "retry", retryable_provider_error: "exclude_provider" };
+  const { plan_digest: _invalidPlanDigest, ...invalidPlanBody } = invalidPolicy;
+  invalidPolicy.plan_digest = await digestJson(invalidPlanBody);
+  await assert.rejects(validateAutonomousModelContinuationPlan(invalidPolicy), /failure policy/);
+
+  const invalidAttempt = structuredClone(afterTimeout);
+  invalidAttempt.attempts[0].provider = "other";
+  const { state_digest: _invalidStateDigest, ...invalidStateBody } = invalidAttempt;
+  invalidAttempt.state_digest = await digestJson(invalidStateBody);
+  await assert.rejects(validateAutonomousModelContinuationState(continuation, invalidAttempt), /attempt identity/);
+});
+
+test("autonomous failover follows the compiled ladder even when a selector would change its mind", async () => {
+  let selectorCalls = 0;
+  const runtime = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async (url) => String(url).includes("ladder-unavailable") ? jsonResponse({ error: "busy" }, 503) : jsonResponse({ choices: [{ message: { role: "assistant", content: "ladder winner" }, finish_reason: "stop" }] }),
+  });
+  runtime.registerProvider(openaiCompatibleProvider("ladder-unavailable", "https://ladder-unavailable.test", { requiresCredential: false, maxAttempts: 1 }));
+  runtime.registerProvider(openaiCompatibleProvider("ladder-backup", "https://ladder-backup.test", { requiresCredential: false, maxAttempts: 1 }));
+  const agent = new AutonomousRuntime(runtime, {
+    selector: async (input) => {
+      selectorCalls += 1;
+      return { selected_model: { provider: selectorCalls === 1 ? "ladder-unavailable" : "ladder-backup", model: selectorCalls === 1 ? "primary" : "backup" }, ranking: input.candidates.map((candidate) => ({ provider: candidate.provider, model: candidate.model, score: candidate.provider === "ladder-unavailable" ? 100 : 1, eligible: true, reasons: [] })), strategy: "caller_selector", abstention_reason: null };
+    },
+  });
+  const result = await agent.invoke({
+    task: "Keep the initial decision's bounded fallback order.",
+    candidates: [
+      { provider: "ladder-unavailable", model: "primary", context_window_tokens: 8_000, max_output_tokens: 256, quality: 0.99, latency_ms: 10, cost_per_million_tokens: 1, reliability: 0.99 },
+      { provider: "ladder-backup", model: "backup", context_window_tokens: 8_000, max_output_tokens: 256, quality: 0.5, latency_ms: 100, cost_per_million_tokens: 5, reliability: 0.5 },
+    ],
+    request: request("primary"),
+  }, { maxProviderFailovers: 1 });
+  assert.equal(selectorCalls, 1);
+  assert.equal(result.response.text, "ladder winner");
+  assert.deepEqual(result.provider_invocations.map((receipt) => receipt.model), ["primary", "backup"]);
 });
 
 test("autonomous runtime isolates a model timeout and retries a healthy sibling on the same provider", async () => {

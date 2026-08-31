@@ -11,6 +11,190 @@ the integration layer above the deterministic kernel described by [ADR-001](ADR-
 Python can orchestrate and author requests, while Rust remains the owner of canonical bytes,
 domain invariants, release gates, and evidence semantics.
 
+### Restart-safe autonomous execution accounting
+
+`AutonomousExecutionController` is the Python policy boundary for provider turns, tool intents,
+evaluator settlements, and bounded replans. Its optional `AutonomousExecutionJournal` is an
+append-only, hash-chained metadata journal; it never stores task text, prompts, provider payloads,
+tool arguments/results, credentials, or raw evaluator instructions. `resume=True` requires the
+same execution id and policy digest, so a worker can rehydrate counters without pretending that a
+provider conversation or an external effect was reconstructed.
+
+Provider admission accepts `failover=True` only for a reviewed fallback transition and persists
+`state.provider_failovers` separately from total `state.provider_calls`. The provider observer
+marks only the first turn of a selected fallback session as a failover; continuation turns consume
+the provider-call budget but cannot inflate the failover budget. The policy therefore survives a
+process restart and prevents a fresh worker from bypassing the configured failover ceiling. A
+provider outcome also records a metadata-only `retryable` flag. With `stop_on_error=True`, a
+non-retryable failure moves the controller to `error` and requires an explicit `fail()` decision;
+retryable failures remain eligible for the caller's bounded continuation ladder.
+
+An evaluator-approved planning transition is recorded with
+`controller.replan(instruction_digest=..., reason=..., attempt=...)`. Only the instruction digest,
+bounded reason, attempt index, and incremented replan counter enter the journal. `max_replans`
+is enforced before the transition and is restored with the rest of the execution state. This
+keeps planning guidance transient while making recovery decisions auditable and deterministic.
+All controller transitions are serialized with a re-entrant lock, so concurrent domain workers
+share one linearizable provider/tool/cost budget; the journal lock alone is not relied on to make
+counter updates safe. The same metadata-only fields and serialized transition contract are
+validated by the TypeScript execution controller, preserving cross-SDK replay and failure
+semantics.
+
+### Shared provider/model quota admission
+
+`ProviderQuotaController` is the Python runtime's process-local capacity gate. Attach one to the
+shared `LLMRuntime` so direct calls, streams, collected streams, native tool-loop turns, provider
+failover, and every autonomous domain consume the same provider/model ceiling:
+
+```python
+from prism_sdk import LLMRuntime, ProviderQuotaController
+
+quota = ProviderQuotaController()
+quota.set_policy({
+    "provider": "openai",
+    "model": "gpt-5",
+    "windowMs": 60_000,
+    "maxRequests": 30,
+    "maxInputTokens": 250_000,
+    "maxOutputTokens": 80_000,
+    "maxConcurrent": 4,
+})
+runtime = LLMRuntime(provider_quota=quota)
+```
+
+Policies may be provider-wide or exact-model and can bound requests, input/output/total tokens,
+estimated cost units, and in-flight concurrency. The runtime reserves before the provider transport
+starts, releases pre-dispatch approval/credential refusals, and settles one charged request after
+transport begins. A provider response can replace estimates with bounded usage; a live stream that
+does not expose final usage uses its requested output ceiling. `ProviderQuotaError` is retryable and
+contains only stable policy identity, refusal dimensions, observed counters, concurrency, and a
+next-window hint. It never contains prompts, responses, headers, tool arguments, credentials, or
+effect values.
+
+`quota.snapshot()` and `JsonProviderQuotaPersistence` retain only canonical policy/counter metadata
+and verify a SHA-256 digest on restore. `TransactionalJsonProviderQuotaPersistence` supports a
+caller-owned compare-and-swap store. Active reservations are not restored because the external
+provider outcome is unknowable after a process restart. The controller uses epoch milliseconds for
+the cross-language fixed-window schema and is thread-safe within one Python process; distributed
+quota authority, tenant isolation, encryption, billing truth, and provider-side rate limits remain
+deployment responsibilities.
+
+`AutonomousAgent.run_cross_domain(..., max_parallelism=...)` can use that shared controller for
+bounded specialist fan-out. The value is capped at eight; child futures are submitted and
+collected in accepted order, so completion timing cannot reorder `child_results` or the transient
+inputs passed to synthesis. Synthesis waits for all children, including failed or refused ones,
+before applying the existing `allow_partial` and response-review gates. The result projection
+reports the requested ceiling without retaining tasks, prompts, provider values, credentials, or
+tool data. This direct path is intentionally separate from evaluator-driven cross-domain learning
+and replanning: those APIs keep sequential delayed-credit settlement so concurrent completion
+cannot change bandit updates or trajectory identity.
+
+Provider and credential boundary failures inside a child or the synthesis leg are converted into a
+typed, metadata-only `BrainRunResult` with `status="provider_failed"`. It exposes only stable
+failure metadata such as retryability, circuit state, and status code; exception text, request
+messages, credential material, provider responses, and wire payloads are never retained. With
+`allow_partial=True`, healthy siblings and synthesis can proceed and the parent can complete while
+the failed child remains visible. The evaluator-driven `run_cross_domain_learning()` path uses the
+same envelope and does not settle rewards or memory for failed items; it preserves declaration/
+accepted-plan order for the items that did settle. With `allow_partial=False`, the parent returns
+`child_failed` without synthesis after a strict child failure. Programming, malformed-input, and
+configuration errors remain hard failures.
+
+### Shared aggregate cost admission
+
+`AutonomousCostBudget` is the composition-level estimate ceiling. `ProviderQuotaController`
+still handles provider/model windows and concurrency; this budget handles the total estimated
+cost of one composed run across providers and domains:
+
+```python
+from prism_sdk import AutonomousCostBudget
+
+budget = AutonomousCostBudget(max_cost_units=12)
+result = agent.run(
+    task="compare the available evidence and produce a safe implementation plan",
+    domain="cross_domain",
+    reserve_cost=budget.reserve,
+)
+print(budget.snapshot())
+```
+
+The callback is forwarded through model failover, native tool-loop turns, missions, workflows,
+cross-domain specialists and synthesis, including evaluator/replan and restart-step facades.
+Admission is atomic inside one Python process, so concurrent fan-out cannot oversubscribe the
+ceiling. A reservation is released only when local admission or an observer refuses before
+provider dispatch; transport failures after dispatch remain charged because the provider may
+have incurred cost. Live streams reserve lazily when iteration begins, and an unconsumed stream
+does not spend either aggregate or provider quota. `AutonomousCostBudgetError` exposes bounded
+accounting fields without prompt, response, credential, or provider payload data.
+
+`budget.snapshot()` and `AutonomousCostBudget.from_snapshot(...)` provide a portable numeric
+handoff for caller-owned restart storage. The snapshot is not billing truth, does not restore an
+in-flight request, and cannot lower already-consumed accounting. Persist it alongside the
+execution/checkpoint identity and rehydrate the same budget before resuming; distributed writers,
+tenant isolation, encryption, billing reconciliation, and provider-side limits remain deployment
+responsibilities.
+
+The delayed `run_cross_domain_trajectory_learning()` and
+`settle_cross_domain_trajectory_learning()` entry points apply the same admission at the
+trajectory boundary. They preserve accepted execution order but pass only `completed*` child and
+synthesis results to the generic trajectory preparer. Incomplete provider, approval, route, or
+response-review envelopes remain visible in `cross_domain` control-plane metadata and receive no
+trajectory episode, evaluator call, reward, or episodic-memory receipt. Partial execution must be
+explicitly enabled with `allow_partial=True`; strict delayed learning raises before evaluation if
+any result is incomplete. The caller-owned settlement path applies this filtering again after a
+durable worker handoff, making replay safe without re-invoking providers.
+
+For a local durable worker, `SQLiteAutonomousExecutionSnapshotPersistence(path)` is a ready
+transactional implementation of the snapshot adapter. It stores one canonical metadata snapshot
+row, uses WAL plus full synchronous commits, and fences `flush()` with an atomic
+`BEGIN IMMEDIATE` compare-and-swap. Multiple worker processes can open the same SQLite file;
+exactly one writer can advance a given expected digest, while stale coordinators receive
+`AutonomyPersistenceError`. Reopening validates the stored digest before the normal JSON snapshot
+and journal-chain validators run. SQLite provides local durability and process fencing only; it
+does not provide tenant isolation, encryption, distributed leases, protected-value storage, or
+external provider/effect reconciliation.
+
+The evidence worker has the same local durability posture through
+`SQLiteAutonomousEvidenceWorkQueuePersistence(path)`. Its queue snapshot adapter uses WAL,
+full-synchronous transactions, bounded busy waits, and an atomic digest fence for
+`AutonomousEvidenceWorkQueuePersistenceCoordinator.flush()`. A `None` expected digest means
+create-if-empty; once a snapshot exists, a stale coordinator receives a compare-and-swap refusal
+instead of overwriting a newer lease or reconciliation transition. This protects metadata
+coordination between local processes but does not replace distributed consensus, tenant isolation,
+encryption, or source/evaluator authority.
+
+For event-level multi-process coordination, pass `SQLiteAutonomousExecutionJournal(path)` as the
+`journal` when constructing `AutonomousExecutionController` or `AutonomousAgent`. It allocates
+sequence numbers and hash-chain predecessors under the same SQLite write transaction as the
+event, so concurrent workers cannot fork one metadata history. This is stronger than conditional
+snapshot flushes when workers share the journal directly, but policy counters still belong to the
+controller instance and deployment-owned leases must prevent two workers from executing the same
+rehydrated task concurrently.
+
+For the external-effect boundary, `SQLiteAutonomousEffectJournal(path)` provides the corresponding
+restart-safe event ledger. It persists only effect identities, argument/idempotency digests,
+dispatch attempts, lifecycle statuses, and bounded reconciliation metadata; it never stores the
+arguments, outputs, prompts, credentials, or provider envelopes. Concurrent appenders share one
+SQLite hash chain, and reopening verifies the complete chain before pending effects are inspected.
+The caller must still provide distributed lease ownership, an idempotency-aware external system,
+and the resolver that establishes whether an uncertain effect actually happened.
+
+```python
+from prism_sdk import (
+    AutonomousExecutionJournal,
+    AutonomousExecutionPersistenceCoordinator,
+    SQLiteAutonomousExecutionSnapshotPersistence,
+)
+
+persistence = SQLiteAutonomousExecutionSnapshotPersistence(".aurora/execution.sqlite3")
+journal = AutonomousExecutionJournal(".aurora/execution.jsonl")
+coordinator = AutonomousExecutionPersistenceCoordinator(journal, persistence)
+coordinator.restore()
+# Call after each bounded checkpoint or worker handoff.
+coordinator.flush()
+persistence.close()
+```
+
 The artifact registry is available through typed `ArtifactRegistrationRequest`,
 `ArtifactQueryRequest`, `ArtifactGetRequest`, `ArtifactRegistrationReport`, `ArtifactQueryReport`,
 `ArtifactGetReport`, `ArtifactLineageReport`, `ArtifactDomainEvidenceLineageRequest`,

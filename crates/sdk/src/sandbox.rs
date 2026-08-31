@@ -109,6 +109,8 @@ impl ResourceRequest {
         self
     }
 
+    /// The third ceiling 11.12 asks for. Present so a declaration can state all three; a struct
+    /// with a field no builder sets would make "unstated" indistinguishable from "unstatable".
     pub fn with_max_output_bytes(mut self, bytes: u64) -> Self {
         self.max_output_bytes = Some(bytes);
         self
@@ -172,6 +174,26 @@ mod tests {
             .with_memory_mib(512)
             .is_unstated());
         assert_eq!(ResourceRequest::unstated().wall_clock_ms, None);
+    }
+
+    /// Each of the three ceilings can be stated, and stating one leaves the other two unstated.
+    ///
+    /// A missing builder would not fail to compile anywhere — it would just make one ceiling
+    /// permanently unsayable, so the field count and the builder count are asserted together.
+    #[test]
+    fn every_resource_ceiling_has_a_builder_and_setting_one_leaves_the_others_unstated() {
+        let stated = ResourceRequest::unstated()
+            .with_wall_clock_ms(30_000)
+            .with_memory_mib(512)
+            .with_max_output_bytes(1_048_576);
+        assert_eq!(stated.wall_clock_ms, Some(30_000));
+        assert_eq!(stated.memory_mib, Some(512));
+        assert_eq!(stated.max_output_bytes, Some(1_048_576));
+
+        let only_output = ResourceRequest::unstated().with_max_output_bytes(4_096);
+        assert!(!only_output.is_unstated());
+        assert_eq!(only_output.wall_clock_ms, None);
+        assert_eq!(only_output.memory_mib, None);
     }
 
     #[test]

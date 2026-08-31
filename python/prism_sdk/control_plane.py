@@ -10,7 +10,7 @@ or external effects from retained metadata.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import hashlib
 import json
 import math
@@ -28,6 +28,7 @@ from .brain import (
     BrainOutcomeEvaluator,
 )
 from .evaluators import DomainEvaluatorRegistry
+from .autonomous_effects import AutonomousProviderEffectReconciliationCoordinator
 from .jobs import (
     JOB_RECONCILIATION_OUTCOMES,
     JOB_RECONCILIATION_SCHEMA,
@@ -1489,6 +1490,7 @@ class BrainWorker:
         heartbeat_seconds: float = 30.0,
         execution_kind: str = "mission_learning",
         workflow_checkpoint_sink: Callable[[str, Any], Any] | None = None,
+        effect_reconciliation: AutonomousProviderEffectReconciliationCoordinator | None = None,
     ) -> None:
         if execution_kind not in {"mission_learning", "workflow_learning", "cross_domain"}:
             raise BrainRunError("worker execution_kind must be mission_learning, workflow_learning, or cross_domain")
@@ -1532,6 +1534,8 @@ class BrainWorker:
             raise BrainRunError("worker heartbeat_seconds must be within [0.1, lease_seconds)")
         if workflow_checkpoint_sink is not None and not callable(workflow_checkpoint_sink):
             raise BrainRunError("workflow_checkpoint_sink must be callable or None")
+        if effect_reconciliation is not None and not isinstance(effect_reconciliation, AutonomousProviderEffectReconciliationCoordinator):
+            raise BrainRunError("effect_reconciliation must be an AutonomousProviderEffectReconciliationCoordinator or None")
         self.resolver = resolver
         self.evaluator = evaluator
         self.bandit_state = dict(bandit_state)
@@ -1545,8 +1549,23 @@ class BrainWorker:
         self.heartbeat_seconds = float(heartbeat_seconds)
         self.execution_kind = execution_kind
         self.workflow_checkpoint_sink = workflow_checkpoint_sink
+        self.effect_reconciliation = effect_reconciliation
+
+    def reconcile_effects(self) -> dict[str, Any] | None:
+        """Run or return the cached restart reconciliation admission for this worker lifecycle."""
+
+        return None if self.effect_reconciliation is None else self.effect_reconciliation.admit()
+
+    def reset_effect_reconciliation(self) -> None:
+        """Re-open the caller-owned reconciliation cycle after resolving external state."""
+
+        if self.effect_reconciliation is not None:
+            self.effect_reconciliation.reset()
 
     def run_once(self, job_id: str | None = None) -> BrainJobRunResult | None:
+        effect_reconciliation = self.reconcile_effects()
+        if effect_reconciliation is not None and effect_reconciliation.get("status") == "blocked":
+            raise BrainRunError("brain worker effect reconciliation admission is blocked")
         claimed: BrainJobRecord | None = None
         if job_id is None:
             claimed = self.store.claim_next(self.worker_id, lease_seconds=self.lease_seconds)
@@ -1556,7 +1575,7 @@ class BrainWorker:
         else:
             claimed = self.store.claim(job_id, self.worker_id, lease_seconds=self.lease_seconds)
         if claimed.terminal:
-            return BrainJobRunResult(status="already_terminal", job=claimed.to_dict(), cycle=None, workflow=None)
+            return BrainJobRunResult(status="already_terminal", job=claimed.to_dict(), cycle=None, workflow=None, effect_reconciliation=effect_reconciliation)
         stop = threading.Event()
         heartbeat_errors: list[Exception] = []
 
@@ -1653,12 +1672,15 @@ class BrainWorker:
                         job=failed.to_dict(),
                         cycle=None,
                         error_class=type(operation_error).__name__,
+                        effect_reconciliation=effect_reconciliation,
                     )
             except Exception as persistence_error:
                 raise BrainRunError("worker failure could not be durably recorded") from persistence_error
             raise operation_error
         if result is None:
             raise BrainRunError("worker execution returned no result")
+        if effect_reconciliation is not None:
+            result = replace(result, effect_reconciliation=effect_reconciliation)
         if result.workflow is not None and self.execution_kind == "workflow_learning":
             next_state = getattr(result.workflow, "bandit_state", None)
             if isinstance(next_state, Mapping):
@@ -1800,6 +1822,7 @@ class BrainWorker:
                 cycle=result.cycle,
                 error_class=type(heartbeat_errors[0]).__name__,
                 workflow=result.workflow,
+                effect_reconciliation=effect_reconciliation,
             )
         return result
 

@@ -36,8 +36,14 @@ import secrets
 import threading
 import time
 import uuid
-from typing import Any, Callable, Iterable, Iterator, Mapping, Protocol, Sequence
+from typing import TYPE_CHECKING, Any, Callable, Iterable, Iterator, Mapping, Protocol, Sequence
 from urllib.parse import urlsplit
+
+from .authoring import content_digest
+from .autonomous_cost_budget import AutonomousCostReservationCallback
+
+if TYPE_CHECKING:
+    from .autonomous_authorization import AutonomousAuthorizationContext
 
 
 MAX_MESSAGES = 512
@@ -62,6 +68,8 @@ MODEL_CATALOGUE_SCHEMA = "bioprism-llm-model-catalogue/0.1"
 PROVIDER_HEALTH_LEDGER_SCHEMA = "bioprism-llm-provider-health-ledger/0.1"
 _LEGACY_PROVIDER_HEALTH_SNAPSHOT_SCHEMA = "bioprism-llm-provider-health-snapshot/0.1"
 PROVIDER_HEALTH_SNAPSHOT_SCHEMA = "bioprism-llm-provider-health-snapshot/0.2"
+_LEGACY_LLM_RUNTIME_HEALTH_SNAPSHOT_SCHEMA = "bioprism-llm-runtime-health-snapshot/0.1"
+LLM_RUNTIME_HEALTH_SNAPSHOT_SCHEMA = "bioprism-llm-runtime-health-snapshot/0.2"
 CREDENTIAL_ONBOARDING_SCHEMA = "bioprism-llm-credential-onboarding/0.1"
 CREDENTIAL_PROVISIONING_SCHEMA = "bioprism-llm-credential-provisioning/0.1"
 PROVIDER_MODEL_DISCOVERY_SCHEMA = "bioprism-llm-provider-model-discovery/0.1"
@@ -71,6 +79,9 @@ MAX_MODEL_METADATA_BYTES = 256_000
 MAX_PROVIDER_HEALTH_RECORDS = 16_384
 MAX_PROVIDER_HEALTH_BYTES = 32_000_000
 MAX_PROVIDER_HEALTH_SNAPSHOT_BYTES = 32_000_000
+MAX_LLM_RUNTIME_HEALTH_PROVIDERS = 128
+MAX_LLM_RUNTIME_HEALTH_MODELS = 2_048
+MAX_LLM_RUNTIME_HEALTH_SNAPSHOT_BYTES = 1_000_000
 MAX_PROVIDER_DISCOVERED_MODELS = 512
 MAX_PROVIDER_MODEL_DISCOVERY_BYTES = 8_000_000
 MAX_CREDENTIAL_PROVISIONING_SOURCES = 128
@@ -190,11 +201,21 @@ class ProviderError(RuntimeError):
         retryable: bool = False,
         status_code: int | None = None,
         circuit_open: bool = False,
+        code: str = "provider_error",
+        provider: str | None = None,
+        operation: str | None = None,
+        request_id: str | None = None,
+        retry_after_ms: int | None = None,
     ) -> None:
         super().__init__(message)
         self.retryable = retryable
         self.status_code = status_code
         self.circuit_open = circuit_open
+        self.code = code
+        self.provider = provider
+        self.operation = operation
+        self.request_id = request_id
+        self.retry_after_ms = retry_after_ms
 
 
 @dataclass(frozen=True, slots=True)
@@ -1119,6 +1140,25 @@ class ModelCatalogue:
         ):
             raise ProviderError("model catalogue candidate count is invalid")
         return cls(tuple(ModelCandidate.from_mapping(candidate) for candidate in candidates))
+
+    def restore(self, value: "ModelCatalogue" | Mapping[str, Any]) -> None:
+        """Atomically replace this catalogue with a validated metadata-only image.
+
+        The object identity is preserved so an already-composed autonomous agent and its
+        inventory coordinator continue to observe the restored candidates. Provider registration,
+        credentials, health circuits, and evaluator evidence remain outside this catalogue image.
+        """
+
+        replacement = value if isinstance(value, ModelCatalogue) else ModelCatalogue.from_mapping(value)
+        candidates = tuple(
+            ModelCandidate.from_mapping(candidate)
+            for candidate in replacement.candidates()
+        )
+        with self._lock:
+            self._candidates = {
+                (candidate.provider, candidate.model): candidate
+                for candidate in candidates
+            }
 
     def register(
         self,
@@ -2235,6 +2275,335 @@ class ProviderHealthPersistenceCoordinator:
         return snapshot
 
 
+def _runtime_health_identifier(name: str, value: Any, *, max_bytes: int, provider: bool = False) -> str:
+    if not isinstance(value, str) or not value.strip() or len(value.encode("utf-8")) > max_bytes:
+        raise ProviderError(f"{name} is outside its bounded identifier contract")
+    if any(ord(character) < 32 for character in value) or (provider and ("/" in value or " " in value)):
+        raise ProviderError(f"{name} is outside its bounded identifier contract")
+    return value
+
+
+def _runtime_health_count(name: str, value: Any) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0 or value > 2**53 - 1:
+        raise ProviderError(f"{name} is outside its bounded health contract")
+    return value
+
+
+def _runtime_health_metric(name: str, value: Any) -> int | float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0 or value > 2**53 - 1:
+        raise ProviderError(f"{name} is outside its bounded health contract")
+    return value
+
+
+def _runtime_health_timestamp(name: str, value: Any) -> int | float | None:
+    if value is None:
+        return None
+    return _runtime_health_metric(name, value)
+
+
+def _runtime_health_nullable_string(name: str, value: Any, *, max_bytes: int) -> str | None:
+    if value is None:
+        return None
+    return _runtime_health_identifier(name, value, max_bytes=max_bytes)
+
+
+def _normalize_runtime_health_counts(name: str, value: Mapping[str, Any]) -> dict[str, Any]:
+    attempts = _runtime_health_count(f"{name} attempts", value.get("attempts"))
+    successes = _runtime_health_count(f"{name} successes", value.get("successes"))
+    failures = _runtime_health_count(f"{name} failures", value.get("failures"))
+    if successes + failures != attempts:
+        raise ProviderError(f"{name} attempts do not equal successes plus failures")
+    return {
+        "attempts": attempts,
+        "successes": successes,
+        "failures": failures,
+        "total_latency_ms": _runtime_health_metric(f"{name} total_latency_ms", value.get("total_latency_ms")),
+        "last_latency_ms": _runtime_health_timestamp(f"{name} last_latency_ms", value.get("last_latency_ms")),
+        "last_model": _runtime_health_nullable_string(f"{name} last_model", value.get("last_model"), max_bytes=512),
+        "last_status_code": (
+            None
+            if value.get("last_status_code") is None
+            else _runtime_health_count(f"{name} last_status_code", value.get("last_status_code"))
+        ),
+    }
+
+
+def _normalize_runtime_provider_health_row(value: Any) -> dict[str, Any]:
+    expected = {
+        "provider",
+        "attempts",
+        "successes",
+        "failures",
+        "total_latency_ms",
+        "last_latency_ms",
+        "last_model",
+        "last_status_code",
+        "consecutive_failures",
+        "circuit_opened_until",
+    }
+    if not isinstance(value, Mapping) or set(value) != expected:
+        raise ProviderError("LLM runtime provider health row is malformed")
+    provider = _runtime_health_identifier(
+        "LLM runtime provider health provider", value.get("provider"), max_bytes=128, provider=True
+    )
+    return {
+        "provider": provider,
+        **_normalize_runtime_health_counts("LLM runtime provider health row", value),
+        "consecutive_failures": _runtime_health_count(
+            "LLM runtime provider health consecutive_failures", value.get("consecutive_failures")
+        ),
+        "circuit_opened_until": _runtime_health_timestamp(
+            "LLM runtime provider health circuit_opened_until", value.get("circuit_opened_until")
+        ),
+    }
+
+
+def _normalize_runtime_model_health_row(value: Any) -> dict[str, Any]:
+    expected = {
+        "provider",
+        "model",
+        "attempts",
+        "successes",
+        "failures",
+        "total_latency_ms",
+        "last_latency_ms",
+        "last_model",
+        "last_status_code",
+    }
+    if not isinstance(value, Mapping) or set(value) != expected:
+        raise ProviderError("LLM runtime model health row is malformed")
+    return {
+        "provider": _runtime_health_identifier(
+            "LLM runtime model health provider", value.get("provider"), max_bytes=128, provider=True
+        ),
+        "model": _runtime_health_identifier("LLM runtime model health model", value.get("model"), max_bytes=512),
+        **_normalize_runtime_health_counts("LLM runtime model health row", value),
+    }
+
+
+def _build_runtime_health_snapshot(
+    providers: Sequence[Mapping[str, Any]],
+    models: Sequence[Mapping[str, Any]],
+    *,
+    snapshot_generation: int,
+    previous_snapshot_digest: str | None,
+) -> dict[str, Any]:
+    if not isinstance(snapshot_generation, int) or isinstance(snapshot_generation, bool) or snapshot_generation < 1:
+        raise ProviderError("LLM runtime health snapshot generation is outside its bound")
+    if snapshot_generation == 1 and previous_snapshot_digest is not None:
+        raise ProviderError("LLM runtime health snapshot generation and previous_snapshot_digest are inconsistent")
+    if previous_snapshot_digest is not None and (
+        not isinstance(previous_snapshot_digest, str)
+        or len(previous_snapshot_digest) != 64
+        or any(character not in "0123456789abcdef" for character in previous_snapshot_digest)
+    ):
+        raise ProviderError("LLM runtime health previous_snapshot_digest is invalid")
+    normalized_providers = [_normalize_runtime_provider_health_row(row) for row in providers]
+    normalized_models = [_normalize_runtime_model_health_row(row) for row in models]
+    descriptor = {
+        "schema": LLM_RUNTIME_HEALTH_SNAPSHOT_SCHEMA,
+        "snapshot_generation": snapshot_generation,
+        "previous_snapshot_digest": previous_snapshot_digest,
+        "providers": normalized_providers,
+        "models": normalized_models,
+        "retention": "transport_health_metadata_only_hash_bound",
+        "secret_material": "never_returned",
+    }
+    snapshot = {
+        **descriptor,
+        "snapshot_digest": hashlib.sha256(_canonical_provider_health_json(descriptor).encode("utf-8")).hexdigest(),
+    }
+    if len(_canonical_provider_health_json(snapshot).encode("utf-8")) > MAX_LLM_RUNTIME_HEALTH_SNAPSHOT_BYTES:
+        raise ProviderError("LLM runtime health snapshot exceeds its byte capacity")
+    return snapshot
+
+
+def _normalize_runtime_health_snapshot(value: Mapping[str, Any], *, max_bytes: int) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise ProviderError("LLM runtime health snapshot is malformed")
+    legacy = value.get("schema") == _LEGACY_LLM_RUNTIME_HEALTH_SNAPSHOT_SCHEMA
+    expected = {
+        "schema",
+        "providers",
+        "models",
+        "snapshot_digest",
+        "retention",
+        "secret_material",
+    }
+    if not legacy:
+        expected.update({"snapshot_generation", "previous_snapshot_digest"})
+    if set(value) != expected:
+        raise ProviderError("LLM runtime health snapshot is malformed")
+    if value.get("schema") != LLM_RUNTIME_HEALTH_SNAPSHOT_SCHEMA and not legacy:
+        raise ProviderError("LLM runtime health snapshot schema is unsupported")
+    if value.get("retention") != "transport_health_metadata_only_hash_bound" or value.get("secret_material") != "never_returned":
+        raise ProviderError("LLM runtime health snapshot markers are invalid")
+    generation = None
+    previous = None
+    if not legacy:
+        generation = value.get("snapshot_generation")
+        previous = value.get("previous_snapshot_digest")
+        if not isinstance(generation, int) or isinstance(generation, bool) or generation < 1:
+            raise ProviderError("LLM runtime health snapshot generation is outside its bound")
+        if previous is not None and (
+            not isinstance(previous, str)
+            or len(previous) != 64
+            or any(character not in "0123456789abcdef" for character in previous)
+        ):
+            raise ProviderError("LLM runtime health previous_snapshot_digest is invalid")
+        if (generation == 1) != (previous is None):
+            raise ProviderError("LLM runtime health snapshot generation and previous_snapshot_digest are inconsistent")
+    raw_providers = value.get("providers")
+    raw_models = value.get("models")
+    if not isinstance(raw_providers, Sequence) or isinstance(raw_providers, (str, bytes, bytearray)) or len(raw_providers) > MAX_LLM_RUNTIME_HEALTH_PROVIDERS:
+        raise ProviderError("LLM runtime health snapshot provider capacity is exceeded")
+    if not isinstance(raw_models, Sequence) or isinstance(raw_models, (str, bytes, bytearray)) or len(raw_models) > MAX_LLM_RUNTIME_HEALTH_MODELS:
+        raise ProviderError("LLM runtime health snapshot model capacity is exceeded")
+    providers = [_normalize_runtime_provider_health_row(row) for row in raw_providers]
+    models = [_normalize_runtime_model_health_row(row) for row in raw_models]
+    provider_ids: set[str] = set()
+    for row in providers:
+        if row["provider"] in provider_ids:
+            raise ProviderError(f"LLM runtime health snapshot contains duplicate provider {row['provider']}")
+        provider_ids.add(row["provider"])
+    model_ids: set[tuple[str, str]] = set()
+    for row in models:
+        model_id = (row["provider"], row["model"])
+        if model_id in model_ids:
+            raise ProviderError(f"LLM runtime health snapshot contains duplicate model {row['provider']}/{row['model']}")
+        model_ids.add(model_id)
+    descriptor = {
+        "schema": _LEGACY_LLM_RUNTIME_HEALTH_SNAPSHOT_SCHEMA if legacy else LLM_RUNTIME_HEALTH_SNAPSHOT_SCHEMA,
+        **({} if legacy else {"snapshot_generation": generation, "previous_snapshot_digest": previous}),
+        "providers": providers,
+        "models": models,
+        "retention": "transport_health_metadata_only_hash_bound",
+        "secret_material": "never_returned",
+    }
+    digest = value.get("snapshot_digest")
+    expected_digest = hashlib.sha256(_canonical_provider_health_json(descriptor).encode("utf-8")).hexdigest()
+    if not isinstance(digest, str) or len(digest) != 64 or any(character not in "0123456789abcdef" for character in digest) or digest != expected_digest:
+        raise ProviderError("LLM runtime health snapshot digest does not match its metadata")
+    normalized = {**descriptor, "snapshot_digest": digest}
+    if len(_canonical_provider_health_json(normalized).encode("utf-8")) > min(max_bytes, MAX_LLM_RUNTIME_HEALTH_SNAPSHOT_BYTES):
+        raise ProviderError("LLM runtime health snapshot exceeds its byte capacity")
+    return normalized
+
+
+def validate_llm_runtime_health_snapshot(value: Mapping[str, Any]) -> dict[str, Any]:
+    """Strictly validate a restart-safe, value-only runtime health snapshot."""
+
+    return _normalize_runtime_health_snapshot(value, max_bytes=MAX_LLM_RUNTIME_HEALTH_SNAPSHOT_BYTES)
+
+
+class LLMRuntimeHealthSnapshotTextStore(Protocol):
+    """Portable text persistence for process-local provider transport health."""
+
+    def read(self) -> str | None: ...
+
+    def write(self, value: str) -> None: ...
+
+
+class TransactionalLLMRuntimeHealthSnapshotTextStore(LLMRuntimeHealthSnapshotTextStore, Protocol):
+    def write_if_unchanged(self, expected_snapshot_digest: str | None, value: str) -> bool: ...
+
+
+class JsonLLMRuntimeHealthSnapshotPersistence:
+    """Canonical JSON persistence for runtime transport-health snapshots."""
+
+    def __init__(self, store: LLMRuntimeHealthSnapshotTextStore, *, max_bytes: int = MAX_LLM_RUNTIME_HEALTH_SNAPSHOT_BYTES) -> None:
+        if not all(callable(getattr(store, name, None)) for name in ("read", "write")):
+            raise ProviderError("LLM runtime health JSON persistence requires a text store")
+        if isinstance(max_bytes, bool) or not isinstance(max_bytes, int) or not 1 <= max_bytes <= MAX_LLM_RUNTIME_HEALTH_SNAPSHOT_BYTES:
+            raise ProviderError("LLM runtime health JSON persistence max_bytes is outside its bound")
+        self.store = store
+        self.max_bytes = max_bytes
+
+    def read(self) -> dict[str, Any] | None:
+        encoded = self.store.read()
+        if encoded is None:
+            return None
+        if not isinstance(encoded, str) or len(encoded.encode("utf-8")) > self.max_bytes:
+            raise ProviderError("LLM runtime health JSON snapshot exceeds its byte bound")
+        try:
+            raw = json.loads(encoded)
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise ProviderError("LLM runtime health JSON snapshot is invalid") from error
+        if not isinstance(raw, Mapping):
+            raise ProviderError("LLM runtime health JSON snapshot must be an object")
+        normalized = _normalize_runtime_health_snapshot(raw, max_bytes=self.max_bytes)
+        if encoded != _canonical_provider_health_json(normalized):
+            raise ProviderError("LLM runtime health JSON snapshot is not canonical")
+        return normalized
+
+    def write(self, snapshot: Mapping[str, Any]) -> None:
+        normalized = _normalize_runtime_health_snapshot(snapshot, max_bytes=self.max_bytes)
+        encoded = _canonical_provider_health_json(normalized)
+        if len(encoded.encode("utf-8")) > self.max_bytes:
+            raise ProviderError("LLM runtime health JSON snapshot exceeds its byte bound")
+        self.store.write(encoded)
+
+
+class TransactionalJsonLLMRuntimeHealthSnapshotPersistence(JsonLLMRuntimeHealthSnapshotPersistence):
+    """Canonical JSON runtime-health persistence with compare-and-swap fencing."""
+
+    def __init__(self, store: TransactionalLLMRuntimeHealthSnapshotTextStore, *, max_bytes: int = MAX_LLM_RUNTIME_HEALTH_SNAPSHOT_BYTES) -> None:
+        super().__init__(store, max_bytes=max_bytes)
+        if not callable(getattr(store, "write_if_unchanged", None)):
+            raise ProviderError("transactional LLM runtime health persistence requires write_if_unchanged")
+        self.store = store
+
+    def write_if_unchanged(self, expected_snapshot_digest: str | None, snapshot: Mapping[str, Any]) -> bool:
+        if expected_snapshot_digest is not None and (
+            not isinstance(expected_snapshot_digest, str)
+            or len(expected_snapshot_digest) != 64
+            or any(character not in "0123456789abcdef" for character in expected_snapshot_digest)
+        ):
+            raise ProviderError("LLM runtime health expected snapshot digest is invalid")
+        normalized = _normalize_runtime_health_snapshot(snapshot, max_bytes=self.max_bytes)
+        committed = self.store.write_if_unchanged(expected_snapshot_digest, _canonical_provider_health_json(normalized))
+        if not isinstance(committed, bool):
+            raise ProviderError("LLM runtime health compare-and-swap returned a non-boolean result")
+        return committed
+
+
+class LLMRuntimeHealthPersistenceCoordinator:
+    """Connect an LLM runtime's transport state to caller-owned durable storage."""
+
+    def __init__(self, runtime: Any, persistence: Any) -> None:
+        if not isinstance(runtime, LLMRuntime):
+            raise ProviderError("LLM runtime health persistence requires an LLMRuntime")
+        if not all(callable(getattr(persistence, name, None)) for name in ("read", "write")):
+            raise ProviderError("LLM runtime health persistence adapter is malformed")
+        self.runtime = runtime
+        self.persistence = persistence
+        self._expected_snapshot_digest: str | None = None
+        self._operation_lock = threading.RLock()
+
+    def restore(self) -> dict[str, Any] | None:
+        with self._operation_lock:
+            raw = self.persistence.read()
+            if raw is None:
+                self._expected_snapshot_digest = None
+                return None
+            snapshot = _normalize_runtime_health_snapshot(raw, max_bytes=MAX_LLM_RUNTIME_HEALTH_SNAPSHOT_BYTES)
+            self.runtime.restore_health(snapshot)
+            self._expected_snapshot_digest = snapshot["snapshot_digest"]
+            return deepcopy(snapshot)
+
+    def flush(self) -> dict[str, Any]:
+        with self._operation_lock:
+            snapshot = self.runtime.snapshot_health()
+            write_if_unchanged = getattr(self.persistence, "write_if_unchanged", None)
+            if callable(write_if_unchanged):
+                if not write_if_unchanged(self._expected_snapshot_digest, snapshot):
+                    raise ProviderError("LLM runtime health persistence compare-and-swap conflict")
+            else:
+                self.persistence.write(snapshot)
+            self._expected_snapshot_digest = snapshot["snapshot_digest"]
+            return deepcopy(snapshot)
+
+
 @dataclass(frozen=True, slots=True)
 class ProviderContentPart:
     """Provider-neutral text/image content translated at the final wire boundary.
@@ -2614,6 +2983,38 @@ class ProviderResponse:
             "tool_calls": [call.to_dict() for call in self.tool_calls],
             "credential_posture": "not_in_response",
         }
+
+
+def _provider_effect_projection(response: ProviderResponse) -> dict[str, Any]:
+    """Reduce a transient provider response to ledger-safe accounting metadata."""
+
+    if not isinstance(response, ProviderResponse):
+        raise ProviderError("provider effect returned a malformed response")
+    usage = response.usage if isinstance(response.usage, Mapping) else {}
+    projection: dict[str, Any] = {
+        "provider": response.provider,
+        "model": response.model,
+        "status_code": response.status_code,
+        "input_tokens": usage.get("input_tokens", 0),
+        "output_tokens": usage.get("output_tokens", 0),
+        "tool_call_count": len(response.tool_calls),
+        "structured_output_present": response.structured is not None,
+        "continuation_item_count": len(response.provider_output_items),
+    }
+    if response.request_id is not None:
+        projection["request_id_digest"] = content_digest(response.request_id)
+    return projection
+
+
+def _provider_effect_failure_is_definite(error: BaseException) -> bool:
+    """Keep explicit provider refusals ordinary while treating transport ambiguity as uncertain."""
+
+    if not isinstance(error, ProviderError):
+        return False
+    if error.circuit_open:
+        return True
+    status = error.status_code
+    return isinstance(status, int) and 400 <= status < 500 and status not in {408, 409, 425, 429}
 
 
 class InMemoryProvider:
@@ -3026,18 +3427,60 @@ class LLMRuntime:
         clock: Callable[[], float] = time.time,
         sleeper: Callable[[float], None] = time.sleep,
         observation_callback: Callable[[Mapping[str, Any]], None] | None = None,
+        effect_boundary: Any | None = None,
+        provider_quota: Any | None = None,
     ) -> None:
         self.credentials = credentials or CredentialStore()
         self._providers: dict[str, ProviderConfig] = {}
         self._circuits: dict[str, _CircuitState] = {}
         self._provider_observations: dict[str, _ProviderObservationState] = {}
         self._model_observations: dict[tuple[str, str], _ProviderObservationState] = {}
+        self._health_snapshot_generation = 0
+        self._previous_health_snapshot_digest: str | None = None
+        self._cached_health_snapshot: dict[str, Any] | None = None
+        self._cached_health_signature: str | None = None
         self._clock = clock
         self._sleeper = sleeper
         self._observation_lock = threading.RLock()
         self._observation_callbacks: list[Callable[[Mapping[str, Any]], None]] = []
+        self._effect_boundary: Any | None = None
+        if provider_quota is not None and not callable(getattr(provider_quota, "reserve", None)):
+            raise ProviderError("provider_quota must expose a callable reserve method")
+        self._provider_quota = provider_quota
+        if effect_boundary is not None:
+            self.bind_effect_boundary(effect_boundary)
         if observation_callback is not None:
             self.add_observation_callback(observation_callback)
+
+    @property
+    def effect_boundary(self) -> Any | None:
+        """Return the optional caller-owned crash-safe provider effect boundary."""
+
+        return self._effect_boundary
+
+    @property
+    def provider_quota(self) -> Any | None:
+        """Return the optional process-local provider/model quota controller."""
+
+        return self._provider_quota
+
+    def bind_effect_boundary(self, effect_boundary: Any | None) -> None:
+        """Bind one effect boundary to provider dispatch without importing the effect module.
+
+        The duck-typed seam avoids a module cycle: ``autonomous_effects`` imports provider
+        request/response types for tool authorization.  A boundary is deliberately opt-in;
+        applications that need durable provider reconciliation must bind the same boundary to
+        their agent and runtime.
+        """
+
+        if effect_boundary is not None and (
+            not callable(getattr(effect_boundary, "execute", None))
+            or not callable(getattr(effect_boundary, "execute_stream", None))
+        ):
+            raise ProviderError("effect_boundary must expose execute and execute_stream methods")
+        if self._effect_boundary is not None and effect_boundary is not self._effect_boundary:
+            raise ProviderError("a different effect_boundary is already bound to this runtime")
+        self._effect_boundary = effect_boundary
 
     def add_observation_callback(self, callback: Callable[[Mapping[str, Any]], None]) -> None:
         """Register a best-effort value-only provider outcome observer.
@@ -3319,6 +3762,152 @@ class LLMRuntime:
             },
         )
 
+    def snapshot_health(self) -> dict[str, Any]:
+        """Seal bounded provider transport health without prompts, responses, or credentials.
+
+        The snapshot contains only counters, latency, model identifiers, status codes, and
+        circuit timing. It is deliberately separate from :class:`ProviderHealthLedger`: this
+        state is the runtime's immediate circuit/transport projection and is safe to restore
+        only after the same provider transports have been explicitly registered.
+        """
+
+        with self._observation_lock:
+            providers: list[dict[str, Any]] = []
+            for provider in sorted(self._providers):
+                observed = self._provider_observations.get(provider, _ProviderObservationState())
+                circuit = self._circuits.get(provider, _CircuitState())
+                providers.append(
+                    {
+                        "provider": provider,
+                        "attempts": observed.attempts,
+                        "successes": observed.successes,
+                        "failures": observed.failures,
+                        "total_latency_ms": observed.total_latency_ms,
+                        "last_latency_ms": observed.last_latency_ms,
+                        "last_model": observed.last_model,
+                        "last_status_code": observed.last_status_code,
+                        "consecutive_failures": circuit.consecutive_failures,
+                        "circuit_opened_until": circuit.opened_until,
+                    }
+                )
+            models: list[dict[str, Any]] = []
+            for (provider, model), observed in sorted(self._model_observations.items()):
+                models.append(
+                    {
+                        "provider": provider,
+                        "model": model,
+                        "attempts": observed.attempts,
+                        "successes": observed.successes,
+                        "failures": observed.failures,
+                        "total_latency_ms": observed.total_latency_ms,
+                        "last_latency_ms": observed.last_latency_ms,
+                        "last_model": observed.last_model,
+                        "last_status_code": observed.last_status_code,
+                    }
+                )
+            signature = _canonical_provider_health_json({"providers": providers, "models": models})
+            if self._cached_health_snapshot is not None and self._cached_health_signature == signature:
+                return deepcopy(self._cached_health_snapshot)
+            snapshot = _build_runtime_health_snapshot(
+                providers,
+                models,
+                snapshot_generation=self._health_snapshot_generation + 1,
+                previous_snapshot_digest=(
+                    None
+                    if self._health_snapshot_generation == 0
+                    else self._previous_health_snapshot_digest
+                ),
+            )
+            self._health_snapshot_generation = snapshot["snapshot_generation"]
+            self._previous_health_snapshot_digest = snapshot["snapshot_digest"]
+            self._cached_health_snapshot = deepcopy(snapshot)
+            self._cached_health_signature = signature
+            return deepcopy(snapshot)
+
+    def health_snapshot(self) -> dict[str, Any]:
+        """Compatibility alias for :meth:`snapshot_health` using the SDK's projection naming."""
+
+        return self.snapshot_health()
+
+    def restore_health(self, raw: Mapping[str, Any]) -> None:
+        """Atomically restore validated runtime transport health for registered providers."""
+
+        snapshot = _normalize_runtime_health_snapshot(raw, max_bytes=MAX_LLM_RUNTIME_HEALTH_SNAPSHOT_BYTES)
+        for row in snapshot["providers"]:
+            if row["provider"] not in self._providers:
+                raise ProviderError(f"cannot restore health for unregistered provider {row['provider']}")
+        for row in snapshot["models"]:
+            if row["provider"] not in self._providers:
+                raise ProviderError(f"cannot restore model health for unregistered provider {row['provider']}")
+        providers: dict[str, _ProviderObservationState] = {
+            provider: _ProviderObservationState() for provider in self._providers
+        }
+        circuits: dict[str, _CircuitState] = {
+            provider: _CircuitState() for provider in self._providers
+        }
+        for row in snapshot["providers"]:
+            providers[row["provider"]] = _ProviderObservationState(
+                attempts=row["attempts"],
+                successes=row["successes"],
+                failures=row["failures"],
+                total_latency_ms=row["total_latency_ms"],
+                last_latency_ms=row["last_latency_ms"],
+                last_model=row["last_model"],
+                last_status_code=row["last_status_code"],
+            )
+            circuits[row["provider"]] = _CircuitState(
+                consecutive_failures=row["consecutive_failures"],
+                opened_until=row["circuit_opened_until"],
+            )
+        models: dict[tuple[str, str], _ProviderObservationState] = {}
+        for row in snapshot["models"]:
+            models[(row["provider"], row["model"])] = _ProviderObservationState(
+                attempts=row["attempts"],
+                successes=row["successes"],
+                failures=row["failures"],
+                total_latency_ms=row["total_latency_ms"],
+                last_latency_ms=row["last_latency_ms"],
+                last_model=row["last_model"],
+                last_status_code=row["last_status_code"],
+            )
+        with self._observation_lock:
+            self._provider_observations = providers
+            self._circuits = circuits
+            self._model_observations = models
+            if snapshot["schema"] == LLM_RUNTIME_HEALTH_SNAPSHOT_SCHEMA:
+                self._health_snapshot_generation = snapshot["snapshot_generation"]
+                self._previous_health_snapshot_digest = snapshot["snapshot_digest"]
+                self._cached_health_snapshot = deepcopy(snapshot)
+                self._cached_health_signature = _canonical_provider_health_json(
+                    {"providers": snapshot["providers"], "models": snapshot["models"]}
+                )
+            else:
+                self._health_snapshot_generation = 0
+                self._previous_health_snapshot_digest = None
+                self._cached_health_snapshot = None
+                self._cached_health_signature = None
+
+    def save_health(self, persistence: Any) -> dict[str, Any]:
+        """Write the current runtime health through a caller-owned persistence adapter."""
+
+        if not all(callable(getattr(persistence, name, None)) for name in ("read", "write")):
+            raise ProviderError("LLM runtime health persistence adapter is malformed")
+        snapshot = self.snapshot_health()
+        persistence.write(snapshot)
+        return snapshot
+
+    def restore_persisted_health(self, persistence: Any) -> dict[str, Any] | None:
+        """Read and atomically apply a persisted runtime-health snapshot."""
+
+        if not all(callable(getattr(persistence, name, None)) for name in ("read", "write")):
+            raise ProviderError("LLM runtime health persistence adapter is malformed")
+        raw = persistence.read()
+        if raw is None:
+            return None
+        snapshot = _normalize_runtime_health_snapshot(raw, max_bytes=MAX_LLM_RUNTIME_HEALTH_SNAPSHOT_BYTES)
+        self.restore_health(snapshot)
+        return snapshot
+
     def provider_requires_credential(self, provider: str) -> bool:
         """Return whether this registered transport requires a caller-owned credential handle."""
 
@@ -3432,6 +4021,32 @@ class LLMRuntime:
         )
 
     @staticmethod
+    def _authorize_provider(
+        authorization_context: AutonomousAuthorizationContext | None,
+        *,
+        provider: str,
+        request: ProviderRequest,
+        invocation_kind: str,
+        authorization_domain: str | None,
+        execution_attempt: int | None,
+        execution_turn: int | None,
+    ) -> None:
+        """Apply caller authorization before credential resolution or effect dispatch."""
+
+        if authorization_context is None:
+            return
+        if not callable(getattr(authorization_context, "authorize_provider", None)):
+            raise ProviderError("authorization_context must expose authorize_provider")
+        authorization_context.authorize_provider(
+            provider=provider,
+            model=request.model,
+            invocation_kind=invocation_kind,
+            domain=authorization_domain,
+            attempt=0 if execution_attempt is None else execution_attempt,
+            turn=0 if execution_turn is None else execution_turn,
+        )
+
+    @staticmethod
     def _notify_invocation_before(
         observer: ProviderInvocationObserver | None,
         metadata: ProviderInvocationMetadata,
@@ -3450,6 +4065,26 @@ class LLMRuntime:
         if observer is not None:
             observer.after(metadata, response, error, max(0.0, (time.perf_counter() - started) * 1000.0))
 
+    @staticmethod
+    def _provider_headers(
+        config: ProviderConfig,
+        secret: SecretValue | None,
+        request: ProviderRequest,
+    ) -> dict[str, str]:
+        headers = {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+        }
+        if secret is not None:
+            if config.protocol == "anthropic_messages":
+                headers[config.api_key_header or "x-api-key"] = secret.expose()
+                headers["anthropic-version"] = "2023-06-01"
+            else:
+                headers[config.api_key_header or "Authorization"] = "Bearer " + secret.expose()
+        if request.idempotency_key is not None:
+            headers["Idempotency-Key"] = request.idempotency_key
+        return headers
+
     def reset_provider(self, provider: str) -> None:
         """Explicitly close a circuit after an operator or health check has reviewed it."""
 
@@ -3465,10 +4100,28 @@ class LLMRuntime:
         credential: CredentialHandle | None = None,
         invocation_observer: ProviderInvocationObserver | None = None,
         invocation_kind: str = "provider_call",
+        effect_boundary: Any | None = None,
+        effect_execution: Any | None = None,
+        provider_quota: Any | None = None,
+        estimated_cost_units: float = 0.0,
+        reserve_cost: AutonomousCostReservationCallback | None = None,
+        authorization_context: AutonomousAuthorizationContext | None = None,
+        authorization_domain: str | None = None,
+        authorization_attempt: int = 0,
+        authorization_turn: int = 0,
     ) -> ProviderResponse:
         config = self._providers.get(provider)
         if config is None:
             raise ProviderError(f"provider {provider!r} is not configured")
+        self._authorize_provider(
+            authorization_context,
+            provider=provider,
+            request=request,
+            invocation_kind=invocation_kind,
+            authorization_domain=authorization_domain,
+            execution_attempt=authorization_attempt,
+            execution_turn=authorization_turn,
+        )
         secret: SecretValue | None = None
         if config.requires_credential:
             if credential is None:
@@ -3476,28 +4129,117 @@ class LLMRuntime:
             if credential.provider != provider:
                 raise CredentialError("credential provider does not match invocation provider")
             secret = self.credentials._resolve(credential)
-        body = self._body(config, request)
-        headers = {
-            "Accept": "application/json",
-            "Content-Type": "application/json",
-        }
-        if secret is not None:
-            if config.protocol == "anthropic_messages":
-                headers[config.api_key_header or "x-api-key"] = secret.expose()
-                headers["anthropic-version"] = "2023-06-01"
-            else:
-                headers[config.api_key_header or "Authorization"] = "Bearer " + secret.expose()
-        if request.idempotency_key is not None:
-            headers["Idempotency-Key"] = request.idempotency_key
         metadata = self._invocation_metadata(provider, request, invocation_kind)
-        self._notify_invocation_before(invocation_observer, metadata)
+        quota = self._provider_quota if provider_quota is None else provider_quota
+        quota_reservation = None
+        if quota is not None:
+            if not callable(getattr(quota, "reserve", None)):
+                raise ProviderError("provider_quota must expose a callable reserve method")
+            quota_reservation = quota.reserve({
+                "provider": provider,
+                "model": request.model,
+                "input_tokens": metadata.input_tokens,
+                "output_tokens": request.max_output_tokens,
+                "cost_units": estimated_cost_units,
+            })
+        cost_reservation = None
+        if reserve_cost is not None:
+            if not callable(reserve_cost):
+                if quota_reservation is not None:
+                    quota_reservation.release()
+                raise ProviderError("reserve_cost must be callable")
+            try:
+                cost_reservation = reserve_cost(estimated_cost_units)
+            except BaseException:
+                if quota_reservation is not None:
+                    quota_reservation.release()
+                raise
+            if cost_reservation is not None and not callable(cost_reservation):
+                if quota_reservation is not None:
+                    quota_reservation.release()
+                raise ProviderError("reserve_cost must return a callable release handle or None")
+        try:
+            self._notify_invocation_before(invocation_observer, metadata)
+        except BaseException:
+            if quota_reservation is not None:
+                quota_reservation.release()
+            if cost_reservation is not None:
+                cost_reservation()
+            raise
         started = time.perf_counter()
         try:
-            response = self._post(config, body, headers, request)
+            selected_boundary = effect_boundary if effect_boundary is not None else self._effect_boundary
+            if selected_boundary is None:
+                if quota_reservation is not None:
+                    quota_reservation.mark_dispatched()
+                response = self._post(config, self._body(config, request), self._provider_headers(config, secret, request), request)
+            else:
+                request_digest = content_digest({
+                    "provider": provider,
+                    "model": request.model,
+                    "kind": invocation_kind,
+                    "messages": request.messages,
+                    "max_output_tokens": request.max_output_tokens,
+                    "temperature": request.temperature,
+                    "require_json": request.require_json,
+                    "response_schema": request.response_schema,
+                    "tools": [tool.to_dict() for tool in request.tools],
+                    "tool_choice": request.tool_choice,
+                })
+                generated_key = request.idempotency_key or f"aurora-provider-{uuid.uuid4().hex}"
+                call_id = f"provider-call-{content_digest(generated_key)[:48]}"
+                boundary_execution = effect_execution or getattr(selected_boundary, "execution", None) or getattr(invocation_observer, "controller", None)
+                state = getattr(boundary_execution, "state", None)
+                execution_id = getattr(state, "execution_id", None)
+                effect_request = {
+                    "execution_id": execution_id,
+                    "tool": f"provider.{provider}.invoke",
+                    "call_id": call_id,
+                    "risk_class": "provider_invocation",
+                    "arguments": {
+                        "provider": provider,
+                        "model": request.model,
+                        "kind": invocation_kind,
+                        "request_digest": request_digest,
+                        "requested_output_tokens": request.max_output_tokens,
+                        "tool_count": len(request.tools),
+                        "idempotency_key_present": request.idempotency_key is not None,
+                    },
+                }
+
+                def dispatch(context: Any) -> ProviderResponse:
+                    dispatched_request = request if request.idempotency_key is not None else replace(request, idempotency_key=context.idempotency_key)
+                    if quota_reservation is not None:
+                        quota_reservation.mark_dispatched()
+                    return self._post(config, self._body(config, dispatched_request), self._provider_headers(config, secret, dispatched_request), dispatched_request)
+
+                response = selected_boundary.execute(
+                    effect_request,
+                    dispatch,
+                    execution=boundary_execution,
+                    result_projector=_provider_effect_projection,
+                    cache_result=False,
+                    definite_failure=_provider_effect_failure_is_definite,
+                )
         except BaseException as error:
-            self._notify_invocation_after(invocation_observer, metadata, None, error, started)
+            try:
+                self._notify_invocation_after(invocation_observer, metadata, None, error, started)
+            finally:
+                if quota_reservation is not None:
+                    if quota_reservation.is_dispatched:
+                        quota_reservation.settle()
+                    else:
+                        quota_reservation.release()
             raise
-        self._notify_invocation_after(invocation_observer, metadata, response, None, started)
+        try:
+            self._notify_invocation_after(invocation_observer, metadata, response, None, started)
+        finally:
+            if quota_reservation is not None:
+                quota_reservation.settle({
+                    "input_tokens": response.usage.get("input_tokens", metadata.input_tokens),
+                    "output_tokens": response.usage.get("output_tokens", request.max_output_tokens),
+                    "cost_units": estimated_cost_units,
+                })
         return response
 
     def invoke_stream(
@@ -3508,6 +4250,145 @@ class LLMRuntime:
         credential: CredentialHandle | None = None,
         invocation_observer: ProviderInvocationObserver | None = None,
         invocation_kind: str = "provider_stream",
+        provider_quota: Any | None = None,
+        estimated_cost_units: float = 0.0,
+        reserve_cost: AutonomousCostReservationCallback | None = None,
+        effect_boundary: Any | None = None,
+        effect_execution: Any | None = None,
+        effect_id_observer: Callable[[str], None] | None = None,
+        authorization_context: AutonomousAuthorizationContext | None = None,
+        authorization_domain: str | None = None,
+        authorization_attempt: int = 0,
+        authorization_turn: int = 0,
+    ) -> Iterator[ProviderStreamEvent]:
+        """Open a provider stream with a metadata-only crash-safe dispatch boundary.
+
+        The returned iterator is live and transient.  When an effect boundary is bound, it
+        persists ``dispatched`` before the underlying iterator is entered and persists only a
+        bounded completion summary.  Raw deltas never enter the effect journal.
+        """
+
+        self._authorize_provider(
+            authorization_context,
+            provider=provider,
+            request=request,
+            invocation_kind=invocation_kind,
+            authorization_domain=authorization_domain,
+            execution_attempt=authorization_attempt,
+            execution_turn=authorization_turn,
+        )
+        selected_boundary = effect_boundary if effect_boundary is not None else self._effect_boundary
+        if selected_boundary is None:
+            return self._invoke_stream_unbounded(
+                provider,
+                request,
+                credential=credential,
+                invocation_observer=invocation_observer,
+                invocation_kind=invocation_kind,
+                provider_quota=provider_quota,
+                estimated_cost_units=estimated_cost_units,
+                reserve_cost=reserve_cost,
+            )
+        if not callable(getattr(selected_boundary, "execute_stream", None)):
+            raise ProviderError("effect_boundary must expose execute_stream for live provider streams")
+        request_digest = content_digest({
+            "provider": provider,
+            "model": request.model,
+            "kind": invocation_kind,
+            "messages": request.messages,
+            "max_output_tokens": request.max_output_tokens,
+            "temperature": request.temperature,
+            "require_json": request.require_json,
+            "response_schema": request.response_schema,
+            "tools": [tool.to_dict() for tool in request.tools],
+            "tool_choice": request.tool_choice,
+        })
+        generated_key = request.idempotency_key or f"aurora-provider-stream-{uuid.uuid4().hex}"
+        call_id = f"provider-stream-{content_digest(generated_key)[:48]}"
+        boundary_execution = effect_execution or getattr(selected_boundary, "execution", None) or getattr(invocation_observer, "controller", None)
+        state = getattr(getattr(boundary_execution, "state", None), "execution_id", None)
+        effect_request = {
+            "execution_id": state,
+            "tool": f"provider.{provider}.stream",
+            "call_id": call_id,
+            "risk_class": "provider_invocation",
+            "arguments": {
+                "provider": provider,
+                "model": request.model,
+                "kind": invocation_kind,
+                "request_digest": request_digest,
+                "requested_output_tokens": request.max_output_tokens,
+                "tool_count": len(request.tools),
+                "idempotency_key_present": request.idempotency_key is not None,
+            },
+        }
+        if effect_id_observer is not None:
+            if not callable(effect_id_observer):
+                raise ProviderError("effect_id_observer must be callable")
+            try:
+                effect_id_observer(selected_boundary.effect_id(effect_request))
+            except Exception:
+                # Effect identity is diagnostic metadata. A faulty observer must never alter
+                # provider dispatch or turn a valid stream into a caller-visible failure.
+                pass
+        summary: dict[str, Any] = {
+            "provider": provider,
+            "model": request.model,
+            "event_count": 0,
+            "text_delta_bytes": 0,
+            "tool_call_count": 0,
+            "done_seen": False,
+        }
+
+        def observe(event: ProviderStreamEvent, event_count: int) -> None:
+            summary["event_count"] = event_count
+            summary["text_delta_bytes"] += len(event.text_delta.encode("utf-8"))
+            if event.tool_call is not None:
+                summary["tool_call_count"] += 1
+            summary["done_seen"] = bool(summary["done_seen"] or event.done)
+            for key in ("input_tokens", "output_tokens", "total_tokens"):
+                value = event.usage.get(key)
+                if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+                    summary[key] = value
+            if event.request_id is not None:
+                summary["request_id_digest"] = content_digest(event.request_id)
+
+        def project(base: Mapping[str, Any]) -> Mapping[str, Any]:
+            return {**summary, "event_count": base["event_count"], "completed": True}
+
+        def dispatch(context: Any) -> Iterable[ProviderStreamEvent]:
+            dispatched_request = request if request.idempotency_key is not None else replace(request, idempotency_key=context.idempotency_key)
+            return self._invoke_stream_unbounded(
+                provider,
+                dispatched_request,
+                credential=credential,
+                invocation_observer=invocation_observer,
+                invocation_kind=invocation_kind,
+                provider_quota=provider_quota,
+                estimated_cost_units=estimated_cost_units,
+                reserve_cost=reserve_cost,
+            )
+
+        return selected_boundary.execute_stream(
+            effect_request,
+            dispatch,
+            execution=boundary_execution,
+            summary_projector=project,
+            observe=observe,
+            definite_failure=_provider_effect_failure_is_definite,
+        )
+
+    def _invoke_stream_unbounded(
+        self,
+        provider: str,
+        request: ProviderRequest,
+        *,
+        credential: CredentialHandle | None = None,
+        invocation_observer: ProviderInvocationObserver | None = None,
+        invocation_kind: str = "provider_stream",
+        provider_quota: Any | None = None,
+        estimated_cost_units: float = 0.0,
+        reserve_cost: AutonomousCostReservationCallback | None = None,
     ) -> Iterator[ProviderStreamEvent]:
         """Open one bounded SSE provider invocation.
 
@@ -3542,19 +4423,58 @@ class LLMRuntime:
         if request.idempotency_key is not None:
             headers["Idempotency-Key"] = request.idempotency_key
         metadata = self._invocation_metadata(provider, request, invocation_kind)
-        stream = self._stream(config, body, headers, request)
-        if invocation_observer is None:
-            return stream
+        quota = self._provider_quota if provider_quota is None else provider_quota
 
         def observed_stream() -> Iterator[ProviderStreamEvent]:
-            self._notify_invocation_before(invocation_observer, metadata)
-            started = time.perf_counter()
+            quota_reservation = None
+            cost_reservation = None
+            dispatched = False
             try:
+                if quota is not None:
+                    if not callable(getattr(quota, "reserve", None)):
+                        raise ProviderError("provider_quota must expose a callable reserve method")
+                    quota_reservation = quota.reserve({
+                        "provider": provider,
+                        "model": request.model,
+                        "input_tokens": metadata.input_tokens,
+                        "output_tokens": request.max_output_tokens,
+                        "cost_units": estimated_cost_units,
+                    })
+                if reserve_cost is not None:
+                    if not callable(reserve_cost):
+                        raise ProviderError("reserve_cost must be callable")
+                    cost_reservation = reserve_cost(estimated_cost_units)
+                    if cost_reservation is not None and not callable(cost_reservation):
+                        raise ProviderError("reserve_cost must return a callable release handle or None")
+                self._notify_invocation_before(invocation_observer, metadata)
+                started = time.perf_counter()
+                stream = self._stream(config, body, headers, request)
+                if quota_reservation is not None:
+                    quota_reservation.mark_dispatched()
+                dispatched = True
                 yield from stream
             except BaseException as error:
-                self._notify_invocation_after(invocation_observer, metadata, None, error, started)
+                if dispatched:
+                    try:
+                        self._notify_invocation_after(invocation_observer, metadata, None, error, started)
+                    finally:
+                        if quota_reservation is not None:
+                            quota_reservation.settle()
+                else:
+                    if quota_reservation is not None:
+                        quota_reservation.release()
+                    if cost_reservation is not None:
+                        cost_reservation()
                 raise
-            self._notify_invocation_after(invocation_observer, metadata, None, None, started)
+            try:
+                self._notify_invocation_after(invocation_observer, metadata, None, None, started)
+            finally:
+                if quota_reservation is not None:
+                    quota_reservation.settle({
+                        "input_tokens": metadata.input_tokens,
+                        "output_tokens": request.max_output_tokens,
+                        "cost_units": estimated_cost_units,
+                    })
 
         return observed_stream()
 
@@ -3566,22 +4486,50 @@ class LLMRuntime:
         credential: CredentialHandle | None = None,
         invocation_observer: ProviderInvocationObserver | None = None,
         invocation_kind: str = "provider_stream",
+        effect_boundary: Any | None = None,
+        effect_execution: Any | None = None,
+        provider_quota: Any | None = None,
+        estimated_cost_units: float = 0.0,
+        reserve_cost: AutonomousCostReservationCallback | None = None,
+        authorization_context: AutonomousAuthorizationContext | None = None,
+        authorization_domain: str | None = None,
+        authorization_attempt: int = 0,
+        authorization_turn: int = 0,
     ) -> ProviderResponse:
         """Collect a stream into the same bounded response contract as ``invoke``."""
 
+        self._authorize_provider(
+            authorization_context,
+            provider=provider,
+            request=request,
+            invocation_kind=invocation_kind,
+            authorization_domain=authorization_domain,
+            execution_attempt=authorization_attempt,
+            execution_turn=authorization_turn,
+        )
         metadata = self._invocation_metadata(provider, request, invocation_kind)
         self._notify_invocation_before(invocation_observer, metadata)
         started = time.perf_counter()
-        text_parts: list[str] = []
-        text_bytes = 0
-        tool_calls: list[ProviderToolCall] = []
-        usage: Mapping[str, Any] = {}
-        request_id: str | None = None
-        model = request.model
-        event_count = 0
-        terminal_type: str | None = None
-        try:
-            for event in self.invoke_stream(provider, request, credential=credential):
+
+        def collect(dispatched_request: ProviderRequest) -> ProviderResponse:
+            text_parts: list[str] = []
+            text_bytes = 0
+            tool_calls: list[ProviderToolCall] = []
+            usage: Mapping[str, Any] = {}
+            request_id: str | None = None
+            model = dispatched_request.model
+            event_count = 0
+            terminal_type: str | None = None
+            # collect_stream owns the response-level effect boundary below; avoid nesting a
+            # second stream boundary around the same provider dispatch.
+            for event in self._invoke_stream_unbounded(
+                provider,
+                dispatched_request,
+                credential=credential,
+                provider_quota=provider_quota,
+                estimated_cost_units=estimated_cost_units,
+                reserve_cost=reserve_cost,
+            ):
                 event_count += 1
                 if event_count > MAX_STREAM_EVENTS:
                     raise ProviderError("provider stream exceeded max event count")
@@ -3598,11 +4546,17 @@ class LLMRuntime:
                 model = event.model or model
                 if event.done:
                     terminal_type = event.event_type
+            if terminal_type is None:
+                raise ProviderError(
+                    "provider stream ended without a done event",
+                    retryable=event_count == 0,
+                    code="invalid_response",
+                )
             if not text_parts and not tool_calls:
                 raise ProviderError("provider stream contained no assistant text or tool call")
             text = "".join(text_parts)
-            structured = None if tool_calls else _validate_structured_response(text, request)
-            response = ProviderResponse(
+            structured = None if tool_calls else _validate_structured_response(text, dispatched_request)
+            return ProviderResponse(
                 provider=provider,
                 model=model,
                 text=text,
@@ -3617,6 +4571,57 @@ class LLMRuntime:
                 structured=structured,
                 tool_calls=tuple(tool_calls),
             )
+
+        try:
+            selected_boundary = effect_boundary if effect_boundary is not None else self._effect_boundary
+            if selected_boundary is None:
+                response = collect(request)
+            else:
+                request_digest = content_digest({
+                    "provider": provider,
+                    "model": request.model,
+                    "kind": invocation_kind,
+                    "messages": request.messages,
+                    "max_output_tokens": request.max_output_tokens,
+                    "temperature": request.temperature,
+                    "require_json": request.require_json,
+                    "response_schema": request.response_schema,
+                    "tools": [tool.to_dict() for tool in request.tools],
+                    "tool_choice": request.tool_choice,
+                })
+                generated_key = request.idempotency_key or f"aurora-provider-stream-{uuid.uuid4().hex}"
+                call_id = f"provider-stream-{content_digest(generated_key)[:48]}"
+                boundary_execution = effect_execution or getattr(selected_boundary, "execution", None) or getattr(invocation_observer, "controller", None)
+                state = getattr(boundary_execution, "state", None)
+                execution_id = getattr(state, "execution_id", None)
+                effect_request = {
+                    "execution_id": execution_id,
+                    "tool": f"provider.{provider}.stream",
+                    "call_id": call_id,
+                    "risk_class": "provider_invocation",
+                    "arguments": {
+                        "provider": provider,
+                        "model": request.model,
+                        "kind": invocation_kind,
+                        "request_digest": request_digest,
+                        "requested_output_tokens": request.max_output_tokens,
+                        "tool_count": len(request.tools),
+                        "idempotency_key_present": request.idempotency_key is not None,
+                    },
+                }
+
+                def dispatch(context: Any) -> ProviderResponse:
+                    dispatched_request = request if request.idempotency_key is not None else replace(request, idempotency_key=context.idempotency_key)
+                    return collect(dispatched_request)
+
+                response = selected_boundary.execute(
+                    effect_request,
+                    dispatch,
+                    execution=boundary_execution,
+                    result_projector=_provider_effect_projection,
+                    cache_result=False,
+                    definite_failure=_provider_effect_failure_is_definite,
+                )
         except BaseException as error:
             self._notify_invocation_after(invocation_observer, metadata, None, error, started)
             raise
@@ -3636,6 +4641,13 @@ class LLMRuntime:
         initial_response: ProviderResponse | None = None,
         invocation_observer: ProviderInvocationObserver | None = None,
         invocation_kind: str = "tool_loop_turn",
+        provider_quota: Any | None = None,
+        estimated_cost_units: float = 0.0,
+        reserve_cost: AutonomousCostReservationCallback | None = None,
+        context_budget: Any | None = None,
+        authorization_context: AutonomousAuthorizationContext | None = None,
+        authorization_domain: str | None = None,
+        authorization_attempt: int = 0,
     ) -> ProviderToolLoopResult:
         """Run bounded native tool continuation with a caller-owned authorization callback.
 
@@ -3661,6 +4673,14 @@ class LLMRuntime:
         total_tool_calls = 0
         response = initial_response
         for _turn in range(max_turns):
+            if context_budget is not None:
+                from .autonomous_context_budget import AutonomousContextBudgetError, compact_autonomous_provider_request
+
+                try:
+                    response_request = compact_autonomous_provider_request(current, context_budget)
+                except AutonomousContextBudgetError as error:
+                    raise ProviderError("autonomous provider context budget could not be satisfied", code="invalid_request") from error
+                current = response_request.request
             if response is None:
                 response = (
                     self.collect_stream(
@@ -3669,6 +4689,13 @@ class LLMRuntime:
                         credential=credential,
                         invocation_observer=invocation_observer,
                         invocation_kind=invocation_kind,
+                        provider_quota=provider_quota,
+                        estimated_cost_units=estimated_cost_units,
+                        reserve_cost=reserve_cost,
+                        authorization_context=authorization_context,
+                        authorization_domain=authorization_domain,
+                        authorization_attempt=authorization_attempt,
+                        authorization_turn=_turn,
                     )
                     if stream
                     else self.invoke(
@@ -3677,6 +4704,13 @@ class LLMRuntime:
                         credential=credential,
                         invocation_observer=invocation_observer,
                         invocation_kind=invocation_kind,
+                        provider_quota=provider_quota,
+                        estimated_cost_units=estimated_cost_units,
+                        reserve_cost=reserve_cost,
+                        authorization_context=authorization_context,
+                        authorization_domain=authorization_domain,
+                        authorization_attempt=authorization_attempt,
+                        authorization_turn=_turn,
                     )
                 )
             responses.append(response)
@@ -3741,7 +4775,24 @@ class LLMRuntime:
     ) -> Iterator[ProviderStreamEvent]:
         started = time.perf_counter()
         try:
-            yield from self._stream_with_circuit(config, body, headers, request)
+            done_seen = False
+            event_count = 0
+            for event in self._stream_with_circuit(config, body, headers, request):
+                if done_seen:
+                    raise ProviderError(
+                        "provider stream emitted an event after its terminal done event",
+                        code="invalid_response",
+                    )
+                event_count += 1
+                if event.done:
+                    done_seen = True
+                yield event
+            if not done_seen:
+                raise ProviderError(
+                    "provider stream ended without a done event",
+                    retryable=event_count == 0,
+                    code="invalid_response",
+                )
         except ProviderError as error:
             self._notify_observation(
                 config,
@@ -3836,9 +4887,15 @@ class LLMRuntime:
                 "request_id": None,
                 "calls": {},
             }
+            done_seen = False
             sequence = 0
             for event_name, data in _iter_sse_frames(response, config.max_response_bytes):
                 if data.strip() == "[DONE]":
+                    # Chat Completions commonly emits a finish_reason terminal event followed
+                    # by the [DONE] framing sentinel. The sentinel is not a second provider
+                    # event, so only synthesize a terminal event when one was not emitted.
+                    if done_seen:
+                        continue
                     specs = _finalize_stream_tool_calls(config.protocol, state)
                     specs.append({"event_type": "stream.done", "done": True})
                 else:
@@ -3865,6 +4922,8 @@ class LLMRuntime:
                         raise ProviderError("provider stream text exceeded the bounded size")
                     if event.tool_name is not None and event.tool_name not in {tool.name for tool in request.tools}:
                         raise ProviderError("provider returned an unrequested streamed tool call")
+                    if event.done:
+                        done_seen = True
                     yield event
         except (OSError, http.client.HTTPException) as error:
             raise ProviderError(
@@ -5665,6 +6724,9 @@ def _project_stream_payload(
                         }
                     )
                     handled = True
+            if isinstance(payload.get("usage"), Mapping):
+                specs.append({"event_type": event_type, "usage": dict(payload["usage"])})
+                handled = True
             finish_reason = choice.get("finish_reason")
             if finish_reason == "tool_calls":
                 specs.extend(_finalize_stream_tool_calls(protocol, state))
@@ -5673,9 +6735,6 @@ def _project_stream_payload(
             elif finish_reason is not None:
                 specs.append({"event_type": event_type, "done": True})
                 handled = True
-        if isinstance(payload.get("usage"), Mapping):
-            specs.append({"event_type": event_type, "usage": dict(payload["usage"])})
-            handled = True
     else:
         if event_type == "message_start":
             message = payload.get("message")

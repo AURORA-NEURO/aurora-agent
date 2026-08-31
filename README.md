@@ -1,26 +1,17 @@
-# bioprism
-
-## Autonomous agent process boundary
-
-The Python SDK includes a secret-safe operator entry point for the autonomous brain:
-
-```bash
-cd python
-python -m prism_sdk catalogue
-python -m prism_sdk evidence-plan --domain science
-python -m prism_sdk provider-status --provider openai
-```
-
-For keyless local development, the same boundary supports an explicit credentialless fixture:
-`python -m prism_sdk provider-status --provider local` and `run --provider local --model local-model`
-use the runtime's bounded in-memory transport; no key or network provider is contacted.
-
-Use `run` with a caller-owned MCP server when you are ready to invoke a provider. Keys are accepted
-only through a hidden prompt or an explicitly named environment variable; they are never command
-line arguments, MCP arguments, plans, or persisted state. See [the autonomous brain guide](docs/AUTONOMOUS_BRAIN.md#operator-process-boundary)
-for model discovery, durable inventory refresh, model-selection, approval, and credential-lifecycle details.
+# AURORA Agent (bioprism)
 
 **Query-compiled inference for executable biology.**
+
+Context engineering, with receipts.
+
+An MCP server and CLI built on the FIBER decision-context compiler: a typed decision query is
+compiled into the smallest decision-sufficient evidence region, delivered with a Context
+Certificate stating exactly what was omitted.
+
+[![CI](https://github.com/AURORA-NEURO/aurora-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/AURORA-NEURO/aurora-agent/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/AURORA-NEURO/aurora-agent)](https://github.com/AURORA-NEURO/aurora-agent/releases)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
+[![MCP registry](https://img.shields.io/badge/MCP%20registry-io.github.MurariAmbati%2Faurora--agent-blue)](https://registry.modelcontextprotocol.io/?search=aurora-agent)
 
 Implementation of the AURORA BioPRISM / OncoWorld / FIBER blueprint (v0.6, 935 registered spec
 modules). A Rust workspace whose central idea is that **context assembly is a compiler pass**:
@@ -68,16 +59,100 @@ That last failure is why the harness ranks on admissibility rather than verdict 
 verdict would have crowned the strategy that violated the mandatory closure and got away with it.
 
 This does not show FIBER wins generally: the discriminating world was built to expose these modes,
-just as the reference world was built to expose hub expansion. Both are single points, the full
-sweep is not done, and an embedding retriever and a *directed* dependency walk are still missing
-from the panel. Full analysis: [docs/FINDINGS.md](docs/FINDINGS.md). How much of the blueprint the
+just as the reference world was built to expose hub expansion. The full structural family sweep has
+now been run — 36 cells over attachment x relay depth x tag style x distractor count — and the two
+formerly missing baselines are in the panel. The sweep's headline is a negative result for FIBER: a
+plain backward walk over the *directed* factor edges, closure first, is admissible in all 36 cells
+at exactly FIBER's fact count, so on this family admissibility and cost cannot distinguish the
+compiler from that walk; the fixed-basis embedding retriever, by contrast, fails every camouflaged
+cell at the tight budget. Full analysis: [docs/FINDINGS.md](docs/FINDINGS.md). How much of the blueprint the
 workspace actually covers, and which sections have nothing standing in for them:
 [docs/COVERAGE.md](docs/COVERAGE.md). The crate layout and the blueprint path:
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
+## Autonomous agent process boundary
+
+The Python SDK includes a secret-safe operator entry point for the autonomous brain:
+
+```bash
+cd python
+python -m prism_sdk catalogue
+python -m prism_sdk evidence-plan --domain science
+python -m prism_sdk provider-status --provider openai
+```
+
+For keyless local development, the same boundary supports an explicit credentialless fixture:
+`python -m prism_sdk provider-status --provider local` and `run --provider local --model local-model`
+use the runtime's bounded in-memory transport; no key or network provider is contacted.
+
+Use `run` with a caller-owned MCP server when you are ready to invoke a provider. Keys are accepted
+only through a hidden prompt or an explicitly named environment variable; they are never command
+line arguments, MCP arguments, plans, or persisted state. See [the autonomous brain guide](docs/AUTONOMOUS_BRAIN.md#operator-process-boundary)
+for model discovery, durable inventory refresh, model-selection, approval, and credential-lifecycle details.
+
+For post-run operations, both SDKs expose digest-bound, metadata-only trace analytics through
+`analyze_autonomous_run_trace()` / `analyzeAutonomousRunTrace()` and the corresponding agent
+facade methods. The report separates measured values from unmeasured domains, aggregates
+provider/model failure and latency observations, and emits conservative threshold alerts; it does
+not infer cost, task correctness, provider health, or domain truth. Longitudinal deployments can
+retain validated reports through the bounded `AutonomousRunAnalyticsLedger` with digest-checked
+restore and optional CAS persistence. TypeScript and Python application facades also provide
+restore-before-read analytics controllers that analyze verified traces, persist accepted reports,
+classify duplicates/conflicts, and expose safe all-domain rollups. See the [analytics section](docs/AUTONOMOUS_BRAIN.md#conservative-run-trace-analytics).
+The TypeScript facade and Python agent also provide a run-observability controller, which restores
+and flushes both projections and coordinates publication plus analysis from one source snapshot
+so registry and analytics digests cannot drift during an append race. Partial persistence is
+reported explicitly and never retriggers execution.
+When configured, its caller-owned alert sink receives only deterministic, digest-keyed threshold
+metadata; delivery failures are isolated from analytics and execution outcomes.
+
+Both SDKs also expose a tenant-scoped `AutonomousAuthorizationLedger` and fail-closed
+`AutonomousAuthorizationGate`. Caller-issued grants can cover one or all twelve domains and
+explicitly scope planning, provider invocation, evidence, connectors, tools, effects, evaluation,
+learning, memory, trace, or analytics by tenant, actor, session, capability, risk class, expiry,
+and bounded use count. The ledger is restart-safe and CAS-persistable, with hash-linked metadata
+events and request-digest replay protection. It never accepts task text, prompts, credentials,
+headers, provider payloads, tool arguments, or results; authentication, grant issuance, encrypted
+storage, distributed leases, and external effect reconciliation remain deployment-owned. See the
+[tenant authorization contract](docs/AUTONOMOUS_BRAIN.md#tenant-scoped-authorization-contract).
+
+For live model calls, bind an `AutonomousAuthorizationContext` created from the caller's grant to
+`LLMRuntime.invoke()`, `invokeStream()`, `collectStream()`, or `invokeToolLoop()` (and to the
+high-level autonomous run options). The runtime mints a fresh, metadata-only request immediately
+before every provider attempt and every tool-loop turn, then checks it before credential
+resolution, quota reservation, observers, effect journaling, or transport. A denied domain or
+exhausted grant therefore cannot contact a provider, while failover and streaming retain the same
+tenant/session boundary. The context never carries a key, prompt, message, response, or tool
+result; credentials remain caller-supplied opaque handles.
+
+The same context can be passed to `AutonomousEvidenceRuntime.execute()` or the reviewed evidence
+execution controller. It authorizes `evidence_acquisition` immediately before each source adapter
+and `evaluation` immediately before each evaluator callback, binding the decision to a request or
+receipt digest rather than a raw value. Journal replay does not reacquire or consume an acquisition
+grant; `reevaluatePending` authorizes the fresh evaluator revision separately. A refusal raises the
+typed authorization error before the callback and does not create a misleading failed-evidence
+receipt. The Python high-level `acquire_evidence()` facade forwards the same options, preserving
+least-privilege behavior across direct, reviewed, resumable, and facade entry points.
+
+The same least-privilege process now covers the remaining durable boundaries: provider planning
+authorizes `plan` before the planner invocation; episodic recall and recording authorize
+`memory_retrieval` and `memory_write`; evaluator-to-bandit settlement authorizes `learning`; and
+metadata-only trace append/complete plus longitudinal analytics ingestion authorize `trace_write`
+and `analytics_write`. These checks use only domain and digest metadata, are propagated through
+cross-domain helpers, and rethrow typed authorization refusals instead of converting them into
+provider, memory, or persistence failures. Applications can therefore issue one twelve-domain
+grant for a complete run or narrow grants to each worker boundary.
+
+The same boundary is enforced by the high-level learning surfaces, not only by the primitive
+brain methods: workflow and mission learning, delayed trajectory settlement, cross-domain fan-out
+and synthesis, automatic decision cycles, replans, and consolidated-lesson recall all authorize
+the final memory operation immediately before it reaches a caller-owned store. Nested runs also
+forward the authorization context into each exact domain, so a convenience facade cannot silently
+turn a permitted provider call into an unscoped memory read or evaluation write.
+
 ## Status
 
-**77 crates, 375,037 lines, zero clippy warnings across the workspace.** Byte-level parity with the
+**83 crates, 538,938 lines, clippy -D warnings enforced in CI.** Byte-level parity with the
 CPython reference runtime is enforced by test and holds across *three* implementations: CPython, the
 Rust eager path, and the Rust indexed store.
 
@@ -98,17 +173,19 @@ How much of the blueprint is covered, and what the remainder is:
 [docs/COVERAGE.md](docs/COVERAGE.md) and [docs/BACKLOG.md](docs/BACKLOG.md). Every uncovered module
 carries a typed verdict in [`crates/residue`](crates/residue) explaining why nothing implements it.
 
-<!-- generated by tools/status.sh at 725fa10 -->
+<!-- generated by tools/status.sh at b1586a92 -->
 
 | Crate | Blueprint | What it does |
 |---|---|---|
 | [`bioprism-adapter`](crates/adapter) | 04,28,40,43 | Data adapter contract with mandatory semantic-loss reporting |
 | [`bioprism-adaptive`](crates/adaptive) | 08,43 | Adaptive evaluation: capability posterior, information-gain suite selection, parent-aware uncertainty |
+| [`bioprism-api`](crates/api) | 11 | Bounded HTTP API, event stream, and signed webhook outbox for the Prism MCP kernel |
 | [`bioprism-atlas`](crates/atlas) | 03,33,43 | BioCapability atlas and metrics: capability ontology, coverage, failure atlas |
 | [`bioprism-atlashub`](crates/atlashub) | 09,27,34 | BioAtlas surfaces: world cards, connector registry, value-of-experiment, federated evaluation, research CI |
 | [`bioprism-atlasx`](crates/atlasx) | 34 | Capability atlas and public-hub remainder: coverage debt as a derived claim, and the failure-atlas browsing surface |
+| [`bioprism-autopilot`](crates/autopilot) | 40 | Grant-gated autonomous mission driver: plan, dispatch, classify, repair — with mission-report and reconciliation receipts for every attempt |
 | [`bioprism-backends`](crates/backends) | 32,43 | Physical backend portfolio: variable elimination, worst-case-optimal joins, structural estimation and the honest fallback |
-| [`bioprism-baseline`](crates/baseline) | 43 | Equal-engineering context baselines: full-context, k-hop incidence, connected component, lexical top-k and query-graph |
+| [`bioprism-baseline`](crates/baseline) | 43 | Equal-engineering context baselines: full-context, k-hop incidence, connected component, lexical top-k, embedding top-k, directed dependency walk, query-graph, and the structural family sweep |
 | [`bioprism-benchcompiler`](crates/benchcompiler) | 06,35 | Benchmark compiler: trajectory to decision cell, first causal divergence, minimization, oracle synthesis |
 | [`bioprism-bioethics`](crates/bioethics) | 13,30,36 | Section 36 remainder: biology security, privacy, ethics and governance beyond policy and safety |
 | [`bioprism-bioeval`](crates/bioeval) | 26,31,43 | Biological evaluation engine: scoring planes, partial credit, biological error classes |
@@ -116,18 +193,20 @@ carries a typed verdict in [`crates/residue`](crates/residue) explaining why not
 | [`bioprism-bioir`](crates/bioir) | 25,39 | Biological IR: BioWorld, specimen lineage, AssayLens, cohort and split, uncertainty and reference standards |
 | [`bioprism-biolang`](crates/biolang) | 25,28,39,43 | The biological IR family and BioQL: typed world, state, intervention, worldline, oracle, mutation and bundle representations |
 | [`bioprism-bioworlds`](crates/bioworlds) | 30,38,43 | Reference bioworlds and vertical slices: worlds built to make blocked platform claims exercisable |
-| [`bioprism-bundle`](crates/bundle) | 10,12,13,21,23,34,43 | Signed result bundles and reproduction: attestation, replay, and what symmetric authentication cannot promise |
+| [`bioprism-brain`](crates/brain) | 09,11 | Provider-neutral autonomous brain kernel: model routing, prompt assembly, bounded plans, and online bandit state |
+| [`bioprism-bundle`](crates/bundle) | 10,12,13,34,43 | Signed result bundles and reproduction: attestation, replay, and what symmetric authentication cannot promise |
 | [`bioprism-choreography`](crates/choreography) | 23 | Multiparty choreography: session types with projection, bounded protocol model checking, adjudication, quorum with checked independence, and sagas with honest compensation |
 | [`bioprism-cli`](crates/cli) | 40,43 | The bioprism command-line interface |
 | [`bioprism-conformance`](crates/conformance) | 14,40,43 | Conformance suites, the test pyramid and release quality gates |
 | [`bioprism-cookbook`](crates/cookbook) | 03,11,13,14,19,21,38,39,40,41,43 | Reference examples: worked recipes with the claim each one demonstrates and the property a reader can check |
 | [`bioprism-dataops`](crates/dataops) | 12 | Section 12 remainder: storage topology, relational catalog, SLOs, compute placement and federated deployment, each answer carrying the basis it was known from |
-| [`bioprism-devplat`](crates/devplat) | 11,19 | Developer platform contracts: evidence-aware authoring workbench, cross-domain mission DAGs, digest-bound capability discovery, notebook/session audit, capability dashboard queries, CI planning, and reference-example predicates |
+| [`bioprism-devplat`](crates/devplat) | 11,19 | Developer platform remainder and reference examples: which of them are artifacts this repository can hold, and predicates over the ones that are |
 | [`bioprism-devx`](crates/devx) | 11,23,38,39,40,41,43 | Developer platform: machine-actionable diagnostics, compile introspection, the local-loop invalidation contract and the 23.32 debugger surface model |
 | [`bioprism-docgraph`](crates/docgraph) | 39,41,43 | Documentation graph: module registry, edge vocabulary, context cards, task routes, bundle compiler, change impact |
-| [`bioprism-epistemic`](crates/epistemic) | 43 | The remaining FIBER calculus: decision-equivalence quotient, coverage-aware selection, separator protocol, rate-distortion and value of information |
+| [`bioprism-domain`](crates/domain) | 43 | Domain packs: declarative rule oracles and scope vocabularies that carry the FIBER pipeline to non-biological decision questions |
+| [`bioprism-epistemic`](crates/epistemic) | 43 | The remaining FIBER calculus: coverage-aware selection, separator protocol, rate-distortion and value of information |
 | [`bioprism-evalengine`](crates/evalengine) | 06,07,43 | Evaluation engine: the deterministic-first scoring ladder and causal component attribution |
-| [`bioprism-examples`](crates/examples) | 19,38,39,40,43 | Reference BioWorlds and runnable vertical slices |
+| [`bioprism-examples`](crates/examples) | 13,19,34,38,39,40,43 | Reference BioWorlds and runnable vertical slices |
 | [`bioprism-fabric`](crates/fabric) | 23,43 | Interweave fabric above the microkernel: composition algebra, effect and information flow, contextual reputation, common ground, semantic lifecycle |
 | [`bioprism-factory`](crates/factory) | 40 | Job, worker, lease and recovery lifecycle with idempotency-aware retry |
 | [`bioprism-fiber`](crates/fiber) | 39,40,43 | The FIBER query compiler: protected closure, dependency slicing, temporal cut and certificate emission |
@@ -145,7 +224,7 @@ carries a typed verdict in [`crates/residue`](crates/residue) explaining why not
 | [`bioprism-lens`](crates/lens) | 03,33,42,43 | Graph lens grammar: the typed lens catalogue behind the evaluation hub, and the non-visual contract |
 | [`bioprism-mcp`](crates/mcp) | 11,43 | Model Context Protocol server exposing the FIBER context compiler to agents |
 | [`bioprism-megafactory`](crates/megafactory) | 35 | Section 35 remainder: million-scale factory modules scale and factory did not claim |
-| [`bioprism-metrics`](crates/metrics) | 03,33,43 | BioCapability metrics: aggregation/comparability, bounded descriptive analytics, and what a capability number may not claim |
+| [`bioprism-metrics`](crates/metrics) | 03,33,43 | BioCapability metrics: aggregation rules, comparability of scores, and what a capability number may not claim |
 | [`bioprism-modalities`](crates/modalities) | 28,30,43 | Modality data standards: what each assay family measures, what it cannot, and when two modalities are comparable |
 | [`bioprism-mutation`](crates/mutation) | 03,40 | Metamorphic mutations with executable postconditions, lineage, deduplication and effective-diversity accounting |
 | [`bioprism-obligation`](crates/obligation) | 39 | Decision obligation graph, BioContext capsule and the token budget controller |
@@ -157,7 +236,9 @@ carries a typed verdict in [`crates/residue`](crates/residue) explaining why not
 | [`bioprism-packs`](crates/packs) | 03,15,29 | Benchmark pack taxonomy and portfolio definitions |
 | [`bioprism-policy`](crates/policy) | 13,36,39,43 | Policy, privacy and information-flow fibers: consent, purpose, residency, role visibility, redaction |
 | [`bioprism-prism`](crates/prism) | 03,40,43 | Decision Cells, matched counterfactual forks, state minimization and attested result bundles |
+| [`bioprism-project`](crates/project) | 40 | Project modeling: compiles a software project tree into a FIBER world through the sealed adapter contract, with every scanning loss declared |
 | [`bioprism-registry`](crates/registry) | 10,27,40,43 | Benchmark packs, promotion, trust tiers and the CI release gate |
+| [`bioprism-repair`](crates/repair) | — | Issue repair planning and three-valued acceptance verification over a scanned project world: plans and checks, never edits and never executes |
 | [`bioprism-residue`](crates/residue) | — | The explained residue: every uncovered blueprint module with the reason no crate implements it |
 | [`bioprism-routing`](crates/routing) | 09,43 | Evaluation-conditioned inference routing: pick a context architecture from prior evidence |
 | [`bioprism-runtime`](crates/runtime) | 05 | Execution runtime: run orchestrator, executor providers, WorldTape, fork/replay, virtualization, effects broker, budget controller |
@@ -173,7 +254,7 @@ carries a typed verdict in [`crates/residue`](crates/residue) explaining why not
 | [`bioprism-stress`](crates/stress) | 30,32,38 | Biological stress program: prevalence shift, batch and site effects, assay uncertainty |
 | [`bioprism-sweep`](crates/sweep) | 03,04,05,08,10,13,39,43 | The small remainders: core specifications, ingestion, execution runtime, adaptive, registry and safety tails |
 | [`bioprism-tokens`](crates/tokens) | 39 | Token-efficient biological inference: golden context fixtures, staleness and recomputation, ablation design, multi-agent projection, summarisation contracts |
-| [`bioprism-trace`](crates/trace) | 03,39 | Trajectory ingestion, decision segmentation, first-divergence localization and Decision Cell compilation |
+| [`bioprism-trace`](crates/trace) | 03,04,39 | Trajectory ingestion, decision segmentation, first-divergence localization and Decision Cell compilation |
 | [`bioprism-weave`](crates/weave) | 23 | The Weave microkernel: typed acts, commitment and epistemic ledgers, attenuating authority, affine budgets, context capsules and continuations |
 | [`bioprism-weavelang`](crates/weavelang) | 23 | WeaveLang and WeaveIR: surface syntax, canonical IR schema, compiler pipeline, operational semantics |
 | [`bioprism-world`](crates/world) | 40,43 | FIBER world model: local evidence sections, typed factors and the causal event structure |
@@ -258,16 +339,87 @@ neither; the registry it found them in is retained there as the audit's known-po
 
 ## Installing (Claude surfaces)
 
-- **Claude Desktop**: download `aurora-agent.mcpb` from the
-  [latest release](https://github.com/MurariAmbati/aurora-agent-releases/releases/latest)
+- **Claude Desktop**: download `aurora-agent.mcpb` (prebuilt for Windows only) from the
+  [latest release](https://github.com/AURORA-NEURO/aurora-agent/releases)
   and double-click it (or Settings → Extensions). Ships with the reference
   fixtures; the "AURORA data root" setting can point at a full checkout.
 - **Claude Code**: this repo is a plugin marketplace —
   `claude plugin marketplace add AURORA-NEURO/aurora-agent` then
   `claude plugin install aurora-agent@aurora` (see [plugins/README.md](plugins/README.md)).
+- **VS Code**: sideload `aurora-agent-0.1.3.vsix` from the
+  [v0.1.3 release](https://github.com/AURORA-NEURO/aurora-agent/releases/tag/v0.1.3)
+  (`code --install-extension aurora-agent-0.1.3.vsix`). The extension registers the MCP
+  server with VS Code (1.101+) so Copilot agent mode can call the 264 tools, and adds
+  workflow/autopilot/pipeline views (see [editors/vscode](editors/vscode/)).
 - **MCP registry**: listed as `io.github.MurariAmbati/aurora-agent` on
   [registry.modelcontextprotocol.io](https://registry.modelcontextprotocol.io/).
 - Privacy: local program, no network, no data collection — [PRIVACY.md](PRIVACY.md).
+
+## Documentation
+
+Project site: [aurora-neuro.github.io/aurora-agent](https://aurora-neuro.github.io/aurora-agent/).
+The full reference lives in [docs/](docs/); contribution workflow in
+[CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Autonomous workflows, with receipts
+
+`bioprism autopilot` drives an instantiated workflow's mission autonomously under an explicit
+**AutonomyGrant** — the only source of authority; there is no default grant. The driver dispatches
+the mission in-process, classifies every failed step by its declared 40.36 retry class
+(`terminal`, `retryable_after_change`, `retryable_as_is`, or unknown), and re-dispatches only what
+the grant authorises, as a repair subset with rematerialised bindings. Terminal and cancelled
+steps are never re-dispatched; an `unknown` failure is never retried unless the grant explicitly
+opts in.
+
+Success is never inferred: it requires full step coverage, a succeeded mission report, and — by
+default — a complete workflow reconciliation with valid integrity. Every drive emits a
+**digest-sealed autopilot report** chaining the grant digest, every mission and report digest, and
+every reconciliation digest; `bioprism autopilot verify` recomputes it and detects a single
+tampered byte. `--dry-run` plans attempt 1 only — no dispatch, zero writes.
+
+```bash
+bioprism workflow instantiate --workflow decision_context --mission-id demo --goal "compile and verify" --steps steps.json
+bioprism autopilot grant-template --json > grant.json
+bioprism autopilot run --instantiation instantiation.json --grant grant.json --report-out report.json
+bioprism autopilot verify --report report.json
+```
+
+What it deliberately does not do: no recurrence, no MCP tool exposure of the driver itself, and
+no ownership of wall-clock deadlines. Grants can authorize deterministic logical-tick retry
+backoff; the host supplies the wait/deadline implementation. Restart is supported only through a caller-owned, metadata-only
+checkpoint: mission/report material is rehydrated by the host and matched by digest before the
+planner can continue. Full reference:
+[docs/AUTOPILOT.md](docs/AUTOPILOT.md).
+
+## Autonomous research
+
+`bioprism research` executes a fixed protocol over **synthetic decision worlds** — generate,
+compile and certify, equal-engineering baseline panel, then optional structural sweep, metamorphic
+mutation, and minimization — and writes a digest-sealed dossier, a rendered report, and figures.
+Findings are derived by fixed public rules and locked to level `observation`: a single-variant
+enum, so no stronger level is representable. Each finding cites the sha256 of every artifact it was
+derived from, and each figure's footer carries the sha256 of the exact value rendered.
+`research verify` recomputes the seal and detects a one-byte tamper; `--dry-run` prints the plan
+and writes nothing.
+
+```bash
+bioprism --json research template > request.json
+  # edit request.json: research_id, question, family, distractor_points, seed
+bioprism research run --request request.json --out-dir out
+bioprism research verify --dossier out/dossier.json
+```
+
+A committed worked example lives in [`docs/research-example/`](docs/research-example/): the
+`discriminating` family at distractor points 50/250/750, 12 steps in about four seconds, **9
+findings of which 7 are negative**, and 7 figures. Its headline is a negative about this
+repository's own compiler — FIBER is tied by `directed-walk-full` at every declared distractor
+level (both admissible at 11 facts) and is not separated in 36 of 36 sweep cells. The run is
+deterministic: an independent re-run reproduced it byte-identically across all nine files.
+
+Limitations, carried verbatim in every dossier: measurement over synthetic decision worlds only;
+no biology, no literature or prior-work coverage, and no external-world claims; oracle review is a
+human gate; the sweep deliberately does not vary decision-defining knobs; and negative findings are
+first-class results. Full reference: [docs/RESEARCH.md](docs/RESEARCH.md).
 
 ## Using it from an agent
 
@@ -643,7 +795,7 @@ refusing a numeric score for an unreportable revision.
 ceilings, release sequencing, and duplicate-signature review candidates; it does not turn a
 portfolio declaration into observed performance.
 `foundation_contract_check` validates falsifiable-contract admissibility, safe refinement, claim
-applicability, world-class counterfactual strength, reveal policy, and transition-plane consistency
+applicability, counterfactual strength over the world class, reveal policy, and transition-plane consistency
 as separate gates.
 The Python and TypeScript SDKs expose those gates as typed subreports and keep a transport-success
 response distinct from an admitted contract or an authorized biological claim.

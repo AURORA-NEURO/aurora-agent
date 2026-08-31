@@ -766,3 +766,44 @@ fn a_published_artifact_cannot_be_quietly_republished_at_a_different_tier() {
     assert!(matches!(error, RegistryError::AlreadyPublished { .. }));
     assert_eq!(registry.log().len(), 1);
 }
+
+/// A publisher whose digest field holds a typo has not been shown to have edited the pack.
+///
+/// The registry's whole job is telling a consumer whether a pack it did not build is the pack it
+/// claims to be. `Attestation::Mismatch` is the answer that says somebody changed the benchmark
+/// after attesting it; answering it for a `pack_sha256` that is not a digest at all names the
+/// wrong party, and a tier decision made on that reading would hold an honest pack below Gold for
+/// a reason its publisher cannot find.
+#[test]
+fn a_malformed_pack_digest_is_reported_as_malformed_and_never_as_a_mismatch() {
+    let pack = honest_pack(3);
+    let attested = pack.attest().expect("digestible");
+    assert_eq!(BenchmarkPack::verify(&attested), Attestation::Valid);
+
+    let claimed = attested["pack_sha256"]
+        .as_str()
+        .expect("a digest")
+        .to_string();
+    for broken in [
+        String::new(),
+        "not-a-digest".to_string(),
+        claimed.to_ascii_uppercase(),
+        claimed[..63].to_string(),
+        format!("{claimed}0"),
+    ] {
+        let mut document = attested.clone();
+        document["pack_sha256"] = Value::String(broken.clone());
+        assert!(
+            matches!(BenchmarkPack::verify(&document), Attestation::Malformed(_)),
+            "pack_sha256 = {broken:?} is a defect in the claimed digest, not evidence that the \
+             pack content changed"
+        );
+    }
+
+    let mut edited = attested;
+    edited["intended_use"] = json!("rewritten after publication");
+    assert!(
+        matches!(BenchmarkPack::verify(&edited), Attestation::Mismatch { .. }),
+        "an edit to the pack body is the case Mismatch exists for, and it must still reach it"
+    );
+}

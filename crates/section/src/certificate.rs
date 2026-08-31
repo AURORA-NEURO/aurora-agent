@@ -37,6 +37,14 @@ pub enum CertificateProfile {
 pub struct ReferenceOmissions {
     pub total_facts: usize,
     pub exploratory_facts: usize,
+    /// A schema literal, not a computed verdict about this compile's omissions.
+    ///
+    /// Every producer of a `fiber-context-certificate/0.1` writes the same string here whatever
+    /// the omitted population turns out to contain, so it cannot be read as a claim that each
+    /// omitted fact met the condition it names — and on a world with a shadowed variable, some do
+    /// not. The honest reading is that the v0.1 wire carries a count and a fixed label; the
+    /// per-class verdict lives in [`crate::OmissionManifest`], which
+    /// [`CertificateProfile::Extended`] emits and this profile has no room for.
     pub classification: String,
     pub inaccessible_selected_before_cut: Vec<String>,
 }
@@ -131,6 +139,14 @@ impl ContextCertificate {
 
     /// Recomputes the embedded digest and checks it, the way a consumer must before trusting a
     /// certificate it did not produce.
+    ///
+    /// A `certificate_sha256` that is not a 64-character lowercase hex digest is
+    /// [`CertificateVerification::Malformed`], never
+    /// [`CertificateVerification::DigestMismatch`]. The two answers accuse different parties: a
+    /// mismatch says the body moved after the digest was taken, and a shape defect says the
+    /// claimed digest was never a digest. Reporting the second as the first would report tampering
+    /// on the strength of a typo, and the recomputed value it printed alongside would be evidence
+    /// of nothing.
     pub fn verify(document: &Value) -> Result<CertificateVerification, CanonicalError> {
         let Some(map) = document.as_object() else {
             return Ok(CertificateVerification::Malformed("not an object".into()));
@@ -140,6 +156,11 @@ impl ContextCertificate {
                 "missing certificate_sha256".into(),
             ));
         };
+        if ContentHash::parse(claimed.to_string()).is_err() {
+            return Ok(CertificateVerification::Malformed(
+                "certificate_sha256 is not a 64-character lowercase hex digest".into(),
+            ));
+        }
         let mut body = map.clone();
         body.remove("certificate_sha256");
         let recomputed = ContentHash::of_value(&Value::Object(body))?;

@@ -1,0 +1,22 @@
+[package]
+name = "bioprism-research"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Autonomous research protocol runner: a validated request, a pure planned protocol, in-process measurement over generated worlds, and a digested dossier whose findings are derived by fixed rules — never free-generated"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+bioprism-ids = { workspace = true }
+bioprism-section = { workspace = true }
+bioprism-world = { workspace = true }
+bioprism-fiber = { workspace = true }
+bioprism-baseline = { workspace = true }
+bioprism-worldgen = { workspace = true }
+bioprism-mutation = { workspace = true }
+bioprism-prism = { workspace = true }
+bioprism-figures = { workspace = true }

@@ -1,4 +1,8 @@
-import { ArgumentError, ProviderRuntimeError, isObject } from "./errors.js";
+import { ArgumentError, CredentialError, ProviderRuntimeError, isObject } from "./errors.js";
+import type { ProviderErrorCode } from "./errors.js";
+import { AUTONOMOUS_DOMAIN_NAMES } from "./autonomous-domains.js";
+import type { AutonomousDomainName } from "./autonomous-domains.js";
+import type { AutonomousLaunchAdmissionReport } from "./autonomous-launch-admission.js";
 import type { ApiClient } from "./client.js";
 import { createAutonomousApiToolExecutor } from "./autonomous-api-adapter.js";
 import {
@@ -9,8 +13,18 @@ import {
 import { AutonomousSelectionPromotionLifecycle } from "./autonomous-selection-lifecycle.js";
 import type { AutonomousSelectionLifecycleState, AutonomousSelectionLifecycleStore } from "./autonomous-selection-lifecycle.js";
 import type { AutonomousSelectionPromotionReport } from "./autonomous-selection-promotion.js";
-import { AutonomousBrainControlPlaneBridge, AutonomousModelHealthController, type AutonomousModelHealthStore } from "./autonomous-control.js";
-import type { AutonomousExecutionController } from "./autonomous-execution.js";
+import {
+  AutonomousBrainControlPlaneBridge,
+  AutonomousModelHealthController,
+  AutonomousModelHealthPersistenceCoordinator,
+  type AutonomousModelHealthSnapshot,
+  type AutonomousModelHealthStore,
+} from "./autonomous-control.js";
+import type {
+  AutonomousExecutionController,
+  AutonomousExecutionPersistenceCoordinator,
+  AutonomousExecutionSnapshotJournal,
+} from "./autonomous-execution.js";
 import {
   AUTONOMOUS_CAPABILITY_BATCH_SCHEMA,
   AutonomousCapabilityRuntime,
@@ -32,13 +46,36 @@ import type {
   AutonomousCapabilityExecutionRequest,
   AutonomousCapabilityExecutionResult,
 } from "./autonomous-capabilities.js";
-import type { AutonomousCapabilityJournalStore } from "./autonomous-capability-persistence.js";
+import type {
+  AutonomousCapabilityJournalPersistenceCoordinator,
+  AutonomousCapabilityJournalStore,
+} from "./autonomous-capability-persistence.js";
+import {
+  AutonomousToolOutcomeEvaluator,
+  type AutonomousToolLearningReport,
+} from "./autonomous-tool-evaluation.js";
+import {
+  AutonomousProviderOutcomeEvaluator,
+  type AutonomousProviderLearningReport,
+  type AutonomousProviderLearningUpdater,
+  type AutonomousProviderOutcomeContext,
+} from "./autonomous-provider-evaluation.js";
+import type { AutonomousDecisionCyclePersistenceCoordinator } from "./autonomous-decision-persistence.js";
 import {
   autonomousRunTraceStatus,
   AutonomousRunTraceSession,
   type AutonomousRunTraceStore,
   type AutonomousRunTraceSummary,
 } from "./autonomous-run-trace.js";
+import {
+  analyzeAutonomousRunTrace,
+  type AutonomousRunTraceAnalyticsPolicy,
+  type AutonomousRunTraceAnalyticsReport,
+} from "./autonomous-run-analytics.js";
+import {
+  AutonomousRunAnalyticsLedger,
+  type AutonomousRunAnalyticsLedgerPolicy,
+} from "./autonomous-run-analytics-ledger.js";
 import {
   AutonomousConnectorRegistry,
   AutonomousConnectorRuntime,
@@ -48,9 +85,17 @@ import {
   type AutonomousConnectorTraceEventCallback,
 } from "./autonomous-connectors.js";
 import { AutonomousEffectBoundary, AutonomousEffectReconciliationRequiredError, type AutonomousEffectExecutionContext } from "./autonomous-effects.js";
+import { AutonomousAuthorizationError, type AutonomousAuthorizationContext } from "./autonomous-authorization.js";
 import type { AutonomousLearningController } from "./autonomous-learning.js";
 import type { AutonomousEvaluatorCalibrationReport } from "./autonomous-evaluator-calibration.js";
-import type { AutonomousModelInventoryRefreshOptions, AutonomousModelInventorySnapshot } from "./autonomous-model-inventory.js";
+import type {
+  AutonomousEvaluatorCalibrationImport,
+  AutonomousEvaluatorCalibrationQueryOptions,
+  AutonomousEvaluatorCalibrationRegistry,
+  AutonomousEvaluatorCalibrationRegistryPersistenceCoordinator,
+  AutonomousEvaluatorCalibrationStoreSnapshot,
+} from "./autonomous-evaluator-calibration-store.js";
+import type { AutonomousModelInventoryReadiness, AutonomousModelInventoryReadinessOptions, AutonomousModelInventoryRefreshOptions, AutonomousModelInventorySnapshot } from "./autonomous-model-inventory.js";
 import type {
   AutonomousWorkflowPortfolioItemRequest,
   AutonomousWorkflowPortfolioPlan,
@@ -76,6 +121,19 @@ import type {
   AutonomousWorkflowPortfolioEvidenceResumableExecutionOptions,
 } from "./autonomous-workflow-portfolio-evidence-resumable.js";
 import { taskFacetDigests } from "./autonomous-memory.js";
+import {
+  AutonomousPromptLearningPersistenceCoordinator,
+  extractAutonomousPromptLearningSelections,
+} from "./autonomous-prompt-learning-persistence.js";
+import type {
+  AutonomousOnlineLearnerPersistenceCoordinator,
+  AutonomousOnlineLearnerSnapshot,
+} from "./autonomous-online-learner-persistence.js";
+import {
+  AutonomousToolSelectionPersistenceCoordinator,
+  type AutonomousToolSelectionPersistence,
+  type AutonomousToolSelectionSnapshot,
+} from "./autonomous-tool-selection-persistence.js";
 import { buildAutonomousEvidencePlan, type AutonomousEvidencePlan, type AutonomousEvidencePlanJSON } from "./autonomous-evidence.js";
 import {
   AutonomousEvidenceRuntime,
@@ -96,18 +154,93 @@ import type {
   AutonomousEvidenceExecutionResult,
 } from "./autonomous-evidence-execution.js";
 import type {
+  AutonomousMissionCheckpointStore,
+  AutonomousMissionExecuteOptions,
+  AutonomousMissionExecutionResult,
+  AutonomousMissionResultStore,
+  AutonomousMissionStepResult,
+} from "./mission-execution.js";
+import type {
+  AutonomousMissionReplanOptions,
+  AutonomousMissionReplanPromptLearningProjection,
+  AutonomousMissionReplanResult,
+} from "./mission-replan.js";
+import type {
+  AutonomousConnectorMissionAgentRunOptions,
+  AutonomousConnectorPlannedMissionRun,
+  AutonomousConnectorMissionProviderPlanningOptions,
+} from "./autonomous-connector-mission.js";
+import type {
   AutonomousEvidenceExecutionCheckpointStore,
   AutonomousEvidenceExecutionResumableRun,
 } from "./autonomous-evidence-execution-resumable.js";
+import {
+  planAutonomousInformationAcquisition,
+  type AutonomousInformationAcquisitionCandidate,
+  type AutonomousInformationAcquisitionPlan,
+  type AutonomousInformationAcquisitionPolicy,
+  type AutonomousInformationAcquisitionPolicyInput,
+} from "./autonomous-information-acquisition.js";
+import type { AutonomousInformationAcquisitionCandidateInput } from "./autonomous-information-acquisition.js";
+import {
+  assessAutonomousClaimIntegrity,
+  bindAutonomousClaimIntegrityAcquisitionRequests,
+  planAutonomousClaimIntegrityAcquisition,
+  reassessAutonomousClaimIntegrity,
+  type AssessAutonomousClaimIntegrityOptions,
+  type AutonomousClaimIntegrityAssessment,
+  type AutonomousClaimIntegrityClaim,
+  type AutonomousClaimIntegrityClaimInput,
+  type AutonomousClaimIntegrityEvidence,
+  type AutonomousClaimIntegrityEvidenceInput,
+  type AutonomousClaimIntegrityPolicy,
+  type AutonomousClaimIntegrityPolicyInput,
+} from "./autonomous-claim-integrity.js";
+import type { AutonomousClaimIntegrityAcquisitionBinding, AutonomousClaimIntegrityAcquisitionRequestInput, PlanAutonomousClaimIntegrityAcquisitionOptions } from "./autonomous-claim-integrity.js";
+import {
+  assessAutonomousOutcomeIntegrity,
+  bindAutonomousOutcomeIntegrityClaims,
+  projectAutonomousOutcomeIntegrityRun,
+  type AssessAutonomousOutcomeIntegrityOptions,
+  type AutonomousOutcomeIntegrityAssessment,
+  type AutonomousOutcomeIntegrityClaimBinding,
+  type AutonomousOutcomeIntegrityClaimBindingInput,
+  type AutonomousOutcomeIntegrityRun,
+} from "./autonomous-outcome-integrity.js";
+import {
+  assessAutonomousCrossDomainResponseSet,
+  type AutonomousCrossDomainResponseAssessment,
+  type AutonomousCrossDomainResponseAlignmentInput,
+  type AutonomousCrossDomainResponseEntry,
+} from "./autonomous-cross-domain-response.js";
+import type {
+  AutonomousDomainEvidenceBrainRunOptions,
+  AutonomousDomainEvidenceBrainRunResult,
+} from "./autonomous-domain-evidence-brain.js";
 import type {
   AutonomousEpisodicMemoryStore,
+  AutonomousMemoryPersistenceCoordinator,
+  AutonomousMemorySnapshot,
   AutonomousMemoryEpisode,
   AutonomousMemoryQuery,
   AutonomousMemoryReceipt,
 } from "./autonomous-memory.js";
+import type {
+  AutonomousMemoryConsolidationObservation,
+  AutonomousMemoryConsolidationPromptReference,
+  AutonomousMemoryLessonContextResolver,
+  AutonomousMemoryConsolidationReport,
+  AutonomousMemoryConsolidator,
+} from "./autonomous-memory-consolidation.js";
 import {
+  runAutonomousAutoDecisionCycle,
+  runAutonomousAutoReplanCycle,
   runAutonomousCrossDomainReplanCycle,
   runAutonomousReplanCycle,
+  type AutonomousAutoDecisionCycleOptions,
+  type AutonomousAutoDecisionCycleResult,
+  type AutonomousAutoReplanCycleOptions,
+  type AutonomousAutoReplanCycleResult,
   type AutonomousCrossDomainReplanCycleOptions,
   type AutonomousCrossDomainReplanCycleResult,
   type AutonomousReplanCycleOptions,
@@ -129,6 +262,11 @@ import {
   AutonomousCostBudget,
   type AutonomousCostBudgetSnapshot,
   type AutonomousModelCandidate,
+  type AutonomousModelObservation,
+  type AutonomousModelRanking,
+  type AutonomousSelectionWeights,
+  normalizeAutonomousSelectionWeights,
+  normalizeAutonomousModelObservations,
   type AutonomousModelSelector,
   type AutonomousModelSelectionTraceEventCallback,
   type AutonomousSelectionDecision,
@@ -151,7 +289,17 @@ import {
   autonomousSelectionConfidence,
   type AutonomousModelCandidateDefaults,
   type ProviderModelDiscovery,
+  type AutonomousProviderFailoverProjection,
+  type AutonomousProviderInvocationReceipt,
+  type AutonomousStreamCompletion,
+  type AutonomousStreamHandle,
+  type AutonomousStreamInvocationOptions,
+  type ProviderStreamEvent,
+  LLMRuntimeHealthPersistenceCoordinator,
+  type LLMRuntimeHealthSnapshot,
 } from "./llm.js";
+import type { AutonomousModelContinuationPlan } from "./autonomous-continuation.js";
+import { normalizeAutonomousContextBudget, type AutonomousContextBudgetOptions, type AutonomousContextBudgetPlan } from "./autonomous-context-budget.js";
 import {
   buildAutonomousDomainResponseContract,
   evaluateAutonomousDomainResponse,
@@ -161,22 +309,45 @@ import type { AutonomousDomainResponseContract, AutonomousDomainResponseEvaluati
 import {
   autonomousDomainTaskLens,
   autonomousTaskLensPromptContract,
+  validateAutonomousDomainTaskLens,
   type AutonomousDomainTaskLens,
 } from "./autonomous-task-lens.js";
 import {
   autonomousTaskIntentPromptContract,
   inferAutonomousTaskIntent,
+  validateAutonomousTaskIntent,
   type AutonomousTaskIntent,
 } from "./autonomous-task-intent.js";
 import {
+  routeAutonomousCapability,
+  type AutonomousCapabilityRoute,
+} from "./autonomous-capability-routing.js";
+import {
   autonomousTaskDecisionPromptContract,
   inferAutonomousTaskDecision,
+  validateAutonomousTaskDecision,
   type AutonomousTaskDecision,
 } from "./autonomous-task-decision.js";
+import {
+  AUTONOMOUS_TASK_CLARIFICATION_RECOMPILE_SCHEMA,
+  planAutonomousTaskClarification,
+  resolveAutonomousTaskClarification,
+  validateAutonomousTaskClarificationPlan,
+  validateAutonomousTaskClarificationRecompile,
+  validateAutonomousTaskClarificationResolution,
+  type AutonomousTaskClarificationPlan,
+  type AutonomousTaskClarificationResolution,
+} from "./autonomous-task-clarification.js";
+import {
+  semanticRouteAutonomousTask,
+  type AutonomousSemanticRouteOptions,
+  type AutonomousSemanticRouteResult,
+} from "./autonomous-routing.js";
 import { ToolCatalogue, canonicalJson, digestBytesSync, digestCanonicalJsonText, digestCanonicalJsonTextSync, digestJson, digestJsonSync } from "./tooling.js";
 import {
   autonomousDomainPolicy,
   evaluateAutonomousDomainPolicy,
+  validateAutonomousDomainPolicy,
   type AutonomousDomainPolicy,
   type AutonomousDomainPolicyAdmission,
   type AutonomousDomainPolicyExecutionMode,
@@ -194,14 +365,29 @@ import type {
   BrainModelSelectionArgs,
   BrainModelSelectionContext,
   BrainProviderHealth,
+  AgentMissionArgs,
+  AgentMissionStep,
   JsonObject,
   JsonValue,
+  AutonomousPlanningFailureProjection,
   AutonomousCrossDomainPlanRefinementResult,
   AutonomousOrderedStepPlanRefinementResult,
   AutonomousPlanRefinementResult,
   RestToolResponse,
   ToolDefinition,
 } from "./types.js";
+import {
+  AutonomousPromptAdaptiveSelection,
+  AutonomousPromptRegistry,
+  AutonomousPromptTemplate,
+  type AutonomousPromptAdaptiveSelectionJSON,
+  type AutonomousPromptLearningState,
+  type AutonomousPromptLearningStateJSON,
+  selectAdaptiveAutonomousPrompts,
+  type AutonomousPromptRenderResult,
+  type AutonomousPromptSelectionPlan,
+  type AutonomousPromptSelectionPlanJSON,
+} from "./autonomous-prompt-registry.js";
 
 /** Cross-domain orchestration contracts shared with the Python autonomous façade. */
 export const AUTONOMY_SCHEMA = "bioprism-typescript-autonomous-agent/0.1" as const;
@@ -214,6 +400,10 @@ export const AUTONOMOUS_PLAN_REFINEMENT_SCHEMA = "bioprism-python-autonomous-pla
 export const AUTONOMOUS_CROSS_DOMAIN_PLAN_REFINEMENT_SCHEMA = "bioprism-python-autonomous-cross-domain-plan-refinement/0.1" as const;
 export const AUTONOMOUS_ORDERED_STEP_PLAN_REFINEMENT_SCHEMA = "bioprism-typescript-autonomous-ordered-step-plan-refinement/0.1" as const;
 export const AUTONOMOUS_PLAN_AND_RUN_SCHEMA = "bioprism-typescript-autonomous-plan-and-run/0.1" as const;
+export const AUTONOMOUS_AUTO_RUN_SCHEMA = "bioprism-typescript-autonomous-auto-run/0.1" as const;
+export const AUTONOMOUS_RUN_STREAM_SCHEMA = "bioprism-typescript-autonomous-run-stream/0.1" as const;
+export const AUTONOMOUS_RUN_STREAM_COMPLETION_SCHEMA = "bioprism-typescript-autonomous-run-stream-completion/0.1" as const;
+export const AUTONOMOUS_RUN_STREAM_MAX_QUEUED_EVENTS = 4_096;
 export const AUTONOMOUS_EVIDENCE_BACKED_RUN_SCHEMA = "bioprism-typescript-autonomous-evidence-backed-run/0.1" as const;
 export const MAX_AUTONOMOUS_EVIDENCE_BACKED_PROMPT_CHUNKS = 32;
 export const MAX_AUTONOMOUS_EVIDENCE_BACKED_CONTEXT_BYTES = 48_000;
@@ -221,6 +411,10 @@ export const MAX_AUTONOMOUS_EVIDENCE_BACKED_RESULT_BYTES = 512_000;
 export const AUTONOMOUS_DOMAIN_TOOL_SCHEMA = "bioprism-typescript-autonomous-domain-tool/0.1" as const;
 export const AUTONOMOUS_DOMAIN_TOOL_REGISTRY_SCHEMA = "bioprism-typescript-autonomous-domain-tool-registry/0.1" as const;
 export const AUTONOMOUS_WORKFLOW_STAGE_CONTRACT_SCHEMA = "bioprism-typescript-autonomous-workflow-stage-contract/0.1" as const;
+/** Cross-SDK stage execution packet schema; intentionally matches the Python façade. */
+export const AUTONOMOUS_WORKFLOW_STAGE_PLAN_SCHEMA = "bioprism-python-autonomous-workflow-stage-plan/0.1" as const;
+export const AUTONOMOUS_CAPABILITY_CONTRACT_SCHEMA = "bioprism-python-autonomous-capability-contract/0.1" as const;
+export const MAX_AUTONOMOUS_WORKFLOW_STAGE_PLAN_BYTES = 64_000;
 export const AUTONOMOUS_DOMAIN_TOOL_PLAN_SCHEMA = "bioprism-typescript-autonomous-domain-tool-plan/0.1" as const;
 export const AUTONOMOUS_CAPABILITY_PLAN_SCHEMA = "bioprism-typescript-autonomous-capability-plan/0.1" as const;
 export const AUTONOMOUS_LEARNING_SCHEMA = "bioprism-typescript-autonomous-online-learning/0.1" as const;
@@ -241,21 +435,8 @@ export const AUTONOMOUS_MODEL_CATALOGUE_MAX_SNAPSHOT_BYTES = 1_000_000;
 export const MAX_AUTONOMOUS_MODEL_SELECTION_PREVIEW_BYTES = 250_000;
 const AUTONOMOUS_BANDIT_MAX_ARMS = 512;
 
-export const AUTONOMOUS_DOMAIN_NAMES = [
-  "coding",
-  "browser",
-  "data",
-  "science",
-  "biomedical",
-  "neuroscience",
-  "operations",
-  "enterprise",
-  "multi_agent",
-  "multimodal",
-  "cross_domain",
-  "evaluation",
-] as const;
-export type AutonomousDomainName = typeof AUTONOMOUS_DOMAIN_NAMES[number];
+export { AUTONOMOUS_DOMAIN_NAMES } from "./autonomous-domains.js";
+export type { AutonomousDomainName } from "./autonomous-domains.js";
 
 /**
  * Reviewed workflow-to-adapter aliases. Workflow stages intentionally use a small stable
@@ -362,6 +543,12 @@ export interface AutonomousWorkflowToolContext extends JsonObject {
   workflow_id: string;
   workflow_digest: string;
   stage_id: string;
+  /** Optional digest-bound stage packet supplied by workflow executors. */
+  stage_plan_digest?: string;
+  /** Exact reviewed stage contract digest; live dispatch rejects stale values. */
+  stage_contract_digest?: string;
+  /** Tool portfolio selected by the stage packet; omission means legacy domain admission. */
+  selected_tool_names?: string[];
 }
 
 export interface AutonomousWorkflow extends JsonObject {
@@ -388,21 +575,37 @@ export interface AutonomousDomainToolBinding extends JsonObject {
   secret_material: "never_returned";
 }
 
+/** Ordered risk ceiling used by provider-free tool portfolio selection. */
+export type AutonomousToolRiskClass = AutonomousDomainToolBinding["risk_class"];
+export const AUTONOMOUS_TOOL_RISK_ORDER: readonly AutonomousToolRiskClass[] = [
+  "read_only",
+  "reversible_effect",
+  "external_effect",
+  "high_impact_effect",
+];
+
 /** Metadata-only evidence emitted by the domain adapter boundary; raw arguments/results never enter it. */
 export interface AutonomousDomainToolExecutionReceipt extends JsonObject {
   schema: typeof AUTONOMOUS_DOMAIN_TOOL_REGISTRY_SCHEMA;
   receipt_kind: "tool_execution_receipt";
+  /** Provider call identity; retained so evaluator batches can reject ambiguous replays. */
+  call_id?: string;
+  /** Caller execution identity; null means the receipt was not attached to an execution journal. */
+  execution_id?: string | null;
+  /** Digest of the bounded arguments accepted by the catalogue; arguments themselves never persist. */
+  arguments_digest?: string;
   domain: AutonomousDomainName | null;
   workflow_id: string | null;
   workflow_digest: string | null;
   stage_id: string | null;
   stage_contract_digest: string | null;
+  stage_plan_digest?: string | null;
   required_evidence_outputs: string[];
   evidence_status: "tool_execution_only";
   does_not_claim: string[];
   tool: string;
   capability: string | null;
-  status: "approval_required" | "executed" | "reconciliation_required" | "execution_failed";
+  status: "approval_required" | "authorization_required" | "executed" | "reconciliation_required" | "execution_failed";
   schema_digest?: string;
   result_digest?: string;
   effect?: string;
@@ -503,6 +706,12 @@ export interface AutonomousPlan extends JsonObject {
   workflow_digest: string;
   ordered_step_ids: string[];
   steps: AutonomousPlanStep[];
+  /** Deterministic dependency-closed batches for caller-owned scheduling. */
+  execution_waves: string[][];
+  critical_path_cost: number;
+  max_parallelism: number;
+  estimated_parallel_rounds: number;
+  peak_parallelism: number;
   allowed_tools: string[];
   estimated_cost: number;
   requires_approval: boolean;
@@ -592,6 +801,7 @@ export interface AutonomousReadinessReport extends JsonObject {
   workflows: AutonomousWorkflow[];
   domain_packs: AutonomousDomainPack[];
   model_capability_coverage: JsonObject;
+  model_inventory_readiness: AutonomousModelInventoryReadiness;
   model_health: JsonObject;
   learning: JsonObject;
   tooling: JsonObject;
@@ -614,11 +824,17 @@ export interface AutonomousModelSelectionPreviewOptions {
   context?: readonly AutonomousPromptChunk[];
   candidates?: readonly AutonomousModelCandidate[];
   estimatedInputTokens?: number;
+  /** Apply the same explicit context budget used by an eventual invocation. */
+  contextBudget?: AutonomousContextBudgetOptions;
   requestedOutputTokens?: number;
   maxCostPerMillionTokens?: number;
   maxLatencyMs?: number;
   minQuality?: number;
   minSelectionConfidence?: number;
+  /** Explicit weighted utility policy shared with the Rust brain kernel. */
+  selectionWeights?: Partial<AutonomousSelectionWeights>;
+  /** Optional value-only observations used by the deterministic preview ranker. */
+  selectionObservations?: readonly AutonomousModelObservation[];
 }
 
 export interface AutonomousModelSelectionContract extends JsonObject {
@@ -637,6 +853,13 @@ export interface AutonomousModelSelectionContract extends JsonObject {
   max_latency_ms: number | null;
   min_quality: number | null;
   min_selection_confidence: number | null;
+  selection_weights: AutonomousSelectionWeights;
+  selection_observations_digest: string;
+  context_budget: {
+    max_input_tokens: number;
+    preserve_recent_messages: number;
+    max_messages: number;
+  } | null;
 }
 
 /** Options for approving one previously reviewed model-selection preview. */
@@ -698,12 +921,104 @@ export interface AutonomousTaskBlueprint extends JsonObject {
   task_intent: AutonomousTaskIntent;
   /** Intent-to-action posture; guidance metadata never authorizes execution. */
   task_decision: AutonomousTaskDecision;
+  /** Provider-free capability selection used to shape this blueprint; never execution authority. */
+  capability_route: AutonomousCapabilityRoute;
+  /** Digest-bound stage packets used by workflow dispatch and evaluator/checkpoint identity. */
+  stage_execution_plans: AutonomousWorkflowStageExecutionPlan[];
   prompt: AutonomousPromptResult;
   plan: AutonomousPlan;
   /** Present only when the caller explicitly enables the reviewed structured domain response. */
   response_contract?: AutonomousDomainResponseContract;
   execution: "not_started";
   credential_posture: "caller_supplied_opaque_handle_not_returned";
+}
+
+export interface AutonomousClarificationRecompileProjection extends JsonObject {
+  schema: "bioprism-autonomous-task-clarification-recompile/0.1";
+  plan_digest: string;
+  resolution_digest: string;
+  original_task_digest: string;
+  recompiled_task_digest: string;
+  domain: AutonomousDomainName;
+  workflow_id: string;
+  recompiled_intent_digest: string;
+  recompiled_decision_digest: string;
+  execution_plan_digest: string;
+  status: "ready";
+  recompile_digest: string;
+  blueprint: JsonObject;
+  execution: "not_started; fresh_blueprint_requires_existing_gates";
+  authorization: "recompile_only; provider_source_tool_and_effect_gates_remain_required";
+  retention: "metadata_only; task_text_and_answer_values_not_retained";
+  secret_material: "never_returned";
+}
+
+export interface AutonomousClarificationRecompileResult {
+  schema: "bioprism-autonomous-task-clarification-recompile/0.1";
+  plan_digest: string;
+  resolution_digest: string;
+  original_task_digest: string;
+  recompiled_task_digest: string;
+  domain: AutonomousDomainName;
+  workflow_id: string;
+  recompiled_intent_digest: string;
+  recompiled_decision_digest: string;
+  execution_plan_digest: string;
+  status: "ready";
+  recompile_digest: string;
+  /** Live blueprint; task text and prompt messages remain caller-owned and transient. */
+  blueprint: AutonomousTaskBlueprint;
+  toJSON(): AutonomousClarificationRecompileProjection;
+}
+
+export interface AutonomousCapabilityContract extends JsonObject {
+  schema: typeof AUTONOMOUS_CAPABILITY_CONTRACT_SCHEMA;
+  domain: AutonomousDomainName;
+  capability: string;
+  stage_ids: string[];
+  tool_capabilities: string[];
+  required_model_capabilities: string[];
+  evidence_outputs: string[];
+  evaluator_signals: string[];
+  read_only: boolean;
+  approval_required: boolean;
+  review_triggers: string[];
+  fallback_policy: "provider_only_or_blocked" | "provider_only";
+  contract_digest: string;
+  adapter_posture: "exact_capability_aliases_only";
+  credential_posture: "caller_supplied_opaque_handles";
+  authority_posture: "metadata_only; no_provider_or_effect_authority";
+}
+
+/**
+ * Exact runtime handoff for one reviewed workflow stage. This is metadata only: it narrows
+ * provider-visible tools and binds evidence/capability identities, but never authorizes a
+ * provider call, credential use, tool effect, or external-world claim.
+ */
+export interface AutonomousWorkflowStageExecutionPlan extends JsonObject {
+  schema: typeof AUTONOMOUS_WORKFLOW_STAGE_PLAN_SCHEMA;
+  domain: AutonomousDomainName;
+  workflow_id: string;
+  workflow_digest: string;
+  stage_id: string;
+  stage_objective: string;
+  required_capabilities: string[];
+  tool_capabilities: string[];
+  capability_contracts: AutonomousCapabilityContract[];
+  required_model_capabilities: string[];
+  evidence_outputs: string[];
+  evaluator_signals: string[];
+  active_tool_names: string[];
+  selected_tool_names: string[];
+  withheld_tool_names: string[];
+  approval_required: boolean;
+  read_only: boolean;
+  execution_posture: "approval_gated" | "tool_backed" | "provider_only_or_blocked";
+  source_plan_digest: string | null;
+  stage_plan_digest: string;
+  capability_contract_digests: string[];
+  credential_posture: "caller_supplied_opaque_handles; no_keys_or_handles";
+  authority_posture: "metadata_only; stage_plan_does_not_grant_authority";
 }
 
 export interface AutonomousCrossDomainSubtask {
@@ -736,6 +1051,7 @@ export interface AutonomousAutoBlueprint {
   route: AutonomousRouteProposal;
   blueprint: AutonomousTaskBlueprint | null;
   cross_domain_blueprint?: AutonomousCrossDomainBlueprint | null;
+  capability_route?: AutonomousCapabilityRoute | null;
   execution: "not_started";
   authorization: "route_and_plan_only; no_provider_or_tool_effects_authorized";
 }
@@ -766,13 +1082,14 @@ export interface AutonomousDomainToolPlan extends JsonObject {
   secret_material: "never_returned";
 }
 
-export type AutonomousCapabilitySelectionStatus = "selected" | "activation_required" | "catalogue_missing" | "provider_only" | "capacity_limited" | "learning_disabled";
+export type AutonomousCapabilitySelectionStatus = "selected" | "activation_required" | "catalogue_missing" | "provider_only" | "capacity_limited" | "learning_disabled" | "risk_budget_blocked";
 
 /** Shared value-only state for adaptive reviewed-tool selection. */
 export const AUTONOMOUS_TOOL_SELECTION_STATE_SCHEMA = "bioprism-autonomous-tool-selection-state/0.1" as const;
 export const AUTONOMOUS_TOOL_SELECTION_POLICY = "stage_coverage_then_capability_then_ucb_value_then_task_relevance_then_read_only_then_name" as const;
 export const MAX_AUTONOMOUS_TOOL_SELECTION_ARMS = 512;
 export const MAX_AUTONOMOUS_TOOL_SELECTION_CREDITS = 4096;
+export const MAX_AUTONOMOUS_TOOL_SELECTION_CANDIDATES_PER_STAGE = 2;
 
 export interface AutonomousToolSelectionArm extends JsonObject {
   arm_id: string;
@@ -832,6 +1149,8 @@ export interface AutonomousCapabilityPlanCoverage extends JsonObject {
   approval_required: boolean;
   selected_arm_id: string | null;
   selection_utility: number | null;
+  candidate_ranking: AutonomousCapabilityCandidateRanking[];
+  selection_rationale: "highest_ranked_eligible_candidate" | "portfolio_reuse_lower_rank_candidate" | "no_reviewed_binding_for_stage" | "no_live_catalogue_binding" | "activation_or_allowlist_required" | "all_candidates_learning_disabled" | "risk_budget_excluded_all_candidates" | "portfolio_capacity_limit";
   status: AutonomousCapabilitySelectionStatus;
 }
 
@@ -839,7 +1158,27 @@ export interface AutonomousCapabilityPlanOmission extends JsonObject {
   name: string;
   domains: AutonomousDomainName[];
   capability: string;
-  reason: "not_required_for_reviewed_workflow" | "activation_required" | "capacity_limited" | "duplicate_binding" | "learning_disabled";
+  reason: "not_required_for_reviewed_workflow" | "activation_required" | "capacity_limited" | "duplicate_binding" | "learning_disabled" | "risk_budget_limited";
+}
+
+export type AutonomousCapabilityCandidateReason = "eligible" | "not_allowed" | "risk_budget_exceeded" | "read_only_required" | "approval_required" | "learning_disabled";
+
+/** Candidate-level, value-only explanation for one reviewed workflow stage. */
+export interface AutonomousCapabilityCandidateRanking extends JsonObject {
+  tool: string;
+  capability: string;
+  risk_class: AutonomousToolRiskClass;
+  read_only: boolean;
+  approval_required: boolean;
+  eligible: boolean;
+  rank: number | null;
+  requested_capability_match: boolean;
+  stage_capability_match: boolean;
+  selection_utility: number;
+  task_relevance: number;
+  observed_pulls: number;
+  observed_failure_rate: number;
+  reason: AutonomousCapabilityCandidateReason;
 }
 
 /** Deterministic task-to-capability selection; this is a tool portfolio, never authorization. */
@@ -860,6 +1199,7 @@ export interface AutonomousCapabilityPlan extends JsonObject {
   omissions: AutonomousCapabilityPlanOmission[];
   coverage: AutonomousCapabilityPlanCoverage[];
   selection_learning: JsonObject;
+  selection_constraints: JsonObject;
   selection_policy: typeof AUTONOMOUS_TOOL_SELECTION_POLICY;
   execution: "metadata_only; no_provider_or_tool_calls";
   authorization: "selection_does_not_authorize_tools_or_effects";
@@ -867,7 +1207,17 @@ export interface AutonomousCapabilityPlan extends JsonObject {
   plan_digest: string;
 }
 
-export type AutonomousRunStatus = "completed" | "route_review_required" | "approval_required" | "policy_review_required" | "policy_blocked" | "reconciliation_required" | "turn_limit_reached" | "abstained" | "cross_domain_partial" | "child_failed";
+export type AutonomousRunStatus = "completed" | "route_review_required" | "approval_required" | "policy_review_required" | "policy_blocked" | "reconciliation_required" | "turn_limit_reached" | "abstained" | "cross_domain_partial" | "child_failed" | "response_review_required";
+
+/**
+ * Safe metadata for a provider/credential boundary failure captured inside a parent fan-out.
+ * Error messages and provider payloads are intentionally absent: provider implementations may
+ * include sensitive diagnostics in exception text, and a child failure must be safe to persist
+ * in the parent execution receipt.
+ */
+export interface AutonomousProviderFailureProjection extends AutonomousPlanningFailureProjection {
+  code: ProviderErrorCode | "credential";
+}
 
 export type AutonomousToolLoopStatus = "completed" | "authorization_required" | "reconciliation_required" | "turn_limit_reached";
 
@@ -881,13 +1231,27 @@ export interface AutonomousRunResult {
   schema: "bioprism-typescript-autonomous-run/0.1";
   status: AutonomousRunStatus;
   route: AutonomousRouteProposal;
+  /** Optional provider-assisted routing proposal used by the high-level execution path. */
+  semantic_route?: AutonomousSemanticRouteResult | null;
   blueprint: AutonomousTaskBlueprint | null;
   /** Digest of the explicitly accepted provider planning proposal that shaped invocation. */
   plan_refinement_digest: string | null;
   selection: AutonomousSelectionDecision | null;
   response: ProviderResponse | null;
+  /** Metadata-only transport receipts for the provider turns used by this run. */
+  provider_invocations?: AutonomousProviderInvocationReceipt[];
+  /** Metadata-only failover projection; null when the selected provider completed directly. */
+  provider_failover?: AutonomousProviderFailoverProjection | null;
+  /** Metadata-only prompt-history compaction receipt, when an explicit budget was configured. */
+  context_budget?: AutonomousContextBudgetPlan | null;
+  /** Exact bounded model fallback ladder used by the provider invocation, when one was compiled. */
+  continuation_plan?: AutonomousModelContinuationPlan | null;
+  /** Digest-only identity for an explicitly selected versioned prompt; rendered messages remain transient. */
+  prompt?: AutonomousRunPromptProjection | null;
   /** Deterministic value-only response composition signal; never task truth or effect evidence. */
   response_evaluation?: AutonomousDomainResponseEvaluation | null;
+  /** Redacted provider-boundary failure captured by a parent cross-domain fan-out. */
+  failure?: AutonomousProviderFailureProjection | null;
   tool_loop?: AutonomousToolLoopSummary | null;
   cross_domain?: AutonomousCrossDomainRunResult | null;
   /** Optional value-only episodic-memory projection; absent when memory is not configured. */
@@ -906,6 +1270,69 @@ export interface AutonomousRunResult {
   retention: "provider_response_local; value_only_learning_projection";
 }
 
+function providerFailureRunResult(
+  parentRoute: AutonomousRouteProposal,
+  blueprint: AutonomousTaskBlueprint,
+  error: ProviderRuntimeError | CredentialError,
+  learning: AutonomousRunResult["learning"],
+): AutonomousRunResult {
+  const failure: AutonomousProviderFailureProjection = {
+    error_class: error instanceof CredentialError ? "CredentialError" : "ProviderRuntimeError",
+    code: error instanceof CredentialError ? "credential" : error.code,
+    retryable: error instanceof CredentialError ? false : error.retryable,
+    status_code: error instanceof CredentialError ? null : error.statusCode ?? null,
+    circuit_open: error instanceof CredentialError ? false : error.circuitOpen,
+    retention: "metadata_only;provider_error_message_and_payloads_not_retained",
+    secret_material: "never_returned",
+  };
+  return {
+    schema: "bioprism-typescript-autonomous-run/0.1",
+    status: "child_failed",
+    route: parentRoute,
+    blueprint,
+    plan_refinement_digest: null,
+    selection: null,
+    response: null,
+    provider_invocations: [],
+    provider_failover: null,
+    context_budget: null,
+    continuation_plan: null,
+    prompt: null,
+    response_evaluation: null,
+    tool_loop: null,
+    cross_domain: null,
+    learning_episode_id: null,
+    learning_episode_status: "not_eligible",
+    learning_error_class: null,
+    response_learning_episode_id: null,
+    response_learning_episode_status: "not_eligible",
+    response_learning_error_class: null,
+    learning,
+    failure,
+    retention: "provider_response_local; value_only_learning_projection",
+  };
+}
+
+export interface AutonomousRunPromptProjection extends JsonObject {
+  mode: "versioned_template" | "registry_selection";
+  prompt_id: string;
+  version: string;
+  domain: AutonomousDomainName;
+  stage: string;
+  manifest_digest: string;
+  rendered_prompt_digest: string;
+  final_prompt_digest: string;
+  selection_plan_digest: string | null;
+  adaptive_selection_digest?: string | null;
+  adaptive_arm_id?: string | null;
+  adaptive_generation?: number | null;
+  /** Exact registry-bound adaptive selection receipt for explicit evaluator settlement. */
+  adaptive_selection?: AutonomousPromptAdaptiveSelectionJSON;
+  selection_policy?: string | null;
+  retention: "prompt_messages_transient;digest_only_projection";
+  secret_material: "never_returned";
+}
+
 /**
  * The only memory state attached to a run result. Episode metadata and digests are safe to
  * persist; task text, prompts, provider responses, credentials, and tool payloads never cross
@@ -916,6 +1343,10 @@ export interface AutonomousMemoryRunProjection extends JsonObject {
   retrieved_episode_ids: string[];
   retrieved_episode_digests: string[];
   retrieval_digest: string | null;
+  /** Stable evaluator-gated lesson identities recalled for this run; lesson text is never retained here. */
+  consolidated_lesson_ids: string[];
+  consolidated_lesson_digests: string[];
+  consolidated_retrieval_digest: string | null;
   recorded_episode_id: string | null;
   recorded_episode_digest: string | null;
   record_event_digest: string | null;
@@ -929,7 +1360,10 @@ export type AutonomousEvidenceBackedRunStatus =
   | "evidence_blocked"
   | "evidence_failed"
   | "evidence_incomplete"
-  | AutonomousRunStatus;
+  | AutonomousPlanAndRunStatus;
+
+/** Execution modes for the evidence-to-agent bridge. */
+export type AutonomousEvidenceExecutionMode = "domain" | "cross_domain" | "auto";
 
 /** Explicit transient bridge input for callers that want to project raw evidence into a prompt. */
 export interface AutonomousEvidencePromptProjection {
@@ -960,14 +1394,22 @@ export interface AutonomousEvidenceBackedRunOptions {
   completedStages?: Readonly<Record<string, readonly string[]>>;
   prepare?: AutonomousReviewedEvidencePreparationOptions;
   execute?: AutonomousEvidenceExecutionOptions;
-  /** Normal agent options; provider approval remains separate from source approval. */
-  run?: AutonomousRunOptions;
+  /** Select the provider handoff shape; defaults to the historical single-domain handoff. */
+  runMode?: AutonomousEvidenceExecutionMode;
+  /** Normal agent options; automatic mode may additionally supply reviewed planning controls. */
+  run?: AutonomousAutoRunOptions;
+  /** Additional bounded controls for cross-domain fan-out and synthesis. */
+  crossDomain?: Pick<AutonomousCrossDomainRunOptions, "subtasks" | "allowPartial" | "synthesize" | "maxParallelChildren" | "responseAlignments" | "requireResponseAlignment" | "minimumResponseReward" | "minimumResponseAlignmentConfidence" | "responseContradictionConfidenceThreshold">;
   /** Defaults to a metadata-only context. This callback is the explicit transient value bridge. */
   promptBuilder?: AutonomousEvidencePromptBuilder;
   /** Persist a caller-owned checkpoint immediately before the provider boundary is entered. */
   beforeProviderRun?: AutonomousEvidenceBackedRunPreflightHook;
   /** Rehydrate an already-completed caller-owned provider result without invoking a provider. */
   providerRunOverride?: AutonomousRunResult;
+  /** Rehydrate an already-completed automatic envelope without invoking planning or execution. */
+  automaticRunOverride?: AutonomousAutoRunResult;
+  /** Rehydrate an already-completed cross-domain fan-out without invoking a provider. */
+  crossDomainRunOverride?: AutonomousCrossDomainRunResult;
   /** Permit a provider run when evidence is partial or awaiting evaluator settlement. */
   allowIncompleteEvidence?: boolean;
   /** Optional job-level source checkpoint; source approval and provider approval remain separate. */
@@ -981,12 +1423,17 @@ export interface AutonomousEvidenceBackedRunOptions {
 export interface AutonomousEvidenceBackedRunProjection extends JsonObject {
   schema: typeof AUTONOMOUS_EVIDENCE_BACKED_RUN_SCHEMA;
   status: AutonomousEvidenceBackedRunStatus;
+  run_mode: AutonomousEvidenceExecutionMode;
   task_digest: string;
   evidence_plan_digest: string;
   execution_plan_digest: string;
   evidence_result_digest: string | null;
   prompt_projection_digest: string | null;
   run_status: AutonomousRunStatus | null;
+  cross_domain_run_status: AutonomousCrossDomainRunStatus | null;
+  automatic_status: AutonomousPlanAndRunStatus | null;
+  automatic_route_digest: string | null;
+  automatic_next_action: AutonomousAutoRunNextAction | null;
   selection_digest: string | null;
   response_digest: string | null;
   retention: "metadata_only;raw_evidence_prompt_values_and_provider_response_caller_owned";
@@ -1004,11 +1451,14 @@ export interface AutonomousEvidenceBackedRunProjection extends JsonObject {
 export interface AutonomousEvidenceBackedRunResult {
   schema: typeof AUTONOMOUS_EVIDENCE_BACKED_RUN_SCHEMA;
   status: AutonomousEvidenceBackedRunStatus;
+  run_mode: AutonomousEvidenceExecutionMode;
   task_digest: string;
   execution_plan: AutonomousEvidenceExecutionPlan;
   evidence: AutonomousEvidenceExecutionResult | null;
   prompt_context: readonly AutonomousPromptChunk[];
   run: AutonomousRunResult | null;
+  cross_domain_run: AutonomousCrossDomainRunResult | null;
+  automatic: AutonomousAutoRunResult | null;
   toJSON(): AutonomousEvidenceBackedRunProjection;
 }
 
@@ -1082,9 +1532,9 @@ export interface AutonomousCrossDomainChildRun {
   output_bytes: number;
 }
 
-export type AutonomousCrossDomainRunStatus = "completed" | "children_completed" | "children_partial" | "approval_required" | "policy_review_required" | "policy_blocked" | "reconciliation_required" | "turn_limit_reached" | "child_failed" | "route_review_required";
+export type AutonomousCrossDomainRunStatus = "completed" | "children_completed" | "children_partial" | "approval_required" | "policy_review_required" | "policy_blocked" | "reconciliation_required" | "turn_limit_reached" | "child_failed" | "route_review_required" | "response_review_required";
 
-export type AutonomousCrossDomainExecutionNextAction = "review_route" | "approve_child" | "reconcile_child" | "retry_child" | "synthesize" | "approve_synthesis" | "reconcile_synthesis" | "inspect_synthesis_failure" | "inspect_partial_synthesis" | "complete";
+export type AutonomousCrossDomainExecutionNextAction = "review_route" | "approve_child" | "reconcile_child" | "retry_child" | "synthesize" | "approve_synthesis" | "reconcile_synthesis" | "inspect_synthesis_failure" | "inspect_partial_synthesis" | "review_response_gate" | "complete";
 
 /**
  * Value-only operational projection for cross-domain execution.
@@ -1119,6 +1569,8 @@ export interface AutonomousCrossDomainRunResult {
   schema: typeof AUTONOMOUS_CROSS_DOMAIN_RESULT_SCHEMA;
   status: AutonomousCrossDomainRunStatus;
   route: AutonomousRouteProposal;
+  /** Optional provider-assisted routing proposal used by the high-level execution path. */
+  semantic_route?: AutonomousSemanticRouteResult | null;
   blueprint: AutonomousCrossDomainBlueprint | null;
   child_runs: AutonomousCrossDomainChildRun[];
   synthesis: AutonomousRunResult | null;
@@ -1137,12 +1589,18 @@ export interface AutonomousCrossDomainRunResult {
   execution_receipt?: AutonomousCrossDomainExecutionReceipt;
   /** Per-domain strict-mode admissions; absent for ordinary audit-mode runs. */
   domain_policy_admissions?: Record<string, AutonomousDomainPolicyAdmission>;
+  /** Digest-only specialist/synthesis structural admission; provider values remain transient. */
+  response_assessment?: AutonomousCrossDomainResponseAssessment | null;
 }
 
 export interface AutonomousAgentOptions {
   selector?: AutonomousModelSelector;
   /** Optional caller-owned persisted health ledger used for selection and invocation telemetry. */
   modelHealthStore?: AutonomousModelHealthStore;
+  /** Optional CAS-fenced persistence coordinator bound to `modelHealthStore` for restart-safe health. */
+  modelHealthPersistence?: AutonomousModelHealthPersistenceCoordinator;
+  /** Optional CAS-fenced persistence coordinator for process-local transport health and circuits. */
+  runtimeHealthPersistence?: LLMRuntimeHealthPersistenceCoordinator;
   /** Optional Rust/Python control-plane sink for restart-safe transport health observations. */
   modelHealthBridge?: AutonomousBrainControlPlaneBridge;
   apiClient?: ApiClient;
@@ -1153,13 +1611,37 @@ export interface AutonomousAgentOptions {
   effectBoundary?: AutonomousEffectBoundary;
   /** Optional caller-owned metadata-only capability journal used for restart-safe replay. */
   capabilityJournal?: AutonomousCapabilityJournalStore;
+  /** Optional durable coordinator for the capability replay barrier. */
+  capabilityJournalPersistence?: AutonomousCapabilityJournalPersistenceCoordinator;
+  /** Optional metadata-only execution journal used for long-horizon recovery. */
+  executionJournal?: AutonomousExecutionSnapshotJournal;
+  /** Optional durable coordinator for execution checkpoints. */
+  executionPersistence?: AutonomousExecutionPersistenceCoordinator;
+  /** Optional durable coordinator for route/planning/evaluation decision-cycle checkpoints. */
+  decisionCyclePersistence?: AutonomousDecisionCyclePersistenceCoordinator;
   /** Optional caller-owned durable replay barrier for capability evaluator settlements. */
   capabilityLearningSettlementStore?: AutonomousCapabilityLearningSettlementStore;
   learner?: AutonomousOnlineLearner;
+  /** Optional CAS-fenced persistence coordinator bound to `learner` for restart-safe bandit state. */
+  learnerPersistence?: AutonomousOnlineLearnerPersistenceCoordinator;
   /** Optional digest-only lifecycle that gates learned model selection until replay admission. */
   selectionPromotion?: AutonomousSelectionPromotionLifecycle;
+  /** Optional validated aggregate-only evaluator calibration registry used by readiness gates. */
+  evaluatorCalibrationRegistry?: AutonomousEvaluatorCalibrationRegistry;
+  /** Optional CAS-fenced persistence coordinator bound to the evaluator calibration registry. */
+  evaluatorCalibrationPersistence?: AutonomousEvaluatorCalibrationRegistryPersistenceCoordinator;
   /** Optional caller-owned episodic memory used for bounded retrieval and value-only run recording. */
   memoryStore?: AutonomousEpisodicMemoryStore;
+  /** Optional CAS-fenced persistence coordinator bound to `memoryStore` for restart-safe episodes. */
+  memoryPersistence?: AutonomousMemoryPersistenceCoordinator;
+  /** Optional evaluator-gated lesson index; raw lesson text remains caller-resolved and transient. */
+  memoryConsolidator?: AutonomousMemoryConsolidator;
+  /** Optional registry-bound, CAS-fenced prompt learner used by every high-level run. */
+  promptLearningCoordinator?: AutonomousPromptLearningPersistenceCoordinator;
+  /** Optional caller-owned CAS-fenced persistence for evaluator-approved tool selection state. */
+  toolSelectionPersistence?: AutonomousToolSelectionPersistence;
+  /** Optional initial value-only tool selection state restored by the application before execution. */
+  toolSelectionState?: AutonomousToolSelectionState | null;
   /** Optional caller-owned activation state machine; keys and raw prompts never enter its state. */
   activation?: AutonomousCapabilityActivation;
   /** Optional caller-owned external connector catalogue; registration never authorizes dispatch. */
@@ -1193,12 +1675,28 @@ export interface AutonomousProviderPlanningOptions {
   credential?: CredentialHandle;
   credentialFor?: (provider: string) => CredentialHandle | undefined;
   context?: readonly AutonomousPromptChunk[];
+  /** Explicit versioned prompt implementation for the planner; rendered messages remain transient. */
+  promptTemplate?: AutonomousPromptTemplate;
+  /** Reviewed prompt registry used to select the planner implementation. */
+  promptRegistry?: AutonomousPromptRegistry;
+  /** Optional digest-bound planner prompt selection; omitted plans are selected at call time. */
+  promptSelection?: AutonomousPromptSelectionPlan | AutonomousPromptSelectionPlanJSON;
+  /** Caller-owned value-only prompt-arm state; evaluator settlement remains an explicit follow-up. */
+  promptLearningState?: AutonomousPromptLearningState | AutonomousPromptLearningStateJSON;
+  /** UCB exploration weight for adaptive planner prompt selection. */
+  promptLearningExploration?: number;
+  /** Versioned planner prompt stage; defaults to `planning`. */
+  promptStage?: string;
   maxInputTokens?: number;
   maxOutputTokens?: number;
   maxCostPerMillionTokens?: number;
   maxLatencyMs?: number;
   minQuality?: number;
   minSelectionConfidence?: number;
+  /** Explicit weighted utility policy for this run's model decision. */
+  selectionWeights?: Partial<AutonomousSelectionWeights>;
+  /** Caller-owned global online observations used by the deterministic selection ranker. */
+  selectionObservations?: readonly AutonomousModelObservation[];
   /** Aggregate estimated spend ceiling for this planning call and any provider failover. */
   maxTotalCostUnits?: number;
   /** Share a caller-owned aggregate budget across planning and the eventual execution. */
@@ -1220,6 +1718,8 @@ export interface AutonomousProviderPlanningOptions {
   /** Planning itself has no effect by default; callers may declare an effectful planner explicitly. */
   domainPolicyEffectsRequested?: boolean;
   domainPolicyEffectsApproved?: boolean;
+  /** Optional caller-issued grant enforced before the planner provider call. */
+  authorizationContext?: AutonomousAuthorizationContext;
 }
 
 /** Metadata-safe input for planning an existing dependency-closed step graph. */
@@ -1302,17 +1802,60 @@ export interface AutonomousModelCataloguePersistence {
   write(snapshot: AutonomousModelCatalogueSnapshot): Promise<void> | void;
 }
 
+/**
+ * Per-run controls for the optional provider-assisted semantic router. Candidate models,
+ * credentials, context, execution controllers, and the aggregate cost budget are inherited
+ * from the enclosing run so routing cannot silently escape its caller-owned boundaries.
+ */
+export interface AutonomousRunSemanticRoutingOptions {
+  approveProviderCall?: boolean;
+  minSemanticConfidence?: number;
+  maxDomains?: number;
+  allowCrossDomain?: boolean;
+  maxOutputTokens?: number;
+  temperature?: number;
+  maxCostPerMillionTokens?: number;
+  maxLatencyMs?: number;
+  minQuality?: number;
+  maxProviderFailovers?: number;
+  domainPolicyMode?: AutonomousDomainPolicyExecutionMode;
+  domainPolicyEvidenceReady?: boolean;
+  domainPolicyEvaluatorConfigured?: boolean;
+  domainPolicyEffectsRequested?: boolean;
+  domainPolicyEffectsApproved?: boolean;
+}
+
 export interface AutonomousRunOptions {
   domain?: AutonomousDomainName;
   /** Internal reviewed-stage identity; workflow executors populate this before provider dispatch. */
   workflowContext?: AutonomousWorkflowToolContext;
   /** Reuse a route already approved by a caller-owned semantic router. */
   routeOverride?: AutonomousRouteProposal;
+  /**
+   * Opt into provider-assisted semantic routing for the high-level execution path. The
+   * classifier is a proposal only; it shares this run's credential, policy, approval, and
+   * aggregate cost boundary, and execution remains fail-closed on review outcomes.
+   */
+  semanticRouting?: boolean | AutonomousRunSemanticRoutingOptions;
   capability?: string;
   candidates?: readonly AutonomousModelCandidate[];
   credential?: CredentialHandle;
   credentialFor?: (provider: string) => CredentialHandle | undefined;
+  /** Optional caller-issued grant enforced immediately before each provider attempt/turn. */
+  authorizationContext?: AutonomousAuthorizationContext;
   context?: readonly AutonomousPromptChunk[];
+  /** Explicit versioned prompt implementation; its rendered messages remain transient. */
+  promptTemplate?: AutonomousPromptTemplate;
+  /** Reviewed prompt registry used to select a versioned template for the run's domain/stage. */
+  promptRegistry?: AutonomousPromptRegistry;
+  /** Optional digest-bound selection plan; omitted plans are selected from promptRegistry at run time. */
+  promptSelection?: AutonomousPromptSelectionPlan | AutonomousPromptSelectionPlanJSON;
+  /** Caller-owned value-only prompt-arm state; evaluator settlement remains an explicit follow-up. */
+  promptLearningState?: AutonomousPromptLearningState | AutonomousPromptLearningStateJSON;
+  /** UCB exploration weight for adaptive run prompt selection. */
+  promptLearningExploration?: number;
+  /** Prompt workflow stage used for versioned prompt selection; defaults to `answer`. */
+  promptStage?: string;
   /** Transient multimodal evidence appended to the task message only; never retained in autonomy state. */
   contentParts?: readonly ProviderContentPart[];
   /** Override the agent memory store for this run. */
@@ -1331,13 +1874,33 @@ export interface AutonomousRunOptions {
   retrieveMemory?: boolean;
   /** Optional caller-owned lesson; it is screened and retained only as bounded memory metadata. */
   memoryLesson?: string | null;
+  /** Override the agent lesson index for this run; the index retains digests, not lesson text. */
+  memoryConsolidator?: AutonomousMemoryConsolidator;
+  /** Resolve a stable lesson digest to transient prompt text. The resolver remains caller-owned. */
+  memoryLessonResolver?: (lessonDigest: string) => string | null;
+  /** Resolve a stable lesson with domain/capability/scope metadata for caller-owned authorization. */
+  memoryLessonContextResolver?: AutonomousMemoryLessonContextResolver;
+  /** Maximum number of evaluator-gated lesson references recalled per routed domain. */
+  consolidatedMemoryLimit?: number;
+  /** Disable evaluator-gated lesson recall without disabling ordinary episodic memory. */
+  retrieveConsolidatedMemory?: boolean;
+  /** Fail closed when the requested consolidated lesson boundary cannot be assembled. */
+  consolidatedMemoryRequired?: boolean;
   /** Optional controller that prepares a pending bandit-learning episode after a completed run. */
   learning?: AutonomousLearningController;
   /** Stable caller-owned identity for the pending learning episode. */
   learningEpisodeId?: string;
   hints?: readonly string[];
+  /** Provider-free route confidence floor used when no explicit route override is supplied. */
+  minConfidence?: number;
+  /** Provider-free route separation floor used when no explicit route override is supplied. */
+  minMargin?: number;
+  /** Maximum number of domains selected by the provider-free route. */
+  maxDomains?: number;
   allowCrossDomain?: boolean;
   maxInputTokens?: number;
+  /** Explicit lossy context budget; system/developer instructions and recent turns are protected. */
+  contextBudget?: AutonomousContextBudgetOptions;
   maxOutputTokens?: number;
   /** Refuse candidates above this caller-owned cost prior. */
   maxCostPerMillionTokens?: number;
@@ -1347,6 +1910,10 @@ export interface AutonomousRunOptions {
   minQuality?: number;
   /** Abstain when eligible model ranking separation is below this normalized floor. */
   minSelectionConfidence?: number;
+  /** Explicit weighted utility policy for this run's model decision. */
+  selectionWeights?: Partial<AutonomousSelectionWeights>;
+  /** Caller-owned global online observations used by the deterministic selection ranker. */
+  selectionObservations?: readonly AutonomousModelObservation[];
   /** Aggregate estimated spend ceiling shared by nested provider calls in this run. */
   maxTotalCostUnits?: number;
   /** Share a caller-owned aggregate budget across fan-out, synthesis, retries, or cycles. */
@@ -1357,6 +1924,8 @@ export interface AutonomousRunOptions {
   responseSchema?: JsonObject;
   /** Opt into the reviewed domain-specific JSON response contract for this run. */
   structuredDomainResponse?: boolean;
+  /** Hold a structurally valid but below-threshold structured response for caller review. Defaults to true. */
+  requireStructuredResponseReview?: boolean;
   temperature?: number;
   tools?: readonly ProviderTool[];
   authorizeAndExecute?: (calls: ProviderToolCall[]) => ProviderToolResult[] | Promise<ProviderToolResult[]>;
@@ -1386,6 +1955,8 @@ export interface AutonomousRunOptions {
   toolSelectionState?: AutonomousToolSelectionState | null;
   /** Deterministic UCB exploration weight for tool-arm ranking. */
   toolSelectionExploration?: number;
+  /** Maximum reviewed tool risk admitted to the provider-visible portfolio. */
+  maxToolRiskClass?: AutonomousToolRiskClass;
   /** Audit records policy posture; strict blocks before provider/tool dispatch until every gate passes. */
   domainPolicyMode?: AutonomousDomainPolicyExecutionMode;
   /** Explicit evidence acceptance required by strict policies before provider invocation. */
@@ -1408,6 +1979,42 @@ export interface AutonomousCrossDomainRunOptions extends AutonomousRunOptions {
   synthesize?: boolean;
   /** Maximum number of specialist provider calls in flight during bounded fan-out. */
   maxParallelChildren?: number;
+  /** Caller-supplied digest-bound pairwise response alignments for synthesis admission. */
+  responseAlignments?: readonly AutonomousCrossDomainResponseAlignmentInput[];
+  /** Require complete pairwise alignment before synthesis; disabled by default because alignment is semantic work. */
+  requireResponseAlignment?: boolean;
+  /** Minimum structural reward required for each specialist/synthesis response. */
+  minimumResponseReward?: number;
+  /** Minimum confidence required for an alignment to count as unresolved/low-confidence evidence. */
+  minimumResponseAlignmentConfidence?: number;
+  /** Confidence threshold for blocking high-confidence contradictions. */
+  responseContradictionConfidenceThreshold?: number;
+}
+
+/**
+ * Agent-owned composition boundary for durable mission replanning.
+ *
+ * The mission contract, checkpoint stores, evaluator, and provider-planning controls remain
+ * caller-owned. The agent supplies the exact model/prompt/tool invocation adapter for each step,
+ * so the TypeScript façade cannot accidentally fall back to a provider-free executor or lose
+ * prompt-learning receipts at the mission boundary.
+ */
+export interface AutonomousAgentMissionReplanOptions extends Omit<AutonomousMissionReplanOptions, "execute"> {
+  /** Aggregate mission execution controls; provider calls remain explicitly approved. */
+  execute?: Omit<AutonomousMissionExecuteOptions, "signal" | "execution_attempt">;
+  /** Per-step autonomous run controls, including candidates, credentials, prompts, and learning. */
+  stepRun?: Omit<AutonomousRunOptions, "domain" | "capability" | "tools" | "authorizeAndExecute" | "context" | "approveProviderCall" | "signal">;
+  /** Use a caller-owned catalogue instead of the catalogue attached to this agent. */
+  catalogue?: ToolCatalogue;
+  /** Narrow the provider-visible tool definition for each exact mission step. */
+  toolsForStep?: (step: AgentMissionStep) => readonly ProviderTool[] | undefined;
+  /** Explicit effect approval passed to the existing tool/effect boundary. */
+  approveEffects?: boolean;
+  /** Caller-owned metadata checkpoint and raw-result stores used by the mission executor. */
+  checkpointStore?: AutonomousMissionCheckpointStore;
+  resultStore?: AutonomousMissionResultStore;
+  /** Metadata-only step outcome observer; raw values remain in the caller-owned result store. */
+  onStepOutcome?: (outcome: AutonomousMissionStepResult, context: { mission_id: string; wave: number }) => Promise<void> | void;
 }
 
 /** Explicit caller-owned metadata trace controls for one autonomous run. */
@@ -1440,12 +2047,21 @@ export type AutonomousPlanAndRunStatus =
   | AutonomousCrossDomainRunStatus
   | "plan_review_required"
   | "provider_invalid"
+  | "provider_failed"
   | "provider_disagreement";
 
 /** Options for the explicit provider-planning -> human acceptance -> execution bridge. */
 export interface AutonomousPlanAndRunOptions extends AutonomousRunOptions {
   /** Provider planning is disabled unless supplied; its own approval is separate from execution approval. */
   planning?: AutonomousProviderPlanningOptions;
+  /** Optional caller-reviewed specialist tasks for a routed cross-domain plan. */
+  subtasks?: readonly AutonomousCrossDomainSubtask[];
+  /** Prompt stage used when the outer run supplies prompt controls to nested provider planning. */
+  planningPromptStage?: string;
+  /** Optional independent value-only prompt state for the nested planning proposal. */
+  planningPromptLearningState?: AutonomousPromptLearningState | AutonomousPromptLearningStateJSON;
+  /** UCB exploration weight for nested planning prompt selection. */
+  planningPromptLearningExploration?: number;
   /** Only true allows a completed, non-review proposal to shape the subsequent invocation. */
   acceptPlan?: boolean;
 }
@@ -1455,11 +2071,145 @@ export interface AutonomousPlanAndRunResult {
   schema: typeof AUTONOMOUS_PLAN_AND_RUN_SCHEMA;
   status: AutonomousPlanAndRunStatus;
   route: AutonomousRouteProposal;
+  /** Optional provider-assisted routing proposal used before planning. */
+  semantic_route?: AutonomousSemanticRouteResult | null;
   blueprint: AutonomousAutoBlueprint | null;
   plan_refinement: AutonomousPlanRefinementResult | AutonomousCrossDomainPlanRefinementResult | null;
   result: AutonomousRunResult | AutonomousCrossDomainRunResult | null;
   retention: "provider_response_local;plan_proposal_value_only;execution_result_caller_owned";
   authorization: "planning_acceptance_and_provider_invocation_require_separate_explicit_approval";
+}
+
+export type AutonomousAutoPlanningMode = "deterministic" | "provider";
+
+/** One high-level automatic route that can execute deterministically or through reviewed planning. */
+export interface AutonomousAutoRunOptions extends AutonomousPlanAndRunOptions {
+  /** Deterministic execution is the default; provider planning is an explicit opt-in. */
+  planningMode?: AutonomousAutoPlanningMode;
+}
+
+export type AutonomousAutoRunNextAction =
+  | "review_route"
+  | "review_plan"
+  | "review_provider_or_effect_approval"
+  | "inspect_result"
+  | "complete";
+
+/** Value-only envelope for the route -> plan -> execute automatic brain boundary. */
+export interface AutonomousAutoRunResult {
+  schema: typeof AUTONOMOUS_AUTO_RUN_SCHEMA;
+  status: AutonomousPlanAndRunStatus;
+  route: AutonomousRouteProposal;
+  semantic_route: AutonomousSemanticRouteResult | null;
+  blueprint: AutonomousAutoBlueprint | null;
+  planning: AutonomousPlanAndRunResult | null;
+  result: AutonomousRunResult | AutonomousCrossDomainRunResult | null;
+  planning_mode: AutonomousAutoPlanningMode;
+  next_action: AutonomousAutoRunNextAction;
+  retention: "provider_response_local;route_and_plan_metadata_value_only;execution_result_caller_owned";
+  authorization: "route_review_and_provider_or_effect_approval_remain_explicit";
+}
+
+/**
+ * Transient event emitted by the application-facing autonomous stream.
+ *
+ * Provider text and tool-call deltas are available only while the caller consumes `events`.
+ * Lifecycle events intentionally contain digests and counters rather than task text, provider
+ * payloads, credentials, or specialist output.
+ */
+export type AutonomousRunStreamEvent =
+  | {
+      kind: "provider";
+      stage: "direct" | "child" | "synthesis";
+      child_id?: string;
+      event: ProviderStreamEvent;
+    }
+  | {
+      kind: "lifecycle";
+      stage: "route" | "child" | "synthesis";
+      phase: "child_started" | "child_completed" | "synthesis_started" | "synthesis_completed";
+      child_id?: string;
+      domain?: string;
+      status?: string;
+      event_count?: number;
+      text_delta_bytes?: number;
+      selection_digest?: string | null;
+    };
+
+/** Metadata-only terminal receipt for an application-facing autonomous stream. */
+export interface AutonomousRunStreamCompletion extends JsonObject {
+  schema: typeof AUTONOMOUS_RUN_STREAM_COMPLETION_SCHEMA;
+  status: AutonomousRunStatus | AutonomousCrossDomainRunStatus | "failed" | "abandoned";
+  route_digest: string;
+  task_digest: string;
+  blueprint_digest: string | null;
+  event_count: number;
+  text_delta_bytes: number;
+  stage_count: number;
+  provider_invocations: AutonomousProviderInvocationReceipt[];
+  provider_failover: AutonomousProviderFailoverProjection | null;
+  inner_completions: Array<AutonomousStreamCompletion | AutonomousRunStreamCompletion>;
+  error_code: ProviderErrorCode | null;
+  error_class: string | null;
+  retention: "metadata_only_no_stream_payloads_or_credentials";
+  secret_material: "never_returned";
+}
+
+/**
+ * Application-facing stream handle. Selection and blueprint metadata are available before the
+ * first event; text remains transient and is never copied into the completion receipt.
+ */
+export interface AutonomousRunStreamHandle {
+  schema: typeof AUTONOMOUS_RUN_STREAM_SCHEMA;
+  route: AutonomousRouteProposal;
+  semantic_route: AutonomousSemanticRouteResult | null;
+  blueprint: AutonomousTaskBlueprint | AutonomousCrossDomainBlueprint | null;
+  selection: AutonomousSelectionDecision | null;
+  continuation_plan: AutonomousModelContinuationPlan | null;
+  context_budget: AutonomousContextBudgetPlan | null;
+  events: AsyncIterable<AutonomousRunStreamEvent>;
+  completion: Promise<AutonomousRunStreamCompletion>;
+}
+
+const AUTONOMOUS_RUN_SEMANTIC_ROUTING_FIELDS = new Set([
+  "approveProviderCall",
+  "minSemanticConfidence",
+  "maxDomains",
+  "allowCrossDomain",
+  "maxOutputTokens",
+  "temperature",
+  "maxCostPerMillionTokens",
+  "maxLatencyMs",
+  "minQuality",
+  "maxProviderFailovers",
+  "domainPolicyMode",
+  "domainPolicyEvidenceReady",
+  "domainPolicyEvaluatorConfigured",
+  "domainPolicyEffectsRequested",
+  "domainPolicyEffectsApproved",
+]);
+
+function normalizeRunSemanticRouting(value: AutonomousRunOptions["semanticRouting"]): AutonomousRunSemanticRoutingOptions | null {
+  if (value === undefined || value === false) return null;
+  if (value === true) return {};
+  if (!isObject(value)) throw new ArgumentError("semanticRouting must be a boolean or object");
+  const unsupported = Object.keys(value).find((key) => !AUTONOMOUS_RUN_SEMANTIC_ROUTING_FIELDS.has(key));
+  if (unsupported) throw new ArgumentError(`semanticRouting contains unsupported field: ${unsupported}`);
+  return value as unknown as AutonomousRunSemanticRoutingOptions;
+}
+
+function semanticRouteRunStatus(status: AutonomousSemanticRouteResult["status"]): AutonomousRunStatus {
+  if (status === "approval_required") return "approval_required";
+  if (status === "policy_review_required") return "policy_review_required";
+  if (status === "policy_blocked") return "policy_blocked";
+  return "route_review_required";
+}
+
+function semanticRouteCrossDomainStatus(status: AutonomousSemanticRouteResult["status"]): AutonomousCrossDomainRunStatus {
+  if (status === "approval_required") return "approval_required";
+  if (status === "policy_review_required") return "policy_review_required";
+  if (status === "policy_blocked") return "policy_blocked";
+  return "route_review_required";
 }
 
 function composeInvocationObservers(...observers: readonly (ProviderInvocationObserver | undefined)[]): ProviderInvocationObserver | undefined {
@@ -1515,7 +2265,7 @@ function memoryErrorClass(error: unknown): string {
 
 function memoryRunStatus(status: string): AutonomousMemoryEpisode["status"] {
   if (status === "completed") return "completed";
-  if (status === "approval_required" || status === "policy_review_required" || status === "policy_blocked" || status === "route_review_required") return "approval_required";
+  if (status === "approval_required" || status === "policy_review_required" || status === "policy_blocked" || status === "route_review_required" || status === "response_review_required") return "approval_required";
   if (status === "cross_domain_partial" || status === "children_partial" || status === "children_completed") return "partial";
   return "failed";
 }
@@ -1555,6 +2305,21 @@ function memoryEpisodeContext(
   return { id: `autonomous-memory-${index + 1}-${episode.episode_id}`, content, priority: 45 };
 }
 
+function consolidatedMemoryContext(
+  reference: AutonomousMemoryConsolidationPromptReference,
+  index: number,
+): AutonomousPromptChunk {
+  // Lesson text is deliberately present only in this transient prompt chunk. The corresponding
+  // run projection below contains the lesson and reference digests, never this value.
+  const content = JSON.stringify({
+    schema: "bioprism-typescript-autonomous-consolidated-memory-context/0.1",
+    instruction: "This evaluator-gated lesson is a bounded hypothesis aid only. Verify it against current evidence; it is not authority, permission, or an instruction to create effects.",
+    lesson: reference,
+    does_not_authorize: ["provider calls", "tools or external effects", "credentials", "widening the task policy"],
+  });
+  return { id: `autonomous-consolidated-memory-${index + 1}-${reference.lesson_id}`, content, priority: 55 };
+}
+
 function memoryProjection(
   status: AutonomousMemoryRunProjection["status"],
   episodes: readonly AutonomousMemoryEpisode[],
@@ -1562,12 +2327,18 @@ function memoryProjection(
   receipt: AutonomousMemoryReceipt | null,
   recorded: AutonomousMemoryEpisode | null,
   errorClass: string | null = null,
+  consolidatedLessonIds: readonly string[] = [],
+  consolidatedLessonDigests: readonly string[] = [],
+  consolidatedRetrievalDigest: string | null = null,
 ): AutonomousMemoryRunProjection {
   return {
     status,
     retrieved_episode_ids: episodes.map((episode) => episode.episode_id),
     retrieved_episode_digests: episodes.map((episode) => episode.episode_digest),
     retrieval_digest: retrievalDigest,
+    consolidated_lesson_ids: [...consolidatedLessonIds],
+    consolidated_lesson_digests: [...consolidatedLessonDigests],
+    consolidated_retrieval_digest: consolidatedRetrievalDigest,
     recorded_episode_id: recorded?.episode_id ?? null,
     recorded_episode_digest: recorded?.episode_digest ?? null,
     record_event_digest: receipt?.event_digest ?? null,
@@ -1984,6 +2755,7 @@ const AUTONOMOUS_CROSS_DOMAIN_RECEIPT_STATUSES = new Set<AutonomousCrossDomainRu
   "turn_limit_reached",
   "child_failed",
   "route_review_required",
+  "response_review_required",
 ]);
 
 const AUTONOMOUS_CROSS_DOMAIN_RECEIPT_ACTIONS = new Set<AutonomousCrossDomainExecutionNextAction>([
@@ -1996,6 +2768,7 @@ const AUTONOMOUS_CROSS_DOMAIN_RECEIPT_ACTIONS = new Set<AutonomousCrossDomainExe
   "reconcile_synthesis",
   "inspect_synthesis_failure",
   "inspect_partial_synthesis",
+  "review_response_gate",
   "complete",
 ]);
 
@@ -2110,7 +2883,17 @@ export async function autonomousCrossDomainExecutionReceipt(result: AutonomousCr
   const reconciliationRequired = result.status === "reconciliation_required"
     || Object.values(childStatuses).some((status) => status === "reconciliation_required")
     || synthesisStatus === "reconciliation_required";
-  const nextAction: AutonomousCrossDomainExecutionNextAction = result.status === "route_review_required" || result.status === "policy_review_required" || result.status === "policy_blocked"
+  // A partial fan-out must finish/retry its missing child before response alignment review. Once
+  // all children are present, or synthesis has already been attempted for an explicit partial
+  // run, the response gate is the authoritative next action.
+  const responseGateRequiresReview = result.response_assessment !== undefined
+    && result.response_assessment !== null
+    && result.response_assessment.status !== "ready_to_synthesize"
+    && result.response_assessment.status !== "completed"
+    && (incompleteChildIds.length === 0 || synthesisStatus !== null);
+  const nextAction: AutonomousCrossDomainExecutionNextAction = responseGateRequiresReview
+    ? "review_response_gate"
+    : result.status === "route_review_required" || result.status === "policy_review_required" || result.status === "policy_blocked"
     ? "review_route"
     : synthesisStatus === "completed" && incompleteChildIds.length === 0
       ? "complete"
@@ -2133,6 +2916,7 @@ export async function autonomousCrossDomainExecutionReceipt(result: AutonomousCr
                       : "synthesize";
   const safeToSynthesize = incompleteChildIds.length === 0
     && result.synthesis === null
+    && !responseGateRequiresReview
     && result.status !== "route_review_required"
     && result.status !== "approval_required"
     && result.status !== "policy_review_required"
@@ -2198,7 +2982,7 @@ export async function validateAutonomousCrossDomainExecutionReceipt(value: unkno
   if (typeof value.total_units !== "number" || !Number.isSafeInteger(value.total_units) || value.total_units !== expectedTotalUnits) throw new ArgumentError("total_units is inconsistent with the receipt");
   if (typeof value.progress !== "number" || !Number.isFinite(value.progress) || value.progress < 0 || value.progress > 1 || value.progress !== value.completed_units / value.total_units) throw new ArgumentError("progress is inconsistent with the receipt");
   if (typeof value.next_action !== "string" || !AUTONOMOUS_CROSS_DOMAIN_RECEIPT_ACTIONS.has(value.next_action as AutonomousCrossDomainExecutionNextAction)) throw new ArgumentError("next_action is invalid");
-  const safeToSynthesize = incompleteChildIds.length === 0 && synthesisStatus === null && value.status !== "route_review_required" && value.status !== "approval_required" && value.status !== "policy_review_required" && value.status !== "policy_blocked";
+  const safeToSynthesize = incompleteChildIds.length === 0 && synthesisStatus === null && value.next_action !== "review_response_gate" && value.status !== "route_review_required" && value.status !== "approval_required" && value.status !== "policy_review_required" && value.status !== "policy_blocked" && value.status !== "response_review_required";
   if (value.safe_to_synthesize !== safeToSynthesize) throw new ArgumentError("safe_to_synthesize is inconsistent with the receipt");
   const reconciliationRequired = value.status === "reconciliation_required" || Object.values(childStatuses).some((status) => status === "reconciliation_required") || synthesisStatus === "reconciliation_required";
   if (value.reconciliation_required !== reconciliationRequired) throw new ArgumentError("reconciliation_required is inconsistent with the receipt");
@@ -2229,9 +3013,10 @@ export async function validateAutonomousCrossDomainExecutionReceipt(value: unkno
   return { ...fields, receipt_digest: receiptDigest };
 }
 
-function validateAutonomousStructuredOutputOptions(options: Pick<AutonomousRunOptions, "requireJson" | "responseSchema" | "structuredDomainResponse">): void {
+function validateAutonomousStructuredOutputOptions(options: Pick<AutonomousRunOptions, "requireJson" | "responseSchema" | "structuredDomainResponse" | "requireStructuredResponseReview">): void {
   if (options.requireJson !== undefined && typeof options.requireJson !== "boolean") throw new ArgumentError("autonomous requireJson must be boolean");
   if (options.structuredDomainResponse !== undefined && typeof options.structuredDomainResponse !== "boolean") throw new ArgumentError("autonomous structuredDomainResponse must be boolean");
+  if (options.requireStructuredResponseReview !== undefined && typeof options.requireStructuredResponseReview !== "boolean") throw new ArgumentError("autonomous requireStructuredResponseReview must be boolean");
   if (options.structuredDomainResponse === true && options.responseSchema !== undefined) throw new ArgumentError("structuredDomainResponse cannot be combined with a custom responseSchema");
   if (options.responseSchema !== undefined) {
     if (!isObject(options.responseSchema)) throw new ArgumentError("autonomous responseSchema must be a JSON object");
@@ -2240,6 +3025,105 @@ function validateAutonomousStructuredOutputOptions(options: Pick<AutonomousRunOp
     try { encoded = JSON.stringify(options.responseSchema); } catch { throw new ArgumentError("autonomous responseSchema must be JSON-serializable"); }
     if (!encoded || bytes(encoded) > 1_000_000) throw new ArgumentError("autonomous responseSchema exceeds its bounded size");
   }
+}
+
+function directStructuredResponseStatus(
+  status: AutonomousRunStatus,
+  evaluation: AutonomousDomainResponseEvaluation | null,
+  requireReview: boolean | undefined,
+): AutonomousRunStatus {
+  return status === "completed" && requireReview !== false && evaluation !== null && !evaluation.passed
+    ? "response_review_required"
+    : status;
+}
+
+type RenderedAutonomousRunPrompt = {
+  messages: readonly ProviderMessage[];
+  metadata: AutonomousPromptRenderResult;
+  mode: "versioned_template" | "registry_selection";
+};
+
+async function renderAutonomousRunPrompt(
+  task: string,
+  blueprint: AutonomousTaskBlueprint,
+  route: AutonomousRouteProposal | null,
+  options: Pick<AutonomousRunOptions, "promptTemplate" | "promptRegistry" | "promptSelection" | "promptStage" | "promptLearningState" | "promptLearningExploration">,
+  contextIds: readonly string[] = blueprint.prompt.included_context_ids,
+): Promise<RenderedAutonomousRunPrompt | null> {
+  const domain = blueprint.domain_profile.domain;
+  return renderVersionedAutonomousPrompt(
+    {
+      task,
+      objective: task,
+      requirement: {
+        domain,
+        stage_id: options.promptStage ?? "answer",
+        objective: task,
+        workflow_id: blueprint.workflow.workflow_id,
+        required_capabilities: [...blueprint.required_capabilities],
+      },
+      route: {
+        route_digest: route?.route_digest ?? blueprint.route_digest,
+        selected_domains: route ? [...route.selected_domains] : [domain],
+        primary_domain: route?.primary_domain ?? domain,
+        cross_domain: route?.cross_domain ?? domain === "cross_domain",
+      },
+      context_ids: [...contextIds],
+    },
+    options,
+  );
+}
+
+async function renderVersionedAutonomousPrompt(
+  context: Readonly<Record<string, unknown>>,
+  options: Pick<AutonomousRunOptions, "promptTemplate" | "promptRegistry" | "promptSelection" | "promptStage" | "promptLearningState" | "promptLearningExploration">,
+): Promise<RenderedAutonomousRunPrompt | null> {
+  const template = options.promptTemplate;
+  const registry = options.promptRegistry;
+  const selection = options.promptSelection;
+  if (template !== undefined && !(template instanceof AutonomousPromptTemplate)) throw new ArgumentError("autonomous promptTemplate must be an AutonomousPromptTemplate");
+  if (registry !== undefined && !(registry instanceof AutonomousPromptRegistry)) throw new ArgumentError("autonomous promptRegistry must be an AutonomousPromptRegistry");
+  if (template !== undefined && (registry !== undefined || selection !== undefined)) throw new ArgumentError("autonomous promptTemplate cannot be combined with promptRegistry or promptSelection");
+  if (selection !== undefined && registry === undefined) throw new ArgumentError("autonomous promptSelection requires promptRegistry");
+  if (options.promptLearningState !== undefined && registry === undefined) throw new ArgumentError("autonomous promptLearningState requires promptRegistry");
+  if (options.promptLearningState !== undefined && selection !== undefined) throw new ArgumentError("autonomous promptLearningState cannot be combined with promptSelection");
+  if (registry === undefined && template === undefined) return null;
+  const requirement = context.requirement;
+  if (!requirement || typeof requirement !== "object") throw new ArgumentError("autonomous prompt context requirement is malformed");
+  const requirementRecord = requirement as Record<string, unknown>;
+  const domainValue = requirementRecord.domain;
+  const stage = boundedIdentifier("autonomous promptStage", requirementRecord.stage_id ?? options.promptStage ?? "answer");
+  if (typeof domainValue !== "string" || !AUTONOMOUS_DOMAIN_NAMES.includes(domainValue as AutonomousDomainName)) throw new ArgumentError("autonomous prompt context domain is unsupported");
+  const domain = domainValue as AutonomousDomainName;
+  const normalizedContext = { ...context, requirement: { ...requirementRecord, domain, stage_id: stage } } as const;
+  if (template !== undefined) {
+    const rendered = await template.renderTransient(normalizedContext);
+    return { messages: rendered.messages, metadata: rendered.metadata, mode: "versioned_template" };
+  }
+  const request = {
+    // Prompt capabilities are a separate reviewed namespace from model capabilities. A domain
+    // blueprint may require "reasoning" or "code" even when a prompt manifest intentionally
+    // advertises only its rendering concerns, so selection starts with no implicit model labels.
+    domain,
+    stage,
+    requiredCapabilities: [],
+  } as const;
+  const adaptive = options.promptLearningState === undefined
+    ? null
+    : selectAdaptiveAutonomousPrompts(registry!, [request], { state: options.promptLearningState, exploration: options.promptLearningExploration });
+  const resolvedSelection = selection ?? adaptive?.plan ?? registry!.selectFor([request]);
+  const rendered = await registry!.render(resolvedSelection, normalizedContext);
+  const metadata = adaptive === null
+    ? rendered.metadata
+    : {
+      ...rendered.metadata,
+      adaptive_selection_digest: adaptive.selectionDigest,
+      adaptive_arm_id: adaptive.armIds[0] ?? null,
+      adaptive_generation: adaptive.generation,
+      selection_policy: "ucb1_explicit_evaluator_v1",
+      adaptive_selection: adaptive.toJSON(),
+    };
+  return { messages: rendered.messages, metadata, mode: "registry_selection" };
 }
 
 function normalizeAutonomousDomainPolicyMode(value: AutonomousDomainPolicyExecutionMode | undefined): AutonomousDomainPolicyExecutionMode {
@@ -2569,6 +3453,56 @@ export async function routeAutonomousTask(
   return { ...result, route_digest: await digestJson(result) };
 }
 
+/**
+ * Bind a reviewed evidence scope to an exact provider-free route.
+ *
+ * This is intentionally separate from lexical task routing: the evidence planner has already
+ * established which domains are in scope, so automatic execution must not reclassify the task
+ * and silently widen that scope. The resulting route is still only a proposal; normal provider,
+ * tool, effect, and policy gates remain downstream.
+ */
+export async function routeAutonomousEvidenceScope(
+  task: string,
+  domains: readonly AutonomousDomainName[],
+): Promise<AutonomousRouteProposal> {
+  const taskText = boundedText("evidence route task", task, 32_000);
+  if (!Array.isArray(domains) || domains.length < 1 || domains.length > AUTONOMOUS_CROSS_DOMAIN_MAX_CHILDREN) {
+    throw new ArgumentError(`evidence route domains must contain between 1 and ${AUTONOMOUS_CROSS_DOMAIN_MAX_CHILDREN} entries`);
+  }
+  if (new Set(domains).size !== domains.length) throw new ArgumentError("evidence route domains contain duplicates");
+  if (domains.length > 1 && domains.includes("cross_domain")) throw new ArgumentError("cross_domain is a synthesis profile, not an evidence child domain");
+  const profiles = await Promise.all(domains.map((domain) => profileFor(domain)));
+  const candidates: AutonomousRouteCandidate[] = profiles.map((profile) => ({
+    domain: profile.domain,
+    score: 1,
+    matched_terms: ["reviewed_evidence_scope", profile.domain],
+    capability: profile.default_capability,
+    risk_class: profile.risk_class,
+    workflow_id: profile.workflow.workflow_id,
+    evidence: "fixed_catalogue_term_matches_only",
+  }));
+  const crossDomain = domains.length > 1;
+  const descriptor = {
+    schema: AUTONOMOUS_ROUTE_SCHEMA,
+    task_digest: await digestJson({ task: taskText }),
+    candidates,
+    selected_domains: [...domains],
+    primary_domain: domains[0] ?? null,
+    confidence: 1,
+    abstained: false,
+    reason: crossDomain ? "cross_domain" as const : "routed" as const,
+    cross_domain: crossDomain,
+    source: "deterministic_vocabulary" as const,
+    retention: "route_scores_and_digests_only; task_text_is_not_retained_in_route" as const,
+    does_not_claim: [
+      "reviewed evidence scope is caller-owned domain selection, not semantic proof",
+      "evidence scope does not authorize provider calls, tools, or external effects",
+      "automatic planning cannot widen the reviewed evidence scope",
+    ],
+  };
+  return { ...descriptor, route_digest: await digestJson(descriptor) };
+}
+
 /** Validate a caller-owned route handoff before it can influence local planning. */
 export async function validateAutonomousRouteOverride(task: string, route: AutonomousRouteProposal): Promise<AutonomousRouteProposal> {
   if (!isObject(route) || route.schema !== AUTONOMOUS_ROUTE_SCHEMA || typeof route.task_digest !== "string") throw new ArgumentError("autonomous route override is malformed");
@@ -2610,7 +3544,11 @@ async function buildTaskBlueprint(
     taskDigest?: string;
     routeDigest?: string;
     capability?: string;
+    riskClass?: string;
+    capabilityRoute?: AutonomousCapabilityRoute;
     context?: readonly AutonomousPromptChunk[];
+    constraints?: readonly string[];
+    desiredOutputs?: readonly string[];
     maxInputTokens?: number;
     activeToolNames?: readonly string[];
     selectedToolNames?: readonly string[];
@@ -2624,14 +3562,18 @@ async function buildTaskBlueprint(
   const selectedToolNames = [...new Set(options.selectedToolNames ?? activeToolNames)];
   const domainPolicy = autonomousDomainPolicy(profile.domain);
   const taskLens = autonomousDomainTaskLens(profile.domain);
+  const capabilityRoute = options.capabilityRoute ?? routeAutonomousCapability(taskText, profile.domain, options.capability === undefined ? {} : { explicitCapability: options.capability });
+  const effectiveCapability = options.capability ?? capabilityRoute.selected_capability ?? profile.default_capability;
   const taskIntent = inferAutonomousTaskIntent({
     task: taskText,
     taskDigest,
     domain: profile.domain,
-    capability: options.capability ?? profile.default_capability,
-    riskClass: profile.risk_class,
+    capability: effectiveCapability,
+    riskClass: options.riskClass ?? profile.risk_class,
     workflowId: profile.workflow.workflow_id,
     lens: taskLens,
+    constraints: options.constraints,
+    desiredOutputs: options.desiredOutputs,
   });
   const taskDecision = inferAutonomousTaskDecision({
     intent: taskIntent,
@@ -2653,6 +3595,7 @@ async function buildTaskBlueprint(
   });
   const plan = await compileAutonomousPlan(profile, taskText, {
     taskDigest,
+    capability: effectiveCapability,
     activeToolNames,
     selectedToolNames,
     selectedToolOrder: selectedToolNames,
@@ -2660,8 +3603,8 @@ async function buildTaskBlueprint(
   });
   const selectionContext: BrainModelSelectionContext = {
     domain: profile.domain,
-    capability: options.capability ?? profile.default_capability,
-    risk_class: profile.risk_class,
+    capability: effectiveCapability,
+    risk_class: taskIntent.risk_class,
     task_family: profile.workflow.workflow_id,
     task_lens_id: taskLens.lens_id,
     task_lens_digest: taskLens.lens_digest,
@@ -2680,6 +3623,9 @@ async function buildTaskBlueprint(
     task_decision_recommended_path: taskDecision.recommended_path,
     task_decision_approval_requirements: [...taskDecision.approval_requirements],
     task_decision_review_reasons: [...taskDecision.review_reasons],
+    capability_route_digest: capabilityRoute.route_digest,
+    capability_route_reason: capabilityRoute.reason,
+    capability_route_confidence: capabilityRoute.confidence,
   };
   // Match the Rust/Python context identity byte-for-byte: field order is part of this
   // cross-language value contract, while task text and provider payloads stay outside it.
@@ -2693,7 +3639,7 @@ async function buildTaskBlueprint(
     task_family: selectionContext.task_family ?? null,
   };
   const learningContextDigest = await digestCanonicalJsonText(JSON.stringify(learningContext));
-  return {
+  const baseBlueprint = {
     schema: "bioprism-python-autonomous-task/0.1",
     task_digest: taskDigest,
     route_digest: options.routeDigest,
@@ -2708,12 +3654,18 @@ async function buildTaskBlueprint(
     task_lens: taskLens,
     task_intent: taskIntent,
     task_decision: taskDecision,
+    capability_route: capabilityRoute,
     prompt,
     plan,
     ...(responseContract ? { response_contract: responseContract } : {}),
     execution: "not_started",
     credential_posture: "caller_supplied_opaque_handle_not_returned",
-  };
+  } as Omit<AutonomousTaskBlueprint, "stage_execution_plans">;
+  const stageExecutionPlans = await Promise.all(profile.workflow.stages.map((stage) => compileAutonomousWorkflowStageExecutionPlan(baseBlueprint as AutonomousTaskBlueprint, stage, {
+    activeToolNames,
+    selectedToolNames,
+  })));
+  return { ...baseBlueprint, stage_execution_plans: stageExecutionPlans } as AutonomousTaskBlueprint;
 }
 
 function assertAutonomousTaskDecisionAllowsProvider(
@@ -2745,9 +3697,75 @@ function planningResponseSchema(ids: readonly string[], focusField: "focus_stage
 
 interface PreparedProviderPlanning {
   prompt: AutonomousPromptResult;
+  /** Digest of the exact transient planner prompt boundary, including version metadata. */
+  promptDigest: string;
+  /** Exact registry-bound adaptive prompt receipt; rendered messages remain transient. */
+  adaptiveSelection?: AutonomousPromptAdaptiveSelectionJSON;
   plan: AutonomousExecutionPlan;
   learningContext: BrainBanditContext;
   learningContextDigest: string;
+}
+
+/**
+ * Bind provider planning to the same reviewed prompt controls as ordinary execution.
+ *
+ * The legacy assembled prompt remains the bounded source of planning-contract context and
+ * input-budget accounting. A versioned renderer replaces only the planner framing/task
+ * messages; the contract and optional caller context are inserted before the rendered user
+ * message. The raw messages never enter a planning result or digest projection.
+ */
+async function prepareVersionedPlanningMessages(
+  plannerTask: string,
+  profile: AutonomousDomainProfile,
+  prompt: AutonomousPromptResult,
+  planningContext: readonly AutonomousPromptChunk[],
+  options: AutonomousProviderPlanningOptions,
+): Promise<{ messages: readonly ProviderMessage[]; promptDigest: string; adaptiveSelection?: AutonomousPromptAdaptiveSelectionJSON }> {
+  const stage = options.promptStage ?? "planning";
+  const rendered = await renderVersionedAutonomousPrompt(
+    {
+      task: plannerTask,
+      objective: plannerTask,
+      requirement: {
+        domain: profile.domain,
+        stage_id: stage,
+        objective: plannerTask,
+        workflow_id: profile.workflow.workflow_id,
+        required_capabilities: [...profile.required_model_capabilities],
+      },
+      route: {
+        route_digest: null,
+        selected_domains: [profile.domain],
+        primary_domain: profile.domain,
+        cross_domain: profile.domain === "cross_domain",
+      },
+      context_ids: planningContext.map((chunk) => chunk.id),
+    },
+    {
+      promptTemplate: options.promptTemplate,
+      promptRegistry: options.promptRegistry,
+      promptSelection: options.promptSelection,
+      promptLearningState: options.promptLearningState,
+      promptLearningExploration: options.promptLearningExploration,
+    },
+  );
+  const legacyMessages = prompt.messages.map(({ role, content }) => ({ role, content } satisfies ProviderMessage));
+  if (rendered === null) return { messages: legacyMessages, promptDigest: prompt.prompt_digest };
+
+  const supportingMessages = prompt.messages
+    .filter((message) => !["domain-system", "domain-developer", "task"].includes(message.source_id))
+    .map(({ role, content }) => ({ role, content } satisfies ProviderMessage));
+  const messages = [...rendered.messages];
+  const lastUserIndex = messages.reduce((index, message, current) => message.role === "user" ? current : index, -1);
+  const insertionIndex = lastUserIndex < 0 ? messages.length : lastUserIndex;
+  messages.splice(insertionIndex, 0, ...supportingMessages);
+  const promptDigest = await digestJson({
+    schema: AUTONOMOUS_PROMPT_SCHEMA,
+    base_prompt_digest: prompt.prompt_digest,
+    rendered_prompt: rendered.metadata,
+    message_digest: await digestJson(messages),
+  });
+  return { messages, promptDigest, adaptiveSelection: rendered.metadata.adaptive_selection };
 }
 
 function validatePlanningWorkflow(stages: readonly AutonomousWorkflowStage[]): string[] {
@@ -2794,6 +3812,7 @@ async function prepareProviderPlanning(
     maxInputTokens: options.maxInputTokens,
     outputContract: `Return JSON with priority_order, ${focusField}, review_required, confidence, and abstain. Use only identifiers from the planning contract.`,
   });
+  const plannerMessages = await prepareVersionedPlanningMessages(plannerTask, profile, prompt, planningContext, options);
   const responseSchema = planningResponseSchema(ids, focusField);
   const requiredCapabilities = [...new Set([...blueprint.required_capabilities, "structured_output"])];
   // Provider planning is its own learner context. The execution blueprint's digest is keyed
@@ -2808,7 +3827,7 @@ async function prepareProviderPlanning(
   const learningContextDigest = await digestCanonicalJsonText(JSON.stringify(planningLearnerContext));
   const request: ProviderRequest = {
     model: "selection-delegated",
-    messages: prompt.messages.map(({ role, content }) => ({ role, content })),
+    messages: plannerMessages.messages,
     maxOutputTokens: options.maxOutputTokens ?? 1_024,
     ...(options.temperature === undefined ? {} : { temperature: options.temperature }),
     requireJson: true,
@@ -2817,6 +3836,8 @@ async function prepareProviderPlanning(
   };
   return {
     prompt,
+    promptDigest: plannerMessages.promptDigest,
+    adaptiveSelection: plannerMessages.adaptiveSelection,
     plan: {
       task: plannerTask,
       domain: profile.domain,
@@ -2829,6 +3850,8 @@ async function prepareProviderPlanning(
       maxLatencyMs: options.maxLatencyMs,
       minQuality: options.minQuality,
       minSelectionConfidence: options.minSelectionConfidence,
+      selectionWeights: options.selectionWeights,
+      selectionObservations: options.selectionObservations,
       candidates: options.candidates ?? [],
       request,
     },
@@ -2844,6 +3867,7 @@ function planningModelProjection(selection: AutonomousSelectionDecision): { prov
 async function planningOutcomeDigest(
   execution: { selection: AutonomousSelectionDecision; response: ProviderResponse },
   learningContextDigest: string | null = null,
+  promptDigest: string | null = null,
 ): Promise<string> {
   const responseDigest = await digestJson({
     provider: execution.response.provider,
@@ -2854,15 +3878,32 @@ async function planningOutcomeDigest(
     text: execution.response.text,
     structured: execution.response.structured,
   });
-  return digestJson({ selection: execution.selection, response_digest: responseDigest, learning_context_digest: learningContextDigest });
+  return digestJson({ selection: execution.selection, response_digest: responseDigest, learning_context_digest: learningContextDigest, prompt_digest: promptDigest });
 }
 
-/** Project a malformed provider response into a digest-only planning refusal. */
-async function planningProviderFailureDigest(error: ProviderRuntimeError): Promise<string> {
+/** Project a provider planning failure without retaining its message, payload, or credential. */
+function planningProviderFailureProjection(error: ProviderRuntimeError | CredentialError): AutonomousPlanningFailureProjection {
+  return {
+    error_class: error instanceof CredentialError ? "CredentialError" : "ProviderRuntimeError",
+    code: error instanceof CredentialError ? "credential" : error.code,
+    retryable: error instanceof CredentialError ? false : error.retryable,
+    status_code: error instanceof CredentialError ? null : error.statusCode ?? null,
+    circuit_open: error instanceof CredentialError ? false : error.circuitOpen,
+    retention: "metadata_only;provider_error_message_and_payloads_not_retained",
+    secret_material: "never_returned",
+  };
+}
+
+/** Digest only the stable metadata of a provider planning failure. */
+async function planningProviderFailureDigest(error: ProviderRuntimeError | CredentialError): Promise<string> {
+  const projection = planningProviderFailureProjection(error);
   return digestJson({
-    code: error.code,
-    provider: error.provider ?? null,
-    status_code: error.statusCode ?? null,
+    error_class: projection.error_class,
+    code: projection.code,
+    retryable: projection.retryable,
+    status_code: projection.status_code,
+    circuit_open: projection.circuit_open,
+    provider: error instanceof ProviderRuntimeError ? error.provider ?? null : null,
   });
 }
 
@@ -2934,6 +3975,7 @@ async function prepareOrderedStepPlanning(
     risk_class: profile.risk_class,
     task_family: "ordered_step_plan",
   };
+  const plannerMessages = await prepareVersionedPlanningMessages(plannerTask, profile, prompt, planningContext, options);
   // Only the stable four-field learner identity is hashed. Descriptive selection metadata
   // cannot be passed through this digest because the local, Rust, and Python learners all
   // normalize the same bounded BrainBanditContext shape before selecting or settling.
@@ -2957,10 +3999,12 @@ async function prepareOrderedStepPlanning(
     maxLatencyMs: options.maxLatencyMs,
     minQuality: options.minQuality,
     minSelectionConfidence: options.minSelectionConfidence,
+    selectionWeights: options.selectionWeights,
+    selectionObservations: options.selectionObservations,
     candidates: options.candidates ?? [],
     request: {
       model: "selection-delegated",
-      messages: prompt.messages.map(({ role, content }) => ({ role, content })),
+      messages: plannerMessages.messages,
       maxOutputTokens: options.maxOutputTokens ?? 1_024,
       ...(options.temperature === undefined ? {} : { temperature: options.temperature }),
       requireJson: true,
@@ -2968,7 +4012,7 @@ async function prepareOrderedStepPlanning(
       ...(options.runId === undefined ? {} : { idempotencyKey: boundedIdentifier("ordered-step planning run id", options.runId) }),
     },
   };
-  return { prompt, plan, learningContext, learningContextDigest };
+  return { prompt, promptDigest: plannerMessages.promptDigest, adaptiveSelection: plannerMessages.adaptiveSelection, plan, learningContext, learningContextDigest };
 }
 
 export interface AutonomousAcceptedCrossDomainPlan {
@@ -3106,6 +4150,12 @@ function evidenceBackedStatus(status: ReturnType<AutonomousEvidenceExecutionResu
   if (status === "failed") return "evidence_failed";
   if (status === "reconciliation_required") return "evidence_incomplete";
   return "evidence_incomplete";
+}
+
+function normalizeAutonomousEvidenceExecutionMode(value: unknown): AutonomousEvidenceExecutionMode {
+  if (value === undefined) return "domain";
+  if (value !== "domain" && value !== "cross_domain" && value !== "auto") throw new ArgumentError("evidence-backed runMode must be domain, cross_domain, or auto");
+  return value;
 }
 
 /** Assemble the bounded domain prompt locally, retaining exact inclusion/omission evidence. */
@@ -3287,6 +4337,93 @@ function toolSelectionUtility(arm: AutonomousToolSelectionArm | null, totalPulls
   return Number((meanReward - (failureRate * 0.5) - latencyPenalty + explorationBonus).toFixed(12));
 }
 
+function autonomousToolRiskAllowed(riskClass: AutonomousToolRiskClass, maximum: AutonomousToolRiskClass): boolean {
+  return AUTONOMOUS_TOOL_RISK_ORDER.indexOf(riskClass) <= AUTONOMOUS_TOOL_RISK_ORDER.indexOf(maximum);
+}
+
+function capabilityCandidateReason(
+  binding: AutonomousDomainToolBinding,
+  stage: AutonomousWorkflowStage,
+  allowedTools: ReadonlySet<string> | null,
+  readOnlyOnly: boolean,
+  maximumRiskClass: AutonomousToolRiskClass,
+  arm: AutonomousToolSelectionArm | null,
+): AutonomousCapabilityCandidateReason {
+  if (allowedTools !== null && !allowedTools.has(binding.name)) return "not_allowed";
+  if (!autonomousToolRiskAllowed(binding.risk_class, maximumRiskClass)) return "risk_budget_exceeded";
+  if (readOnlyOnly && !binding.read_only || stage.read_only && !binding.read_only) return "read_only_required";
+  if (!stage.approval_required && binding.approval_required) return "approval_required";
+  if (arm?.disabled === true) return "learning_disabled";
+  return "eligible";
+}
+
+function capabilityCandidateRanking(
+  tokens: readonly string[],
+  requestedCapabilities: readonly string[],
+  stage: AutonomousWorkflowStage,
+  bindings: readonly AutonomousDomainToolBinding[],
+  domain: AutonomousDomainName,
+  toolSelectionState: AutonomousToolSelectionState,
+  totalPulls: number,
+  exploration: number,
+  allowedTools: ReadonlySet<string> | null,
+  readOnlyOnly: boolean,
+  maximumRiskClass: AutonomousToolRiskClass,
+): AutonomousCapabilityCandidateRanking[] {
+  const eligible = bindings.filter((binding) => capabilityCandidateReason(
+    binding,
+    stage,
+    allowedTools,
+    readOnlyOnly,
+    maximumRiskClass,
+    toolSelectionArmFor(toolSelectionState, domain, stage, binding),
+  ) === "eligible");
+  const rankByName = new Map(
+    [...eligible].sort((left, right) => compareCapabilityScores(
+      capabilityCandidateScore(tokens, requestedCapabilities, stage, left, domain, toolSelectionState, totalPulls, exploration),
+      capabilityCandidateScore(tokens, requestedCapabilities, stage, right, domain, toolSelectionState, totalPulls, exploration),
+    ) || left.name.localeCompare(right.name)).map((binding, index) => [binding.name, index + 1]),
+  );
+  const rows = [...bindings].map((binding) => {
+    const arm = toolSelectionArmFor(toolSelectionState, domain, stage, binding);
+    const score = capabilityCandidateScore(tokens, requestedCapabilities, stage, binding, domain, toolSelectionState, totalPulls, exploration);
+    const pulls = arm?.pulls ?? 0;
+    return {
+      tool: binding.name,
+      capability: binding.capability,
+      risk_class: binding.risk_class,
+      read_only: binding.read_only,
+      approval_required: binding.approval_required,
+      eligible: rankByName.has(binding.name),
+      rank: rankByName.get(binding.name) ?? null,
+      requested_capability_match: score[0] === 1,
+      stage_capability_match: score[1] === 1,
+      selection_utility: score[2],
+      task_relevance: score[3],
+      observed_pulls: pulls,
+      observed_failure_rate: pulls === 0 ? 0 : Number(((arm?.failures ?? 0) / pulls).toFixed(12)),
+      reason: capabilityCandidateReason(binding, stage, allowedTools, readOnlyOnly, maximumRiskClass, arm),
+    };
+  });
+  const rankedEligible = rows.filter((row) => row.eligible).sort((left, right) => (left.rank! - right.rank!) || left.tool.localeCompare(right.tool));
+  const rejectionPriority: Record<AutonomousCapabilityCandidateReason, number> = {
+    eligible: 99,
+    risk_budget_exceeded: 0,
+    read_only_required: 1,
+    approval_required: 2,
+    not_allowed: 3,
+    learning_disabled: 4,
+  };
+  const rankedRejected = rows.filter((row) => !row.eligible).sort((left, right) => (
+    rejectionPriority[left.reason] - rejectionPriority[right.reason] || left.tool.localeCompare(right.tool)
+  ));
+  if (rankedRejected.length === 0) return rankedEligible.slice(0, MAX_AUTONOMOUS_TOOL_SELECTION_CANDIDATES_PER_STAGE);
+  return [
+    ...rankedEligible.slice(0, 1),
+    ...rankedRejected.slice(0, MAX_AUTONOMOUS_TOOL_SELECTION_CANDIDATES_PER_STAGE - 1),
+  ].slice(0, MAX_AUTONOMOUS_TOOL_SELECTION_CANDIDATES_PER_STAGE);
+}
+
 /** Pure, caller-owned online update for one value-only tool outcome. */
 export function settleAutonomousToolSelectionOutcome(
   state: AutonomousToolSelectionState | null | undefined,
@@ -3335,6 +4472,242 @@ export async function autonomousWorkflowStageContractDigest(workflow: Autonomous
   return digestJson(workflowStageContractDescriptor(workflow, stage));
 }
 
+/** Build the reviewed capability/evidence graph used by stage execution packets. */
+async function buildAutonomousCapabilityContracts(
+  profile: AutonomousDomainProfile,
+  pack: AutonomousDomainPack,
+): Promise<AutonomousCapabilityContract[]> {
+  const orderedCapabilities = [...new Set([
+    ...profile.capabilities,
+    ...profile.workflow.stages.flatMap((stage) => stage.required_capabilities),
+  ])];
+  const contracts = await Promise.all(orderedCapabilities.map(async (capability) => {
+    const stages = profile.workflow.stages.filter((stage) => stage.required_capabilities.includes(capability));
+    const aliases = WORKFLOW_CAPABILITY_ALIASES[profile.domain][capability] ?? [];
+    const evidenceOutputs = [...new Set(stages.flatMap((stage) => stage.evidence_outputs))];
+    const evaluatorSignals = [...new Set([
+      ...stages.flatMap((stage) => stage.evaluator_signals),
+      ...profile.workflow.evaluator_signals,
+    ])];
+    const descriptor = {
+      schema: AUTONOMOUS_CAPABILITY_CONTRACT_SCHEMA,
+      domain: profile.domain,
+      capability,
+      stage_ids: stages.map((stage) => stage.id),
+      tool_capabilities: [...new Set([capability, ...aliases])],
+      required_model_capabilities: [...pack.model_capabilities],
+      evidence_outputs: evidenceOutputs.length ? evidenceOutputs : [`${capability}_result`],
+      evaluator_signals: evaluatorSignals,
+      read_only: stages.length === 0 || stages.every((stage) => stage.read_only),
+      approval_required: stages.some((stage) => stage.approval_required),
+      review_triggers: [...pack.review_triggers],
+      fallback_policy: stages.length ? "provider_only_or_blocked" as const : "provider_only" as const,
+    };
+    return {
+      ...descriptor,
+      contract_digest: await digestJson(descriptor),
+      adapter_posture: "exact_capability_aliases_only" as const,
+      credential_posture: "caller_supplied_opaque_handles" as const,
+      authority_posture: "metadata_only; no_provider_or_effect_authority" as const,
+    };
+  }));
+  if (contracts.length > 128) throw new ArgumentError("autonomous capability contract catalogue exceeds its bound");
+  return contracts;
+}
+
+/**
+ * Compile the exact stage packet used to narrow live tools and bind stage evidence. The
+ * packet deliberately contains no task text, arguments, provider output, credentials, or
+ * effect authorization, and its schema is shared with the Python façade for replay parity.
+ */
+export async function compileAutonomousWorkflowStageExecutionPlan(
+  blueprint: AutonomousTaskBlueprint,
+  stage: AutonomousWorkflowStage,
+  options: {
+    activeToolNames?: readonly string[];
+    selectedToolNames?: readonly string[];
+    withheldToolNames?: readonly string[];
+  } = {},
+): Promise<AutonomousWorkflowStageExecutionPlan> {
+  if (!isObject(blueprint) || blueprint.schema !== "bioprism-python-autonomous-task/0.1") throw new ArgumentError("stage execution plan requires an AutonomousTaskBlueprint");
+  if (!isObject(stage)) throw new ArgumentError("stage execution plan requires an AutonomousWorkflowStage");
+  const reviewedStage = blueprint.workflow.stages.find((candidate) => candidate.id === stage.id);
+  if (!reviewedStage) throw new ArgumentError("stage execution plan stage is outside the prepared workflow");
+  if (reviewedStage !== stage && await digestJson(reviewedStage) !== await digestJson(stage)) throw new ArgumentError("stage execution plan stage does not match the prepared workflow");
+  const activeToolNames = [...new Set((options.activeToolNames ?? blueprint.plan.allowed_tools.filter((name) => name !== "provider.invoke")).map((name) => boundedIdentifier("stage execution plan active tool", name)))].sort();
+  const selectedToolNames = [...new Set((options.selectedToolNames ?? activeToolNames).map((name) => boundedIdentifier("stage execution plan selected tool", name)))];
+  const withheldToolNames = [...new Set((options.withheldToolNames ?? blueprint.domain_profile.tool_profile.bindings.map((binding) => binding.name).filter((name) => !activeToolNames.includes(name))).map((name) => boundedIdentifier("stage execution plan withheld tool", name)))].sort();
+  if (activeToolNames.length > 512 || selectedToolNames.length > 512 || withheldToolNames.length > 512) throw new ArgumentError("stage execution plan tool names exceed their bound");
+  if (selectedToolNames.some((name) => !activeToolNames.includes(name))) throw new ArgumentError("stage execution plan selected tools must be active");
+  if (withheldToolNames.some((name) => activeToolNames.includes(name))) throw new ArgumentError("stage execution plan withheld tools must not be active");
+  const contracts = await buildAutonomousCapabilityContracts(blueprint.domain_profile, blueprint.domain_pack);
+  const stageContracts = contracts.filter((contract) => reviewedStage.required_capabilities.includes(contract.capability));
+  if (stageContracts.length !== new Set(reviewedStage.required_capabilities).size) throw new ArgumentError("stage execution plan has an unresolved capability contract");
+  const supportedBindings = blueprint.domain_profile.tool_profile.bindings.filter((binding) => autonomousDomainToolBindingSupportsStage(blueprint.domain_profile, reviewedStage, binding));
+  const selected = new Set(selectedToolNames);
+  const selectedForStage = supportedBindings.filter((binding) => selected.has(binding.name)).map((binding) => binding.name).sort();
+  const descriptor = {
+    schema: AUTONOMOUS_WORKFLOW_STAGE_PLAN_SCHEMA,
+    domain: blueprint.domain_profile.domain,
+    workflow_id: blueprint.workflow.workflow_id,
+    workflow_digest: blueprint.workflow.workflow_digest,
+    stage_id: reviewedStage.id,
+    stage_objective: reviewedStage.objective,
+    required_capabilities: [...reviewedStage.required_capabilities],
+    tool_capabilities: [...new Set(stageContracts.flatMap((contract) => contract.tool_capabilities))],
+    capability_contracts: stageContracts,
+    required_model_capabilities: [...blueprint.required_capabilities],
+    evidence_outputs: [...reviewedStage.evidence_outputs],
+    evaluator_signals: [...reviewedStage.evaluator_signals],
+    active_tool_names: activeToolNames,
+    selected_tool_names: selectedForStage,
+    withheld_tool_names: withheldToolNames,
+    approval_required: reviewedStage.approval_required,
+    read_only: reviewedStage.read_only,
+    execution_posture: reviewedStage.approval_required
+      ? "approval_gated" as const
+      : selectedForStage.length
+        ? "tool_backed" as const
+        : "provider_only_or_blocked" as const,
+    source_plan_digest: blueprint.plan.plan_digest,
+  };
+  return validateAutonomousWorkflowStageExecutionPlan({
+    ...descriptor,
+    stage_plan_digest: await digestJson(descriptor),
+    capability_contract_digests: stageContracts.map((contract) => contract.contract_digest),
+    credential_posture: "caller_supplied_opaque_handles; no_keys_or_handles",
+    authority_posture: "metadata_only; stage_plan_does_not_grant_authority",
+  }, { blueprint, stage: reviewedStage });
+}
+
+/**
+ * Reconstruct and verify a persisted stage packet before it can re-enter workflow execution.
+ *
+ * A stage packet is metadata-only, but it still narrows provider-visible tools and capability
+ * contracts.  This validator therefore checks the full derived identity rather than accepting a
+ * plausible digest string.  It is safe for restart workers: no task text, prompt, provider
+ * payload, credential, argument, or effect authority is imported from the packet.
+ */
+export async function validateAutonomousWorkflowStageExecutionPlan(
+  value: unknown,
+  options: { blueprint?: AutonomousTaskBlueprint; stage?: AutonomousWorkflowStage } = {},
+): Promise<AutonomousWorkflowStageExecutionPlan> {
+  if (!isObject(value)) throw new ArgumentError("workflow stage execution plan must be an object");
+  const allowed = new Set([
+    "schema", "domain", "workflow_id", "workflow_digest", "stage_id", "stage_objective",
+    "required_capabilities", "tool_capabilities", "capability_contracts",
+    "required_model_capabilities", "evidence_outputs", "evaluator_signals", "active_tool_names",
+    "selected_tool_names", "withheld_tool_names", "approval_required", "read_only",
+    "execution_posture", "source_plan_digest", "stage_plan_digest", "capability_contract_digests",
+    "credential_posture", "authority_posture",
+  ]);
+  if (Object.keys(value).some((key) => !allowed.has(key)) || Object.keys(value).length !== allowed.size) {
+    throw new ArgumentError("workflow stage execution plan has unexpected or missing fields");
+  }
+  if (value.schema !== AUTONOMOUS_WORKFLOW_STAGE_PLAN_SCHEMA) throw new ArgumentError("workflow stage execution plan schema is invalid");
+  if (value.credential_posture !== "caller_supplied_opaque_handles; no_keys_or_handles") throw new ArgumentError("workflow stage execution plan credential posture is invalid");
+  if (value.authority_posture !== "metadata_only; stage_plan_does_not_grant_authority") throw new ArgumentError("workflow stage execution plan authority posture is invalid");
+  if (bytes(JSON.stringify(value) ?? "") > MAX_AUTONOMOUS_WORKFLOW_STAGE_PLAN_BYTES) throw new ArgumentError("workflow stage execution plan exceeds its byte bound");
+
+  const sequence = (name: string, raw: unknown, maximum = 64): string[] => {
+    if (!Array.isArray(raw) || raw.length > maximum) throw new ArgumentError(`workflow stage execution plan ${name} must be a bounded array`);
+    const result = raw.map((item, index) => boundedIdentifier(`workflow stage execution plan ${name}[${index}]`, item));
+    if (new Set(result).size !== result.length) throw new ArgumentError(`workflow stage execution plan ${name} contains duplicates`);
+    return result;
+  };
+  const domain = boundedIdentifier("workflow stage execution plan domain", value.domain) as AutonomousDomainName;
+  if (!AUTONOMOUS_DOMAIN_NAMES.includes(domain)) throw new ArgumentError("workflow stage execution plan domain is unsupported");
+  const workflowId = boundedIdentifier("workflow stage execution plan workflow_id", value.workflow_id);
+  const workflowDigest = boundedDigest("workflow stage execution plan workflow_digest", value.workflow_digest);
+  const stageId = boundedIdentifier("workflow stage execution plan stage_id", value.stage_id);
+  const stageObjective = boundedText("workflow stage execution plan stage_objective", value.stage_objective, 2_048);
+  const requiredCapabilities = sequence("required_capabilities", value.required_capabilities);
+  const toolCapabilities = sequence("tool_capabilities", value.tool_capabilities);
+  const requiredModelCapabilities = sequence("required_model_capabilities", value.required_model_capabilities);
+  const evidenceOutputs = sequence("evidence_outputs", value.evidence_outputs);
+  const evaluatorSignals = sequence("evaluator_signals", value.evaluator_signals);
+  const activeToolNames = sequence("active_tool_names", value.active_tool_names, 512);
+  const selectedToolNames = sequence("selected_tool_names", value.selected_tool_names, 512);
+  const withheldToolNames = sequence("withheld_tool_names", value.withheld_tool_names, 512);
+  if (!requiredCapabilities.length || !evidenceOutputs.length || !evaluatorSignals.length) throw new ArgumentError("workflow stage execution plan requires capabilities, evidence outputs, and evaluator signals");
+  if (selectedToolNames.some((name) => !activeToolNames.includes(name))) throw new ArgumentError("workflow stage execution plan selected tools must be active");
+  if (activeToolNames.some((name) => withheldToolNames.includes(name))) throw new ArgumentError("workflow stage execution plan active and withheld tools overlap");
+  if (typeof value.approval_required !== "boolean" || typeof value.read_only !== "boolean") throw new ArgumentError("workflow stage execution plan safety flags are invalid");
+  const posture = value.execution_posture;
+  if (posture !== "approval_gated" && posture !== "tool_backed" && posture !== "provider_only_or_blocked") throw new ArgumentError("workflow stage execution plan execution posture is invalid");
+  const expectedPosture = value.approval_required ? "approval_gated" : selectedToolNames.length ? "tool_backed" : "provider_only_or_blocked";
+  if (posture !== expectedPosture) throw new ArgumentError("workflow stage execution plan execution posture is inconsistent");
+  const sourcePlanDigest = value.source_plan_digest === null ? null : boundedDigest("workflow stage execution plan source_plan_digest", value.source_plan_digest);
+  if (!Array.isArray(value.capability_contracts) || value.capability_contracts.length > 64) throw new ArgumentError("workflow stage execution plan capability contracts are outside their bound");
+  const contracts = value.capability_contracts.map((raw, index) => {
+    if (!isObject(raw)) throw new ArgumentError(`workflow stage execution plan capability contract ${index} is malformed`);
+    const contract = structuredClone(raw);
+    const contractDigest = boundedDigest(`workflow stage execution plan capability contract ${index} digest`, contract.contract_digest);
+    const descriptor = { ...contract };
+    delete descriptor.contract_digest;
+    delete descriptor.adapter_posture;
+    delete descriptor.credential_posture;
+    delete descriptor.authority_posture;
+    if (contract.schema !== AUTONOMOUS_CAPABILITY_CONTRACT_SCHEMA) throw new ArgumentError("workflow stage execution plan capability contract schema is invalid");
+    if (contract.adapter_posture !== "exact_capability_aliases_only" || contract.credential_posture !== "caller_supplied_opaque_handles" || contract.authority_posture !== "metadata_only; no_provider_or_effect_authority") throw new ArgumentError("workflow stage execution plan capability contract markers are invalid");
+    return { contract, contractDigest, descriptor };
+  });
+  for (const { contract, contractDigest, descriptor } of contracts) {
+    if (await digestJson(descriptor) !== contractDigest) throw new ArgumentError("workflow stage execution plan capability contract digest is invalid");
+  }
+  const contractCapabilities = contracts.map(({ contract }) => boundedIdentifier("workflow stage execution plan capability contract capability", contract.capability));
+  if (new Set(contractCapabilities).size !== requiredCapabilities.length || contractCapabilities.some((capability) => !requiredCapabilities.includes(capability))) throw new ArgumentError("workflow stage execution plan capability contracts do not match required capabilities");
+  if (!Array.isArray(value.capability_contract_digests) || value.capability_contract_digests.length !== contracts.length) throw new ArgumentError("workflow stage execution plan capability contract digests are malformed");
+  const capabilityContractDigests = value.capability_contract_digests.map((item, index) => boundedDigest(`workflow stage execution plan capability_contract_digests[${index}]`, item));
+  if (JSON.stringify(capabilityContractDigests) !== JSON.stringify(contracts.map(({ contractDigest }) => contractDigest))) throw new ArgumentError("workflow stage execution plan capability contract digests are inconsistent");
+  const descriptor = {
+    schema: AUTONOMOUS_WORKFLOW_STAGE_PLAN_SCHEMA,
+    domain,
+    workflow_id: workflowId,
+    workflow_digest: workflowDigest,
+    stage_id: stageId,
+    stage_objective: stageObjective,
+    required_capabilities: requiredCapabilities,
+    tool_capabilities: toolCapabilities,
+    capability_contracts: contracts.map(({ contract }) => contract as unknown as AutonomousCapabilityContract),
+    required_model_capabilities: requiredModelCapabilities,
+    evidence_outputs: evidenceOutputs,
+    evaluator_signals: evaluatorSignals,
+    active_tool_names: activeToolNames,
+    selected_tool_names: selectedToolNames,
+    withheld_tool_names: withheldToolNames,
+    approval_required: value.approval_required,
+    read_only: value.read_only,
+    execution_posture: posture as AutonomousWorkflowStageExecutionPlan["execution_posture"],
+    source_plan_digest: sourcePlanDigest,
+  };
+  const stagePlanDigest = boundedDigest("workflow stage execution plan stage_plan_digest", value.stage_plan_digest);
+  if (await digestJson(descriptor) !== stagePlanDigest) throw new ArgumentError("workflow stage execution plan digest does not match its contents");
+
+  const validated: AutonomousWorkflowStageExecutionPlan = {
+    ...descriptor,
+    stage_plan_digest: stagePlanDigest,
+    capability_contract_digests: capabilityContractDigests,
+    credential_posture: "caller_supplied_opaque_handles; no_keys_or_handles",
+    authority_posture: "metadata_only; stage_plan_does_not_grant_authority",
+  };
+  const reviewedStage = options.stage ?? options.blueprint?.workflow.stages.find((candidate) => candidate.id === stageId);
+  if (reviewedStage !== undefined) {
+    if (await digestJson(reviewedStage) !== await digestJson({ id: stageId, objective: stageObjective, required_capabilities: requiredCapabilities, depends_on: reviewedStage.depends_on, evidence_outputs: evidenceOutputs, evaluator_signals: evaluatorSignals, read_only: value.read_only, approval_required: value.approval_required })) throw new ArgumentError("workflow stage execution plan stage contract does not match");
+  }
+  if (options.blueprint !== undefined) {
+    const blueprint = options.blueprint;
+    if (!isObject(blueprint) || blueprint.schema !== "bioprism-python-autonomous-task/0.1") throw new ArgumentError("workflow stage execution plan blueprint binding is invalid");
+    if (domain !== blueprint.domain_profile.domain || workflowId !== blueprint.workflow.workflow_id || workflowDigest !== blueprint.workflow.workflow_digest) throw new ArgumentError("workflow stage execution plan blueprint workflow does not match");
+    if (JSON.stringify(requiredModelCapabilities) !== JSON.stringify(blueprint.required_capabilities)) throw new ArgumentError("workflow stage execution plan blueprint model capabilities do not match");
+    if (sourcePlanDigest !== null && sourcePlanDigest !== blueprint.plan.plan_digest) throw new ArgumentError("workflow stage execution plan source plan does not match the blueprint");
+    const blueprintStage = blueprint.workflow.stages.find((candidate) => candidate.id === stageId);
+    if (!blueprintStage) throw new ArgumentError("workflow stage execution plan stage is outside the blueprint workflow");
+    if (options.stage !== undefined && await digestJson(options.stage) !== await digestJson(blueprintStage)) throw new ArgumentError("workflow stage execution plan supplied stage does not match the blueprint");
+  }
+  return structuredClone(validated);
+}
+
 function taskRelevanceTokens(task: string): string[] {
   return [...new Set(normalizeRouteText(task).split(" ").filter((token) => token.length >= 3))].slice(0, 128);
 }
@@ -3369,18 +4742,19 @@ function compareCapabilityScores(left: readonly number[], right: readonly number
 export async function compileAutonomousPlan(
   profile: AutonomousDomainProfile,
   task: string,
-  options: { taskDigest?: string; activeToolNames?: readonly string[]; selectedToolNames?: readonly string[]; selectedToolOrder?: readonly string[]; responseContractDigest?: string } = {},
+  options: { taskDigest?: string; capability?: string; activeToolNames?: readonly string[]; selectedToolNames?: readonly string[]; selectedToolOrder?: readonly string[]; responseContractDigest?: string; maxParallelism?: number } = {},
 ): Promise<AutonomousPlan> {
   const taskText = boundedText("autonomous plan objective", task, 32_000);
   const taskDigest = options.taskDigest ?? await digestJson({ task: taskText });
   const intentTaskDigest = await digestJson({ task: taskText });
   const taskLens = autonomousDomainTaskLens(profile.domain);
   const taskPolicy = autonomousDomainPolicy(profile.domain);
+  const effectiveCapability = options.capability ?? profile.default_capability;
   const taskIntent = inferAutonomousTaskIntent({
     task: taskText,
     taskDigest: intentTaskDigest,
     domain: profile.domain,
-    capability: profile.default_capability,
+    capability: effectiveCapability,
     riskClass: profile.risk_class,
     workflowId: profile.workflow.workflow_id,
     lens: taskLens,
@@ -3409,12 +4783,35 @@ export async function compileAutonomousPlan(
       id: stage.id,
       objective: stage.objective,
       tool: binding?.name ?? "provider.invoke",
-      arguments: { domain: profile.domain, capability: profile.default_capability, stage_id: stage.id, task_digest: taskDigest, task_lens_id: taskLens.lens_id, task_lens_digest: taskLens.lens_digest, task_intent_id: taskIntent.intent_id, task_intent_digest: taskIntent.intent_digest, task_intent_action_mode: taskIntent.action_mode, task_intent_requested_effect: taskIntent.requested_effect, task_intent_evidence_mode: taskIntent.evidence_mode, task_intent_ambiguity_flags: [...taskIntent.ambiguity_flags], task_decision_id: taskDecision.decision_id, task_decision_digest: taskDecision.decision_digest, task_decision_posture: taskDecision.posture, task_decision_recommended_path: taskDecision.recommended_path, task_decision_approval_requirements: [...taskDecision.approval_requirements], task_decision_review_reasons: [...taskDecision.review_reasons] },
+      arguments: { domain: profile.domain, capability: effectiveCapability, stage_id: stage.id, task_digest: taskDigest, task_lens_id: taskLens.lens_id, task_lens_digest: taskLens.lens_digest, task_intent_id: taskIntent.intent_id, task_intent_digest: taskIntent.intent_digest, task_intent_action_mode: taskIntent.action_mode, task_intent_requested_effect: taskIntent.requested_effect, task_intent_evidence_mode: taskIntent.evidence_mode, task_intent_ambiguity_flags: [...taskIntent.ambiguity_flags], task_decision_id: taskDecision.decision_id, task_decision_digest: taskDecision.decision_digest, task_decision_posture: taskDecision.posture, task_decision_recommended_path: taskDecision.recommended_path, task_decision_approval_requirements: [...taskDecision.approval_requirements], task_decision_review_reasons: [...taskDecision.review_reasons] },
       depends_on: [...stage.depends_on],
       effect,
       estimated_cost: index + 1,
     };
   });
+  const maxParallelism = options.maxParallelism ?? 4;
+  if (!Number.isSafeInteger(maxParallelism) || maxParallelism < 1 || maxParallelism > 8) throw new ArgumentError("autonomous plan maxParallelism must be a safe integer in [1, 8]");
+  const waveById = new Map<string, number>();
+  const criticalCostById = new Map<string, number>();
+  const dependencyWaves: string[][] = [];
+  for (const step of steps) {
+    const dependencyWave = step.depends_on.reduce((maximum, dependency) => {
+      const dependencyWaveIndex = waveById.get(dependency);
+      if (dependencyWaveIndex === undefined) throw new ArgumentError(`autonomous plan dependency is not closed or ordered: ${step.id} -> ${dependency}`);
+      return Math.max(maximum, dependencyWaveIndex + 1);
+    }, 0);
+    const dependencyCost = step.depends_on.reduce((maximum, dependency) => Math.max(maximum, criticalCostById.get(dependency) ?? 0), 0);
+    waveById.set(step.id, dependencyWave);
+    criticalCostById.set(step.id, dependencyCost + step.estimated_cost);
+    while (dependencyWaves.length <= dependencyWave) dependencyWaves.push([]);
+    dependencyWaves[dependencyWave]!.push(step.id);
+  }
+  const executionWaves = dependencyWaves.flatMap((wave) => {
+    const chunks: string[][] = [];
+    for (let index = 0; index < wave.length; index += maxParallelism) chunks.push(wave.slice(index, index + maxParallelism));
+    return chunks;
+  });
+  const criticalPathCost = Math.max(0, ...steps.map((step) => criticalCostById.get(step.id) ?? 0));
   const descriptor = {
     schema: AUTONOMOUS_PLAN_SCHEMA,
     objective: taskText,
@@ -3422,6 +4819,11 @@ export async function compileAutonomousPlan(
     workflow_digest: profile.workflow.workflow_digest,
     ordered_step_ids: stages.map((stage) => stage.id),
     steps,
+    execution_waves: executionWaves,
+    critical_path_cost: criticalPathCost,
+    max_parallelism: maxParallelism,
+    estimated_parallel_rounds: executionWaves.length,
+    peak_parallelism: Math.max(0, ...executionWaves.map((wave) => wave.length)),
     allowed_tools: ["provider.invoke", ...[...active].sort()],
     estimated_cost: steps.reduce((sum, step) => sum + step.estimated_cost, 0),
     requires_approval: true,
@@ -3524,7 +4926,7 @@ export class AutonomousDomainToolRegistry {
    */
   async planForTask(
     task: string,
-    options: { domains?: readonly string[]; capability?: string; allowedTools?: readonly string[]; maxTools?: number; readOnlyOnly?: boolean; toolSelectionState?: AutonomousToolSelectionState | null; exploration?: number } = {},
+    options: { domains?: readonly string[]; capability?: string; allowedTools?: readonly string[]; maxTools?: number; readOnlyOnly?: boolean; maxRiskClass?: AutonomousToolRiskClass; toolSelectionState?: AutonomousToolSelectionState | null; exploration?: number } = {},
   ): Promise<AutonomousCapabilityPlan> {
     const taskText = boundedText("capability plan task", task, 32_000);
     const domains = options.domains === undefined ? this.profiles.map((profile) => profile.domain) : [...options.domains].map((domain) => boundedIdentifier("capability plan domain", domain) as AutonomousDomainName);
@@ -3535,6 +4937,8 @@ export class AutonomousDomainToolRegistry {
     const requestedCapabilities = options.capability === undefined ? [] : [boundedText("capability plan capability", options.capability, 128)];
     const allowedTools = options.allowedTools === undefined ? null : new Set([...options.allowedTools].map((name) => boundedIdentifier("capability plan allowed tool", name)));
     if (allowedTools && allowedTools.size > 512) throw new ArgumentError("capability plan allowed tools exceed their bound");
+    const maxRiskClass = options.maxRiskClass ?? "high_impact_effect";
+    if (!AUTONOMOUS_TOOL_RISK_ORDER.includes(maxRiskClass)) throw new ArgumentError("capability plan maxRiskClass is unsupported");
     const toolSelectionState = normalizeAutonomousToolSelectionState(options.toolSelectionState);
     const exploration = options.exploration ?? 0.15;
     boundedToolSelectionNumber("capability plan exploration", exploration, 0, 1);
@@ -3562,6 +4966,7 @@ export class AutonomousDomainToolRegistry {
            (options.readOnlyOnly !== true || binding.read_only)
            && (!stage.read_only || binding.read_only)
            && (stage.approval_required || !binding.approval_required)
+           && autonomousToolRiskAllowed(binding.risk_class, maxRiskClass)
            && (allowedTools === null || allowedTools.has(binding.name))
            && !toolSelectionArmFor(toolSelectionState, profile.domain, stage, binding)?.disabled
          ));
@@ -3608,13 +5013,25 @@ export class AutonomousDomainToolRegistry {
           ? "provider_only"
             : row.liveBindings.length === 0
               ? "catalogue_missing"
-              : allowedTools !== null && row.eligible.length === 0
+              : allowedTools !== null && row.eligible.length === 0 && row.liveBindings.every((binding) => !allowedTools.has(binding.name))
                 ? "activation_required"
+                : row.liveBindings.every((binding) => !autonomousToolRiskAllowed(binding.risk_class, maxRiskClass))
+                  ? "risk_budget_blocked"
                 : row.liveBindings.some((binding) => toolSelectionArmFor(toolSelectionState, row.domain, row.stage, binding)?.disabled)
                   ? "learning_disabled"
                 : "capacity_limited";
       const selectedArm = selected ? toolSelectionArmFor(toolSelectionState, row.domain, row.stage, selected) : null;
-      return { domain: row.domain, stage_id: row.stage.id, required_capabilities: [...row.stage.required_capabilities], candidate_tool_names: row.liveBindings.map((binding) => binding.name).sort(), selected_tool: selected?.name ?? null, selected_capability: selected?.capability ?? null, approval_required: selected?.approval_required ?? false, selected_arm_id: selectedArm?.arm_id ?? null, selection_utility: selected ? toolSelectionUtility(selectedArm, totalPulls, exploration) : null, status };
+      const candidateRanking = capabilityCandidateRanking(tokens, requestedCapabilities, row.stage, row.liveBindings, row.domain, toolSelectionState, totalPulls, exploration, allowedTools, options.readOnlyOnly === true, maxRiskClass);
+      const selectedRank = selected === undefined ? null : candidateRanking.find((candidate) => candidate.tool === selected.name)?.rank ?? null;
+      const selectionRationale = selected
+        ? selectedRank === 1 ? "highest_ranked_eligible_candidate" as const : "portfolio_reuse_lower_rank_candidate" as const
+        : status === "provider_only" ? "no_reviewed_binding_for_stage" as const
+          : status === "catalogue_missing" ? "no_live_catalogue_binding" as const
+            : status === "activation_required" ? "activation_or_allowlist_required" as const
+              : status === "learning_disabled" ? "all_candidates_learning_disabled" as const
+                : status === "risk_budget_blocked" ? "risk_budget_excluded_all_candidates" as const
+                  : "portfolio_capacity_limit" as const;
+      return { domain: row.domain, stage_id: row.stage.id, required_capabilities: [...row.stage.required_capabilities], candidate_tool_names: row.liveBindings.map((binding) => binding.name).sort(), selected_tool: selected?.name ?? null, selected_capability: selected?.capability ?? null, approval_required: selected?.approval_required ?? false, selected_arm_id: selectedArm?.arm_id ?? null, selection_utility: selected ? toolSelectionUtility(selectedArm, totalPulls, exploration) : null, candidate_ranking: candidateRanking, selection_rationale: selectionRationale, status };
     });
     const allLiveBindings = selectedProfiles.flatMap((profile) => this.profile(profile.domain).bindings.filter((binding) => this.has(binding.name)));
     const bindingDomains = new Map<string, Set<AutonomousDomainName>>();
@@ -3626,11 +5043,12 @@ export class AutonomousDomainToolRegistry {
     const omissions: AutonomousCapabilityPlanOmission[] = [...bindingByName.keys()].filter((name) => !selectedNames.has(name)).sort().slice(0, 512).map((name) => {
       const binding = bindingByName.get(name)!;
       const disabled = selectedProfiles.some((profile) => profile.workflow.stages.some((stage) => bindingSupportsStage(profile, stage, binding) && toolSelectionArmFor(toolSelectionState, profile.domain, stage, binding)?.disabled));
-      return { name, domains: [...(bindingDomains.get(name) ?? new Set())].sort(), capability: binding.capability, reason: allowedTools !== null && !allowedTools.has(name) ? "activation_required" : disabled ? "learning_disabled" : preferred.has(name) ? "capacity_limited" : "not_required_for_reviewed_workflow" };
+      return { name, domains: [...(bindingDomains.get(name) ?? new Set())].sort(), capability: binding.capability, reason: allowedTools !== null && !allowedTools.has(name) ? "activation_required" : !autonomousToolRiskAllowed(binding.risk_class, maxRiskClass) ? "risk_budget_limited" : disabled ? "learning_disabled" : preferred.has(name) ? "capacity_limited" : "not_required_for_reviewed_workflow" };
     });
     const missingTools = [...new Set(selectedProfiles.flatMap((profile) => this.profile(profile.domain).bindings.filter((binding) => !this.has(binding.name)).map((binding) => binding.name)))].sort();
     const selectionLearning = { schema: AUTONOMOUS_TOOL_SELECTION_STATE_SCHEMA, generation: toolSelectionState.generation, state_digest: await digestJson(toolSelectionState), exploration, total_pulls: totalPulls, known_arm_count: toolSelectionState.arms.length, disabled_arm_count: toolSelectionState.arms.filter((arm) => arm.disabled).length, retention: "value_only;tool_arguments_outputs_prompts_and_credentials_never_returned" as const };
-    const descriptor = { schema: AUTONOMOUS_CAPABILITY_PLAN_SCHEMA, task_digest: await digestJson({ task: taskText }), catalogue_digest: this.catalogue.digest, profile_digest: this.digest, domains: [...domains], requested_capabilities: requestedCapabilities, max_tools: maxTools, selected_tool_names: selectedToolNames, selected_tool_order: selectedToolOrder, selected_bindings: selectedBindings, approval_required_tools: selectedBindings.filter((binding) => binding.approval_required).map((binding) => binding.name).sort(), missing_tools: missingTools, omissions, coverage, selection_learning: selectionLearning, selection_policy: AUTONOMOUS_TOOL_SELECTION_POLICY, execution: "metadata_only; no_provider_or_tool_calls" as const, authorization: "selection_does_not_authorize_tools_or_effects" as const, secret_material: "never_returned" as const };
+    const selectionConstraints = { max_risk_class: maxRiskClass, read_only_only: options.readOnlyOnly === true, allowed_tools_digest: allowedTools === null ? null : await digestJson([...allowedTools].sort()), policy: AUTONOMOUS_TOOL_SELECTION_POLICY };
+    const descriptor = { schema: AUTONOMOUS_CAPABILITY_PLAN_SCHEMA, task_digest: await digestJson({ task: taskText }), catalogue_digest: this.catalogue.digest, profile_digest: this.digest, domains: [...domains], requested_capabilities: requestedCapabilities, max_tools: maxTools, selected_tool_names: selectedToolNames, selected_tool_order: selectedToolOrder, selected_bindings: selectedBindings, approval_required_tools: selectedBindings.filter((binding) => binding.approval_required).map((binding) => binding.name).sort(), missing_tools: missingTools, omissions, coverage, selection_learning: selectionLearning, selection_constraints: selectionConstraints, selection_policy: AUTONOMOUS_TOOL_SELECTION_POLICY, execution: "metadata_only; no_provider_or_tool_calls" as const, authorization: "selection_does_not_authorize_tools_or_effects" as const, secret_material: "never_returned" as const };
     return { ...descriptor, plan_digest: await digestJson(descriptor) };
   }
 
@@ -3663,6 +5081,7 @@ export class AutonomousDomainToolRegistry {
     if (!stage) throw new ProviderRuntimeError(`autonomous tool stage ${context.stage_id} is not in the reviewed workflow`);
     const binding = this.binding(name, [context.domain]);
     if (!binding) throw new ProviderRuntimeError(`tool ${name} is not approved for the selected autonomous domain`);
+    if (context.selected_tool_names !== undefined && !context.selected_tool_names.includes(name)) throw new ProviderRuntimeError(`tool ${name} is outside the selected stage execution portfolio`);
     if (!bindingSupportsStage(workflowProfile, stage, binding)) throw new ProviderRuntimeError(`tool ${name} does not satisfy workflow stage ${stage.id}`);
     if (stage.read_only && !binding.read_only) throw new ProviderRuntimeError(`effectful tool ${name} is not permitted by read-only workflow stage ${stage.id}`);
     if (!stage.approval_required && binding.approval_required) throw new ProviderRuntimeError(`tool ${name} requires approval not declared by workflow stage ${stage.id}`);
@@ -3685,13 +5104,31 @@ function assertSafeToolArguments(value: unknown, depth = 0): void {
 
 function normalizeWorkflowToolContext(value: unknown): AutonomousWorkflowToolContext {
   if (!isObject(value)) throw new ProviderRuntimeError("autonomous workflow tool context is malformed");
-  if (Object.keys(value).some((key) => !["domain", "workflow_id", "workflow_digest", "stage_id"].includes(key))) throw new ProviderRuntimeError("autonomous workflow tool context contains unsupported fields");
+  if (Object.keys(value).some((key) => !["domain", "workflow_id", "workflow_digest", "stage_id", "stage_plan_digest", "stage_contract_digest", "selected_tool_names"].includes(key))) throw new ProviderRuntimeError("autonomous workflow tool context contains unsupported fields");
   if (!AUTONOMOUS_DOMAIN_NAMES.includes(value.domain as AutonomousDomainName)) throw new ProviderRuntimeError("autonomous workflow tool context domain is unsupported");
   const workflowId = boundedIdentifier("autonomous workflow tool context workflow_id", value.workflow_id);
   const workflowDigest = value.workflow_digest;
   if (typeof workflowDigest !== "string" || !/^[0-9a-f]{64}$/.test(workflowDigest)) throw new ProviderRuntimeError("autonomous workflow tool context workflow_digest is malformed");
   const stageId = boundedIdentifier("autonomous workflow tool context stage_id", value.stage_id);
-  return { domain: value.domain as AutonomousDomainName, workflow_id: workflowId, workflow_digest: workflowDigest, stage_id: stageId };
+  const stagePlanDigest = value.stage_plan_digest === undefined ? undefined : boundedDigest("autonomous workflow tool context stage_plan_digest", value.stage_plan_digest);
+  const stageContractDigest = value.stage_contract_digest === undefined ? undefined : boundedDigest("autonomous workflow tool context stage_contract_digest", value.stage_contract_digest);
+  const selectedToolNames = value.selected_tool_names === undefined
+    ? undefined
+    : (() => {
+      if (!Array.isArray(value.selected_tool_names) || value.selected_tool_names.length > 512) throw new ProviderRuntimeError("autonomous workflow tool context selected_tool_names exceed their bound");
+      const names = value.selected_tool_names.map((name, index) => boundedIdentifier(`autonomous workflow tool context selected_tool_names[${index}]`, name));
+      if (new Set(names).size !== names.length) throw new ProviderRuntimeError("autonomous workflow tool context selected_tool_names contain duplicates");
+      return names;
+    })();
+  return {
+    domain: value.domain as AutonomousDomainName,
+    workflow_id: workflowId,
+    workflow_digest: workflowDigest,
+    stage_id: stageId,
+    ...(stagePlanDigest === undefined ? {} : { stage_plan_digest: stagePlanDigest }),
+    ...(stageContractDigest === undefined ? {} : { stage_contract_digest: stageContractDigest }),
+    ...(selectedToolNames === undefined ? {} : { selected_tool_names: selectedToolNames }),
+  };
 }
 
 /** Execute only exact live tools, with schema preflight and approval for every effectful row. */
@@ -3712,7 +5149,7 @@ export class AutonomousDomainToolRuntime {
     this.effectBoundary = options.effectBoundary;
   }
 
-  async authorizeAndExecute(calls: readonly ProviderToolCall[], options: { domains: readonly string[]; approveEffects?: boolean; execution?: AutonomousExecutionController; effectBoundary?: AutonomousEffectBoundary; workflowContext?: AutonomousWorkflowToolContext } ): Promise<ProviderToolResult[]> {
+  async authorizeAndExecute(calls: readonly ProviderToolCall[], options: { domains: readonly string[]; approveEffects?: boolean; execution?: AutonomousExecutionController; effectBoundary?: AutonomousEffectBoundary; workflowContext?: AutonomousWorkflowToolContext; authorizationContext?: AutonomousAuthorizationContext } ): Promise<ProviderToolResult[]> {
     if (!Array.isArray(calls) || calls.length > 128) throw new ProviderRuntimeError("autonomous tool call count is outside its bounds");
     const workflowContext = options.workflowContext === undefined ? null : normalizeWorkflowToolContext(options.workflowContext);
     if (workflowContext && !options.domains.includes(workflowContext.domain)) throw new ProviderRuntimeError("autonomous workflow tool context domain is outside the selected domains");
@@ -3726,11 +5163,14 @@ export class AutonomousDomainToolRuntime {
       const makeReceipt = (extra: JsonObject = {}): AutonomousDomainToolExecutionReceipt => ({
         schema: AUTONOMOUS_DOMAIN_TOOL_REGISTRY_SCHEMA,
         receipt_kind: "tool_execution_receipt",
+        call_id: call.id,
+        execution_id: options.execution?.state.execution_id ?? null,
         domain: workflowContext?.domain ?? (planned && "binding" in planned ? planned.binding.domains[0] ?? null : null),
         workflow_id: workflowContext?.workflow_id ?? null,
         workflow_digest: workflowContext?.workflow_digest ?? null,
         stage_id: workflowContext?.stage_id ?? null,
         stage_contract_digest: stageContractDigest,
+        ...(workflowContext?.stage_plan_digest === undefined ? {} : { stage_plan_digest: workflowContext.stage_plan_digest }),
         required_evidence_outputs: [...requiredEvidenceOutputs],
         evidence_status: "tool_execution_only",
         does_not_claim: ["tool dispatch is not proof that the domain task succeeded", "a result digest is not a claim about external-world truth", "stage evidence outputs still require evaluator review"],
@@ -3748,6 +5188,7 @@ export class AutonomousDomainToolRuntime {
           requiredEvidenceOutputs = [...stagePlanned.stage.evidence_outputs];
           stageApprovalRequired = stagePlanned.stage.approval_required;
           stageContractDigest = await autonomousWorkflowStageContractDigest(stagePlanned.workflow, stagePlanned.stage.id);
+          if (workflowContext.stage_contract_digest !== undefined && workflowContext.stage_contract_digest !== stageContractDigest) throw new ProviderRuntimeError("autonomous workflow stage contract is stale or does not match the reviewed workflow");
         } else {
           planned = this.registry.callPlan(call.name, call.arguments, options.domains);
         }
@@ -3756,19 +5197,34 @@ export class AutonomousDomainToolRuntime {
         let approved = executable.binding.read_only && !executable.binding.approval_required && !stageApprovalRequired;
         if (!approved && options.approveEffects === true) approved = this.approver ? await this.approver(executable.binding, call) : true;
         if (!approved) {
-          const receipt = makeReceipt({ status: "approval_required", schema_digest: executable.schemaDigest, effect: executable.binding.risk_class });
+          const receipt = makeReceipt({ status: "approval_required", schema_digest: executable.schemaDigest, arguments_digest: await digestJson(executable.arguments), effect: executable.binding.risk_class });
           this.receipts.push(receipt);
           results.push({ callId: call.id, approved: false, isError: true, content: { status: "approval_required", tool: call.name, receipt_digest: await digestJson(receipt) } });
           continue;
         }
         const effectBoundary = options.effectBoundary ?? this.effectBoundary;
-        const value = effectBoundary && !executable.binding.read_only
-          ? await effectBoundary.execute({ execution_id: options.execution?.state.execution_id ?? null, tool: call.name, call_id: call.id, risk_class: executable.binding.risk_class, arguments: executable.arguments }, async (effectContext) => this.executor(executable.binding, executable.arguments, effectContext), { execution: options.execution })
-          : await this.executor(executable.binding, executable.arguments);
+        if (options.authorizationContext && executable.binding.read_only) {
+          options.authorizationContext.authorizeOperation({
+            operation: "tool_execution",
+            domains: options.domains,
+            capability: executable.binding.capability,
+            riskClass: executable.binding.risk_class,
+            resourceDigest: await digestJson({ tool: executable.binding.name, call_id: call.id, arguments_digest: await digestJson(executable.arguments) }),
+          });
+        }
+        let value: JsonValue;
+        if (effectBoundary && !executable.binding.read_only) {
+          value = await effectBoundary.execute({ execution_id: options.execution?.state.execution_id ?? null, tool: call.name, call_id: call.id, risk_class: executable.binding.risk_class, arguments: executable.arguments }, async (effectContext) => this.executor(executable.binding, executable.arguments, effectContext), { execution: options.execution, authorizationContext: options.authorizationContext, authorizationDomains: options.domains, authorizationCapability: executable.binding.capability });
+        } else {
+          if (options.authorizationContext && !executable.binding.read_only) {
+            options.authorizationContext.authorizeOperation({ operation: "effect_dispatch", domains: options.domains, capability: executable.binding.capability, riskClass: executable.binding.risk_class, resourceDigest: await digestJson({ tool: executable.binding.name, call_id: call.id, arguments_digest: await digestJson(executable.arguments) }) });
+          }
+          value = await this.executor(executable.binding, executable.arguments);
+        }
         assertSafeToolArguments(value);
         const encoded = canonicalJson(value);
         if (bytes(encoded) > 1_000_000) throw new ProviderRuntimeError("autonomous tool result exceeds its bounded size");
-        const receipt = makeReceipt({ status: "executed", schema_digest: executable.schemaDigest, result_digest: await digestJson(value), effect: executable.binding.risk_class });
+        const receipt = makeReceipt({ status: "executed", schema_digest: executable.schemaDigest, arguments_digest: await digestJson(executable.arguments), result_digest: await digestJson(value), effect: executable.binding.risk_class });
         this.receipts.push(receipt);
         results.push({ callId: call.id, approved: true, content: value });
       } catch (unknownError) {
@@ -3777,6 +5233,12 @@ export class AutonomousDomainToolRuntime {
           const receipt = makeReceipt({ status: "reconciliation_required", effect_id: unknownError.effectId, idempotency_key: unknownError.idempotencyKey });
           this.receipts.push(receipt);
           results.push({ callId: call.id, approved: false, isError: true, content: { status: "reconciliation_required", tool: call.name, effect_id: unknownError.effectId, idempotency_key: unknownError.idempotencyKey, receipt_digest: await digestJson(receipt), secret_material: "never_returned" } });
+          continue;
+        }
+        if (unknownError instanceof AutonomousAuthorizationError) {
+          const receipt = makeReceipt({ status: "authorization_required" });
+          this.receipts.push(receipt);
+          results.push({ callId: call.id, approved: false, isError: true, content: { status: "authorization_required", tool: call.name, secret_material: "never_returned", receipt_digest: await digestJson(receipt) } });
           continue;
         }
         const receipt = makeReceipt({ status: "execution_failed", error_class: error.constructor.name });
@@ -3846,6 +5308,13 @@ function deterministicBanditDrawWithCounter(seed: number, generation: number, la
   return (Number(firstWord) + 0.5) / (Number(0xffff_ffff_ffff_ffffn) + 1);
 }
 
+/**
+ * Evaluator-equivalent observations used to warm-start an arm from its static utility.
+ * Keeping this explicit and immutable prevents a cold-start decision from depending on hidden
+ * process state, while still letting real evaluator feedback take over after a small sample.
+ */
+const AUTONOMOUS_LEARNER_PRIOR_PSEUDO_PULLS = 4;
+
 function standardNormalFromUniforms(first: number, second: number): number {
   return Math.sqrt(-2 * Math.log(first)) * Math.cos(2 * Math.PI * second);
 }
@@ -3879,19 +5348,47 @@ function deterministicBetaSample(alpha: number, beta: number, seed: number, gene
   return Number.isFinite(total) && total > 0 ? Math.min(1, Math.max(0, left / total)) : alpha / (alpha + beta);
 }
 
-function thompsonPosterior(arm: BrainBanditArm | undefined, policy: BrainBanditPolicy, seed: number, generation: number, armId: string): { alpha: number; beta: number; sample: number; sampledReward: number } {
+function thompsonPosterior(
+  arm: BrainBanditArm | undefined,
+  policy: BrainBanditPolicy,
+  seed: number,
+  generation: number,
+  armId: string,
+  priorReward?: number,
+): { alpha: number; beta: number; sample: number; sampledReward: number } {
   const minimum = policy.min_reward ?? -1;
   const maximum = policy.max_reward ?? 1;
   const span = maximum - minimum;
   const pulls = arm?.pulls ?? 0;
   const rewardSum = arm?.reward_sum ?? 0;
   const failures = arm?.failures ?? 0;
-  const normalizedSuccessMass = pulls === 0 ? 0 : Math.min(pulls, Math.max(0, (rewardSum - minimum * pulls) / span));
-  const normalizedFailureMass = Math.max(0, pulls - normalizedSuccessMass + (policy.failure_penalty ?? 0.25) * failures);
+  const priorMass = priorReward === undefined ? 0 : AUTONOMOUS_LEARNER_PRIOR_PSEUDO_PULLS;
+  const normalizedPriorSuccessMass = priorReward === undefined
+    ? 0
+    : priorMass * Math.min(1, Math.max(0, (priorReward - minimum) / span));
+  const observedSuccessMass = pulls === 0 ? 0 : Math.min(pulls, Math.max(0, (rewardSum - minimum * pulls) / span));
+  const normalizedSuccessMass = normalizedPriorSuccessMass + observedSuccessMass;
+  const normalizedFailureMass = Math.max(0, priorMass - normalizedPriorSuccessMass + pulls - observedSuccessMass + (policy.failure_penalty ?? 0.25) * failures);
   const alpha = 1 + normalizedSuccessMass;
   const beta = 1 + normalizedFailureMass;
   const sample = deterministicBetaSample(alpha, beta, seed, generation, armId);
   return { alpha, beta, sample, sampledReward: minimum + sample * span };
+}
+
+function autonomousLearnerPriorReward(staticBaseScore: number, weights: AutonomousSelectionWeights, policy: BrainBanditPolicy): number {
+  // Selection weights are coefficients rather than probabilities. Normalize by their static
+  // magnitude before mapping utility into the configured evaluator-reward range; otherwise a
+  // caller using weights above 1 could permanently drown out online feedback.
+  const staticWeightScale = Math.max(1, weights.quality + weights.reliability + weights.cost + weights.latency);
+  const normalizedUtility = Math.max(-1, Math.min(1, staticBaseScore / staticWeightScale));
+  const minimum = policy.min_reward ?? -1;
+  const maximum = policy.max_reward ?? 1;
+  return minimum + ((normalizedUtility + 1) / 2) * (maximum - minimum);
+}
+
+function autonomousLearnerAdaptedMean(priorReward: number, meanReward: number, pulls: number): number {
+  return (priorReward * AUTONOMOUS_LEARNER_PRIOR_PSEUDO_PULLS + meanReward * pulls)
+    / (AUTONOMOUS_LEARNER_PRIOR_PSEUDO_PULLS + pulls);
 }
 
 function learnerContext(request: AutonomousSelectionRequest): { context_digest: string; context: BrainBanditContext } | null {
@@ -3958,17 +5455,32 @@ export class AutonomousOnlineLearner {
     return this.snapshot();
   }
 
-  /** Select the best eligible model using persisted pulls/rewards; deterministic ties are by arm id. */
+  /**
+   * Select the best eligible model using static utility plus caller-owned evaluator evidence.
+   * Static utility is treated as a bounded four-pull prior, while contextual, global, and
+   * request-supplied observations progressively adapt the decision; deterministic ties are by
+   * arm id.
+   */
   select(request: AutonomousSelectionRequest): AutonomousSelectionDecision {
     validateOnlineSelectionConstraints(request);
     const canonicalRanking = rankAutonomousModels(request);
+    // The canonical ranker intentionally mixes caller-supplied observations into its score.
+    // Keep that ranking for hard gates and audit context, but derive the learner prior from a
+    // score with no observations so the same evaluator evidence is not counted twice.
+    const selectionWeights = normalizeAutonomousSelectionWeights(request.weights);
+    const staticRanking = rankAutonomousModels({ ...request, weights: selectionWeights, observations: [] });
+    const staticRankingByArm = new Map(staticRanking.map((row) => [`${row.provider}/${row.model}`, row]));
+    const suppliedObservations = normalizeAutonomousModelObservations(request.observations);
+    const suppliedObservationByArm = new Map(suppliedObservations.map((observation) => [observation.arm_id, observation]));
     const context = learnerContext(request);
     const contextualState = context ? this.stateValue.contextual_states?.find((state) => state.context_digest === context.context_digest) : undefined;
-    const observationFor = (armId: string): { arm: BrainBanditArm | undefined; source: "contextual" | "global" | "prior" } => {
+    const observationFor = (armId: string): { arm: BrainBanditArm | undefined; source: "contextual" | "global" | "request" | "prior" } => {
       const contextualArm = contextualState?.arms.find((arm) => arm.arm_id === armId);
       if (contextualArm) return { arm: contextualArm, source: "contextual" };
       const globalArm = this.stateValue.arms.find((arm) => arm.arm_id === armId);
-      if (globalArm) return { arm: globalArm, source: context ? "global" : "prior" };
+      if (globalArm) return { arm: globalArm, source: context ? "global" : "global" };
+      const suppliedArm = suppliedObservationByArm.get(armId);
+      if (suppliedArm) return { arm: suppliedArm, source: "request" };
       return { arm: undefined, source: "prior" };
     };
     const eligible = canonicalRanking.filter((row) => row.eligible && !observationFor(`${row.provider}/${row.model}`).arm?.disabled);
@@ -3980,15 +5492,19 @@ export class AutonomousOnlineLearner {
       const arm = observation.arm;
       const pulls = arm?.pulls ?? 0;
       const mean = pulls ? (arm?.reward_sum ?? 0) / pulls : 0;
+      const staticRow = staticRankingByArm.get(armId);
+      const staticBaseScore = staticRow?.base_score ?? 0;
+      const priorReward = autonomousLearnerPriorReward(staticBaseScore, selectionWeights, this.policy);
+      const adaptedMean = autonomousLearnerAdaptedMean(priorReward, mean, pulls);
       const failureRate = pulls ? (arm?.failures ?? 0) / pulls : 0;
-      const posterior = this.policy.strategy === "thompson_sampling" ? thompsonPosterior(arm, this.policy, this.policy.seed ?? 0, this.stateValue.generation ?? 0, armId) : null;
+      const posterior = this.policy.strategy === "thompson_sampling" ? thompsonPosterior(arm, this.policy, this.policy.seed ?? 0, this.stateValue.generation ?? 0, armId, priorReward) : null;
       const bonus = posterior
-        ? posterior.sampledReward - mean
+        ? posterior.sampledReward - adaptedMean
         : this.policy.strategy === "ucb1"
           ? (pulls ? Math.sqrt(Math.log(totalPulls + 1) / pulls) * (this.policy.exploration ?? 0.5) : (this.policy.exploration ?? 0.5))
           : 0;
-      const score = (posterior ? posterior.sampledReward : mean + bonus) - (this.policy.failure_penalty ?? 0.25) * failureRate;
-      return { candidate, armId, pulls, source: observation.source, score, mean, bonus, failureRate, posterior };
+      const score = (posterior ? posterior.sampledReward : adaptedMean + bonus) - (this.policy.failure_penalty ?? 0.25) * failureRate;
+      return { candidate, armId, pulls, source: observation.source, score, mean, adaptedMean, priorReward, staticBaseScore, bonus, failureRate, posterior };
     }).sort((left, right) => right.score - left.score || left.armId.localeCompare(right.armId));
     const explorationDraw = this.policy.strategy === "epsilon_greedy" ? deterministicBanditDraw(this.policy.seed ?? 0, this.stateValue.generation ?? 0, "epsilon") : null;
     const explorationTaken = explorationDraw !== null && explorationDraw < (this.policy.epsilon ?? 0.1);
@@ -3999,7 +5515,7 @@ export class AutonomousOnlineLearner {
       .filter((row) => row.eligible && observationFor(`${row.provider}/${row.model}`).arm?.disabled)
       .map((row) => ({ ...row, eligible: false, reasons: [...row.reasons, "bandit arm is disabled"] }));
     const ranking = [
-      ...scoredEligible.map((row) => ({ provider: row.candidate.provider, model: row.candidate.model, score: Number(row.score.toFixed(12)), eligible: true, reasons: [`arm_id=${row.armId}`, `pulls=${row.pulls}`, `mean_reward=${row.mean.toFixed(6)}`, `failure_rate=${row.failureRate.toFixed(6)}`, `exploration_bonus=${row.bonus.toFixed(6)}`, ...(row.posterior ? [`posterior_alpha=${row.posterior.alpha.toFixed(6)}`, `posterior_beta=${row.posterior.beta.toFixed(6)}`, `posterior_sample=${row.posterior.sample.toFixed(6)}`] : []), `history=${row.source}`, ...(context ? [`context_digest=${context.context_digest}`] : [])] })),
+      ...scoredEligible.map((row) => ({ provider: row.candidate.provider, model: row.candidate.model, score: Number(row.score.toFixed(12)), eligible: true, reasons: [`arm_id=${row.armId}`, `pulls=${row.pulls}`, `mean_reward=${row.mean.toFixed(6)}`, `adapted_mean=${row.adaptedMean.toFixed(6)}`, `static_prior_reward=${row.priorReward.toFixed(6)}`, `static_base_score=${row.staticBaseScore.toFixed(6)}`, `failure_rate=${row.failureRate.toFixed(6)}`, `exploration_bonus=${row.bonus.toFixed(6)}`, ...(row.posterior ? [`posterior_alpha=${row.posterior.alpha.toFixed(6)}`, `posterior_beta=${row.posterior.beta.toFixed(6)}`, `posterior_sample=${row.posterior.sample.toFixed(6)}`] : []), `history=${row.source}`, ...(context ? [`context_digest=${context.context_digest}`] : [])], base_score: Number((row.adaptedMean - (this.policy.failure_penalty ?? 0.25) * row.failureRate).toFixed(12)), exploration_bonus: Number(row.bonus.toFixed(12)), observed_pulls: row.pulls })),
       ...disabledRanking,
       ...canonicalRanking.filter((row) => !row.eligible),
     ];
@@ -4107,6 +5623,50 @@ function cloneBanditState(state: BrainBanditState): BrainBanditState {
   return { schema: typeof state.schema === "string" ? state.schema : "bioprism-brain-bandit-state/0.1", generation: state.generation ?? 0, policy: state.policy ? { ...state.policy } : undefined, arms: state.arms.map((arm) => ({ ...arm })), credited_outcomes: (state.credited_outcomes ?? []).map((receipt) => ({ ...receipt })), ...(contextualStates.length ? { contextual_states: contextualStates.map((contextState) => ({ ...contextState, context: { ...contextState.context }, arms: contextState.arms.map((arm) => ({ ...arm })) })) } : {}) };
 }
 
+/**
+ * Preserve the control-plane's value-only model ranking at the provider boundary.
+ *
+ * The MCP response is remote input even when it comes from the project's own Rust server. Keep
+ * the selected identity bound to the exact local candidate catalogue and reject malformed or
+ * unknown rows before the runtime can expose them as an execution decision. Optional score
+ * components are retained because they are useful for audits, but they never authorize a model.
+ */
+function contextualSelectionRanking(value: unknown, candidates: readonly AutonomousModelCandidate[]): AutonomousModelRanking[] {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value) || value.length > 128) throw new ProviderRuntimeError("contextual brain selector returned a malformed ranking");
+  const candidateById = new Map(candidates.map((candidate) => [`${candidate.provider}/${candidate.model}`, candidate]));
+  const seen = new Set<string>();
+  return value.map((raw, index) => {
+    if (!isObject(raw) || typeof raw.model_id !== "string" || !raw.model_id.trim() || typeof raw.score !== "number" || !Number.isFinite(raw.score) || typeof raw.eligible !== "boolean" || !Array.isArray(raw.reasons) || raw.reasons.length > 64 || raw.reasons.some((reason) => typeof reason !== "string" || !reason.trim())) {
+      throw new ProviderRuntimeError(`contextual brain selector returned a malformed ranking row ${index}`);
+    }
+    const modelId = raw.model_id;
+    const candidate = candidateById.get(modelId);
+    if (!candidate) throw new ProviderRuntimeError(`contextual brain selector returned an unknown model ${modelId}`);
+    if (seen.has(modelId)) throw new ProviderRuntimeError(`contextual brain selector returned duplicate model ${modelId}`);
+    seen.add(modelId);
+    const optionalMetric = (name: string): number | undefined => {
+      const metric = raw[name];
+      if (metric === undefined) return undefined;
+      if (typeof metric !== "number" || !Number.isFinite(metric)) throw new ProviderRuntimeError(`contextual brain selector returned an invalid ${name}`);
+      return metric;
+    };
+    const observedPullsRaw = raw.observed_pulls;
+    const observedPulls = observedPullsRaw === undefined || observedPullsRaw === null ? undefined : observedPullsRaw;
+    if (observedPulls !== undefined && (typeof observedPulls !== "number" || !Number.isSafeInteger(observedPulls) || observedPulls < 0)) throw new ProviderRuntimeError("contextual brain selector returned invalid observed_pulls");
+    return {
+      provider: candidate.provider,
+      model: candidate.model,
+      score: raw.score,
+      eligible: raw.eligible,
+      reasons: [...raw.reasons],
+      ...(raw.base_score === undefined ? {} : { base_score: optionalMetric("base_score") }),
+      ...(raw.exploration_bonus === undefined ? {} : { exploration_bonus: optionalMetric("exploration_bonus") }),
+      ...(observedPulls === undefined ? {} : { observed_pulls: observedPulls }),
+    };
+  });
+}
+
 /** Adapt the TypeScript runtime to the value-only Rust/Python contextual selector. */
 export function contextualSelector(client: ApiClient, options: { requestOptions?: Parameters<ApiClient["brainModelSelectContextual"]>[1]; observations?: (request: AutonomousSelectionRequest) => Array<{ context_digest: string; arm_id: string; pulls?: number; reward_sum?: number; failures?: number; disabled?: boolean }> } = {}): AutonomousModelSelector {
   if (!client || typeof client.brainModelSelectContextual !== "function") throw new ArgumentError("contextual selector requires an ApiClient");
@@ -4135,6 +5695,16 @@ export function contextualSelector(client: ApiClient, options: { requestOptions?
       min_quality: request.min_quality ?? null,
       min_selection_confidence: request.min_selection_confidence ?? null,
       models,
+      // `selectionObservations` are the caller's global value-only history. They must remain in
+      // the base request so the remote contextual selector can use them as a cold-start fallback
+      // for domains without exact contextual evidence.
+      observations: (request.observations ?? []).map((observation) => ({
+        arm_id: observation.arm_id,
+        pulls: observation.pulls,
+        reward_sum: observation.reward_sum,
+        failures: observation.failures,
+        ...(observation.disabled === undefined ? {} : { disabled: observation.disabled }),
+      })),
       provider_health: Object.fromEntries(Object.entries(request.provider_health).map(([provider, health]) => [provider, { registered: true, circuit: health.circuit, credential_ready: health.credential_ready, eligible: health.eligible, attempts: health.attempts, successes: health.successes, failures: health.failures, success_rate: health.success_rate, mean_latency_ms: health.mean_latency_ms }] as [string, BrainProviderHealth])),
       model_health: Object.fromEntries(Object.entries(request.model_health).map(([arm, health]) => [arm, { attempts: health.attempts, successes: health.successes, failures: health.failures, success_rate: health.success_rate, mean_latency_ms: health.mean_latency_ms, last_latency_ms: health.last_latency_ms, circuit: health.circuit }])),
     };
@@ -4151,7 +5721,7 @@ export function contextualSelector(client: ApiClient, options: { requestOptions?
     return {
       selected_model: selected ? { provider: selected.provider, model: selected.model } : null,
       strategy: "caller_selector",
-      ranking: [],
+      ranking: contextualSelectionRanking(selection.ranking, request.candidates),
       abstention_reason: selected ? null : matches.length > 1 ? "contextual selector returned an ambiguous model id" : selection.selection_status || "contextual selector abstained",
       selection_confidence: typeof selection.selection_confidence === "number" ? selection.selection_confidence : undefined,
       min_selection_confidence: typeof selection.min_selection_confidence === "number" ? selection.min_selection_confidence : request.min_selection_confidence ?? null,
@@ -4171,9 +5741,20 @@ export class AutonomousAgent {
   readonly runtime: AutonomousRuntime;
   readonly activation: AutonomousCapabilityActivation;
   readonly modelHealthController?: AutonomousModelHealthController;
+  /** Caller-owned provider/model health ledger used as a durable selection prior. */
+  readonly modelHealthStore?: AutonomousModelHealthStore;
+  /** Caller-owned persistence for aggregate model-health observations and evaluator quality. */
+  readonly modelHealthPersistence?: AutonomousModelHealthPersistenceCoordinator;
+  /** Caller-owned persistence for transport counters and provider circuit continuity. */
+  readonly runtimeHealthPersistence?: LLMRuntimeHealthPersistenceCoordinator;
   readonly modelHealthBridge?: AutonomousBrainControlPlaneBridge;
   readonly learner?: AutonomousOnlineLearner;
+  /** Caller-owned persistence for the online learner; no state is written implicitly. */
+  readonly learnerPersistence?: AutonomousOnlineLearnerPersistenceCoordinator;
   readonly selectionPromotion?: AutonomousSelectionPromotionLifecycle;
+  readonly evaluatorCalibrationRegistry?: AutonomousEvaluatorCalibrationRegistry;
+  /** Caller-owned persistence for aggregate evaluator calibration reports. */
+  readonly evaluatorCalibrationPersistence?: AutonomousEvaluatorCalibrationRegistryPersistenceCoordinator;
   private readonly apiClient?: ApiClient;
   private readonly modelsById = new Map<string, AutonomousModelCandidate>();
   private readonly toolCatalogue?: ToolCatalogue;
@@ -4181,15 +5762,51 @@ export class AutonomousAgent {
   private readonly toolApprover?: DomainToolApprover;
   private readonly effectBoundary?: AutonomousEffectBoundary;
   private readonly capabilityJournal?: AutonomousCapabilityJournalStore;
+  /** Caller-owned persistence for capability replay identities; values remain transient. */
+  readonly capabilityJournalPersistence?: AutonomousCapabilityJournalPersistenceCoordinator;
+  /** Metadata-only execution journal used by restart-aware callers. */
+  readonly executionJournal?: AutonomousExecutionSnapshotJournal;
+  /** Caller-owned persistence for execution checkpoints. */
+  readonly executionPersistence?: AutonomousExecutionPersistenceCoordinator;
+  /** Caller-owned persistence for route/planning/evaluation decision-cycle checkpoints. */
+  readonly decisionCyclePersistence?: AutonomousDecisionCyclePersistenceCoordinator;
   private readonly capabilityLearningSettlementStore: AutonomousCapabilityLearningSettlementStore;
   /** Caller-owned connector catalogue and runtime for bounded external evidence/provider work. */
   readonly connectorRegistry?: AutonomousConnectorRegistry;
   readonly connectorRuntime?: AutonomousConnectorRuntime;
   /** Caller-owned episodic memory; exposed so the learning controller can close evaluation feedback. */
   readonly memoryStore?: AutonomousEpisodicMemoryStore;
+  /** Caller-owned persistence for episodic memory; no episode state is written implicitly. */
+  readonly memoryPersistence?: AutonomousMemoryPersistenceCoordinator;
+  /** Optional evaluator-gated lesson index; it never receives prompts, provider payloads, or keys. */
+  readonly memoryConsolidator?: AutonomousMemoryConsolidator;
+  readonly promptLearningCoordinator?: AutonomousPromptLearningPersistenceCoordinator;
+  /** Caller-owned persistence for value-only adaptive tool-arm state. */
+  readonly toolSelectionPersistence?: AutonomousToolSelectionPersistence;
+  private toolSelectionStateValue: AutonomousToolSelectionState;
+  private readonly toolSelectionConfigured: boolean;
+  private readonly toolSelectionPersistenceCoordinator?: AutonomousToolSelectionPersistenceCoordinator;
   private domainToolRegistry?: AutonomousDomainToolRegistry;
   private domainToolRuntime?: AutonomousDomainToolRuntime;
   private capabilityRuntime?: AutonomousCapabilityRuntime;
+  /**
+   * One serialized model-inventory coordinator per agent lifecycle.
+   *
+   * Inventory refreshes may use a caller-owned CAS store. Recreating the coordinator for each
+   * refresh would discard the last observed inventory digest and turn a legitimate sequential
+   * refresh into a false stale-writer conflict. Keep the coordinator lazy so lightweight agents do
+   * not load the optional inventory module until discovery or restore is requested.
+   */
+  private modelInventoryCoordinator?: import("./autonomous-model-inventory.js").AutonomousModelInventoryCoordinator;
+  private persistenceLifecycleCoordinator?: import("./autonomous-agent-lifecycle.js").AutonomousAgentPersistenceLifecycleCoordinator;
+  private persistenceLifecycleModelInventoryPersistence?: import("./autonomous-model-inventory.js").AutonomousModelInventoryPersistence;
+  private persistenceLifecycleActivationStore?: AutonomousCapabilityActivationSnapshotStore;
+  private persistenceLifecycleSelectionPromotionStore?: AutonomousSelectionLifecycleStore;
+  private persistenceLifecycleCapabilityJournalPersistence?: AutonomousCapabilityJournalPersistenceCoordinator;
+  private persistenceLifecycleDecisionCyclePersistence?: AutonomousDecisionCyclePersistenceCoordinator;
+  private persistenceLifecycleExecutionPersistence?: AutonomousExecutionPersistenceCoordinator;
+  private persistenceLifecycleRequireAll?: boolean;
+  private persistenceLifecycleContinueOnError?: boolean;
 
   constructor(llm: LLMRuntime, options: AutonomousAgentOptions = {}) {
     if (!(llm instanceof LLMRuntime)) throw new ProviderRuntimeError("AutonomousAgent requires an LLMRuntime");
@@ -4197,23 +5814,84 @@ export class AutonomousAgent {
     if (options.toolCatalogue !== undefined && !(options.toolCatalogue instanceof ToolCatalogue)) throw new ArgumentError("AutonomousAgent toolCatalogue must be a ToolCatalogue");
     if (options.toolExecutor !== undefined && typeof options.toolExecutor !== "function") throw new ArgumentError("AutonomousAgent toolExecutor must be callable");
     if (options.effectBoundary !== undefined && !(options.effectBoundary instanceof AutonomousEffectBoundary)) throw new ArgumentError("AutonomousAgent effectBoundary must be an AutonomousEffectBoundary");
+    const modelHealthStore = options.modelHealthStore ?? options.modelHealthPersistence?.store;
+    if (options.modelHealthPersistence !== undefined && !(options.modelHealthPersistence instanceof AutonomousModelHealthPersistenceCoordinator)) throw new ArgumentError("AutonomousAgent modelHealthPersistence must be an AutonomousModelHealthPersistenceCoordinator");
+    if (options.modelHealthPersistence !== undefined && options.modelHealthStore !== undefined && options.modelHealthPersistence.store !== options.modelHealthStore) throw new ArgumentError("AutonomousAgent modelHealthPersistence must be bound to the supplied modelHealthStore");
+    if (modelHealthStore !== undefined && (
+      typeof modelHealthStore.record !== "function"
+      || typeof modelHealthStore.recordInvocation !== "function"
+      || typeof modelHealthStore.recordEvaluation !== "function"
+      || typeof modelHealthStore.health !== "function"
+      || typeof modelHealthStore.selectorHealth !== "function"
+      || typeof modelHealthStore.snapshot !== "function"
+      || typeof modelHealthStore.restore !== "function"
+    )) throw new ArgumentError("AutonomousAgent modelHealthStore is malformed");
+    if (options.runtimeHealthPersistence !== undefined && !(options.runtimeHealthPersistence instanceof LLMRuntimeHealthPersistenceCoordinator)) throw new ArgumentError("AutonomousAgent runtimeHealthPersistence must be an LLMRuntimeHealthPersistenceCoordinator");
+    if (options.runtimeHealthPersistence !== undefined && options.runtimeHealthPersistence.runtime !== llm) throw new ArgumentError("AutonomousAgent runtimeHealthPersistence must be bound to the supplied LLMRuntime");
     if (options.activation !== undefined && !(options.activation instanceof AutonomousCapabilityActivation)) throw new ArgumentError("AutonomousAgent activation must be an AutonomousCapabilityActivation");
     if (options.selectionPromotion !== undefined && !(options.selectionPromotion instanceof AutonomousSelectionPromotionLifecycle)) throw new ArgumentError("AutonomousAgent selectionPromotion must be an AutonomousSelectionPromotionLifecycle");
+    if (options.evaluatorCalibrationRegistry !== undefined && (
+      typeof options.evaluatorCalibrationRegistry.import !== "function"
+      || typeof options.evaluatorCalibrationRegistry.get !== "function"
+      || typeof options.evaluatorCalibrationRegistry.query !== "function"
+      || typeof options.evaluatorCalibrationRegistry.snapshot !== "function"
+      || typeof options.evaluatorCalibrationRegistry.restore !== "function"
+    )) throw new ArgumentError("AutonomousAgent evaluatorCalibrationRegistry is malformed");
+    if (options.evaluatorCalibrationPersistence !== undefined && (
+      typeof options.evaluatorCalibrationPersistence.restore !== "function"
+      || typeof options.evaluatorCalibrationPersistence.flush !== "function"
+      || options.evaluatorCalibrationPersistence.registry !== options.evaluatorCalibrationRegistry
+    )) throw new ArgumentError("AutonomousAgent evaluatorCalibrationPersistence must be bound to the supplied registry");
+    if (options.promptLearningCoordinator !== undefined && !(options.promptLearningCoordinator instanceof AutonomousPromptLearningPersistenceCoordinator)) throw new ArgumentError("AutonomousAgent promptLearningCoordinator must be an AutonomousPromptLearningPersistenceCoordinator");
+    if (options.toolSelectionPersistence !== undefined && (typeof options.toolSelectionPersistence.read !== "function" || typeof options.toolSelectionPersistence.write !== "function")) throw new ArgumentError("AutonomousAgent toolSelectionPersistence is malformed");
     if (options.connectorRegistry !== undefined && !(options.connectorRegistry instanceof AutonomousConnectorRegistry)) throw new ArgumentError("AutonomousAgent connectorRegistry must be an AutonomousConnectorRegistry");
     if (options.connectorRuntime !== undefined && !(options.connectorRuntime instanceof AutonomousConnectorRuntime)) throw new ArgumentError("AutonomousAgent connectorRuntime must be an AutonomousConnectorRuntime");
     if (options.connectorRegistry !== undefined && options.connectorRuntime !== undefined && options.connectorRuntime.registry !== options.connectorRegistry) throw new ArgumentError("AutonomousAgent connectorRegistry and connectorRuntime must reference the same catalogue");
+    if (options.learnerPersistence !== undefined && (
+      typeof options.learnerPersistence.restore !== "function"
+      || typeof options.learnerPersistence.flush !== "function"
+      || options.learnerPersistence.learner !== options.learner
+    )) throw new ArgumentError("AutonomousAgent learnerPersistence must be bound to the supplied learner");
     this.llm = llm;
     this.apiClient = options.apiClient;
     this.learner = options.learner;
+    this.learnerPersistence = options.learnerPersistence;
+    this.modelHealthStore = modelHealthStore;
+    this.modelHealthPersistence = options.modelHealthPersistence;
     this.selectionPromotion = options.selectionPromotion;
+    this.evaluatorCalibrationRegistry = options.evaluatorCalibrationRegistry;
+    this.evaluatorCalibrationPersistence = options.evaluatorCalibrationPersistence;
     if (options.memoryStore !== undefined && (
       typeof options.memoryStore.retrieve !== "function"
       || typeof options.memoryStore.recordEpisode !== "function"
       || typeof options.memoryStore.get !== "function"
     )) throw new ArgumentError("AutonomousAgent memoryStore is malformed");
     this.memoryStore = options.memoryStore;
+    if (options.memoryPersistence !== undefined && (
+      typeof options.memoryPersistence.restore !== "function"
+      || typeof options.memoryPersistence.flush !== "function"
+      || options.memoryPersistence.store !== options.memoryStore
+    )) throw new ArgumentError("AutonomousAgent memoryPersistence must be bound to the supplied memoryStore");
+    this.memoryPersistence = options.memoryPersistence;
+    if (options.memoryConsolidator !== undefined && (
+      typeof options.memoryConsolidator.consolidate !== "function"
+      || typeof options.memoryConsolidator.recall !== "function"
+      || typeof options.memoryConsolidator.promptReferences !== "function"
+    )) throw new ArgumentError("AutonomousAgent memoryConsolidator is malformed");
+    this.memoryConsolidator = options.memoryConsolidator;
+    this.promptLearningCoordinator = options.promptLearningCoordinator;
+    this.toolSelectionPersistence = options.toolSelectionPersistence;
+    this.toolSelectionStateValue = normalizeAutonomousToolSelectionState(options.toolSelectionState);
+    this.toolSelectionConfigured = options.toolSelectionState !== undefined || options.toolSelectionPersistence !== undefined;
+    if (this.toolSelectionPersistence !== undefined) {
+      this.toolSelectionPersistenceCoordinator = new AutonomousToolSelectionPersistenceCoordinator({
+        get: () => structuredClone(this.toolSelectionStateValue),
+        set: (state) => { this.toolSelectionStateValue = normalizeAutonomousToolSelectionState(state); },
+      }, this.toolSelectionPersistence);
+    }
     this.activation = options.activation ?? new AutonomousCapabilityActivation();
-    this.modelHealthController = options.modelHealthStore === undefined ? undefined : new AutonomousModelHealthController(options.modelHealthStore);
+    this.modelHealthController = modelHealthStore === undefined ? undefined : new AutonomousModelHealthController(modelHealthStore);
+    this.runtimeHealthPersistence = options.runtimeHealthPersistence;
     if (options.modelHealthBridge !== undefined && !(options.modelHealthBridge instanceof AutonomousBrainControlPlaneBridge)) throw new ArgumentError("AutonomousAgent modelHealthBridge must be an AutonomousBrainControlPlaneBridge");
     this.modelHealthBridge = options.modelHealthBridge;
     this.toolCatalogue = options.toolCatalogue;
@@ -4222,8 +5900,23 @@ export class AutonomousAgent {
       : undefined);
     this.toolApprover = options.toolApprover;
     this.effectBoundary = options.effectBoundary;
+    if (this.effectBoundary !== undefined) {
+      try {
+        llm.bindEffectBoundary(this.effectBoundary);
+      } catch (error) {
+        throw new ProviderRuntimeError("runtime and agent effect boundaries must be the same instance", { code: "configuration" });
+      }
+    }
     if (options.capabilityJournal !== undefined && (typeof options.capabilityJournal.append !== "function" || typeof options.capabilityJournal.find !== "function" || typeof options.capabilityJournal.records !== "function")) throw new ArgumentError("AutonomousAgent capabilityJournal is malformed");
+    if (options.capabilityJournalPersistence !== undefined && (typeof options.capabilityJournalPersistence.restore !== "function" || typeof options.capabilityJournalPersistence.flush !== "function" || options.capabilityJournalPersistence.store !== options.capabilityJournal)) throw new ArgumentError("AutonomousAgent capabilityJournalPersistence must be bound to the supplied capabilityJournal");
+    if (options.executionJournal !== undefined && (typeof options.executionJournal.append !== "function" || typeof options.executionJournal.state !== "function" || typeof options.executionJournal.snapshot !== "function" || typeof options.executionJournal.restore !== "function")) throw new ArgumentError("AutonomousAgent executionJournal is malformed");
+    if (options.executionPersistence !== undefined && (typeof options.executionPersistence.restore !== "function" || typeof options.executionPersistence.flush !== "function" || options.executionPersistence.journal !== options.executionJournal)) throw new ArgumentError("AutonomousAgent executionPersistence must be bound to the supplied executionJournal");
+    if (options.decisionCyclePersistence !== undefined && (typeof options.decisionCyclePersistence.restore !== "function" || typeof options.decisionCyclePersistence.flush !== "function" || typeof options.decisionCyclePersistence.store?.snapshot !== "function" || typeof options.decisionCyclePersistence.store?.restore !== "function")) throw new ArgumentError("AutonomousAgent decisionCyclePersistence is malformed");
     this.capabilityJournal = options.capabilityJournal;
+    this.capabilityJournalPersistence = options.capabilityJournalPersistence;
+    this.executionJournal = options.executionJournal;
+    this.executionPersistence = options.executionPersistence;
+    this.decisionCyclePersistence = options.decisionCyclePersistence;
     if (options.capabilityLearningSettlementStore !== undefined && (typeof options.capabilityLearningSettlementStore.load !== "function" || typeof options.capabilityLearningSettlementStore.save !== "function")) throw new ArgumentError("AutonomousAgent capabilityLearningSettlementStore is malformed");
     this.capabilityLearningSettlementStore = options.capabilityLearningSettlementStore ?? new InMemoryAutonomousCapabilityLearningSettlementStore();
     this.connectorRegistry = options.connectorRegistry ?? options.connectorRuntime?.registry;
@@ -4269,6 +5962,192 @@ export class AutonomousAgent {
       }
       : baseSelector;
     this.runtime = new AutonomousRuntime(llm, { selector });
+  }
+
+  /**
+   * Restore the digest-bound online bandit before the agent accepts evaluator feedback.
+   *
+   * Restoring is intentionally explicit: a missing coordinator is a configuration error rather
+   * than an invitation to silently start a fresh learner, because that would discard the model
+   * and domain history that the caller believed was being used for adaptation.
+   */
+  async restoreOnlineLearning(): Promise<AutonomousOnlineLearnerSnapshot | null> {
+    if (!this.learner) throw new ArgumentError("AutonomousAgent has no AutonomousOnlineLearner");
+    if (!this.learnerPersistence) throw new ArgumentError("AutonomousAgent online learner persistence is not configured");
+    return this.learnerPersistence.restore();
+  }
+
+  /**
+   * Flush the current bandit state through its caller-owned CAS boundary.
+   *
+   * The snapshot contains arm statistics, bounded evaluator digests, and contextual metadata
+   * only. Prompts, provider responses, credentials, task text, and live tool values never enter
+   * this persistence path. Callers choose when to flush so an application can coordinate the
+   * write with its own transaction or feedback outbox.
+   */
+  async flushOnlineLearning(): Promise<AutonomousOnlineLearnerSnapshot> {
+    if (!this.learner) throw new ArgumentError("AutonomousAgent has no AutonomousOnlineLearner");
+    if (!this.learnerPersistence) throw new ArgumentError("AutonomousAgent online learner persistence is not configured");
+    return this.learnerPersistence.flush();
+  }
+
+  /**
+   * Restore aggregate provider/model health before admitting new selections.
+   *
+   * Health is an availability and quality prior, not evaluator authority. Restoration is
+   * therefore explicit and coordinator-bound: it can never silently replace a missing ledger
+   * with an empty one or make a previously unregistered model eligible.
+   */
+  async restoreHealth(): Promise<AutonomousModelHealthSnapshot | null> {
+    if (!this.modelHealthStore) throw new ArgumentError("AutonomousAgent has no model health store");
+    if (!this.modelHealthPersistence) throw new ArgumentError("AutonomousAgent model health persistence is not configured");
+    return this.modelHealthPersistence.restore();
+  }
+
+  /** Flush aggregate provider/model health through the caller-owned CAS boundary. */
+  async flushHealth(): Promise<AutonomousModelHealthSnapshot> {
+    if (!this.modelHealthStore) throw new ArgumentError("AutonomousAgent has no model health store");
+    if (!this.modelHealthPersistence) throw new ArgumentError("AutonomousAgent model health persistence is not configured");
+    return this.modelHealthPersistence.flush();
+  }
+
+  /** Compatibility alias whose name makes the provider/model scope explicit. */
+  async restoreModelHealth(): Promise<AutonomousModelHealthSnapshot | null> {
+    return this.restoreHealth();
+  }
+
+  /** Compatibility alias whose name makes the provider/model scope explicit. */
+  async flushModelHealth(): Promise<AutonomousModelHealthSnapshot> {
+    return this.flushHealth();
+  }
+
+  /** Return the agent-owned value-only adaptive tool state without exposing mutable internals. */
+  toolSelectionState(): AutonomousToolSelectionState {
+    return structuredClone(this.toolSelectionStateValue);
+  }
+
+  /** Restore evaluator-approved tool-arm statistics before admitting new adaptive decisions. */
+  async restoreToolSelection(): Promise<AutonomousToolSelectionSnapshot | null> {
+    if (!this.toolSelectionPersistenceCoordinator) throw new ArgumentError("AutonomousAgent tool selection persistence is not configured");
+    return this.toolSelectionPersistenceCoordinator.restore();
+  }
+
+  /** Flush evaluator-approved tool-arm statistics through the caller-owned CAS boundary. */
+  async flushToolSelection(): Promise<AutonomousToolSelectionSnapshot> {
+    if (!this.toolSelectionPersistenceCoordinator) throw new ArgumentError("AutonomousAgent tool selection persistence is not configured");
+    return this.toolSelectionPersistenceCoordinator.flush();
+  }
+
+  /** Apply one independent evaluator reward to the agent-owned tool selector. */
+  recordToolSelectionReward(outcome: AutonomousToolSelectionOutcome): AutonomousToolSelectionState {
+    if (!this.toolSelectionConfigured) throw new ArgumentError("AutonomousAgent tool selection state is not configured");
+    this.toolSelectionStateValue = settleAutonomousToolSelectionOutcome(this.toolSelectionStateValue, outcome);
+    return this.toolSelectionState();
+  }
+
+  /**
+   * Restore process-local provider transport counters and circuit state after a restart.
+   *
+   * This is deliberately explicit and coordinator-bound. A restored image is a transport
+   * availability prior only; it does not restore credentials, prompts, responses, evaluator
+   * rewards, or authorization. Provider registrations must be recreated before this call.
+   */
+  async restoreRuntimeHealth(): Promise<LLMRuntimeHealthSnapshot | null> {
+    if (!this.runtimeHealthPersistence) throw new ArgumentError("AutonomousAgent runtime health persistence is not configured");
+    return this.runtimeHealthPersistence.restore();
+  }
+
+  /** Flush process-local transport counters and circuit state through the caller-owned CAS boundary. */
+  async flushRuntimeHealth(): Promise<LLMRuntimeHealthSnapshot> {
+    if (!this.runtimeHealthPersistence) throw new ArgumentError("AutonomousAgent runtime health persistence is not configured");
+    return this.runtimeHealthPersistence.flush();
+  }
+
+  /** Compatibility alias for restoring transport health through the agent boundary. */
+  async restoreTransportHealth(): Promise<LLMRuntimeHealthSnapshot | null> {
+    return this.restoreRuntimeHealth();
+  }
+
+  /** Compatibility alias for flushing transport health through the agent boundary. */
+  async flushTransportHealth(): Promise<LLMRuntimeHealthSnapshot> {
+    return this.flushRuntimeHealth();
+  }
+
+  /** Register a validated aggregate evaluator calibration report; persistence remains explicit. */
+  registerEvaluatorCalibration(report: AutonomousEvaluatorCalibrationReport): AutonomousEvaluatorCalibrationImport {
+    if (!this.evaluatorCalibrationRegistry) throw new ArgumentError("AutonomousAgent evaluator calibration registry is not configured");
+    return this.evaluatorCalibrationRegistry.import(report);
+  }
+
+  /** Retrieve one persisted calibration report by its exact content digest. */
+  evaluatorCalibrationReport(reportDigest: string): AutonomousEvaluatorCalibrationReport | null {
+    if (!this.evaluatorCalibrationRegistry) throw new ArgumentError("AutonomousAgent evaluator calibration registry is not configured");
+    return this.evaluatorCalibrationRegistry.get(reportDigest);
+  }
+
+  /** Query only aggregate calibration metadata; source cases and labels are never retained here. */
+  evaluatorCalibrationReports(options: AutonomousEvaluatorCalibrationQueryOptions = {}): AutonomousEvaluatorCalibrationReport[] {
+    if (!this.evaluatorCalibrationRegistry) throw new ArgumentError("AutonomousAgent evaluator calibration registry is not configured");
+    return this.evaluatorCalibrationRegistry.query(options);
+  }
+
+  /** Restore evaluator calibration before enabling a calibration-gated learning path. */
+  async restoreEvaluatorCalibration(): Promise<AutonomousEvaluatorCalibrationStoreSnapshot | null> {
+    if (!this.evaluatorCalibrationRegistry) throw new ArgumentError("AutonomousAgent evaluator calibration registry is not configured");
+    if (!this.evaluatorCalibrationPersistence) throw new ArgumentError("AutonomousAgent evaluator calibration persistence is not configured");
+    return this.evaluatorCalibrationPersistence.restore();
+  }
+
+  /** Flush aggregate evaluator calibration through the caller-owned CAS boundary. */
+  async flushEvaluatorCalibration(): Promise<AutonomousEvaluatorCalibrationStoreSnapshot> {
+    if (!this.evaluatorCalibrationRegistry) throw new ArgumentError("AutonomousAgent evaluator calibration registry is not configured");
+    if (!this.evaluatorCalibrationPersistence) throw new ArgumentError("AutonomousAgent evaluator calibration persistence is not configured");
+    return this.evaluatorCalibrationPersistence.flush();
+  }
+
+  /**
+   * Restore the hash-chained episodic memory before the agent accepts new run context.
+   *
+   * Restoration is explicit and exact-store-bound. A coordinator for a different memory store
+   * is rejected during construction so a restart cannot appear successful while restoring into a
+   * store that the agent does not actually query.
+   */
+  async restoreMemory(): Promise<AutonomousMemorySnapshot | null> {
+    if (!this.memoryStore) throw new ArgumentError("AutonomousAgent has no episodic memory store");
+    if (!this.memoryPersistence) throw new ArgumentError("AutonomousAgent memory persistence is not configured");
+    return this.memoryPersistence.restore();
+  }
+
+  /**
+   * Flush value-only memory episodes and evaluations through the caller-owned CAS boundary.
+   * Prompts, task text, provider responses, tool payloads, and credentials never enter the
+   * persisted memory image; only the memory store's validated digest projections are written.
+   */
+  async flushMemory(): Promise<AutonomousMemorySnapshot> {
+    if (!this.memoryStore) throw new ArgumentError("AutonomousAgent has no episodic memory store");
+    if (!this.memoryPersistence) throw new ArgumentError("AutonomousAgent memory persistence is not configured");
+    return this.memoryPersistence.flush();
+  }
+
+  /** Consolidate explicit evaluator observations through the configured lesson index. */
+  consolidateMemory(
+    observations: readonly AutonomousMemoryConsolidationObservation[],
+    options: { generation?: number } = {},
+  ): AutonomousMemoryConsolidationReport {
+    if (this.memoryConsolidator === undefined) throw new ArgumentError("AutonomousAgent memoryConsolidator is not configured");
+    return this.memoryConsolidator.consolidate(observations, options);
+  }
+
+  /** Resolve stable, scope-checked lesson digests into transient prompt references. */
+  memoryReferences(options: {
+    domain: AutonomousDomainName;
+    capability?: string;
+    lessonResolver?: (lessonDigest: string) => string | null;
+    lessonContextResolver?: AutonomousMemoryLessonContextResolver;
+    limit?: number;
+  }): AutonomousMemoryConsolidationPromptReference[] {
+    if (this.memoryConsolidator === undefined) throw new ArgumentError("AutonomousAgent memoryConsolidator is not configured");
+    return this.memoryConsolidator.promptReferences(options);
   }
 
   registerModel(candidate: AutonomousModelCandidate, options: { replaceExisting?: boolean } = {}): AutonomousModelCandidate {
@@ -4358,10 +6237,11 @@ export class AutonomousAgent {
   }
 
   /** Persist only the digest-bound learned-selection authority state through a caller-owned store. */
-  async saveSelectionPromotion(store: AutonomousSelectionLifecycleStore): Promise<void> {
+  async saveSelectionPromotion(store: AutonomousSelectionLifecycleStore): Promise<AutonomousSelectionLifecycleState> {
     if (!store || typeof store.save !== "function" || typeof store.load !== "function") throw new ArgumentError("selection promotion store is malformed");
     if (!this.selectionPromotion) throw new ArgumentError("selection promotion lifecycle is not configured");
     await store.save(this.selectionPromotion.state);
+    return this.selectionPromotion.state;
   }
 
   /** Restore learned-selection authority state after validating identity, revision, and digests. */
@@ -4402,9 +6282,10 @@ export class AutonomousAgent {
   }
 
   /** Persist the redacted activation state through a caller-owned store. */
-  async saveActivation(store: AutonomousCapabilityActivationSnapshotStore): Promise<void> {
+  async saveActivation(store: AutonomousCapabilityActivationSnapshotStore): Promise<AutonomousCapabilityActivationState> {
     if (!store || typeof store.save !== "function") throw new ArgumentError("activation store must implement save");
     await store.save(this.activation.state);
+    return this.activation.state;
   }
 
   /** Restore redacted activation state through a caller-owned store; null means no state existed. */
@@ -4435,13 +6316,13 @@ export class AutonomousAgent {
   }
 
   /** Dispatch one already-reviewed connector request; external authority remains caller-owned. */
-  async dispatchConnector(request: AutonomousConnectorDispatchRequest, options: { traceEventCallback?: AutonomousConnectorTraceEventCallback } = {}): Promise<AutonomousConnectorDispatchResult> {
+  async dispatchConnector(request: AutonomousConnectorDispatchRequest, options: { traceEventCallback?: AutonomousConnectorTraceEventCallback; authorizationContext?: AutonomousAuthorizationContext; authorizationDomain?: string; authorizationCapability?: string | null; authorizationRiskClass?: string | null } = {}): Promise<AutonomousConnectorDispatchResult> {
     if (!this.connectorRuntime) throw new ArgumentError("AutonomousAgent has no connector runtime");
     return this.connectorRuntime.dispatch(request, options);
   }
 
   /** Dispatch only when the digest-bound selection plan still matches the live connector catalogue. */
-  async dispatchConnectorFromPlan(plan: AutonomousConnectorSelectionPlan | unknown, request: AutonomousConnectorDispatchRequest, options: { traceEventCallback?: AutonomousConnectorTraceEventCallback } = {}): Promise<AutonomousConnectorDispatchResult> {
+  async dispatchConnectorFromPlan(plan: AutonomousConnectorSelectionPlan | unknown, request: AutonomousConnectorDispatchRequest, options: { traceEventCallback?: AutonomousConnectorTraceEventCallback; authorizationContext?: AutonomousAuthorizationContext; authorizationDomain?: string; authorizationCapability?: string | null; authorizationRiskClass?: string | null } = {}): Promise<AutonomousConnectorDispatchResult> {
     if (!this.connectorRuntime) throw new ArgumentError("AutonomousAgent has no connector runtime");
     return this.connectorRuntime.dispatchFromPlan(plan, request, options);
   }
@@ -4460,6 +6341,7 @@ export class AutonomousAgent {
       execution?: AutonomousExecutionController;
       effectBoundary?: AutonomousEffectBoundary;
       workflowContext?: AutonomousWorkflowToolContext;
+      authorizationContext?: AutonomousAuthorizationContext;
     },
   ): Promise<ProviderToolResult[]> {
     if (!Array.isArray(calls) || calls.length > 128) throw new ArgumentError("autonomous tool call count is outside its bounds");
@@ -4478,6 +6360,7 @@ export class AutonomousAgent {
       execution: options.execution,
       effectBoundary: options.effectBoundary ?? this.effectBoundary,
       workflowContext: options.workflowContext,
+      authorizationContext: options.authorizationContext,
     }));
   }
 
@@ -4530,6 +6413,83 @@ export class AutonomousAgent {
     return runtime.rehydrate();
   }
 
+  /** Restore durable capability metadata and reopen the in-process replay barrier. */
+  async restoreCapabilityJournalPersistence(): Promise<Record<string, unknown>> {
+    if (this.capabilityJournalPersistence === undefined) throw new ArgumentError("restoreCapabilityJournalPersistence requires configured persistence");
+    const persisted = await this.capabilityJournalPersistence.restore();
+    const rehydrated = await this.restoreCapabilityJournal();
+    return {
+      schema: "bioprism-typescript-autonomous-capability-journal-snapshot/0.2",
+      ...persisted,
+      rehydrated: rehydrated.restored,
+      replayable: rehydrated.replayable,
+      value_retention: rehydrated.value_retention,
+      retention: "metadata_only;caller_values_not_restored",
+    };
+  }
+
+  /** Flush capability replay metadata without returning journal entries. */
+  async flushCapabilityJournalPersistence(): Promise<Record<string, unknown>> {
+    if (this.capabilityJournalPersistence === undefined) throw new ArgumentError("flushCapabilityJournalPersistence requires configured persistence");
+    return this.capabilityJournalPersistence.flush();
+  }
+
+  /** Restore the metadata-only execution checkpoint used by long-horizon recovery. */
+  async restoreExecutionPersistence(): Promise<Record<string, unknown>> {
+    if (this.executionPersistence === undefined) throw new ArgumentError("restoreExecutionPersistence requires configured persistence");
+    const snapshot = await this.executionPersistence.restore();
+    if (snapshot === null) return { restored: false, snapshot_digest: null, events: 0, retention: "metadata_only" };
+    return {
+      restored: true,
+      schema: snapshot.schema,
+      snapshot_digest: snapshot.snapshot_digest,
+      head_digest: snapshot.head_digest,
+      events: snapshot.rows.length,
+      retention: "metadata_only_hash_chained",
+    };
+  }
+
+  /** Flush the execution journal while projecting only checkpoint metadata. */
+  async flushExecutionPersistence(): Promise<Record<string, unknown>> {
+    if (this.executionPersistence === undefined) throw new ArgumentError("flushExecutionPersistence requires configured persistence");
+    const snapshot = await this.executionPersistence.flush();
+    return {
+      schema: snapshot.schema,
+      snapshot_digest: snapshot.snapshot_digest,
+      head_digest: snapshot.head_digest,
+      events: snapshot.rows.length,
+      retention: "metadata_only_hash_chained",
+    };
+  }
+
+  /** Restore metadata-only route/planning/evaluation checkpoints for all persisted cycles. */
+  async restoreDecisionCyclePersistence(): Promise<Record<string, unknown>> {
+    if (this.decisionCyclePersistence === undefined) throw new ArgumentError("restoreDecisionCyclePersistence requires configured persistence");
+    const snapshot = await this.decisionCyclePersistence.restore();
+    if (snapshot === null) return { restored: false, snapshot_digest: null, cycles: 0, terminal_cycles: 0, retention: "metadata_only_hash_bound" };
+    return {
+      restored: true,
+      schema: snapshot.schema,
+      snapshot_digest: snapshot.snapshot_digest,
+      cycles: snapshot.states.length,
+      terminal_cycles: snapshot.states.filter((state) => state.phase === "terminal").length,
+      retention: "metadata_only_hash_bound",
+    };
+  }
+
+  /** Flush decision-cycle checkpoints without returning task, prompt, or provider payloads. */
+  async flushDecisionCyclePersistence(): Promise<Record<string, unknown>> {
+    if (this.decisionCyclePersistence === undefined) throw new ArgumentError("flushDecisionCyclePersistence requires configured persistence");
+    const snapshot = await this.decisionCyclePersistence.flush();
+    return {
+      schema: snapshot.schema,
+      snapshot_digest: snapshot.snapshot_digest,
+      cycles: snapshot.states.length,
+      terminal_cycles: snapshot.states.filter((state) => state.phase === "terminal").length,
+      retention: "metadata_only_hash_bound",
+    };
+  }
+
   /** Return metadata-only capability records produced by this agent instance. */
   capabilityExecutionEvidence(): AutonomousCapabilityExecutionRecord[] {
     return this.capabilityRuntime?.executionEvidence() ?? [];
@@ -4542,6 +6502,8 @@ export class AutonomousAgent {
   ): Promise<AutonomousAgentCapabilityLearningResult> {
     if (!this.learner) throw new ArgumentError("AutonomousAgent has no AutonomousOnlineLearner");
     const { toolSelectionState, ...learningOptions } = options;
+    const callerProvidedToolSelectionState = toolSelectionState !== undefined;
+    const effectiveToolSelectionState = callerProvidedToolSelectionState ? toolSelectionState : this.effectiveToolSelectionState();
     const settlement = await settleAutonomousCapabilityLearning(result, {
       ...learningOptions,
       settlementStore: learningOptions.settlementStore ?? this.capabilityLearningSettlementStore,
@@ -4555,7 +6517,7 @@ export class AutonomousAgent {
     });
     this.learner.restore(settlement.next_state);
     const record = ("record" in result ? (result as AutonomousCapabilityExecutionResult).record : result) as AutonomousCapabilityExecutionRecord;
-    const nextToolSelectionState = settleAutonomousToolSelectionOutcome(toolSelectionState, {
+    const nextToolSelectionState = settleAutonomousToolSelectionOutcome(effectiveToolSelectionState, {
       domain: record.domain as AutonomousDomainName,
       capability: record.capability ?? "capability_execution",
       tool: record.tool,
@@ -4564,6 +6526,7 @@ export class AutonomousAgent {
       latencyMs: record.duration_ms,
       outcomeDigest: settlement.outcome_digest,
     });
+    if (!callerProvidedToolSelectionState && this.toolSelectionConfigured) this.toolSelectionStateValue = nextToolSelectionState;
     return { ...settlement, tool_selection_state: nextToolSelectionState, tool_selection_state_digest: await digestJson(nextToolSelectionState) };
   }
 
@@ -4574,6 +6537,8 @@ export class AutonomousAgent {
   ): Promise<AutonomousAgentCapabilityLearningBatchResult> {
     if (!this.learner) throw new ArgumentError("AutonomousAgent has no AutonomousOnlineLearner");
     const { toolSelectionState, ...learningOptions } = options;
+    const callerProvidedToolSelectionState = toolSelectionState !== undefined;
+    const effectiveToolSelectionState = callerProvidedToolSelectionState ? toolSelectionState : this.effectiveToolSelectionState();
     const settlement = await settleAutonomousCapabilityLearningBatch(results, {
       ...learningOptions,
       settlementStore: learningOptions.settlementStore ?? this.capabilityLearningSettlementStore,
@@ -4586,7 +6551,7 @@ export class AutonomousAgent {
       }),
     });
     for (const item of settlement.settlements) this.learner.restore(item.next_state);
-    let nextToolSelectionState = normalizeAutonomousToolSelectionState(toolSelectionState);
+    let nextToolSelectionState = normalizeAutonomousToolSelectionState(effectiveToolSelectionState);
     for (const [index, item] of settlement.settlements.entries()) {
       const record = ("record" in results[index]! ? (results[index] as AutonomousCapabilityExecutionResult).record : results[index]) as AutonomousCapabilityExecutionRecord;
       nextToolSelectionState = settleAutonomousToolSelectionOutcome(nextToolSelectionState, {
@@ -4599,12 +6564,80 @@ export class AutonomousAgent {
         outcomeDigest: item.outcome_digest,
       });
     }
+    if (!callerProvidedToolSelectionState && this.toolSelectionConfigured) this.toolSelectionStateValue = nextToolSelectionState;
     return { ...settlement, tool_selection_state: nextToolSelectionState, tool_selection_state_digest: await digestJson(nextToolSelectionState) };
   }
 
   /** Return metadata-only adapter evidence collected by this agent; raw arguments/results are never exposed here. */
   toolExecutionEvidence(): AutonomousDomainToolExecutionReceipt[] {
     return this.domainToolRuntime?.receiptsSnapshot() ?? [];
+  }
+
+  /**
+   * Evaluate live tool receipts through an independent value-only evaluator and advance the
+   * caller-owned adaptive tool-selection state. Provider/tool transport status is deliberately
+   * not converted into reward; only the evaluator assessment can create bandit credit.
+   */
+  async evaluateToolReceipts(
+    options: {
+      evaluator: AutonomousToolOutcomeEvaluator;
+      receipts?: readonly AutonomousDomainToolExecutionReceipt[];
+      evidence?: Readonly<Record<string, JsonObject>>;
+      toolSelectionState?: AutonomousToolSelectionState | null;
+    },
+  ): Promise<AutonomousToolLearningReport> {
+    if (!this.domainToolRuntime) throw new ArgumentError("evaluateToolReceipts requires a configured domain tool runtime");
+    if (!(options?.evaluator instanceof AutonomousToolOutcomeEvaluator)) throw new ArgumentError("evaluateToolReceipts requires an AutonomousToolOutcomeEvaluator");
+    const receipts = options.receipts === undefined ? this.domainToolRuntime.receiptsSnapshot() : [...options.receipts];
+    const callerProvidedToolSelectionState = options.toolSelectionState !== undefined;
+    const effectiveToolSelectionState = callerProvidedToolSelectionState ? options.toolSelectionState : this.effectiveToolSelectionState();
+    const report = await options.evaluator.evaluateReceipts(receipts, {
+      evidence: options.evidence,
+      toolSelectionState: effectiveToolSelectionState,
+      toolSelectionUpdater: settleAutonomousToolSelectionOutcome,
+    });
+    if (!callerProvidedToolSelectionState && this.toolSelectionConfigured && report.next_tool_selection_state !== null) this.toolSelectionStateValue = normalizeAutonomousToolSelectionState(report.next_tool_selection_state);
+    return report;
+  }
+
+  /**
+   * Evaluate provider invocation receipts and feed explicit model-quality credit into the
+   * configured online learner. Provider transport success is never treated as task quality;
+   * only the caller-owned evaluator can create a model-arm update.
+   */
+  async evaluateProviderReceipts(
+    options: {
+      evaluator: AutonomousProviderOutcomeEvaluator;
+      receipts?: readonly AutonomousProviderInvocationReceipt[];
+      contexts?: Readonly<Record<string, AutonomousProviderOutcomeContext>>;
+      evidence?: Readonly<Record<string, JsonObject>>;
+      learningState?: JsonObject | null;
+      learning?: boolean;
+      learningUpdater?: AutonomousProviderLearningUpdater;
+    },
+  ): Promise<AutonomousProviderLearningReport> {
+    if (!(options?.evaluator instanceof AutonomousProviderOutcomeEvaluator)) throw new ArgumentError("evaluateProviderReceipts requires an AutonomousProviderOutcomeEvaluator");
+    const receipts = options.receipts === undefined ? [] : [...options.receipts];
+    const updater = options.learningUpdater ?? (options.learning === false || !this.learner
+      ? undefined
+      : (armId, reward, update) => this.recordEvaluatorReward(armId, reward, {
+        failed: update.failed,
+        outcomeDigest: update.outcomeDigest,
+        contractDigest: update.contractDigest,
+        contextDigest: update.contextDigest,
+        context: update.context,
+      }));
+    const learningState = options.learningState !== undefined
+      ? options.learningState
+      : updater && this.learner
+        ? this.learner.snapshot()
+        : null;
+    return options.evaluator.evaluateReceipts(receipts, {
+      contexts: options.contexts,
+      evidence: options.evidence,
+      learningState,
+      learningUpdater: updater,
+    });
   }
 
   /** Discover live provider model metadata and atomically reconcile it into this agent's catalogue. */
@@ -4735,7 +6768,120 @@ export class AutonomousAgent {
     options: AutonomousModelInventoryRefreshOptions = {},
   ): Promise<AutonomousModelInventorySnapshot> {
     const { AutonomousModelInventoryCoordinator } = await import("./autonomous-model-inventory.js");
-    return new AutonomousModelInventoryCoordinator(this).refresh(specs, options);
+    const coordinator = this.modelInventoryCoordinator ??= new AutonomousModelInventoryCoordinator(this);
+    return coordinator.refresh(specs, options);
+  }
+
+  /**
+   * Return the current model catalogue's live all-domain eligibility without discovery or
+   * invocation. This is safe for onboarding/readiness screens before a user supplies a key.
+   */
+  async modelInventoryReadiness(
+    options: AutonomousModelInventoryReadinessOptions = {},
+  ): Promise<AutonomousModelInventoryReadiness> {
+    const { AutonomousModelInventoryCoordinator } = await import("./autonomous-model-inventory.js");
+    const coordinator = this.modelInventoryCoordinator ??= new AutonomousModelInventoryCoordinator(this);
+    return coordinator.readiness(options);
+  }
+
+  /**
+   * Restore the last validated model inventory into this agent and retain its CAS fence for the
+   * next refresh. Provider registrations and credential handles are intentionally not restored;
+   * the snapshot contains only model metadata and redacted all-domain coverage.
+   */
+  async restoreModelInventory(
+    persistence: import("./autonomous-model-inventory.js").AutonomousModelInventoryPersistence,
+  ): Promise<AutonomousModelInventorySnapshot | null> {
+    const { AutonomousModelInventoryCoordinator } = await import("./autonomous-model-inventory.js");
+    const coordinator = this.modelInventoryCoordinator ??= new AutonomousModelInventoryCoordinator(this);
+    return coordinator.restore(persistence);
+  }
+
+  /** Re-commit the last validated inventory image without rediscovering provider models. */
+  async flushModelInventory(
+    persistence: import("./autonomous-model-inventory.js").AutonomousModelInventoryPersistence,
+  ): Promise<AutonomousModelInventorySnapshot | null> {
+    const { AutonomousModelInventoryCoordinator } = await import("./autonomous-model-inventory.js");
+    const coordinator = this.modelInventoryCoordinator ??= new AutonomousModelInventoryCoordinator(this);
+    return coordinator.flush(persistence);
+  }
+
+  private async persistenceLifecycleFor(options: {
+    modelInventoryPersistence?: import("./autonomous-model-inventory.js").AutonomousModelInventoryPersistence;
+    activationStore?: AutonomousCapabilityActivationSnapshotStore;
+    selectionPromotionStore?: AutonomousSelectionLifecycleStore;
+    capabilityJournalPersistence?: AutonomousCapabilityJournalPersistenceCoordinator;
+    decisionCyclePersistence?: AutonomousDecisionCyclePersistenceCoordinator;
+    executionPersistence?: AutonomousExecutionPersistenceCoordinator;
+    requireAll?: boolean;
+    continueOnError?: boolean;
+  } = {}): Promise<import("./autonomous-agent-lifecycle.js").AutonomousAgentPersistenceLifecycleCoordinator> {
+    const { AutonomousAgentPersistenceLifecycleCoordinator } = await import("./autonomous-agent-lifecycle.js");
+    const requireAll = options.requireAll ?? false;
+    const continueOnError = options.continueOnError ?? false;
+    if (
+      this.persistenceLifecycleCoordinator === undefined
+      || this.persistenceLifecycleModelInventoryPersistence !== options.modelInventoryPersistence
+      || this.persistenceLifecycleActivationStore !== options.activationStore
+      || this.persistenceLifecycleSelectionPromotionStore !== options.selectionPromotionStore
+      || this.persistenceLifecycleCapabilityJournalPersistence !== options.capabilityJournalPersistence
+      || this.persistenceLifecycleDecisionCyclePersistence !== options.decisionCyclePersistence
+      || this.persistenceLifecycleExecutionPersistence !== options.executionPersistence
+      || this.persistenceLifecycleRequireAll !== requireAll
+      || this.persistenceLifecycleContinueOnError !== continueOnError
+    ) {
+      this.persistenceLifecycleCoordinator = new AutonomousAgentPersistenceLifecycleCoordinator(this, {
+        modelInventoryPersistence: options.modelInventoryPersistence,
+        activationStore: options.activationStore,
+        selectionPromotionStore: options.selectionPromotionStore,
+        capabilityJournalPersistence: options.capabilityJournalPersistence,
+        decisionCyclePersistence: options.decisionCyclePersistence,
+        executionPersistence: options.executionPersistence,
+        requireAll,
+        continueOnError,
+      });
+      this.persistenceLifecycleModelInventoryPersistence = options.modelInventoryPersistence;
+      this.persistenceLifecycleActivationStore = options.activationStore;
+      this.persistenceLifecycleSelectionPromotionStore = options.selectionPromotionStore;
+      this.persistenceLifecycleCapabilityJournalPersistence = options.capabilityJournalPersistence;
+      this.persistenceLifecycleDecisionCyclePersistence = options.decisionCyclePersistence;
+      this.persistenceLifecycleExecutionPersistence = options.executionPersistence;
+      this.persistenceLifecycleRequireAll = requireAll;
+      this.persistenceLifecycleContinueOnError = continueOnError;
+    }
+    return this.persistenceLifecycleCoordinator;
+  }
+
+  /** Restore all configured metadata coordinators in the reviewed dependency order. */
+  async restorePersistedState(options: {
+    modelInventoryPersistence?: import("./autonomous-model-inventory.js").AutonomousModelInventoryPersistence;
+    activationStore?: AutonomousCapabilityActivationSnapshotStore;
+    selectionPromotionStore?: AutonomousSelectionLifecycleStore;
+    capabilityJournalPersistence?: AutonomousCapabilityJournalPersistenceCoordinator;
+    decisionCyclePersistence?: AutonomousDecisionCyclePersistenceCoordinator;
+    executionPersistence?: AutonomousExecutionPersistenceCoordinator;
+    strict?: boolean;
+    requireAll?: boolean;
+    continueOnError?: boolean;
+  } = {}): Promise<import("./autonomous-agent-lifecycle.js").AutonomousAgentPersistenceLifecycleReport> {
+    const coordinator = await this.persistenceLifecycleFor(options);
+    return coordinator.restore({ strict: options.strict, continueOnError: options.continueOnError });
+  }
+
+  /** Flush all configured metadata coordinators in reverse dependency order. */
+  async flushPersistedState(options: {
+    modelInventoryPersistence?: import("./autonomous-model-inventory.js").AutonomousModelInventoryPersistence;
+    activationStore?: AutonomousCapabilityActivationSnapshotStore;
+    selectionPromotionStore?: AutonomousSelectionLifecycleStore;
+    capabilityJournalPersistence?: AutonomousCapabilityJournalPersistenceCoordinator;
+    decisionCyclePersistence?: AutonomousDecisionCyclePersistenceCoordinator;
+    executionPersistence?: AutonomousExecutionPersistenceCoordinator;
+    strict?: boolean;
+    requireAll?: boolean;
+    continueOnError?: boolean;
+  } = {}): Promise<import("./autonomous-agent-lifecycle.js").AutonomousAgentPersistenceLifecycleReport> {
+    const coordinator = await this.persistenceLifecycleFor(options);
+    return coordinator.flush({ strict: options.strict, continueOnError: options.continueOnError });
   }
 
   async profiles(): Promise<AutonomousDomainProfile[]> {
@@ -4756,6 +6902,8 @@ export class AutonomousAgent {
     estimatedInputTokens?: number;
     requestedOutputTokens?: number;
     calibrationReport?: AutonomousEvaluatorCalibrationReport;
+    /** Exact digest of a report previously registered and restored into this agent. */
+    calibrationReportDigest?: string;
     requireCalibratedLearning?: boolean;
     selectionPromotionReport?: AutonomousSelectionPromotionReport;
     requirePromotedSelection?: boolean;
@@ -4771,10 +6919,16 @@ export class AutonomousAgent {
       if (!Number.isSafeInteger(value) || value < 1 || value > 10_000_000) throw new ArgumentError(`autonomous readiness ${name} is outside its bounds`);
     }
     if (options.requireCalibratedLearning !== undefined && typeof options.requireCalibratedLearning !== "boolean") throw new ArgumentError("autonomous readiness requireCalibratedLearning must be boolean");
-    if (options.requireCalibratedLearning === true && options.calibrationReport === undefined) throw new ArgumentError("autonomous readiness requires calibrationReport when calibrated learning is required");
+    if (options.calibrationReport !== undefined && options.calibrationReportDigest !== undefined) throw new ArgumentError("autonomous readiness accepts calibrationReport or calibrationReportDigest, not both");
+    const storedCalibrationReport = options.calibrationReportDigest === undefined
+      ? undefined
+      : this.evaluatorCalibrationReport(options.calibrationReportDigest);
+    if (options.calibrationReportDigest !== undefined && storedCalibrationReport === null) throw new ArgumentError("autonomous readiness calibrationReportDigest was not found in the registry");
+    const suppliedCalibrationReport = options.calibrationReport ?? storedCalibrationReport ?? undefined;
+    if (options.requireCalibratedLearning === true && suppliedCalibrationReport === undefined) throw new ArgumentError("autonomous readiness requires calibrationReport or calibrationReportDigest when calibrated learning is required");
     if (options.requirePromotedSelection !== undefined && typeof options.requirePromotedSelection !== "boolean") throw new ArgumentError("autonomous readiness requirePromotedSelection must be boolean");
-    const calibrationRuntime = options.calibrationReport === undefined ? null : await import("./autonomous-evaluator-calibration.js");
-    const calibrationReport = options.calibrationReport === undefined ? null : calibrationRuntime!.validateAutonomousEvaluatorCalibrationReport(options.calibrationReport);
+    const calibrationRuntime = suppliedCalibrationReport === undefined ? null : await import("./autonomous-evaluator-calibration.js");
+    const calibrationReport = suppliedCalibrationReport === undefined ? null : calibrationRuntime!.validateAutonomousEvaluatorCalibrationReport(suppliedCalibrationReport);
     const selectionPromotionRuntime = options.selectionPromotionReport === undefined ? null : await import("./autonomous-selection-promotion.js");
     const selectionPromotionReport = options.selectionPromotionReport === undefined ? null : selectionPromotionRuntime!.validateAutonomousSelectionPromotionReport(options.selectionPromotionReport);
     const selectionPromotionState = this.selectionPromotion?.state ?? null;
@@ -4791,6 +6945,11 @@ export class AutonomousAgent {
       candidateIds.add(id);
     }
     const profiles = await builtinAutonomousDomainProfiles();
+    const modelInventoryReadiness = await this.modelInventoryReadiness({
+      candidates,
+      estimatedInputTokens,
+      requestedOutputTokens,
+    });
     let evidenceReadinessReport: import("./autonomous-evidence-readiness.js").AutonomousEvidenceReadinessReport | null = null;
     if (options.evidenceReadiness !== undefined) {
       const { AutonomousEvidenceReadinessAuditor } = await import("./autonomous-evidence-readiness.js");
@@ -4899,7 +7058,7 @@ export class AutonomousAgent {
     const connectorReadiness = this.connectorRegistry
       ? { configured: true, registry_digest: this.connectorRegistry.digest, connector_count: this.connectorRegistry.registrations().length, execution: "selection_and_dispatch_require_explicit_plan_and_approval", secret_material: "never_returned" as const }
       : { configured: false, registry_digest: null, connector_count: 0, execution: "caller_owned_connector_registry_not_configured", secret_material: "never_returned" as const };
-    const descriptor = { schema: AUTONOMOUS_READINESS_SCHEMA, providers: providerRows, models: [...modelRows].sort((left, right) => `${left.provider}/${left.model}`.localeCompare(`${right.provider}/${right.model}`)), domains: domainRows, workflows: profiles.map((profile) => profile.workflow), domain_packs: domainPacks, model_capability_coverage: { domain_count: capabilityRows.length, rows: capabilityRows, evidence_posture: "static_caller_declared_capabilities_only" }, model_health: this.llm.modelHealthSnapshot(), learning, tooling: { configured: this.toolCatalogue !== undefined, catalogue_digest: this.toolCatalogue?.digest ?? null, available_tool_count: toolNames.size, execution: "catalogue_metadata_only; registration_is_not_authorization", activation_status: activation.status }, ...(evidenceReadinessReport === null ? {} : { evidence: { configured: true, registry_digest: evidenceReadinessReport.registry_digest, report_digest: evidenceReadinessReport.report_digest, status: evidenceReadinessReport.status, ready_count: evidenceReadinessReport.ready_count, degraded_count: evidenceReadinessReport.degraded_count, blocked_count: evidenceReadinessReport.blocked_count, missing_count: evidenceReadinessReport.missing_count, domains: evidenceReadinessReport.domains.map((row) => row.toJSON()), execution: "readiness_projection_only;no_source_dispatch", secret_material: "never_returned" } }), connectors: connectorReadiness, activation, next_actions: [...nextActions].sort(), readiness_state: readinessState, execution: "not_started; no_provider_or_tool_calls" as const, credential_posture: "caller_supplied_opaque_handles" as const, secret_material: "never_returned" as const };
+    const descriptor = { schema: AUTONOMOUS_READINESS_SCHEMA, providers: providerRows, models: [...modelRows].sort((left, right) => `${left.provider}/${left.model}`.localeCompare(`${right.provider}/${right.model}`)), domains: domainRows, workflows: profiles.map((profile) => profile.workflow), domain_packs: domainPacks, model_capability_coverage: { domain_count: capabilityRows.length, rows: capabilityRows, evidence_posture: "static_caller_declared_capabilities_only" }, model_inventory_readiness: modelInventoryReadiness, model_health: this.llm.modelHealthSnapshot(), learning, tooling: { configured: this.toolCatalogue !== undefined, catalogue_digest: this.toolCatalogue?.digest ?? null, available_tool_count: toolNames.size, execution: "catalogue_metadata_only; registration_is_not_authorization", activation_status: activation.status }, ...(evidenceReadinessReport === null ? {} : { evidence: { configured: true, registry_digest: evidenceReadinessReport.registry_digest, report_digest: evidenceReadinessReport.report_digest, status: evidenceReadinessReport.status, ready_count: evidenceReadinessReport.ready_count, degraded_count: evidenceReadinessReport.degraded_count, blocked_count: evidenceReadinessReport.blocked_count, missing_count: evidenceReadinessReport.missing_count, domains: evidenceReadinessReport.domains.map((row) => row.toJSON()), execution: "readiness_projection_only;no_source_dispatch", secret_material: "never_returned" } }), connectors: connectorReadiness, activation, next_actions: [...nextActions].sort(), readiness_state: readinessState, execution: "not_started; no_provider_or_tool_calls" as const, credential_posture: "caller_supplied_opaque_handles" as const, secret_material: "never_returned" as const };
     return { ...descriptor, readiness_digest: await digestJson(descriptor) };
   }
 
@@ -4928,11 +7087,20 @@ export class AutonomousAgent {
         throw new ArgumentError(`autonomous model selection preview ${name} is outside its bounds`);
       }
     }
+    const selectionWeights = normalizeAutonomousSelectionWeights(options.selectionWeights);
+    const selectionObservations = normalizeAutonomousModelObservations(options.selectionObservations);
+    const selectionObservationsDigest = await digestJson(selectionObservations);
+    const normalizedContextBudget = options.contextBudget === undefined
+      ? null
+      : normalizeAutonomousContextBudget(options.contextBudget);
+    const effectiveEstimatedInputTokens = normalizedContextBudget === null
+      ? estimatedInputTokens
+      : Math.min(estimatedInputTokens, normalizedContextBudget.maxInputTokens);
     const blueprintEnvelope = await this.blueprint(taskText, {
       domain: options.domain,
       capability: options.capability,
       context: options.context,
-      maxInputTokens: estimatedInputTokens,
+      maxInputTokens: effectiveEstimatedInputTokens,
     });
     const blueprint = blueprintEnvelope.blueprint;
     if (!blueprint || blueprintEnvelope.route.cross_domain) {
@@ -4963,6 +7131,9 @@ export class AutonomousAgent {
       maxLatencyMs: options.maxLatencyMs,
       minQuality: options.minQuality,
       minSelectionConfidence: options.minSelectionConfidence,
+      selectionWeights,
+      selectionObservations,
+      contextBudget: normalizedContextBudget === null ? undefined : normalizedContextBudget,
       candidates,
       request,
     };
@@ -4981,12 +7152,19 @@ export class AutonomousAgent {
       required_capabilities: [...blueprint.required_capabilities],
       candidates,
       selection_constraints: {
-        estimated_input_tokens: estimatedInputTokens,
+        estimated_input_tokens: effectiveEstimatedInputTokens,
         requested_output_tokens: requestedOutputTokens,
         max_cost_per_million_tokens: options.maxCostPerMillionTokens ?? null,
         max_latency_ms: options.maxLatencyMs ?? null,
         min_quality: options.minQuality ?? null,
         min_selection_confidence: options.minSelectionConfidence ?? null,
+        selection_weights: selectionWeights,
+        selection_observations_digest: selectionObservationsDigest,
+        context_budget: normalizedContextBudget === null ? null : {
+          max_input_tokens: normalizedContextBudget.maxInputTokens,
+          preserve_recent_messages: normalizedContextBudget.preserveRecentMessages,
+          max_messages: normalizedContextBudget.maxMessages,
+        },
       },
     });
     const selected = selection.selected_model !== null;
@@ -5018,12 +7196,19 @@ export class AutonomousAgent {
         task_decision_posture: blueprint.task_decision.posture,
         required_model_capabilities: [...blueprint.required_capabilities],
         candidate_ids: candidates.map((candidate) => `${candidate.provider}/${candidate.model}`),
-        input_tokens: estimatedInputTokens,
+        input_tokens: effectiveEstimatedInputTokens,
         requested_output_tokens: requestedOutputTokens,
         max_cost_per_million_tokens: options.maxCostPerMillionTokens ?? null,
         max_latency_ms: options.maxLatencyMs ?? null,
         min_quality: options.minQuality ?? null,
         min_selection_confidence: options.minSelectionConfidence ?? null,
+        selection_weights: selectionWeights,
+        selection_observations_digest: selectionObservationsDigest,
+        context_budget: normalizedContextBudget === null ? null : {
+          max_input_tokens: normalizedContextBudget.maxInputTokens,
+          preserve_recent_messages: normalizedContextBudget.preserveRecentMessages,
+          max_messages: normalizedContextBudget.maxMessages,
+        },
       },
       selection_audit: structuredClone(selection),
       review: {
@@ -5072,6 +7257,12 @@ export class AutonomousAgent {
     if (!isObject(contract) || !Array.isArray(contract.candidate_ids) || contract.candidate_ids.some((candidateId) => typeof candidateId !== "string" || !candidateId.trim())) {
       throw new ProviderRuntimeError("approved model selection preview contract is malformed");
     }
+    const reviewedWeights = normalizeAutonomousSelectionWeights(contract.selection_weights);
+    const suppliedWeights = normalizeAutonomousSelectionWeights(options.selectionWeights);
+    if (canonicalJson(reviewedWeights) !== canonicalJson(suppliedWeights)) throw new ProviderRuntimeError("approved model selection weights changed; re-review required");
+    const suppliedObservations = normalizeAutonomousModelObservations(options.selectionObservations);
+    if (typeof contract.selection_observations_digest !== "string" || !/^[0-9a-f]{64}$/.test(contract.selection_observations_digest)) throw new ProviderRuntimeError("approved model selection observation contract is malformed");
+    if (await digestJson(suppliedObservations) !== contract.selection_observations_digest) throw new ProviderRuntimeError("approved model selection observations changed; re-review required");
     const audit = preview.selection_audit;
     if (!isObject(audit) || !isObject(audit.selected_model) || typeof audit.selected_model.provider !== "string" || typeof audit.selected_model.model !== "string") {
       throw new ProviderRuntimeError("approved model selection preview has no exact selected model");
@@ -5085,6 +7276,23 @@ export class AutonomousAgent {
     if (canonicalJson(contract.candidate_ids) !== canonicalJson(candidateIds)) throw new ProviderRuntimeError("approved model selection candidate catalogue changed; re-review required");
     const selectedCandidates = candidates.filter((candidate) => `${candidate.provider}/${candidate.model}` === selectedId);
     if (selectedCandidates.length !== 1) throw new ProviderRuntimeError("approved model selection selected model is absent or duplicated");
+
+    const reviewedContextBudgetValue = contract.context_budget ?? null;
+    let reviewedContextBudget: AutonomousContextBudgetOptions | undefined;
+    if (reviewedContextBudgetValue !== null) {
+      if (!isObject(reviewedContextBudgetValue)) throw new ProviderRuntimeError("approved model selection context budget contract is malformed");
+      reviewedContextBudget = normalizeAutonomousContextBudget({
+        maxInputTokens: reviewedContextBudgetValue.max_input_tokens,
+        preserveRecentMessages: reviewedContextBudgetValue.preserve_recent_messages,
+        maxMessages: reviewedContextBudgetValue.max_messages,
+      });
+    }
+    if (options.contextBudget !== undefined) {
+      const suppliedContextBudget = normalizeAutonomousContextBudget(options.contextBudget);
+      if (canonicalJson(suppliedContextBudget) !== canonicalJson(reviewedContextBudget)) {
+        throw new ProviderRuntimeError("approved model selection context budget changed; re-review required");
+      }
+    }
 
     const inputTokens = options.maxInputTokens ?? contract.input_tokens;
     const requestedOutputTokens = options.maxOutputTokens ?? contract.requested_output_tokens;
@@ -5111,10 +7319,13 @@ export class AutonomousAgent {
       candidates,
       estimatedInputTokens: inputTokens,
       requestedOutputTokens,
+      contextBudget: reviewedContextBudget,
       ...(maxCostPerMillionTokens === undefined ? {} : { maxCostPerMillionTokens }),
       ...(maxLatencyMs === undefined ? {} : { maxLatencyMs }),
       ...(minQuality === undefined ? {} : { minQuality }),
       ...(minSelectionConfidence === undefined ? {} : { minSelectionConfidence }),
+      selectionWeights: suppliedWeights,
+      selectionObservations: suppliedObservations,
     });
     for (const field of [
       "task_digest",
@@ -5149,6 +7360,9 @@ export class AutonomousAgent {
       ...(maxLatencyMs === undefined ? {} : { maxLatencyMs }),
       ...(minQuality === undefined ? {} : { minQuality }),
       ...(minSelectionConfidence === undefined ? {} : { minSelectionConfidence }),
+      selectionWeights: suppliedWeights,
+      selectionObservations: suppliedObservations,
+      contextBudget: reviewedContextBudget,
       approveProviderCall: true,
       maxProviderFailovers: 0,
     };
@@ -5164,6 +7378,263 @@ export class AutonomousAgent {
       return { ...descriptor, route_digest: await digestJson(descriptor) };
     }
     return routeAutonomousTask(taskText, options);
+  }
+
+  /**
+   * Resolve the route authority for a high-level execution call. Semantic routing is opt-in,
+   * inherits all caller-owned boundaries, and returns its proposal separately so callers can
+   * audit the classifier without confusing it with task evidence or execution authorization.
+   */
+  private async resolveExecutionRoute(
+    taskText: string,
+    options: AutonomousRunOptions,
+    costBudget: AutonomousCostBudget | undefined,
+  ): Promise<{ route: AutonomousRouteProposal; semanticRoute: AutonomousSemanticRouteResult | null }> {
+    if (options.routeOverride !== undefined) {
+      return { route: await validateAutonomousRouteOverride(taskText, options.routeOverride), semanticRoute: null };
+    }
+    const semanticRouting = normalizeRunSemanticRouting(options.semanticRouting);
+    if (semanticRouting === null) {
+      return {
+        route: await this.route(taskText, {
+          domain: options.domain,
+          hints: options.hints,
+          minConfidence: options.minConfidence,
+          minMargin: options.minMargin,
+          maxDomains: options.maxDomains,
+          allowCrossDomain: options.allowCrossDomain,
+        }),
+        semanticRoute: null,
+      };
+    }
+    if (options.domain !== undefined) throw new ArgumentError("semanticRouting cannot be combined with an explicit domain");
+    const semanticOptions: AutonomousSemanticRouteOptions = {
+      candidates: options.candidates,
+      credential: options.credential,
+      credentialFor: options.credentialFor,
+      hints: options.hints,
+      approveProviderCall: semanticRouting.approveProviderCall ?? options.approveProviderCall ?? false,
+      minSemanticConfidence: semanticRouting.minSemanticConfidence,
+      maxDomains: semanticRouting.maxDomains ?? 3,
+      allowCrossDomain: semanticRouting.allowCrossDomain ?? options.allowCrossDomain,
+      maxOutputTokens: semanticRouting.maxOutputTokens ?? options.maxOutputTokens ?? 1_024,
+      temperature: semanticRouting.temperature ?? options.temperature,
+      maxCostPerMillionTokens: semanticRouting.maxCostPerMillionTokens ?? options.maxCostPerMillionTokens,
+      maxLatencyMs: semanticRouting.maxLatencyMs ?? options.maxLatencyMs,
+      minQuality: semanticRouting.minQuality ?? options.minQuality,
+      costBudget,
+      execution: options.execution,
+      executionAttempt: options.executionAttempt,
+      maxProviderFailovers: semanticRouting.maxProviderFailovers ?? options.maxProviderFailovers,
+      executionLifecycle: options.executionLifecycle,
+      signal: options.signal,
+      observer: options.observer,
+      domainPolicyMode: semanticRouting.domainPolicyMode ?? options.domainPolicyMode,
+      domainPolicyEvidenceReady: semanticRouting.domainPolicyEvidenceReady ?? options.domainPolicyEvidenceReady,
+      domainPolicyEvaluatorConfigured: semanticRouting.domainPolicyEvaluatorConfigured ?? options.domainPolicyEvaluatorConfigured,
+      domainPolicyEffectsRequested: semanticRouting.domainPolicyEffectsRequested ?? options.domainPolicyEffectsRequested,
+      domainPolicyEffectsApproved: semanticRouting.domainPolicyEffectsApproved ?? options.domainPolicyEffectsApproved,
+    };
+    const semanticRoute = await semanticRouteAutonomousTask(this, taskText, semanticOptions);
+    return { route: semanticRoute.route, semanticRoute };
+  }
+
+  /**
+   * Select the next bounded context/evidence acquisitions before the reviewed evidence queue.
+   * Automatic mode binds the candidate plan to the deterministic route digest; explicit domains
+   * are caller-selected and get a separate explicit-domain identity. No source, provider, tool,
+   * learner, or credential operation occurs here.
+   */
+  async planInformationAcquisition(
+    task: string,
+    options: {
+      candidates: readonly (AutonomousInformationAcquisitionCandidate | AutonomousInformationAcquisitionCandidateInput | Record<string, unknown>)[];
+      domains?: readonly AutonomousDomainName[];
+      hints?: readonly string[];
+      maxDomains?: number;
+      allowCrossDomain?: boolean;
+      policy?: AutonomousInformationAcquisitionPolicy | AutonomousInformationAcquisitionPolicyInput;
+      satisfiedCandidateIds?: readonly string[];
+    },
+  ): Promise<AutonomousInformationAcquisitionPlan> {
+    const taskText = boundedText("information acquisition task", task, 32_000);
+    let requestedDomains: readonly AutonomousDomainName[];
+    let routeDigest: string;
+    if (options.domains === undefined) {
+      const route = await this.route(taskText, {
+        hints: options.hints,
+        maxDomains: options.maxDomains,
+        allowCrossDomain: options.allowCrossDomain,
+      });
+      if (route.abstained) throw new ArgumentError("information acquisition planning requires route review before candidate selection");
+      requestedDomains = route.selected_domains.length > 0
+        ? route.selected_domains
+        : route.primary_domain === null ? [] : [route.primary_domain];
+      routeDigest = route.route_digest;
+    } else {
+      requestedDomains = options.domains;
+      routeDigest = await digestJson({ schema: "bioprism-typescript-explicit-information-domains/0.1", domains: [...requestedDomains] });
+    }
+    if (requestedDomains.length === 0) throw new ArgumentError("information acquisition planning requires at least one routed domain");
+    return planAutonomousInformationAcquisition({
+      taskDigest: await digestJson({ task: taskText }),
+      routeDigest,
+      candidates: options.candidates,
+      requestedDomains,
+      policy: options.policy,
+      satisfiedCandidateIds: options.satisfiedCandidateIds,
+    });
+  }
+
+  /** Fuse caller-supplied evidence metadata into claim decisions without dispatching anything. */
+  assessClaimIntegrity(
+    task: string,
+    options: {
+      claims: readonly (AutonomousClaimIntegrityClaim | AutonomousClaimIntegrityClaimInput | Record<string, unknown>)[];
+      evidence: readonly (AutonomousClaimIntegrityEvidence | AutonomousClaimIntegrityEvidenceInput | Record<string, unknown>)[];
+      referenceTime: string;
+      policy?: AutonomousClaimIntegrityPolicy | AutonomousClaimIntegrityPolicyInput;
+    },
+  ): AutonomousClaimIntegrityAssessment {
+    const taskText = boundedText("claim integrity task", task, 32_000);
+    return assessAutonomousClaimIntegrity({
+      contextDigest: digestJsonSync({ task: taskText }),
+      claims: options.claims,
+      evidence: options.evidence,
+      referenceTime: options.referenceTime,
+      policy: options.policy,
+    } satisfies AssessAutonomousClaimIntegrityOptions);
+  }
+
+  /** Continue a claim-integrity chain with a digest-fenced generation and caller-owned values. */
+  reassessClaimIntegrity(
+    previous: AutonomousClaimIntegrityAssessment,
+    options: {
+      claims: AssessAutonomousClaimIntegrityOptions["claims"];
+      evidence: AssessAutonomousClaimIntegrityOptions["evidence"];
+      referenceTime: string;
+      policy?: AutonomousClaimIntegrityPolicy | AutonomousClaimIntegrityPolicyInput;
+    },
+  ): AutonomousClaimIntegrityAssessment {
+    return reassessAutonomousClaimIntegrity({ previous, ...options });
+  }
+
+  /** Translate integrity blockers into the existing reviewed acquisition planner. */
+  planClaimIntegrityAcquisition(
+    assessment: AutonomousClaimIntegrityAssessment,
+    options: PlanAutonomousClaimIntegrityAcquisitionOptions,
+  ) {
+    return planAutonomousClaimIntegrityAcquisition(assessment, options);
+  }
+
+  /** Bind caller-owned requests to the exact candidates selected by a claim-integrity bridge. */
+  bindClaimIntegrityAcquisition(
+    bridge: Parameters<typeof bindAutonomousClaimIntegrityAcquisitionRequests>[0],
+    requests: readonly (AutonomousClaimIntegrityAcquisitionRequestInput | Record<string, unknown>)[],
+  ): AutonomousClaimIntegrityAcquisitionBinding {
+    return bindAutonomousClaimIntegrityAcquisitionRequests(bridge, requests);
+  }
+
+  /** Execute only the integrity-selected evidence queue through the reviewed source boundary. */
+  async executeClaimIntegrityAcquisition(
+    bridge: Parameters<typeof bindAutonomousClaimIntegrityAcquisitionRequests>[0],
+    registry: AutonomousEvidenceAdapterRegistry,
+    requests: readonly (AutonomousClaimIntegrityAcquisitionRequestInput | Record<string, unknown>)[],
+    options: {
+      prepare?: AutonomousReviewedEvidencePreparationOptions;
+      execute?: AutonomousEvidenceExecutionOptions;
+      availableEvidence?: readonly string[];
+      completedStages?: Readonly<Record<string, readonly string[]>>;
+    } = {},
+  ): Promise<AutonomousEvidenceExecutionResult> {
+    const binding = this.bindClaimIntegrityAcquisition(bridge, requests);
+    const acquisitionPlan = bridge.acquisitionPlan;
+    if (acquisitionPlan === null) throw new ArgumentError("integrity acquisition bridge has no executable plan");
+    const plan = await this.evidencePlan(acquisitionPlan.selectedDomains, { availableEvidence: options.availableEvidence, completedStages: options.completedStages });
+    const prepareOptions = options.prepare ?? {};
+    const { healthStore, ...controllerPrepareOptions } = prepareOptions;
+    const controller = await this.createEvidenceExecutionController(registry, healthStore);
+    const executionPlan = await controller.prepare(plan, controllerPrepareOptions);
+    const executeOptions: AutonomousEvidenceExecutionOptions = {
+      ...(options.execute ?? {}),
+      ...(controllerPrepareOptions.providerContracts !== undefined && options.execute?.providerContracts === undefined
+        ? { providerContracts: controllerPrepareOptions.providerContracts }
+        : {}),
+    };
+    return controller.execute(executionPlan, plan, binding.requests, executeOptions);
+  }
+
+  /** Resume the integrity-selected evidence queue through the existing CAS-fenced checkpoint. */
+  async executeClaimIntegrityAcquisitionResumable(
+    bridge: Parameters<typeof bindAutonomousClaimIntegrityAcquisitionRequests>[0],
+    registry: AutonomousEvidenceAdapterRegistry,
+    requests: readonly (AutonomousClaimIntegrityAcquisitionRequestInput | Record<string, unknown>)[],
+    options: AutonomousReviewedEvidenceResumableExecutionOptions,
+  ): Promise<AutonomousEvidenceExecutionResumableRun> {
+    const binding = this.bindClaimIntegrityAcquisition(bridge, requests);
+    const acquisitionPlan = bridge.acquisitionPlan;
+    if (acquisitionPlan === null) throw new ArgumentError("integrity acquisition bridge has no executable plan");
+    return this.executeReviewedEvidenceResumable(registry, acquisitionPlan.selectedDomains, binding.requests, options);
+  }
+
+  /** Project a completed direct or cross-domain result into a metadata-only reliance identity. */
+  projectOutcomeIntegrityRun(result: AutonomousRunResult | AutonomousCrossDomainRunResult): AutonomousOutcomeIntegrityRun {
+    return projectAutonomousOutcomeIntegrityRun(result);
+  }
+
+  /** Bind explicit claims to the exact output and structural response of one autonomous result. */
+  bindOutcomeIntegrityClaims(
+    result: AutonomousRunResult | AutonomousCrossDomainRunResult,
+    bindings: readonly (AutonomousOutcomeIntegrityClaimBindingInput | Record<string, unknown>)[],
+  ): AutonomousOutcomeIntegrityClaimBinding[] {
+    return bindAutonomousOutcomeIntegrityClaims(projectAutonomousOutcomeIntegrityRun(result), bindings);
+  }
+
+  /**
+   * Decide whether caller-supplied claims may rely on one exact autonomous outcome.
+   *
+   * This is a provider-free final gate: claim/evidence values are evaluated transiently, while
+   * the returned contract retains only digests, counts, statuses, and next actions.  It never
+   * upgrades a model response into external truth or authorizes any downstream effect.
+   */
+  assessOutcomeIntegrity(
+    result: AutonomousRunResult | AutonomousCrossDomainRunResult,
+    options: Omit<AssessAutonomousOutcomeIntegrityOptions, "run">,
+  ): AutonomousOutcomeIntegrityAssessment {
+    return assessAutonomousOutcomeIntegrity({
+      run: projectAutonomousOutcomeIntegrityRun(result),
+      ...options,
+    });
+  }
+
+  /** Gate structured specialist outputs before cross-domain synthesis. */
+  assessCrossDomainResponses(
+    responses: readonly AutonomousCrossDomainResponseEntry[],
+    options: {
+      task?: string;
+      contextDigest?: string | null;
+      requestedDomains?: readonly AutonomousDomainName[];
+      alignments?: readonly AutonomousCrossDomainResponseAlignmentInput[];
+      requireSynthesis?: boolean;
+      requireCompleteAlignment?: boolean;
+      minimumReward?: number;
+      minimumAlignmentConfidence?: number;
+      contradictionConfidenceThreshold?: number;
+    } = {},
+  ): AutonomousCrossDomainResponseAssessment {
+    if (options.task !== undefined && options.contextDigest !== undefined && options.contextDigest !== null) throw new ArgumentError("cross-domain response assessment accepts task or contextDigest, not both");
+    if (options.task !== undefined && (typeof options.task !== "string" || options.task.trim().length === 0 || options.task.includes("\u0000") || new TextEncoder().encode(options.task).byteLength > 32_000)) throw new ArgumentError("cross-domain response assessment task is outside its bound");
+    const contextDigest = options.task === undefined ? options.contextDigest : digestJsonSync({ task: options.task });
+    return assessAutonomousCrossDomainResponseSet(responses, {
+      requestedDomains: options.requestedDomains,
+      contextDigest,
+      alignments: options.alignments,
+      requireSynthesis: options.requireSynthesis,
+      requireCompleteAlignment: options.requireCompleteAlignment,
+      minimumReward: options.minimumReward,
+      minimumAlignmentConfidence: options.minimumAlignmentConfidence,
+      contradictionConfidenceThreshold: options.contradictionConfidenceThreshold,
+    });
   }
 
   /** Resolve the bounded policy for a domain without provider, tool, or source activity. */
@@ -5375,6 +7846,15 @@ export class AutonomousAgent {
     const taskText = boundedText("evidence-backed autonomous task", task, 32_000);
     const taskDigest = await digestJson({ task: taskText });
     const domains = options.domains ?? AUTONOMOUS_DOMAIN_NAMES;
+    const runMode = normalizeAutonomousEvidenceExecutionMode(options.runMode);
+    const overrideCount = [options.providerRunOverride, options.automaticRunOverride, options.crossDomainRunOverride].filter((value) => value !== undefined).length;
+    if (overrideCount > 1) throw new ArgumentError("evidence-backed execution accepts only one result override");
+    if (options.providerRunOverride !== undefined && runMode !== "domain") throw new ArgumentError("evidence-backed providerRunOverride is supported only for domain mode");
+    if (options.automaticRunOverride !== undefined && runMode !== "auto") throw new ArgumentError("evidence-backed automaticRunOverride is supported only for auto mode");
+    if (options.crossDomainRunOverride !== undefined && runMode !== "cross_domain") throw new ArgumentError("evidence-backed crossDomainRunOverride is supported only for cross_domain mode");
+    if (runMode === "cross_domain" && options.domains === undefined) throw new ArgumentError("cross-domain evidence execution requires an explicit 2..8 domain scope");
+    if (runMode === "cross_domain" && (domains.length < 2 || domains.length > AUTONOMOUS_CROSS_DOMAIN_MAX_CHILDREN || domains.includes("cross_domain"))) throw new ArgumentError("cross-domain evidence execution requires 2..8 non-synthesis domains");
+    const evidenceScopeRoute = options.domains === undefined ? null : await routeAutonomousEvidenceScope(taskText, domains);
     const plan = await this.evidencePlan(domains, {
       availableEvidence: options.availableEvidence,
       completedStages: options.completedStages,
@@ -5395,19 +7875,27 @@ export class AutonomousAgent {
       evidence: AutonomousEvidenceExecutionResult | null,
       promptContext: readonly AutonomousPromptChunk[],
       run: AutonomousRunResult | null,
+      crossDomainRun: AutonomousCrossDomainRunResult | null = null,
+      automatic: AutonomousAutoRunResult | null = null,
     ): Promise<AutonomousEvidenceBackedRunResult> => {
       const evidenceResultDigest = evidence?.result_digest ?? null;
-      const selectionDigest = run?.selection ? await digestJson(run.selection) : null;
-      const responseDigest = run?.response ? await digestJson(run.response) : null;
+      const metadataRun = run ?? crossDomainRun?.synthesis ?? (automatic?.result?.schema === "bioprism-typescript-autonomous-run/0.1" ? automatic.result : automatic?.result?.synthesis ?? null);
+      const selectionDigest = metadataRun?.selection ? await digestJson(metadataRun.selection) : null;
+      const responseDigest = metadataRun?.response ? await digestJson(metadataRun.response) : null;
       const descriptor = {
         schema: AUTONOMOUS_EVIDENCE_BACKED_RUN_SCHEMA,
         status,
+        run_mode: runMode,
         task_digest: taskDigest,
         evidence_plan_digest: plan.plan_digest,
         execution_plan_digest: executionPlan.plan_digest,
         evidence_result_digest: evidenceResultDigest,
         prompt_projection_digest: promptContext.length ? await digestJson(promptContext) : null,
         run_status: run?.status ?? null,
+        cross_domain_run_status: crossDomainRun?.status ?? null,
+        automatic_status: automatic?.status ?? null,
+        automatic_route_digest: automatic?.route.route_digest ?? null,
+        automatic_next_action: automatic?.next_action ?? null,
         selection_digest: selectionDigest,
         response_digest: responseDigest,
         retention: "metadata_only;raw_evidence_prompt_values_and_provider_response_caller_owned" as const,
@@ -5418,11 +7906,14 @@ export class AutonomousAgent {
       return {
         schema: AUTONOMOUS_EVIDENCE_BACKED_RUN_SCHEMA,
         status,
+        run_mode: runMode,
         task_digest: taskDigest,
         execution_plan: executionPlan,
         evidence,
         prompt_context: structuredClone(promptContext),
         run,
+        cross_domain_run: crossDomainRun,
+        automatic,
         toJSON: () => structuredClone(projection),
       };
     };
@@ -5458,30 +7949,762 @@ export class AutonomousAgent {
     );
     const runOptions = options.run ?? {};
     const context = normalizeEvidenceBackedPromptContext([...(runOptions.context ?? []), ...projectedContext], 128);
-    let run: AutonomousRunResult;
+    let run: AutonomousRunResult | null = null;
+    let crossDomainRun: AutonomousCrossDomainRunResult | null = null;
+    let automatic: AutonomousAutoRunResult | null = null;
     if (options.providerRunOverride !== undefined) {
       if (!isObject(options.providerRunOverride) || options.providerRunOverride.schema !== "bioprism-typescript-autonomous-run/0.1") throw new ArgumentError("evidence-backed provider run override is malformed");
       if (runOptions.approveProviderCall !== true) throw new ArgumentError("evidence-backed provider run override requires provider approval in the reviewed run options");
+      await validateAutonomousRouteOverride(taskText, options.providerRunOverride.route);
       run = options.providerRunOverride;
+    } else if (options.automaticRunOverride !== undefined) {
+      if (!isObject(options.automaticRunOverride) || options.automaticRunOverride.schema !== AUTONOMOUS_AUTO_RUN_SCHEMA) throw new ArgumentError("evidence-backed automatic run override is malformed");
+      if (runOptions.approveProviderCall !== true) throw new ArgumentError("evidence-backed automatic run override requires provider approval in the reviewed run options");
+      if (!options.automaticRunOverride.result) throw new ArgumentError("evidence-backed automatic run override requires a completed result envelope");
+      const overrideRoute = await validateAutonomousRouteOverride(taskText, options.automaticRunOverride.route);
+      if (evidenceScopeRoute && overrideRoute.route_digest !== evidenceScopeRoute.route_digest) throw new ArgumentError("evidence-backed automatic run override does not match the reviewed evidence route");
+      const nestedRoute = await validateAutonomousRouteOverride(taskText, options.automaticRunOverride.result.route);
+      if (nestedRoute.route_digest !== overrideRoute.route_digest) throw new ArgumentError("evidence-backed automatic run override result route does not match its envelope");
+      automatic = options.automaticRunOverride;
+      const automaticResult = automatic.result;
+      if (automaticResult && automaticResult.schema === "bioprism-typescript-autonomous-run/0.1") run = automaticResult;
+      if (automaticResult && automaticResult.schema === AUTONOMOUS_CROSS_DOMAIN_RESULT_SCHEMA) crossDomainRun = automaticResult;
+    } else if (options.crossDomainRunOverride !== undefined) {
+      if (!isObject(options.crossDomainRunOverride) || options.crossDomainRunOverride.schema !== AUTONOMOUS_CROSS_DOMAIN_RESULT_SCHEMA) throw new ArgumentError("evidence-backed cross-domain run override is malformed");
+      if (runOptions.approveProviderCall !== true) throw new ArgumentError("evidence-backed cross-domain run override requires provider approval in the reviewed run options");
+      const overrideRoute = await validateAutonomousRouteOverride(taskText, options.crossDomainRunOverride.route);
+      if (!overrideRoute.cross_domain) throw new ArgumentError("evidence-backed cross-domain run override must carry a cross-domain route");
+      if (evidenceScopeRoute && overrideRoute.route_digest !== evidenceScopeRoute.route_digest) throw new ArgumentError("evidence-backed cross-domain run override does not match the reviewed evidence route");
+      crossDomainRun = options.crossDomainRunOverride;
     } else {
       await options.beforeProviderRun?.({ executionPlan, evidence, promptContext: projectedContext });
-      run = await this.run(taskText, { ...runOptions, context });
+      if (runMode === "domain") {
+        const evidenceDomain = options.domains?.length === 1 ? options.domains[0] : undefined;
+        if (evidenceDomain !== undefined && runOptions.domain !== undefined && runOptions.domain !== evidenceDomain) throw new ArgumentError("domain evidence scope does not match the requested provider domain");
+        run = await this.run(taskText, {
+          ...runOptions,
+          context,
+          ...(evidenceDomain !== undefined && runOptions.domain === undefined ? { domain: evidenceDomain } : {}),
+        });
+      } else if (runMode === "cross_domain") {
+        if (!evidenceScopeRoute) throw new ProviderRuntimeError("cross-domain evidence route was not compiled");
+        if (runOptions.semanticRouting !== undefined && runOptions.semanticRouting !== false) throw new ArgumentError("cross-domain evidence execution requires provider-free route binding");
+        const { domain: _domain, routeOverride: _routeOverride, semanticRouting: _semanticRouting, ...crossRunOptions } = runOptions;
+        crossDomainRun = await this.runCrossDomain(taskText, {
+          ...crossRunOptions,
+          ...options.crossDomain,
+          context,
+          routeOverride: evidenceScopeRoute,
+          domainPolicyEvidenceReady: true,
+          semanticRouting: false,
+        });
+      } else {
+        if (evidenceScopeRoute) {
+          if (runOptions.routeOverride !== undefined) throw new ArgumentError("automatic evidence execution owns the evidence-scope route override");
+          if (runOptions.semanticRouting !== undefined && runOptions.semanticRouting !== false) throw new ArgumentError("automatic evidence execution cannot combine an exact evidence scope with provider-assisted semantic routing");
+          const { domain: _domain, routeOverride: _routeOverride, semanticRouting: _semanticRouting, ...automaticRunOptions } = runOptions;
+          automatic = await this.runAuto(taskText, {
+            ...automaticRunOptions,
+            context,
+            routeOverride: evidenceScopeRoute,
+            semanticRouting: false,
+            domainPolicyEvidenceReady: true,
+          });
+        } else {
+          automatic = await this.runAuto(taskText, { ...runOptions, context, domainPolicyEvidenceReady: true });
+        }
+        if (automatic.result?.schema === "bioprism-typescript-autonomous-run/0.1") run = automatic.result;
+        if (automatic.result?.schema === "bioprism-typescript-autonomous-cross-domain-result/0.1") crossDomainRun = automatic.result;
+      }
     }
-    return finish(run.status, evidence, projectedContext, run);
+    const status = automatic?.status ?? crossDomainRun?.status ?? run?.status ?? "evidence_failed";
+    return finish(status, evidence, projectedContext, run, crossDomainRun, automatic);
   }
 
-  async blueprint(task: string, options: { domain?: AutonomousDomainName; routeOverride?: AutonomousRouteProposal; capability?: string; context?: readonly AutonomousPromptChunk[]; hints?: readonly string[]; maxInputTokens?: number; tools?: readonly string[]; subtasks?: readonly AutonomousCrossDomainSubtask[]; structuredDomainResponse?: boolean; toolSelectionState?: AutonomousToolSelectionState | null; toolSelectionExploration?: number } = {}): Promise<AutonomousAutoBlueprint> {
+  /**
+   * Run the catalogue-backed evidence brain lifecycle. The source catalogue owns route and
+   * normalizer identity; this facade owns prompt assembly, model selection, provider invocation,
+   * memory, and optional online-learning feedback. Source approval and provider approval remain
+   * independent, and the default prompt contains metadata-only evidence projections.
+   */
+  async runWithDomainEvidenceCatalogue(
+    task: string,
+    options: AutonomousDomainEvidenceBrainRunOptions,
+  ): Promise<AutonomousDomainEvidenceBrainRunResult> {
+    const { runAutonomousDomainEvidenceBacked } = await import("./autonomous-domain-evidence-brain.js");
+    return runAutonomousDomainEvidenceBacked(this, task, options);
+  }
+
+  /**
+   * Admit the complete declared evidence scope before source adapters, credentials, or providers
+   * can be reached. Evidence acquisition is a separate authority from provider execution, so
+   * the launch record covers every requested domain while the nested evidence options retain
+   * their own source and provider approvals.
+   */
+  async runWithReviewedEvidenceWithLaunchAdmission(
+    task: string,
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousEvidenceBackedRunOptions,
+  ): Promise<AutonomousEvidenceBackedRunResult> {
+    const domains = options?.domains ?? AUTONOMOUS_DOMAIN_NAMES;
+    const { authorizeAutonomousLaunchDomains } = await import("./autonomous-launch-admission.js");
+    authorizeAutonomousLaunchDomains(admission, domains);
+    return this.runWithReviewedEvidence(task, options);
+  }
+
+  /** Catalogue equivalent of the evidence-first launch-admission handoff. */
+  async runWithDomainEvidenceCatalogueWithLaunchAdmission(
+    task: string,
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousDomainEvidenceBrainRunOptions,
+  ): Promise<AutonomousDomainEvidenceBrainRunResult> {
+    const domains = options?.domains ?? AUTONOMOUS_DOMAIN_NAMES;
+    const { authorizeAutonomousLaunchDomains } = await import("./autonomous-launch-admission.js");
+    authorizeAutonomousLaunchDomains(admission, domains);
+    return this.runWithDomainEvidenceCatalogue(task, options);
+  }
+
+  async blueprint(task: string, options: { domain?: AutonomousDomainName; routeOverride?: AutonomousRouteProposal; capability?: string; riskClass?: string; constraints?: readonly string[]; desiredOutputs?: readonly string[]; context?: readonly AutonomousPromptChunk[]; hints?: readonly string[]; minConfidence?: number; minMargin?: number; maxDomains?: number; allowCrossDomain?: boolean; maxInputTokens?: number; tools?: readonly string[]; subtasks?: readonly AutonomousCrossDomainSubtask[]; structuredDomainResponse?: boolean; toolSelectionState?: AutonomousToolSelectionState | null; toolSelectionExploration?: number; maxToolRiskClass?: AutonomousToolRiskClass } = {}): Promise<AutonomousAutoBlueprint> {
     const taskText = boundedText("autonomous task", task, 32_000);
-    const route = options.routeOverride ? await validateAutonomousRouteOverride(taskText, options.routeOverride) : await this.route(taskText, { domain: options.domain, hints: options.hints });
+    const route = options.routeOverride ? await validateAutonomousRouteOverride(taskText, options.routeOverride) : await this.route(taskText, { domain: options.domain, hints: options.hints, minConfidence: options.minConfidence, minMargin: options.minMargin, maxDomains: options.maxDomains, allowCrossDomain: options.allowCrossDomain });
     if (route.abstained || !route.primary_domain) return { schema: "bioprism-python-autonomous-auto-blueprint/0.1", route, blueprint: null, cross_domain_blueprint: null, execution: "not_started", authorization: "route_and_plan_only; no_provider_or_tool_effects_authorized" };
     if (route.cross_domain) {
       const crossDomain = await this.buildCrossDomainBlueprint(taskText, route, options);
       return { schema: "bioprism-python-autonomous-auto-blueprint/0.1", route, blueprint: crossDomain.child_blueprints[0] ?? null, cross_domain_blueprint: crossDomain, execution: "not_started", authorization: "route_and_plan_only; no_provider_or_tool_effects_authorized" };
     }
     const profile = await profileFor(route.primary_domain);
-    const activeToolNames = options.tools ? this.filterActivatedToolNames([...options.tools]) : await this.liveToolNamesForTask(taskText, [route.primary_domain], options.capability, options.toolSelectionState, options.toolSelectionExploration);
-    const blueprint = await buildTaskBlueprint(profile, taskText, { taskDigest: route.task_digest, routeDigest: route.route_digest, capability: options.capability, context: options.context, maxInputTokens: options.maxInputTokens, activeToolNames, selectedToolNames: activeToolNames, structuredDomainResponse: options.structuredDomainResponse });
-    return { schema: "bioprism-python-autonomous-auto-blueprint/0.1", route, blueprint, cross_domain_blueprint: null, execution: "not_started", authorization: "route_and_plan_only; no_provider_or_tool_effects_authorized" };
+    const capabilityRoute = routeAutonomousCapability(taskText, profile.domain, options.capability === undefined ? {} : { explicitCapability: options.capability });
+    const effectiveCapability = options.capability ?? capabilityRoute.selected_capability ?? undefined;
+    const activeToolNames = options.tools ? this.filterActivatedToolNames([...options.tools]) : await this.liveToolNamesForTask(taskText, [route.primary_domain], effectiveCapability, this.effectiveToolSelectionState(options.toolSelectionState), options.toolSelectionExploration, options.maxToolRiskClass);
+    const blueprint = await buildTaskBlueprint(profile, taskText, { taskDigest: route.task_digest, routeDigest: route.route_digest, capability: effectiveCapability, riskClass: options.riskClass, constraints: options.constraints, desiredOutputs: options.desiredOutputs, capabilityRoute, context: options.context, maxInputTokens: options.maxInputTokens, activeToolNames, selectedToolNames: activeToolNames, structuredDomainResponse: options.structuredDomainResponse });
+    return { schema: "bioprism-python-autonomous-auto-blueprint/0.1", route, blueprint, cross_domain_blueprint: null, capability_route: capabilityRoute, execution: "not_started", authorization: "route_and_plan_only; no_provider_or_tool_effects_authorized" };
+  }
+
+  /**
+   * Compile deterministic clarification questions from the same blueprint that would shape
+   * execution. The returned plan is a user-interaction receipt only; it cannot authorize a
+   * provider, source, tool, credential, evaluator, or external effect.
+   */
+  async clarificationPlan(
+    task: string,
+    options: {
+      domain: AutonomousDomainName;
+      capability?: string;
+      riskClass?: string;
+      constraints?: readonly string[];
+      desiredOutputs?: readonly string[];
+      context?: readonly AutonomousPromptChunk[];
+      maxInputTokens?: number;
+      structuredDomainResponse?: boolean;
+      maxQuestions?: number;
+    },
+  ): Promise<AutonomousTaskClarificationPlan> {
+    if (!options || !options.domain) throw new ArgumentError("clarificationPlan requires an explicit domain");
+    const taskText = boundedText("autonomous clarification task", task, 32_000);
+    const envelope = await this.blueprint(taskText, {
+      domain: options.domain,
+      capability: options.capability,
+      riskClass: options.riskClass,
+      constraints: options.constraints,
+      desiredOutputs: options.desiredOutputs,
+      context: options.context,
+      maxInputTokens: options.maxInputTokens,
+      structuredDomainResponse: options.structuredDomainResponse,
+      allowCrossDomain: false,
+    });
+    if (!envelope.blueprint || envelope.cross_domain_blueprint) throw new ArgumentError("clarificationPlan requires a single-domain blueprint");
+    return planAutonomousTaskClarification({
+      intent: envelope.blueprint.task_intent,
+      lens: envelope.blueprint.task_lens,
+      policy: envelope.blueprint.domain_policy,
+      decision: envelope.blueprint.task_decision,
+      maxQuestions: options.maxQuestions,
+    });
+  }
+
+  /** Resolve transient answers into a plan-bound, answer-digest-only receipt. */
+  async resolveClarification(
+    plan: AutonomousTaskClarificationPlan | unknown,
+    task: string,
+    answers: Readonly<Record<string, string>>,
+  ): Promise<AutonomousTaskClarificationResolution> {
+    const taskText = boundedText("autonomous clarification task", task, 32_000);
+    return resolveAutonomousTaskClarification(plan, { taskDigest: digestJsonSync({ task: taskText }), answers });
+  }
+
+  /** Rehydrate a persisted clarification receipt against its exact plan. */
+  async validateClarification(
+    plan: AutonomousTaskClarificationPlan | unknown,
+    receipt: AutonomousTaskClarificationResolution | unknown,
+  ): Promise<AutonomousTaskClarificationResolution> {
+    return validateAutonomousTaskClarificationResolution(receipt, plan);
+  }
+
+  /** Validate a persisted domain lens before task classification or planning resumes. */
+  validateTaskLens(value: AutonomousDomainTaskLens | unknown, expectedDomain?: AutonomousDomainName): AutonomousDomainTaskLens {
+    return validateAutonomousDomainTaskLens(value, expectedDomain);
+  }
+
+  /** Validate persisted intent metadata and optionally bind it to the current task/lens. */
+  validateTaskIntent(
+    value: AutonomousTaskIntent | unknown,
+    options: { lens?: AutonomousDomainTaskLens; taskDigest?: string } = {},
+  ): AutonomousTaskIntent {
+    return validateAutonomousTaskIntent(value, options);
+  }
+
+  /** Validate a persisted domain policy before a resumed decision replay. */
+  validateDomainPolicy(value: AutonomousDomainPolicy | unknown, expectedDomain?: AutonomousDomainName): AutonomousDomainPolicy {
+    return validateAutonomousDomainPolicy(value, expectedDomain);
+  }
+
+  /** Validate a persisted task decision before a resumed execution boundary. */
+  validateTaskDecision(
+    value: AutonomousTaskDecision | unknown,
+    options: {
+      intent?: AutonomousTaskIntent;
+      lens?: AutonomousDomainTaskLens;
+      policy?: AutonomousDomainPolicy;
+      requiredModelCapabilities?: readonly string[];
+    } = {},
+  ): AutonomousTaskDecision {
+    return validateAutonomousTaskDecision(value, options);
+  }
+
+  /**
+   * Recompile a caller-clarified task only after the original task and complete receipt verify.
+   * The returned live blueprint remains transient; JSON serialization uses a metadata-only
+   * projection so answer values and task text cannot accidentally enter a durable handoff.
+   */
+  async recompileClarification(
+    plan: AutonomousTaskClarificationPlan | unknown,
+    receipt: AutonomousTaskClarificationResolution | unknown,
+    task: string,
+    clarifiedTask: string,
+    options: {
+      capability?: string;
+      riskClass?: string;
+      constraints?: readonly string[];
+      desiredOutputs?: readonly string[];
+      context?: readonly AutonomousPromptChunk[];
+      maxInputTokens?: number;
+      structuredDomainResponse?: boolean;
+    } = {},
+  ): Promise<AutonomousClarificationRecompileResult> {
+    const resolvedPlan = validateAutonomousTaskClarificationPlan(plan);
+    const taskText = boundedText("autonomous clarification task", task, 32_000);
+    const originalTaskDigest = digestJsonSync({ task: taskText });
+    if (resolvedPlan.task_digest !== originalTaskDigest) throw new ArgumentError("clarification recompile task does not match the original plan");
+    const resolvedReceipt = validateAutonomousTaskClarificationResolution(receipt, resolvedPlan);
+    if (resolvedReceipt.task_digest !== originalTaskDigest) throw new ArgumentError("clarification recompile receipt does not match the original task");
+    if (resolvedReceipt.status !== "resolved") throw new ArgumentError("clarification recompile requires a resolved clarification receipt");
+    const clarifiedText = boundedText("autonomous clarified task", clarifiedTask, 32_000);
+    const envelope = await this.blueprint(clarifiedText, {
+      domain: resolvedPlan.domain,
+      capability: options.capability,
+      riskClass: options.riskClass,
+      constraints: options.constraints,
+      desiredOutputs: options.desiredOutputs,
+      context: options.context,
+      maxInputTokens: options.maxInputTokens,
+      structuredDomainResponse: options.structuredDomainResponse,
+      allowCrossDomain: false,
+    });
+    if (!envelope.blueprint || envelope.cross_domain_blueprint) throw new ArgumentError("clarification recompile requires a single-domain blueprint");
+    const blueprint = envelope.blueprint;
+    const descriptor = {
+      schema: AUTONOMOUS_TASK_CLARIFICATION_RECOMPILE_SCHEMA,
+      plan_digest: resolvedPlan.plan_digest,
+      resolution_digest: resolvedReceipt.resolution_digest,
+      original_task_digest: originalTaskDigest,
+      recompiled_task_digest: blueprint.task_digest,
+      domain: blueprint.domain_profile.domain,
+      workflow_id: blueprint.workflow.workflow_id,
+      recompiled_intent_digest: blueprint.task_intent.intent_digest,
+      recompiled_decision_digest: blueprint.task_decision.decision_digest,
+      execution_plan_digest: blueprint.plan.plan_digest,
+      status: "ready" as const,
+    };
+    const recompileDigest = digestJsonSync(descriptor);
+    const blueprintProjection: JsonObject = {
+      schema: blueprint.schema,
+      task_digest: blueprint.task_digest,
+      route_digest: blueprint.route_digest,
+      domain: blueprint.domain_profile.domain,
+      workflow_id: blueprint.workflow.workflow_id,
+      workflow_digest: blueprint.workflow.workflow_digest,
+      task_intent_digest: blueprint.task_intent.intent_digest,
+      task_decision_digest: blueprint.task_decision.decision_digest,
+      task_decision_posture: blueprint.task_decision.posture,
+      plan_digest: blueprint.plan.plan_digest,
+      prompt_digest: blueprint.prompt.prompt_digest,
+      learning_context_digest: blueprint.learning_context_digest,
+      required_capabilities: [...blueprint.required_capabilities],
+      stage_ids: blueprint.stage_execution_plans.map((stage) => stage.stage_id),
+      execution: "not_started",
+      authorization: "plan_only; provider_source_tool_and_effect_gates_remain_required",
+      retention: "metadata_only; task_text_and_answer_values_not_retained",
+      secret_material: "never_returned",
+    };
+    const toJSON = (): AutonomousClarificationRecompileProjection => ({
+      ...descriptor,
+      recompile_digest: recompileDigest,
+      blueprint: blueprintProjection,
+      execution: "not_started; fresh_blueprint_requires_existing_gates",
+      authorization: "recompile_only; provider_source_tool_and_effect_gates_remain_required",
+      retention: "metadata_only; task_text_and_answer_values_not_retained",
+      secret_material: "never_returned",
+    });
+    return {
+      ...descriptor,
+      recompile_digest: recompileDigest,
+      blueprint,
+      toJSON,
+    };
+  }
+
+  /** Validate a persisted recompile projection without restoring transient task values. */
+  async validateClarificationRecompile(
+    value: unknown,
+    plan?: AutonomousTaskClarificationPlan | unknown,
+    receipt?: AutonomousTaskClarificationResolution | unknown,
+  ): Promise<AutonomousClarificationRecompileProjection> {
+    return validateAutonomousTaskClarificationRecompile(value, plan, receipt) as AutonomousClarificationRecompileProjection;
+  }
+
+  /**
+   * Route and execute one task through the same high-level boundary regardless of domain.
+   * Deterministic mode performs a provider-free route/blueprint pass and then delegates to the
+   * ordinary single- or cross-domain executor. Provider mode delegates to `planAndRun`, preserving
+   * its separate planning acceptance and execution-approval gates. The route is resolved once and
+   * then passed back as a digest-verified override, so semantic routing or model selection cannot
+   * silently change between the preview and the actual invocation.
+   */
+  async runAuto(task: string, options: AutonomousAutoRunOptions = {}): Promise<AutonomousAutoRunResult> {
+    const taskText = boundedText("autonomous runAuto task", task, 32_000);
+    const planningMode = options.planningMode ?? "deterministic";
+    if (planningMode !== "deterministic" && planningMode !== "provider") throw new ArgumentError("runAuto planningMode must be deterministic or provider");
+    if (options.acceptedSingleDomainPlanRefinement !== undefined || options.acceptedCrossDomainPlanRefinement !== undefined) {
+      throw new ArgumentError("runAuto creates its own route and plan boundary; apply an accepted refinement through run or runCrossDomain");
+    }
+
+    const nextAction = (status: AutonomousPlanAndRunStatus, result: AutonomousRunResult | AutonomousCrossDomainRunResult | null): AutonomousAutoRunNextAction => {
+      if (status === "route_review_required" || status === "abstained") return "review_route";
+      if (status === "plan_review_required" || status === "provider_invalid" || status === "provider_failed" || status === "provider_disagreement") return "review_plan";
+      if (status === "approval_required" || status === "policy_review_required" || status === "policy_blocked" || status === "reconciliation_required") return "review_provider_or_effect_approval";
+      if (result === null) return "inspect_result";
+      return status === "completed" ? "complete" : "inspect_result";
+    };
+
+    if (planningMode === "provider") {
+      const { planningMode: _planningMode, ...planningOptions } = options;
+      const planned = await this.planAndRun(taskText, planningOptions);
+      return {
+        schema: AUTONOMOUS_AUTO_RUN_SCHEMA,
+        status: planned.status,
+        route: planned.route,
+        semantic_route: planned.semantic_route ?? null,
+        blueprint: planned.blueprint,
+        planning: planned,
+        result: planned.result,
+        planning_mode: planningMode,
+        next_action: nextAction(planned.status, planned.result),
+        retention: "provider_response_local;route_and_plan_metadata_value_only;execution_result_caller_owned",
+        authorization: "route_review_and_provider_or_effect_approval_remain_explicit",
+      };
+    }
+
+    const {
+      planningMode: _planningMode,
+      planning: _planning,
+      planningPromptStage: _planningPromptStage,
+      planningPromptLearningState: _planningPromptLearningState,
+      planningPromptLearningExploration: _planningPromptLearningExploration,
+      acceptPlan: _acceptPlan,
+      ...runOptions
+    } = options;
+    const costBudget = resolveAutonomousCostBudget(runOptions);
+    const routeResolution = await this.resolveExecutionRoute(taskText, runOptions, costBudget);
+    const route = routeResolution.route;
+    const semanticRoute = routeResolution.semanticRoute;
+    if (semanticRoute !== null && semanticRoute.status !== "completed") {
+      const status = semanticRouteRunStatus(semanticRoute.status);
+      return {
+        schema: AUTONOMOUS_AUTO_RUN_SCHEMA,
+        status,
+        route,
+        semantic_route: semanticRoute,
+        blueprint: null,
+        planning: null,
+        result: null,
+        planning_mode: planningMode,
+        next_action: "review_route",
+        retention: "provider_response_local;route_and_plan_metadata_value_only;execution_result_caller_owned",
+        authorization: "route_review_and_provider_or_effect_approval_remain_explicit",
+      };
+    }
+    const envelope = await this.blueprint(taskText, {
+      domain: route.primary_domain ?? undefined,
+      routeOverride: route,
+      capability: runOptions.capability,
+      context: runOptions.context,
+      maxInputTokens: runOptions.maxInputTokens,
+      tools: runOptions.tools?.map((tool) => tool.name),
+      hints: runOptions.hints,
+      minConfidence: runOptions.minConfidence,
+      minMargin: runOptions.minMargin,
+      maxDomains: runOptions.maxDomains,
+      allowCrossDomain: runOptions.allowCrossDomain,
+      subtasks: runOptions.subtasks,
+      structuredDomainResponse: runOptions.structuredDomainResponse,
+      toolSelectionState: runOptions.toolSelectionState,
+      toolSelectionExploration: runOptions.toolSelectionExploration,
+      maxToolRiskClass: runOptions.maxToolRiskClass,
+    });
+    if (route.abstained || !route.primary_domain || (!envelope.blueprint && !envelope.cross_domain_blueprint)) {
+      return {
+        schema: AUTONOMOUS_AUTO_RUN_SCHEMA,
+        status: "route_review_required",
+        route,
+        semantic_route: semanticRoute,
+        blueprint: envelope,
+        planning: null,
+        result: null,
+        planning_mode: planningMode,
+        next_action: "review_route",
+        retention: "provider_response_local;route_and_plan_metadata_value_only;execution_result_caller_owned",
+        authorization: "route_review_and_provider_or_effect_approval_remain_explicit",
+      };
+    }
+    const executionOptions: AutonomousRunOptions = {
+      ...runOptions,
+      routeOverride: route,
+      ...(runOptions.capability === undefined && envelope.blueprint?.capability_route?.selected_capability
+        ? { capability: envelope.blueprint.capability_route.selected_capability }
+        : {}),
+      costBudget,
+      maxTotalCostUnits: undefined,
+    };
+    const rawResult = envelope.cross_domain_blueprint
+      ? await this.runCrossDomain(taskText, executionOptions)
+      : await this.run(taskText, { ...executionOptions, domain: route.primary_domain });
+    const result = semanticRoute === null ? rawResult : { ...rawResult, semantic_route: semanticRoute };
+    return {
+      schema: AUTONOMOUS_AUTO_RUN_SCHEMA,
+      status: result.status,
+      route,
+      semantic_route: semanticRoute,
+      blueprint: envelope,
+      planning: null,
+      result,
+      planning_mode: planningMode,
+      next_action: nextAction(result.status, result),
+      retention: "provider_response_local;route_and_plan_metadata_value_only;execution_result_caller_owned",
+      authorization: "route_review_and_provider_or_effect_approval_remain_explicit",
+    };
+  }
+
+  /**
+   * Compile one deterministic route, require a caller-owned launch admission for every selected
+   * domain, and only then enter the normal provider/tool execution boundary.  The route is passed
+   * back as an exact override so a second classification cannot widen or change the admitted
+   * execution scope.  Provider-assisted semantic routing is rejected because its classifier is a
+   * separate provider boundary and must be reviewed independently.
+   */
+  async runWithLaunchAdmission(
+    task: string,
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousRunOptions = {},
+  ): Promise<AutonomousRunResult> {
+    if (options.routeOverride !== undefined) throw new ArgumentError("runWithLaunchAdmission owns routeOverride; pass routing controls instead");
+    if (options.semanticRouting !== undefined && options.semanticRouting !== false) throw new ArgumentError("launch-admitted execution requires provider-free routing; admit semantic routing separately");
+    const route = await this.route(task, {
+      domain: options.domain,
+      hints: options.hints,
+      minConfidence: options.minConfidence,
+      minMargin: options.minMargin,
+      maxDomains: options.maxDomains,
+      allowCrossDomain: options.allowCrossDomain,
+    });
+    const { authorizeAutonomousLaunchDomains } = await import("./autonomous-launch-admission.js");
+    if (!route.abstained) authorizeAutonomousLaunchDomains(admission, route.selected_domains);
+    const { domain: _domain, routeOverride: _routeOverride, semanticRouting: _semanticRouting, ...runOptions } = options;
+    return this.run(task, { ...runOptions, routeOverride: route, semanticRouting: false });
+  }
+
+  /**
+   * Route and admit an automatic run before any provider-assisted planning, credentials, or
+   * tools are touched.  This covers both single-domain and cross-domain automatic execution and
+   * preserves the frozen route through `runAuto`'s deterministic or reviewed planning mode.
+   */
+  async runAutoWithLaunchAdmission(
+    task: string,
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousAutoRunOptions = {},
+  ): Promise<AutonomousAutoRunResult> {
+    if (options.routeOverride !== undefined) throw new ArgumentError("runAutoWithLaunchAdmission owns routeOverride; pass routing controls instead");
+    if (options.semanticRouting !== undefined && options.semanticRouting !== false) throw new ArgumentError("launch-admitted automatic execution requires provider-free routing; admit semantic routing separately");
+    const route = await this.route(task, {
+      domain: options.domain,
+      hints: options.hints,
+      minConfidence: options.minConfidence,
+      minMargin: options.minMargin,
+      maxDomains: options.maxDomains,
+      allowCrossDomain: options.allowCrossDomain,
+    });
+    const { authorizeAutonomousLaunchDomains } = await import("./autonomous-launch-admission.js");
+    if (!route.abstained) authorizeAutonomousLaunchDomains(admission, route.selected_domains);
+    const { domain: _domain, routeOverride: _routeOverride, semanticRouting: _semanticRouting, ...runOptions } = options;
+    return this.runAuto(task, { ...runOptions, routeOverride: route, semanticRouting: false });
+  }
+
+  /**
+   * Perform only the provider-free route/admission half of `runAutoWithLaunchAdmission`.  This
+   * gives a deployment a safe point to display or persist the exact launch decision before it
+   * collects a short-lived credential or starts a provider session.
+   */
+  async authorizeAutoLaunchAdmission(
+    task: string,
+    admission: AutonomousLaunchAdmissionReport,
+    options: Pick<AutonomousAutoRunOptions, "domain" | "hints" | "minConfidence" | "minMargin" | "maxDomains" | "allowCrossDomain" | "semanticRouting"> = {},
+  ): Promise<AutonomousLaunchAdmissionReport> {
+    if (options.semanticRouting !== undefined && options.semanticRouting !== false) throw new ArgumentError("launch-admitted automatic authorization requires provider-free routing; admit semantic routing separately");
+    const route = await this.route(task, {
+      domain: options.domain,
+      hints: options.hints,
+      minConfidence: options.minConfidence,
+      minMargin: options.minMargin,
+      maxDomains: options.maxDomains,
+      allowCrossDomain: options.allowCrossDomain,
+    });
+    const { authorizeAutonomousLaunchDomains, validateAutonomousLaunchAdmission } = await import("./autonomous-launch-admission.js");
+    if (route.abstained) return validateAutonomousLaunchAdmission(admission);
+    return authorizeAutonomousLaunchDomains(admission, route.selected_domains);
+  }
+
+  /**
+   * Route once and execute the evaluator-backed single- or cross-domain decision cycle.
+   *
+   * This is the closed-loop counterpart to `runAuto()`: callers can supply an explicit
+   * evaluator and learning controller, while the cycle retains the existing approval,
+   * provider-planning, persistence, and rehydration boundaries.
+   */
+  async runAutoCycle(task: string, options: AutonomousAutoDecisionCycleOptions = {}): Promise<AutonomousAutoDecisionCycleResult> {
+    const decisionStateStore = options.decisionStateStore ?? this.decisionCyclePersistence?.store;
+    return runAutonomousAutoDecisionCycle(
+      this,
+      task,
+      decisionStateStore === undefined || options.decisionStateStore !== undefined
+        ? options
+        : { ...options, decisionStateStore },
+    );
+  }
+
+  /**
+   * Run one automatic decision cycle only after a provider-free launch admission covers its
+   * frozen route. Semantic routing is intentionally refused because its classifier call is a
+   * separate provider boundary that must be reviewed independently.
+   */
+  async runAutoCycleWithLaunchAdmission(
+    task: string,
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousAutoDecisionCycleOptions = {},
+  ): Promise<AutonomousAutoDecisionCycleResult> {
+    if (options.routeOverride !== undefined) throw new ArgumentError("runAutoCycleWithLaunchAdmission owns routeOverride; pass routing controls instead");
+    if (options.semanticRouting?.enabled === true) throw new ArgumentError("launch-admitted automatic decision-cycle execution requires provider-free routing; admit semantic routing separately before enabling it");
+    const route = await this.route(task, {
+      domain: options.domain,
+      hints: options.hints,
+      minConfidence: options.minConfidence,
+      minMargin: options.minMargin,
+      maxDomains: options.maxDomains,
+      allowCrossDomain: options.allowCrossDomain,
+    });
+    const { authorizeAutonomousLaunchDomains } = await import("./autonomous-launch-admission.js");
+    if (!route.abstained) authorizeAutonomousLaunchDomains(admission, route.selected_domains);
+    const { domain: _domain, routeOverride: _routeOverride, semanticRouting: _semanticRouting, ...cycleOptions } = options;
+    return this.runAutoCycle(task, { ...cycleOptions, routeOverride: route, semanticRouting: undefined });
+  }
+
+  /**
+   * Route once and execute the bounded evaluator-guided single- or cross-domain replan cycle.
+   * Replan attempts retain the reviewed route, share the aggregate cost boundary, and preserve
+   * the lower-level persistence and evaluator-settlement contracts.
+   */
+  async runAutoReplanCycle(task: string, options: AutonomousAutoReplanCycleOptions): Promise<AutonomousAutoReplanCycleResult> {
+    return runAutonomousAutoReplanCycle(this, task, options);
+  }
+
+  /** Run the automatic evaluator/replan cycle only after its provider-free route is admitted. */
+  async runAutoReplanCycleWithLaunchAdmission(
+    task: string,
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousAutoReplanCycleOptions,
+  ): Promise<AutonomousAutoReplanCycleResult> {
+    if (options.routeOverride !== undefined) throw new ArgumentError("runAutoReplanCycleWithLaunchAdmission owns routeOverride; pass routing controls instead");
+    if (options.semanticRouting?.enabled === true) throw new ArgumentError("launch-admitted automatic replan execution requires provider-free routing; admit semantic routing separately before enabling it");
+    const route = await this.route(task, {
+      domain: options.domain,
+      hints: options.hints,
+      minConfidence: options.minConfidence,
+      minMargin: options.minMargin,
+      maxDomains: options.maxDomains,
+      allowCrossDomain: options.allowCrossDomain,
+    });
+    const { authorizeAutonomousLaunchDomains } = await import("./autonomous-launch-admission.js");
+    if (!route.abstained) authorizeAutonomousLaunchDomains(admission, route.selected_domains);
+    const { domain: _domain, routeOverride: _routeOverride, semanticRouting: _semanticRouting, ...cycleOptions } = options;
+    return this.runAutoReplanCycle(task, { ...cycleOptions, routeOverride: route, semanticRouting: undefined });
+  }
+
+  /**
+   * Compose the full agent-owned provider/tool boundary with the durable mission replan kernel.
+   *
+   * Callers provide the reviewed mission and evaluator. This method supplies the exact-step
+   * autonomous adapter, the attached tool catalogue, provider credentials/models from `stepRun`,
+   * and optional persistent prompt-learning receipts. Mission checkpoints contain only the
+   * existing value-only metadata; provider responses, rendered prompts, credentials, and tool
+   * arguments remain transient or in caller-owned stores.
+   */
+  async runMissionReplanCycle(
+    mission: AgentMissionArgs,
+    options: AutonomousAgentMissionReplanOptions,
+  ): Promise<AutonomousMissionReplanResult> {
+    if (!isObject(mission)) throw new ArgumentError("runMissionReplanCycle requires an AgentMissionArgs object");
+    if (!isObject(options) || typeof options.evaluate !== "function") throw new ArgumentError("runMissionReplanCycle requires an evaluator callback");
+    const catalogue = options.catalogue ?? this.toolCatalogue;
+    if (!(catalogue instanceof ToolCatalogue)) throw new ArgumentError("runMissionReplanCycle requires a ToolCatalogue on the agent or call options");
+
+    // Dynamic import keeps the existing autonomous <-> mission-execution type boundary free of a
+    // module-initialization cycle. `mission-execution` imports this class for its runtime adapter.
+    const {
+      AutonomousMissionExecutor,
+      agentMissionStepExecutor,
+      runAutonomousMissionReplanCycle,
+    } = await import("./mission-execution.js").then(async (missionExecution) => ({
+      AutonomousMissionExecutor: missionExecution.AutonomousMissionExecutor,
+      agentMissionStepExecutor: missionExecution.agentMissionStepExecutor,
+      runAutonomousMissionReplanCycle: (await import("./mission-replan.js")).runAutonomousMissionReplanCycle,
+    }));
+
+    const promptSelections: AutonomousPromptAdaptiveSelectionJSON[] = [];
+    const promptSelectionDigests = new Set<string>();
+    const promptCoordinator = this.promptLearningCoordinator;
+    const defaultToolsForStep = (step: AgentMissionStep): readonly ProviderTool[] => {
+      const definition = catalogue.get(step.tool);
+      return [{ name: definition.name, description: definition.description, parameters: definition.inputSchema }];
+    };
+    const toolsForStep = (step: AgentMissionStep): readonly ProviderTool[] | undefined => options.toolsForStep?.(step) ?? defaultToolsForStep(step);
+    const executeStep = agentMissionStepExecutor(this, {
+      toolsForStep,
+      run: options.stepRun,
+      approveEffects: options.approveEffects,
+      signal: options.signal,
+      onPromptSelection: promptCoordinator === undefined
+        ? undefined
+        : (selection) => {
+            const normalized = extractAutonomousPromptLearningSelections({ adaptive_selection: selection }, promptCoordinator.registry);
+            for (const item of normalized) {
+              if (promptSelectionDigests.has(item.selectionDigest)) continue;
+              promptSelectionDigests.add(item.selectionDigest);
+              promptSelections.push(item.toJSON());
+            }
+          },
+    });
+    const executor = new AutonomousMissionExecutor({
+      agent: this,
+      catalogue,
+      executeStep,
+      checkpointStore: options.checkpointStore,
+      resultStore: options.resultStore,
+      onStepOutcome: options.onStepOutcome,
+    });
+    const {
+      catalogue: _catalogue,
+      toolsForStep: _toolsForStep,
+      stepRun: _stepRun,
+      approveEffects: _approveEffects,
+      checkpointStore: _checkpointStore,
+      resultStore: _resultStore,
+      onStepOutcome: _onStepOutcome,
+      ...cycleOptions
+    } = options;
+    const result = await runAutonomousMissionReplanCycle(executor, mission, cycleOptions);
+    if (promptCoordinator === undefined) return result;
+    const prompt_learning: AutonomousMissionReplanPromptLearningProjection = {
+      selection_count: promptSelections.length,
+      selection_digests: promptSelections.map((selection) => selection.selection_digest),
+      selections: promptSelections,
+      retention: "selection_metadata_only;rendered_messages_transient",
+      secret_material: "never_returned",
+    };
+    return { ...result, prompt_learning };
+  }
+
+  /**
+   * Execute a caller-reviewed mission through the all-domain connector boundary.
+   *
+   * This is intentionally a thin agent-owned convenience method: the connector runtime,
+   * approval decision, checkpoint store, and optional raw-result store remain caller-owned.
+   * The attached ToolCatalogue is used when the caller does not provide an exact snapshot.
+   */
+  async runConnectorMission(
+    mission: AgentMissionArgs,
+    options: AutonomousConnectorMissionAgentRunOptions,
+  ): Promise<AutonomousMissionExecutionResult> {
+    if (!isObject(options)) throw new ArgumentError("runConnectorMission requires execution options");
+    const catalogue = options.catalogue ?? this.toolCatalogue;
+    if (!(catalogue instanceof ToolCatalogue)) throw new ArgumentError("runConnectorMission requires a ToolCatalogue on the agent or call options");
+    const { runAutonomousConnectorMission } = await import("./autonomous-connector-mission.js");
+    return runAutonomousConnectorMission(mission, { ...options, catalogue, agent: this });
+  }
+
+  /** Execute a connector mission only after the exact domain admission is approved. */
+  async runConnectorMissionWithLaunchAdmission(
+    mission: AgentMissionArgs,
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousConnectorMissionAgentRunOptions,
+  ): Promise<AutonomousMissionExecutionResult> {
+    if (!isObject(options)) throw new ArgumentError("runConnectorMissionWithLaunchAdmission requires execution options");
+    const catalogue = options.catalogue ?? this.toolCatalogue;
+    if (!(catalogue instanceof ToolCatalogue)) throw new ArgumentError("runConnectorMissionWithLaunchAdmission requires a ToolCatalogue on the agent or call options");
+    const { runAutonomousConnectorMissionWithLaunchAdmission } = await import("./autonomous-connector-mission.js");
+    return runAutonomousConnectorMissionWithLaunchAdmission(mission, admission, { ...options, catalogue, agent: this });
+  }
+
+  /**
+   * Provider-order an existing mission, require explicit caller acceptance, then execute it
+   * through the strict connector adapter. A supplied accepted refinement is replayed locally and
+   * never causes a second provider invocation.
+   */
+  async runConnectorMissionWithProviderPlanning(
+    mission: AgentMissionArgs,
+    options: AutonomousConnectorMissionProviderPlanningOptions,
+  ): Promise<AutonomousConnectorPlannedMissionRun> {
+    if (!isObject(options) || !isObject(options.execution)) throw new ArgumentError("runConnectorMissionWithProviderPlanning requires execution options");
+    const catalogue = options.execution.catalogue ?? this.toolCatalogue;
+    if (!(catalogue instanceof ToolCatalogue)) throw new ArgumentError("runConnectorMissionWithProviderPlanning requires a ToolCatalogue on the agent or call options");
+    const { runAutonomousConnectorMissionWithProviderPlanning } = await import("./autonomous-connector-mission.js");
+    return runAutonomousConnectorMissionWithProviderPlanning(this, mission, {
+      ...options,
+      execution: { ...options.execution, catalogue, agent: this },
+    });
+  }
+
+  /** Provider-order a mission with the launch admission checked before any planner call. */
+  async runConnectorMissionWithProviderPlanningAndLaunchAdmission(
+    mission: AgentMissionArgs,
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousConnectorMissionProviderPlanningOptions,
+  ): Promise<AutonomousConnectorPlannedMissionRun> {
+    if (!isObject(options) || !isObject(options.execution)) throw new ArgumentError("runConnectorMissionWithProviderPlanningAndLaunchAdmission requires execution options");
+    const catalogue = options.execution.catalogue ?? this.toolCatalogue;
+    if (!(catalogue instanceof ToolCatalogue)) throw new ArgumentError("runConnectorMissionWithProviderPlanningAndLaunchAdmission requires a ToolCatalogue on the agent or call options");
+    const { runAutonomousConnectorMissionWithProviderPlanningAndLaunchAdmission } = await import("./autonomous-connector-mission.js");
+    return runAutonomousConnectorMissionWithProviderPlanningAndLaunchAdmission(this, mission, admission, {
+      ...options,
+      execution: { ...options.execution, catalogue, agent: this },
+    });
   }
 
   /**
@@ -5496,6 +8719,7 @@ export class AutonomousAgent {
     request: AutonomousOrderedStepPlanRequest,
     options: AutonomousProviderPlanningOptions = {},
   ): Promise<AutonomousOrderedStepPlanRefinementResult> {
+    options = this.withPromptLearningOptions(options);
     if (!isObject(request) || typeof request.task !== "string" || !Array.isArray(request.steps)) throw new ArgumentError("ordered-step provider planning requires a task and step array");
     const taskText = boundedText("ordered-step planning task", request.task, 32_000);
     const steps = request.steps.map((step) => structuredClone(step));
@@ -5524,7 +8748,8 @@ export class AutonomousAgent {
       confidence: 0,
       selected_model: null,
       selection_digest: null,
-      planner_prompt_digest: prepared.prompt.prompt_digest,
+      planner_prompt_digest: prepared.promptDigest,
+      ...(prepared.adaptiveSelection === undefined ? {} : { adaptive_selection: prepared.adaptiveSelection }),
       planner_plan_digest: null,
       outcome_digest: null,
       planner_context: prepared.learningContext,
@@ -5536,6 +8761,18 @@ export class AutonomousAgent {
     if (options.approveProviderCall !== true) return { ...base, cost_budget: budgetSnapshot() };
     const candidates = options.candidates ? [...options.candidates] : this.models();
     if (!candidates.length) throw new ProviderRuntimeError("ordered-step provider planning requires at least one model candidate");
+    options.authorizationContext?.authorizeOperation({
+      operation: "plan",
+      domain,
+      resourceDigest: digestJsonSync({
+        schema: "bioprism-autonomous-plan-authorization-resource/0.1",
+        domain,
+        task_digest: taskDigest,
+        base_plan_digest: basePlanDigest,
+        planner_prompt_digest: prepared.promptDigest,
+        planner_context_digest: prepared.learningContextDigest,
+      }),
+    });
     let execution: Awaited<ReturnType<AutonomousRuntime["invoke"]>>;
     try {
       execution = await this.runtime.invoke({ ...prepared.plan, candidates }, {
@@ -5548,10 +8785,19 @@ export class AutonomousAgent {
         executionAttempt: options.executionAttempt,
         maxProviderFailovers: options.maxProviderFailovers,
         reserveCost: costBudget ? (costUnits) => costBudget.reserve(costUnits) : undefined,
+        authorizationContext: options.authorizationContext,
+        authorizationDomain: prepared.plan.domain,
       });
     } catch (error) {
-      if (!(error instanceof ProviderRuntimeError) || error.code !== "invalid_response") throw error;
-      return { ...base, status: "provider_invalid", outcome_digest: await planningProviderFailureDigest(error), cost_budget: budgetSnapshot() };
+      if (!(error instanceof ProviderRuntimeError || error instanceof CredentialError)) throw error;
+      const failure = planningProviderFailureProjection(error);
+      return {
+        ...base,
+        status: error instanceof ProviderRuntimeError && error.code === "invalid_response" ? "provider_invalid" : "provider_failed",
+        failure,
+        outcome_digest: await planningProviderFailureDigest(error),
+        cost_budget: budgetSnapshot(),
+      };
     }
     const metadata = {
       ...base,
@@ -5559,7 +8805,7 @@ export class AutonomousAgent {
       selected_model: planningModelProjection(execution.selection),
       selection_digest: await digestJson(execution.selection),
       planner_plan_digest: await digestJson({ planner_output: execution.response.structured }),
-      outcome_digest: await planningOutcomeDigest(execution, prepared.learningContextDigest),
+      outcome_digest: await planningOutcomeDigest(execution, prepared.learningContextDigest, prepared.promptDigest),
       cost_budget: budgetSnapshot(),
     };
     const raw = execution.response.structured;
@@ -5590,6 +8836,7 @@ export class AutonomousAgent {
     blueprint: AutonomousTaskBlueprint,
     options: AutonomousProviderPlanningOptions = {},
   ): Promise<AutonomousPlanRefinementResult> {
+    options = this.withPromptLearningOptions(options);
     if (!isObject(blueprint) || blueprint.schema !== "bioprism-python-autonomous-task/0.1") throw new ArgumentError("provider planning requires an AutonomousTaskBlueprint");
     if (!isObject(blueprint.workflow) || !Array.isArray(blueprint.workflow.stages)) throw new ProviderRuntimeError("provider planning workflow is malformed");
     let costBudget = resolveAutonomousCostBudget(options);
@@ -5627,7 +8874,8 @@ export class AutonomousAgent {
       confidence: 0,
       selected_model: null,
       selection_digest: null,
-      planner_prompt_digest: prepared.prompt.prompt_digest,
+      planner_prompt_digest: prepared.promptDigest,
+      ...(prepared.adaptiveSelection === undefined ? {} : { adaptive_selection: prepared.adaptiveSelection }),
       planner_plan_digest: null,
       outcome_digest: null,
       planner_context: prepared.learningContext,
@@ -5641,6 +8889,18 @@ export class AutonomousAgent {
     if (options.approveProviderCall !== true) return { ...base, status: "approval_required", cost_budget: budgetSnapshot() };
     const candidates = options.candidates ? [...options.candidates] : this.models();
     if (!candidates.length) throw new ProviderRuntimeError("provider planning requires at least one model candidate");
+    options.authorizationContext?.authorizeOperation({
+      operation: "plan",
+      domain: blueprint.domain_profile.domain,
+      resourceDigest: digestJsonSync({
+        schema: "bioprism-autonomous-plan-authorization-resource/0.1",
+        domain: blueprint.domain_profile.domain,
+        task_digest: blueprint.task_digest,
+        base_plan_digest: basePlanDigest,
+        planner_prompt_digest: prepared.promptDigest,
+        planner_context_digest: prepared.learningContextDigest,
+      }),
+    });
     let execution: Awaited<ReturnType<AutonomousRuntime["invoke"]>>;
     try {
       execution = await this.runtime.invoke({ ...prepared.plan, candidates }, {
@@ -5653,18 +8913,22 @@ export class AutonomousAgent {
         executionAttempt: options.executionAttempt,
         maxProviderFailovers: effectiveMaxProviderFailovers,
         reserveCost: costBudget ? (costUnits) => costBudget.reserve(costUnits) : undefined,
+        authorizationContext: options.authorizationContext,
+        authorizationDomain: prepared.plan.domain,
       });
     } catch (error) {
-      if (!(error instanceof ProviderRuntimeError) || error.code !== "invalid_response") throw error;
+      if (!(error instanceof ProviderRuntimeError || error instanceof CredentialError)) throw error;
+      const failure = planningProviderFailureProjection(error);
       return {
         ...base,
-        status: "provider_invalid",
+        status: error instanceof ProviderRuntimeError && error.code === "invalid_response" ? "provider_invalid" : "provider_failed",
+        failure,
         outcome_digest: await planningProviderFailureDigest(error),
         cost_budget: budgetSnapshot(),
       };
     }
     const selectionDigest = await digestJson(execution.selection);
-    const outcomeDigest = await planningOutcomeDigest(execution, prepared.learningContextDigest);
+    const outcomeDigest = await planningOutcomeDigest(execution, prepared.learningContextDigest, prepared.promptDigest);
     const plannerPlanDigest = await digestJson({ planner_output: execution.response.structured });
     const metadata = { ...base, selected_model: planningModelProjection(execution.selection), selection_digest: selectionDigest, planner_plan_digest: plannerPlanDigest, outcome_digest: outcomeDigest, cost_budget: budgetSnapshot() };
     const raw = execution.response.structured;
@@ -5688,6 +8952,7 @@ export class AutonomousAgent {
     blueprint: AutonomousCrossDomainBlueprint,
     options: AutonomousProviderPlanningOptions = {},
   ): Promise<AutonomousCrossDomainPlanRefinementResult> {
+    options = this.withPromptLearningOptions(options);
     if (!isObject(blueprint) || blueprint.schema !== AUTONOMOUS_CROSS_DOMAIN_SCHEMA) throw new ArgumentError("cross-domain provider planning requires an AutonomousCrossDomainBlueprint");
     if (!Array.isArray(blueprint.child_ids) || !isObject(blueprint.dependency_graph) || !Array.isArray(blueprint.dependency_graph.fan_out)) throw new ProviderRuntimeError("cross-domain provider planning blueprint is malformed");
     let costBudget = resolveAutonomousCostBudget(options);
@@ -5725,7 +8990,8 @@ export class AutonomousAgent {
       confidence: 0,
       selected_model: null,
       selection_digest: null,
-      planner_prompt_digest: prepared.prompt.prompt_digest,
+      planner_prompt_digest: prepared.promptDigest,
+      ...(prepared.adaptiveSelection === undefined ? {} : { adaptive_selection: prepared.adaptiveSelection }),
       planner_plan_digest: null,
       outcome_digest: null,
       planner_context: prepared.learningContext,
@@ -5739,6 +9005,18 @@ export class AutonomousAgent {
     if (options.approveProviderCall !== true) return { ...base, cost_budget: budgetSnapshot() };
     const candidates = options.candidates ? [...options.candidates] : this.models();
     if (!candidates.length) throw new ProviderRuntimeError("cross-domain provider planning requires at least one model candidate");
+    options.authorizationContext?.authorizeOperation({
+      operation: "plan",
+      domain: "cross_domain",
+      resourceDigest: digestJsonSync({
+        schema: "bioprism-autonomous-plan-authorization-resource/0.1",
+        domain: "cross_domain",
+        task_digest: blueprint.task_digest,
+        base_plan_digest: basePlanDigest,
+        planner_prompt_digest: prepared.promptDigest,
+        planner_context_digest: prepared.learningContextDigest,
+      }),
+    });
     let execution: Awaited<ReturnType<AutonomousRuntime["invoke"]>>;
     try {
       execution = await this.runtime.invoke({ ...prepared.plan, candidates }, {
@@ -5751,12 +9029,16 @@ export class AutonomousAgent {
         executionAttempt: options.executionAttempt,
         maxProviderFailovers: effectiveMaxProviderFailovers,
         reserveCost: costBudget ? (costUnits) => costBudget.reserve(costUnits) : undefined,
+        authorizationContext: options.authorizationContext,
+        authorizationDomain: prepared.plan.domain,
       });
     } catch (error) {
-      if (!(error instanceof ProviderRuntimeError) || error.code !== "invalid_response") throw error;
+      if (!(error instanceof ProviderRuntimeError || error instanceof CredentialError)) throw error;
+      const failure = planningProviderFailureProjection(error);
       return {
         ...base,
-        status: "provider_invalid",
+        status: error instanceof ProviderRuntimeError && error.code === "invalid_response" ? "provider_invalid" : "provider_failed",
+        failure,
         outcome_digest: await planningProviderFailureDigest(error),
         cost_budget: budgetSnapshot(),
       };
@@ -5767,7 +9049,7 @@ export class AutonomousAgent {
       selected_model: planningModelProjection(execution.selection),
       selection_digest: await digestJson(execution.selection),
       planner_plan_digest: await digestJson({ planner_output: execution.response.structured }),
-      outcome_digest: await planningOutcomeDigest(execution, prepared.learningContextDigest),
+      outcome_digest: await planningOutcomeDigest(execution, prepared.learningContextDigest, prepared.promptDigest),
       cost_budget: budgetSnapshot(),
     };
     const raw = execution.response.structured;
@@ -5795,7 +9077,22 @@ export class AutonomousAgent {
     if (options.acceptedSingleDomainPlanRefinement !== undefined || options.acceptedCrossDomainPlanRefinement !== undefined) throw new ArgumentError("planAndRun creates its own accepted proposal; use run or runCrossDomain to apply an existing proposal");
     const planning = options.planning;
     const sharedBudget = resolvePlanAndRunBudget(options, planning);
-    const route = options.routeOverride ? await validateAutonomousRouteOverride(taskText, options.routeOverride) : await this.route(taskText, { domain: options.domain, hints: options.hints, allowCrossDomain: options.allowCrossDomain });
+    const routeResolution = await this.resolveExecutionRoute(taskText, options, sharedBudget);
+    const route = routeResolution.route;
+    const semanticRoute = routeResolution.semanticRoute;
+    if (semanticRoute !== null && semanticRoute.status !== "completed") {
+      return {
+        schema: AUTONOMOUS_PLAN_AND_RUN_SCHEMA,
+        status: semanticRouteRunStatus(semanticRoute.status),
+        route,
+        semantic_route: semanticRoute,
+        blueprint: null,
+        plan_refinement: null,
+        result: null,
+        retention: "provider_response_local;plan_proposal_value_only;execution_result_caller_owned",
+        authorization: "planning_acceptance_and_provider_invocation_require_separate_explicit_approval",
+      };
+    }
     const envelope = await this.blueprint(taskText, {
       domain: route.primary_domain ?? undefined,
       routeOverride: route,
@@ -5804,13 +9101,25 @@ export class AutonomousAgent {
       maxInputTokens: options.maxInputTokens,
       tools: options.tools?.map((tool) => tool.name),
       hints: options.hints,
+      subtasks: options.subtasks,
       structuredDomainResponse: options.structuredDomainResponse,
+      maxToolRiskClass: options.maxToolRiskClass,
     });
     if (route.abstained || !route.primary_domain || (!envelope.blueprint && !envelope.cross_domain_blueprint)) {
-      return { schema: AUTONOMOUS_PLAN_AND_RUN_SCHEMA, status: "route_review_required", route, blueprint: envelope, plan_refinement: null, result: null, retention: "provider_response_local;plan_proposal_value_only;execution_result_caller_owned", authorization: "planning_acceptance_and_provider_invocation_require_separate_explicit_approval" };
+      return { schema: AUTONOMOUS_PLAN_AND_RUN_SCHEMA, status: "route_review_required", route, semantic_route: semanticRoute, blueprint: envelope, plan_refinement: null, result: null, retention: "provider_response_local;plan_proposal_value_only;execution_result_caller_owned", authorization: "planning_acceptance_and_provider_invocation_require_separate_explicit_approval" };
     }
     const planningOptions: AutonomousProviderPlanningOptions = {
       ...(planning ?? {}),
+      ...(planning?.promptTemplate === undefined && options.promptTemplate !== undefined ? { promptTemplate: options.promptTemplate } : {}),
+      ...(planning?.promptRegistry === undefined && options.promptRegistry !== undefined ? { promptRegistry: options.promptRegistry } : {}),
+      ...(planning?.promptSelection === undefined && options.promptSelection !== undefined ? { promptSelection: options.promptSelection } : {}),
+      ...(planning?.promptLearningState === undefined && options.planningPromptLearningState !== undefined ? { promptLearningState: options.planningPromptLearningState } : {}),
+      ...(planning?.promptLearningState === undefined && options.planningPromptLearningState === undefined && options.promptLearningState !== undefined ? { promptLearningState: options.promptLearningState } : {}),
+      ...(planning?.promptLearningExploration === undefined && options.planningPromptLearningExploration !== undefined ? { promptLearningExploration: options.planningPromptLearningExploration } : {}),
+      ...(planning?.promptLearningExploration === undefined && options.planningPromptLearningExploration === undefined && options.promptLearningExploration !== undefined ? { promptLearningExploration: options.promptLearningExploration } : {}),
+      ...(planning?.promptStage === undefined ? { promptStage: options.planningPromptStage ?? "planning" } : {}),
+      ...(planning?.selectionWeights === undefined && options.selectionWeights !== undefined ? { selectionWeights: options.selectionWeights } : {}),
+      ...(planning?.selectionObservations === undefined && options.selectionObservations !== undefined ? { selectionObservations: options.selectionObservations } : {}),
       ...(sharedBudget ? { costBudget: sharedBudget, maxTotalCostUnits: undefined } : {}),
       ...(options.domainPolicyMode === undefined ? {} : { domainPolicyMode: options.domainPolicyMode }),
       ...(options.domainPolicyEvidenceReady === undefined ? {} : { domainPolicyEvidenceReady: options.domainPolicyEvidenceReady }),
@@ -5827,34 +9136,37 @@ export class AutonomousAgent {
       acceptedCrossDomainPlanRefinement: undefined,
     };
     delete (executionOptions as AutonomousPlanAndRunOptions).planning;
+    delete (executionOptions as AutonomousPlanAndRunOptions).planningPromptStage;
+    delete (executionOptions as AutonomousPlanAndRunOptions).planningPromptLearningState;
+    delete (executionOptions as AutonomousPlanAndRunOptions).planningPromptLearningExploration;
     delete (executionOptions as AutonomousPlanAndRunOptions).acceptPlan;
     if (envelope.cross_domain_blueprint) {
       const proposal = await this.planCrossDomainWithProvider(envelope.cross_domain_blueprint, planningOptions);
       if (proposal.status !== "completed") {
-        const status: AutonomousPlanAndRunStatus = proposal.status === "approval_required" ? "approval_required" : proposal.status === "policy_review_required" ? "policy_review_required" : proposal.status === "policy_blocked" ? "policy_blocked" : proposal.status === "provider_invalid" ? "provider_invalid" : "provider_disagreement";
-        return { schema: AUTONOMOUS_PLAN_AND_RUN_SCHEMA, status, route, blueprint: envelope, plan_refinement: proposal, result: null, retention: "provider_response_local;plan_proposal_value_only;execution_result_caller_owned", authorization: "planning_acceptance_and_provider_invocation_require_separate_explicit_approval" };
+        const status: AutonomousPlanAndRunStatus = proposal.status === "approval_required" ? "approval_required" : proposal.status === "policy_review_required" ? "policy_review_required" : proposal.status === "policy_blocked" ? "policy_blocked" : proposal.status === "provider_invalid" ? "provider_invalid" : proposal.status === "provider_failed" ? "provider_failed" : "provider_disagreement";
+        return { schema: AUTONOMOUS_PLAN_AND_RUN_SCHEMA, status, route, semantic_route: semanticRoute, blueprint: envelope, plan_refinement: proposal, result: null, retention: "provider_response_local;plan_proposal_value_only;execution_result_caller_owned", authorization: "planning_acceptance_and_provider_invocation_require_separate_explicit_approval" };
       }
-      if (proposal.review_required || options.acceptPlan !== true) return { schema: AUTONOMOUS_PLAN_AND_RUN_SCHEMA, status: "plan_review_required", route, blueprint: envelope, plan_refinement: proposal, result: null, retention: "provider_response_local;plan_proposal_value_only;execution_result_caller_owned", authorization: "planning_acceptance_and_provider_invocation_require_separate_explicit_approval" };
-      const result = await this.runCrossDomain(taskText, { ...executionOptions, acceptedCrossDomainPlanRefinement: proposal });
-      return { schema: AUTONOMOUS_PLAN_AND_RUN_SCHEMA, status: result.status, route, blueprint: envelope, plan_refinement: proposal, result, retention: "provider_response_local;plan_proposal_value_only;execution_result_caller_owned", authorization: "planning_acceptance_and_provider_invocation_require_separate_explicit_approval" };
+      if (proposal.review_required || options.acceptPlan !== true) return { schema: AUTONOMOUS_PLAN_AND_RUN_SCHEMA, status: "plan_review_required", route, semantic_route: semanticRoute, blueprint: envelope, plan_refinement: proposal, result: null, retention: "provider_response_local;plan_proposal_value_only;execution_result_caller_owned", authorization: "planning_acceptance_and_provider_invocation_require_separate_explicit_approval" };
+      const result = await this.runCrossDomain(taskText, { ...executionOptions, subtasks: options.subtasks, acceptedCrossDomainPlanRefinement: proposal });
+      return { schema: AUTONOMOUS_PLAN_AND_RUN_SCHEMA, status: result.status, route, semantic_route: semanticRoute, blueprint: envelope, plan_refinement: proposal, result, retention: "provider_response_local;plan_proposal_value_only;execution_result_caller_owned", authorization: "planning_acceptance_and_provider_invocation_require_separate_explicit_approval" };
     }
     const blueprint = envelope.blueprint;
     if (!blueprint) throw new ProviderRuntimeError("planAndRun single-domain blueprint is missing");
     const proposal = await this.planWithProvider(blueprint, planningOptions);
     if (proposal.status !== "completed") {
-      const status: AutonomousPlanAndRunStatus = proposal.status === "approval_required" ? "approval_required" : proposal.status === "policy_review_required" ? "policy_review_required" : proposal.status === "policy_blocked" ? "policy_blocked" : proposal.status === "provider_invalid" ? "provider_invalid" : "provider_disagreement";
-      return { schema: AUTONOMOUS_PLAN_AND_RUN_SCHEMA, status, route, blueprint: envelope, plan_refinement: proposal, result: null, retention: "provider_response_local;plan_proposal_value_only;execution_result_caller_owned", authorization: "planning_acceptance_and_provider_invocation_require_separate_explicit_approval" };
+      const status: AutonomousPlanAndRunStatus = proposal.status === "approval_required" ? "approval_required" : proposal.status === "policy_review_required" ? "policy_review_required" : proposal.status === "policy_blocked" ? "policy_blocked" : proposal.status === "provider_invalid" ? "provider_invalid" : proposal.status === "provider_failed" ? "provider_failed" : "provider_disagreement";
+      return { schema: AUTONOMOUS_PLAN_AND_RUN_SCHEMA, status, route, semantic_route: semanticRoute, blueprint: envelope, plan_refinement: proposal, result: null, retention: "provider_response_local;plan_proposal_value_only;execution_result_caller_owned", authorization: "planning_acceptance_and_provider_invocation_require_separate_explicit_approval" };
     }
-    if (proposal.review_required || options.acceptPlan !== true) return { schema: AUTONOMOUS_PLAN_AND_RUN_SCHEMA, status: "plan_review_required", route, blueprint: envelope, plan_refinement: proposal, result: null, retention: "provider_response_local;plan_proposal_value_only;execution_result_caller_owned", authorization: "planning_acceptance_and_provider_invocation_require_separate_explicit_approval" };
+    if (proposal.review_required || options.acceptPlan !== true) return { schema: AUTONOMOUS_PLAN_AND_RUN_SCHEMA, status: "plan_review_required", route, semantic_route: semanticRoute, blueprint: envelope, plan_refinement: proposal, result: null, retention: "provider_response_local;plan_proposal_value_only;execution_result_caller_owned", authorization: "planning_acceptance_and_provider_invocation_require_separate_explicit_approval" };
     const result = await this.run(taskText, { ...executionOptions, acceptedSingleDomainPlanRefinement: proposal });
-    return { schema: AUTONOMOUS_PLAN_AND_RUN_SCHEMA, status: result.status, route, blueprint: envelope, plan_refinement: proposal, result, retention: "provider_response_local;plan_proposal_value_only;execution_result_caller_owned", authorization: "planning_acceptance_and_provider_invocation_require_separate_explicit_approval" };
+    return { schema: AUTONOMOUS_PLAN_AND_RUN_SCHEMA, status: result.status, route, semantic_route: semanticRoute, blueprint: envelope, plan_refinement: proposal, result, retention: "provider_response_local;plan_proposal_value_only;execution_result_caller_owned", authorization: "planning_acceptance_and_provider_invocation_require_separate_explicit_approval" };
   }
 
   /** Build a bounded fan-out/fan-in plan without contacting a provider or executing a tool. */
   private async buildCrossDomainBlueprint(
     taskText: string,
     route: AutonomousRouteProposal,
-    options: { capability?: string; context?: readonly AutonomousPromptChunk[]; hints?: readonly string[]; maxInputTokens?: number; tools?: readonly string[]; subtasks?: readonly AutonomousCrossDomainSubtask[]; structuredDomainResponse?: boolean; toolSelectionState?: AutonomousToolSelectionState | null; toolSelectionExploration?: number } = {},
+    options: { capability?: string; context?: readonly AutonomousPromptChunk[]; hints?: readonly string[]; maxInputTokens?: number; tools?: readonly string[]; subtasks?: readonly AutonomousCrossDomainSubtask[]; structuredDomainResponse?: boolean; toolSelectionState?: AutonomousToolSelectionState | null; toolSelectionExploration?: number; maxToolRiskClass?: AutonomousToolRiskClass } = {},
   ): Promise<AutonomousCrossDomainBlueprint> {
     const selectedDomains = route.selected_domains.slice(0, AUTONOMOUS_CROSS_DOMAIN_MAX_CHILDREN);
     if (selectedDomains.length < 2) throw new ProviderRuntimeError("cross-domain blueprint requires at least two routed domains");
@@ -5878,14 +9190,21 @@ export class AutonomousAgent {
       childIds.add(id);
       const childTask = boundedText(`cross-domain child ${id} task`, subtask.task, 32_000);
       const profile = await profileFor(subtask.domain);
+      const capabilityRoute = routeAutonomousCapability(
+        childTask,
+        profile.domain,
+        subtask.capability === undefined ? {} : { explicitCapability: subtask.capability },
+      );
+      const effectiveCapability = subtask.capability ?? capabilityRoute.selected_capability ?? profile.default_capability;
       const childContext: AutonomousPromptChunk[] = [
         ...(options.context ?? []),
         { id: "cross-domain-parent", content: `Parent route digest: ${parentDigest}; child id: ${id}`, required: true, priority: 100 },
         ...(subtask.context ?? []),
       ];
-      const activeToolNames = options.tools ? this.filterActivatedToolNames([...options.tools]) : await this.liveToolNamesForTask(childTask, [subtask.domain], subtask.capability, options.toolSelectionState, options.toolSelectionExploration);
+      const activeToolNames = options.tools ? this.filterActivatedToolNames([...options.tools]) : await this.liveToolNamesForTask(childTask, [subtask.domain], effectiveCapability, this.effectiveToolSelectionState(options.toolSelectionState), options.toolSelectionExploration, options.maxToolRiskClass);
       const child = await buildTaskBlueprint(profile, childTask, {
-        capability: subtask.capability,
+        capability: effectiveCapability,
+        capabilityRoute,
         routeDigest: route.route_digest,
         context: childContext,
         maxInputTokens: options.maxInputTokens,
@@ -5907,7 +9226,7 @@ export class AutonomousAgent {
       },
     ];
     const synthesisTask = `Synthesize the domain analyses for: ${taskText}`;
-    const synthesisTools = options.tools ? this.filterActivatedToolNames([...options.tools]) : await this.liveToolNamesForTask(synthesisTask, [...selectedDomains, "cross_domain"], options.capability ?? synthesisProfile.default_capability, options.toolSelectionState, options.toolSelectionExploration);
+    const synthesisTools = options.tools ? this.filterActivatedToolNames([...options.tools]) : await this.liveToolNamesForTask(synthesisTask, [...selectedDomains, "cross_domain"], options.capability ?? synthesisProfile.default_capability, this.effectiveToolSelectionState(options.toolSelectionState), options.toolSelectionExploration, options.maxToolRiskClass);
     const synthesis = await buildTaskBlueprint(synthesisProfile, synthesisTask, {
       capability: options.capability ?? synthesisProfile.default_capability,
       routeDigest: route.route_digest,
@@ -6318,7 +9637,7 @@ export class AutonomousAgent {
     const taskDigest = await digestJson({ task: taskText });
     const runOptions = options.run ?? {};
     const initialDomains = [runOptions.domain ?? "cross_domain"] as AutonomousDomainName[];
-    const trace = new AutonomousRunTraceSession(options.traceStore, { run_id: options.runId, task_digest: taskDigest, domains: initialDomains });
+    const trace = new AutonomousRunTraceSession(options.traceStore, { run_id: options.runId, task_digest: taskDigest, domains: initialDomains, authorizationContext: runOptions.authorizationContext });
     await trace.started();
     try {
       const result = await this.run(taskText, { ...runOptions, observer: composeInvocationObservers(runOptions.observer, trace.providerObserver()), selectionEventCallback: trace.selectionEventCallback(runOptions.selectionEventCallback) });
@@ -6336,6 +9655,18 @@ export class AutonomousAgent {
     }
   }
 
+  /** Analyze a verified trace without invoking providers or retaining transient values. */
+  analyzeRunTrace(snapshot: unknown, options: { policy?: Partial<AutonomousRunTraceAnalyticsPolicy> } = {}): AutonomousRunTraceAnalyticsReport {
+    if (!options || typeof options !== "object") throw new ArgumentError("autonomous analyzeRunTrace options must be an object");
+    return analyzeAutonomousRunTrace(snapshot, options);
+  }
+
+  /** Create bounded restart-safe storage for already-verified trace analytics reports. */
+  createRunAnalyticsLedger(options: { policy?: Partial<AutonomousRunAnalyticsLedgerPolicy>; clock?: () => number; authorizationContext?: AutonomousAuthorizationContext } = {}): AutonomousRunAnalyticsLedger {
+    if (!options || typeof options !== "object") throw new ArgumentError("autonomous createRunAnalyticsLedger options must be an object");
+    return new AutonomousRunAnalyticsLedger(options);
+  }
+
   /** Cross-domain variant of runWithTrace; the same trace contains specialist and synthesis turns. */
   async runCrossDomainWithTrace(task: string, options: AutonomousRunWithTraceOptions): Promise<AutonomousTracedCrossDomainRunResult> {
     if (!options || typeof options !== "object") throw new ArgumentError("autonomous runCrossDomainWithTrace options must be an object");
@@ -6343,7 +9674,7 @@ export class AutonomousAgent {
     const taskText = boundedText("autonomous traced cross-domain task", task, 32_000);
     const taskDigest = await digestJson({ task: taskText });
     const runOptions = options.run ?? {};
-    const trace = new AutonomousRunTraceSession(options.traceStore, { run_id: options.runId, task_digest: taskDigest, domains: ["cross_domain"] });
+    const trace = new AutonomousRunTraceSession(options.traceStore, { run_id: options.runId, task_digest: taskDigest, domains: ["cross_domain"], authorizationContext: runOptions.authorizationContext });
     await trace.started();
     try {
       const result = await this.runCrossDomain(taskText, { ...runOptions, observer: composeInvocationObservers(runOptions.observer, trace.providerObserver()), selectionEventCallback: trace.selectionEventCallback(runOptions.selectionEventCallback) });
@@ -6360,7 +9691,570 @@ export class AutonomousAgent {
     }
   }
 
+  private withPromptLearningOptions<T extends { promptRegistry?: AutonomousPromptRegistry; promptLearningState?: AutonomousPromptLearningState | AutonomousPromptLearningStateJSON }>(options: T): T {
+    const resolved = { ...options } as T & { memoryConsolidator?: AutonomousMemoryConsolidator };
+    if (resolved.memoryConsolidator === undefined && this.memoryConsolidator !== undefined) {
+      resolved.memoryConsolidator = this.memoryConsolidator;
+    }
+    const coordinator = this.promptLearningCoordinator;
+    if (coordinator === undefined) return resolved as T;
+    if (resolved.promptLearningState !== undefined && resolved.promptLearningState !== coordinator.state) throw new ArgumentError("promptLearningState cannot override the agent's persistent prompt learner");
+    if (resolved.promptRegistry !== undefined && resolved.promptRegistry !== coordinator.registry) throw new ArgumentError("promptRegistry must be the same registry as the agent's prompt learner");
+    return { ...resolved, promptRegistry: coordinator.registry, promptLearningState: coordinator.state } as T;
+  }
+
+  /** Recover exact registry-bound prompt choices from a direct, cross-domain, or workflow result. */
+  promptLearningSelections(result: unknown): readonly AutonomousPromptAdaptiveSelection[] {
+    const coordinator = this.promptLearningCoordinator;
+    if (coordinator === undefined) throw new ArgumentError("prompt learning coordinator is not configured");
+    return extractAutonomousPromptLearningSelections(result, coordinator.registry);
+  }
+
+  /** Apply explicit evaluator credit to one high-level prompt choice; provider output is never reward. */
+  async settlePromptLearning(
+    selection: AutonomousPromptAdaptiveSelection,
+    options: { armId: string; evaluatorId: string; evaluatorVersion: string; reward: number; passed: boolean; outcomeDigest?: string; settlementKey?: string },
+  ): Promise<unknown> {
+    if (this.promptLearningCoordinator === undefined) throw new ArgumentError("prompt learning coordinator is not configured");
+    return this.promptLearningCoordinator.settle(selection, options);
+  }
+
+  async restorePromptLearning(): Promise<unknown> {
+    if (this.promptLearningCoordinator === undefined) throw new ArgumentError("prompt learning coordinator is not configured");
+    return this.promptLearningCoordinator.restore();
+  }
+
+  async flushPromptLearning(): Promise<unknown> {
+    if (this.promptLearningCoordinator === undefined) throw new ArgumentError("prompt learning coordinator is not configured");
+    return this.promptLearningCoordinator.flush();
+  }
+
+  /**
+   * Open a bounded cross-domain stream. Specialist streams are multiplexed into one transient
+   * event channel, then their bounded local text is handed to a final synthesis stream. Nothing
+   * in the fan-in queue or synthesis context is written to autonomy state.
+   */
+  async runCrossDomainStream(task: string, options: AutonomousCrossDomainRunOptions = {}): Promise<AutonomousRunStreamHandle> {
+    options = this.withPromptLearningOptions(options);
+    const taskText = boundedText("cross-domain stream task", task, 32_000);
+    validateAutonomousStructuredOutputOptions(options);
+    const contentParts = options.contentParts === undefined ? undefined : normalizeProviderContentParts(options.contentParts);
+    const costBudget = resolveAutonomousCostBudget(options);
+    const routeResolution = await this.resolveExecutionRoute(taskText, options, costBudget);
+    const route = routeResolution.route;
+    const emptyHandle = async (status: AutonomousRunStreamCompletion["status"], blueprint: AutonomousTaskBlueprint | AutonomousCrossDomainBlueprint | null = null): Promise<AutonomousRunStreamHandle> => {
+      let consumed = false;
+      const events: AsyncIterable<AutonomousRunStreamEvent> = {
+        [Symbol.asyncIterator]: async function* (): AsyncGenerator<AutonomousRunStreamEvent> {
+          if (consumed) throw new ArgumentError("autonomous stream handles are single-consumer");
+          consumed = true;
+        },
+      };
+      return {
+        schema: AUTONOMOUS_RUN_STREAM_SCHEMA,
+        route,
+        semantic_route: routeResolution.semanticRoute,
+        blueprint,
+        selection: null,
+        continuation_plan: null,
+        context_budget: null,
+        events,
+        completion: Promise.resolve({
+          schema: AUTONOMOUS_RUN_STREAM_COMPLETION_SCHEMA,
+          status,
+          route_digest: route.route_digest,
+          task_digest: route.task_digest,
+          blueprint_digest: blueprint === null ? null : await digestJson(blueprint),
+          event_count: 0,
+          text_delta_bytes: 0,
+          stage_count: 0,
+          provider_invocations: [],
+          provider_failover: null,
+          inner_completions: [],
+          effect_ids: [],
+          error_code: null,
+          error_class: null,
+          retention: "metadata_only_no_stream_payloads_or_credentials",
+          secret_material: "never_returned",
+        }),
+      };
+    };
+    if (routeResolution.semanticRoute !== null && routeResolution.semanticRoute.status !== "completed") return emptyHandle(semanticRouteCrossDomainStatus(routeResolution.semanticRoute.status));
+    if (route.abstained || !route.cross_domain || route.selected_domains.length < 2) return emptyHandle("route_review_required");
+
+    // Cross-domain `run()` provides the canonical no-provider preflight, including child/synthesis
+    // blueprints and strict policy admissions. Streaming starts only after that gate succeeds.
+    const preflight = await this.runCrossDomain(taskText, {
+      ...options,
+      routeOverride: route,
+      contentParts,
+      approveProviderCall: false,
+      recordMemory: false,
+      learning: undefined,
+      maxTotalCostUnits: undefined,
+      costBudget,
+    });
+    if (options.approveProviderCall !== true || !preflight.blueprint || preflight.status !== "approval_required") return emptyHandle(preflight.status, preflight.blueprint);
+    const blueprint = preflight.blueprint;
+    const candidates = options.candidates ? [...options.candidates] : this.models();
+    if (!candidates.length) throw new ProviderRuntimeError("cross-domain stream requires at least one registered model candidate");
+
+    type QueueItem = { event?: AutonomousRunStreamEvent; done?: boolean; error?: unknown };
+    const queued: AutonomousRunStreamEvent[] = [];
+    const waiters: Array<(item: QueueItem) => void> = [];
+    const capacityWaiters: Array<() => void> = [];
+    let queueClosed = false;
+    let queueError: unknown = null;
+    const wakeCapacityWaiter = (): void => {
+      if (queued.length >= AUTONOMOUS_RUN_STREAM_MAX_QUEUED_EVENTS) return;
+      capacityWaiters.shift()?.();
+    };
+    const push = async (event: AutonomousRunStreamEvent): Promise<void> => {
+      // Backpressure is part of the stream contract.  A provider is allowed to be faster than
+      // its consumer; that must suspend the producer at the bounded queue rather than inventing
+      // an invalid-response failure or dropping a caller-visible delta.
+      while (!queueClosed && queued.length >= AUTONOMOUS_RUN_STREAM_MAX_QUEUED_EVENTS && waiters.length === 0) {
+        await new Promise<void>((resolve) => capacityWaiters.push(resolve));
+      }
+      if (queueClosed) return;
+      const waiter = waiters.shift();
+      if (waiter) waiter({ event });
+      else queued.push(event);
+    };
+    const close = (error: unknown = null): void => {
+      if (queueClosed) return;
+      queueClosed = true;
+      queueError = error;
+      while (waiters.length) waiters.shift()!({ done: true, error });
+      while (capacityWaiters.length) capacityWaiters.shift()!();
+    };
+    const next = async (): Promise<QueueItem> => {
+      const event = queued.shift();
+      if (event !== undefined) wakeCapacityWaiter();
+      if (event !== undefined) return { event };
+      if (queueClosed) return { done: true, error: queueError };
+      return new Promise<QueueItem>((resolve) => waiters.push(resolve));
+    };
+    const abortController = new AbortController();
+    if (options.signal?.aborted) abortController.abort(options.signal.reason);
+    const abortListener = (): void => abortController.abort(options.signal?.reason);
+    options.signal?.addEventListener("abort", abortListener, { once: true });
+    const childOutputsByIndex: Array<{ id: string; domain: AutonomousDomainName; status: string; output: string } | undefined> = new Array(blueprint.child_blueprints.length);
+    const innerCompletions: Array<AutonomousStreamCompletion | AutonomousRunStreamCompletion> = [];
+    const providerInvocations: AutonomousProviderInvocationReceipt[] = [];
+    let eventCount = 0;
+    let textDeltaBytes = 0;
+    let completionResolver: ((completion: AutonomousRunStreamCompletion) => void) | undefined;
+    let completionSettled = false;
+    const settle = async (status: AutonomousRunStreamCompletion["status"], error: unknown = null): Promise<void> => {
+      if (completionSettled) return;
+      completionSettled = true;
+      const providerFailover = [...innerCompletions].reverse().find((item) => item.provider_failover !== null)?.provider_failover ?? null;
+      const effectIds = [...new Set(innerCompletions.flatMap((item) => "effect_ids" in item && Array.isArray(item.effect_ids) ? item.effect_ids : []))];
+      completionResolver?.({
+        schema: AUTONOMOUS_RUN_STREAM_COMPLETION_SCHEMA,
+        status,
+        route_digest: route.route_digest,
+        task_digest: route.task_digest,
+        blueprint_digest: await digestJson(blueprint),
+        event_count: eventCount,
+        text_delta_bytes: textDeltaBytes,
+        stage_count: innerCompletions.length,
+        provider_invocations: [...providerInvocations],
+        provider_failover: providerFailover,
+        inner_completions: [...innerCompletions],
+        effect_ids: effectIds,
+        error_code: error instanceof ProviderRuntimeError ? error.code : null,
+        error_class: error instanceof Error ? error.constructor.name : error === null ? null : "UnknownError",
+        retention: "metadata_only_no_stream_payloads_or_credentials",
+        secret_material: "never_returned",
+      });
+    };
+    let started = false;
+    const start = (): void => {
+      if (started) return;
+      started = true;
+      void (async (): Promise<void> => {
+        try {
+          const executionOrder = blueprint.child_blueprints.map((_, index) => index);
+          const maxParallelChildren = normalizedCrossDomainConcurrency(options.maxParallelChildren, executionOrder.length);
+          let nextIndex = 0;
+          let stopDispatch = false;
+          const executeChild = async (index: number): Promise<void> => {
+            const child = blueprint.child_blueprints[index];
+            if (!child) throw new ProviderRuntimeError(`cross-domain stream child ${index + 1} is missing`);
+            const childId = blueprint.child_ids[index] ?? `child-${index + 1}`;
+            const taskMessage = child.prompt.messages.find((message) => message.source_id === "task");
+            if (!taskMessage) throw new ProviderRuntimeError(`cross-domain stream child ${childId} has no bounded task message`);
+            const childContext: AutonomousPromptChunk[] = [
+              ...(options.context ?? []),
+              { id: "cross-domain-parent", content: `Parent route digest: ${route.route_digest}; child id: ${childId}`, required: true, priority: 100 },
+            ];
+            let handle: AutonomousRunStreamHandle | null = null;
+            try {
+              handle = await this.runStream(taskMessage.content, {
+                ...options,
+                domain: child.domain_profile.domain,
+                routeOverride: undefined,
+                semanticRouting: false,
+                allowCrossDomain: false,
+                context: childContext,
+                contentParts,
+                retrieveMemory: false,
+                recordMemory: false,
+                learning: undefined,
+                approveProviderCall: true,
+                signal: abortController.signal,
+                maxTotalCostUnits: undefined,
+                costBudget,
+              });
+              await push({ kind: "lifecycle", stage: "child", phase: "child_started", child_id: childId, domain: child.domain_profile.domain, selection_digest: handle.selection ? await digestJson(handle.selection) : null });
+              let output = "";
+              for await (const event of handle.events) {
+                if (event.kind === "provider") {
+                  output += event.event.textDelta;
+                  if (bytes(output) > 48_000) output = `${output.slice(0, 47_000)}\n[child output bounded locally]`;
+                  eventCount += 1;
+                  textDeltaBytes += bytes(event.event.textDelta);
+                  await push({ kind: "provider", stage: "child", child_id: childId, event: event.event });
+                }
+              }
+              const childCompletion = await handle.completion;
+              innerCompletions.push(childCompletion);
+              providerInvocations.push(...childCompletion.provider_invocations);
+              const completed = childCompletion.status === "completed";
+              childOutputsByIndex[index] = { id: childId, domain: child.domain_profile.domain, status: childCompletion.status, output: output.trim() || "[child returned no textual output]" };
+              await push({ kind: "lifecycle", stage: "child", phase: "child_completed", child_id: childId, domain: child.domain_profile.domain, status: childCompletion.status, event_count: childCompletion.event_count, text_delta_bytes: childCompletion.text_delta_bytes });
+              if (!completed && !options.allowPartial) stopDispatch = true;
+            } catch (error) {
+              if (!(error instanceof ProviderRuntimeError || error instanceof CredentialError)) throw error;
+              const childCompletion = handle === null ? null : await handle.completion;
+              if (childCompletion) {
+                innerCompletions.push(childCompletion);
+                providerInvocations.push(...childCompletion.provider_invocations);
+              }
+              childOutputsByIndex[index] = { id: childId, domain: child.domain_profile.domain, status: "failed", output: "[child stream failed]" };
+              await push({ kind: "lifecycle", stage: "child", phase: "child_completed", child_id: childId, domain: child.domain_profile.domain, status: "failed" });
+              stopDispatch = true;
+              if (!options.allowPartial) return;
+            }
+          };
+          const worker = async (): Promise<void> => {
+            while (true) {
+              if (stopDispatch && !options.allowPartial) return;
+              const sequenceIndex = nextIndex++;
+              const index = executionOrder[sequenceIndex];
+              if (index === undefined) return;
+              await executeChild(index);
+            }
+          };
+          await Promise.all(Array.from({ length: maxParallelChildren }, () => worker()));
+          const childOutputs = executionOrder.flatMap((index) => childOutputsByIndex[index] ? [childOutputsByIndex[index]!] : []);
+          const completedChildren = childOutputs.filter((child) => child.status === "completed").length;
+          if (completedChildren === 0 || options.synthesize === false) {
+            await settle(completedChildren === executionOrder.length ? "completed" : "child_failed");
+            close();
+            return;
+          }
+          const synthesisTaskMessage = blueprint.synthesis_blueprint.prompt.messages.find((message) => message.source_id === "task");
+          if (!synthesisTaskMessage) throw new ProviderRuntimeError("cross-domain stream synthesis has no bounded task message");
+          const synthesisContext: AutonomousPromptChunk[] = [
+            ...(options.context ?? []),
+            { id: "cross-domain-parent", content: `Parent route digest: ${route.route_digest}`, required: true, priority: 100 },
+            ...childOutputs.filter((child) => child.status === "completed").map((child) => ({ id: `cross-domain-output-${child.id}`, content: JSON.stringify(child), priority: 90 })),
+          ];
+          const synthesis = await this.runStream(synthesisTaskMessage.content, {
+            ...options,
+            domain: "cross_domain",
+            routeOverride: undefined,
+            semanticRouting: false,
+            allowCrossDomain: false,
+            context: synthesisContext,
+            contentParts,
+            retrieveMemory: false,
+            recordMemory: false,
+            learning: undefined,
+            approveProviderCall: true,
+            signal: abortController.signal,
+            maxTotalCostUnits: undefined,
+            costBudget,
+          });
+            await push({ kind: "lifecycle", stage: "synthesis", phase: "synthesis_started", domain: "cross_domain", selection_digest: synthesis.selection ? await digestJson(synthesis.selection) : null });
+          for await (const event of synthesis.events) {
+            if (event.kind !== "provider") continue;
+            eventCount += 1;
+            textDeltaBytes += bytes(event.event.textDelta);
+            await push({ kind: "provider", stage: "synthesis", event: event.event });
+          }
+          const synthesisCompletion = await synthesis.completion;
+          innerCompletions.push(synthesisCompletion);
+          providerInvocations.push(...synthesisCompletion.provider_invocations);
+          await push({ kind: "lifecycle", stage: "synthesis", phase: "synthesis_completed", domain: "cross_domain", status: synthesisCompletion.status, event_count: synthesisCompletion.event_count, text_delta_bytes: synthesisCompletion.text_delta_bytes });
+          await settle(synthesisCompletion.status === "completed" ? "completed" : synthesisCompletion.status === "abandoned" ? "abandoned" : "failed");
+          close();
+        } catch (error) {
+          await settle("failed", error);
+          close(error);
+        } finally {
+          options.signal?.removeEventListener("abort", abortListener);
+        }
+      })();
+    };
+    const completion = new Promise<AutonomousRunStreamCompletion>((resolve) => { completionResolver = resolve; });
+    let consumed = false;
+    const events: AsyncIterable<AutonomousRunStreamEvent> = {
+      [Symbol.asyncIterator]: async function* (): AsyncGenerator<AutonomousRunStreamEvent> {
+        if (consumed) throw new ArgumentError("autonomous stream handles are single-consumer");
+        consumed = true;
+        start();
+        try {
+          while (true) {
+            const item = await next();
+            if (item.error) throw item.error;
+            if (item.done) return;
+            if (item.event) yield item.event;
+          }
+        } finally {
+          if (!queueClosed) {
+            abortController.abort();
+            await settle("abandoned");
+            close();
+          }
+        }
+      },
+    };
+    return { schema: AUTONOMOUS_RUN_STREAM_SCHEMA, route, semantic_route: routeResolution.semanticRoute, blueprint, selection: null, continuation_plan: null, context_budget: null, events, completion };
+  }
+
+  /** Automatic deterministic mode with the same live stream contract as `run()`. */
+  async runAutoStream(task: string, options: AutonomousAutoRunOptions = {}): Promise<AutonomousRunStreamHandle> {
+    if (options.planningMode === "provider" || options.planning !== undefined || options.acceptPlan === true) {
+      throw new ArgumentError("provider-planned automatic streaming requires an explicit plan acceptance flow; use runAuto() before opening a stream");
+    }
+    return this.runStream(task, options);
+  }
+
+  /** Open the provider-neutral stream after the same route/blueprint/policy gates as `run()`. */
+  async runStream(task: string, options: AutonomousRunOptions = {}): Promise<AutonomousRunStreamHandle> {
+    options = this.withPromptLearningOptions(options);
+    const taskText = boundedText("autonomous stream task", task, 32_000);
+    validateAutonomousStructuredOutputOptions(options);
+    const contentParts = options.contentParts === undefined ? undefined : normalizeProviderContentParts(options.contentParts);
+    const costBudget = resolveAutonomousCostBudget(options);
+    const routeResolution = await this.resolveExecutionRoute(taskText, options, costBudget);
+    const route = routeResolution.route;
+    if (route.cross_domain && options.domain === undefined) {
+      if (options.acceptedSingleDomainPlanRefinement !== undefined) throw new ArgumentError("single-domain plan refinement cannot be applied to a cross-domain stream");
+      const cross = await this.runCrossDomainStream(taskText, { ...options, routeOverride: route, contentParts });
+      return routeResolution.semanticRoute === null ? cross : { ...cross, semantic_route: routeResolution.semanticRoute };
+    }
+
+    const emptyHandle = async (status: AutonomousRunStreamCompletion["status"], blueprint: AutonomousTaskBlueprint | AutonomousCrossDomainBlueprint | null = null): Promise<AutonomousRunStreamHandle> => {
+      let consumed = false;
+      const events: AsyncIterable<AutonomousRunStreamEvent> = {
+        [Symbol.asyncIterator]: async function* (): AsyncGenerator<AutonomousRunStreamEvent> {
+          if (consumed) throw new ArgumentError("autonomous stream handles are single-consumer");
+          consumed = true;
+        },
+      };
+      return {
+        schema: AUTONOMOUS_RUN_STREAM_SCHEMA,
+        route,
+        semantic_route: routeResolution.semanticRoute,
+        blueprint,
+        selection: null,
+        continuation_plan: null,
+        context_budget: null,
+        events,
+        completion: Promise.resolve({
+          schema: AUTONOMOUS_RUN_STREAM_COMPLETION_SCHEMA,
+          status,
+          route_digest: route.route_digest,
+          task_digest: route.task_digest,
+          blueprint_digest: blueprint === null ? null : await digestJson(blueprint),
+          event_count: 0,
+          text_delta_bytes: 0,
+          stage_count: 0,
+          provider_invocations: [],
+          provider_failover: null,
+          inner_completions: [],
+          effect_ids: [],
+          error_code: null,
+          error_class: null,
+          retention: "metadata_only_no_stream_payloads_or_credentials",
+          secret_material: "never_returned",
+        }),
+      };
+    };
+    if (routeResolution.semanticRoute !== null && routeResolution.semanticRoute.status !== "completed") return emptyHandle(semanticRouteRunStatus(routeResolution.semanticRoute.status));
+    if (route.abstained || !route.primary_domain) return emptyHandle("route_review_required");
+
+    // `run()` is used only as a provider-free preflight so the stream cannot bypass any existing
+    // blueprint, task-decision, memory, structured-output, or explicit-approval gate.
+    const preflight = await this.run(taskText, {
+      ...options,
+      routeOverride: route,
+      contentParts,
+      approveProviderCall: false,
+      recordMemory: false,
+      learning: undefined,
+      maxTotalCostUnits: undefined,
+      costBudget,
+    });
+    if (options.approveProviderCall !== true || !preflight.blueprint || preflight.status !== "approval_required") return emptyHandle(preflight.status, preflight.blueprint);
+    let blueprint = preflight.blueprint;
+    if (preflight.memory?.consolidated_retrieval_digest) {
+      blueprint = { ...blueprint, selection_context: { ...blueprint.selection_context, consolidated_memory_retrieval_digest: preflight.memory.consolidated_retrieval_digest } };
+    }
+    const acceptedPlan = await acceptedAutonomousPlan(blueprint, options.acceptedSingleDomainPlanRefinement);
+    const domainPolicyMode = normalizeAutonomousDomainPolicyMode(options.domainPolicyMode);
+    const domainPolicyAdmission = domainPolicyAdmissionForBlueprint(route, blueprint, options, acceptedPlan !== null);
+    if (domainPolicyMode === "strict" && domainPolicyAdmission && domainPolicyAdmission.decision !== "admitted") return emptyHandle(domainPolicyStatus(domainPolicyAdmission), blueprint);
+    const domainPolicy = blueprint.domain_policy;
+    const streamCostBudget = costBudget ?? (domainPolicyMode === "strict" ? new AutonomousCostBudget(domainPolicy.max_total_cost_units) : undefined);
+    const effectiveMaxProviderFailovers = domainPolicyMode === "strict"
+      ? Math.min(options.maxProviderFailovers ?? Math.max(0, domainPolicy.max_provider_attempts - 1), Math.max(0, domainPolicy.max_provider_attempts - 1))
+      : options.maxProviderFailovers;
+    const candidates = options.candidates ? [...options.candidates] : this.models();
+    if (!candidates.length) throw new ProviderRuntimeError("autonomous stream requires at least one registered model candidate");
+    const selectedDomains = route.selected_domains.length ? route.selected_domains : [route.primary_domain];
+    if (options.tools && this.toolCatalogue && this.toolExecutor) await this.ensureToolRegistry();
+    const defaultToolNames = blueprint.plan.allowed_tools.filter((name) => name !== "provider.invoke");
+    const tools = options.tools === undefined ? await this.liveToolsForNames(selectedDomains, defaultToolNames) : this.filterActivatedTools(options.tools);
+    const renderedPrompt = await renderAutonomousRunPrompt(taskText, blueprint, route, options);
+    const messages: ProviderMessage[] = renderedPrompt
+      ? renderedPrompt.messages.map((message) => ({ ...message }))
+      : blueprint.prompt.messages.map((message) => ({ role: message.role, content: message.content }));
+    if (renderedPrompt) {
+      const supportingMessages = blueprint.prompt.messages
+        .filter((message) => !["domain-system", "domain-developer", "task"].includes(message.source_id))
+        .map((message) => ({ role: message.role, content: message.content } as ProviderMessage));
+      if (supportingMessages.length) {
+        const lastUserIndex = messages.reduce((found, message, index) => message.role === "user" ? index : found, -1);
+        messages.splice(lastUserIndex < 0 ? messages.length : lastUserIndex, 0, ...supportingMessages);
+      }
+    }
+    if (contentParts) {
+      let taskMessageIndex = -1;
+      for (let index = messages.length - 1; index >= 0; index -= 1) if (messages[index]?.role === "user") { taskMessageIndex = index; break; }
+      if (taskMessageIndex < 0) throw new ProviderRuntimeError("autonomous stream prompt has no user task message for content parts");
+      const taskMessage = messages[taskMessageIndex];
+      if (!taskMessage || typeof taskMessage.content !== "string") throw new ProviderRuntimeError("autonomous stream task message must be text before content parts are attached");
+      messages[taskMessageIndex] = { ...taskMessage, content: [providerTextPart(taskMessage.content), ...contentParts] };
+    }
+    if (acceptedPlan) messages.push({ role: "user", content: `Accepted provider plan refinement (digest ${acceptedPlan.refinement_digest}). Follow this existing workflow order and focus only; do not add tools, effects, permissions, credentials, or claims. Priority stages: ${acceptedPlan.priority_stage_ids.join(", ")}. Focus stages: ${acceptedPlan.focus_stage_ids.join(", ")}.` });
+    const promptProjection: AutonomousRunPromptProjection | null = renderedPrompt === null ? null : {
+      mode: renderedPrompt.mode,
+      prompt_id: renderedPrompt.metadata.prompt_id,
+      version: renderedPrompt.metadata.version,
+      domain: renderedPrompt.metadata.domain,
+      stage: renderedPrompt.metadata.stage,
+      manifest_digest: renderedPrompt.metadata.manifest_digest,
+      rendered_prompt_digest: renderedPrompt.metadata.rendered_prompt_digest,
+      final_prompt_digest: await digestJson(messages),
+      selection_plan_digest: renderedPrompt.metadata.selection_plan_digest,
+      ...(renderedPrompt.metadata.adaptive_selection_digest !== undefined ? { adaptive_selection_digest: renderedPrompt.metadata.adaptive_selection_digest } : {}),
+      ...(renderedPrompt.metadata.adaptive_arm_id !== undefined ? { adaptive_arm_id: renderedPrompt.metadata.adaptive_arm_id } : {}),
+      ...(renderedPrompt.metadata.adaptive_generation !== undefined ? { adaptive_generation: renderedPrompt.metadata.adaptive_generation } : {}),
+      ...(renderedPrompt.metadata.selection_policy !== undefined ? { selection_policy: renderedPrompt.metadata.selection_policy } : {}),
+      ...(renderedPrompt.metadata.adaptive_selection !== undefined ? { adaptive_selection: renderedPrompt.metadata.adaptive_selection } : {}),
+      retention: "prompt_messages_transient;digest_only_projection",
+      secret_material: "never_returned",
+    };
+    const requiredCapabilities = [...blueprint.required_capabilities];
+    const requireJson = options.structuredDomainResponse === true || options.requireJson === true;
+    const responseSchema = options.structuredDomainResponse === true ? blueprint.response_contract?.response_schema : options.responseSchema;
+    if (options.structuredDomainResponse === true && !responseSchema) throw new ProviderRuntimeError("structured domain response contract was not compiled into the stream blueprint");
+    if (requireJson && !requiredCapabilities.includes("structured_output")) requiredCapabilities.push("structured_output");
+    const request: ProviderRequest = {
+      model: "selection-delegated",
+      messages,
+      maxOutputTokens: options.maxOutputTokens ?? 1_024,
+      temperature: options.temperature,
+      ...(promptProjection ? { idempotencyKey: await digestJson({ schema: "bioprism-typescript-autonomous-run-stream-request/0.1", task_digest: blueprint.task_digest, plan_digest: blueprint.plan.plan_digest, prompt_digest: promptProjection.final_prompt_digest, manifest_digest: promptProjection.manifest_digest, selection_plan_digest: promptProjection.selection_plan_digest, consolidated_memory_retrieval_digest: preflight.memory?.consolidated_retrieval_digest ?? null }) } : {}),
+      ...(requireJson ? { requireJson: true } : options.requireJson === false ? { requireJson: false } : {}),
+      ...(responseSchema !== undefined ? { responseSchema } : {}),
+      tools: tools.length ? tools : undefined,
+      toolChoice: tools.length ? "auto" : undefined,
+    };
+    const executionPlan: AutonomousExecutionPlan = {
+      task: taskText,
+      domain: blueprint.domain_profile.domain,
+      capability: blueprint.selection_context.capability,
+      riskClass: blueprint.domain_profile.risk_class,
+      taskFamily: blueprint.selection_context.task_family ?? undefined,
+      learningContextDigest: blueprint.learning_context_digest,
+      requiredCapabilities,
+      maxCostPerMillionTokens: options.maxCostPerMillionTokens,
+      maxLatencyMs: options.maxLatencyMs,
+      minQuality: options.minQuality,
+      minSelectionConfidence: domainPolicyMode === "strict" ? Math.max(options.minSelectionConfidence ?? 0, domainPolicy.min_selection_confidence) : options.minSelectionConfidence,
+      selectionWeights: options.selectionWeights,
+      selectionObservations: options.selectionObservations,
+      contextBudget: options.contextBudget,
+      candidates,
+      request,
+    };
+    const healthObserver = this.modelHealthController?.observer({ domain: blueprint.domain_profile.domain, capability: executionPlan.capability ?? blueprint.domain_profile.default_capability, riskClass: blueprint.domain_profile.risk_class });
+    const remoteHealthObserver = this.modelHealthBridge?.observer({ domain: blueprint.domain_profile.domain, capability: executionPlan.capability ?? blueprint.domain_profile.default_capability, riskClass: blueprint.domain_profile.risk_class });
+    const feedbackObserver = composeInvocationObservers(options.observer, healthObserver, remoteHealthObserver);
+    const inner = await this.runtime.invokeStream(executionPlan, {
+      credential: options.credential,
+      credentialFor: options.credentialFor,
+      signal: options.signal,
+      observer: feedbackObserver,
+      selectionEventCallback: options.selectionEventCallback,
+      execution: options.execution,
+      executionAttempt: options.executionAttempt,
+      maxProviderFailovers: effectiveMaxProviderFailovers,
+      reserveCost: streamCostBudget ? (costUnits) => streamCostBudget.reserve(costUnits) : undefined,
+      effectBoundary: options.effectBoundary ?? this.effectBoundary,
+      authorizationContext: options.authorizationContext,
+      authorizationDomain: blueprint.domain_profile.domain,
+    });
+    let completionResolver: ((completion: AutonomousRunStreamCompletion) => void) | undefined;
+    const completion = new Promise<AutonomousRunStreamCompletion>((resolve) => { completionResolver = resolve; });
+    let consumed = false;
+    const events: AsyncIterable<AutonomousRunStreamEvent> = {
+      [Symbol.asyncIterator]: async function* (): AsyncGenerator<AutonomousRunStreamEvent> {
+        if (consumed) throw new ArgumentError("autonomous stream handles are single-consumer");
+        consumed = true;
+        let eventCount = 0;
+        let textDeltaBytes = 0;
+        try {
+          for await (const event of inner.events) {
+            eventCount += 1;
+            textDeltaBytes += bytes(event.textDelta);
+            yield { kind: "provider", stage: "direct", event };
+          }
+        } finally {
+          const innerCompletion = await inner.completion;
+          completionResolver?.({
+            schema: AUTONOMOUS_RUN_STREAM_COMPLETION_SCHEMA,
+            status: innerCompletion.status === "completed" ? "completed" : innerCompletion.status === "abandoned" ? "abandoned" : "failed",
+            route_digest: route.route_digest,
+            task_digest: route.task_digest,
+            blueprint_digest: await digestJson(blueprint),
+            event_count: eventCount,
+            text_delta_bytes: textDeltaBytes,
+            stage_count: 1,
+            provider_invocations: innerCompletion.provider_invocations,
+            provider_failover: innerCompletion.provider_failover,
+            inner_completions: [innerCompletion],
+            effect_ids: [...innerCompletion.effect_ids],
+            error_code: innerCompletion.error_code,
+            error_class: innerCompletion.error_class,
+            retention: "metadata_only_no_stream_payloads_or_credentials",
+            secret_material: "never_returned",
+          });
+        }
+      },
+    };
+    return { schema: AUTONOMOUS_RUN_STREAM_SCHEMA, route, semantic_route: routeResolution.semanticRoute, blueprint, selection: inner.selection, continuation_plan: inner.continuation_plan, context_budget: inner.context_budget, events, completion };
+  }
+
   async run(task: string, options: AutonomousRunOptions = {}): Promise<AutonomousRunResult> {
+    options = this.withPromptLearningOptions(options);
     const taskText = boundedText("autonomous task", task, 32_000);
     validateAutonomousStructuredOutputOptions(options);
     const domainPolicyMode = normalizeAutonomousDomainPolicyMode(options.domainPolicyMode);
@@ -6368,18 +10262,44 @@ export class AutonomousAgent {
       ? undefined
       : normalizeProviderContentParts(options.contentParts);
     let costBudget = resolveAutonomousCostBudget(options);
-    const route = options.routeOverride ? await validateAutonomousRouteOverride(taskText, options.routeOverride) : await this.route(taskText, { domain: options.domain, hints: options.hints, allowCrossDomain: options.allowCrossDomain });
+    const routeResolution = await this.resolveExecutionRoute(taskText, options, costBudget);
+    const route = routeResolution.route;
+    const semanticRoute = routeResolution.semanticRoute;
+    if (semanticRoute !== null && semanticRoute.status !== "completed") {
+      return {
+        schema: "bioprism-typescript-autonomous-run/0.1",
+        status: semanticRouteRunStatus(semanticRoute.status),
+        route,
+        semantic_route: semanticRoute,
+        blueprint: null,
+        plan_refinement_digest: null,
+        selection: null,
+        response: null,
+        tool_loop: null,
+        cross_domain: null,
+        learning: this.learner ? "online_bandit_feedback_available" : "provider_health_feedback_only",
+        retention: "provider_response_local; value_only_learning_projection",
+      };
+    }
     if (route.cross_domain && options.domain === undefined) {
       if (options.acceptedSingleDomainPlanRefinement !== undefined) throw new ArgumentError("single-domain plan refinement cannot be applied to a cross-domain route");
-      const cross = await this.runCrossDomain(taskText, { ...options, contentParts, maxTotalCostUnits: undefined, costBudget });
+      const cross = await this.runCrossDomain(taskText, { ...options, routeOverride: route, contentParts, maxTotalCostUnits: undefined, costBudget });
       return {
         schema: "bioprism-typescript-autonomous-run/0.1",
         status: cross.status === "completed" ? "completed" : cross.status === "approval_required" ? "approval_required" : cross.status === "reconciliation_required" ? "reconciliation_required" : cross.status === "turn_limit_reached" ? "turn_limit_reached" : cross.status === "child_failed" ? "child_failed" : cross.status === "children_partial" ? "cross_domain_partial" : "route_review_required",
         route,
+        semantic_route: semanticRoute,
         blueprint: cross.blueprint?.synthesis_blueprint ?? null,
         plan_refinement_digest: cross.plan_refinement_digest,
         selection: cross.synthesis?.selection ?? null,
         response: cross.synthesis?.response ?? null,
+        provider_invocations: [
+          ...cross.child_runs.flatMap((child) => child.result.provider_invocations ?? []),
+          ...(cross.synthesis?.provider_invocations ?? []),
+        ],
+        provider_failover: cross.synthesis?.provider_failover ?? null,
+        continuation_plan: cross.synthesis?.continuation_plan ?? null,
+        prompt: cross.synthesis?.prompt ?? null,
         response_evaluation: cross.synthesis?.response_evaluation ?? null,
         tool_loop: cross.synthesis?.tool_loop ?? null,
         cross_domain: cross,
@@ -6388,17 +10308,27 @@ export class AutonomousAgent {
         retention: "provider_response_local; value_only_learning_projection",
       };
     }
-    if (route.abstained || !route.primary_domain) return { schema: "bioprism-typescript-autonomous-run/0.1", status: "route_review_required", route, blueprint: null, plan_refinement_digest: null, selection: null, response: null, tool_loop: null, cross_domain: null, learning: this.learner ? "online_bandit_feedback_available" : "provider_health_feedback_only", retention: "provider_response_local; value_only_learning_projection" };
+    if (route.abstained || !route.primary_domain) return { schema: "bioprism-typescript-autonomous-run/0.1", status: "route_review_required", route, semantic_route: semanticRoute, blueprint: null, plan_refinement_digest: null, selection: null, response: null, tool_loop: null, cross_domain: null, learning: this.learner ? "online_bandit_feedback_available" : "provider_health_feedback_only", retention: "provider_response_local; value_only_learning_projection" };
     const memory = await this.prepareMemory(taskText, route, options, [route.primary_domain]);
     const finish = async (result: AutonomousRunResult): Promise<AutonomousRunResult> => {
-      const memoryProjection = memory.store ? await this.recordMemory(taskText, route, result, options, memory) : null;
+      const memoryProjection = memory.store ? await this.recordMemory(taskText, route, result, options, memory) : memory.projection;
       const withMemory = memoryProjection ? { ...result, memory: memoryProjection } : result;
-      if (!options.learning) return withMemory;
-      return { ...withMemory, ...(await this.prepareDirectLearning(withMemory, route, { ...options, memoryEpisodeId: memoryProjection?.recorded_episode_id ?? null })) };
+      const withSemanticRoute = semanticRoute === null ? withMemory : { ...withMemory, semantic_route: semanticRoute };
+      if (!options.learning) return withSemanticRoute;
+      return { ...withSemanticRoute, ...(await this.prepareDirectLearning(withSemanticRoute, route, { ...options, memoryEpisodeId: memoryProjection?.recorded_episode_id ?? null })) };
     };
-    const blueprintEnvelope = await this.blueprint(taskText, { domain: route.primary_domain, routeOverride: options.routeOverride, capability: options.capability, context: [...(options.context ?? []), ...memory.context], maxInputTokens: options.maxInputTokens, tools: options.tools?.map((tool) => tool.name), hints: options.hints, structuredDomainResponse: options.structuredDomainResponse, toolSelectionState: options.toolSelectionState, toolSelectionExploration: options.toolSelectionExploration });
-    const blueprint = blueprintEnvelope.blueprint;
+    const blueprintEnvelope = await this.blueprint(taskText, { domain: route.primary_domain, routeOverride: route, capability: options.capability, context: [...(options.context ?? []), ...memory.context], maxInputTokens: options.maxInputTokens, tools: options.tools?.map((tool) => tool.name), hints: options.hints, minConfidence: options.minConfidence, minMargin: options.minMargin, maxDomains: options.maxDomains, allowCrossDomain: options.allowCrossDomain, structuredDomainResponse: options.structuredDomainResponse, toolSelectionState: options.toolSelectionState, toolSelectionExploration: options.toolSelectionExploration, maxToolRiskClass: options.maxToolRiskClass });
+    let blueprint = blueprintEnvelope.blueprint;
     if (!blueprint) return finish({ schema: "bioprism-typescript-autonomous-run/0.1", status: "route_review_required", route, blueprint: null, plan_refinement_digest: null, selection: null, response: null, tool_loop: null, cross_domain: null, learning: this.learner ? "online_bandit_feedback_available" : "provider_health_feedback_only", retention: "provider_response_local; value_only_learning_projection" });
+    if (memory.projection?.consolidated_retrieval_digest !== null && memory.projection?.consolidated_retrieval_digest !== undefined) {
+      blueprint = {
+        ...blueprint,
+        selection_context: {
+          ...blueprint.selection_context,
+          consolidated_memory_retrieval_digest: memory.projection.consolidated_retrieval_digest,
+        },
+      };
+    }
     assertAutonomousTaskDecisionAllowsProvider(blueprint.task_decision, "autonomous execution");
     const acceptedPlan = await acceptedAutonomousPlan(blueprint, options.acceptedSingleDomainPlanRefinement);
     const planRefinementDigest = acceptedPlan?.refinement_digest ?? null;
@@ -6424,7 +10354,22 @@ export class AutonomousAgent {
     if (options.tools && this.toolCatalogue && this.toolExecutor) await this.ensureToolRegistry();
     const defaultToolNames = blueprint.plan.allowed_tools.filter((name) => name !== "provider.invoke");
     const tools = options.tools === undefined ? await this.liveToolsForNames(selectedDomains, defaultToolNames) : this.filterActivatedTools(options.tools);
-    const messages: ProviderMessage[] = blueprint.prompt.messages.map((message) => ({ role: message.role, content: message.content }));
+    const renderedPrompt = await renderAutonomousRunPrompt(taskText, blueprint, route, options);
+    const messages: ProviderMessage[] = renderedPrompt
+      ? renderedPrompt.messages.map((message) => ({ ...message }))
+      : blueprint.prompt.messages.map((message) => ({ role: message.role, content: message.content }));
+    if (renderedPrompt) {
+      // The versioned renderer controls the specialist framing, while the reviewed blueprint
+      // remains the source of bounded caller/memory context. Keep those context messages without
+      // reintroducing the generated domain system/developer prompt or duplicate task message.
+      const supportingMessages = blueprint.prompt.messages
+        .filter((message) => !["domain-system", "domain-developer", "task"].includes(message.source_id))
+        .map((message) => ({ role: message.role, content: message.content } as ProviderMessage));
+      if (supportingMessages.length) {
+        const lastUserIndex = messages.reduce((found, message, index) => message.role === "user" ? index : found, -1);
+        messages.splice(lastUserIndex < 0 ? messages.length : lastUserIndex, 0, ...supportingMessages);
+      }
+    }
     if (contentParts) {
       let taskMessageIndex = -1;
       for (let index = messages.length - 1; index >= 0; index -= 1) {
@@ -6439,6 +10384,26 @@ export class AutonomousAgent {
       messages[taskMessageIndex] = { ...taskMessage, content: [providerTextPart(taskMessage.content), ...contentParts] };
     }
     if (acceptedPlan) messages.push({ role: "user", content: `Accepted provider plan refinement (digest ${acceptedPlan.refinement_digest}). Follow this existing workflow order and focus only; do not add tools, effects, permissions, credentials, or claims. Priority stages: ${acceptedPlan.priority_stage_ids.join(", ")}. Focus stages: ${acceptedPlan.focus_stage_ids.join(", ")}.` });
+    const promptProjection: AutonomousRunPromptProjection | null = renderedPrompt === null
+      ? null
+      : {
+        mode: renderedPrompt.mode,
+        prompt_id: renderedPrompt.metadata.prompt_id,
+        version: renderedPrompt.metadata.version,
+        domain: renderedPrompt.metadata.domain,
+        stage: renderedPrompt.metadata.stage,
+        manifest_digest: renderedPrompt.metadata.manifest_digest,
+        rendered_prompt_digest: renderedPrompt.metadata.rendered_prompt_digest,
+        final_prompt_digest: await digestJson(messages),
+        selection_plan_digest: renderedPrompt.metadata.selection_plan_digest,
+        ...(renderedPrompt.metadata.adaptive_selection_digest !== undefined ? { adaptive_selection_digest: renderedPrompt.metadata.adaptive_selection_digest } : {}),
+        ...(renderedPrompt.metadata.adaptive_arm_id !== undefined ? { adaptive_arm_id: renderedPrompt.metadata.adaptive_arm_id } : {}),
+        ...(renderedPrompt.metadata.adaptive_generation !== undefined ? { adaptive_generation: renderedPrompt.metadata.adaptive_generation } : {}),
+        ...(renderedPrompt.metadata.selection_policy !== undefined ? { selection_policy: renderedPrompt.metadata.selection_policy } : {}),
+        ...(renderedPrompt.metadata.adaptive_selection !== undefined ? { adaptive_selection: renderedPrompt.metadata.adaptive_selection } : {}),
+        retention: "prompt_messages_transient;digest_only_projection",
+        secret_material: "never_returned",
+      };
     const requiredCapabilities = [...blueprint.required_capabilities];
     const requireJson = options.structuredDomainResponse === true || options.requireJson === true;
     const responseSchema = options.structuredDomainResponse === true
@@ -6451,12 +10416,23 @@ export class AutonomousAgent {
       messages,
       maxOutputTokens: options.maxOutputTokens ?? 1_024,
       temperature: options.temperature,
+      ...(promptProjection ? {
+        idempotencyKey: await digestJson({
+          schema: "bioprism-typescript-autonomous-run-prompt-request/0.1",
+          task_digest: blueprint.task_digest,
+          plan_digest: blueprint.plan.plan_digest,
+          prompt_digest: promptProjection.final_prompt_digest,
+          manifest_digest: promptProjection.manifest_digest,
+          selection_plan_digest: promptProjection.selection_plan_digest,
+          consolidated_memory_retrieval_digest: memory.projection?.consolidated_retrieval_digest ?? null,
+        }),
+      } : {}),
       ...(requireJson ? { requireJson: true } : options.requireJson === false ? { requireJson: false } : {}),
       ...(responseSchema !== undefined ? { responseSchema } : {}),
       tools: tools.length ? tools : undefined,
       toolChoice: tools.length ? "auto" : undefined,
     };
-    const executionPlan = { task: taskText, domain: blueprint.domain_profile.domain, capability: options.capability ?? blueprint.domain_profile.default_capability, riskClass: blueprint.domain_profile.risk_class, taskFamily: blueprint.selection_context.task_family ?? undefined, learningContextDigest: blueprint.learning_context_digest, requiredCapabilities, maxCostPerMillionTokens: options.maxCostPerMillionTokens, maxLatencyMs: options.maxLatencyMs, minQuality: options.minQuality, minSelectionConfidence: effectiveMinSelectionConfidence, candidates, request };
+    const executionPlan: AutonomousExecutionPlan = { task: taskText, domain: blueprint.domain_profile.domain, capability: blueprint.selection_context.capability, riskClass: blueprint.domain_profile.risk_class, taskFamily: blueprint.selection_context.task_family ?? undefined, learningContextDigest: blueprint.learning_context_digest, requiredCapabilities, maxCostPerMillionTokens: options.maxCostPerMillionTokens, maxLatencyMs: options.maxLatencyMs, minQuality: options.minQuality, minSelectionConfidence: effectiveMinSelectionConfidence, selectionWeights: options.selectionWeights, selectionObservations: options.selectionObservations, contextBudget: options.contextBudget, candidates, request };
     const healthObserver = this.modelHealthController?.observer({ domain: blueprint.domain_profile.domain, capability: executionPlan.capability ?? blueprint.domain_profile.default_capability, riskClass: blueprint.domain_profile.risk_class });
     const remoteHealthObserver = this.modelHealthBridge?.observer({ domain: blueprint.domain_profile.domain, capability: executionPlan.capability ?? blueprint.domain_profile.default_capability, riskClass: blueprint.domain_profile.risk_class });
     const feedbackObserver = composeInvocationObservers(options.observer, healthObserver, remoteHealthObserver);
@@ -6465,25 +10441,53 @@ export class AutonomousAgent {
       const authorizeAndExecute = options.authorizeAndExecute
         ? (calls: ProviderToolCall[]) => this.dispatchActivatedToolCalls(calls, options.authorizeAndExecute!)
         : (toolRuntime
-          ? (calls: ProviderToolCall[]) => this.dispatchActivatedToolCalls(calls, (allowed) => toolRuntime.authorizeAndExecute(allowed, { domains: selectedDomains, approveEffects: options.approveEffects, execution: options.execution, effectBoundary: options.effectBoundary ?? this.effectBoundary, workflowContext: options.workflowContext }))
+          ? (calls: ProviderToolCall[]) => this.dispatchActivatedToolCalls(calls, (allowed) => toolRuntime.authorizeAndExecute(allowed, { domains: selectedDomains, approveEffects: options.approveEffects, execution: options.execution, effectBoundary: options.effectBoundary ?? this.effectBoundary, workflowContext: options.workflowContext, authorizationContext: options.authorizationContext }))
           : async (calls: ProviderToolCall[]) => calls.map((call) => ({ callId: call.id, approved: false, isError: true, content: { status: "authorization_required", tool: call.name, secret_material: "never_returned" } })));
       const toolReadOnly = options.toolReadOnly ?? (async (call: ProviderToolCall): Promise<boolean> => this.domainToolRegistry?.binding(call.name, selectedDomains)?.risk_class === "read_only");
-      const loop = await this.runtime.invokeToolLoop(executionPlan, { credential: options.credential, credentialFor: options.credentialFor, authorizeAndExecute, maxTurns: effectiveMaxToolTurns, signal: options.signal, observer: feedbackObserver, selectionEventCallback: options.selectionEventCallback, execution: options.execution, executionAttempt: options.executionAttempt, maxProviderFailovers: effectiveMaxProviderFailovers, reserveCost: costBudget ? (costUnits) => costBudget!.reserve(costUnits) : undefined, toolReadOnly });
-      const status: AutonomousRunStatus = loop.loop.status === "completed" ? "completed" : loop.loop.status === "authorization_required" ? "approval_required" : loop.loop.status === "reconciliation_required" ? "reconciliation_required" : "turn_limit_reached";
+      const loop = await this.runtime.invokeToolLoop(executionPlan, { credential: options.credential, credentialFor: options.credentialFor, authorizeAndExecute, maxTurns: effectiveMaxToolTurns, signal: options.signal, observer: feedbackObserver, selectionEventCallback: options.selectionEventCallback, execution: options.execution, executionAttempt: options.executionAttempt, maxProviderFailovers: effectiveMaxProviderFailovers, reserveCost: costBudget ? (costUnits) => costBudget!.reserve(costUnits) : undefined, toolReadOnly, authorizationContext: options.authorizationContext });
       const responseEvaluation = options.structuredDomainResponse === true && loop.loop.finalResponse
         ? evaluateAutonomousDomainResponseOrThrow(loop.loop.finalResponse, blueprint.response_contract)
         : null;
-      return finish({ schema: "bioprism-typescript-autonomous-run/0.1", status, route, blueprint, plan_refinement_digest: planRefinementDigest, selection: loop.selection, response: loop.loop.finalResponse, response_evaluation: responseEvaluation, tool_loop: { status: loop.loop.status, turns: loop.loop.turns, toolCalls: loop.loop.toolCalls }, cross_domain: null, domain_policy_admission: domainPolicyAdmission, learning: this.learner ? "online_bandit_feedback_available" : "provider_health_feedback_only", retention: "provider_response_local; value_only_learning_projection" });
+      const status: AutonomousRunStatus = directStructuredResponseStatus(
+        loop.loop.status === "completed" ? "completed" : loop.loop.status === "authorization_required" ? "approval_required" : loop.loop.status === "reconciliation_required" ? "reconciliation_required" : "turn_limit_reached",
+        responseEvaluation,
+        options.requireStructuredResponseReview,
+      );
+      return finish({ schema: "bioprism-typescript-autonomous-run/0.1", status, route, blueprint, plan_refinement_digest: planRefinementDigest, selection: loop.selection, response: loop.loop.finalResponse, provider_invocations: loop.provider_invocations, provider_failover: loop.provider_failover, continuation_plan: loop.continuation_plan, context_budget: loop.context_budget, prompt: promptProjection, response_evaluation: responseEvaluation, tool_loop: { status: loop.loop.status, turns: loop.loop.turns, toolCalls: loop.loop.toolCalls }, cross_domain: null, domain_policy_admission: domainPolicyAdmission, learning: this.learner ? "online_bandit_feedback_available" : "provider_health_feedback_only", retention: "provider_response_local; value_only_learning_projection" });
     }
-    const result = await this.runtime.invoke(executionPlan, { credential: options.credential, credentialFor: options.credentialFor, signal: options.signal, observer: feedbackObserver, selectionEventCallback: options.selectionEventCallback, execution: options.execution, executionAttempt: options.executionAttempt, maxProviderFailovers: effectiveMaxProviderFailovers, reserveCost: costBudget ? (costUnits) => costBudget!.reserve(costUnits) : undefined });
+    const result = await this.runtime.invoke(executionPlan, { credential: options.credential, credentialFor: options.credentialFor, signal: options.signal, observer: feedbackObserver, selectionEventCallback: options.selectionEventCallback, execution: options.execution, executionAttempt: options.executionAttempt, maxProviderFailovers: effectiveMaxProviderFailovers, reserveCost: costBudget ? (costUnits) => costBudget!.reserve(costUnits) : undefined, authorizationContext: options.authorizationContext });
     const responseEvaluation = options.structuredDomainResponse === true
       ? evaluateAutonomousDomainResponseOrThrow(result.response, blueprint.response_contract)
       : null;
-    return finish({ schema: "bioprism-typescript-autonomous-run/0.1", status: "completed", route, blueprint, plan_refinement_digest: planRefinementDigest, selection: result.selection, response: result.response, response_evaluation: responseEvaluation, tool_loop: null, cross_domain: null, domain_policy_admission: domainPolicyAdmission, learning: this.learner ? "online_bandit_feedback_available" : "provider_health_feedback_only", retention: "provider_response_local; value_only_learning_projection" });
+    return finish({ schema: "bioprism-typescript-autonomous-run/0.1", status: directStructuredResponseStatus("completed", responseEvaluation, options.requireStructuredResponseReview), route, blueprint, plan_refinement_digest: planRefinementDigest, selection: result.selection, response: result.response, provider_invocations: result.provider_invocations, provider_failover: result.provider_failover, continuation_plan: result.continuation_plan, context_budget: result.context_budget, prompt: promptProjection, response_evaluation: responseEvaluation, tool_loop: null, cross_domain: null, domain_policy_admission: domainPolicyAdmission, learning: this.learner ? "online_bandit_feedback_available" : "provider_health_feedback_only", retention: "provider_response_local; value_only_learning_projection" });
+  }
+
+  private crossDomainResponseEntries(
+    blueprint: AutonomousCrossDomainBlueprint,
+    childRuns: readonly AutonomousCrossDomainChildRun[],
+    synthesis: AutonomousRunResult | null = null,
+  ): AutonomousCrossDomainResponseEntry[] | null {
+    if (!blueprint.child_blueprints.some((child) => child.response_contract !== undefined) && blueprint.synthesis_blueprint.response_contract === undefined) return null;
+    const entries: AutonomousCrossDomainResponseEntry[] = [];
+    for (const childRun of childRuns) {
+      if (childRun.result.status !== "completed") continue;
+      const child = blueprint.child_blueprints[blueprint.child_ids.indexOf(childRun.id)];
+      if (!child?.response_contract) continue;
+      const structured = childRun.result.response?.structured;
+      if (structured === null || structured === undefined) throw new ProviderRuntimeError(`structured response is missing for cross-domain child ${childRun.id}`);
+      entries.push({ domain: child.domain_profile.domain, contract: child.response_contract, response: structured, role: "specialist" });
+    }
+    if (synthesis?.status === "completed" && synthesis.blueprint?.response_contract) {
+      const structured = synthesis.response?.structured;
+      if (structured === null || structured === undefined) throw new ProviderRuntimeError("structured response is missing for cross-domain synthesis");
+      entries.push({ domain: "cross_domain", contract: synthesis.blueprint.response_contract, response: structured, role: "synthesis" });
+    }
+    return entries.length ? entries : null;
   }
 
   /** Execute routed specialist children with bounded fan-out, then hand local outputs to synthesis. */
   async runCrossDomain(task: string, options: AutonomousCrossDomainRunOptions = {}): Promise<AutonomousCrossDomainRunResult> {
+    options = this.withPromptLearningOptions(options);
     const taskText = boundedText("cross-domain task", task, 32_000);
     validateAutonomousStructuredOutputOptions(options);
     const domainPolicyMode = normalizeAutonomousDomainPolicyMode(options.domainPolicyMode);
@@ -6491,16 +10495,39 @@ export class AutonomousAgent {
       ? undefined
       : normalizeProviderContentParts(options.contentParts);
     let costBudget = resolveAutonomousCostBudget(options);
-    const route = options.routeOverride ? await validateAutonomousRouteOverride(taskText, options.routeOverride) : await this.route(taskText, { hints: options.hints, allowCrossDomain: options.allowCrossDomain });
+    const routeResolution = await this.resolveExecutionRoute(taskText, options, costBudget);
+    const route = routeResolution.route;
+    const semanticRoute = routeResolution.semanticRoute;
     const learning = this.learner ? "online_bandit_feedback_available" as const : "provider_health_feedback_only" as const;
+    if (semanticRoute !== null && semanticRoute.status !== "completed") {
+      const reviewed: AutonomousCrossDomainRunResult = {
+        schema: AUTONOMOUS_CROSS_DOMAIN_RESULT_SCHEMA,
+        status: semanticRouteCrossDomainStatus(semanticRoute.status),
+        route,
+        semantic_route: semanticRoute,
+        blueprint: null,
+        child_runs: [],
+        synthesis: null,
+        completed_children: 0,
+        total_children: route.selected_domains.length,
+        partial: false,
+        plan_refinement_digest: null,
+        learning_episode_ids: [],
+        response_learning_episode_ids: [],
+        learning,
+        retention: "provider_responses_local; child_digests_only_in_synthesis_metadata",
+      };
+      return { ...reviewed, execution_receipt: await autonomousCrossDomainExecutionReceipt(reviewed) };
+    }
     if (route.abstained || !route.cross_domain || route.selected_domains.length < 2) {
-      const reviewed: AutonomousCrossDomainRunResult = { schema: AUTONOMOUS_CROSS_DOMAIN_RESULT_SCHEMA, status: "route_review_required", route, blueprint: null, child_runs: [], synthesis: null, completed_children: 0, total_children: route.selected_domains.length, partial: false, plan_refinement_digest: null, learning_episode_ids: [], response_learning_episode_ids: [], learning, retention: "provider_responses_local; child_digests_only_in_synthesis_metadata" };
+      const reviewed: AutonomousCrossDomainRunResult = { schema: AUTONOMOUS_CROSS_DOMAIN_RESULT_SCHEMA, status: "route_review_required", route, semantic_route: semanticRoute, blueprint: null, child_runs: [], synthesis: null, completed_children: 0, total_children: route.selected_domains.length, partial: false, plan_refinement_digest: null, learning_episode_ids: [], response_learning_episode_ids: [], learning, retention: "provider_responses_local; child_digests_only_in_synthesis_metadata" };
       return { ...reviewed, execution_receipt: await autonomousCrossDomainExecutionReceipt(reviewed) };
     }
     const memory = await this.prepareMemory(taskText, route, options, [...route.selected_domains, "cross_domain"]);
     const finish = async (result: AutonomousCrossDomainRunResult): Promise<AutonomousCrossDomainRunResult> => {
-      const withReceipt: AutonomousCrossDomainRunResult = { ...result, execution_receipt: await autonomousCrossDomainExecutionReceipt(result) };
-      if (!memory.store) return withReceipt;
+      const withSemanticRoute = semanticRoute === null ? result : { ...result, semantic_route: semanticRoute };
+      const withReceipt: AutonomousCrossDomainRunResult = { ...withSemanticRoute, execution_receipt: await autonomousCrossDomainExecutionReceipt(withSemanticRoute) };
+      if (!memory.store) return memory.projection ? { ...withReceipt, memory: memory.projection } : withReceipt;
       return { ...withReceipt, memory: await this.recordMemory(taskText, route, withReceipt, options, memory) };
     };
     const blueprint = await this.buildCrossDomainBlueprint(taskText, route, {
@@ -6512,6 +10539,7 @@ export class AutonomousAgent {
       structuredDomainResponse: options.structuredDomainResponse,
       toolSelectionState: options.toolSelectionState,
       toolSelectionExploration: options.toolSelectionExploration,
+      maxToolRiskClass: options.maxToolRiskClass,
     });
     for (const [index, child] of blueprint.child_blueprints.entries()) {
       assertAutonomousTaskDecisionAllowsProvider(child.task_decision, `cross-domain child ${index + 1}`);
@@ -6558,56 +10586,74 @@ export class AutonomousAgent {
       const childId = blueprint.child_ids[index] ?? `child-${index + 1}`;
       const taskMessage = child.prompt.messages.find((message) => message.source_id === "task");
       if (!taskMessage) throw new ProviderRuntimeError(`cross-domain child ${childId} has no bounded task message`);
-      const childResult = await this.run(taskMessage.content, {
-        domain: child.domain_profile.domain,
-        capability: child.selection_context.capability,
-        candidates,
-        credential: options.credential,
-        credentialFor: options.credentialFor,
-        context: [
-          ...(options.context ?? []),
-          ...memory.context,
-          { id: "cross-domain-parent", content: `Parent route digest: ${route.route_digest}; child id: ${childId}`, required: true, priority: 100 },
-          ...(acceptedPlan ? [{ id: "accepted-cross-domain-plan", content: JSON.stringify({ refinement_digest: acceptedPlan.refinement_digest, child_id: childId, priority_rank: acceptedPlan.priority_child_ids.indexOf(childId), focus: acceptedPlan.focus_child_ids.includes(childId) }), required: true, priority: 95 }] : []),
-        ],
-        contentParts,
-        retrieveMemory: false,
-        recordMemory: false,
-        hints: [],
-        maxInputTokens: options.maxInputTokens,
-        maxOutputTokens: options.maxOutputTokens,
-        maxCostPerMillionTokens: options.maxCostPerMillionTokens,
-        maxLatencyMs: options.maxLatencyMs,
-        minQuality: options.minQuality,
-        minSelectionConfidence: options.minSelectionConfidence,
-        requireJson: options.requireJson,
-        responseSchema: options.responseSchema,
-        structuredDomainResponse: options.structuredDomainResponse,
-        domainPolicyMode: options.domainPolicyMode,
-        domainPolicyEvidenceReady: options.domainPolicyEvidenceReady,
-        domainPolicyEvaluatorConfigured: options.domainPolicyEvaluatorConfigured,
-        domainPolicyPlanAccepted: options.domainPolicyPlanAccepted ?? acceptedPlan !== null,
-        domainPolicyEffectsRequested: options.domainPolicyEffectsRequested,
-        domainPolicyEffectsApproved: options.domainPolicyEffectsApproved,
-        maxToolTurns: options.maxToolTurns,
-        temperature: options.temperature,
-        tools: options.tools,
-        authorizeAndExecute: options.authorizeAndExecute,
-        toolReadOnly: options.toolReadOnly,
-        approveProviderCall: true,
-        approveEffects: options.approveEffects,
-        execution: options.execution,
-        effectBoundary: options.effectBoundary ?? this.effectBoundary,
-        maxTotalCostUnits: undefined,
-        costBudget,
-        executionAttempt: index + 1,
-        maxProviderFailovers: options.maxProviderFailovers,
-        signal: options.signal,
-        observer: options.observer,
-        selectionEventCallback: options.selectionEventCallback,
-        toolSelectionState: options.toolSelectionState,
-        toolSelectionExploration: options.toolSelectionExploration,
-      });
+      let childResult: AutonomousRunResult;
+      try {
+        childResult = await this.run(taskMessage.content, {
+          domain: child.domain_profile.domain,
+          capability: child.selection_context.capability,
+          candidates,
+          credential: options.credential,
+          credentialFor: options.credentialFor,
+          context: [
+            ...(options.context ?? []),
+            ...memory.context,
+            { id: "cross-domain-parent", content: `Parent route digest: ${route.route_digest}; child id: ${childId}`, required: true, priority: 100 },
+            ...(acceptedPlan ? [{ id: "accepted-cross-domain-plan", content: JSON.stringify({ refinement_digest: acceptedPlan.refinement_digest, child_id: childId, priority_rank: acceptedPlan.priority_child_ids.indexOf(childId), focus: acceptedPlan.focus_child_ids.includes(childId) }), required: true, priority: 95 }] : []),
+          ],
+          promptTemplate: options.promptTemplate,
+          promptRegistry: options.promptRegistry,
+          promptSelection: options.promptSelection,
+          promptStage: options.promptStage,
+          promptLearningState: options.promptLearningState,
+          promptLearningExploration: options.promptLearningExploration,
+          contentParts,
+          retrieveMemory: false,
+          recordMemory: false,
+          hints: [],
+          maxInputTokens: options.maxInputTokens,
+          maxOutputTokens: options.maxOutputTokens,
+          maxCostPerMillionTokens: options.maxCostPerMillionTokens,
+          maxLatencyMs: options.maxLatencyMs,
+          minQuality: options.minQuality,
+          minSelectionConfidence: options.minSelectionConfidence,
+          requireJson: options.requireJson,
+          responseSchema: options.responseSchema,
+          structuredDomainResponse: options.structuredDomainResponse,
+          requireStructuredResponseReview: false,
+          domainPolicyMode: options.domainPolicyMode,
+          domainPolicyEvidenceReady: options.domainPolicyEvidenceReady,
+          domainPolicyEvaluatorConfigured: options.domainPolicyEvaluatorConfigured,
+          domainPolicyPlanAccepted: options.domainPolicyPlanAccepted ?? acceptedPlan !== null,
+          domainPolicyEffectsRequested: options.domainPolicyEffectsRequested,
+          domainPolicyEffectsApproved: options.domainPolicyEffectsApproved,
+          maxToolTurns: options.maxToolTurns,
+          temperature: options.temperature,
+          tools: options.tools,
+          authorizeAndExecute: options.authorizeAndExecute,
+          toolReadOnly: options.toolReadOnly,
+          approveProviderCall: true,
+          approveEffects: options.approveEffects,
+          execution: options.execution,
+          effectBoundary: options.effectBoundary ?? this.effectBoundary,
+          maxTotalCostUnits: undefined,
+          costBudget,
+          executionAttempt: index + 1,
+          maxProviderFailovers: options.maxProviderFailovers,
+          signal: options.signal,
+          observer: options.observer,
+          selectionEventCallback: options.selectionEventCallback,
+          toolSelectionState: options.toolSelectionState,
+          toolSelectionExploration: options.toolSelectionExploration,
+          maxToolRiskClass: options.maxToolRiskClass,
+        });
+      } catch (error) {
+        if (!(error instanceof ProviderRuntimeError || error instanceof CredentialError)) throw error;
+        // Provider/credential failures are expected operational outcomes for a bounded child.
+        // Convert them to metadata-only results so allowPartial can preserve healthy siblings
+        // and synthesis can explicitly see the omission without receiving an error message or
+        // provider payload. Programming/configuration errors still propagate to the caller.
+        childResult = providerFailureRunResult(route, child, error, learning);
+      }
       const rawOutput = childResult.response?.text ?? (childResult.response?.structured === null || childResult.response?.structured === undefined ? "" : JSON.stringify(childResult.response.structured));
       const boundedOutput = rawOutput.length > 48_000 ? `${rawOutput.slice(0, 48_000)}\n[child output bounded locally]` : rawOutput;
       const output = boundedOutput.trim() || "[child returned no textual or structured output]";
@@ -6660,12 +10706,35 @@ export class AutonomousAgent {
     const allChildrenCompleted = childRuns.length === blueprint.child_blueprints.length && completedChildren === blueprint.child_blueprints.length;
     const hasApproval = childRuns.some((child) => child.result.status === "approval_required");
     const hasTurnLimit = childRuns.some((child) => child.result.status === "turn_limit_reached");
-    if (!allChildrenCompleted && !options.allowPartial) {
+    let responseAssessment: AutonomousCrossDomainResponseAssessment | null = null;
+    if (options.structuredDomainResponse === true) {
+      const entries = this.crossDomainResponseEntries(blueprint, childRuns);
+      if (entries !== null) {
+        responseAssessment = assessAutonomousCrossDomainResponseSet(entries, {
+          requestedDomains: blueprint.child_blueprints.map((child) => child.domain_profile.domain),
+          contextDigest: blueprint.task_digest,
+          alignments: options.responseAlignments,
+          requireSynthesis: false,
+          requireCompleteAlignment: options.requireResponseAlignment ?? false,
+          minimumReward: options.minimumResponseReward,
+          minimumAlignmentConfidence: options.minimumResponseAlignmentConfidence,
+          contradictionConfidenceThreshold: options.responseContradictionConfidenceThreshold,
+        });
+      }
+    }
+    // Partial fan-in is useful only when at least one specialist produced usable evidence.
+    // Never spend another provider call synthesizing an empty or entirely blocked fan-out.
+    // This also keeps credential/provider failures from being accidentally upgraded into a
+    // successful-looking conclusion when allowPartial is enabled.
+    if (!allChildrenCompleted && (!options.allowPartial || (options.synthesize !== false && completedChildren === 0))) {
       const hasReconciliation = childRuns.some((child) => child.result.status === "reconciliation_required");
-      return finish({ schema: AUTONOMOUS_CROSS_DOMAIN_RESULT_SCHEMA, status: hasReconciliation ? "reconciliation_required" : hasApproval ? "approval_required" : hasTurnLimit ? "turn_limit_reached" : "child_failed", route, blueprint, child_runs: childRuns, synthesis: null, completed_children: completedChildren, total_children: blueprint.child_blueprints.length, partial: completedChildren > 0, plan_refinement_digest: planRefinementDigest, ...(domainPolicyAdmissions === undefined ? {} : { domain_policy_admissions: domainPolicyAdmissions }), learning_episode_ids: learningEpisodeIds, response_learning_episode_ids: responseLearningEpisodeIds, learning, retention: "provider_responses_local; child_digests_only_in_synthesis_metadata" });
+      return finish({ schema: AUTONOMOUS_CROSS_DOMAIN_RESULT_SCHEMA, status: hasReconciliation ? "reconciliation_required" : hasApproval ? "approval_required" : hasTurnLimit ? "turn_limit_reached" : "child_failed", route, blueprint, child_runs: childRuns, synthesis: null, completed_children: completedChildren, total_children: blueprint.child_blueprints.length, partial: completedChildren > 0, plan_refinement_digest: planRefinementDigest, response_assessment: responseAssessment, ...(domainPolicyAdmissions === undefined ? {} : { domain_policy_admissions: domainPolicyAdmissions }), learning_episode_ids: learningEpisodeIds, response_learning_episode_ids: responseLearningEpisodeIds, learning, retention: "provider_responses_local; child_digests_only_in_synthesis_metadata" });
+    }
+    if (options.synthesize !== false && responseAssessment !== null && !responseAssessment.ready_to_synthesize) {
+      return finish({ schema: AUTONOMOUS_CROSS_DOMAIN_RESULT_SCHEMA, status: "response_review_required", route, blueprint, child_runs: childRuns, synthesis: null, completed_children: completedChildren, total_children: blueprint.child_blueprints.length, partial: !allChildrenCompleted, plan_refinement_digest: planRefinementDigest, response_assessment: responseAssessment, ...(domainPolicyAdmissions === undefined ? {} : { domain_policy_admissions: domainPolicyAdmissions }), learning_episode_ids: learningEpisodeIds, response_learning_episode_ids: responseLearningEpisodeIds, learning, retention: "provider_responses_local; child_digests_only_in_synthesis_metadata" });
     }
     if (options.synthesize === false) {
-      return finish({ schema: AUTONOMOUS_CROSS_DOMAIN_RESULT_SCHEMA, status: allChildrenCompleted ? "children_completed" : "children_partial", route, blueprint, child_runs: childRuns, synthesis: null, completed_children: completedChildren, total_children: blueprint.child_blueprints.length, partial: !allChildrenCompleted, plan_refinement_digest: planRefinementDigest, ...(domainPolicyAdmissions === undefined ? {} : { domain_policy_admissions: domainPolicyAdmissions }), learning_episode_ids: learningEpisodeIds, response_learning_episode_ids: responseLearningEpisodeIds, learning, retention: "provider_responses_local; child_digests_only_in_synthesis_metadata" });
+      return finish({ schema: AUTONOMOUS_CROSS_DOMAIN_RESULT_SCHEMA, status: allChildrenCompleted ? "children_completed" : "children_partial", route, blueprint, child_runs: childRuns, synthesis: null, completed_children: completedChildren, total_children: blueprint.child_blueprints.length, partial: !allChildrenCompleted, plan_refinement_digest: planRefinementDigest, response_assessment: responseAssessment, ...(domainPolicyAdmissions === undefined ? {} : { domain_policy_admissions: domainPolicyAdmissions }), learning_episode_ids: learningEpisodeIds, response_learning_episode_ids: responseLearningEpisodeIds, learning, retention: "provider_responses_local; child_digests_only_in_synthesis_metadata" });
     }
     const synthesisTaskMessage = blueprint.synthesis_blueprint.prompt.messages.find((message) => message.source_id === "task");
     if (!synthesisTaskMessage) throw new ProviderRuntimeError("cross-domain synthesis has no bounded task message");
@@ -6680,13 +10749,21 @@ export class AutonomousAgent {
         priority: 90,
       })),
     ];
-    const synthesis = await this.run(synthesisTaskMessage.content, {
+    let synthesis: AutonomousRunResult;
+    try {
+      synthesis = await this.run(synthesisTaskMessage.content, {
       domain: "cross_domain",
       capability: "cross_domain_synthesis",
       candidates,
       credential: options.credential,
       credentialFor: options.credentialFor,
       context: synthesisContext,
+      promptTemplate: options.promptTemplate,
+      promptRegistry: options.promptRegistry,
+      promptSelection: options.promptSelection,
+      promptStage: options.promptStage,
+      promptLearningState: options.promptLearningState,
+      promptLearningExploration: options.promptLearningExploration,
       contentParts,
       retrieveMemory: false,
       recordMemory: false,
@@ -6700,6 +10777,7 @@ export class AutonomousAgent {
       requireJson: options.requireJson,
       responseSchema: options.responseSchema,
       structuredDomainResponse: options.structuredDomainResponse,
+      requireStructuredResponseReview: false,
       domainPolicyMode: options.domainPolicyMode,
       domainPolicyEvidenceReady: options.domainPolicyEvidenceReady,
       domainPolicyEvaluatorConfigured: options.domainPolicyEvaluatorConfigured,
@@ -6724,7 +10802,14 @@ export class AutonomousAgent {
       selectionEventCallback: options.selectionEventCallback,
       toolSelectionState: options.toolSelectionState,
       toolSelectionExploration: options.toolSelectionExploration,
-    });
+        maxToolRiskClass: options.maxToolRiskClass,
+      });
+    } catch (error) {
+      if (!(error instanceof ProviderRuntimeError || error instanceof CredentialError)) throw error;
+      // Keep synthesis failures on the same typed boundary as child failures. The parent
+      // remains explicit about the failed synthesis and never serializes provider diagnostics.
+      synthesis = providerFailureRunResult(route, blueprint.synthesis_blueprint, error, learning);
+    }
     if (options.learning && synthesis.status === "completed") {
       const episodeId = `cross:${route.task_digest}:synthesis`;
       const episode = await options.learning.prepareRun(synthesis, { episodeId, runId: episodeId, stageId: "synthesis", parentJobId: `cross:${route.task_digest}`, planRefinementDigest });
@@ -6735,8 +10820,25 @@ export class AutonomousAgent {
         responseLearningEpisodeIds.push(responseEpisode.episode_id);
       }
     }
-    const status: AutonomousCrossDomainRunStatus = synthesis.status === "completed" ? (allChildrenCompleted ? "completed" : "children_partial") : synthesis.status === "approval_required" ? "approval_required" : synthesis.status === "reconciliation_required" ? "reconciliation_required" : synthesis.status === "turn_limit_reached" ? "turn_limit_reached" : "child_failed";
-    return finish({ schema: AUTONOMOUS_CROSS_DOMAIN_RESULT_SCHEMA, status, route, blueprint, child_runs: childRuns, synthesis, completed_children: completedChildren, total_children: blueprint.child_blueprints.length, partial: !allChildrenCompleted, plan_refinement_digest: planRefinementDigest, ...(domainPolicyAdmissions === undefined ? {} : { domain_policy_admissions: domainPolicyAdmissions }), learning_episode_ids: learningEpisodeIds, response_learning_episode_ids: responseLearningEpisodeIds, learning, retention: "provider_responses_local; child_digests_only_in_synthesis_metadata" });
+    if (options.structuredDomainResponse === true && synthesis.status === "completed") {
+      const entries = this.crossDomainResponseEntries(blueprint, childRuns, synthesis);
+      if (entries !== null) {
+        responseAssessment = assessAutonomousCrossDomainResponseSet(entries, {
+          requestedDomains: blueprint.child_blueprints.map((child) => child.domain_profile.domain),
+          contextDigest: blueprint.task_digest,
+          alignments: options.responseAlignments,
+          requireSynthesis: true,
+          requireCompleteAlignment: options.requireResponseAlignment ?? false,
+          minimumReward: options.minimumResponseReward,
+          minimumAlignmentConfidence: options.minimumResponseAlignmentConfidence,
+          contradictionConfidenceThreshold: options.responseContradictionConfidenceThreshold,
+        });
+      }
+    }
+    const status: AutonomousCrossDomainRunStatus = synthesis.status === "completed"
+      ? responseAssessment !== null && responseAssessment.status !== "completed" ? "response_review_required" : (allChildrenCompleted ? "completed" : "children_partial")
+      : synthesis.status === "approval_required" ? "approval_required" : synthesis.status === "reconciliation_required" ? "reconciliation_required" : synthesis.status === "turn_limit_reached" ? "turn_limit_reached" : "child_failed";
+    return finish({ schema: AUTONOMOUS_CROSS_DOMAIN_RESULT_SCHEMA, status, route, blueprint, child_runs: childRuns, synthesis, completed_children: completedChildren, total_children: blueprint.child_blueprints.length, partial: !allChildrenCompleted, plan_refinement_digest: planRefinementDigest, response_assessment: responseAssessment, ...(domainPolicyAdmissions === undefined ? {} : { domain_policy_admissions: domainPolicyAdmissions }), learning_episode_ids: learningEpisodeIds, response_learning_episode_ids: responseLearningEpisodeIds, learning, retention: "provider_responses_local; child_digests_only_in_synthesis_metadata" });
   }
 
   private memoryStoreForRun(options: Pick<AutonomousRunOptions, "memoryStore">): AutonomousEpisodicMemoryStore | undefined {
@@ -6750,28 +10852,37 @@ export class AutonomousAgent {
     options: Pick<AutonomousRunOptions, "learning" | "learningEpisodeId" | "memoryRunId"> & { memoryEpisodeId?: string | null },
   ): Promise<Pick<AutonomousRunResult, "learning_episode_id" | "learning_episode_status" | "learning_error_class" | "response_learning_episode_id" | "response_learning_episode_status" | "response_learning_error_class">> {
     if (!options.learning) return {};
-    if (result.status !== "completed" || !result.blueprint || !result.selection?.selected_model) {
+    if (!result.blueprint || !result.selection?.selected_model) {
       return { learning_episode_id: null, learning_episode_status: "not_eligible", learning_error_class: null, response_learning_episode_id: null, response_learning_episode_status: "not_eligible", response_learning_error_class: null };
     }
+    const taskEligible = result.status === "completed";
+    let episode: Awaited<ReturnType<AutonomousLearningController["prepareRun"]>> | null = null;
     try {
-      const derivedId = options.learningEpisodeId
-        ?? (options.memoryRunId
-          ? `learning:${memoryIdentity("memory run id", options.memoryRunId)}`
-          : `learning:${route.task_digest.slice(0, 24)}:${++autonomousLearningEpisodeSequence}`);
-      const episodeId = memoryIdentity("learning episode id", derivedId);
-      const episode = await options.learning.prepareRun(result, { episodeId, runId: episodeId, memoryEpisodeId: options.memoryEpisodeId ?? null });
-      if (!result.response_evaluation) return { learning_episode_id: episode.episode_id, learning_episode_status: "prepared", learning_error_class: null, response_learning_episode_id: null, response_learning_episode_status: "not_eligible", response_learning_error_class: null };
+      if (taskEligible) {
+        const derivedId = options.learningEpisodeId
+          ?? (options.memoryRunId
+            ? `learning:${memoryIdentity("memory run id", options.memoryRunId)}`
+            : `learning:${route.task_digest.slice(0, 24)}:${++autonomousLearningEpisodeSequence}`);
+        const episodeId = memoryIdentity("learning episode id", derivedId);
+        episode = await options.learning.prepareRun(result, { episodeId, runId: episodeId, memoryEpisodeId: options.memoryEpisodeId ?? null });
+      }
+      if (!result.response_evaluation) {
+        return { learning_episode_id: episode?.episode_id ?? null, learning_episode_status: episode ? "prepared" : "not_eligible", learning_error_class: null, response_learning_episode_id: null, response_learning_episode_status: "not_eligible", response_learning_error_class: null };
+      }
       try {
-        const responseEpisodeId = memoryIdentity("response learning episode id", `response:${digestJsonSync({ episode_id: episode.episode_id }).slice(0, 64)}`);
-        const responseEpisode = await options.learning.prepareRun(result, { episodeId: responseEpisodeId, runId: responseEpisodeId, memoryEpisodeId: null });
-        return { learning_episode_id: episode.episode_id, learning_episode_status: "prepared", learning_error_class: null, response_learning_episode_id: responseEpisode.episode_id, response_learning_episode_status: "prepared", response_learning_error_class: null };
+        const responseSeed = episode?.episode_id
+          ? `response:${digestJsonSync({ episode_id: episode.episode_id }).slice(0, 64)}`
+          : `response:${options.learningEpisodeId ?? `run:${route.task_digest.slice(0, 24)}:${result.response_evaluation.response_digest.slice(0, 40)}`}`;
+        const responseEpisodeId = memoryIdentity("response learning episode id", responseSeed);
+        const responseEpisode = await options.learning.prepareRun(result, { episodeId: responseEpisodeId, runId: responseEpisodeId, memoryEpisodeId: null, responseOnly: !taskEligible });
+        return { learning_episode_id: episode?.episode_id ?? null, learning_episode_status: episode ? "prepared" : "not_eligible", learning_error_class: null, response_learning_episode_id: responseEpisode.episode_id, response_learning_episode_status: "prepared", response_learning_error_class: null };
       } catch (error) {
-        return { learning_episode_id: episode.episode_id, learning_episode_status: "prepared", learning_error_class: null, response_learning_episode_id: null, response_learning_episode_status: "failed", response_learning_error_class: memoryErrorClass(error) };
+        return { learning_episode_id: episode?.episode_id ?? null, learning_episode_status: episode ? "prepared" : "not_eligible", learning_error_class: null, response_learning_episode_id: null, response_learning_episode_status: "failed", response_learning_error_class: memoryErrorClass(error) };
       }
     } catch (error) {
       // A requested learning adapter must be observable as failed, but it must not turn a valid
       // provider result into a fabricated provider failure or cause a provider replay.
-      return { learning_episode_id: null, learning_episode_status: "failed", learning_error_class: memoryErrorClass(error), response_learning_episode_id: null, response_learning_episode_status: result.response_evaluation ? "failed" : "not_eligible", response_learning_error_class: result.response_evaluation ? memoryErrorClass(error) : null };
+      return { learning_episode_id: null, learning_episode_status: taskEligible ? "failed" : "not_eligible", learning_error_class: taskEligible ? memoryErrorClass(error) : null, response_learning_episode_id: null, response_learning_episode_status: result.response_evaluation ? "failed" : "not_eligible", response_learning_error_class: result.response_evaluation ? memoryErrorClass(error) : null };
     }
   }
 
@@ -6779,13 +10890,70 @@ export class AutonomousAgent {
   private async prepareMemory(
     taskText: string,
     route: AutonomousRouteProposal,
-    options: Pick<AutonomousRunOptions, "memoryStore" | "memoryQuery" | "memoryRecall" | "memoryLimit" | "capability" | "retrieveMemory">,
+    options: Pick<AutonomousRunOptions, "memoryStore" | "memoryQuery" | "memoryRecall" | "memoryLimit" | "capability" | "retrieveMemory" | "memoryConsolidator" | "memoryLessonResolver" | "memoryLessonContextResolver" | "consolidatedMemoryLimit" | "retrieveConsolidatedMemory" | "consolidatedMemoryRequired">,
     domains: readonly AutonomousDomainName[],
   ): Promise<AutonomousMemoryPreparation> {
     const store = this.memoryStoreForRun(options);
-    if (!store) return { store: undefined, context: [], projection: null };
+    const authorizationContext = (options as Pick<AutonomousRunOptions, "authorizationContext">).authorizationContext;
+    const consolidator = options.memoryConsolidator ?? this.memoryConsolidator;
+    if (options.memoryLessonResolver !== undefined && typeof options.memoryLessonResolver !== "function") throw new ArgumentError("autonomous memoryLessonResolver must be callable");
+    if (options.memoryLessonContextResolver !== undefined && typeof options.memoryLessonContextResolver !== "function") throw new ArgumentError("autonomous memoryLessonContextResolver must be callable");
+    if (options.memoryLessonResolver !== undefined && options.memoryLessonContextResolver !== undefined) throw new ArgumentError("autonomous memoryLessonResolver and memoryLessonContextResolver are mutually exclusive");
+    if (options.retrieveConsolidatedMemory !== undefined && typeof options.retrieveConsolidatedMemory !== "boolean") throw new ArgumentError("autonomous retrieveConsolidatedMemory must be boolean");
+    if (options.consolidatedMemoryRequired !== undefined && typeof options.consolidatedMemoryRequired !== "boolean") throw new ArgumentError("autonomous consolidatedMemoryRequired must be boolean");
+    const consolidationRequested = options.retrieveConsolidatedMemory !== false && consolidator !== undefined && (options.memoryLessonResolver !== undefined || options.memoryLessonContextResolver !== undefined);
+    if (options.consolidatedMemoryRequired === true && !consolidationRequested) throw new ArgumentError("autonomous consolidatedMemoryRequired needs a consolidator and one lesson resolver");
+    const consolidatedReferences = new Map<string, AutonomousMemoryConsolidationPromptReference>();
+    let consolidatedErrorClass: string | null = null;
+    if (consolidationRequested) {
+      const consolidatedLimit = options.consolidatedMemoryLimit ?? 8;
+      if (!Number.isSafeInteger(consolidatedLimit) || consolidatedLimit < 1 || consolidatedLimit > 32) throw new ArgumentError("autonomous consolidatedMemoryLimit must be between 1 and 32");
+      try {
+        for (const domain of [...new Set(domains)]) {
+          if (authorizationContext) {
+            await authorizationContext.authorizeOperation({
+              operation: "memory_retrieval",
+              domain,
+              resourceDigest: await digestJson({
+                schema: "bioprism-typescript-autonomous-consolidated-memory-authorization-resource/0.1",
+                domain,
+                capability: options.capability ?? null,
+                limit: consolidatedLimit,
+                resolver: options.memoryLessonContextResolver !== undefined ? "lesson_context" : "lesson",
+              }),
+            });
+          }
+          const references = consolidator!.promptReferences({ domain, capability: options.capability, lessonResolver: options.memoryLessonResolver, lessonContextResolver: options.memoryLessonContextResolver, limit: consolidatedLimit });
+          for (const reference of references) {
+            const key = `${reference.lesson_digest}:${reference.lesson_id}`;
+            if (!consolidatedReferences.has(key)) consolidatedReferences.set(key, reference);
+          }
+        }
+      } catch (error) {
+        if (error instanceof AutonomousAuthorizationError) throw error;
+        if (options.consolidatedMemoryRequired === true) throw error;
+        consolidatedErrorClass = memoryErrorClass(error);
+      }
+    }
+    const consolidated = [...consolidatedReferences.values()].slice(0, 32);
+    const consolidatedLessonIds = consolidated.map((reference) => reference.lesson_id);
+    const consolidatedLessonDigests = consolidated.map((reference) => reference.lesson_digest);
+    const consolidatedRetrievalDigest = consolidated.length
+      ? await digestJson({ lessons: consolidated.map(({ lesson_id, concept_id, lesson_digest, status, confidence }) => ({ lesson_id, concept_id, lesson_digest, status, confidence })) })
+      : null;
+    const consolidatedContext = consolidated.map(consolidatedMemoryContext);
+    const consolidatedStatus = consolidatedErrorClass === null ? "retrieved" : "retrieval_failed";
+    if (!store) {
+      return {
+        store: undefined,
+        context: consolidatedContext,
+        projection: consolidationRequested
+          ? memoryProjection(consolidatedStatus, [], null, null, null, consolidatedErrorClass, consolidatedLessonIds, consolidatedLessonDigests, consolidatedRetrievalDigest)
+          : null,
+      };
+    }
     if (options.retrieveMemory === false) {
-      return { store, context: [], projection: memoryProjection("disabled", [], null, null, null) };
+      return { store, context: consolidatedContext, projection: memoryProjection(consolidatedErrorClass === null && consolidationRequested ? "retrieved" : "disabled", [], null, null, null, consolidatedErrorClass, consolidatedLessonIds, consolidatedLessonDigests, consolidatedRetrievalDigest) };
     }
     const supplied = options.memoryQuery ?? {};
     const taskFacets = supplied.task_facets === undefined ? taskFacetDigests(taskText) : supplied.task_facets;
@@ -6802,6 +10970,18 @@ export class AutonomousAgent {
           ranking: options.memoryRecall ?? supplied.ranking ?? "planning",
           limit,
         };
+        if (authorizationContext) {
+          const queryDomains = typeof query.domain === "string" ? [query.domain] : [...new Set(domains)];
+          await authorizationContext.authorizeOperation({
+            operation: "memory_retrieval",
+            ...(queryDomains.length === 1 ? { domain: queryDomains[0] } : { domains: queryDomains }),
+            resourceDigest: await digestJson({
+              schema: "bioprism-autonomous-memory-authorization-resource/0.1",
+              query_digest: await digestJson(query),
+              limit,
+            }),
+          });
+        }
         const episodes = await store.retrieve(query);
         for (const episode of episodes) episodesById.set(episode.episode_id, episode);
       }
@@ -6817,11 +10997,12 @@ export class AutonomousAgent {
         return planScore(right) - planScore(left) || right.updated_at - left.updated_at || left.episode_id.localeCompare(right.episode_id);
       }).slice(0, limit);
       const retrievalDigest = await digestJson({ episodes: episodes.map((episode) => ({ episode_id: episode.episode_id, episode_digest: episode.episode_digest })) });
-      const projection = memoryProjection("retrieved", episodes, retrievalDigest, null, null);
-      return { store, context: episodes.map(memoryEpisodeContext), projection };
+      const projection = memoryProjection(consolidatedErrorClass === null ? "retrieved" : "retrieval_failed", episodes, retrievalDigest, null, null, consolidatedErrorClass, consolidatedLessonIds, consolidatedLessonDigests, consolidatedRetrievalDigest);
+      return { store, context: [...episodes.map(memoryEpisodeContext), ...consolidatedContext], projection };
     } catch (error) {
-      const projection = memoryProjection("retrieval_failed", [], null, null, null, memoryErrorClass(error));
-      return { store, context: [], projection };
+      if (error instanceof AutonomousAuthorizationError) throw error;
+      const projection = memoryProjection("retrieval_failed", [], null, null, null, memoryErrorClass(error), consolidatedLessonIds, consolidatedLessonDigests, consolidatedRetrievalDigest);
+      return { store, context: consolidatedContext, projection };
     }
   }
 
@@ -6834,6 +11015,7 @@ export class AutonomousAgent {
     preparation: AutonomousMemoryPreparation,
   ): Promise<AutonomousMemoryRunProjection | null> {
     if (!preparation.store || options.recordMemory === false) return preparation.projection;
+    const authorizationContext = (options as Pick<AutonomousRunOptions, "authorizationContext">).authorizationContext;
     const retrievedDigests = preparation.projection?.retrieved_episode_digests ?? [];
     const retrievalDigest = preparation.projection?.retrieval_digest ?? null;
     try {
@@ -6860,7 +11042,7 @@ export class AutonomousAgent {
       autonomousMemoryRunSequence += 1;
       const runId = memoryIdentity("memory run id", options.memoryRunId ?? (options.learningEpisodeId ? `learning-memory:${options.learningEpisodeId}` : `autonomous:${route.task_digest.slice(0, 24)}:${autonomousMemoryRunSequence}`));
       const episodeId = memoryIdentity("memory episode id", `episode:${runId}`);
-      const receipt = await preparation.store.recordEpisode({
+      const memoryEpisodeInput = {
         episode_id: episodeId,
         run_id: runId,
         result_kind: "synthesis" in result ? "autonomous_cross_domain_run" : "autonomous_run",
@@ -6889,13 +11071,31 @@ export class AutonomousAgent {
           source: "typescript_autonomous_agent",
           result_schema: result.schema,
         },
-      });
+      } satisfies Parameters<AutonomousEpisodicMemoryStore["recordEpisode"]>[0];
+      if (authorizationContext) {
+        const authorizationDomain = typeof context.domain === "string" ? context.domain : route.primary_domain ?? "cross_domain";
+        await authorizationContext.authorizeOperation({
+          operation: "memory_write",
+          domain: authorizationDomain,
+          resourceDigest: await digestJson({
+            schema: "bioprism-autonomous-memory-authorization-resource/0.1",
+            episode_id: episodeId,
+            run_id: runId,
+            task_digest: route.task_digest,
+            outcome_digest: outcomeDigest,
+          }),
+        });
+      }
+      const receipt = await preparation.store.recordEpisode(memoryEpisodeInput);
       const recorded = await preparation.store.get(episodeId);
       return {
         status: "recorded",
         retrieved_episode_ids: preparation.projection?.retrieved_episode_ids ?? [],
         retrieved_episode_digests: retrievedDigests,
         retrieval_digest: retrievalDigest,
+        consolidated_lesson_ids: preparation.projection?.consolidated_lesson_ids ?? [],
+        consolidated_lesson_digests: preparation.projection?.consolidated_lesson_digests ?? [],
+        consolidated_retrieval_digest: preparation.projection?.consolidated_retrieval_digest ?? null,
         recorded_episode_id: recorded?.episode_id ?? episodeId,
         recorded_episode_digest: recorded?.episode_digest ?? null,
         record_event_digest: receipt.event_digest,
@@ -6904,11 +11104,15 @@ export class AutonomousAgent {
         secret_material: "never_returned",
       };
     } catch (error) {
+      if (error instanceof AutonomousAuthorizationError) throw error;
       return {
         status: "record_failed",
         retrieved_episode_ids: preparation.projection?.retrieved_episode_ids ?? [],
         retrieved_episode_digests: retrievedDigests,
         retrieval_digest: retrievalDigest,
+        consolidated_lesson_ids: preparation.projection?.consolidated_lesson_ids ?? [],
+        consolidated_lesson_digests: preparation.projection?.consolidated_lesson_digests ?? [],
+        consolidated_retrieval_digest: preparation.projection?.consolidated_retrieval_digest ?? null,
         recorded_episode_id: null,
         recorded_episode_digest: null,
         record_event_digest: null,
@@ -6973,11 +11177,16 @@ export class AutonomousAgent {
     return registry ? this.filterActivatedToolNames((await registry.plan(domains)).available_curated_tools) : [];
   }
 
-  private async liveToolNamesForTask(task: string, domains: readonly AutonomousDomainName[], capability?: string, toolSelectionState?: AutonomousToolSelectionState | null, exploration?: number): Promise<string[]> {
+  private effectiveToolSelectionState(state?: AutonomousToolSelectionState | null): AutonomousToolSelectionState | null | undefined {
+    if (state !== undefined) return state;
+    return this.toolSelectionConfigured ? this.toolSelectionStateValue : undefined;
+  }
+
+  private async liveToolNamesForTask(task: string, domains: readonly AutonomousDomainName[], capability?: string, toolSelectionState?: AutonomousToolSelectionState | null, exploration?: number, maxRiskClass?: AutonomousToolRiskClass): Promise<string[]> {
     const registry = await this.ensureToolRegistry();
     if (!registry) return [];
     const gate = this.activationToolGate();
-    const plan = await registry.planForTask(task, { domains, capability, allowedTools: gate === null ? undefined : [...gate], toolSelectionState, exploration });
+    const plan = await registry.planForTask(task, { domains, capability, allowedTools: gate === null ? undefined : [...gate], toolSelectionState, exploration, maxRiskClass });
     return this.filterActivatedToolNames(plan.selected_tool_order);
   }
 

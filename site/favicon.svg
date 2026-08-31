@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- A-shaped section mark: a large region outline with a small certified core -->
+  <rect x="4" y="4" width="56" height="56" rx="10" fill="#a4500f"/>
+  <path d="M32 14 L50 50 L42 50 L32 28 L22 50 L14 50 Z" fill="#fbfaf8"/>
+  <rect x="27" y="41" width="10" height="5" rx="1.5" fill="#fbfaf8"/>
+</svg>

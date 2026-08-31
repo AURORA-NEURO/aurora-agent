@@ -21,9 +21,31 @@ import {
   type AutonomousBrainJobSnapshot,
 } from "./autonomous-brain-jobs.js";
 import type { AutonomousRunTraceStore, AutonomousRunTraceSummary } from "./autonomous-run-trace.js";
+import {
+  AutonomousRunTraceRegistry,
+  publishAutonomousRunTraceRegistrySnapshot,
+  type AutonomousRunTraceRegistryPublication,
+} from "./autonomous-run-trace-registry.js";
 import type { AutonomousCredentialBinding, AutonomousCredentialScope } from "./autonomous-credential-scope.js";
+import { AutonomousProtectedRehydrationAdapter } from "./autonomous-protected-rehydration.js";
+import { AUTONOMOUS_DOMAIN_NAMES, type AutonomousDomainName } from "./autonomous-domains.js";
 import { digestJsonSync } from "./tooling.js";
 import type { JsonObject } from "./types.js";
+import {
+  AutonomousProviderEffectReconciliationCoordinator,
+  type AutonomousProviderEffectReconciliationAdmission,
+} from "./autonomous-effects.js";
+import {
+  AutonomousActionAdmission,
+  AutonomousActionPlan,
+  buildAutonomousActionPlan,
+  type AutonomousActionAdmissionJSON,
+  type AutonomousActionPlanJSON,
+} from "./autonomous-action-plan.js";
+import {
+  validateAutonomousActionDispatchHandoff,
+  type AutonomousActionDispatchHandoff,
+} from "./autonomous-action-admission-controller.js";
 
 /** Metadata-only worker lifecycle for one rehydrated autonomous brain job. */
 export const AUTONOMOUS_BRAIN_JOB_WORKER_SCHEMA = "bioprism-typescript-autonomous-brain-job-worker/0.2" as const;
@@ -39,6 +61,16 @@ export interface AutonomousBrainJobSpecDigestInput {
   mode: AutonomousBrainJobExecutionMode;
   /** Digest of caller-owned provider/evaluator/connector policy; private policy values stay transient. */
   policyDigest?: string | null;
+  /** Optional digest of a persisted metadata-only action plan. */
+  actionPlanDigest?: string | null;
+  /** Optional digest of the explicit gates bound to that action plan. */
+  actionAdmissionDigest?: string | null;
+  /** Optional digest of the verified dispatch handoff that carries the plan and admission. */
+  actionHandoffDigest?: string | null;
+}
+
+export interface AutonomousBrainJobHandoffSpecDigestInput extends Omit<AutonomousBrainJobSpecDigestInput, "actionPlanDigest" | "actionAdmissionDigest" | "actionHandoffDigest"> {
+  actionHandoff: unknown;
 }
 
 export interface AutonomousBrainJobResolution {
@@ -49,6 +81,10 @@ export interface AutonomousBrainJobResolution {
   execute?: AutonomousBrainExecuteOptions;
   cycle?: AutonomousBrainCycleOptions;
   adaptive?: AutonomousBrainAdaptiveCycleOptions;
+  actionPlan?: AutonomousActionPlan | AutonomousActionPlanJSON | null;
+  actionAdmission?: AutonomousActionAdmission | AutonomousActionAdmissionJSON | null;
+  /** A verified operator handoff may replace the separate actionPlan/actionAdmission fields. */
+  actionHandoff?: AutonomousActionDispatchHandoff | null;
 }
 
 export interface AutonomousBrainJobResolverContext {
@@ -61,12 +97,114 @@ export type AutonomousBrainJobResolver = (
   context: AutonomousBrainJobResolverContext,
 ) => AutonomousBrainJobResolution | Promise<AutonomousBrainJobResolution>;
 
+export interface AutonomousBrainJobProtectedRehydrationContext {
+  jobId: string;
+  specDigest: string;
+  domain: AutonomousDomainName;
+  capability: string;
+  attempt: number;
+  approvalReleased: boolean;
+}
+
+export type AutonomousBrainJobProtectedReceiptResolver = (
+  context: AutonomousBrainJobProtectedRehydrationContext,
+) => unknown | Promise<unknown>;
+
+/** Rehydrates a private job resolution from a caller-owned, identity-bound receipt. */
+export class AutonomousBrainJobProtectedRehydrator {
+  readonly adapter: AutonomousProtectedRehydrationAdapter;
+  readonly receiptResolver: AutonomousBrainJobProtectedReceiptResolver;
+  readonly valueDecoder?: (value: unknown) => unknown;
+  readonly domain?: AutonomousDomainName;
+  readonly purpose: string;
+  readonly valueKind: string;
+  readonly oneTime: boolean;
+  readonly digestScheme: string;
+
+  constructor(options: {
+    adapter: AutonomousProtectedRehydrationAdapter;
+    receiptResolver: AutonomousBrainJobProtectedReceiptResolver;
+    valueDecoder?: (value: unknown) => unknown;
+    domain?: AutonomousDomainName;
+    purpose?: string;
+    valueKind?: string;
+    oneTime?: boolean;
+    digestScheme?: string;
+  }) {
+    if (!options || !(options.adapter instanceof AutonomousProtectedRehydrationAdapter)) throw new ArgumentError("protected brain job rehydrator requires a protected receipt adapter");
+    if (typeof options.receiptResolver !== "function") throw new ArgumentError("protected brain job receiptResolver must be callable");
+    if (options.valueDecoder !== undefined && typeof options.valueDecoder !== "function") throw new ArgumentError("protected brain job valueDecoder must be callable");
+    this.adapter = options.adapter;
+    this.receiptResolver = options.receiptResolver;
+    this.valueDecoder = options.valueDecoder;
+    this.domain = options.domain;
+    this.purpose = identifier("protected brain job purpose", options.purpose ?? "autonomous_brain_job_resolution");
+    this.valueKind = identifier("protected brain job valueKind", options.valueKind ?? "autonomous_brain_job_resolution");
+    if (options.oneTime !== undefined && typeof options.oneTime !== "boolean") throw new ArgumentError("protected brain job oneTime must be boolean");
+    this.oneTime = options.oneTime ?? false;
+    this.digestScheme = options.digestScheme ?? "canonical_json";
+    if (this.digestScheme !== "canonical_json" && this.digestScheme !== "utf8_sha256") throw new ArgumentError("protected brain job digestScheme is unsupported");
+  }
+
+  private assertReceiptIdentity(receipt: unknown, context: AutonomousBrainJobProtectedRehydrationContext): asserts receipt is Record<string, unknown> {
+    if (!isObject(receipt)) throw new ProviderRuntimeError("protected brain job receipt must be a metadata object", { code: "protocol" });
+    const expected: Record<string, unknown> = {
+      job_id: context.jobId,
+      spec_digest: context.specDigest,
+      domain: context.domain,
+      capability: context.capability,
+      attempt: context.attempt,
+      approval_released: context.approvalReleased,
+    };
+    for (const [key, value] of Object.entries(expected)) {
+      if (receipt[key] !== value) throw new ProviderRuntimeError(`protected brain job receipt ${key} does not match the durable job`, { code: "protocol" });
+    }
+  }
+
+  async resolve(context: AutonomousBrainJobProtectedRehydrationContext): Promise<AutonomousBrainJobResolution> {
+    if (!context || typeof context !== "object" || !context.jobId || !context.specDigest || !context.domain || !context.capability || !Number.isSafeInteger(context.attempt) || context.attempt < 1 || typeof context.approvalReleased !== "boolean") {
+      throw new ArgumentError("protected brain job rehydration context is malformed");
+    }
+    identifier("protected brain job_id", context.jobId);
+    digest("protected brain specDigest", context.specDigest);
+    identifier("protected brain capability", context.capability);
+    if (!AUTONOMOUS_DOMAIN_NAMES.includes(context.domain)) throw new ArgumentError("protected brain job domain is unsupported");
+    if (this.domain !== undefined && this.domain !== context.domain) throw new ProviderRuntimeError("protected brain configured domain does not match the durable job", { code: "protocol" });
+    try {
+      const receipt = await this.receiptResolver(context);
+      this.assertReceiptIdentity(receipt, context);
+      const value = this.adapter.resolveReceipt(receipt, {
+        domain: this.domain ?? context.domain,
+        purpose: this.purpose,
+        valueKind: this.valueKind,
+        oneTime: this.oneTime,
+        digestScheme: this.digestScheme,
+      });
+      const decoded = this.valueDecoder ? this.valueDecoder(value) : value;
+      if (!isObject(decoded)) throw new ProviderRuntimeError("protected brain job resolution must be a metadata object", { code: "protocol" });
+      return decoded as unknown as AutonomousBrainJobResolution;
+    } catch (error) {
+      if (error instanceof ProviderRuntimeError) throw error;
+      const wrapped = new ProviderRuntimeError("protected brain job receipt could not be resolved", { code: "configuration" });
+      (wrapped as Error & { cause?: unknown }).cause = error;
+      throw wrapped;
+    }
+  }
+}
+
 export interface AutonomousBrainJobWorkerOptions {
   brain: AutonomousBrainFacade;
   scheduler: InMemoryAutonomousBrainJobScheduler;
   workerId: string;
-  resolve: AutonomousBrainJobResolver;
+  /** Explicit resolver remains authoritative when both resolution paths are configured. */
+  resolve?: AutonomousBrainJobResolver;
+  /** Optional protected receipt fallback for restart-safe caller-owned private specs. */
+  protectedRehydration?: AutonomousBrainJobProtectedRehydrator;
   traceStore?: AutonomousRunTraceStore;
+  /** Optional metadata-only trace projection; publication failures never replay execution. */
+  traceRegistry?: AutonomousRunTraceRegistry;
+  /** Optional restart-time gate; unresolved external effects block fresh provider dispatch. */
+  effectReconciliation?: AutonomousProviderEffectReconciliationCoordinator;
   persistence?: AutonomousBrainJobSchedulerPersistenceCoordinator;
   leaseMs?: number;
   heartbeatMs?: number;
@@ -87,6 +225,8 @@ export interface AutonomousBrainJobWorkerRun {
   cycle: AutonomousBrainCycleExecution | null;
   adaptive: AutonomousBrainAdaptiveCycleExecution | null;
   trace: AutonomousRunTraceSummary | null;
+  trace_registry?: AutonomousRunTraceRegistryPublication;
+  effect_reconciliation?: AutonomousProviderEffectReconciliationAdmission;
   error_class: string | null;
   failure_code: string | null;
   error_retryable: boolean | null;
@@ -105,9 +245,23 @@ export interface AutonomousBrainJobWorkerBatch {
   reconciliation_count: number;
   retry_scheduled_count: number;
   failed_count: number;
+  requested_count: number;
+  max_parallelism: number;
+  stopped_on_non_terminal: boolean;
   batch_digest: string;
   retention: "metadata_only_job_and_trace;private_task_policy_provider_and_evaluator_values_transient";
   secret_material: "never_returned";
+}
+
+/**
+ * Bounded drain controls for a local worker. The default keeps the historical one-at-a-time
+ * behavior; callers can opt into independent claims when their provider/effect budget allows it.
+ */
+export interface AutonomousBrainJobWorkerRunOptions {
+  limit?: number;
+  maxParallelism?: number;
+  /** Continue claiming after a job enters approval, retry, or reconciliation backpressure. */
+  continueOnNonTerminal?: boolean;
 }
 
 const RETENTION = "metadata_only_job_and_trace;private_task_policy_provider_and_evaluator_values_transient" as const;
@@ -163,6 +317,21 @@ function requestDomainCovered(plan: AutonomousBrainPlan, domain: AutonomousBrain
   return plan.selected_domains.includes(domain) || plan.route.primary_domain === domain;
 }
 
+function actionPlanFromResolution(value: AutonomousBrainJobResolution["actionPlan"]): AutonomousActionPlan | null {
+  if (value === undefined || value === null) return null;
+  return value instanceof AutonomousActionPlan ? value : AutonomousActionPlan.fromJSON(value);
+}
+
+function actionAdmissionFromResolution(value: AutonomousBrainJobResolution["actionAdmission"]): AutonomousActionAdmission | null {
+  if (value === undefined || value === null) return null;
+  return value instanceof AutonomousActionAdmission ? value : AutonomousActionAdmission.fromJSON(value);
+}
+
+function actionHandoffFromResolution(value: AutonomousBrainJobResolution["actionHandoff"]): AutonomousActionDispatchHandoff | null {
+  if (value === undefined || value === null) return null;
+  return validateAutonomousActionDispatchHandoff(value);
+}
+
 function approvalBoundary(result: AutonomousBrainExecution | AutonomousBrainCycleExecution | AutonomousBrainAdaptiveCycleExecution): "preflight" | "dispatched" {
   if ("connector" in result && result.connector !== null) return "dispatched";
   if ("run" in result && result.run !== null) return "dispatched";
@@ -186,8 +355,35 @@ export function autonomousBrainJobSpecDigest(input: AutonomousBrainJobSpecDigest
   if (!input || typeof input !== "object") throw new ArgumentError("autonomous brain job spec digest input is malformed");
   const selectedMode = mode(input.mode);
   const policyDigest = digest("job policyDigest", input.policyDigest ?? null, true);
+  const actionPlanDigest = digest("job actionPlanDigest", input.actionPlanDigest ?? null, true);
+  const actionAdmissionDigest = digest("job actionAdmissionDigest", input.actionAdmissionDigest ?? null, true);
+  const actionHandoffDigest = digest("job actionHandoffDigest", input.actionHandoffDigest ?? null, true);
+  if (actionAdmissionDigest !== null && actionPlanDigest === null) throw new ArgumentError("action admission digest requires an action plan digest");
+  if (actionHandoffDigest !== null && (actionPlanDigest === null || actionAdmissionDigest === null)) throw new ArgumentError("action handoff digest requires action plan and admission digests");
   if (!input.request || typeof input.request !== "object") throw new ArgumentError("autonomous brain job spec digest request is malformed");
-  return digestJsonSync({ schema: AUTONOMOUS_BRAIN_JOB_SPEC_SCHEMA, mode: selectedMode, request: input.request, policy_digest: policyDigest });
+  return digestJsonSync({
+    schema: AUTONOMOUS_BRAIN_JOB_SPEC_SCHEMA,
+    mode: selectedMode,
+    request: input.request,
+    policy_digest: policyDigest,
+    ...(actionPlanDigest === null ? {} : { action_plan_digest: actionPlanDigest }),
+    ...(actionAdmissionDigest === null ? {} : { action_admission_digest: actionAdmissionDigest }),
+    ...(actionHandoffDigest === null ? {} : { action_handoff_digest: actionHandoffDigest }),
+  });
+}
+
+/** Compute a durable job identity directly from a verified action dispatch handoff. */
+export function autonomousBrainJobSpecDigestForHandoff(input: AutonomousBrainJobHandoffSpecDigestInput): string {
+  if (!input || typeof input !== "object") throw new ArgumentError("autonomous brain handoff spec digest input is malformed");
+  const handoff = validateAutonomousActionDispatchHandoff(input.actionHandoff);
+  return autonomousBrainJobSpecDigest({
+    request: input.request,
+    mode: input.mode,
+    policyDigest: input.policyDigest ?? null,
+    actionPlanDigest: handoff.plan_digest,
+    actionAdmissionDigest: handoff.admission_digest,
+    actionHandoffDigest: handoff.handoff_digest,
+  });
 }
 
 /**
@@ -200,8 +396,11 @@ export class AutonomousBrainJobWorker {
   readonly brain: AutonomousBrainFacade;
   readonly scheduler: InMemoryAutonomousBrainJobScheduler;
   readonly workerId: string;
-  readonly resolve: AutonomousBrainJobResolver;
+  readonly resolve?: AutonomousBrainJobResolver;
+  readonly protectedRehydration?: AutonomousBrainJobProtectedRehydrator;
   readonly traceStore?: AutonomousRunTraceStore;
+  readonly traceRegistry?: AutonomousRunTraceRegistry;
+  readonly effectReconciliation?: AutonomousProviderEffectReconciliationCoordinator;
   readonly persistence?: AutonomousBrainJobSchedulerPersistenceCoordinator;
   readonly leaseMs: number;
   readonly heartbeatMs: number;
@@ -215,10 +414,18 @@ export class AutonomousBrainJobWorker {
     this.brain = options.brain;
     this.scheduler = options.scheduler;
     this.workerId = identifier("autonomous brain workerId", options.workerId);
-    if (typeof options.resolve !== "function") throw new ArgumentError("autonomous brain job worker resolver must be callable");
+    if (options.resolve !== undefined && typeof options.resolve !== "function") throw new ArgumentError("autonomous brain job worker resolver must be callable");
+    if (options.protectedRehydration !== undefined && !(options.protectedRehydration instanceof AutonomousBrainJobProtectedRehydrator)) throw new ArgumentError("autonomous brain job worker protectedRehydration is malformed");
+    if (options.resolve === undefined && options.protectedRehydration === undefined) throw new ArgumentError("autonomous brain job worker requires resolve or protectedRehydration");
     this.resolve = options.resolve;
+    this.protectedRehydration = options.protectedRehydration;
     if (options.traceStore !== undefined && (typeof options.traceStore.append !== "function" || typeof options.traceStore.events !== "function")) throw new ArgumentError("autonomous brain job worker traceStore is malformed");
+    if (options.traceRegistry !== undefined && !(options.traceRegistry instanceof AutonomousRunTraceRegistry)) throw new ArgumentError("autonomous brain job worker traceRegistry is malformed");
+    if (options.traceRegistry !== undefined && options.traceStore === undefined) throw new ArgumentError("autonomous brain job worker traceRegistry requires traceStore");
     this.traceStore = options.traceStore;
+    this.traceRegistry = options.traceRegistry;
+    if (options.effectReconciliation !== undefined && !(options.effectReconciliation instanceof AutonomousProviderEffectReconciliationCoordinator)) throw new ArgumentError("autonomous brain job worker effectReconciliation is malformed");
+    this.effectReconciliation = options.effectReconciliation;
     if (options.persistence !== undefined && (!(options.persistence instanceof AutonomousBrainJobSchedulerPersistenceCoordinator) || options.persistence.scheduler !== this.scheduler)) throw new ArgumentError("autonomous brain job worker persistence must own the supplied scheduler");
     this.persistence = options.persistence;
     this.leaseMs = boundedInteger("autonomous brain worker leaseMs", options.leaseMs ?? 60_000, 1, 600_000);
@@ -264,15 +471,27 @@ export class AutonomousBrainJobWorker {
     return job;
   }
 
+  /** Run or return the cached restart reconciliation admission for this worker lifecycle. */
+  async reconcileEffects(): Promise<AutonomousProviderEffectReconciliationAdmission | null> {
+    return this.effectReconciliation === undefined ? null : this.effectReconciliation.admit();
+  }
+
+  /** Re-open the caller-owned reconciliation cycle after resolving external state. */
+  resetEffectReconciliation(): void {
+    this.effectReconciliation?.reset();
+  }
+
   async runOnce(jobId?: string, now?: number): Promise<AutonomousBrainJobWorkerRun | null> {
     this.assertRestored();
+    const effectReconciliation = await this.reconcileEffects();
+    if (effectReconciliation?.status === "blocked") throw new ProviderRuntimeError("autonomous brain worker effect reconciliation admission is blocked", { code: "configuration" });
     const claimed = jobId === undefined
       ? this.scheduler.claimNext(this.workerId, this.leaseMs, now)
       : this.scheduler.claim(jobId, this.workerId, this.leaseMs, now);
     await this.persist();
     if (claimed === null) return null;
     if (["succeeded", "failed", "dead_lettered", "cancelled", "reconciliation_required"].includes(claimed.state)) {
-      return this.envelope(claimed, "already_terminal", null, null, null, null, null, null);
+      return this.envelope(claimed, "already_terminal", null, null, null, null, null, null, undefined, effectReconciliation ?? undefined);
     }
 
     let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
@@ -299,6 +518,7 @@ export class AutonomousBrainJobWorker {
     let resolution: AutonomousBrainJobResolution | null = null;
     let credentialBinding: AutonomousCredentialBinding | null = null;
     let trace: AutonomousRunTraceSummary | null = null;
+    let traceRegistryPublication: AutonomousRunTraceRegistryPublication | undefined;
     try {
       const approvalReleased = this.scheduler.eventsFor(claimed.job_id).some((event) => event.event_type === "job_approval_released");
       await this.checkpoint(claimed.job_id, {
@@ -306,22 +526,39 @@ export class AutonomousBrainJobWorker {
         checkpointDigest: digestJsonSync({ schema: AUTONOMOUS_BRAIN_JOB_WORKER_SCHEMA, job_id: claimed.job_id, spec_digest: claimed.spec_digest, attempt: claimed.attempts }),
         sideEffectBoundary: claimed.side_effect_boundary === "not_started" ? "not_started" : "preflight",
       });
-      resolution = await this.resolve({ job: claimed, approvalReleased, attempt: claimed.attempts });
+      resolution = this.resolve !== undefined
+        ? await this.resolve({ job: claimed, approvalReleased, attempt: claimed.attempts })
+        : await this.protectedRehydration!.resolve({
+          jobId: claimed.job_id,
+          specDigest: claimed.spec_digest,
+          domain: claimed.domain,
+          capability: claimed.capability,
+          attempt: claimed.attempts,
+          approvalReleased,
+        });
       this.validateResolution(claimed, resolution);
       const plan = await this.brain.plan(resolution.request);
       if (!requestDomainCovered(plan, claimed.domain)) throw new ArgumentError("rehydrated brain request is outside the durable job domain");
+      const actionHandoff = actionHandoffFromResolution(resolution.actionHandoff);
+      const actionPlan = actionPlanFromResolution(resolution.actionPlan) ?? (actionHandoff === null ? null : actionPlanFromResolution(actionHandoff.plan));
+      const actionAdmission = actionAdmissionFromResolution(resolution.actionAdmission) ?? (actionHandoff === null ? null : actionAdmissionFromResolution(actionHandoff.admission));
+      if (actionPlan !== null && actionAdmission !== null) {
+        const liveActionPlan = buildAutonomousActionPlan(plan.toJSON());
+        if (liveActionPlan.plan_digest !== actionPlan.plan_digest) throw new ArgumentError("durable action plan is stale or does not match the compiled request");
+        if (actionAdmission.plan_digest !== liveActionPlan.plan_digest || actionAdmission.status !== "admitted") throw new ArgumentError("durable action admission is not admitted for the compiled request");
+      }
       if (plan.status === "route_review_required") {
-        await this.checkpoint(claimed.job_id, { phase: "route_review_required", checkpointDigest: digestJsonSync({ plan_digest: plan.plan_digest, route_digest: plan.route.route_digest }), sideEffectBoundary: "preflight", waitingForApproval: true });
-        return this.envelope(this.scheduler.get(claimed.job_id)!, "waiting_approval", resolution.mode, null, null, null, null, null);
+        await this.checkpoint(claimed.job_id, { phase: "route_review_required", checkpointDigest: digestJsonSync({ plan_digest: plan.plan_digest, route_digest: plan.route.route_digest, action_plan_digest: actionPlan?.plan_digest ?? null, action_admission_digest: actionAdmission?.admission_digest ?? null, action_handoff_digest: actionHandoff?.handoff_digest ?? null }), sideEffectBoundary: "preflight", waitingForApproval: true });
+        return this.envelope(this.scheduler.get(claimed.job_id)!, "waiting_approval", resolution.mode, null, null, null, null, null, undefined, effectReconciliation ?? undefined);
       }
       planCompiled = true;
-      await this.checkpoint(claimed.job_id, { phase: "plan_compiled", checkpointDigest: digestJsonSync({ plan_digest: plan.plan_digest, route_digest: plan.route.route_digest, mode: resolution.mode }), sideEffectBoundary: "preflight" });
+      await this.checkpoint(claimed.job_id, { phase: "plan_compiled", checkpointDigest: digestJsonSync({ plan_digest: plan.plan_digest, route_digest: plan.route.route_digest, mode: resolution.mode, action_plan_digest: actionPlan?.plan_digest ?? null, action_admission_digest: actionAdmission?.admission_digest ?? null, action_handoff_digest: actionHandoff?.handoff_digest ?? null }), sideEffectBoundary: "preflight" });
       // The durable worker owns a second approval gate around the entire rehydrated dispatch.
       // Do not even invoke the facade before the scheduler records an explicit release; this
       // prevents a connector or provider-planning callback from doing work during a pause.
       if (!approvalReleased) {
-        await this.checkpoint(claimed.job_id, { phase: "provider_approval_required", checkpointDigest: digestJsonSync({ plan_digest: plan.plan_digest, mode: resolution.mode }), sideEffectBoundary: "preflight", waitingForApproval: true });
-        return this.envelope(this.scheduler.get(claimed.job_id)!, "waiting_approval", resolution.mode, null, null, null, null, null);
+        await this.checkpoint(claimed.job_id, { phase: "provider_approval_required", checkpointDigest: digestJsonSync({ plan_digest: plan.plan_digest, mode: resolution.mode, action_plan_digest: actionPlan?.plan_digest ?? null, action_admission_digest: actionAdmission?.admission_digest ?? null, action_handoff_digest: actionHandoff?.handoff_digest ?? null }), sideEffectBoundary: "preflight", waitingForApproval: true });
+        return this.envelope(this.scheduler.get(claimed.job_id)!, "waiting_approval", resolution.mode, null, null, null, null, null, undefined, effectReconciliation ?? undefined);
       }
       let approvedResolution = this.approvalBoundResolution(resolution, approvalReleased);
       if (this.credentialScope) {
@@ -330,7 +567,7 @@ export class AutonomousBrainJobWorker {
         approvedResolution = this.bindCredentialResolution(approvedResolution, credentialBinding);
       }
       const shouldTrace = this.traceStore !== undefined;
-      await this.checkpoint(claimed.job_id, { phase: "dispatch_started", checkpointDigest: digestJsonSync({ plan_digest: plan.plan_digest, attempt: claimed.attempts }), sideEffectBoundary: "dispatched" });
+      await this.checkpoint(claimed.job_id, { phase: "dispatch_started", checkpointDigest: digestJsonSync({ plan_digest: plan.plan_digest, attempt: claimed.attempts, action_plan_digest: actionPlan?.plan_digest ?? null, action_admission_digest: actionAdmission?.admission_digest ?? null, action_handoff_digest: actionHandoff?.handoff_digest ?? null }), sideEffectBoundary: "dispatched" });
       executionStarted = true;
       if (heartbeatError !== null) throw heartbeatError;
       let result: AutonomousBrainExecution | AutonomousBrainCycleExecution | AutonomousBrainAdaptiveCycleExecution;
@@ -355,24 +592,38 @@ export class AutonomousBrainJobWorker {
       } else result = await this.brain.executePlannedAdaptiveCycle(plan, resolution.request, approvedResolution.adaptive!);
 
       if (heartbeatError !== null) throw heartbeatError;
+      if (this.traceRegistry !== undefined && this.traceStore !== undefined && trace !== null) {
+        traceRegistryPublication = await publishAutonomousRunTraceRegistrySnapshot(
+          this.traceRegistry,
+          this.traceStore,
+          `${claimed.job_id}:attempt-${claimed.attempts}`,
+        );
+      }
       const status = statusOf(result);
       if (APPROVAL_STATUSES.has(status)) {
         await this.checkpoint(claimed.job_id, { phase: status, checkpointDigest: resultDigest(result, trace), sideEffectBoundary: approvalBoundary(result), waitingForApproval: true });
-        return this.envelope(this.scheduler.get(claimed.job_id)!, "waiting_approval", resolution.mode, result, null, null, trace, null);
+        return this.envelope(this.scheduler.get(claimed.job_id)!, "waiting_approval", resolution.mode, result, null, null, trace, null, traceRegistryPublication, effectReconciliation ?? undefined);
       }
       if (status === "reconciliation_required") {
         await this.checkpoint(claimed.job_id, { phase: status, checkpointDigest: resultDigest(result, trace), sideEffectBoundary: "unknown" });
         const quarantined = await this.fail(claimed.job_id, { reason: "brain execution requires caller reconciliation", retryable: false });
-        return this.envelope(quarantined, "reconciliation_required", resolution.mode, result, null, null, trace, null);
+        return this.envelope(quarantined, "reconciliation_required", resolution.mode, result, null, null, trace, null, traceRegistryPublication, effectReconciliation ?? undefined);
       }
       if (status !== "completed") {
         await this.checkpoint(claimed.job_id, { phase: `terminal_${status}`, checkpointDigest: resultDigest(result, trace), sideEffectBoundary: "dispatched" });
         const failed = await this.fail(claimed.job_id, { reason: `brain execution ended with ${status}`, retryable: false });
-        return this.envelope(failed, failed.state === "reconciliation_required" ? "reconciliation_required" : "failed", resolution.mode, result, null, null, trace, null);
+        return this.envelope(failed, failed.state === "reconciliation_required" ? "reconciliation_required" : "failed", resolution.mode, result, null, null, trace, null, traceRegistryPublication, effectReconciliation ?? undefined);
       }
       const completed = await this.complete(claimed.job_id, resultDigest(result, trace));
-      return this.envelope(completed, "succeeded", resolution.mode, result, null, null, trace, null);
+      return this.envelope(completed, "succeeded", resolution.mode, result, null, null, trace, null, traceRegistryPublication, effectReconciliation ?? undefined);
     } catch (error) {
+      if (this.traceRegistry !== undefined && this.traceStore !== undefined && traceRegistryPublication === undefined) {
+        traceRegistryPublication = await publishAutonomousRunTraceRegistrySnapshot(
+          this.traceRegistry,
+          this.traceStore,
+          `${claimed.job_id}:attempt-${claimed.attempts}`,
+        );
+      }
       const projection = errorProjection(error);
       const current = this.scheduler.get(claimed.job_id);
       if (!current || current.lease_owner !== this.workerId || !["leased", "running"].includes(current.state)) throw error;
@@ -393,7 +644,7 @@ export class AutonomousBrainJobWorker {
           : failed.state === "queued"
             ? "retry_scheduled"
             : "failed";
-        return this.envelope(failed, workerStatus, resolution?.mode ?? null, null, null, null, trace, projection);
+        return this.envelope(failed, workerStatus, resolution?.mode ?? null, null, null, null, trace, projection, traceRegistryPublication, effectReconciliation ?? undefined);
       } catch (persistenceError) {
         const wrapped = new ProviderRuntimeError("autonomous brain worker failure could not be durably recorded", { code: "configuration" });
         (wrapped as Error & { cause?: unknown }).cause = persistenceError;
@@ -405,15 +656,29 @@ export class AutonomousBrainJobWorker {
     }
   }
 
-  async run(options: { limit?: number } = {}): Promise<AutonomousBrainJobWorkerBatch> {
+  async run(options: AutonomousBrainJobWorkerRunOptions = {}): Promise<AutonomousBrainJobWorkerBatch> {
     const limit = boundedInteger("autonomous brain worker limit", options.limit ?? 1, 1, MAX_AUTONOMOUS_BRAIN_WORKER_BATCH);
-    const runs: AutonomousBrainJobWorkerRun[] = [];
-    for (let index = 0; index < limit; index += 1) {
-      const result = await this.runOnce();
-      if (result === null) break;
-      runs.push(result);
-      if (result.status === "waiting_approval" || result.status === "retry_scheduled" || result.status === "reconciliation_required") break;
-    }
+    const maxParallelism = boundedInteger("autonomous brain worker maxParallelism", options.maxParallelism ?? 1, 1, Math.min(limit, MAX_AUTONOMOUS_BRAIN_WORKER_BATCH));
+    if (options.continueOnNonTerminal !== undefined && typeof options.continueOnNonTerminal !== "boolean") throw new ArgumentError("autonomous brain worker continueOnNonTerminal must be boolean");
+    const continueOnNonTerminal = options.continueOnNonTerminal ?? false;
+    const indexedRuns: Array<{ index: number; result: AutonomousBrainJobWorkerRun }> = [];
+    let nextIndex = 0;
+    let stoppedOnNonTerminal = false;
+    const drain = async (): Promise<void> => {
+      while (!stoppedOnNonTerminal) {
+        const index = nextIndex;
+        nextIndex += 1;
+        if (index >= limit) return;
+        const result = await this.runOnce();
+        if (result === null) return;
+        indexedRuns.push({ index, result });
+        if (!continueOnNonTerminal && (result.status === "waiting_approval" || result.status === "retry_scheduled" || result.status === "reconciliation_required")) {
+          stoppedOnNonTerminal = true;
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: maxParallelism }, () => drain()));
+    const runs = indexedRuns.sort((left, right) => left.index - right.index).map((entry) => entry.result);
     const succeeded = runs.filter((run) => run.status === "succeeded").length;
     const waiting = runs.filter((run) => run.status === "waiting_approval").length;
     const reconciliation = runs.filter((run) => run.status === "reconciliation_required").length;
@@ -430,6 +695,9 @@ export class AutonomousBrainJobWorker {
       reconciliation_count: reconciliation,
       retry_scheduled_count: retryScheduled,
       failed_count: failed,
+      requested_count: limit,
+      max_parallelism: maxParallelism,
+      stopped_on_non_terminal: stoppedOnNonTerminal,
       batch_digest: digestJsonSync(runs.map((run) => ({ job_id: run.job_id, status: run.status, job_digest: run.job.job_digest, trace_digest: run.trace?.trace_digest ?? null }))),
       retention: RETENTION,
       secret_material: SECRET_MATERIAL,
@@ -509,8 +777,28 @@ export class AutonomousBrainJobWorker {
   private validateResolution(job: AutonomousBrainJob, value: AutonomousBrainJobResolution): void {
     if (!value || typeof value !== "object") throw new ArgumentError("brain job resolver must return an object");
     const selectedMode = mode(value.mode);
+    const actionHandoff = actionHandoffFromResolution(value.actionHandoff);
+    const handoffPlan = actionHandoff === null ? null : actionPlanFromResolution(actionHandoff.plan);
+    const handoffAdmission = actionHandoff === null ? null : actionAdmissionFromResolution(actionHandoff.admission);
+    const explicitActionPlan = actionPlanFromResolution(value.actionPlan);
+    const explicitActionAdmission = actionAdmissionFromResolution(value.actionAdmission);
+    if (actionHandoff !== null && explicitActionPlan !== null && explicitActionPlan.plan_digest !== handoffPlan?.plan_digest) throw new ArgumentError("durable action plan does not match the verified handoff");
+    if (actionHandoff !== null && explicitActionAdmission !== null && explicitActionAdmission.admission_digest !== handoffAdmission?.admission_digest) throw new ArgumentError("durable action admission does not match the verified handoff");
+    const actionPlan = explicitActionPlan ?? handoffPlan;
+    const actionAdmission = explicitActionAdmission ?? handoffAdmission;
+    if ((actionPlan === null) !== (actionAdmission === null)) throw new ArgumentError("durable action plan and admission must be supplied together");
+    if (actionPlan !== null && actionAdmission !== null) {
+      if (actionAdmission.plan_digest !== actionPlan.plan_digest) throw new ArgumentError("durable action admission is bound to a different action plan");
+      if (actionAdmission.status !== "admitted") throw new ArgumentError("durable action admission must be admitted before worker dispatch");
+    }
     if (digest("job resolution specDigest", value.specDigest) !== job.spec_digest) throw new ArgumentError("brain job resolver specDigest does not match the durable job");
-    if (autonomousBrainJobSpecDigest({ request: value.request, mode: selectedMode, policyDigest: value.policyDigest ?? null }) !== job.spec_digest) throw new ArgumentError("brain job request, mode, and policy digest do not match the durable spec");
+    const requestDomain = isObject(value.request) && typeof value.request.domain === "string" ? value.request.domain : null;
+    if (actionHandoff !== null) {
+      if (job.domain === "cross_domain" && !actionHandoff.cross_domain && !actionHandoff.selected_domains.includes("cross_domain")) throw new ArgumentError("cross-domain job requires a cross-domain action handoff");
+      if (job.domain !== "cross_domain" && !actionHandoff.selected_domains.includes(job.domain as typeof actionHandoff.selected_domains[number])) throw new ArgumentError("action handoff does not cover the durable job domain");
+      if (requestDomain !== null && requestDomain !== "cross_domain" && !actionHandoff.selected_domains.includes(requestDomain as typeof actionHandoff.selected_domains[number])) throw new ArgumentError("action handoff does not cover the request domain");
+    }
+    if (autonomousBrainJobSpecDigest({ request: value.request, mode: selectedMode, policyDigest: value.policyDigest ?? null, actionPlanDigest: actionPlan?.plan_digest ?? null, actionAdmissionDigest: actionAdmission?.admission_digest ?? null, actionHandoffDigest: actionHandoff?.handoff_digest ?? null }) !== job.spec_digest) throw new ArgumentError("brain job request, mode, policy, and action handoff do not match the durable spec");
     if (!value.request || typeof value.request !== "object" || typeof value.request.task !== "string" || !value.request.task.trim()) throw new ArgumentError("brain job resolver request is invalid");
     if (selectedMode === "adaptive" && (!value.adaptive || typeof value.adaptive !== "object" || typeof value.adaptive.adaptive?.evaluate !== "function")) throw new ArgumentError("adaptive brain job requires an evaluator policy");
   }
@@ -536,10 +824,12 @@ export class AutonomousBrainJobWorker {
     cycle: AutonomousBrainCycleExecution | null,
     trace: AutonomousRunTraceSummary | null,
     error: { errorClass: string; failureCode: string; retryable: boolean | null } | null,
+    traceRegistryPublication?: AutonomousRunTraceRegistryPublication,
+    effectReconciliation?: AutonomousProviderEffectReconciliationAdmission,
   ): AutonomousBrainJobWorkerRun {
     const resolvedExecution = execution ?? (result && "run" in result ? result as AutonomousBrainExecution : null);
     const resolvedCycle = cycle ?? (result && "cycle" in result ? result as AutonomousBrainCycleExecution : null);
     const resolvedAdaptive = result && "adaptive" in result ? result as AutonomousBrainAdaptiveCycleExecution : null;
-    return { schema: AUTONOMOUS_BRAIN_JOB_WORKER_SCHEMA, worker_id: this.workerId, job_id: job.job_id, status, job, mode: selectedMode, execution: resolvedExecution, cycle: resolvedCycle, adaptive: resolvedAdaptive, trace, error_class: error?.errorClass ?? null, failure_code: error?.failureCode ?? null, error_retryable: error?.retryable ?? null, retention: RETENTION, secret_material: SECRET_MATERIAL };
+    return { schema: AUTONOMOUS_BRAIN_JOB_WORKER_SCHEMA, worker_id: this.workerId, job_id: job.job_id, status, job, mode: selectedMode, execution: resolvedExecution, cycle: resolvedCycle, adaptive: resolvedAdaptive, trace, ...(traceRegistryPublication === undefined ? {} : { trace_registry: traceRegistryPublication }), ...(effectReconciliation === undefined ? {} : { effect_reconciliation: effectReconciliation }), error_class: error?.errorClass ?? null, failure_code: error?.failureCode ?? null, error_retryable: error?.retryable ?? null, retention: RETENTION, secret_material: SECRET_MATERIAL };
   }
 }

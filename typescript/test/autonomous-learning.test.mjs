@@ -447,6 +447,92 @@ test("high-level cross-domain learning evaluates every specialist and synthesis 
   assert.equal(JSON.stringify(result.settlement).includes("Integrate domains"), false);
 });
 
+test("high-level cross-domain learning partially settles healthy episodes after a provider failure", async () => {
+  const llm = new LLMRuntime({ credentials: new CredentialStore() });
+  llm.registerInMemoryProvider("partial-learning", (request) => {
+    const promptText = JSON.stringify(request.messages);
+    if (promptText.includes("FAIL_CHILD")) throw new Error("sensitive partial-learning provider diagnostic");
+    return { text: "healthy bounded specialist or synthesis output" };
+  });
+  const agent = new AutonomousAgent(llm, { learner: new AutonomousOnlineLearner() });
+  const model = candidate();
+  model.provider = "partial-learning";
+  model.model = "partial-learning-model";
+  agent.registerModel(model);
+  let evaluations = 0;
+  const controller = new AutonomousLearningController(agent);
+  const result = await controller.runCrossDomainLearning("Learn from a partially available biomedical and neuroscience review.", {
+    trajectoryId: "partial-cross-domain-learning-trajectory",
+    evaluator: async () => {
+      evaluations += 1;
+      return { evaluator_id: "partial-cross-domain-reviewer", evaluator_version: "1", reward: 0.76, passed: true, evidence_digest: "a".repeat(64) };
+    },
+    run: {
+      candidates: [model],
+      approveProviderCall: true,
+      allowPartial: true,
+      maxParallelChildren: 2,
+      subtasks: [
+        { id: "failing-specialist", domain: "biomedical", task: "FAIL_CHILD review the biomedical evidence." },
+        { id: "healthy-specialist", domain: "neuroscience", task: "Review the neuroscience signal limits." },
+      ],
+    },
+  });
+  assert.equal(result.status, "partially_settled");
+  assert.equal(result.run.status, "children_partial");
+  assert.equal(result.run.completed_children, 1);
+  assert.deepEqual(result.run.child_runs.map((child) => child.result.status), ["child_failed", "completed"]);
+  assert.equal(result.run.synthesis?.status, "completed");
+  assert.equal(result.run.learning_episode_ids.length, 2);
+  assert.equal(Object.keys(result.rewards).length, 2);
+  assert.equal(result.settlement?.trajectory.steps.length, 2);
+  assert.equal(evaluations, 2, "only healthy specialist and synthesis results are evaluated");
+  assert.equal(JSON.stringify(result).includes("sensitive partial-learning provider diagnostic"), false);
+
+  const strict = await controller.runCrossDomainLearning("Learn strictly from a biomedical and neuroscience review.", {
+    trajectoryId: "strict-cross-domain-learning-trajectory",
+    evaluator: async () => {
+      evaluations += 1;
+      return { evaluator_id: "partial-cross-domain-reviewer", evaluator_version: "1", reward: 0.76, passed: true, evidence_digest: "a".repeat(64) };
+    },
+    run: {
+      candidates: [model],
+      approveProviderCall: true,
+      allowPartial: false,
+      maxParallelChildren: 1,
+      subtasks: [
+        { id: "failing-specialist", domain: "biomedical", task: "FAIL_CHILD review the biomedical evidence." },
+        { id: "healthy-specialist", domain: "neuroscience", task: "Review the neuroscience signal limits." },
+      ],
+    },
+  });
+  assert.equal(strict.status, "not_eligible");
+  assert.equal(strict.reason, "run_not_completed");
+  assert.equal(strict.run.status, "child_failed");
+  assert.equal(strict.run.learning_episode_ids.length, 0);
+  assert.equal(evaluations, 2, "strict failure must not invoke the evaluator");
+
+  const childrenOnly = await controller.runCrossDomainLearning("Learn from completed biomedical and neuroscience specialists without synthesis.", {
+    trajectoryId: "children-only-learning-trajectory",
+    evaluator: async () => ({ evaluator_id: "partial-cross-domain-reviewer", evaluator_version: "1", reward: 0.7, passed: true, evidence_digest: "b".repeat(64) }),
+    run: {
+      candidates: [model],
+      approveProviderCall: true,
+      allowPartial: false,
+      synthesize: false,
+      maxParallelChildren: 2,
+      subtasks: [
+        { id: "first-specialist", domain: "biomedical", task: "Review the biomedical evidence." },
+        { id: "second-specialist", domain: "neuroscience", task: "Review the neuroscience signal limits." },
+      ],
+    },
+  });
+  assert.equal(childrenOnly.status, "settled");
+  assert.equal(childrenOnly.run.status, "children_completed");
+  assert.equal(childrenOnly.run.synthesis, null);
+  assert.equal(childrenOnly.settlement?.trajectory.steps.length, 2);
+});
+
 test("the learning controller gates direct and outbox settlement on evaluator calibration", async () => {
   const agent = await learningAgent();
   const episodes = new InMemoryAutonomousLearningEpisodeStore();

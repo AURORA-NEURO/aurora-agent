@@ -9,15 +9,17 @@
 //!
 //! # The gap this world addresses, and the part of it that stays open
 //!
-//! `crates/examples` records `underdetermined_abstention` as blocked:
-//!
-//! > `OracleVerdict::abstain` exists in `bioprism-section` but no path in `bioprism-fiber`
-//! > constructs it; the v0.1 oracle derives status solely from whether the witness list is empty.
+//! `crates/examples` records `underdetermined_abstention` as blocked: `OracleVerdict::abstain`
+//! exists in `bioprism-section` but no path in `bioprism-fiber` constructs it. Construction now
+//! lives behind injection — `bioprism_fiber::compile_with_oracle` judges a compile by any
+//! `DecisionOracle`, and `bioprism-domain`'s rule oracles return abstaining verdicts through it —
+//! yet the default compile's split-integrity oracle still derives status solely from whether the
+//! witness list is empty.
 //!
 //! That blocker is about the *compiler*, and this crate cannot lift it — `bioprism-fiber` is not
-//! in the dependency set. What a compiler with an abstention path would need is an input that
-//! genuinely underdetermines, and that input did not exist. This world is it, and
-//! [`AbstentionStep`] states exactly what would still have to be built.
+//! in the dependency set. What a judge with an abstention path needs is an input that genuinely
+//! underdetermines, and that input did not exist. This world is it, and [`AbstentionStep`] states
+//! exactly what a judge of this world would still have to be built to do.
 //!
 //! The distinction the world is built around is the one that makes the property hard: **this is
 //! not a world with missing evidence.** Every input to every hypothesis-support factor is
@@ -327,9 +329,10 @@ pub fn build(spec: &PostTreatmentSpec) -> Result<BioWorld, BioWorldError> {
     builder.fact(
         "fact.confirmation",
         CONFIRMATION_MEASUREMENT,
-        per_subject(&subjects, |_, _| {
-            json!({ "scheduled": "2025-05-12", "bidimensional_product_mm2": null })
-        }),
+        per_subject(
+            &subjects,
+            |_, _| json!({ "scheduled": "2025-05-12", "bidimensional_product_mm2": null }),
+        ),
         &["confirmation"],
         &["imaging/confirmation_schedule.json"],
     );
@@ -579,6 +582,7 @@ pub fn query(spec: &PostTreatmentSpec) -> QueryShape {
 
 /// What the world's structure says about whether the verdict is settled.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct UnderdeterminationProfile {
     pub world_id: String,
     pub hypothesis_variables: Vec<String>,
@@ -621,7 +625,10 @@ impl UnderdeterminationProfile {
 ///
 /// Generic over any world: it reads declared factor kinds and tags, not this module's constants
 /// applied by name, so a consumer can point it at a world this crate did not build.
-pub fn analyse(world: &BioWorld, query: &QueryShape) -> Result<UnderdeterminationProfile, BioWorldError> {
+pub fn analyse(
+    world: &BioWorld,
+    query: &QueryShape,
+) -> Result<UnderdeterminationProfile, BioWorldError> {
     let inner = world.world();
     let profile = crate::structure::profile(world, query, DISTRACTOR_TAG)?;
     let withheld: BTreeSet<&str> = profile
@@ -658,7 +665,11 @@ pub fn analyse(world: &BioWorld, query: &QueryShape) -> Result<Underdeterminatio
     let mut unresolvable = BTreeSet::new();
     let mut withheld_inputs = BTreeSet::new();
 
-    for factor in inner.factors.iter().filter(|f| f.kind == HYPOTHESIS_SUPPORT_RULE) {
+    for factor in inner
+        .factors
+        .iter()
+        .filter(|f| f.kind == HYPOTHESIS_SUPPORT_RULE)
+    {
         for output in &factor.outputs {
             hypothesis_variables.push(output.as_str().to_string());
             let is_settled = factor
@@ -757,8 +768,12 @@ impl AbstentionStep {
 
     /// Whether the step needs a change to `bioprism-fiber` rather than to a world.
     ///
-    /// Every one of them does. That is the honest summary of this slice: the world side of
-    /// `underdetermined_abstention` is now built and the compiler side is untouched.
+    /// Every one of them still does. `bioprism_fiber::compile_with_oracle` now lets an injected
+    /// oracle construct `OracleVerdict::abstain` — `bioprism-domain`'s rule oracles do exactly
+    /// that — but that contract hands an oracle the compiled value map only, and abstaining on
+    /// *this* world requires first reading its hypothesis and exclusion factors, which no
+    /// injected oracle can see. Lifting these steps therefore still means changing the compiler
+    /// contract rather than building another world.
     pub const fn requires_a_compiler_change(self) -> bool {
         true
     }

@@ -105,10 +105,6 @@ impl CellularFraction {
         self.parts_per_ten_thousand
     }
 
-    pub fn as_ratio(self) -> f64 {
-        f64::from(self.parts_per_ten_thousand) / 10_000.0
-    }
-
     fn describe(self) -> String {
         format!("{}/10000", self.parts_per_ten_thousand)
     }
@@ -158,11 +154,6 @@ impl Subclone {
 
     pub fn carrying(mut self, marker: MolecularMarker) -> Self {
         self.alterations.insert(marker);
-        self
-    }
-
-    pub fn seen_in(mut self, region: RegionId) -> Self {
-        self.observed_in.insert(region);
         self
     }
 }

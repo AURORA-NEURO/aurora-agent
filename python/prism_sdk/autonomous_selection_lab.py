@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 import math
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence, TypedDict
 
 from .authoring import canonical_json, content_digest
 from .domain_tools import AUTONOMOUS_DOMAIN_NAMES
@@ -26,6 +26,59 @@ MAX_AUTONOMOUS_SELECTION_LAB_CAPABILITIES = 64
 MAX_AUTONOMOUS_SELECTION_LAB_HEALTH_ROWS = 512
 MAX_AUTONOMOUS_SELECTION_LAB_TASK_BYTES = 1_000_000
 MAX_AUTONOMOUS_SELECTION_LAB_REPORT_BYTES = 2_000_000
+MAX_AUTONOMOUS_SELECTION_LAB_OBSERVATIONS = 512
+
+AUTONOMOUS_SELECTION_WEIGHTS_SCHEMA = "bioprism-autonomous-selection-weights/0.1"
+DEFAULT_AUTONOMOUS_SELECTION_WEIGHTS: dict[str, float] = {
+    "quality": 0.55,
+    "reliability": 0.25,
+    "cost": 0.10,
+    "latency": 0.10,
+    "exploration": 0.15,
+}
+
+
+class AutonomousSelectionWeights(TypedDict):
+    """Cross-runtime multi-objective model-selection policy."""
+
+    quality: float
+    reliability: float
+    cost: float
+    latency: float
+    exploration: float
+
+
+_SELECTION_WEIGHT_NAMES = tuple(DEFAULT_AUTONOMOUS_SELECTION_WEIGHTS)
+
+
+def normalize_autonomous_selection_weights(
+    value: Mapping[str, Any] | None = None,
+) -> AutonomousSelectionWeights:
+    """Validate and fill the policy consumed by the Rust and TypeScript rankers.
+
+    Weights are non-negative utility coefficients rather than probabilities.  Keeping the
+    coefficients unnormalised preserves the Rust kernel's established contract, while refusing
+    an all-zero policy prevents a decision from degenerating into lexical tie-breaking.
+    """
+
+    if value is not None and not isinstance(value, Mapping):
+        _fail("selection weights must be an object")
+    if value is not None:
+        if any(not isinstance(key, str) for key in value):
+            _fail("selection weights fields must be strings")
+        unsupported = sorted(set(value).difference(_SELECTION_WEIGHT_NAMES))
+        if unsupported:
+            _fail("selection weights contain unsupported fields: " + ", ".join(unsupported))
+    normalized: dict[str, float] = dict(DEFAULT_AUTONOMOUS_SELECTION_WEIGHTS)
+    for name in _SELECTION_WEIGHT_NAMES:
+        if value is None or name not in value:
+            continue
+        raw = value[name]
+        _bounded_number(f"selection weights.{name}", raw, 0, 100)
+        normalized[name] = round(float(raw), 12)
+    if all(weight == 0 for weight in normalized.values()):
+        _fail("selection weights must contain at least one positive value")
+    return normalized  # type: ignore[return-value]
 
 _RETENTION = "metadata_only;tasks_candidates_and_raw_selector_output_not_retained"
 _SECRET_MATERIAL = "never_returned"
@@ -138,6 +191,66 @@ def _validate_health_map(name: str, value: Any) -> None:
         _validate_health_row(f"{name}.{key}", row)
 
 
+def _validate_observations(value: Any) -> list[dict[str, Any]]:
+    """Validate caller-owned online-learning evidence without accepting hidden state."""
+
+    if value is None:
+        return []
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes, bytearray)):
+        _fail("request.observations must be a sequence")
+    if len(value) > MAX_AUTONOMOUS_SELECTION_LAB_OBSERVATIONS:
+        _fail(
+            "request.observations must contain at most "
+            f"{MAX_AUTONOMOUS_SELECTION_LAB_OBSERVATIONS} items"
+        )
+    seen: set[str] = set()
+    normalized: list[dict[str, Any]] = []
+    for index, raw in enumerate(value):
+        if not isinstance(raw, Mapping):
+            _fail(f"request.observations[{index}] must be an object")
+        arm_id = _bounded_text(
+            f"request.observations[{index}].arm_id", raw.get("arm_id"), 768
+        )
+        if arm_id in seen:
+            _fail(f"request.observations contains duplicate arm {arm_id}")
+        seen.add(arm_id)
+        pulls = _bounded_integer(
+            f"request.observations[{index}].pulls", raw.get("pulls"), 0, 1_000_000_000
+        )
+        reward_sum = _bounded_number(
+            f"request.observations[{index}].reward_sum",
+            raw.get("reward_sum"),
+            -1e12,
+            1e12,
+        )
+        failures = _bounded_integer(
+            f"request.observations[{index}].failures", raw.get("failures"), 0, pulls
+        )
+        disabled = raw.get("disabled")
+        if "disabled" in raw:
+            _optional_boolean(f"request.observations[{index}].disabled", disabled)
+            if disabled is None:
+                _fail(f"request.observations[{index}].disabled must be boolean")
+        normalized.append(
+            {
+                "arm_id": arm_id,
+                "pulls": pulls,
+                "reward_sum": round(float(reward_sum), 12),
+                "failures": failures,
+                **({} if "disabled" not in raw else {"disabled": disabled}),
+            }
+        )
+    return normalized
+
+
+def normalize_autonomous_model_observations(
+    value: Sequence[Mapping[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    """Validate caller-owned model-arm evidence before it enters a live selection request."""
+
+    return _validate_observations(value)
+
+
 def _validate_candidate(value: Any, index: int, seen: set[str]) -> str:
     if not isinstance(value, Mapping):
         _fail(f"candidate {index} must be an object")
@@ -179,6 +292,8 @@ def _validate_request(value: Any, expected_domain: str) -> dict[str, Any]:
     for field, maximum in (("max_cost_per_million_tokens", 1_000_000_000), ("max_latency_ms", 86_400_000), ("min_quality", 1), ("min_selection_confidence", 1)):
         _optional_number(f"request.{field}", value.get(field), 0, maximum)
     _optional_boolean("request.require_json", value.get("require_json"))
+    weights = normalize_autonomous_selection_weights(value.get("weights"))
+    observations = _validate_observations(value.get("observations"))
     candidates = value.get("candidates")
     if not isinstance(candidates, Sequence) or isinstance(candidates, (str, bytes, bytearray)) or not 1 <= len(candidates) <= MAX_AUTONOMOUS_SELECTION_LAB_CANDIDATES:
         _fail(f"request.candidates must contain 1-{MAX_AUTONOMOUS_SELECTION_LAB_CANDIDATES} candidates")
@@ -187,7 +302,7 @@ def _validate_request(value: Any, expected_domain: str) -> dict[str, Any]:
         _validate_candidate(candidate, index, seen)
     _validate_health_map("request.provider_health", value.get("provider_health"))
     _validate_health_map("request.model_health", value.get("model_health"))
-    return dict(value)
+    return {**dict(value), "weights": weights, "observations": observations}
 
 
 def _validate_case(value: Any, index: int, seen: set[str]) -> dict[str, Any]:
@@ -218,12 +333,46 @@ def rank_autonomous_models(request: Mapping[str, Any]) -> list[dict[str, Any]]:
     rankings: list[dict[str, Any]] = []
     provider_health = normalized["provider_health"]
     model_health = normalized["model_health"]
+    weights = normalized["weights"]
+    observations = {row["arm_id"]: row for row in normalized["observations"]}
+    max_cost = max(
+        1.0,
+        *(float(candidate["cost_per_million_tokens"]) for candidate in normalized["candidates"]),
+    )
+    effective_metrics: dict[str, tuple[float, float]] = {}
+    for candidate in normalized["candidates"]:
+        arm_id = f"{candidate['provider']}/{candidate['model']}"
+        health = model_health.get(arm_id)
+        attempts = health.get("attempts", 0) if isinstance(health, Mapping) else 0
+        if (
+            isinstance(health, Mapping)
+            and isinstance(health.get("success_rate"), (int, float))
+            and not isinstance(health.get("success_rate"), bool)
+            and attempts > 0
+        ):
+            confidence = min(float(attempts) / 12.0, 0.75)
+            reliability = (1.0 - confidence) * float(candidate["reliability"]) + confidence * float(health["success_rate"])
+            observed_latency = health.get("last_latency_ms")
+            if observed_latency is None:
+                observed_latency = health.get("mean_latency_ms")
+            latency = float(candidate["latency_ms"])
+            if isinstance(observed_latency, (int, float)) and not isinstance(observed_latency, bool):
+                latency = (1.0 - confidence) * latency + confidence * float(observed_latency)
+            effective_metrics[arm_id] = (reliability, latency)
+        else:
+            effective_metrics[arm_id] = (float(candidate["reliability"]), float(candidate["latency_ms"]))
+    max_latency = max(1.0, *(latency for _, latency in effective_metrics.values()))
+    total_pulls = sum(int(row["pulls"]) for row in observations.values())
+    log_total = math.log(total_pulls + 1)
     for candidate in normalized["candidates"]:
         provider_name = candidate["provider"]
         model_name = candidate["model"]
         reasons: list[str] = []
         provider = provider_health.get(provider_name)
-        model = model_health.get(f"{provider_name}/{model_name}")
+        arm_id = f"{provider_name}/{model_name}"
+        model = model_health.get(arm_id)
+        metrics = effective_metrics[arm_id]
+        observation = observations.get(arm_id)
         if candidate.get("enabled") is False:
             reasons.append("candidate disabled")
         if not isinstance(provider, Mapping):
@@ -234,6 +383,12 @@ def rank_autonomous_models(request: Mapping[str, Any]) -> list[dict[str, Any]]:
             reasons.append("model circuit open")
         if not isinstance(provider, Mapping) or provider.get("credential_required") is not False or provider.get("credential_ready") is not True:
             reasons.append("credential not ready")
+        if isinstance(provider, Mapping) and provider.get("registered") is False:
+            reasons.append("provider not registered")
+        if isinstance(provider, Mapping) and provider.get("eligible") is False:
+            reasons.append("provider health ineligible")
+        if isinstance(observation, Mapping) and observation.get("disabled") is True:
+            reasons.append("disabled by learning policy")
         if candidate["max_output_tokens"] < normalized["requested_output_tokens"]:
             reasons.append("model output capacity is below the request")
         if candidate["context_window_tokens"] < normalized["estimated_input_tokens"] + normalized["requested_output_tokens"]:
@@ -248,19 +403,36 @@ def rank_autonomous_models(request: Mapping[str, Any]) -> list[dict[str, Any]]:
             reasons.append("provider structured output is disabled")
         if normalized.get("max_cost_per_million_tokens") is not None and candidate["cost_per_million_tokens"] > normalized["max_cost_per_million_tokens"]:
             reasons.append("model cost exceeds the caller budget")
-        if normalized.get("max_latency_ms") is not None and candidate["latency_ms"] > normalized["max_latency_ms"]:
+        if normalized.get("max_latency_ms") is not None and metrics[1] > normalized["max_latency_ms"]:
             reasons.append("model latency exceeds the caller bound")
         if normalized.get("min_quality") is not None and candidate["quality"] < normalized["min_quality"]:
             reasons.append("model quality is below the caller floor")
-        attempts = model.get("attempts", 0) if isinstance(model, Mapping) else 0
-        health_rate = model.get("success_rate") if isinstance(model, Mapping) and attempts and attempts > 0 else 0.5
-        quality_observations = model.get("quality_observations", 0) if isinstance(model, Mapping) else 0
-        quality_rate = model.get("quality_mean") if isinstance(model, Mapping) and quality_observations and quality_observations > 0 else None
-        latency_utility = 1 - min(1, float(candidate["latency_ms"]) / 60_000)
-        cost_utility = 1 - min(1, float(candidate["cost_per_million_tokens"]) / 10_000)
-        adaptive_health = float(health_rate) * 0.15 if quality_rate is None else float(health_rate) * 0.1 + float(quality_rate) * 0.05
-        score = float(candidate["quality"]) * 0.4 + float(candidate["reliability"]) * 0.3 + adaptive_health + latency_utility * 0.1 + cost_utility * 0.05
-        rankings.append({"provider": provider_name, "model": model_name, "score": round(score, 12), "eligible": not reasons, "reasons": reasons})
+        pulls = 0 if observation is None else int(observation["pulls"])
+        mean_reward = 0.0 if pulls == 0 else float(observation["reward_sum"]) / pulls
+        exploration_bonus = (
+            float(weights["exploration"])
+            if pulls == 0
+            else float(weights["exploration"]) * math.sqrt(log_total / pulls)
+        )
+        base_score = (
+            float(weights["quality"]) * float(candidate["quality"])
+            + float(weights["reliability"]) * metrics[0]
+            + float(weights["exploration"]) * mean_reward
+            - float(weights["cost"]) * (float(candidate["cost_per_million_tokens"]) / max_cost)
+            - float(weights["latency"]) * (metrics[1] / max_latency)
+        )
+        rankings.append(
+            {
+                "provider": provider_name,
+                "model": model_name,
+                "score": round(base_score + exploration_bonus, 12),
+                "eligible": not reasons,
+                "reasons": reasons,
+                "base_score": round(base_score, 12),
+                "exploration_bonus": round(exploration_bonus, 12),
+                "observed_pulls": pulls,
+            }
+        )
     rankings.sort(key=lambda row: (-int(row["eligible"]), -row["score"], row["provider"], row["model"]))
     return rankings
 
@@ -654,6 +826,12 @@ __all__ = [
     "MAX_AUTONOMOUS_SELECTION_LAB_HEALTH_ROWS",
     "MAX_AUTONOMOUS_SELECTION_LAB_TASK_BYTES",
     "MAX_AUTONOMOUS_SELECTION_LAB_REPORT_BYTES",
+    "MAX_AUTONOMOUS_SELECTION_LAB_OBSERVATIONS",
+    "AUTONOMOUS_SELECTION_WEIGHTS_SCHEMA",
+    "DEFAULT_AUTONOMOUS_SELECTION_WEIGHTS",
+    "AutonomousSelectionWeights",
+    "normalize_autonomous_selection_weights",
+    "normalize_autonomous_model_observations",
     "SelectionLabSelector",
     "rank_autonomous_models",
     "autonomous_selection_confidence",

@@ -8,6 +8,7 @@ import {
   autonomousDomainPolicy,
   builtinAutonomousDomainPolicies,
   evaluateAutonomousDomainPolicy,
+  validateAutonomousDomainPolicy,
 } from "../dist/index.js";
 
 test("domain policies cover every domain with bounded, digest-addressed defaults", () => {
@@ -21,6 +22,24 @@ test("domain policies cover every domain with bounded, digest-addressed defaults
     assert.match(policy.policy_digest, /^[0-9a-f]{64}$/);
     assert.equal(autonomousDomainPolicy(policy.domain).policy_digest, policy.policy_digest);
   }
+});
+
+test("policy replay validation rejects tampering and cross-domain binding", () => {
+  const policy = autonomousDomainPolicy("coding");
+  assert.equal(validateAutonomousDomainPolicy({ ...policy }).policy_digest, policy.policy_digest);
+  assert.throws(() => validateAutonomousDomainPolicy({ ...policy, max_tool_turns: policy.max_tool_turns + 1 }), /digest/);
+  const missing = { ...policy };
+  delete missing.policy_id;
+  missing.unexpected = true;
+  assert.throws(() => validateAutonomousDomainPolicy(missing), /missing or unsupported/);
+  assert.throws(() => validateAutonomousDomainPolicy(policy, "science"), /expected domain/);
+  assert.throws(() => validateAutonomousDomainPolicy({ ...policy, retention: "raw_policy" }), /markers/);
+});
+
+test("agent exposes policy replay validation", () => {
+  const agent = new AutonomousAgent(new LLMRuntime({ fetch: async () => { throw new Error("policy validation must not contact a provider"); } }));
+  const policy = autonomousDomainPolicy("science");
+  assert.deepEqual(agent.validateDomainPolicy({ ...policy }, "science"), policy);
 });
 
 test("policy admission distinguishes complete review from hard budget and safety blocks", () => {
