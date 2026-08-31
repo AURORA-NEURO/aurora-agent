@@ -16,6 +16,7 @@ use super::evidence::{EvidenceDisposition, EvidenceQualification};
 use super::experiment::{ExperimentDesign, ExperimentDisposition};
 use super::mechanism::{MechanismDisposition, MechanismPortfolio};
 use super::multimodal::{MultimodalDisposition, MultimodalQcReport};
+use super::programs::p07_protocol_simulation::{ProtocolDisposition, ProtocolSimulation};
 use bioprism_foundation::{AutonomyTier, PRECLINICAL_BOUNDARY, RESEARCH_CONTRACT_SCHEMA_VERSION};
 use bioprism_ids::ContentHash;
 use serde::{Deserialize, Serialize};
@@ -64,6 +65,7 @@ pub struct GliomaWorkflowRequest {
     pub qc_report: Option<MultimodalQcReport>,
     pub mechanism_portfolio: Option<MechanismPortfolio>,
     pub experiment_design: Option<ExperimentDesign>,
+    pub protocol_simulation: Option<ProtocolSimulation>,
     pub max_parallelism: u16,
 }
 
@@ -437,6 +439,14 @@ fn feedback_decision(
         {
             Some((WorkflowNodeDecision::Hold, "power-repair-required".into(), "do not execute an underpowered or blocked design; repair allocation or explicitly release its null result".into()))
         }
+        GliomaStageKind::InstrumentPreflight | GliomaStageKind::ComputationalExecution
+            if request
+                .protocol_simulation
+                .as_ref()
+                .is_some_and(|simulation| simulation.disposition != ProtocolDisposition::Feasible) =>
+        {
+            Some((WorkflowNodeDecision::Hold, "protocol-feasibility-required".into(), "repair capacity, horizon, risk, or approval constraints before dispatching work".into()))
+        }
         _ => None,
     }
 }
@@ -447,6 +457,7 @@ fn context_completed(kind: GliomaStageKind, request: &GliomaWorkflowRequest) -> 
         GliomaStageKind::MultimodalIngestionQc => request.qc_report.is_some(),
         GliomaStageKind::MechanismExploration => request.mechanism_portfolio.is_some(),
         GliomaStageKind::ExperimentDesign => request.experiment_design.is_some(),
+        GliomaStageKind::ProtocolSimulation => request.protocol_simulation.is_some(),
         _ => false,
     }
 }
@@ -472,6 +483,13 @@ fn checkpoint_digest_order(request: &GliomaWorkflowRequest) -> Vec<ContentHash> 
             GliomaStageKind::ExperimentDesign.stage_id(),
             request
                 .experiment_design
+                .as_ref()
+                .map(|value| value.digest.clone()),
+        ),
+        (
+            GliomaStageKind::ProtocolSimulation.stage_id(),
+            request
+                .protocol_simulation
                 .as_ref()
                 .map(|value| value.digest.clone()),
         ),
@@ -520,6 +538,10 @@ pub fn plan_glioma_workflow(
             .experiment_design
             .as_ref()
             .is_some_and(|design| design.validate().is_err())
+        || request
+            .protocol_simulation
+            .as_ref()
+            .is_some_and(|simulation| simulation.validate().is_err())
     {
         return Err(GliomaWorkflowError::InvalidRequest(
             "supplied checkpoint output failed its contract validation".into(),
@@ -541,6 +563,10 @@ pub fn plan_glioma_workflow(
         (
             GliomaStageKind::ExperimentDesign,
             request.experiment_design.is_some(),
+        ),
+        (
+            GliomaStageKind::ProtocolSimulation,
+            request.protocol_simulation.is_some(),
         ),
     ] {
         if request.completed_stages.contains(&kind) && !supplied {
@@ -885,6 +911,7 @@ mod tests {
             qc_report: None,
             mechanism_portfolio: None,
             experiment_design: None,
+            protocol_simulation: None,
             max_parallelism: 3,
         };
         let first = plan_glioma_workflow(&request).unwrap();
@@ -920,6 +947,7 @@ mod tests {
             qc_report: None,
             mechanism_portfolio: None,
             experiment_design: None,
+            protocol_simulation: None,
             max_parallelism: 2,
         };
         let plan = plan_glioma_workflow(&request).unwrap();
@@ -944,6 +972,7 @@ mod tests {
             qc_report: None,
             mechanism_portfolio: None,
             experiment_design: None,
+            protocol_simulation: None,
             max_parallelism: 2,
         };
         let mut executor = DryRunGliomaExecutor;
@@ -970,6 +999,7 @@ mod tests {
             qc_report: None,
             mechanism_portfolio: None,
             experiment_design: None,
+            protocol_simulation: None,
             max_parallelism: 2,
         };
         let plan = plan_glioma_workflow(&request).unwrap();
@@ -991,6 +1021,7 @@ mod tests {
             qc_report: None,
             mechanism_portfolio: None,
             experiment_design: None,
+            protocol_simulation: None,
             max_parallelism: 1,
         };
         assert!(matches!(

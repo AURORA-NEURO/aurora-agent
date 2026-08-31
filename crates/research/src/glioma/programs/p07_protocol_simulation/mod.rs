@@ -10,6 +10,13 @@ pub use crate::glioma::workflow::{
     GliomaWorkflowExecution, GliomaWorkflowMode, GliomaWorkflowNode, GliomaWorkflowPlan,
     GliomaWorkflowRequest, WorkflowNodeDecision,
 };
+mod simulator;
+
+pub use simulator::{
+    protocol_request_from_experiment_design, simulate_glioma_protocol, ProtocolDisposition,
+    ProtocolResource, ProtocolResourceKind, ProtocolSimulation, ProtocolSimulationError,
+    ProtocolSimulationRequest, ProtocolTask, ResourceUtilization, ScheduleEntry,
+};
 
 pub const PROGRAM_ID: GliomaProgramId = GliomaProgramId::ProtocolSimulation;
 

@@ -1624,6 +1624,11 @@ pub fn glioma_research_engine_manifest() -> CapabilityManifest {
                 schema: "GliomaAdaptiveWorkflow1@1".into(),
                 required: false,
             },
+            TypedPort {
+                name: "glioma_protocol_simulation".into(),
+                schema: "GliomaProtocolSimulation1@1".into(),
+                required: false,
+            },
         ],
         effects: BTreeSet::from([
             Effect::ReadLocalData,

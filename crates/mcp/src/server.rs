@@ -470,11 +470,12 @@ use bioprism_research::{
     analyze_preclinical_outcomes, assess_replication, build_research_object_manifest,
     design_preclinical_experiment, dry_run_glioma_research, explore_mechanisms,
     generate_feature_catalog, glioma_program_catalog, harmonize_multimodal_inputs,
-    plan_glioma_workflow, qualify_evidence, select_glioma_actions, validate_feature_catalog,
-    AnalysisDataset, AnalysisRequest, EvidenceRecord, EvidenceRequest, ExperimentArm,
-    ExperimentRequest, GliomaActionCandidate, GliomaResearchIntent, GliomaWorkflowRequest,
-    MechanismCandidate, MechanismRequest, MultimodalObservation, MultimodalRequest,
-    ReplicationRequest, ReplicationStudy, ResearchObjectRequest,
+    plan_glioma_workflow, qualify_evidence, select_glioma_actions, simulate_glioma_protocol,
+    validate_feature_catalog, AnalysisDataset, AnalysisRequest, EvidenceRecord, EvidenceRequest,
+    ExperimentArm, ExperimentRequest, GliomaActionCandidate, GliomaResearchIntent,
+    GliomaWorkflowRequest, MechanismCandidate, MechanismRequest, MultimodalObservation,
+    MultimodalRequest, ProtocolSimulationRequest, ReplicationRequest, ReplicationStudy,
+    ResearchObjectRequest,
 };
 use bioprism_routing::{
     lab::{run as run_routing_lab, LabSettings, Task},
@@ -1910,6 +1911,7 @@ impl Server {
             "brain_replay_evaluate" => self.brain_replay_evaluate(&arguments),
             "glioma_research_dry_run" => self.glioma_research_dry_run(&arguments),
             "glioma_workflow_plan" => self.glioma_workflow_plan(&arguments),
+            "glioma_protocol_simulate" => self.glioma_protocol_simulate(&arguments),
             "glioma_research_select_actions" => self.glioma_research_select_actions(&arguments),
             "glioma_program_catalog" => self.glioma_program_catalog(&arguments),
             "glioma_evidence_qualify" => self.glioma_evidence_qualify(&arguments),
@@ -3053,6 +3055,32 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma workflow plan: {error}"))
+    }
+
+    /// Simulate a caller-declared glioma protocol with deterministic resource-constrained list
+    /// scheduling. This computes timing, parallelism, critical path, utilization, and explicit
+    /// capacity/risk/approval stops; it never dispatches a provider or claims an assay result.
+    fn glioma_protocol_simulate(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ProtocolSimulationRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_protocol_simulate requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma protocol simulation request: {error}"))?;
+        let output = simulate_glioma_protocol(&request)
+            .map_err(|error| format!("glioma protocol simulation refused: {error}"))?;
+        serde_json::to_value(json!({
+            "simulation": output,
+            "dispatch": "not_started",
+            "guarantees": [
+                "critical-path-first scheduling is deterministic from typed tasks and resources",
+                "capacity, horizon, risk, and instrument approvals fail closed",
+                "unscheduled work remains explicit and is never treated as completed",
+                "the output is a scheduling model, not biological evidence"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma protocol simulation: {error}"))
     }
 
     /// Choose a bounded next batch of local glioma actions. This only ranks typed candidates; it
@@ -43280,6 +43308,7 @@ pub fn workspace_capabilities() -> Value {
             "mcp_tools": [
                 "glioma_research_dry_run",
                 "glioma_workflow_plan",
+                "glioma_protocol_simulate",
                 "glioma_research_select_actions",
                 "glioma_program_catalog",
                 "glioma_evidence_qualify",
@@ -50104,6 +50133,20 @@ pub fn tool_definitions() -> Vec<Value> {
                 "request": {
                     "type": "object",
                     "description": "Serialized GliomaWorkflowRequest1@1 containing a GliomaResearchIntent, mode, optional validated checkpoint outputs, completed stage ids, and max_parallelism."
+                }
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_protocol_simulate",
+        "description": "Simulate a declared preclinical glioma protocol using deterministic critical-path-first resource scheduling. Returns typed task timing, parallelism, critical path, resource utilization, unscheduled work, and explicit capacity, horizon, risk, or instrument-approval stops. This is planning only: it never dispatches providers or instruments and never claims biological efficacy.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {
+                    "type": "object",
+                    "description": "Serialized ProtocolSimulationRequest1@1 containing typed tasks, local resource capacities, a bounded horizon/risk budget, and preclinical model binding."
                 }
             },
             "required": ["request"]

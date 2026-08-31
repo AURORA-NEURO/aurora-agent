@@ -314,7 +314,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 57;
-const TOOL_DEFINITION_COUNT: usize = 531;
+const TOOL_DEFINITION_COUNT: usize = 532;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -448,6 +448,55 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
     assert_eq!(
         workflow["next_ready_batch"],
         json!(["intent-normalization"])
+    );
+
+    let protocol = call(
+        &mut server,
+        "glioma_protocol_simulate",
+        json!({
+            "request": {
+                "objective": "schedule a preclinical glioma assay",
+                "model_system": "organoid",
+                "tasks": [
+                    {
+                        "task_id": "prepare",
+                        "label": "prepare organoid controls",
+                        "resource_kind": "culture",
+                        "resource_units": 1,
+                        "duration_ticks": 2,
+                        "depends_on": [],
+                        "model_system": "organoid",
+                        "output_schema": "Setup1@1",
+                        "risk_milli": 10,
+                        "requires_instrument": false
+                    },
+                    {
+                        "task_id": "assay",
+                        "label": "run invasion assay",
+                        "resource_kind": "culture",
+                        "resource_units": 1,
+                        "duration_ticks": 3,
+                        "depends_on": ["prepare"],
+                        "model_system": "organoid",
+                        "output_schema": "Assay1@1",
+                        "risk_milli": 20,
+                        "requires_instrument": false
+                    }
+                ],
+                "resources": [{"resource_id": "culture", "kind": "culture", "capacity_units": 1}],
+                "max_ticks": 20,
+                "max_risk_milli": 100,
+                "allow_instrument_execution": false,
+                "approval_reference": null,
+                "randomization_seed": artifact_hash
+            }
+        }),
+    );
+    assert_eq!(protocol["dispatch"], json!("not_started"));
+    assert_eq!(protocol["simulation"]["disposition"], json!("feasible"));
+    assert_eq!(
+        protocol["simulation"]["schedule"].as_array().unwrap().len(),
+        2
     );
 }
 

@@ -38,6 +38,7 @@ crates/research/src/glioma/
     p11_research_object_release/
     p12_federated_benchmarking/
   workflow.rs                               P07 adaptive campaign planner and guarded execution
+    p07_protocol_simulation/simulator.rs    P07 deterministic resource-constrained scheduling
 ```
 
 `docs/glioma/organization.json` is the machine-readable version of this map. The runtime
@@ -54,7 +55,7 @@ crates/research/src/glioma/
 | P04 Question-to-decision context | principal investigator | intent normalization, context compilation | bounded decision context and unresolved omissions |
 | P05 Mechanism exploration | mechanism scientist | molecular landscape, mechanism exploration | ranked competing mechanisms and discriminating actions |
 | P06 Power-aware experiment design | experimentalist | experiment design | falsifiable allocation, power, blocking, and null-result plan |
-| P07 Protocol simulation | lab operations lead | protocol simulation, adaptive workflow planning | resource-feasible branches, deterministic next batches, and repair/abstain routing before physical effects |
+| P07 Protocol simulation | lab operations lead | protocol simulation, adaptive workflow planning | critical-path resource scheduling, utilization, deterministic next batches, and repair/abstain routing before physical effects |
 | P08 Instrument and robotics preflight | instrument operator | instrument preflight | signed, interlocked, human-authorized action plan |
 | P09 Reproducible computation | computational scientist | computational execution | checkpointed and replayable analysis run |
 | P10 Causal interpretation and replication | methods reviewer | statistical interpretation, replication/robustness | uncertainty-aware effect and cross-site verdict |

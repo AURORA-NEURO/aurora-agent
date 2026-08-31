@@ -32,6 +32,11 @@ pub use mechanism::{explore_mechanisms, MechanismCandidate, MechanismPortfolio, 
 pub use multimodal::{
     harmonize_multimodal_inputs, MultimodalObservation, MultimodalQcReport, MultimodalRequest,
 };
+pub use programs::p07_protocol_simulation::{
+    protocol_request_from_experiment_design, simulate_glioma_protocol, ProtocolDisposition,
+    ProtocolResource, ProtocolResourceKind, ProtocolSimulation, ProtocolSimulationError,
+    ProtocolSimulationRequest, ProtocolTask, ResourceUtilization, ScheduleEntry,
+};
 pub use release::{build_research_object_manifest, ResearchObjectManifest, ResearchObjectRequest};
 pub use replication::{
     assess_replication, ReplicationAssessment, ReplicationRequest, ReplicationStudy,
