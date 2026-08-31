@@ -329,16 +329,14 @@ pub fn assess_glioma_robustness(
         .filter(|case| !matches!(case.disposition, AnalysisDisposition::Unresolved))
         .filter(|case| sign(case.effect_milli) == primary_sign)
         .count();
-    let stability_milli = if eligible_case_count == 0 {
-        0
-    } else {
-        ((stable_cases * 1_000) / eligible_case_count).min(1_000) as u16
-    };
-    let direction_concordance_milli = if eligible_case_count == 0 {
-        0
-    } else {
-        ((direction_matches * 1_000) / eligible_case_count).min(1_000) as u16
-    };
+    let stability_milli = (stable_cases * 1_000)
+        .checked_div(eligible_case_count)
+        .unwrap_or_default()
+        .min(1_000) as u16;
+    let direction_concordance_milli = (direction_matches * 1_000)
+        .checked_div(eligible_case_count)
+        .unwrap_or_default()
+        .min(1_000) as u16;
     let (effect_low_milli, effect_high_milli) = cases
         .iter()
         .map(|case| case.effect_milli)
