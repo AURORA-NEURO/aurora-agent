@@ -142,3 +142,12 @@ pub const LENS_REPORT_SCHEMA_VERSION: &str = "bioprism-lens-report/0.1";
 
 /// The number of modules in blueprint section 42.
 pub const SECTION_42_MODULE_COUNT: usize = 31;
+pub mod provenance_signing_copilot;
+pub use provenance_signing_copilot::{
+    capability_manifest as provenance_signing_copilot_manifest, compile_provenance_envelope,
+    ArtifactAndDerivation2, ProvenanceSigningError, ProvenanceSigningRequest,
+    SignedProvenanceEnvelope3, CONTENT_TYPE as PROVENANCE_SIGNING_CONTENT_TYPE,
+    CONTRACT_VERSION as PROVENANCE_SIGNING_CONTRACT_VERSION,
+    FEATURE_ID as PROVENANCE_SIGNING_FEATURE_ID, INPUT_SCHEMA as PROVENANCE_SIGNING_INPUT_SCHEMA,
+    OUTPUT_SCHEMA as PROVENANCE_SIGNING_OUTPUT_SCHEMA,
+};

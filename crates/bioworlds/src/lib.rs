@@ -180,3 +180,17 @@ pub const UNBUILT_BLUEPRINT_WORLDS: [&str; 14] = [
     "38.15 federated external site validation",
     "38.16 prospective blind reveal discovery",
 ];
+pub mod knowledge_workflow_fabric;
+pub mod resource_discovery_copilot;
+pub use knowledge_workflow_fabric::{
+    compile_knowledge_workflow, knowledge_workflow_manifest, KnowledgeObservation6,
+    KnowledgeWorkflowDisposition, KnowledgeWorkflowError, KnowledgeWorkflowReceipt7,
+    KnowledgeWorkflowRequest5, CONTRACT_VERSION as KNOWLEDGE_WORKFLOW_CONTRACT_VERSION,
+    FEATURE_ID as KNOWLEDGE_WORKFLOW_FEATURE_ID,
+};
+pub use resource_discovery_copilot::{
+    qualify_resources, resource_discovery_manifest, QualifiedResourceSet6, ResourceCandidate6,
+    ResourceDiscoveryDisposition, ResourceDiscoveryError, ResourceNeed5,
+    CONTRACT_VERSION as RESOURCE_DISCOVERY_COPILOT_CONTRACT_VERSION,
+    FEATURE_ID as RESOURCE_DISCOVERY_COPILOT_FEATURE_ID,
+};

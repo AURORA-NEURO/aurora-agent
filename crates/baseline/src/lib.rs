@@ -62,3 +62,14 @@ pub use index::PanelIndex;
 pub use lexical::LexicalTopK;
 pub use strategy::{ContextStrategy, FiberCompiled, FullContext, Selection};
 pub use sweep::{run_cell, run_sweep, sweep_panel, SweepCell, SweepError, SweepGrid, SweepRow, SweepTable};
+pub mod interpretation_assurance;
+pub use interpretation_assurance::{
+    assure_multimodal_interpretation, interpretation_assurance_manifest,
+    EvidenceBackedResult as BaselineEvidenceBackedResult,
+    InterpretationAssuranceError as BaselineInterpretationAssuranceError,
+    InterpretationAssuranceReceipt as BaselineInterpretationAssuranceReceipt,
+    InterpretationAssuranceRequest as BaselineInterpretationAssuranceRequest,
+    InterpretationDisposition as BaselineInterpretationDisposition,
+    CONTRACT_VERSION as BASELINE_INTERPRETATION_CONTRACT_VERSION,
+    FEATURE_ID as BASELINE_INTERPRETATION_FEATURE_ID,
+};

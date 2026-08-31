@@ -124,6 +124,7 @@ dependencies = [
  "bioprism-section",
  "bioprism-world",
  "bioprism-worldgen",
+ "serde",
  "serde_json",
  "thiserror",
 ]
@@ -1089,6 +1090,7 @@ dependencies = [
  "bioprism-ids",
  "serde",
  "serde_json",
+ "thiserror",
 ]
 
 [[package]]

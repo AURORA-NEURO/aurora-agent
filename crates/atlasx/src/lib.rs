@@ -159,3 +159,33 @@ pub use surface::{
 /// derivation rules is a debt claiming a coverage it does not have — the same reason
 /// `bioprism-metrics` versions its own.
 pub const ATLASX_SCHEMA_VERSION: &str = "bioprism-atlasx/0.1";
+pub mod computational_execution_assurance;
+pub mod context_compilation_assurance;
+pub mod federated_execution_control_plane;
+pub mod mechanism_contract_model;
+pub use context_compilation_assurance::{
+    compile_context, context_compilation_assurance_manifest, CompiledResearchContext6,
+    ContextCompilationDisposition, ContextCompilationError, ContextCompilationQuestion4,
+    ContextFragment5, CONTRACT_VERSION as CONTEXT_COMPILATION_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as CONTEXT_COMPILATION_ASSURANCE_FEATURE_ID,
+};
+pub use computational_execution_assurance::{
+    assure_computational_execution, computational_execution_assurance_manifest,
+    ComputationalExecutionError, ExecutionArtifact7, ExecutionEvidenceState, ExecutionNode3,
+    ExecutionRun7, ResearchWorkflowSpec3,
+    CONTRACT_VERSION as COMPUTATIONAL_EXECUTION_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as COMPUTATIONAL_EXECUTION_ASSURANCE_FEATURE_ID,
+};
+pub use federated_execution_control_plane::{
+    federated_execution_control_plane_manifest, plan_federated_execution, ExecutionDisposition,
+    ExecutionNode5, ExecutionRun8, FederatedExecutionError, PeerAttestation5,
+    ResearchWorkflowSpec4, CONTRACT_VERSION as FEDERATED_EXECUTION_CONTROL_CONTRACT_VERSION,
+    FEATURE_ID as FEDERATED_EXECUTION_CONTROL_FEATURE_ID,
+};
+pub use mechanism_contract_model::{
+    admit_atlasx_mechanism_contract, mechanism_contract_model_manifest, AtlasxMechanismCandidate5,
+    AtlasxMechanismPeer5, AtlasxMechanismPortfolio2, AtlasxMechanismPortfolio2Artifact,
+    AtlasxMechanismQuestion4, MechanismContractModelError, MechanismEvidenceState,
+    CONTRACT_VERSION as ATLASX_MECHANISM_CONTRACT_VERSION,
+    FEATURE_ID as ATLASX_MECHANISM_FEATURE_ID,
+};

@@ -88,3 +88,14 @@ pub use snapshot::{
     MAX_JOB_STORE_SNAPSHOT_VALUE_BYTES, MAX_JOB_STORE_SNAPSHOT_WORKER_ID_BYTES,
 };
 pub use store::{JobStore, Recovery};
+pub mod prospective_evidence_surveillance_assurance;
+pub use prospective_evidence_surveillance_assurance::{
+    assure_prospective_evidence_surveillance, prospective_evidence_surveillance_manifest,
+    EvidenceFeedItem4, EvidenceSurveillanceDisposition, EvidenceSurveillanceError,
+    EvidenceSurveillanceReceipt9, EvidenceSurveillanceRequest8, QualifiedEvidenceSet7,
+    CONTENT_TYPE as PROSPECTIVE_EVIDENCE_CONTENT_TYPE,
+    CONTRACT_VERSION as PROSPECTIVE_EVIDENCE_CONTRACT_VERSION,
+    FEATURE_ID as PROSPECTIVE_EVIDENCE_FEATURE_ID,
+    INPUT_SCHEMA as PROSPECTIVE_EVIDENCE_INPUT_SCHEMA,
+    OUTPUT_SCHEMA as PROSPECTIVE_EVIDENCE_OUTPUT_SCHEMA,
+};

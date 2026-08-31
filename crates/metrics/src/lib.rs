@@ -194,3 +194,14 @@ pub use federated_continual_discovery_rate_integrity_workflow_fabric::*;
 /// Bumped when a serialized shape changes, because a stored [`CoveredAggregate`] whose coverage
 /// fields are read under different rules is a number claiming a coverage it does not have.
 pub const METRICS_SCHEMA_VERSION: &str = "bioprism-metrics/0.1";
+pub mod experiment_design_control_plane;
+pub use experiment_design_control_plane::{
+    evaluate_experiment_design, experiment_design_control_plane_manifest,
+    DesignCandidate as MetricsDesignCandidate,
+    DesignDisposition as MetricsDesignDisposition,
+    ExecutableExperimentDesign as MetricsExecutableExperimentDesign,
+    ExperimentDesignError as MetricsExperimentDesignError,
+    ExperimentObjective as MetricsExperimentObjective,
+    CONTRACT_VERSION as METRICS_EXPERIMENT_DESIGN_CONTRACT_VERSION,
+    FEATURE_ID as METRICS_EXPERIMENT_DESIGN_FEATURE_ID,
+};

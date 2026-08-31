@@ -64,6 +64,21 @@ pub use cohort::{
     GroupingKey, LeakageFinding, Observation, Predicate, RepeatedMeasures, RuleEffect, SplitPlan,
     SplitUnit, TimeAnchor, Truth, UnitOfAnalysis,
 };
+pub mod laboratory_control_plane;
+pub mod performance_reliability_control_plane;
+pub use laboratory_control_plane::{
+    laboratory_control_plane_manifest, preflight_instrument_action,
+    InstrumentActionReceipt, InstrumentActionRequest, InstrumentCapability,
+    LaboratoryControlError, CONTRACT_VERSION as LABORATORY_CONTROL_CONTRACT_VERSION,
+    FEATURE_ID as LABORATORY_CONTROL_FEATURE_ID,
+};
+pub use performance_reliability_control_plane::{
+    evaluate_performance_reliability, performance_reliability_control_plane_manifest,
+    CapabilityInvocation, CapabilityManifestEntry, CapabilityWorkload,
+    PerformanceReliabilityError, ReliableCapabilityResult, ReliabilityDisposition,
+    CONTRACT_VERSION as PERFORMANCE_RELIABILITY_CONTRACT_VERSION,
+    FEATURE_ID as PERFORMANCE_RELIABILITY_FEATURE_ID,
+};
 pub use evidence::{
     AccessPolicy, Derivation, EvidenceIssue, EvidenceLedger, EvidenceObject, Locator,
     MeasurementContext, Modality, Provenance, QualityAssertion, Relation, Stance,

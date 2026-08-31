@@ -475,3 +475,20 @@ mod tests {
         }
     }
 }
+pub mod federated_analysis_assurance;
+pub mod replication_negative_results_assurance;
+pub use federated_analysis_assurance::{
+    assure as assure_federated_analysis, capability_manifest as federated_analysis_manifest,
+    AnalysisCandidate, AnalysisDecision, AnalysisAdmission, FederatedAnalysisError,
+    FederatedAnalysisReceipt, FederatedAnalysisRequest,
+    FEATURE_ID as FEDERATED_ANALYSIS_FEATURE_ID,
+    CONTRACT_VERSION as FEDERATED_ANALYSIS_CONTRACT_VERSION,
+};
+pub use replication_negative_results_assurance::{
+    assure_replication, replication_negative_results_manifest, ClaimAndProtocol, ReplicationClaim,
+    ReplicationAssuranceError, ReplicationDisposition, ReplicationOutcome, ReplicationRecord,
+    CONTRACT_VERSION as REPLICATION_NEGATIVE_RESULTS_CONTRACT_VERSION,
+    FEATURE_ID as REPLICATION_NEGATIVE_RESULTS_FEATURE_ID,
+    INPUT_SCHEMA as REPLICATION_NEGATIVE_RESULTS_INPUT_SCHEMA,
+    OUTPUT_SCHEMA as REPLICATION_NEGATIVE_RESULTS_OUTPUT_SCHEMA,
+};

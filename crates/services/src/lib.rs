@@ -202,3 +202,19 @@ mod tests {
         assert_eq!(entry.module_id, "40.25");
     }
 }
+pub mod context_compilation_research_copilot;
+pub mod multimodal_interpretation_engine;
+pub use context_compilation_research_copilot::{
+    compile_context_compilation, context_compilation_research_copilot_manifest,
+    CertifiedDecisionSection3, CompilationDisposition, ContextCompilationError,
+    ContextCompilationRequest, DecisionQuery4,
+    CONTRACT_VERSION as CONTEXT_COMPILATION_COPILOT_CONTRACT_VERSION,
+    FEATURE_ID as CONTEXT_COMPILATION_COPILOT_FEATURE_ID,
+};
+pub use multimodal_interpretation_engine::{
+    compile_multimodal_interpretation, multimodal_interpretation_engine_manifest,
+    EvidenceBackedResult2, InteractiveInterpretation1, InterpretationDisposition,
+    InterpretationEngineError, InterpretationRequest2,
+    CONTRACT_VERSION as MULTIMODAL_INTERPRETATION_CONTRACT_VERSION,
+    FEATURE_ID as MULTIMODAL_INTERPRETATION_FEATURE_ID,
+};

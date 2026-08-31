@@ -142,3 +142,13 @@ pub use local_projection_integrity_workflow_fabric::*;
 pub use multimodal_projection_integrity_workflow_fabric::*;
 pub use throughput_projection_integrity_workflow_fabric::*;
 pub use federated_continual_projection_integrity_workflow_fabric::*;
+pub mod computational_execution_gateway;
+pub use computational_execution_gateway::{
+    admit as admit_computational_execution,
+    capability_manifest as computational_execution_capability_manifest, ExecutionNode,
+    ExecutionRun, GatewayError, ResearchWorkflowSpec,
+    CONTRACT_VERSION as COMPUTATIONAL_EXECUTION_CONTRACT_VERSION,
+    FEATURE_ID as COMPUTATIONAL_EXECUTION_FEATURE_ID,
+    INPUT_SCHEMA as COMPUTATIONAL_EXECUTION_INPUT_SCHEMA,
+    OUTPUT_SCHEMA as COMPUTATIONAL_EXECUTION_OUTPUT_SCHEMA,
+};

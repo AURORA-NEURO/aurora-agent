@@ -199,3 +199,12 @@ pub use local_control_integrity_workflow_fabric::*;
 pub use multimodal_control_integrity_workflow_fabric::*;
 pub use throughput_control_integrity_workflow_fabric::*;
 pub use federated_continual_control_integrity_workflow_fabric::*;
+pub mod evidence_surveillance_copilot;
+pub use evidence_surveillance_copilot::{
+    assure_evidence_surveillance, evidence_surveillance_copilot_manifest,
+    EvidenceObservation, EvidenceSurveillanceError, EvidenceWatchRequest, QualifiedEvidenceSet,
+    CONTRACT_VERSION as EVIDENCE_SURVEILLANCE_COPILOT_CONTRACT_VERSION,
+    FEATURE_ID as EVIDENCE_SURVEILLANCE_COPILOT_FEATURE_ID,
+    INPUT_SCHEMA as EVIDENCE_SURVEILLANCE_COPILOT_INPUT_SCHEMA,
+    OUTPUT_SCHEMA as EVIDENCE_SURVEILLANCE_COPILOT_OUTPUT_SCHEMA,
+};

@@ -120,6 +120,56 @@ pub use protocol_assurance::{
     CONTRACT_VERSION as PROTOCOL_ASSURANCE_CONTRACT_VERSION,
     FEATURE_ID as PROTOCOL_ASSURANCE_FEATURE_ID,
 };
+pub mod analysis_copilot;
+pub mod federated_commons_interoperability_gateway;
+pub mod federated_continual_grant_integrity_contract_model;
+pub mod federated_continual_grant_integrity_inference;
+pub mod federated_continual_grant_integrity_research_copilot;
+pub mod federated_continual_grant_integrity_workflow_fabric;
+pub mod grant_integrity_support;
+pub mod local_grant_integrity_contract_model;
+pub mod local_grant_integrity_inference;
+pub mod local_grant_integrity_research_copilot;
+pub mod local_grant_integrity_workflow_fabric;
+pub mod multimodal_grant_integrity_contract_model;
+pub mod multimodal_grant_integrity_inference;
+pub mod multimodal_grant_integrity_research_copilot;
+pub mod multimodal_grant_integrity_workflow_fabric;
+pub mod throughput_grant_integrity_contract_model;
+pub mod throughput_grant_integrity_inference;
+pub mod throughput_grant_integrity_research_copilot;
+pub mod throughput_grant_integrity_workflow_fabric;
+pub use analysis_copilot::{
+    analysis_copilot_manifest, qualify_analysis_question, AnalysisCandidate5, AnalysisCopilotError,
+    AnalysisDisposition, AnalysisQuestion4, QualifiedAnalysisResult3,
+    CONTRACT_VERSION as ANALYSIS_COPILOT_CONTRACT_VERSION,
+    FEATURE_ID as ANALYSIS_COPILOT_FEATURE_ID,
+};
+pub use grant_integrity_support::{qualify as qualify_grant_integrity, manifest as grant_integrity_manifest, AutonomyGrant4, GrantIntegrityArtifact4, GrantIntegrityCard7, GrantIntegrityError, GrantIntegrityRequest4, BOUNDARY as GRANT_INTEGRITY_BOUNDARY, CONTENT_TYPE as GRANT_INTEGRITY_CONTENT_TYPE};
+pub use local_grant_integrity_inference::*;
+pub use multimodal_grant_integrity_inference::*;
+pub use throughput_grant_integrity_inference::*;
+pub use federated_continual_grant_integrity_inference::*;
+pub use local_grant_integrity_contract_model::*;
+pub use multimodal_grant_integrity_contract_model::*;
+pub use throughput_grant_integrity_contract_model::*;
+pub use federated_continual_grant_integrity_contract_model::*;
+pub use local_grant_integrity_research_copilot::*;
+pub use multimodal_grant_integrity_research_copilot::*;
+pub use throughput_grant_integrity_research_copilot::*;
+pub use federated_continual_grant_integrity_research_copilot::*;
+pub use local_grant_integrity_workflow_fabric::*;
+pub use multimodal_grant_integrity_workflow_fabric::*;
+pub use throughput_grant_integrity_workflow_fabric::*;
+pub use federated_continual_grant_integrity_workflow_fabric::*;
+pub use federated_commons_interoperability_gateway::{
+    admit as admit_policy_federation, admit_json as admit_policy_federation_json,
+    capability_manifest as federated_commons_manifest, FederationAdmission,
+    FederationArtifactCandidate, PolicyFederationEnvelope, PolicyFederationError,
+    PolicyFederationRequest, CONTRACT_VERSION as FEDERATED_COMMONS_CONTRACT_VERSION,
+    FEATURE_ID as FEDERATED_COMMONS_FEATURE_ID, INPUT_SCHEMA as FEDERATED_COMMONS_INPUT_SCHEMA,
+    OUTPUT_SCHEMA as FEDERATED_COMMONS_OUTPUT_SCHEMA,
+};
 pub use purpose::{Purpose, PurposeSet};
 pub use redaction::{
     CellRelease, RedactedView, RedactionPlan, RedactionReceipt, RedactionRule, Replacement,

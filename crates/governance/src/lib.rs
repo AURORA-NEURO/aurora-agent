@@ -166,3 +166,12 @@ pub use local_evolution_integrity_workflow_fabric::*;
 pub use multimodal_evolution_integrity_workflow_fabric::*;
 pub use throughput_evolution_integrity_workflow_fabric::*;
 pub use federated_continual_evolution_integrity_workflow_fabric::*;
+pub mod experiment_design_assurance;
+pub use experiment_design_assurance::{
+    assure_experiment_design, experiment_design_assurance_manifest, DesignArm,
+    ExperimentDesignAssurance, ExperimentDesignError, ExperimentObjective,
+    CONTRACT_VERSION as EXPERIMENT_DESIGN_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as EXPERIMENT_DESIGN_ASSURANCE_FEATURE_ID,
+    INPUT_SCHEMA as EXPERIMENT_DESIGN_ASSURANCE_INPUT_SCHEMA,
+    OUTPUT_SCHEMA as EXPERIMENT_DESIGN_ASSURANCE_OUTPUT_SCHEMA,
+};
