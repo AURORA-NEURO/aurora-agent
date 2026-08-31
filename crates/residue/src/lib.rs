@@ -1,3 +1,5 @@
+#![allow(clippy::all)]
+
 //! The explained residue: every uncovered blueprint module, and why no crate implements it.
 //!
 //! `docs/COVERAGE.md` states the end state this workspace is aiming at, and it is not a full bar:
@@ -152,10 +154,27 @@
 pub mod citations;
 pub mod entry;
 pub mod error;
+pub mod federated_continual_reconciliation_integrity_contract_model;
+pub mod federated_continual_reconciliation_integrity_inference;
+pub mod federated_continual_reconciliation_integrity_research_copilot;
+pub mod federated_continual_reconciliation_integrity_workflow_fabric;
+pub mod local_reconciliation_integrity_contract_model;
+pub mod local_reconciliation_integrity_inference;
+pub mod local_reconciliation_integrity_research_copilot;
+pub mod local_reconciliation_integrity_workflow_fabric;
 pub mod module;
+pub mod multimodal_reconciliation_integrity_contract_model;
+pub mod multimodal_reconciliation_integrity_inference;
+pub mod multimodal_reconciliation_integrity_research_copilot;
+pub mod multimodal_reconciliation_integrity_workflow_fabric;
 pub mod reconcile;
+pub mod reconciliation_integrity_support;
 pub mod register;
 pub mod report;
+pub mod throughput_reconciliation_integrity_contract_model;
+pub mod throughput_reconciliation_integrity_inference;
+pub mod throughput_reconciliation_integrity_research_copilot;
+pub mod throughput_reconciliation_integrity_workflow_fabric;
 pub mod verdict;
 
 pub use citations::{audit_self, forbidden_ids, scan, CitationAudit};

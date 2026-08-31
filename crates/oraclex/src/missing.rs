@@ -37,7 +37,7 @@ use std::collections::BTreeMap;
 use bioprism_oracle::EvidenceTier;
 use serde::{Deserialize, Serialize};
 
-use crate::verdict::{Determination, Missing, Unresolved, Witness};
+use crate::verdict::{Determination, Unresolved, Witness};
 
 /// Why a value is absent. Every variant is a different downstream obligation.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -234,7 +234,8 @@ pub fn informativeness(pattern: &AbsencePattern) -> Determination {
         .map(|(group, _)| group.as_str())
         .collect();
 
-    if let (Some(absent_group), Some(present_group)) = (fully_absent.first(), fully_present.first()) {
+    if let (Some(absent_group), Some(present_group)) = (fully_absent.first(), fully_present.first())
+    {
         return Determination::contradicted(
             EvidenceTier::Deterministic,
             Witness::RelationViolated {
@@ -257,7 +258,8 @@ pub fn informativeness(pattern: &AbsencePattern) -> Determination {
                     false
                 }
                 Some((p, a)) => {
-                    (current.1 as u128) * ((p + a) as u128) != (a as u128) * ((current.0 + current.1) as u128)
+                    (current.1 as u128) * ((p + a) as u128)
+                        != (a as u128) * ((current.0 + current.1) as u128)
                 }
             }
         })
@@ -367,12 +369,9 @@ pub fn egress(field: &Field, boundary: &Boundary, small_cell_floor: u64) -> Dete
                 field.name
             ),
         ),
-        None => Determination::Unresolved(
-            Unresolved::new([Missing::new(
-                format!("a subject count for '{}'", field.name),
-                "an aggregate with no denominator cannot be checked against the small-cell floor",
-            )])
-            .expect("one item is not zero"),
-        ),
+        None => Determination::Unresolved(Unresolved::of(
+            format!("a subject count for '{}'", field.name),
+            "an aggregate with no denominator cannot be checked against the small-cell floor",
+        )),
     }
 }

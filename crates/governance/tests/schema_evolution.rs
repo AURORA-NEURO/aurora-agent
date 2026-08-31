@@ -139,10 +139,7 @@ fn a_reader_that_ignores_what_it_does_not_understand_destroys_a_certificate_it_m
 fn a_writer_and_a_reader_that_declare_different_modes_never_get_as_far_as_exchanging_bytes() {
     let error = negotiate(certificate_reference().mode, CompatibilityMode::Ignore)
         .expect_err("43.35 requires the mode to be declared, and these declarations disagree");
-    assert!(matches!(
-        error,
-        CompatibilityError::ModeDisagreement { .. }
-    ));
+    assert!(matches!(error, CompatibilityError::ModeDisagreement { .. }));
 }
 
 #[test]
@@ -223,10 +220,15 @@ fn projecting_an_extended_certificate_back_to_the_reference_profile_must_declare
             "derived from the manifest, so it cannot outlive it",
         ),
     ]);
-    let audit = declared.audit_loss(&corpus).expect("declared loss is allowed");
+    let audit = declared
+        .audit_loss(&corpus)
+        .expect("declared loss is allowed");
     assert!(!audit.lossless());
     assert!(!audit.invertible);
-    assert_eq!(audit.lost, ["omission_manifest", "supports_sufficiency_claim"]);
+    assert_eq!(
+        audit.lost,
+        ["omission_manifest", "supports_sufficiency_claim"]
+    );
 
     let report = declared.totality_over(&corpus, &certificate_extended(), &certificate_reference());
     assert!(
@@ -238,14 +240,18 @@ fn projecting_an_extended_certificate_back_to_the_reference_profile_must_declare
 #[test]
 fn a_migrated_certificate_no_longer_matches_its_own_embedded_digest() {
     let extended = document(CertificateProfile::Extended);
-    let projected = downgrade().apply(&extended).expect("the projection applies");
+    let projected = downgrade()
+        .apply(&extended)
+        .expect("the projection applies");
 
     assert!(matches!(
         ContextCertificate::verify(&projected).expect("verification runs"),
         CertificateVerification::DigestMismatch { .. }
     ));
     assert!(
-        certificate_reference().check_document(&projected).is_clean(),
+        certificate_reference()
+            .check_document(&projected)
+            .is_clean(),
         "the projection is a structurally valid v0.1 document — it is only its identity that did \
          not survive"
     );

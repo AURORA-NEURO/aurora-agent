@@ -8,6 +8,7 @@ repository.workspace = true
 description = "Conformance suites, the test pyramid and release quality gates"
 
 [dependencies]
+bioprism-foundation = { workspace = true }
 bioprism-ids = { workspace = true }
 bioprism-section = { workspace = true }
 bioprism-world = { workspace = true }

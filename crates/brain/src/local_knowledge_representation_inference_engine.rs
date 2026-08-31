@@ -1,0 +1,456 @@
+//! Local single-study knowledge-representation inference engine.
+//!
+//! Atlas feature: `AFA-brain-P04-F01`. Typed claims become a deterministic
+//! knowledge-world artifact while omissions and contradictions remain visible.
+
+use bioprism_foundation::{
+    AutonomyTier, CapabilityManifest, Determinism, Effect, EvidenceReference, EvidenceState,
+    ResearchSurface, TypedPort, TypedResearchArtifact, PRECLINICAL_BOUNDARY,
+    RESEARCH_CONTRACT_SCHEMA_VERSION,
+};
+use bioprism_ids::ContentHash;
+use serde::{Deserialize, Serialize};
+use serde_json::json;
+use std::collections::{BTreeMap, BTreeSet};
+use thiserror::Error;
+
+pub const FEATURE_ID: &str = "AFA-brain-P04-F01";
+pub const CONTRACT_VERSION: &str = "brain-local-knowledge-representation-inference-engine/1.0";
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KnowledgeRepresentationClaim {
+    pub claim_id: String,
+    pub subject: String,
+    pub predicate: String,
+    pub object: String,
+    pub evidence_digest: Option<ContentHash>,
+    pub provenance_digest: Option<ContentHash>,
+    pub state: EvidenceState,
+    pub study_id: String,
+    pub boundary: String,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KnowledgeRepresentationRequest {
+    pub request_id: String,
+    pub study_id: String,
+    pub claims: Vec<KnowledgeRepresentationClaim>,
+    pub required_claim_ids: Vec<String>,
+    pub replay_identity: ContentHash,
+    pub policy_allow: bool,
+    pub protected_closure: bool,
+    pub raw_data_local: bool,
+    pub boundary: String,
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum KnowledgeRepresentationDisposition {
+    Completed,
+    Partial,
+    Unresolved,
+    Denied,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KnowledgeRepresentationReceipt {
+    pub schema_version: String,
+    pub contract_version: String,
+    pub feature_id: String,
+    pub request_id: String,
+    pub study_id: String,
+    pub disposition: KnowledgeRepresentationDisposition,
+    pub candidate_order: Vec<String>,
+    pub admitted_order: Vec<String>,
+    pub unresolved_order: Vec<String>,
+    pub denied_order: Vec<String>,
+    pub world_digest: ContentHash,
+    pub evidence_digest: ContentHash,
+    pub provenance_digest: ContentHash,
+    pub replay_identity: ContentHash,
+    pub witness_order: Vec<String>,
+    pub counterexample_order: Vec<String>,
+    pub omissions: Vec<String>,
+    pub uncertainty: Vec<String>,
+    pub negative_evidence: Vec<String>,
+    pub effect_receipts: Vec<String>,
+    pub artifact: TypedResearchArtifact,
+    pub raw_data_local: bool,
+    pub boundary: String,
+}
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum KnowledgeRepresentationError {
+    #[error("invalid knowledge representation request: {0}")]
+    Invalid(String),
+    #[error("knowledge representation artifact failed: {0}")]
+    Artifact(String),
+}
+
+impl KnowledgeRepresentationReceipt {
+    pub fn validate(&self) -> Result<(), KnowledgeRepresentationError> {
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION
+            || self.contract_version != CONTRACT_VERSION
+            || self.feature_id != FEATURE_ID
+            || self.boundary != PRECLINICAL_BOUNDARY
+            || !self.raw_data_local
+            || self.request_id.trim().is_empty()
+            || self.study_id.trim().is_empty()
+            || self.candidate_order.is_empty()
+            || self.effect_receipts.is_empty()
+        {
+            return Err(KnowledgeRepresentationError::Invalid("knowledge representation identity, locality, candidates, or effects are incomplete".into()));
+        }
+        for values in [
+            &self.candidate_order,
+            &self.admitted_order,
+            &self.unresolved_order,
+            &self.denied_order,
+            &self.witness_order,
+            &self.counterexample_order,
+            &self.omissions,
+            &self.uncertainty,
+            &self.negative_evidence,
+            &self.effect_receipts,
+        ] {
+            if values.windows(2).any(|pair| pair[0] >= pair[1]) {
+                return Err(KnowledgeRepresentationError::Invalid(
+                    "knowledge representation ordering is not canonical".into(),
+                ));
+            }
+        }
+        let classified = self
+            .admitted_order
+            .iter()
+            .chain(self.unresolved_order.iter())
+            .chain(self.denied_order.iter())
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        if classified.len() != self.candidate_order.len()
+            || classified
+                .iter()
+                .any(|claim| !self.candidate_order.contains(claim))
+        {
+            return Err(KnowledgeRepresentationError::Invalid(
+                "knowledge representation states do not partition claims".into(),
+            ));
+        }
+        for digest in [
+            &self.world_digest,
+            &self.evidence_digest,
+            &self.provenance_digest,
+            &self.replay_identity,
+        ] {
+            if digest.as_str().len() != 64 {
+                return Err(KnowledgeRepresentationError::Invalid(
+                    "knowledge representation digest is invalid".into(),
+                ));
+            }
+        }
+        if self.effect_receipts.iter().any(|effect| {
+            !effect.starts_with("read:local-knowledge-world:") && effect != "block:unsafe-release"
+        }) {
+            return Err(KnowledgeRepresentationError::Invalid(
+                "knowledge representation effect is outside read-only gate".into(),
+            ));
+        }
+        let expected_artifact_id =
+            format!("brain-local-knowledge-representation:{}", self.request_id);
+        if self.artifact.artifact_id != expected_artifact_id
+            || self.artifact.content_type != "application/vnd.aurora.typed-knowledge-world+json"
+            || !self.artifact.semantic_loss.is_empty()
+            || !self.artifact.provenance.is_empty()
+        {
+            return Err(KnowledgeRepresentationError::Invalid(
+                "knowledge representation artifact identity or provenance is inconsistent".into(),
+            ));
+        }
+        self.artifact
+            .validate_metadata()
+            .map_err(|error| KnowledgeRepresentationError::Artifact(error.to_string()))?;
+        self.artifact
+            .verify_payload(&receipt_payload(self))
+            .map_err(|error| KnowledgeRepresentationError::Artifact(error.to_string()))
+    }
+    pub fn digest(&self) -> Result<ContentHash, KnowledgeRepresentationError> {
+        self.validate()?;
+        let value = serde_json::to_value(self)
+            .map_err(|error| KnowledgeRepresentationError::Artifact(error.to_string()))?;
+        ContentHash::of_value(&value)
+            .map_err(|error| KnowledgeRepresentationError::Artifact(error.to_string()))
+    }
+}
+
+pub fn local_knowledge_representation_inference_engine_manifest() -> CapabilityManifest {
+    CapabilityManifest { schema_version: RESEARCH_CONTRACT_SCHEMA_VERSION.into(), capability_id: FEATURE_ID.into(), version: CONTRACT_VERSION.into(), owner_crate: "brain".into(), consumers: ["research workflow operator".into(), "knowledge curator".into()].into(), behavior: "deterministically compiles scoped typed research claims into a local knowledge-world artifact while retaining omissions and contradiction evidence".into(), value: "makes single-study knowledge representation reproducible and prevents unknown or contradicted claims from becoming asserted facts".into(), inputs: vec![TypedPort { name: "knowledge_representation_request".into(), schema: "ScopedResearchClaims1@1".into(), required: true }], outputs: vec![TypedPort { name: "typed_knowledge_world".into(), schema: "TypedKnowledgeWorld1@1".into(), required: true }], effects: [Effect::ReadLocalData, Effect::WriteLocalArtifact].into(), permissions: ["read:local-research-artifacts".into()].into(), determinism: Determinism::ByteStable, evidence: vec![EvidenceReference { source_id: "json-schema".into(), state: EvidenceState::Supported, locator: Some("https://json-schema.org/specification".into()) }], authority_requirements: Vec::new(), autonomy_tier: AutonomyTier::A0, surfaces: [ResearchSurface::Ui, ResearchSurface::Api, ResearchSurface::Sdk, ResearchSurface::Cli, ResearchSurface::McpTool, ResearchSurface::Operator].into(), boundary: PRECLINICAL_BOUNDARY.into() }
+}
+
+fn receipt_payload(receipt: &KnowledgeRepresentationReceipt) -> serde_json::Value {
+    json!({
+        "schema_version": receipt.schema_version,
+        "contract_version": receipt.contract_version,
+        "feature_id": receipt.feature_id,
+        "request_id": receipt.request_id,
+        "study_id": receipt.study_id,
+        "disposition": receipt.disposition,
+        "world_digest": receipt.world_digest,
+        "evidence_digest": receipt.evidence_digest,
+        "provenance_digest": receipt.provenance_digest,
+        "replay_identity": receipt.replay_identity,
+        "boundary": receipt.boundary,
+    })
+}
+
+pub fn infer_local_knowledge_representation(
+    request: &KnowledgeRepresentationRequest,
+) -> Result<KnowledgeRepresentationReceipt, KnowledgeRepresentationError> {
+    if request.request_id.trim().is_empty()
+        || request.study_id.trim().is_empty()
+        || request.claims.is_empty()
+        || request.replay_identity.as_str().len() != 64
+        || !request.raw_data_local
+        || request.boundary != PRECLINICAL_BOUNDARY
+    {
+        return Err(KnowledgeRepresentationError::Invalid(
+            "knowledge representation identity, claims, replay, locality, or boundary is invalid"
+                .into(),
+        ));
+    }
+    let mut claims = request.claims.clone();
+    claims.sort_by(|left, right| left.claim_id.cmp(&right.claim_id));
+    let candidate = claims
+        .iter()
+        .map(|claim| claim.claim_id.clone())
+        .collect::<Vec<_>>();
+    if candidate.windows(2).any(|pair| pair[0] == pair[1])
+        || candidate.iter().any(|value| value.trim().is_empty())
+    {
+        return Err(KnowledgeRepresentationError::Invalid(
+            "claim identifiers must be unique and non-empty".into(),
+        ));
+    }
+    let map = claims
+        .iter()
+        .map(|claim| (claim.claim_id.clone(), claim))
+        .collect::<BTreeMap<_, _>>();
+    let required = request
+        .required_claim_ids
+        .iter()
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    let mut admitted = BTreeSet::new();
+    let mut unresolved = BTreeSet::new();
+    let mut denied = BTreeSet::new();
+    let mut facts = Vec::new();
+    let mut witnesses = BTreeSet::from([
+        "gate:typed-scoped-claims".to_string(),
+        "gate:study-scope".to_string(),
+        "gate:evidence-provenance".to_string(),
+        "gate:unknown-is-not-asserted".to_string(),
+        "gate:locality".to_string(),
+    ]);
+    let mut counterexamples = BTreeSet::new();
+    let mut omissions = BTreeSet::new();
+    let mut uncertainty = BTreeSet::new();
+    let mut negative = BTreeSet::new();
+    for claim_id in &candidate {
+        let claim = map[claim_id];
+        if !request.policy_allow
+            || !request.protected_closure
+            || claim.study_id != request.study_id
+            || claim.boundary != PRECLINICAL_BOUNDARY
+        {
+            denied.insert(claim_id.clone());
+            counterexamples.insert(format!("counterexample:{}:scope-policy-closure", claim_id));
+        } else if claim.evidence_digest.is_none() || claim.provenance_digest.is_none() {
+            unresolved.insert(claim_id.clone());
+            omissions.insert(format!("claim:{}:evidence-or-provenance-missing", claim_id));
+        } else if matches!(
+            claim.state,
+            EvidenceState::Unknown | EvidenceState::Speculative
+        ) {
+            unresolved.insert(claim_id.clone());
+            uncertainty.insert(format!("claim:{}:unknown-not-asserted", claim_id));
+        } else if matches!(claim.state, EvidenceState::Contradicted) {
+            denied.insert(claim_id.clone());
+            negative.insert(format!("claim:{}:contradicted", claim_id));
+        } else {
+            admitted.insert(claim_id.clone());
+            facts.push(json!({"claim_id": claim.claim_id, "subject": claim.subject, "predicate": claim.predicate, "object": claim.object, "evidence_digest": claim.evidence_digest, "provenance_digest": claim.provenance_digest}));
+        }
+    }
+    for required_id in required {
+        if !map.contains_key(&required_id) {
+            omissions.insert(format!("claim:{}:required-missing", required_id));
+            uncertainty.insert(format!("claim:{}:required-unresolved", required_id));
+        } else if !admitted.contains(&required_id) {
+            uncertainty.insert(format!("claim:{}:required-not-admitted", required_id));
+        }
+    }
+    if !request.policy_allow {
+        omissions.insert("control:policy-denied".into());
+    }
+    if !request.protected_closure {
+        omissions.insert("control:protected-closure-incomplete".into());
+    }
+    if !unresolved.is_empty() {
+        witnesses.insert("gate:omissions-retained".into());
+    }
+    let disposition = if !request.policy_allow
+        || !request.protected_closure
+        || !denied.is_empty() && admitted.is_empty()
+    {
+        KnowledgeRepresentationDisposition::Denied
+    } else if admitted.is_empty() {
+        KnowledgeRepresentationDisposition::Unresolved
+    } else if !unresolved.is_empty() || !denied.is_empty() {
+        KnowledgeRepresentationDisposition::Partial
+    } else {
+        KnowledgeRepresentationDisposition::Completed
+    };
+    facts.sort_by(|left, right| left["claim_id"].as_str().cmp(&right["claim_id"].as_str()));
+    let world = ContentHash::of_value(&json!({"study_id": request.study_id, "facts": facts}))
+        .map_err(|error| KnowledgeRepresentationError::Artifact(error.to_string()))?;
+    let evidence = ContentHash::of_value(&json!({"candidate_order": candidate, "admitted_order": admitted, "unresolved_order": unresolved, "denied_order": denied})).map_err(|error| KnowledgeRepresentationError::Artifact(error.to_string()))?;
+    let provenance = ContentHash::of_value(&json!({"request_id": request.request_id, "study_id": request.study_id, "world_digest": world, "replay_identity": request.replay_identity})).map_err(|error| KnowledgeRepresentationError::Artifact(error.to_string()))?;
+    let payload = json!({"schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION, "contract_version": CONTRACT_VERSION, "feature_id": FEATURE_ID, "request_id": request.request_id, "study_id": request.study_id, "disposition": disposition, "world_digest": world, "evidence_digest": evidence, "provenance_digest": provenance, "replay_identity": request.replay_identity, "boundary": PRECLINICAL_BOUNDARY});
+    let artifact = TypedResearchArtifact::from_payload(
+        format!(
+            "brain-local-knowledge-representation:{}",
+            request.request_id
+        ),
+        "application/vnd.aurora.typed-knowledge-world+json",
+        &payload,
+        Vec::new(),
+        Vec::new(),
+    )
+    .map_err(|error| KnowledgeRepresentationError::Artifact(error.to_string()))?;
+    let receipt = KnowledgeRepresentationReceipt {
+        schema_version: RESEARCH_CONTRACT_SCHEMA_VERSION.into(),
+        contract_version: CONTRACT_VERSION.into(),
+        feature_id: FEATURE_ID.into(),
+        request_id: request.request_id.clone(),
+        study_id: request.study_id.clone(),
+        disposition,
+        candidate_order: candidate,
+        admitted_order: admitted.into_iter().collect(),
+        unresolved_order: unresolved.into_iter().collect(),
+        denied_order: denied.into_iter().collect(),
+        world_digest: world,
+        evidence_digest: evidence,
+        provenance_digest: provenance,
+        replay_identity: request.replay_identity.clone(),
+        witness_order: witnesses.into_iter().collect(),
+        counterexample_order: counterexamples.into_iter().collect(),
+        omissions: omissions.into_iter().collect(),
+        uncertainty: uncertainty.into_iter().collect(),
+        negative_evidence: negative.into_iter().collect(),
+        effect_receipts: if matches!(
+            disposition,
+            KnowledgeRepresentationDisposition::Completed
+                | KnowledgeRepresentationDisposition::Partial
+        ) {
+            vec![format!("read:local-knowledge-world:{}", request.request_id)]
+        } else {
+            vec!["block:unsafe-release".into()]
+        },
+        artifact,
+        raw_data_local: request.raw_data_local,
+        boundary: PRECLINICAL_BOUNDARY.into(),
+    };
+    receipt.validate()?;
+    Ok(receipt)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn hash(value: &str) -> ContentHash {
+        ContentHash::of_bytes(value.as_bytes())
+    }
+    fn request() -> KnowledgeRepresentationRequest {
+        let h = hash("knowledge");
+        let claim = |id: &str, state: EvidenceState| KnowledgeRepresentationClaim {
+            claim_id: id.into(),
+            subject: "organoid".into(),
+            predicate: "expresses".into(),
+            object: "marker".into(),
+            evidence_digest: Some(h.clone()),
+            provenance_digest: Some(h.clone()),
+            state,
+            study_id: "study:one".into(),
+            boundary: PRECLINICAL_BOUNDARY.into(),
+        };
+        KnowledgeRepresentationRequest {
+            request_id: "request:knowledge".into(),
+            study_id: "study:one".into(),
+            claims: vec![
+                claim("claim:a", EvidenceState::Supported),
+                claim("claim:b", EvidenceState::Supported),
+            ],
+            required_claim_ids: vec!["claim:a".into()],
+            replay_identity: h,
+            policy_allow: true,
+            protected_closure: true,
+            raw_data_local: true,
+            boundary: PRECLINICAL_BOUNDARY.into(),
+        }
+    }
+    #[test]
+    fn manifest_is_a0() {
+        assert_eq!(
+            local_knowledge_representation_inference_engine_manifest().autonomy_tier,
+            AutonomyTier::A0
+        );
+    }
+    #[test]
+    fn supported_claims_complete() {
+        assert_eq!(
+            infer_local_knowledge_representation(&request())
+                .unwrap()
+                .disposition,
+            KnowledgeRepresentationDisposition::Completed
+        );
+    }
+    #[test]
+    fn unknown_is_unresolved() {
+        let mut v = request();
+        v.claims[0].state = EvidenceState::Unknown;
+        assert_eq!(
+            infer_local_knowledge_representation(&v)
+                .unwrap()
+                .disposition,
+            KnowledgeRepresentationDisposition::Partial
+        );
+    }
+    #[test]
+    fn contradiction_is_denied() {
+        let mut v = request();
+        v.claims[0].state = EvidenceState::Contradicted;
+        assert_eq!(
+            infer_local_knowledge_representation(&v)
+                .unwrap()
+                .disposition,
+            KnowledgeRepresentationDisposition::Partial
+        );
+    }
+    #[test]
+    fn policy_is_denied() {
+        let mut v = request();
+        v.policy_allow = false;
+        assert_eq!(
+            infer_local_knowledge_representation(&v)
+                .unwrap()
+                .disposition,
+            KnowledgeRepresentationDisposition::Denied
+        );
+    }
+    #[test]
+    fn required_claim_is_omitted() {
+        let mut v = request();
+        v.required_claim_ids.push("claim:missing".into());
+        let r = infer_local_knowledge_representation(&v).unwrap();
+        assert!(r.omissions.iter().any(|x| x.contains("required-missing")));
+    }
+    #[test]
+    fn digest_is_stable() {
+        let r = infer_local_knowledge_representation(&request()).unwrap();
+        assert_eq!(r.digest().unwrap(), r.digest().unwrap());
+    }
+}

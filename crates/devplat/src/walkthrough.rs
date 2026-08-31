@@ -306,30 +306,20 @@ fn foreign_claim(
     artifact: &str,
     reason: &str,
 ) -> Result<ApiClaim, WalkthroughError> {
-    let surface = Surface::foreign(kind, artifact).expect("static surfaces are well formed");
-    ApiClaim::about(
-        ApiName::parse(api).expect("static api names are non-empty"),
-        surface,
-    )
-    .outside(reason)
-    .seal()
-    .map_err(|_| WalkthroughError::MalformedId {
-        id: api.to_string(),
-    })
+    let surface = Surface::foreign(kind, artifact)?;
+    ApiClaim::about(ApiName::parse(api)?, surface)
+        .outside(reason)
+        .seal()
+        .map_err(WalkthroughError::from)
 }
 
 fn rust_claim(api: &str, krate: &str, file: &str) -> Result<ApiClaim, WalkthroughError> {
-    let name = bioprism_cookbook::CrateName::parse(krate).expect("static crate names are valid");
-    let surface = Surface::rust(&name).expect("static crate names are workspace crates");
-    ApiClaim::about(
-        ApiName::parse(api).expect("static api names are non-empty"),
-        surface,
-    )
-    .resolved_in(file)
-    .seal()
-    .map_err(|_| WalkthroughError::MalformedId {
-        id: api.to_string(),
-    })
+    let name = bioprism_cookbook::CrateName::parse(krate)?;
+    let surface = Surface::rust(&name)?;
+    ApiClaim::about(ApiName::parse(api)?, surface)
+        .resolved_in(file)
+        .seal()
+        .map_err(WalkthroughError::from)
 }
 
 /// The quickstarts the developer-platform section's remaining modules assume.
@@ -351,8 +341,7 @@ pub fn standard_walkthroughs() -> Result<Vec<Walkthrough>, WalkthroughError> {
         WalkthroughId::parse("python-sdk-quickstart")?,
         "Compile decision cells from an imported trace and compare two architectures, following \
          the developer-platform section's own Python example.",
-        Surface::foreign(SurfaceKind::PythonPackage, "prism_sdk")
-            .expect("static surface is well formed"),
+        Surface::foreign(SurfaceKind::PythonPackage, "prism_sdk")?,
     )
     .step(Step::naming(
         "Open a local platform handle.",
@@ -395,8 +384,7 @@ pub fn standard_walkthroughs() -> Result<Vec<Walkthrough>, WalkthroughError> {
     let ci = Walkthrough::draft(
         WalkthroughId::parse("ci-regression-gate")?,
         "Gate a pull request on evaluation regressions, following the section's workflow example.",
-        Surface::foreign(SurfaceKind::GitHubAction, ".github/workflows/prism.yml")
-            .expect("static surface is well formed"),
+        Surface::foreign(SurfaceKind::GitHubAction, ".github/workflows/prism.yml")?,
     )
     .step(Step::narrating(
         "Decide which sentinels run on every pull request and which run nightly.",
@@ -427,7 +415,7 @@ pub fn standard_walkthroughs() -> Result<Vec<Walkthrough>, WalkthroughError> {
         WalkthroughId::parse("mcp-agent-quickstart")?,
         "Let an agent compile a decision context over the Model Context Protocol without linking \
          the engine.",
-        Surface::foreign(SurfaceKind::McpTool, "prism-mcp").expect("static surface is well formed"),
+        Surface::foreign(SurfaceKind::McpTool, "prism-mcp")?,
     )
     .step(Step::naming(
         "Start the stdio server.",
@@ -455,8 +443,7 @@ pub fn standard_walkthroughs() -> Result<Vec<Walkthrough>, WalkthroughError> {
         WalkthroughId::parse("one-evidence-state-report")?,
         "Render the same evidence for four audiences without any of them disagreeing about a \
          number.",
-        Surface::rust(&bioprism_cookbook::CrateName::parse("bioprism-devplat").expect("valid"))
-            .expect("this crate is a workspace crate"),
+        Surface::rust(&bioprism_cookbook::CrateName::parse("bioprism-devplat")?)?,
     )
     .step(Step::naming(
         "Assemble the figures, each with a source pointer.",
@@ -487,8 +474,7 @@ pub fn standard_walkthroughs() -> Result<Vec<Walkthrough>, WalkthroughError> {
     let reproduction = Walkthrough::draft(
         WalkthroughId::parse("partial-reproduction-report")?,
         "Report a figure as partially reproduced, without collapsing the outcome to pass or fail.",
-        Surface::rust(&bioprism_cookbook::CrateName::parse("bioprism-devplat").expect("valid"))
-            .expect("this crate is a workspace crate"),
+        Surface::rust(&bioprism_cookbook::CrateName::parse("bioprism-devplat")?)?,
     )
     .step(Step::naming(
         "Record the ten evidence obligations, including the ones in conflict.",
@@ -517,8 +503,7 @@ pub fn standard_walkthroughs() -> Result<Vec<Walkthrough>, WalkthroughError> {
     let security = Walkthrough::draft(
         WalkthroughId::parse("evaluator-exploit-gate")?,
         "Decide whether a benchmark release is stable when an agent can write the grade file.",
-        Surface::rust(&bioprism_cookbook::CrateName::parse("bioprism-devplat").expect("valid"))
-            .expect("this crate is a workspace crate"),
+        Surface::rust(&bioprism_cookbook::CrateName::parse("bioprism-devplat")?)?,
     )
     .step(Step::naming(
         "Score the four axes separately.",

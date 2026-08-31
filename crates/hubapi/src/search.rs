@@ -110,6 +110,23 @@ impl Query {
         self.limit = Some(limit);
         self
     }
+
+    fn validate(&self) -> Result<(), SearchError> {
+        if self.facets.is_empty() {
+            return Err(SearchError::NoFacets);
+        }
+        if self.facets.iter().any(|facet| {
+            matches!(
+                facet,
+                Facet::Keyword(keyword) | Facet::Term(keyword) if keyword.trim().is_empty()
+            )
+        }) {
+            return Err(SearchError::InvalidQuery {
+                detail: "keyword and term facets must contain a non-whitespace value".into(),
+            });
+        }
+        Ok(())
+    }
 }
 
 /// Why one release was offered.
@@ -222,22 +239,26 @@ pub fn search(
     catalogs: &[Catalog],
     query: &Query,
 ) -> Result<Results, SearchError> {
-    if query.facets.is_empty() {
-        return Err(SearchError::NoFacets);
-    }
+    query.validate()?;
 
     let mut best: BTreeMap<(PackName, crate::name::Version), Match> = BTreeMap::new();
     let mut excluded = Vec::new();
 
     for catalog in catalogs {
+        catalog
+            .validate()
+            .map_err(|error| SearchError::CatalogInvalid {
+                registry: catalog.id().clone(),
+                detail: error.to_string(),
+            })?;
         let freshness = catalog.sync().freshness(None);
         if query.freshness.check(&freshness).is_err() {
             continue;
         }
         for release in catalog.releases() {
-            let Ok(authority) = federation.standing_for(catalog.id(), &release.name) else {
-                continue;
-            };
+            let authority = federation
+                .standing_for(catalog.id(), &release.name)
+                .map_err(SearchError::Authority)?;
             let mut why = Vec::new();
             let mut failed = None;
             for facet in &query.facets {
@@ -268,6 +289,40 @@ pub fn search(
                         freshness: freshness.clone(),
                         why,
                     };
+                    if let Some(held) = best.get(&key) {
+                        if held.digest != candidate.digest {
+                            let (mirror, origin, mirror_digest, origin_digest) =
+                                if held.is_authoritative() && !candidate.is_authoritative() {
+                                    (
+                                        candidate.authority.answered_by().clone(),
+                                        held.authority.authority().clone(),
+                                        candidate.digest.clone(),
+                                        held.digest.clone(),
+                                    )
+                                } else if candidate.is_authoritative() && !held.is_authoritative() {
+                                    (
+                                        held.authority.answered_by().clone(),
+                                        candidate.authority.authority().clone(),
+                                        held.digest.clone(),
+                                        candidate.digest.clone(),
+                                    )
+                                } else {
+                                    (
+                                        candidate.authority.answered_by().clone(),
+                                        held.authority.authority().clone(),
+                                        candidate.digest.clone(),
+                                        held.digest.clone(),
+                                    )
+                                };
+                            return Err(SearchError::Mirror(MirrorError::Divergent {
+                                subject: format!("{}@{}", release.name, release.version),
+                                mirror,
+                                origin,
+                                mirror_digest,
+                                origin_digest,
+                            }));
+                        }
+                    }
                     let replace = best.get(&key).is_none_or(|held| {
                         !held.is_authoritative() && candidate.is_authoritative()
                     });
@@ -351,6 +406,15 @@ fn reason(catalog: &Catalog, release: &crate::catalog::PackRelease, facet: &Face
 pub enum SearchError {
     #[error("a query with no facets has nothing to explain about its results")]
     NoFacets,
+
+    #[error("invalid search query: {detail}")]
+    InvalidQuery { detail: String },
+
+    #[error("{registry} contains an invalid catalog: {detail}")]
+    CatalogInvalid {
+        registry: crate::registry::RegistryId,
+        detail: String,
+    },
 
     #[error(transparent)]
     Authority(#[from] AuthorityError),
@@ -456,6 +520,17 @@ mod tests {
     }
 
     #[test]
+    fn an_empty_text_facet_is_refused_rather_than_matching_every_release() {
+        let error = search(
+            &federation(),
+            &[stocked()],
+            &offline(vec![Facet::Keyword("   ".into())]),
+        )
+        .expect_err("an empty facet has no search meaning");
+        assert!(matches!(error, SearchError::InvalidQuery { .. }));
+    }
+
+    #[test]
     fn a_tier_in_a_result_is_attributed_to_the_registry_that_assessed_it() {
         let results = search(
             &federation(),
@@ -557,6 +632,32 @@ mod tests {
         .expect("searches");
         assert_eq!(results.len(), 2);
         assert!(results.matches.iter().all(Match::is_authoritative));
+    }
+
+    #[test]
+    fn a_search_refuses_a_divergent_binding_instead_of_hiding_it_behind_origin_preference() {
+        let mut copy = Catalog::mirror(
+            Authority::new(id("site-mirror"))
+                .carrying(ns("bioprism"), id("origin"))
+                .expect("carries"),
+            Replication::mirror(id("origin"), Epoch(4), StalenessBound::epochs(2)),
+        );
+        copy.record(PackRelease::new(
+            name("bioprism/onco-tp53"),
+            v(1, 0, 0),
+            "sha256:tampered",
+        ))
+        .expect("records");
+        let error = search(
+            &federation(),
+            &[stocked(), copy],
+            &offline(vec![Facet::InNamespace(ns("bioprism"))]),
+        )
+        .expect_err("a name/version cannot legitimately bind to two digests");
+        assert!(matches!(
+            error,
+            SearchError::Mirror(MirrorError::Divergent { .. })
+        ));
     }
 
     #[test]

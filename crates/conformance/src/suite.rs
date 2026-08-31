@@ -520,7 +520,12 @@ impl SuiteReport {
                 CaseOutcome::Errored { reason } => {
                     format!("  ERRORED {} {reason}", result.case_id)
                 }
-                CaseOutcome::Passed => unreachable!("unmet requirements are never passes"),
+                CaseOutcome::Passed => {
+                    format!(
+                        "  PASSED {} [invariant state is inconsistent]",
+                        result.case_id
+                    )
+                }
             });
         }
         lines.join("\n")
@@ -674,7 +679,9 @@ fn check(
     };
 
     match expectation {
-        Expectation::FailsWith { .. } => unreachable!("handled above"),
+        Expectation::FailsWith { .. } => Err(Check::Fail(
+            "failure expectation reached the artifact branch after its admission check".into(),
+        )),
 
         Expectation::ProducesArtifacts { artifacts: names } => {
             for name in names {

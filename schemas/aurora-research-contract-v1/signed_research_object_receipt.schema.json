@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aurora-neuro.org/schemas/aurora-research-contract-v1/signed-research-object-receipt.json",
+  "title": "AURORA governance signed research-object receipt",
+  "description": "Local-first signed research-object metadata after policy, provenance, migration, and signature gates.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "feature_id", "contract_version", "run_id", "release_id", "origin", "purpose", "artifact_ids", "evidence_receipt_ids", "release_digest", "signer_public_key_hex", "signer_signature_hex", "migration_notes", "omissions", "raw_data_local", "artifact", "boundary"],
+  "properties": {
+    "schema_version": { "const": "aurora-research-contract/1.0" },
+    "feature_id": { "const": "AFA-governance-P16-F08" },
+    "contract_version": { "const": "signed-research-object/2.0" },
+    "run_id": { "type": "string", "minLength": 1 },
+    "release_id": { "type": "string", "minLength": 1 },
+    "origin": { "type": "string", "minLength": 1 },
+    "purpose": { "type": "string", "minLength": 1 },
+    "artifact_ids": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+    "evidence_receipt_ids": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+    "release_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "signer_public_key_hex": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "signer_signature_hex": { "type": "string", "pattern": "^[0-9a-f]{128}$" },
+    "migration_notes": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+    "omissions": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "raw_data_local": { "const": true },
+    "artifact": { "type": "object", "required": ["content_hash"], "properties": { "content_hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" } } },
+    "boundary": { "const": "preclinical-research-only; no human-subject or clinical-source data; no diagnosis, treatment, triage, enrollment, or clinical decisions" }
+  }
+}

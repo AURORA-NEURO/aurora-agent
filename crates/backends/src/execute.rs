@@ -79,9 +79,12 @@ pub(crate) fn run(
         messages.push(produced);
     }
 
-    let answer = messages
-        .pop()
-        .expect("every schedule ends with a combine over the free scope");
+    let Some(answer) = messages.pop() else {
+        return Err(Declined::InvalidSchedule {
+            backend: name,
+            detail: "schedule produced no final free-scope message".into(),
+        });
+    };
 
     Ok(ComputedRegion::new(
         answer,

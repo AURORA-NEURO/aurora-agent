@@ -3,12 +3,13 @@
 mod common;
 
 use bioprism_bioeval::{
-    AggregationError, BiologicalErrorClass, CollapsePolicy, ConsensusPolicy, ConsensusState,
-    Dispersion, PanelAggregate, PooledScore, Prediction, Rating, ReferenceStandard,
+    AggregationError, BioScore, BiologicalErrorClass, CollapsePolicy, ConsensusPolicy,
+    ConsensusState, Dispersion, PanelAggregate, PooledScore, Prediction, Rating, ReferenceStandard,
 };
 use common::{
     grader, progression_reference, score, witness, PROGRESSION, REQUIREMENT_ID, TREATMENT_EFFECT,
 };
+use serde_json::json;
 
 fn policy() -> ConsensusPolicy {
     ConsensusPolicy::conventional("bioeval/panel/1")
@@ -200,6 +201,72 @@ fn an_empty_panel_is_not_consensus() {
 }
 
 #[test]
+fn malformed_policy_is_refused_before_it_can_change_consensus() {
+    let policy = ConsensusPolicy {
+        policy_id: " ".to_string(),
+        majority_threshold: f64::NAN,
+        veto_on_safety_reaching: true,
+    };
+
+    let refusal = PanelAggregate::tally(&policy, [Rating::new("reader-a", PROGRESSION)])
+        .expect_err("an aggregate needs a named, bounded policy");
+
+    assert!(matches!(refusal, AggregationError::InvalidPolicy { .. }));
+}
+
+#[test]
+fn malformed_rating_payloads_are_refused_instead_of_becoming_panel_evidence() {
+    let refusal = PanelAggregate::tally(
+        &policy(),
+        [Rating::new("reader-a", " ").because("line\nnoise")],
+    )
+    .expect_err("empty positions and control-bearing rationales are not evidence");
+
+    assert!(
+        matches!(refusal, AggregationError::InvalidRating { rater, .. } if rater == "reader-a")
+    );
+}
+
+#[test]
+fn a_rating_cannot_repeat_the_same_error_class_to_multiply_a_veto() {
+    let refusal = PanelAggregate::tally(
+        &policy(),
+        [Rating::new("reader-a", PROGRESSION)
+            .flagging(BiologicalErrorClass::Laterality)
+            .flagging(BiologicalErrorClass::Laterality)],
+    )
+    .expect_err("a flagged class is a set-valued assertion, not a vote count");
+
+    assert!(matches!(refusal, AggregationError::InvalidRating { .. }));
+}
+
+#[test]
+fn panel_order_is_canonicalized_before_tallying() {
+    let forward = PanelAggregate::tally(
+        &policy(),
+        [
+            Rating::new("reader-b", TREATMENT_EFFECT),
+            Rating::new("reader-a", PROGRESSION),
+        ],
+    )
+    .expect("valid panel");
+    let reverse = PanelAggregate::tally(
+        &policy(),
+        [
+            Rating::new("reader-a", PROGRESSION),
+            Rating::new("reader-b", TREATMENT_EFFECT),
+        ],
+    )
+    .expect("valid panel");
+
+    assert_eq!(
+        serde_json::to_value(forward).expect("panel serialises"),
+        serde_json::to_value(reverse).expect("panel serialises"),
+        "the same ratings must not produce input-order-dependent aggregate records"
+    );
+}
+
+#[test]
 fn pooling_scores_across_comparability_gates_is_refused() {
     let here = score(
         &Prediction::categorical(PROGRESSION),
@@ -236,6 +303,22 @@ fn pooling_scores_across_comparability_gates_is_refused() {
         refusal,
         AggregationError::MixedRequirements { expected, .. } if expected == REQUIREMENT_ID
     ));
+}
+
+#[test]
+fn pooling_rechecks_persisted_score_fields_before_reading_their_band() {
+    let clean = score(
+        &Prediction::categorical(PROGRESSION),
+        &progression_reference(Dispersion::Aleatoric),
+    );
+    let mut forged = serde_json::to_value(&clean).expect("score serialises");
+    forged["subject"] = json!(" ");
+    let forged: BioScore = serde_json::from_value(forged).expect("shape still parses");
+
+    let refusal = PooledScore::pool([forged])
+        .expect_err("a parsed score is not trustworthy evidence until aggregation validates it");
+
+    assert!(matches!(refusal, AggregationError::InvalidScore { .. }));
 }
 
 #[test]

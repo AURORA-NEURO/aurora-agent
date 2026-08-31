@@ -265,6 +265,43 @@ impl EngineeringManifest {
             }
         }
 
+        if self.packages.is_empty() {
+            blocking(
+                &mut issues,
+                "packages_missing",
+                "packages",
+                "the engineering manifest declares no package boundaries",
+                "declare at least one package before publishing the engineering plan",
+            );
+        }
+        if self.tickets.is_empty() && self.policies.require_ticket_contracts {
+            blocking(
+                &mut issues,
+                "tickets_missing",
+                "tickets",
+                "ticket contracts are required but no tickets are declared",
+                "declare at least one ticket with an acceptance condition",
+            );
+        }
+        if self.adrs.is_empty() && self.policies.require_adr_targets {
+            blocking(
+                &mut issues,
+                "adrs_missing",
+                "adrs",
+                "ADR targets are required but no decision records are declared",
+                "declare the decisions that govern the engineering boundaries",
+            );
+        }
+        if self.ownership.is_empty() && self.policies.require_ownership {
+            blocking(
+                &mut issues,
+                "ownership_missing",
+                "ownership",
+                "ownership is required but no RACI rows are declared",
+                "assign accountable and responsible parties to the governed surfaces",
+            );
+        }
+
         for package in &self.packages {
             if !package_ids.insert(package.id.clone()) {
                 blocking(
@@ -301,6 +338,15 @@ impl EngineeringManifest {
                     );
                 }
             }
+            if !repository_relative_path(&package.path) {
+                blocking(
+                    &mut issues,
+                    "package_path_invalid",
+                    &package.id,
+                    "package path must be repository-relative and free of traversal",
+                    "use a normalized path beneath the repository root",
+                );
+            }
             package_map.insert(package.id.clone(), package);
         }
 
@@ -308,6 +354,20 @@ impl EngineeringManifest {
         for package in &self.packages {
             let mut dependencies = package.depends_on.clone();
             dependencies.sort();
+            let mut dependency_ids = BTreeSet::new();
+            if package
+                .depends_on
+                .iter()
+                .any(|dependency| !dependency_ids.insert(dependency))
+            {
+                blocking(
+                    &mut issues,
+                    "duplicate_package_dependency",
+                    &package.id,
+                    "a package dependency edge occurs more than once",
+                    "retain one edge per dependency target",
+                );
+            }
             dependencies.dedup();
             for dependency in &dependencies {
                 if dependency == &package.id {
@@ -390,7 +450,10 @@ impl EngineeringManifest {
                 );
             }
             if ticket.acceptance.is_empty()
-                || ticket.acceptance.iter().any(|item| item.trim().is_empty())
+                || ticket
+                    .acceptance
+                    .iter()
+                    .any(|item| item.trim().is_empty() || item.chars().any(char::is_control))
             {
                 if self.policies.require_ticket_contracts {
                     blocking(
@@ -409,6 +472,20 @@ impl EngineeringManifest {
                         "add an observable acceptance condition before execution",
                     );
                 }
+            }
+            let mut dependency_ids = BTreeSet::new();
+            if ticket
+                .depends_on
+                .iter()
+                .any(|dependency| !dependency_ids.insert(dependency))
+            {
+                blocking(
+                    &mut issues,
+                    "duplicate_ticket_dependency",
+                    &ticket.id,
+                    "a ticket dependency edge occurs more than once",
+                    "retain one edge per dependency target",
+                );
             }
             if matches!(ticket.status, TicketStatus::Blocked)
                 && ticket.blocker.as_deref().unwrap_or("").trim().is_empty()
@@ -448,6 +525,22 @@ impl EngineeringManifest {
                     );
                 }
             }
+        }
+
+        let ticket_graph = self
+            .tickets
+            .iter()
+            .map(|ticket| (ticket.id.clone(), ticket.depends_on.clone()))
+            .collect::<BTreeMap<_, _>>();
+        let (_, ticket_cycles) = topo_order(&ticket_graph);
+        for cycle in ticket_cycles {
+            blocking(
+                &mut issues,
+                "ticket_cycle",
+                cycle.join(" -> "),
+                "ticket dependencies contain a cycle",
+                "break the cycle so ticket readiness has a deterministic order",
+            );
         }
 
         let mut ticket_readiness = Vec::with_capacity(self.tickets.len());
@@ -690,6 +783,17 @@ fn warning(
     });
 }
 
+fn repository_relative_path(value: &str) -> bool {
+    let path = std::path::Path::new(value);
+    !value.chars().any(char::is_control)
+        && !path.is_absolute()
+        && !value.starts_with('\\')
+        && !value.as_bytes().get(1).is_some_and(|byte| *byte == b':')
+        && !path
+            .components()
+            .any(|component| matches!(component, std::path::Component::ParentDir))
+}
+
 fn topo_order(graph: &BTreeMap<String, Vec<String>>) -> (Vec<String>, Vec<Vec<String>>) {
     let mut incoming = graph
         .keys()
@@ -719,10 +823,11 @@ fn topo_order(graph: &BTreeMap<String, Vec<String>>) -> (Vec<String>, Vec<Vec<St
     while let Some(node) = ready.pop_first() {
         order.push(node.clone());
         for dependent in outgoing.get(&node).into_iter().flatten() {
-            let degree = incoming.get_mut(dependent).expect("outgoing target exists");
-            *degree -= 1;
-            if *degree == 0 {
-                ready.insert(dependent.clone());
+            if let Some(degree) = incoming.get_mut(dependent) {
+                *degree = degree.saturating_sub(1);
+                if *degree == 0 {
+                    ready.insert(dependent.clone());
+                }
             }
         }
     }
@@ -978,5 +1083,62 @@ mod tests {
         let decoded: EngineeringManifest = serde_json::from_value(encoded).unwrap();
         assert_eq!(decoded, value);
         assert!(decoded.policies.require_ticket_contracts);
+    }
+
+    #[test]
+    fn required_engineering_sections_cannot_be_vacuously_empty() {
+        let mut value = manifest();
+        value.packages.clear();
+        value.tickets.clear();
+        value.adrs.clear();
+        value.ownership.clear();
+        let report = value.audit().unwrap();
+        assert!(!report.valid);
+        for code in [
+            "packages_missing",
+            "tickets_missing",
+            "adrs_missing",
+            "ownership_missing",
+        ] {
+            assert!(
+                report.issues.iter().any(|issue| issue.code == code),
+                "{code}"
+            );
+        }
+    }
+
+    #[test]
+    fn ticket_cycles_and_repository_traversal_are_blocking() {
+        let mut value = manifest();
+        value.packages[0].path = "../outside".into();
+        value.tickets[0].depends_on = vec!["T-002".into()];
+        value.tickets[1].depends_on = vec!["T-001".into()];
+        let report = value.audit().unwrap();
+        assert!(!report.valid);
+        assert!(report
+            .issues
+            .iter()
+            .any(|issue| issue.code == "package_path_invalid"));
+        assert!(report
+            .issues
+            .iter()
+            .any(|issue| issue.code == "ticket_cycle"));
+    }
+
+    #[test]
+    fn duplicate_dependency_edges_are_not_silently_deduplicated() {
+        let mut value = manifest();
+        value.packages[1].depends_on = vec!["core".into(), "core".into()];
+        value.tickets[1].depends_on = vec!["T-001".into(), "T-001".into()];
+        let report = value.audit().unwrap();
+        assert!(!report.valid);
+        assert!(report
+            .issues
+            .iter()
+            .any(|issue| issue.code == "duplicate_package_dependency"));
+        assert!(report
+            .issues
+            .iter()
+            .any(|issue| issue.code == "duplicate_ticket_dependency"));
     }
 }

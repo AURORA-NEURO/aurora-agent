@@ -125,6 +125,9 @@ pub mod molecule;
 pub mod mutation;
 pub mod oracle;
 pub mod projection;
+pub mod publication_copilot;
+pub mod quality_workbench;
+pub mod retrieval_assurance;
 pub mod span;
 pub mod state;
 pub mod system;
@@ -134,6 +137,13 @@ pub mod worldline;
 pub use canonical::{round_trips, Canonical};
 pub use clock::{Clock, Stamped};
 pub use projection::{Projection, ProjectionGap};
+pub use publication_copilot::{
+    prepare_publication_queue, publication_copilot_manifest, PublicationCopilotError,
+    PublicationCopilotReceipt, PublicationCopilotRequest, PublicationDisposition, RunState,
+    SignedResearchObject, ValidatedResearchRun,
+    CONTRACT_VERSION as PUBLICATION_COPILOT_CONTRACT_VERSION,
+    FEATURE_ID as PUBLICATION_COPILOT_FEATURE_ID,
+};
 pub use span::Span;
 
 pub use act::{
@@ -165,6 +175,23 @@ pub use molecule::{
 };
 pub use mutation::{MutationProgram, Risk, SeedDeclaration, SemanticRelation, Transformation};
 pub use oracle::{DisagreementIr, EvidencePlane, EvidenceTier, OracleIr, Verdict};
+pub use quality_workbench::{
+    operate_quality_workbench, MetricDirection, QualityDisposition, QualityObservation,
+    QualityState, QualityWorkbenchError, QualityWorkbenchReceipt, QualityWorkbenchRequest,
+    QualityWorkbenchSummary, CONTRACT_VERSION as QUALITY_WORKBENCH_CONTRACT_VERSION,
+    FEATURE_ID as QUALITY_WORKBENCH_FEATURE_ID,
+    PRECLINICAL_BOUNDARY as QUALITY_WORKBENCH_PRECLINICAL_BOUNDARY,
+    SCHEMA_VERSION as QUALITY_WORKBENCH_SCHEMA_VERSION,
+};
+pub use retrieval_assurance::{
+    assure_retrieval_synthesis, RetrievalAssuranceDisposition, RetrievalAssuranceError,
+    RetrievalAssuranceReceipt, RetrievalAssuranceRequest, RetrievalAssuranceSummary,
+    RetrievalCandidate, RetrievalEvidenceState,
+    CONTRACT_VERSION as RETRIEVAL_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as RETRIEVAL_ASSURANCE_FEATURE_ID,
+    PRECLINICAL_BOUNDARY as RETRIEVAL_ASSURANCE_PRECLINICAL_BOUNDARY,
+    SCHEMA_VERSION as RETRIEVAL_ASSURANCE_SCHEMA_VERSION,
+};
 pub use state::{BioState, Plane, ResourceLedger, Transition, UncertaintySummary};
 pub use system::{Component, ComponentKind, Pin, PromptDisclosure, SystemManifest, Wire};
 pub use world::{

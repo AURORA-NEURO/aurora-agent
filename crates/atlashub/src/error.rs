@@ -99,6 +99,10 @@ pub enum ValueError {
     /// ranking non-deterministic.
     #[error("declared value for '{experiment}' is not a finite non-negative number")]
     NonFiniteValue { experiment: String },
+
+    /// A supplied exchange rate cannot represent the scalar cost without losing information.
+    #[error("scalar cost overflowed on budget axis '{axis}'")]
+    CostOverflow { axis: String },
 }
 
 /// Refusals in the data connector registry (34.12).
@@ -141,10 +145,7 @@ pub enum ConnectorError {
 
     /// The request asked for something the connector never claimed.
     #[error("connector '{connector}' does not declare modality '{modality}'")]
-    ModalityNotDeclared {
-        connector: String,
-        modality: String,
-    },
+    ModalityNotDeclared { connector: String, modality: String },
 }
 
 /// Refusals in federated and bring-your-own-data evaluation (34.17).
@@ -189,6 +190,18 @@ pub enum FederatedError {
     /// ambiguous and lets one site's participation be counted twice.
     #[error("site '{site}' appears more than once in the same pooled result")]
     DuplicateSite { site: String },
+
+    /// The pooled sample count cannot be represented without changing the estimator's denominator.
+    #[error("pooled sample count overflowed while adding site '{site}'")]
+    SampleCountOverflow { site: String },
+
+    /// An invalid site aggregate cannot produce a meaningful pooled estimate.
+    #[error("site '{site}' reported an invalid aggregate: {reason}")]
+    InvalidAggregate { site: String, reason: String },
+
+    /// A received site result did not preserve the invariants established by the site constructor.
+    #[error("site '{site}' result is invalid: {reason}")]
+    InvalidSiteResult { site: String, reason: String },
 }
 
 /// Refusals in research CI (34.20).

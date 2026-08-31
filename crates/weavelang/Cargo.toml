@@ -9,6 +9,7 @@ description = "WeaveLang and WeaveIR: surface syntax, canonical IR schema, compi
 
 [dependencies]
 bioprism-ids = { workspace = true }
+bioprism-foundation = { workspace = true }
 bioprism-weave = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

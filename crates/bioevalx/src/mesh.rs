@@ -51,6 +51,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::MeshError;
 
+const MAX_MESH_TEXT_BYTES: usize = 256;
+const MAX_EVALUATORS: usize = 4096;
+const MAX_VERDICTS: usize = 4096;
+
 /// The seven evaluator kinds 26.01 lists under "Evaluation target", in its own order.
 ///
 /// The mapping onto [`ScoreTier`] is stated here rather than invented per call site, because a
@@ -182,7 +186,10 @@ impl EvaluatorVerdict {
 }
 
 /// A set of evaluators declared against one system under evaluation.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// A derived mesh. It serializes for reporting but is intentionally not deserializable: evaluator
+/// declarations must pass admission again so circularity and identity checks cannot be bypassed by
+/// restoring a persisted evaluator vector.
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Mesh {
     /// Artifacts belonging to the system under evaluation. An evaluator derived from any of these
     /// is circular and is refused at admission.
@@ -204,14 +211,15 @@ impl Mesh {
     /// The refusal is at admission rather than at scoring, because a circular oracle that has
     /// already produced a verdict has already produced a number somebody will quote.
     pub fn admit(&mut self, decl: EvaluatorDecl) -> Result<(), MeshError> {
+        self.validate()?;
+        validate_evaluator(&decl, &self.system_artifacts)?;
+        if self.evaluators.len() >= MAX_EVALUATORS {
+            return Err(MeshError::TooManyEvaluators {
+                limit: MAX_EVALUATORS,
+            });
+        }
         if self.evaluators.iter().any(|e| e.id == decl.id) {
             return Err(MeshError::DuplicateEvaluator(decl.id));
-        }
-        if let Some(artifact) = decl.derived_from.intersection(&self.system_artifacts).next() {
-            return Err(MeshError::CircularOracle {
-                evaluator: decl.id.clone(),
-                artifact: artifact.clone(),
-            });
         }
         self.evaluators.push(decl);
         Ok(())
@@ -269,6 +277,7 @@ impl Mesh {
 
     /// Coverage of the mesh, counted in classes rather than in evaluators.
     pub fn census(&self) -> Result<Census, MeshError> {
+        self.validate()?;
         if self.evaluators.is_empty() {
             return Err(MeshError::Empty);
         }
@@ -308,26 +317,25 @@ impl Mesh {
         &self,
         verdicts: &[EvaluatorVerdict],
     ) -> Result<Vec<Disagreement>, MeshError> {
-        for verdict in verdicts {
-            if !self.evaluators.iter().any(|e| e.id == verdict.evaluator) {
-                return Err(MeshError::UnknownEvaluator(verdict.evaluator.clone()));
-            }
-        }
+        self.validate()?;
+        validate_verdicts(self, verdicts)?;
+        let mut ordered = verdicts.to_vec();
+        ordered.sort_by(|left, right| left.evaluator.cmp(&right.evaluator));
         let class_of: BTreeMap<&str, usize> = self
             .independence_classes()
             .into_iter()
             .enumerate()
             .flat_map(|(index, class)| class.into_iter().map(move |id| (id, index)))
             .collect();
-        let called: Vec<&EvaluatorVerdict> = verdicts.iter().filter(|v| !v.abstained).collect();
+        let called: Vec<&EvaluatorVerdict> = ordered.iter().filter(|v| !v.abstained).collect();
         let mut found = Vec::new();
         for (i, left) in called.iter().enumerate() {
             for right in called.iter().skip(i + 1) {
                 if left.position == right.position {
                     continue;
                 }
-                let same_class = class_of.get(left.evaluator.as_str())
-                    == class_of.get(right.evaluator.as_str());
+                let same_class =
+                    class_of.get(left.evaluator.as_str()) == class_of.get(right.evaluator.as_str());
                 let witness = Witness {
                     left: left.evaluator.clone(),
                     left_position: left.position.clone(),
@@ -365,14 +373,11 @@ impl Mesh {
         &self,
         verdicts: &[EvaluatorVerdict],
     ) -> Result<Vec<bioprism_bioeval::Rating>, MeshError> {
-        for verdict in verdicts {
-            if !self.evaluators.iter().any(|e| e.id == verdict.evaluator) {
-                return Err(MeshError::UnknownEvaluator(verdict.evaluator.clone()));
-            }
-        }
+        self.validate()?;
+        validate_verdicts(self, verdicts)?;
         let mut out = Vec::new();
         for class in self.independence_classes() {
-            let held: Vec<&EvaluatorVerdict> = verdicts
+            let mut held: Vec<&EvaluatorVerdict> = verdicts
                 .iter()
                 .filter(|v| !v.abstained && class.contains(&v.evaluator.as_str()))
                 .collect();
@@ -386,6 +391,7 @@ impl Mesh {
                     positions: positions.into_iter().map(str::to_string).collect(),
                 });
             }
+            held.sort_by(|left, right| left.evaluator.cmp(&right.evaluator));
             let voters: Vec<&str> = held.iter().map(|v| v.evaluator.as_str()).collect();
             out.push(bioprism_bioeval::Rating::new(
                 voters.join("+"),
@@ -405,8 +411,18 @@ impl Mesh {
         verdicts: &[EvaluatorVerdict],
         expected: &str,
     ) -> Result<Vec<Contribution>, MeshError> {
+        self.validate()?;
+        if !valid_mesh_text(expected) {
+            return Err(MeshError::InvalidVerdict {
+                evaluator: "<expected>".into(),
+                detail: "expected position must be a bounded, trimmed, control-free string".into(),
+            });
+        }
+        validate_verdicts(self, verdicts)?;
+        let mut ordered = verdicts.to_vec();
+        ordered.sort_by(|left, right| left.evaluator.cmp(&right.evaluator));
         let mut out = Vec::new();
-        for verdict in verdicts {
+        for verdict in &ordered {
             let decl = self
                 .evaluators
                 .iter()
@@ -428,6 +444,119 @@ impl Mesh {
         }
         Ok(out)
     }
+
+    fn validate(&self) -> Result<(), MeshError> {
+        if self.system_artifacts.len() > MAX_EVALUATORS {
+            return Err(MeshError::InvalidMesh {
+                detail: "system artifact set exceeds the supported bound".into(),
+            });
+        }
+        if self
+            .system_artifacts
+            .iter()
+            .any(|artifact| !valid_mesh_text(artifact))
+        {
+            return Err(MeshError::InvalidMesh {
+                detail: "system artifacts must be bounded, trimmed, control-free strings".into(),
+            });
+        }
+        if self.evaluators.len() > MAX_EVALUATORS {
+            return Err(MeshError::TooManyEvaluators {
+                limit: MAX_EVALUATORS,
+            });
+        }
+        let mut ids = BTreeSet::new();
+        for evaluator in &self.evaluators {
+            validate_evaluator(evaluator, &self.system_artifacts)?;
+            if !ids.insert(evaluator.id.clone()) {
+                return Err(MeshError::DuplicateEvaluator(evaluator.id.clone()));
+            }
+        }
+        Ok(())
+    }
+}
+
+fn valid_mesh_text(value: &str) -> bool {
+    !value.trim().is_empty()
+        && value == value.trim()
+        && value.len() <= MAX_MESH_TEXT_BYTES
+        && !value.chars().any(char::is_control)
+}
+
+fn validate_evaluator(
+    evaluator: &EvaluatorDecl,
+    system_artifacts: &BTreeSet<String>,
+) -> Result<(), MeshError> {
+    if !valid_mesh_text(&evaluator.id) {
+        return Err(MeshError::InvalidEvaluator {
+            evaluator: evaluator.id.clone(),
+            detail: "id must be a bounded, trimmed, control-free string".into(),
+        });
+    }
+    if evaluator
+        .inputs
+        .iter()
+        .chain(evaluator.derived_from.iter())
+        .any(|artifact| !valid_mesh_text(artifact))
+    {
+        return Err(MeshError::InvalidEvaluator {
+            evaluator: evaluator.id.clone(),
+            detail: "input and lineage artifacts must be bounded, trimmed, control-free strings"
+                .into(),
+        });
+    }
+    if let Some(artifact) = evaluator
+        .derived_from
+        .intersection(system_artifacts)
+        .next()
+    {
+        return Err(MeshError::CircularOracle {
+            evaluator: evaluator.id.clone(),
+            artifact: artifact.clone(),
+        });
+    }
+    Ok(())
+}
+
+fn validate_verdicts(mesh: &Mesh, verdicts: &[EvaluatorVerdict]) -> Result<(), MeshError> {
+    if verdicts.len() > MAX_VERDICTS {
+        return Err(MeshError::TooManyVerdicts {
+            limit: MAX_VERDICTS,
+        });
+    }
+    let mut seen = BTreeSet::new();
+    for verdict in verdicts {
+        if !valid_mesh_text(&verdict.evaluator) {
+            return Err(MeshError::InvalidVerdict {
+                evaluator: verdict.evaluator.clone(),
+                detail: "evaluator id must be a bounded, trimmed, control-free string".into(),
+            });
+        }
+        if !seen.insert(verdict.evaluator.clone()) {
+            return Err(MeshError::DuplicateVerdict(verdict.evaluator.clone()));
+        }
+        if !mesh
+            .evaluators
+            .iter()
+            .any(|evaluator| evaluator.id == verdict.evaluator)
+        {
+            return Err(MeshError::UnknownEvaluator(verdict.evaluator.clone()));
+        }
+        if verdict.abstained {
+            if !verdict.position.is_empty() {
+                return Err(MeshError::InvalidVerdict {
+                    evaluator: verdict.evaluator.clone(),
+                    detail: "an abstention cannot carry a called position".into(),
+                });
+            }
+        } else if !valid_mesh_text(&verdict.position) {
+            return Err(MeshError::InvalidVerdict {
+                evaluator: verdict.evaluator.clone(),
+                detail: "called position must be a bounded, trimmed, control-free string".into(),
+            });
+        }
+    }
+    Ok(())
 }
 
 /// A concrete, checkable statement that two named evaluators called different states.

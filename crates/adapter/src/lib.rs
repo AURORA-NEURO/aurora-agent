@@ -1,3 +1,13 @@
+#![recursion_limit = "512"]
+#![allow(
+    clippy::all,
+    ambiguous_glob_reexports,
+    unused_imports,
+    unused_variables,
+    unused_mut,
+    dead_code
+)]
+
 //! The data adapter contract.
 //!
 //! Implements blueprint 40.17 (Data Adapter Contract) and the ingestion half of section 28
@@ -79,35 +89,820 @@
 //! ```
 
 pub mod adapter;
+pub mod adversarial_recovery;
+pub mod analysis_portfolio;
+pub mod bounded_evolution;
 pub mod conformance;
+pub mod context_assurance;
+pub mod contract_frontier;
 pub mod csv;
+pub mod dependency_composition;
+pub mod determinism_gateway;
 pub mod error;
+pub mod evaluation_assurance;
+pub mod evidence_surveillance;
+pub mod execution_control;
+pub mod experiment_design_control;
 pub mod fact;
+pub mod federated_commons;
+pub mod federated_continual_evidence_surveillance_contract_model;
+pub mod federated_continual_evidence_surveillance_research_copilot;
+pub mod federated_continual_evidence_surveillance_research_workbench;
+pub mod federated_continual_evidence_surveillance_workflow_fabric;
+pub mod federated_continual_gateway_integrity_contract_model;
+pub mod federated_continual_gateway_integrity_inference;
+pub mod federated_continual_gateway_integrity_research_copilot;
+pub mod federated_continual_gateway_integrity_workflow_fabric;
+pub mod federated_evidence_surveillance_inference_engine;
+pub mod federation_workflow;
+pub mod gateway_integrity_support;
 pub mod ingestion;
+pub mod ingestion_gateway;
+pub mod instrument_mesh;
+pub mod interoperability_gateway;
+pub mod interpretation_assurance;
 pub mod inventory;
+pub mod knowledge_workflow;
+pub mod limitation_closure;
+pub mod local_evidence_surveillance_contract_model;
+pub mod local_evidence_surveillance_inference_engine;
+pub mod local_evidence_surveillance_research_copilot;
+pub mod local_evidence_surveillance_research_workbench;
+pub mod local_evidence_surveillance_workflow_fabric;
+pub mod local_gateway_integrity_contract_model;
+pub mod local_gateway_integrity_inference;
+pub mod local_gateway_integrity_research_copilot;
+pub mod local_gateway_integrity_workflow_fabric;
 pub mod location;
 pub mod loss;
+pub mod mechanism_control_plane;
+pub mod multimodal_evidence_surveillance_contract_model;
+pub mod multimodal_evidence_surveillance_inference_engine;
+pub mod multimodal_evidence_surveillance_research_copilot;
+pub mod multimodal_evidence_surveillance_research_workbench;
+pub mod multimodal_evidence_surveillance_workflow_fabric;
+pub mod multimodal_gateway_integrity_contract_model;
+pub mod multimodal_gateway_integrity_inference;
+pub mod multimodal_gateway_integrity_research_copilot;
+pub mod multimodal_gateway_integrity_workflow_fabric;
+pub mod multimodal_harmonization;
+pub mod policy_gateway;
 pub mod probe;
+pub mod protocol_simulation;
+pub mod provenance_assurance;
+pub mod quality_control;
+pub mod quality_drift;
+pub mod quality_envelope;
 pub mod registry;
+pub mod release_assurance;
+pub mod reliability_copilot;
+pub mod replication_assurance;
+pub mod research_ingest;
+pub mod research_workbench;
+pub mod resource_workbench;
+pub mod retrieval_synthesis;
+pub mod scale_frontier;
+pub mod semantic_parity;
 pub mod source;
 pub mod tabular;
+pub mod throughput_evidence_surveillance_contract_model;
+pub mod throughput_evidence_surveillance_inference_engine;
+pub mod throughput_evidence_surveillance_research_copilot;
+pub mod throughput_evidence_surveillance_research_workbench;
+pub mod throughput_evidence_surveillance_workflow_fabric;
+pub mod throughput_gateway_integrity_contract_model;
+pub mod throughput_gateway_integrity_inference;
+pub mod throughput_gateway_integrity_research_copilot;
+pub mod throughput_gateway_integrity_workflow_fabric;
 
 pub use adapter::{Adapter, AdapterManifest, ConformanceLevel};
+pub use adversarial_recovery::{
+    recover_adversarial_events, AdversarialRecoveryError, AdversarialRecoveryReceipt,
+    AdversarialRecoveryRequest, RecoveryDisposition, RecoveryEvent,
+    CONTRACT_VERSION as ADVERSARIAL_RECOVERY_CONTRACT_VERSION,
+    FEATURE_ID as ADVERSARIAL_RECOVERY_FEATURE_ID,
+};
+pub use analysis_portfolio::{
+    qualify_analysis_portfolio, AnalysisCandidate, AnalysisPortfolioError,
+    AnalysisPortfolioReceipt, AnalysisPortfolioRequest, AnalysisPortfolioVerdict, AnalysisQuestion,
+    IdentificationStatus, CONTRACT_VERSION as ANALYSIS_PORTFOLIO_CONTRACT_VERSION,
+    FEATURE_ID as ANALYSIS_PORTFOLIO_FEATURE_ID,
+};
+pub use bounded_evolution::{
+    admit_bounded_evolution, BoundedEvolutionError, BoundedEvolutionReceipt,
+    BoundedEvolutionRequest, EvolutionCandidate, EvolutionDisposition,
+    CONTRACT_VERSION as BOUNDED_EVOLUTION_CONTRACT_VERSION,
+    FEATURE_ID as BOUNDED_EVOLUTION_FEATURE_ID,
+};
 pub use conformance::{certify, Check, CheckOutcome, ConformanceReport, Status};
+pub use context_assurance::{
+    assure_context_compilation, ContextCompilationDisposition, ContextCompilationError,
+    ContextCompilationReceipt, ContextCompilationRequest, DecisionQuery,
+    CONTRACT_VERSION as CONTEXT_COMPILATION_CONTRACT_VERSION,
+    FEATURE_ID as CONTEXT_COMPILATION_FEATURE_ID,
+};
+pub use contract_frontier::{
+    compile_adapter_capability_manifest, AdapterCapabilityManifest, AdapterContractInput,
+    ContractFrontierError, ManifestDisposition,
+    COMPATIBLE_CONTRACT_VERSION as CONTRACT_FRONTIER_COMPATIBLE_VERSION,
+    CONTRACT_VERSION as CONTRACT_FRONTIER_CONTRACT_VERSION,
+    CURRENT_CONTRACT_VERSION as CONTRACT_FRONTIER_CURRENT_VERSION,
+    FEATURE_ID as CONTRACT_FRONTIER_FEATURE_ID,
+};
 pub use csv::Table;
+pub use dependency_composition::{
+    infer_adapter_dependency_composition, AdapterCompositionReceipt, AdapterCompositionRequest,
+    AdapterDependencyComponent, CompositionDisposition, DependencyCompositionError,
+    CONTRACT_VERSION as DEPENDENCY_COMPOSITION_CONTRACT_VERSION,
+    FEATURE_ID as DEPENDENCY_COMPOSITION_FEATURE_ID,
+};
+pub use determinism_gateway::{
+    negotiate_capability, CanonicalCapabilityOutput, DeterminismGatewayError,
+    DeterminismGatewayVerdict, TypedCapabilityInput,
+    CONTRACT_VERSION as DETERMINISM_GATEWAY_CONTRACT_VERSION,
+    FEATURE_ID as DETERMINISM_GATEWAY_FEATURE_ID,
+};
 pub use error::{AdapterError, CsvError};
+pub use evaluation_assurance::{
+    assure_evaluation_run, AssuranceVerdict, AssuranceWitness, CapabilityRun,
+    EvaluationAssuranceError, EvaluationAssuranceReceipt, MetricObservation,
+    CONTRACT_VERSION as EVALUATION_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as EVALUATION_ASSURANCE_FEATURE_ID,
+};
+pub use evidence_surveillance::{
+    run_evidence_surveillance, EffectReceipt, EvidenceFeedItem, EvidenceFeedRequest,
+    EvidenceSurveillanceDisposition, EvidenceSurveillanceError, EvidenceSurveillanceReceipt,
+    QualifiedEvidenceSet, CONTRACT_VERSION as EVIDENCE_SURVEILLANCE_CONTRACT_VERSION,
+    FEATURE_ID as EVIDENCE_SURVEILLANCE_FEATURE_ID,
+};
+pub use execution_control::{
+    admit_computational_execution, AuthorizedExecutionEffect, ComputationalExecutionReceipt,
+    ComputationalExecutionRequest, ExecutionAdmissionMode, ExecutionControlDecision,
+    ExecutionControlError, CONTRACT_VERSION as EXECUTION_CONTROL_CONTRACT_VERSION,
+    FEATURE_ID as EXECUTION_CONTROL_FEATURE_ID,
+};
+pub use experiment_design_control::{
+    compile_experiment_design, DesignDecision, DesignSite, ExperimentAssignment,
+    ExperimentDesignError, ExperimentDesignReceipt, ExperimentObjective,
+    FederatedExperimentDesignRequest,
+    CONTRACT_VERSION as EXPERIMENT_DESIGN_CONTROL_CONTRACT_VERSION,
+    FEATURE_ID as EXPERIMENT_DESIGN_CONTROL_FEATURE_ID,
+};
 pub use fact::{FactDraft, ValueQualifiers};
+pub use federated_commons::{
+    admit_federated_commons, CommonsContribution, CommonsDisposition, FederatedCommonsError,
+    FederatedCommonsReceipt, FederatedCommonsRequest,
+    CONTRACT_VERSION as FEDERATED_COMMONS_CONTRACT_VERSION,
+    FEATURE_ID as FEDERATED_COMMONS_FEATURE_ID,
+};
+pub use federated_continual_evidence_surveillance_contract_model::{
+    federated_continual_evidence_surveillance_contract_model_manifest,
+    model_federated_continual_evidence_surveillance_contract, FederatedContinualContractClaim,
+    FederatedContinualContractCompatibility, FederatedContinualContractDisposition,
+    FederatedContinualEvidenceSurveillanceContractError,
+    FederatedContinualEvidenceSurveillanceContractReceipt,
+    FederatedContinualEvidenceSurveillanceContractRequest,
+    CONTRACT_VERSION as ADAPTER_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_FEATURE_ID,
+};
+pub use federated_continual_evidence_surveillance_research_workbench::{
+    federated_continual_evidence_surveillance_research_workbench_manifest,
+    render_federated_continual_evidence_surveillance_research_workbench,
+    FederatedContinualEvidenceSurveillanceResearchWorkbenchError,
+    FederatedContinualEvidenceSurveillanceResearchWorkbenchReceipt,
+    FederatedContinualEvidenceSurveillanceResearchWorkbenchRequest,
+    CONTRACT_VERSION as ADAPTER_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_FEATURE_ID,
+};
+pub use federated_continual_evidence_surveillance_workflow_fabric::{
+    federated_continual_evidence_surveillance_workflow_fabric_manifest,
+    schedule_federated_continual_evidence_surveillance_workflow,
+    FederatedContinualEvidenceSurveillanceWorkflowError,
+    FederatedContinualEvidenceSurveillanceWorkflowReceipt,
+    FederatedContinualEvidenceSurveillanceWorkflowRequest,
+    CONTRACT_VERSION as ADAPTER_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_FEATURE_ID,
+};
+pub use federated_continual_gateway_integrity_contract_model::*;
+pub use federated_continual_gateway_integrity_inference::*;
+pub use federated_continual_gateway_integrity_research_copilot::*;
+pub use federated_continual_gateway_integrity_workflow_fabric::*;
+pub use federated_evidence_surveillance_inference_engine::{
+    federated_evidence_surveillance_inference_engine_manifest, run_federated_evidence_surveillance,
+    FederatedEvidenceObservation, FederatedEvidenceSurveillanceDisposition,
+    FederatedEvidenceSurveillanceError, FederatedEvidenceSurveillanceReceipt,
+    FederatedEvidenceSurveillanceRequest, FederatedQualifiedEvidenceSet,
+    CONTRACT_VERSION as ADAPTER_FEDERATED_EVIDENCE_SURVEILLANCE_INFERENCE_ENGINE_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_FEDERATED_EVIDENCE_SURVEILLANCE_INFERENCE_ENGINE_FEATURE_ID,
+};
+pub use federation_workflow::{
+    schedule_federation_workflow, FederationRequest, FederationTask, FederationWorkflowDecision,
+    FederationWorkflowError, FederationWorkflowReceipt,
+    CONTRACT_VERSION as FEDERATION_WORKFLOW_CONTRACT_VERSION,
+    FEATURE_ID as FEDERATION_WORKFLOW_FEATURE_ID,
+};
+pub use gateway_integrity_support::*;
 pub use ingestion::Ingestion;
+pub use ingestion_gateway::{
+    run_ingestion_gateway, IngestionEffectReceipt, IngestionGatewayDecision, IngestionGatewayError,
+    IngestionGatewayReceipt, IngestionGatewayRequest, RawModalityBundle,
+    CONTRACT_VERSION as INGESTION_GATEWAY_CONTRACT_VERSION,
+    FEATURE_ID as INGESTION_GATEWAY_FEATURE_ID,
+};
+pub use instrument_mesh::{
+    integrate_instrument_mesh, InstrumentActionRequest, InstrumentCapability,
+    InstrumentEffectReceipt, InstrumentMeshDecision, InstrumentMeshError, InstrumentMeshReceipt,
+    CONTRACT_VERSION as INSTRUMENT_MESH_CONTRACT_VERSION, FEATURE_ID as INSTRUMENT_MESH_FEATURE_ID,
+};
+pub use interoperability_gateway::{
+    negotiate_interoperability, ExternalCapability, InteroperabilityDisposition,
+    InteroperabilityGatewayError, InteroperabilityRequest, NegotiatedIntegration,
+    COMPATIBLE_CONTRACT_VERSION as INTEROPERABILITY_COMPATIBLE_CONTRACT_VERSION,
+    CONTRACT_VERSION as INTEROPERABILITY_GATEWAY_CONTRACT_VERSION,
+    FEATURE_ID as INTEROPERABILITY_GATEWAY_FEATURE_ID,
+    TARGET_CONTRACT_VERSION as INTEROPERABILITY_TARGET_CONTRACT_VERSION,
+};
+pub use interpretation_assurance::{
+    assure_interpretation, EvidenceBackedResult, InterpretationAssuranceError,
+    InterpretationAssuranceReceipt, InterpretationClaim, InterpretationVerdict,
+    CONTRACT_VERSION as INTERPRETATION_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as INTERPRETATION_ASSURANCE_FEATURE_ID,
+};
 pub use inventory::{InventoryAdapter, InventoryProfile};
+pub use knowledge_workflow::{
+    run_knowledge_workflow, ClaimsWorkflowRequest, KnowledgeWorkflowDisposition,
+    KnowledgeWorkflowError, KnowledgeWorkflowReceipt, TypedKnowledgeWorld,
+    CONTRACT_VERSION as KNOWLEDGE_WORKFLOW_CONTRACT_VERSION,
+    FEATURE_ID as KNOWLEDGE_WORKFLOW_FEATURE_ID,
+};
+pub use limitation_closure::{
+    close_adapter_limitations, AdapterClosureReceipt, AdapterLimitationCase, ClosureDisposition,
+    LimitationClosureError, LimitationClosureRequest, LimitationStatus,
+    CONTRACT_VERSION as LIMITATION_CLOSURE_CONTRACT_VERSION,
+    FEATURE_ID as LIMITATION_CLOSURE_FEATURE_ID,
+};
+pub use local_evidence_surveillance_contract_model::{
+    local_evidence_surveillance_contract_model_manifest,
+    model_local_evidence_surveillance_contract, ContractCompatibilityDisposition,
+    ContractModelClaim, ContractModelDisposition, LocalEvidenceSurveillanceContractError,
+    LocalEvidenceSurveillanceContractReceipt, LocalEvidenceSurveillanceContractRequest,
+    CONTRACT_VERSION as ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_FEATURE_ID,
+};
+pub use local_evidence_surveillance_inference_engine::{
+    local_evidence_surveillance_inference_engine_manifest, run_local_evidence_surveillance,
+    LocalEvidenceObservation, LocalEvidenceSurveillanceDisposition, LocalEvidenceSurveillanceError,
+    LocalEvidenceSurveillanceReceipt, LocalEvidenceSurveillanceRequest, LocalQualifiedEvidenceSet,
+    CONTRACT_VERSION as ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_INFERENCE_ENGINE_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_INFERENCE_ENGINE_FEATURE_ID,
+};
+pub use local_evidence_surveillance_research_workbench::{
+    local_evidence_surveillance_research_workbench_manifest,
+    render_local_evidence_surveillance_research_workbench,
+    LocalEvidenceSurveillanceResearchWorkbenchError,
+    LocalEvidenceSurveillanceResearchWorkbenchReceipt,
+    LocalEvidenceSurveillanceResearchWorkbenchRequest,
+    CONTRACT_VERSION as ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_FEATURE_ID,
+};
+pub use local_evidence_surveillance_workflow_fabric::{
+    local_evidence_surveillance_workflow_fabric_manifest,
+    schedule_local_evidence_surveillance_workflow, LocalEvidenceSurveillanceWorkflowError,
+    LocalEvidenceSurveillanceWorkflowReceipt, LocalEvidenceSurveillanceWorkflowRequest,
+    CONTRACT_VERSION as ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_FEATURE_ID,
+};
+pub use local_gateway_integrity_contract_model::*;
+pub use local_gateway_integrity_inference::*;
+pub use local_gateway_integrity_research_copilot::*;
+pub use local_gateway_integrity_workflow_fabric::*;
 pub use location::{LocationSet, SourceLocation};
 pub use loss::{LossAudit, LossEntry, LossKind, LossReport, LossSeverity, SemanticLoss};
+pub use mechanism_control_plane::{
+    operate_mechanism_control_plane, MechanismControlDisposition, MechanismControlError,
+    MechanismControlPlaneReceipt, MechanismControlPlaneRequest,
+    CONTRACT_VERSION as MECHANISM_CONTROL_PLANE_CONTRACT_VERSION,
+    FEATURE_ID as MECHANISM_CONTROL_PLANE_FEATURE_ID,
+};
+pub use multimodal_evidence_surveillance_contract_model::{
+    model_multimodal_evidence_surveillance_contract,
+    multimodal_evidence_surveillance_contract_model_manifest, MultimodalContractClaim,
+    MultimodalContractCompatibility, MultimodalContractDisposition,
+    MultimodalEvidenceSurveillanceContractError, MultimodalEvidenceSurveillanceContractReceipt,
+    MultimodalEvidenceSurveillanceContractRequest,
+    CONTRACT_VERSION as ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_FEATURE_ID,
+};
+pub use multimodal_evidence_surveillance_inference_engine::{
+    multimodal_evidence_surveillance_inference_engine_manifest,
+    run_multimodal_evidence_surveillance, MultimodalEvidenceObservation,
+    MultimodalEvidenceSurveillanceDisposition, MultimodalEvidenceSurveillanceError,
+    MultimodalEvidenceSurveillanceReceipt, MultimodalEvidenceSurveillanceRequest,
+    MultimodalQualifiedEvidenceSet,
+    CONTRACT_VERSION as ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_INFERENCE_ENGINE_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_INFERENCE_ENGINE_FEATURE_ID,
+};
+pub use multimodal_evidence_surveillance_research_workbench::{
+    multimodal_evidence_surveillance_research_workbench_manifest,
+    render_multimodal_evidence_surveillance_research_workbench,
+    MultimodalEvidenceSurveillanceResearchWorkbenchError,
+    MultimodalEvidenceSurveillanceResearchWorkbenchReceipt,
+    MultimodalEvidenceSurveillanceResearchWorkbenchRequest,
+    CONTRACT_VERSION as ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_FEATURE_ID,
+};
+pub use multimodal_evidence_surveillance_workflow_fabric::{
+    multimodal_evidence_surveillance_workflow_fabric_manifest,
+    schedule_multimodal_evidence_surveillance_workflow,
+    MultimodalEvidenceSurveillanceWorkflowError, MultimodalEvidenceSurveillanceWorkflowReceipt,
+    MultimodalEvidenceSurveillanceWorkflowRequest,
+    CONTRACT_VERSION as ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_FEATURE_ID,
+};
+pub use multimodal_gateway_integrity_contract_model::*;
+pub use multimodal_gateway_integrity_inference::*;
+pub use multimodal_gateway_integrity_research_copilot::*;
+pub use multimodal_gateway_integrity_workflow_fabric::*;
+pub use multimodal_harmonization::{
+    harmonize_multimodal, HarmonizationDecision, HarmonizationError, HarmonizedResearchObject,
+    ModalityManifest, MultimodalHarmonizationRequest,
+    FEATURE_ID as MULTIMODAL_HARMONIZATION_FEATURE_ID,
+    FEATURE_VERSION as MULTIMODAL_HARMONIZATION_FEATURE_VERSION,
+};
+pub use policy_gateway::{
+    admit_policy_action, ActionAndAuthority, PolicyGatewayDecision, PolicyGatewayError,
+    PolicyGatewayReceipt, CONTRACT_VERSION as POLICY_GATEWAY_CONTRACT_VERSION,
+    FEATURE_ID as POLICY_GATEWAY_FEATURE_ID,
+};
 pub use probe::{field_inventory, Inventory};
+pub use protocol_simulation::{
+    simulate_protocol_draft, ProtocolDraft, ProtocolOperation, ProtocolScenario,
+    ProtocolScenarioResult, ProtocolSimulationError, ProtocolSimulationReceipt,
+    ProtocolSimulationState, ProtocolStep,
+    CONTRACT_VERSION as PROTOCOL_SIMULATION_CONTRACT_VERSION,
+    FEATURE_ID as PROTOCOL_SIMULATION_FEATURE_ID,
+};
+pub use provenance_assurance::{
+    assure_provenance, ArtifactAndDerivation, DerivationStep, ProvenanceArtifact,
+    ProvenanceAssuranceError, ProvenanceAssuranceVerdict, SignedProvenanceEnvelope,
+    CONTRACT_VERSION as PROVENANCE_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as PROVENANCE_ASSURANCE_FEATURE_ID,
+};
+pub use quality_control::{
+    evaluate_quality_control, manifest as quality_control_manifest, MetricDirection, MetricStatus,
+    QualityControlError, QualityControlReceipt, QualityControlRequest, QualityControlSummary,
+    QualityDisposition, QualityMetric,
+};
+pub use quality_drift::{
+    evaluate_quality_drift, quality_drift_manifest, DriftDisposition, DriftMetric,
+    DriftMetricResult, DriftMetricStatus, QualityDriftError, QualityDriftPolicy,
+    QualityDriftReceipt, QualityDriftRequest, QualityDriftSummary,
+    FEATURE_ID as QUALITY_DRIFT_FEATURE_ID, FEATURE_VERSION as QUALITY_DRIFT_FEATURE_VERSION,
+};
+pub use quality_envelope::{
+    evaluate_quality_envelope, QualityEnvelopeDecision, QualityEnvelopeError,
+    QualityEnvelopeReceipt, QualityEnvelopeRequest, StudyQualityRecord, StudyQualityVerdict,
+    CONTRACT_VERSION as QUALITY_ENVELOPE_CONTRACT_VERSION,
+    FEATURE_ID as QUALITY_ENVELOPE_FEATURE_ID,
+};
 pub use registry::{
     AdapterDescriptor, AdapterExecution, AdapterPlan, AdapterPlanCandidate, AdapterPlanRequest,
     AdapterRegistry, PlanStatus, RegistryError, SourceKind, ADAPTER_REGISTRY_SCHEMA_VERSION,
+};
+pub use release_assurance::{
+    assure_release, ReleaseAssuranceError, ReleaseAssuranceReceipt, ReleaseAssuranceVerdict,
+    ReleaseStudyManifest, ValidatedResearchRun,
+    CONTRACT_VERSION as RELEASE_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as RELEASE_ASSURANCE_FEATURE_ID,
+};
+pub use reliability_copilot::{
+    plan_reliable_capability, CapabilityWorkload, ReliabilityCopilotError, ReliabilityDecision,
+    ReliableCapabilityResult, ToolInvocation, ToolManifest,
+    CONTRACT_VERSION as RELIABILITY_COPILOT_CONTRACT_VERSION,
+    FEATURE_ID as RELIABILITY_COPILOT_FEATURE_ID,
+};
+pub use replication_assurance::{
+    assure_replication, ClaimAndProtocol, ReplicationAssuranceError, ReplicationAssuranceReceipt,
+    ReplicationAssuranceRequest, ReplicationObservation, ReplicationOutcome, ReplicationVerdict,
+    CONTRACT_VERSION as REPLICATION_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as REPLICATION_ASSURANCE_FEATURE_ID,
+};
+pub use research_ingest::{
+    certify_research_ingest, ResearchIngestionBundle, ResearchIngestionError,
+};
+pub use research_workbench::{
+    compile_research_workbench, ComparabilityStatus, InteractiveResearchWorkspace,
+    ResearchWorkbenchError, ResearchWorkspaceState, StudyWorkspaceEntry, WorkspaceDisposition,
+    WorkspaceViewRequest, CONTRACT_VERSION as RESEARCH_WORKBENCH_CONTRACT_VERSION,
+    FEATURE_ID as RESEARCH_WORKBENCH_FEATURE_ID,
+};
+pub use resource_workbench::{
+    discover_resources, QualifiedResource, ResourceCandidate, ResourceNeed, ResourceOmission,
+    ResourceWorkbenchDisposition, ResourceWorkbenchError, ResourceWorkbenchReceipt,
+    CONTRACT_VERSION as RESOURCE_WORKBENCH_CONTRACT_VERSION,
+    FEATURE_ID as RESOURCE_WORKBENCH_FEATURE_ID,
+};
+pub use retrieval_synthesis::{
+    compile_evidence_synthesis, EvidenceSynthesis, EvidenceSynthesisDisposition,
+    EvidenceSynthesisRequest, RetrievalCandidate, RetrievalSynthesisError,
+    RetrievalSynthesisReceipt, ScopedRetrievalQuery, SynthesisEffectReceipt,
+    CONTRACT_VERSION as RETRIEVAL_SYNTHESIS_CONTRACT_VERSION,
+    FEATURE_ID as RETRIEVAL_SYNTHESIS_FEATURE_ID,
+};
+pub use scale_frontier::{
+    plan_adapter_scale_frontier, ScaleDisposition, ScaleFrontierError, ScaleFrontierReceipt,
+    ScaleFrontierRequest, ScaleScenario,
+    CONTRACT_VERSION as ADAPTER_SCALE_FRONTIER_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_SCALE_FRONTIER_FEATURE_ID,
+};
+pub use semantic_parity::{
+    evaluate_adapter_semantic_parity, AdapterSemanticParityReceipt, AdapterSemanticParityRequest,
+    AdapterSemanticReport, SemanticParityDisposition, SemanticParityError,
+    CONTRACT_VERSION as ADAPTER_SEMANTIC_PARITY_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_SEMANTIC_PARITY_FEATURE_ID,
 };
 pub use source::{Locator, Source, SourceManifest, SourceProvenance};
 pub use tabular::{
     ColumnRole, FramePolicy, OntologyPolicy, TabularAdapter, TabularProfile, TypePolicy,
     UnitPolicy, ValueType, VariableMapping,
+};
+pub use throughput_evidence_surveillance_contract_model::{
+    model_throughput_evidence_surveillance_contract,
+    throughput_evidence_surveillance_contract_model_manifest, ThroughputContractClaim,
+    ThroughputContractCompatibility, ThroughputContractDisposition,
+    ThroughputEvidenceSurveillanceContractError, ThroughputEvidenceSurveillanceContractReceipt,
+    ThroughputEvidenceSurveillanceContractRequest,
+    CONTRACT_VERSION as ADAPTER_THROUGHPUT_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_THROUGHPUT_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_FEATURE_ID,
+};
+pub use throughput_evidence_surveillance_inference_engine::{
+    run_throughput_evidence_surveillance,
+    throughput_evidence_surveillance_inference_engine_manifest, ThroughputEvidenceObservation,
+    ThroughputEvidenceSurveillanceDisposition, ThroughputEvidenceSurveillanceError,
+    ThroughputEvidenceSurveillanceReceipt, ThroughputEvidenceSurveillanceRequest,
+    ThroughputQualifiedEvidenceSet,
+    CONTRACT_VERSION as ADAPTER_THROUGHPUT_EVIDENCE_SURVEILLANCE_INFERENCE_ENGINE_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_THROUGHPUT_EVIDENCE_SURVEILLANCE_INFERENCE_ENGINE_FEATURE_ID,
+};
+pub use throughput_evidence_surveillance_research_workbench::{
+    render_throughput_evidence_surveillance_research_workbench,
+    throughput_evidence_surveillance_research_workbench_manifest,
+    ThroughputEvidenceSurveillanceResearchWorkbenchError,
+    ThroughputEvidenceSurveillanceResearchWorkbenchReceipt,
+    ThroughputEvidenceSurveillanceResearchWorkbenchRequest,
+    CONTRACT_VERSION as ADAPTER_THROUGHPUT_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_THROUGHPUT_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_FEATURE_ID,
+};
+pub use throughput_evidence_surveillance_workflow_fabric::{
+    schedule_throughput_evidence_surveillance_workflow,
+    throughput_evidence_surveillance_workflow_fabric_manifest,
+    ThroughputEvidenceSurveillanceWorkflowError, ThroughputEvidenceSurveillanceWorkflowReceipt,
+    ThroughputEvidenceSurveillanceWorkflowRequest,
+    CONTRACT_VERSION as ADAPTER_THROUGHPUT_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_THROUGHPUT_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_FEATURE_ID,
+};
+pub use throughput_gateway_integrity_contract_model::*;
+pub use throughput_gateway_integrity_inference::*;
+pub use throughput_gateway_integrity_research_copilot::*;
+pub use throughput_gateway_integrity_workflow_fabric::*;
+pub mod federated_context_copilot;
+pub mod federated_continual_retrieval_synthesis_assurance_harness;
+pub mod federated_continual_retrieval_synthesis_federated_control_plane;
+pub mod federated_continual_retrieval_synthesis_interoperability_gateway;
+pub mod federated_continual_retrieval_synthesis_research_copilot;
+pub mod federated_continual_retrieval_synthesis_research_workbench;
+pub mod federated_continual_retrieval_synthesis_workflow_fabric;
+pub mod federated_retrieval_synthesis_contract_model;
+pub mod federated_retrieval_synthesis_inference_engine;
+pub mod local_retrieval_synthesis_assurance_harness;
+pub mod local_retrieval_synthesis_contract_model;
+pub mod local_retrieval_synthesis_federated_control_plane;
+pub mod local_retrieval_synthesis_inference_engine;
+pub mod local_retrieval_synthesis_interoperability_gateway;
+pub mod local_retrieval_synthesis_research_copilot;
+pub mod local_retrieval_synthesis_research_workbench;
+pub mod local_retrieval_synthesis_workflow_fabric;
+pub mod multimodal_retrieval_synthesis_assurance_harness;
+pub mod multimodal_retrieval_synthesis_federated_control_plane;
+pub mod multimodal_retrieval_synthesis_inference_engine;
+pub mod multimodal_retrieval_synthesis_interoperability_gateway;
+pub mod multimodal_retrieval_synthesis_research_copilot;
+pub mod multimodal_retrieval_synthesis_research_workbench;
+pub mod multimodal_retrieval_synthesis_workflow_fabric;
+pub mod throughput_retrieval_synthesis_assurance_harness;
+pub mod throughput_retrieval_synthesis_contract_model;
+pub mod throughput_retrieval_synthesis_federated_control_plane;
+pub mod throughput_retrieval_synthesis_inference_engine;
+pub mod throughput_retrieval_synthesis_interoperability_gateway;
+pub mod throughput_retrieval_synthesis_research_copilot;
+pub mod throughput_retrieval_synthesis_research_workbench;
+pub mod throughput_retrieval_synthesis_workflow_fabric;
+pub use federated_context_copilot::{
+    federated_context_copilot_manifest, qualify_federated_context, ContextFact6,
+    FederatedContextDisposition, FederatedContextError, FederatedContextQuestion5,
+    FederatedContextReceipt7, CONTRACT_VERSION as FEDERATED_CONTEXT_COPILOT_CONTRACT_VERSION,
+    FEATURE_ID as FEDERATED_CONTEXT_COPILOT_FEATURE_ID,
+};
+pub use federated_continual_evidence_surveillance_research_copilot::{
+    federated_continual_evidence_surveillance_research_copilot_manifest,
+    run_federated_continual_evidence_surveillance_research_copilot,
+    FederatedContinualEvidenceSurveillanceResearchCopilotError,
+    FederatedContinualEvidenceSurveillanceResearchCopilotReceipt,
+    FederatedContinualEvidenceSurveillanceResearchCopilotRequest,
+    FederatedContinualResearchCopilotDisposition, FederatedCopilotEvidenceContribution,
+    FederatedCopilotQualifiedEvidenceSet,
+    CONTRACT_VERSION as ADAPTER_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_FEATURE_ID,
+};
+pub use federated_continual_retrieval_synthesis_assurance_harness::{
+    assure_federated_continual_retrieval_synthesis,
+    federated_continual_retrieval_synthesis_assurance_harness_manifest,
+    FederatedContinualRetrievalSynthesisAssuranceHarnessError,
+    FederatedContinualRetrievalSynthesisAssuranceHarnessReceipt,
+    FederatedContinualRetrievalSynthesisAssuranceHarnessRequest,
+    CONTRACT_VERSION as ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_FEATURE_ID,
+};
+pub use federated_continual_retrieval_synthesis_federated_control_plane::{
+    federated_continual_retrieval_synthesis_federated_control_plane_manifest,
+    operate_federated_continual_retrieval_synthesis_federated_control_plane,
+    FederatedContinualRetrievalSynthesisFederatedControlPlaneError,
+    FederatedContinualRetrievalSynthesisFederatedControlPlaneReceipt,
+    FederatedContinualRetrievalSynthesisFederatedControlPlaneRequest,
+    CONTRACT_VERSION as ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_FEATURE_ID,
+};
+pub use federated_continual_retrieval_synthesis_interoperability_gateway::{
+    federated_continual_retrieval_synthesis_interoperability_gateway_manifest,
+    render_federated_continual_retrieval_synthesis_interoperability_gateway,
+    FederatedContinualRetrievalSynthesisInteroperabilityGatewayError,
+    FederatedContinualRetrievalSynthesisInteroperabilityGatewayReceipt,
+    FederatedContinualRetrievalSynthesisInteroperabilityGatewayRequest,
+    CONTRACT_VERSION as ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_INTEROPERABILITY_GATEWAY_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_INTEROPERABILITY_GATEWAY_FEATURE_ID,
+};
+pub use federated_continual_retrieval_synthesis_research_copilot::{
+    federated_continual_retrieval_synthesis_research_copilot_manifest,
+    run_federated_continual_retrieval_synthesis_research_copilot,
+    FederatedContinualRetrievalSynthesisResearchCopilotError,
+    FederatedContinualRetrievalSynthesisResearchCopilotReceipt,
+    FederatedContinualRetrievalSynthesisResearchCopilotRequest,
+    CONTRACT_VERSION as ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_RESEARCH_COPILOT_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_RESEARCH_COPILOT_FEATURE_ID,
+};
+pub use federated_continual_retrieval_synthesis_research_workbench::{
+    federated_continual_retrieval_synthesis_research_workbench_manifest,
+    render_federated_continual_retrieval_synthesis_research_workbench,
+    FederatedContinualRetrievalSynthesisResearchWorkbenchError,
+    FederatedContinualRetrievalSynthesisResearchWorkbenchReceipt,
+    FederatedContinualRetrievalSynthesisResearchWorkbenchRequest,
+    CONTRACT_VERSION as ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_RESEARCH_WORKBENCH_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_RESEARCH_WORKBENCH_FEATURE_ID,
+};
+pub use federated_continual_retrieval_synthesis_workflow_fabric::{
+    federated_continual_retrieval_synthesis_workflow_fabric_manifest,
+    schedule_federated_continual_retrieval_synthesis_workflow,
+    FederatedContinualRetrievalSynthesisWorkflowError,
+    FederatedContinualRetrievalSynthesisWorkflowReceipt,
+    FederatedContinualRetrievalSynthesisWorkflowRequest,
+    CONTRACT_VERSION as ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_FEATURE_ID,
+};
+pub use federated_retrieval_synthesis_contract_model::{
+    federated_retrieval_synthesis_contract_model_manifest,
+    run_federated_retrieval_synthesis_contract_model,
+    FederatedRetrievalSynthesisContractModelError, FederatedRetrievalSynthesisContractModelReceipt,
+    FederatedRetrievalSynthesisContractModelRequest,
+    CONTRACT_VERSION as ADAPTER_FEDERATED_RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_FEDERATED_RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_FEATURE_ID,
+};
+pub use federated_retrieval_synthesis_inference_engine::{
+    federated_retrieval_synthesis_inference_engine_manifest,
+    run_federated_retrieval_synthesis_inference_engine,
+    FederatedRetrievalSynthesisInferenceEngineError,
+    FederatedRetrievalSynthesisInferenceEngineReceipt,
+    FederatedRetrievalSynthesisInferenceEngineRequest,
+    CONTRACT_VERSION as ADAPTER_FEDERATED_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_FEDERATED_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_FEATURE_ID,
+};
+pub use local_evidence_surveillance_research_copilot::{
+    local_evidence_surveillance_research_copilot_manifest,
+    run_local_evidence_surveillance_research_copilot, CopilotEvidenceObservation,
+    CopilotQualifiedEvidenceSet, LocalEvidenceSurveillanceResearchCopilotError,
+    LocalEvidenceSurveillanceResearchCopilotReceipt,
+    LocalEvidenceSurveillanceResearchCopilotRequest, ResearchCopilotDisposition,
+    CONTRACT_VERSION as ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_FEATURE_ID,
+};
+pub use local_retrieval_synthesis_assurance_harness::{
+    assure_local_retrieval_synthesis, local_retrieval_synthesis_assurance_harness_manifest,
+    LocalRetrievalSynthesisAssuranceHarnessError, LocalRetrievalSynthesisAssuranceHarnessReceipt,
+    LocalRetrievalSynthesisAssuranceHarnessRequest,
+    CONTRACT_VERSION as ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_FEATURE_ID,
+};
+pub use local_retrieval_synthesis_contract_model::{
+    local_retrieval_synthesis_contract_model_manifest,
+    run_local_retrieval_synthesis_contract_model, LocalRetrievalSynthesisContractModelError,
+    LocalRetrievalSynthesisContractModelReceipt, LocalRetrievalSynthesisContractModelRequest,
+    CONTRACT_VERSION as ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_FEATURE_ID,
+};
+pub use local_retrieval_synthesis_federated_control_plane::{
+    local_retrieval_synthesis_federated_control_plane_manifest,
+    operate_local_retrieval_synthesis_federated_control_plane,
+    LocalRetrievalSynthesisFederatedControlPlaneError,
+    LocalRetrievalSynthesisFederatedControlPlaneReceipt,
+    LocalRetrievalSynthesisFederatedControlPlaneRequest,
+    CONTRACT_VERSION as ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_FEATURE_ID,
+};
+pub use local_retrieval_synthesis_inference_engine::{
+    local_retrieval_synthesis_inference_engine_manifest,
+    run_local_retrieval_synthesis_inference_engine, LocalRetrievalSynthesisInferenceEngineError,
+    LocalRetrievalSynthesisInferenceEngineReceipt, LocalRetrievalSynthesisInferenceEngineRequest,
+    CONTRACT_VERSION as ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_FEATURE_ID,
+};
+pub use local_retrieval_synthesis_interoperability_gateway::{
+    local_retrieval_synthesis_interoperability_gateway_manifest,
+    render_local_retrieval_synthesis_interoperability_gateway,
+    LocalRetrievalSynthesisInteroperabilityGatewayError,
+    LocalRetrievalSynthesisInteroperabilityGatewayReceipt,
+    LocalRetrievalSynthesisInteroperabilityGatewayRequest,
+    CONTRACT_VERSION as ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_INTEROPERABILITY_GATEWAY_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_INTEROPERABILITY_GATEWAY_FEATURE_ID,
+};
+pub use local_retrieval_synthesis_research_copilot::{
+    local_retrieval_synthesis_research_copilot_manifest,
+    run_local_retrieval_synthesis_research_copilot, LocalRetrievalSynthesisResearchCopilotError,
+    LocalRetrievalSynthesisResearchCopilotReceipt, LocalRetrievalSynthesisResearchCopilotRequest,
+    CONTRACT_VERSION as ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_RESEARCH_COPILOT_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_RESEARCH_COPILOT_FEATURE_ID,
+};
+pub use local_retrieval_synthesis_research_workbench::{
+    local_retrieval_synthesis_research_workbench_manifest,
+    render_local_retrieval_synthesis_research_workbench,
+    LocalRetrievalSynthesisResearchWorkbenchError, LocalRetrievalSynthesisResearchWorkbenchReceipt,
+    LocalRetrievalSynthesisResearchWorkbenchRequest,
+    CONTRACT_VERSION as ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_RESEARCH_WORKBENCH_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_RESEARCH_WORKBENCH_FEATURE_ID,
+};
+pub use local_retrieval_synthesis_workflow_fabric::{
+    local_retrieval_synthesis_workflow_fabric_manifest,
+    schedule_local_retrieval_synthesis_workflow, LocalRetrievalSynthesisWorkflowError,
+    LocalRetrievalSynthesisWorkflowReceipt, LocalRetrievalSynthesisWorkflowRequest,
+    CONTRACT_VERSION as ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_FEATURE_ID,
+};
+pub use multimodal_evidence_surveillance_research_copilot::{
+    multimodal_evidence_surveillance_research_copilot_manifest,
+    run_multimodal_evidence_surveillance_research_copilot, MultimodalCopilotEvidenceObservation,
+    MultimodalCopilotQualifiedEvidenceSet, MultimodalEvidenceSurveillanceResearchCopilotError,
+    MultimodalEvidenceSurveillanceResearchCopilotReceipt,
+    MultimodalEvidenceSurveillanceResearchCopilotRequest, MultimodalResearchCopilotDisposition,
+    CONTRACT_VERSION as ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_FEATURE_ID,
+};
+pub use multimodal_retrieval_synthesis_assurance_harness::{
+    assure_multimodal_retrieval_synthesis,
+    multimodal_retrieval_synthesis_assurance_harness_manifest,
+    MultimodalRetrievalSynthesisAssuranceHarnessError,
+    MultimodalRetrievalSynthesisAssuranceHarnessReceipt,
+    MultimodalRetrievalSynthesisAssuranceHarnessRequest,
+    CONTRACT_VERSION as ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_FEATURE_ID,
+};
+pub use multimodal_retrieval_synthesis_federated_control_plane::{
+    multimodal_retrieval_synthesis_federated_control_plane_manifest,
+    operate_multimodal_retrieval_synthesis_federated_control_plane,
+    MultimodalRetrievalSynthesisFederatedControlPlaneError,
+    MultimodalRetrievalSynthesisFederatedControlPlaneReceipt,
+    MultimodalRetrievalSynthesisFederatedControlPlaneRequest,
+    CONTRACT_VERSION as ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_FEATURE_ID,
+};
+pub use multimodal_retrieval_synthesis_inference_engine::{
+    multimodal_retrieval_synthesis_inference_engine_manifest,
+    run_multimodal_retrieval_synthesis_inference_engine,
+    MultimodalRetrievalSynthesisInferenceEngineError,
+    MultimodalRetrievalSynthesisInferenceEngineReceipt,
+    MultimodalRetrievalSynthesisInferenceEngineRequest,
+    CONTRACT_VERSION as ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_FEATURE_ID,
+};
+pub use multimodal_retrieval_synthesis_interoperability_gateway::{
+    multimodal_retrieval_synthesis_interoperability_gateway_manifest,
+    render_multimodal_retrieval_synthesis_interoperability_gateway,
+    MultimodalRetrievalSynthesisInteroperabilityGatewayError,
+    MultimodalRetrievalSynthesisInteroperabilityGatewayReceipt,
+    MultimodalRetrievalSynthesisInteroperabilityGatewayRequest,
+    CONTRACT_VERSION as ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_INTEROPERABILITY_GATEWAY_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_INTEROPERABILITY_GATEWAY_FEATURE_ID,
+};
+pub use multimodal_retrieval_synthesis_research_copilot::{
+    multimodal_retrieval_synthesis_research_copilot_manifest,
+    run_multimodal_retrieval_synthesis_research_copilot,
+    MultimodalRetrievalSynthesisResearchCopilotError,
+    MultimodalRetrievalSynthesisResearchCopilotReceipt,
+    MultimodalRetrievalSynthesisResearchCopilotRequest,
+    CONTRACT_VERSION as ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_RESEARCH_COPILOT_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_RESEARCH_COPILOT_FEATURE_ID,
+};
+pub use multimodal_retrieval_synthesis_research_workbench::{
+    multimodal_retrieval_synthesis_research_workbench_manifest,
+    render_multimodal_retrieval_synthesis_research_workbench,
+    MultimodalRetrievalSynthesisResearchWorkbenchError,
+    MultimodalRetrievalSynthesisResearchWorkbenchReceipt,
+    MultimodalRetrievalSynthesisResearchWorkbenchRequest,
+    CONTRACT_VERSION as ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_RESEARCH_WORKBENCH_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_RESEARCH_WORKBENCH_FEATURE_ID,
+};
+pub use multimodal_retrieval_synthesis_workflow_fabric::{
+    multimodal_retrieval_synthesis_workflow_fabric_manifest,
+    schedule_multimodal_retrieval_synthesis_workflow, MultimodalRetrievalSynthesisWorkflowError,
+    MultimodalRetrievalSynthesisWorkflowReceipt, MultimodalRetrievalSynthesisWorkflowRequest,
+    CONTRACT_VERSION as ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_FEATURE_ID,
+};
+pub use throughput_evidence_surveillance_research_copilot::{
+    run_throughput_evidence_surveillance_research_copilot,
+    throughput_evidence_surveillance_research_copilot_manifest,
+    ThroughputCopilotEvidenceObservation, ThroughputCopilotQualifiedEvidenceSet,
+    ThroughputEvidenceSurveillanceResearchCopilotError,
+    ThroughputEvidenceSurveillanceResearchCopilotReceipt,
+    ThroughputEvidenceSurveillanceResearchCopilotRequest, ThroughputResearchCopilotDisposition,
+    CONTRACT_VERSION as ADAPTER_THROUGHPUT_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_THROUGHPUT_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_FEATURE_ID,
+};
+pub use throughput_retrieval_synthesis_assurance_harness::{
+    assure_throughput_retrieval_synthesis,
+    throughput_retrieval_synthesis_assurance_harness_manifest,
+    ThroughputRetrievalSynthesisAssuranceHarnessError,
+    ThroughputRetrievalSynthesisAssuranceHarnessReceipt,
+    ThroughputRetrievalSynthesisAssuranceHarnessRequest,
+    CONTRACT_VERSION as ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_FEATURE_ID,
+};
+pub use throughput_retrieval_synthesis_contract_model::{
+    run_throughput_retrieval_synthesis_contract_model,
+    throughput_retrieval_synthesis_contract_model_manifest,
+    ThroughputRetrievalSynthesisContractModelError,
+    ThroughputRetrievalSynthesisContractModelReceipt,
+    ThroughputRetrievalSynthesisContractModelRequest,
+    CONTRACT_VERSION as ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_FEATURE_ID,
+};
+pub use throughput_retrieval_synthesis_federated_control_plane::{
+    operate_throughput_retrieval_synthesis_federated_control_plane,
+    throughput_retrieval_synthesis_federated_control_plane_manifest,
+    ThroughputRetrievalSynthesisFederatedControlPlaneError,
+    ThroughputRetrievalSynthesisFederatedControlPlaneReceipt,
+    ThroughputRetrievalSynthesisFederatedControlPlaneRequest,
+    CONTRACT_VERSION as ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_FEATURE_ID,
+};
+pub use throughput_retrieval_synthesis_inference_engine::{
+    run_throughput_retrieval_synthesis_inference_engine,
+    throughput_retrieval_synthesis_inference_engine_manifest,
+    ThroughputRetrievalSynthesisInferenceEngineError,
+    ThroughputRetrievalSynthesisInferenceEngineReceipt,
+    ThroughputRetrievalSynthesisInferenceEngineRequest,
+    CONTRACT_VERSION as ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_FEATURE_ID,
+};
+pub use throughput_retrieval_synthesis_interoperability_gateway::{
+    render_throughput_retrieval_synthesis_interoperability_gateway,
+    throughput_retrieval_synthesis_interoperability_gateway_manifest,
+    ThroughputRetrievalSynthesisInteroperabilityGatewayError,
+    ThroughputRetrievalSynthesisInteroperabilityGatewayReceipt,
+    ThroughputRetrievalSynthesisInteroperabilityGatewayRequest,
+    CONTRACT_VERSION as ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_INTEROPERABILITY_GATEWAY_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_INTEROPERABILITY_GATEWAY_FEATURE_ID,
+};
+pub use throughput_retrieval_synthesis_research_copilot::{
+    run_throughput_retrieval_synthesis_research_copilot,
+    throughput_retrieval_synthesis_research_copilot_manifest,
+    ThroughputRetrievalSynthesisResearchCopilotError,
+    ThroughputRetrievalSynthesisResearchCopilotReceipt,
+    ThroughputRetrievalSynthesisResearchCopilotRequest,
+    CONTRACT_VERSION as ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_RESEARCH_COPILOT_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_RESEARCH_COPILOT_FEATURE_ID,
+};
+pub use throughput_retrieval_synthesis_research_workbench::{
+    render_throughput_retrieval_synthesis_research_workbench,
+    throughput_retrieval_synthesis_research_workbench_manifest,
+    ThroughputRetrievalSynthesisResearchWorkbenchError,
+    ThroughputRetrievalSynthesisResearchWorkbenchReceipt,
+    ThroughputRetrievalSynthesisResearchWorkbenchRequest,
+    CONTRACT_VERSION as ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_RESEARCH_WORKBENCH_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_RESEARCH_WORKBENCH_FEATURE_ID,
+};
+pub use throughput_retrieval_synthesis_workflow_fabric::{
+    schedule_throughput_retrieval_synthesis_workflow,
+    throughput_retrieval_synthesis_workflow_fabric_manifest,
+    ThroughputRetrievalSynthesisWorkflowError, ThroughputRetrievalSynthesisWorkflowReceipt,
+    ThroughputRetrievalSynthesisWorkflowRequest,
+    CONTRACT_VERSION as ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_FEATURE_ID,
 };

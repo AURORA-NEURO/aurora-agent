@@ -1,0 +1,4 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema","$id":"https://aurora-neuro.org/schemas/aurora-research-contract-v1/worldgen-throughput-evidence-surveillance-operations.json","title":"AURORA worldgen throughput evidence surveillance operations receipt","type":"object","additionalProperties":false,
+  "allOf":[{"$ref":"worldgen-local-evidence-surveillance-operations.json"}],"properties":{"contract_version":{"const":"worldgen-throughput-evidence-surveillance-operations/1.0"},"feature_id":{"const":"AFA-worldgen-P01-F31"},"scale":{"const":"prospective high-throughput"},"input_schema":{"const":"EvidenceFeed3@1"}}
+}

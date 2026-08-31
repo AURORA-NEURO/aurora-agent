@@ -9,6 +9,14 @@ use bioprism_ids::CanonicalError;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum BundleError {
+    /// A value that should be authenticated could not be serialized. Refusing is safer than
+    /// hashing a substitute representation or allowing a malformed bundle to escape.
+    #[error("{context} could not be serialized: {detail}")]
+    SerializationFailed {
+        context: &'static str,
+        detail: String,
+    },
+
     /// A manifest entry's recorded digest disagrees with the content the bundle actually carries.
     ///
     /// This is the failure the whole verify path exists to catch: a manifest is a claim about

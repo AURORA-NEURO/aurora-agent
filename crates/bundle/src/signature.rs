@@ -550,7 +550,9 @@ fn preimage_bytes(
     );
     map.insert(
         "purpose".into(),
-        serde_json::to_value(purpose).expect("a purpose is serialisable"),
+        serde_json::to_value(purpose).map_err(|error| BundleError::AttestationUnreadable {
+            detail: format!("could not encode attestation purpose: {error}"),
+        })?,
     );
     map.insert("subject_digest".into(), json!(subject_digest.as_str()));
     map.insert("key_identity".into(), json!(key_identity.as_str()));
@@ -563,8 +565,11 @@ fn preimage_bytes(
     map.insert("signed_at".into(), json!(signed_at));
     map.insert(
         "scheme".into(),
-        serde_json::to_value(AuthenticationScheme::Ed25519PublicKey)
-            .expect("the scheme is serialisable"),
+        serde_json::to_value(AuthenticationScheme::Ed25519PublicKey).map_err(|error| {
+            BundleError::AttestationUnreadable {
+                detail: format!("could not encode authentication scheme: {error}"),
+            }
+        })?,
     );
     Ok(bioprism_ids::to_canonical_bytes(&Value::Object(map))?)
 }

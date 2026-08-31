@@ -49,6 +49,22 @@ fn budget_exhaustion_aborts_rather_than_truncating() {
 }
 
 #[test]
+fn counter_overflow_is_budget_exhaustion_not_silent_saturation() {
+    let plan = BudgetPlan::new().with(RuntimeResource::ModelTokens, Limit::hard(u64::MAX));
+    let mut budget = BudgetController::from_plan(&plan);
+    budget
+        .charge(RuntimeResource::ModelTokens, u64::MAX)
+        .expect("the full representable range fits exactly");
+
+    let error = budget
+        .charge(RuntimeResource::ModelTokens, 1)
+        .expect_err("an unrepresentable total must abort");
+    assert!(matches!(error, RuntimeError::BudgetExhausted { .. }));
+    assert_eq!(budget.used(RuntimeResource::ModelTokens), u64::MAX);
+    assert_eq!(budget.aborted_on(), Some(RuntimeResource::ModelTokens));
+}
+
+#[test]
 fn an_aborted_trial_cannot_resume_spending_on_any_resource() {
     let plan = BudgetPlan::new()
         .with(RuntimeResource::ModelTokens, Limit::hard(10))
@@ -72,8 +88,7 @@ fn an_aborted_trial_cannot_resume_spending_on_any_resource() {
 
 #[test]
 fn a_soft_limit_warns_and_lets_the_charge_through() {
-    let plan = BudgetPlan::new()
-        .with(RuntimeResource::ToolCalls, Limit::soft_then_hard(2, 5));
+    let plan = BudgetPlan::new().with(RuntimeResource::ToolCalls, Limit::soft_then_hard(2, 5));
     let mut budget = BudgetController::from_plan(&plan);
 
     assert_eq!(
@@ -89,7 +104,11 @@ fn a_soft_limit_warns_and_lets_the_charge_through() {
         ChargeStatus::OverSoftLimit
     );
 
-    assert_eq!(budget.warnings().len(), 1, "the crossing is warned about once");
+    assert_eq!(
+        budget.warnings().len(),
+        1,
+        "the crossing is warned about once"
+    );
     assert_eq!(budget.warnings()[0].soft, 2);
     assert_eq!(budget.used(RuntimeResource::ToolCalls), 4);
 }
@@ -247,4 +266,22 @@ fn an_unfunded_meter_permits_nothing() {
         .charge(RuntimeResource::ToolCalls, 1)
         .expect_err("nothing was declared, so nothing may be spent");
     assert!(matches!(error, RuntimeError::UndeclaredResource { .. }));
+}
+
+#[test]
+fn an_impossible_soft_limit_is_rejected_before_accounting() {
+    let plan = BudgetPlan::new().with(RuntimeResource::ToolCalls, Limit::soft_then_hard(10, 5));
+    let mut budget = BudgetController::from_plan(&plan);
+
+    let error = budget
+        .charge(RuntimeResource::ToolCalls, 1)
+        .expect_err("a soft limit above the hard limit is not a meaningful meter");
+    assert!(matches!(error, RuntimeError::InvariantViolation { .. }));
+    assert_eq!(budget.used(RuntimeResource::ToolCalls), 0);
+}
+
+#[test]
+fn serialized_impossible_soft_limit_is_rejected_at_the_boundary() {
+    let value = serde_json::json!({"soft": 10, "hard": 5});
+    assert!(serde_json::from_value::<Limit>(value).is_err());
 }

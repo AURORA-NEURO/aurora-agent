@@ -228,14 +228,21 @@ fn a_deterministically_injected_fault_reproduces_exactly() {
 
     let mut first = RecordingHost::new(run("run-fault-1"), faulty(), policy());
     first.now_millis().expect("call 0 is clean");
-    let error_one = first.sleep(10).expect_err("call 1 is scheduled to time out");
+    let error_one = first
+        .sleep(10)
+        .expect_err("call 1 is scheduled to time out");
 
     let mut second = RecordingHost::new(run("run-fault-2"), faulty(), policy());
     second.now_millis().expect("call 0 is clean");
-    let error_two = second.sleep(10).expect_err("call 1 is scheduled to time out");
+    let error_two = second
+        .sleep(10)
+        .expect_err("call 1 is scheduled to time out");
 
     assert_eq!(error_one, error_two);
-    assert!(matches!(error_one, RuntimeError::InjectedFault { call: 1, .. }));
+    assert!(matches!(
+        error_one,
+        RuntimeError::InjectedFault { call: 1, .. }
+    ));
     assert_eq!(
         first.into_tape().len(),
         1,
@@ -245,8 +252,7 @@ fn a_deterministically_injected_fault_reproduces_exactly() {
 
 #[test]
 fn a_truncated_response_is_what_the_tape_records_and_what_a_replay_returns() {
-    let world = world_saying("a-long-body")
-        .with_fault_at(0, Fault::Truncated { keep_bytes: 6 });
+    let world = world_saying("a-long-body").with_fault_at(0, Fault::Truncated { keep_bytes: 6 });
     let mut host = RecordingHost::new(run("run-truncated"), world, policy());
     let live = host
         .get_body("https://fixtures.test/a")

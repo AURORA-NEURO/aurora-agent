@@ -31,9 +31,7 @@ pub enum Refusal {
     #[error("no policy rule claims scope {scope}; unknown policy denies by default")]
     UnlabelledEvidence { scope: String },
 
-    #[error(
-        "purpose {requested} is outside consent {consent_id}, which permits {permitted}"
-    )]
+    #[error("purpose {requested} is outside consent {consent_id}, which permits {permitted}")]
     PurposeNotConsented {
         consent_id: String,
         requested: Purpose,
@@ -94,7 +92,10 @@ pub enum Refusal {
     NoLegalExecutionPath { detail: String },
 
     #[error("export policy {export} forbids this move: {detail}")]
-    ExportForbidden { export: ExportPolicy, detail: String },
+    ExportForbidden {
+        export: ExportPolicy,
+        detail: String,
+    },
 
     #[error(
         "channel {channel} carries at most {ceiling}; this evidence is classified {classification}"

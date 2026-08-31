@@ -1,0 +1,132 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aurora-neuro.org/schemas/aurora-research-contract-v1/worldgen-computational-execution-p12-f11.json",
+  "title": "AFA-worldgen-P12-F11 receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "contract_version",
+    "feature_id",
+    "request_id",
+    "disposition",
+    "action_order",
+    "admitted_action_order",
+    "denied_action_order",
+    "execution_disposition",
+    "run_digest",
+    "copilot_digest",
+    "replay_identity",
+    "omissions",
+    "uncertainty",
+    "negative_evidence",
+    "effect_receipts",
+    "raw_data_local",
+    "aggregate_only",
+    "boundary",
+    "artifact"
+  ],
+  "properties": {
+    "effect_receipts": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "copilot_digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "denied_action_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "feature_id": {
+      "const": "AFA-worldgen-P12-F11"
+    },
+    "schema_version": {
+      "type": "string"
+    },
+    "aggregate_only": {
+      "const": true
+    },
+    "boundary": {
+      "type": "string"
+    },
+    "replay_identity": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "disposition": {
+      "type": "string"
+    },
+    "raw_data_local": {
+      "const": true
+    },
+    "execution_disposition": {
+      "type": "string"
+    },
+    "contract_version": {
+      "const": "worldgen-throughput-computational_execution-copilot/1.0"
+    },
+    "artifact": {
+      "type": "object",
+      "required": [
+        "content_type",
+        "content_hash",
+        "boundary"
+      ],
+      "properties": {
+        "boundary": {
+          "type": "string"
+        },
+        "content_type": {
+          "const": "application/vnd.aurora.worldgen.execution-copilot-receipt+json"
+        },
+        "content_hash": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "run_digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "omissions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "negative_evidence": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "uncertainty": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "admitted_action_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "action_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "request_id": {
+      "type": "string"
+    }
+  }
+}

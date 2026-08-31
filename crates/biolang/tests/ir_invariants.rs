@@ -1,5 +1,6 @@
 //! The invariants each §25 module states, one test per claim.
 
+use bioprism_bioir::{EvidenceId, SpecimenId};
 use bioprism_biolang::act::{
     BioRole, CommitmentType, EvidenceTransition, ScientificAct, ScientificActKind,
     SpecimenTransition,
@@ -45,7 +46,6 @@ use bioprism_biolang::world::{
     VisibleState, WorldClass,
 };
 use bioprism_biolang::worldline::{AlignmentConfidence, Branch, Censoring, RevealGate, Worldline};
-use bioprism_bioir::{EvidenceId, SpecimenId};
 use bioprism_ids::{ContentHash, RunId, WorldId};
 use bioprism_scope::{ScopeKey, Timestamp};
 use serde_json::json;
@@ -192,12 +192,16 @@ fn a_fork_may_spend_more_than_its_parent_and_may_not_spend_less() {
         at("2026-03-02T00:00:00Z"),
         at("2026-03-02T01:00:00Z"),
     );
-    parent.validate_fork(&child).expect("carrying forward is fine");
+    parent
+        .validate_fork(&child)
+        .expect("carrying forward is fine");
 
     let spendier = child
         .clone()
         .having_consumed(ResourceLedger::new().consume("tissue_mg", 60.0));
-    parent.validate_fork(&spendier).expect("spending more is fine");
+    parent
+        .validate_fork(&spendier)
+        .expect("spending more is fine");
 
     let unspent = child.having_consumed(ResourceLedger::new().consume("tissue_mg", 10.0));
     assert!(matches!(
@@ -263,10 +267,16 @@ fn an_assay_result_moves_the_observation_and_knowledge_planes_and_leaves_biology
         .with_plane(Plane::Biological, digest("tumor"))
         .with_plane(Plane::Observation, digest("mri-read"))
         .with_plane(Plane::Knowledge, digest("belief-b"));
-    let transition = Transition::new("read the MRI", before.state_id.clone(), after.state_id.clone())
-        .changing(Plane::Observation)
-        .changing(Plane::Knowledge);
-    transition.validate(&before, &after).expect("declaration matches");
+    let transition = Transition::new(
+        "read the MRI",
+        before.state_id.clone(),
+        after.state_id.clone(),
+    )
+    .changing(Plane::Observation)
+    .changing(Plane::Knowledge);
+    transition
+        .validate(&before, &after)
+        .expect("declaration matches");
     assert!(!transition.is_ontic(), "measuring is not changing");
 }
 
@@ -286,11 +296,16 @@ fn worldline(scope: ScopeKey) -> Worldline {
 #[test]
 fn a_worldline_cannot_silently_interleave_states_from_different_scopes() {
     let line = worldline(ScopeKey::new().exact("subject", "S1"))
-        .then(state("s1", "2026-03-01T00:00:00Z", "2026-03-01T00:00:00Z")
-            .within(ScopeKey::new().exact("subject", "S1")))
-        .then(state("s2", "2026-03-02T00:00:00Z", "2026-03-02T00:00:00Z")
-            .within(ScopeKey::new().exact("subject", "S2")));
-    let WorldlineError::ScopeInterleaving { state, dimension } = line.validate().unwrap_err() else {
+        .then(
+            state("s1", "2026-03-01T00:00:00Z", "2026-03-01T00:00:00Z")
+                .within(ScopeKey::new().exact("subject", "S1")),
+        )
+        .then(
+            state("s2", "2026-03-02T00:00:00Z", "2026-03-02T00:00:00Z")
+                .within(ScopeKey::new().exact("subject", "S2")),
+        );
+    let WorldlineError::ScopeInterleaving { state, dimension } = line.validate().unwrap_err()
+    else {
         panic!("expected scope interleaving");
     };
     assert_eq!((state.as_str(), dimension.as_str()), ("s2", "subject"));
@@ -483,7 +498,7 @@ fn a_precondition_on_a_plane_the_action_never_reads_is_refused() {
     definition.preconditions.push(Precondition {
         plane: Plane::Material,
         expression: "at least 40 mg remains".to_string(),
-        });
+    });
     assert!(matches!(
         definition.validate().unwrap_err(),
         InterventionError::PreconditionOffInputPlane { .. }
@@ -687,9 +702,13 @@ fn comparing_two_architectures_exposes_the_components_that_changed() {
 // --- 25.15 Acts -----------------------------------------------------------------------------------
 
 fn role() -> BioRole {
-    BioRole::new("molecular pathologist", "variant interpretation", "germline")
-        .permitting(ScientificActKind::Hypothesize)
-        .permitting(ScientificActKind::Reserve)
+    BioRole::new(
+        "molecular pathologist",
+        "variant interpretation",
+        "germline",
+    )
+    .permitting(ScientificActKind::Hypothesize)
+    .permitting(ScientificActKind::Reserve)
 }
 
 #[test]
@@ -715,8 +734,7 @@ fn a_claim_act_that_identifies_no_evidence_is_refused() {
         CommitmentType::Asserted,
     )
     .scoped("genome_build=GRCh38");
-    let ActError::ClaimWithout { missing, .. } =
-        act.validate(&role(), &|_| 0.0).unwrap_err()
+    let ActError::ClaimWithout { missing, .. } = act.validate(&role(), &|_| 0.0).unwrap_err()
     else {
         panic!("expected a claim without evidence");
     };
@@ -732,8 +750,7 @@ fn a_claim_act_that_identifies_no_scope_is_refused() {
         CommitmentType::Asserted,
     )
     .citing(EvidenceId::parse("ev-1").expect("well-formed"));
-    let ActError::ClaimWithout { missing, .. } =
-        act.validate(&role(), &|_| 0.0).unwrap_err()
+    let ActError::ClaimWithout { missing, .. } = act.validate(&role(), &|_| 0.0).unwrap_err()
     else {
         panic!("expected a claim without scope");
     };
@@ -1023,7 +1040,9 @@ fn a_resolved_disagreement_that_kept_no_losing_position_is_refused() {
         OracleIrError::DisagreementDiscarded { .. }
     ));
     disagreement.retained_losing_position = Some("oracle/a said pass".to_string());
-    disagreement.validate_resolution().expect("the loser is retained");
+    disagreement
+        .validate_resolution()
+        .expect("the loser is retained");
 }
 
 #[test]

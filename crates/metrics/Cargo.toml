@@ -5,6 +5,7 @@ edition = "2021"
 description = "BioCapability metrics: aggregation rules, comparability of scores, and what a capability number may not claim"
 
 [dependencies]
+bioprism-foundation = { workspace = true }
 bioprism-ids = { workspace = true }
 bioprism-atlas = { workspace = true }
 serde = { workspace = true }

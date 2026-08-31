@@ -123,11 +123,7 @@ pub fn reconcile(claims: &[DateClaim], hierarchy: &SourceHierarchy) -> Reconcili
         return Reconciliation {
             outcome: Determination::supported(
                 EvidenceTier::Deterministic,
-                format!(
-                    "{} source(s) agree on {}",
-                    claims.len(),
-                    claims[0].field
-                ),
+                format!("{} source(s) agree on {}", claims.len(), claims[0].field),
             ),
             kept: Some(claims[0].clone()),
             dropped: Vec::new(),
@@ -155,7 +151,16 @@ pub fn reconcile(claims: &[DateClaim], hierarchy: &SourceHierarchy) -> Reconcili
                     dropped: claims.to_vec(),
                 }
             }
-            Err(_) => unreachable!("prefer returns only UnrankedSources"),
+            Err(error) => {
+                return Reconciliation {
+                    outcome: Determination::unresolved(
+                        "a usable source hierarchy",
+                        error.to_string(),
+                    ),
+                    kept: None,
+                    dropped: claims.to_vec(),
+                }
+            }
         }
     }
 

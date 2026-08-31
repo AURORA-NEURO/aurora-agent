@@ -12,6 +12,7 @@ name = "bioprism"
 path = "src/main.rs"
 
 [dependencies]
+bioprism-foundation = { workspace = true }
 bioprism-adapter = { workspace = true }
 bioprism-autopilot = { workspace = true }
 bioprism-baseline = { workspace = true }
@@ -31,4 +32,11 @@ bioprism-repair = { workspace = true }
 bioprism-research = { workspace = true }
 bioprism-world = { workspace = true }
 bioprism-worldgen = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+bioprism-devplat = { workspace = true }
+bioprism-ids = { workspace = true }
 serde_json = { workspace = true }

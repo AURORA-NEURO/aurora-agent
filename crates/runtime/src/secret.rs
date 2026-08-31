@@ -80,8 +80,19 @@ impl SecretBroker {
     }
 
     pub fn with_secret(mut self, resource: impl Into<String>, value: impl Into<String>) -> Self {
-        self.secrets
-            .insert(resource.into(), SecretRef::new(value.into()));
+        let resource = resource.into();
+        if self.secrets.contains_key(&resource) {
+            let replaced_ids: Vec<String> = self
+                .issued
+                .iter()
+                .filter(|(_, capability)| capability.resource == resource)
+                .map(|(id, _)| id.clone())
+                .collect();
+            for id in replaced_ids {
+                self.revoked.insert(id, ());
+            }
+        }
+        self.secrets.insert(resource, SecretRef::new(value.into()));
         self
     }
 
@@ -102,14 +113,31 @@ impl SecretBroker {
                 resource: resource.to_string(),
             });
         }
+        if resource.trim().is_empty() || operation.trim().is_empty() {
+            return Err(RuntimeError::InvariantViolation {
+                detail: "capability resource and operation must be non-empty and trimmed".into(),
+            });
+        }
+        let expires_at_task_millis = now_task_millis.checked_add(ttl_millis).ok_or_else(|| {
+            RuntimeError::InvariantViolation {
+                detail: "capability expiry overflowed the task clock".into(),
+            }
+        })?;
+        let next = self
+            .next
+            .checked_add(1)
+            .ok_or_else(|| RuntimeError::InvariantViolation {
+                detail: "capability identifier counter exhausted".into(),
+            })?;
         let capability = Capability {
             id: format!("cap-{:06}", self.next),
             resource: resource.to_string(),
             operation: operation.to_string(),
-            expires_at_task_millis: now_task_millis.saturating_add(ttl_millis),
+            expires_at_task_millis,
         };
-        self.next += 1;
-        self.issued.insert(capability.id.clone(), capability.clone());
+        self.next = next;
+        self.issued
+            .insert(capability.id.clone(), capability.clone());
         Ok(capability)
     }
 
@@ -126,6 +154,16 @@ impl SecretBroker {
     ) -> Result<&SecretRef, RuntimeError> {
         if self.revoked.contains_key(&capability.id) {
             return Err(RuntimeError::CapabilityRevoked {
+                id: capability.id.clone(),
+            });
+        }
+        let Some(issued) = self.issued.get(&capability.id) else {
+            return Err(RuntimeError::UnknownCapability {
+                id: capability.id.clone(),
+            });
+        };
+        if issued != capability {
+            return Err(RuntimeError::CapabilityMismatch {
                 id: capability.id.clone(),
             });
         }

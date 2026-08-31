@@ -263,16 +263,13 @@ pub fn decide(
     }
 
     if let Some(mixture) = mixture {
-        return Determination::Unresolved(
-            Unresolved::new([Missing::new(
-                "deconvolved per-contributor genotype",
-                format!(
-                    "{} contributors are present, so a pairwise identity call is underdetermined",
-                    mixture.contributors
-                ),
-            )])
-            .expect("one missing item is not zero"),
-        );
+        return Determination::Unresolved(Unresolved::of(
+            "deconvolved per-contributor genotype",
+            format!(
+                "{} contributors are present, so a pairwise identity call is underdetermined",
+                mixture.contributors
+            ),
+        ));
     }
 
     let discordant: Vec<&IdentitySignal> = signals
@@ -307,7 +304,9 @@ pub fn decide(
                 EvidenceTier::Deterministic,
                 "molecular evidence separates the two artifacts",
             ),
-            IdentityClaim::SingleSource => unreachable!("handled above"),
+            IdentityClaim::SingleSource => Determination::not_evaluable(
+                "single-source identity was already resolved before molecular conflict evaluation",
+            ),
         };
     }
 
@@ -325,8 +324,9 @@ pub fn decide(
         })
         .collect();
     if !ambiguous.is_empty() {
-        return Determination::Unresolved(
-            Unresolved::new(ambiguous).expect("the vector was checked non-empty"),
+        return Unresolved::new(ambiguous).map_or_else(
+            |_| Determination::not_evaluable("the identity ambiguity list was empty"),
+            Determination::Unresolved,
         );
     }
 
@@ -347,7 +347,9 @@ pub fn decide(
             "a discordant molecular signal",
             "nothing separates these artifacts; concordance is not evidence of distinctness",
         ),
-        (IdentityClaim::SingleSource, _) => unreachable!("handled above"),
+        (IdentityClaim::SingleSource, _) => Determination::not_evaluable(
+            "single-source identity was already resolved before final identity evaluation",
+        ),
     }
 }
 

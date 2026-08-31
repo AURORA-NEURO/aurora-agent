@@ -48,6 +48,23 @@ fn restricted_query() -> Query {
     Query::from_json(reference_example("policy_restricted_query.json")).expect("query loads")
 }
 
+fn rate_distortion_query() -> Query {
+    let path: PathBuf = [
+        env!("CARGO_MANIFEST_DIR"),
+        "..",
+        "..",
+        "fixtures",
+        "fiber-v0.4",
+        "rate_distortion_query.json",
+    ]
+    .iter()
+    .collect();
+    let text = std::fs::read_to_string(&path)
+        .unwrap_or_else(|error| panic!("missing fixture {}: {error}", path.display()));
+    Query::from_json(serde_json::from_str(&text).expect("rate-distortion fixture is valid JSON"))
+        .expect("rate-distortion query loads")
+}
+
 /// The restricted query with its accepted clauses replaced.
 fn with_clauses(clauses: &[&str]) -> Query {
     let mut raw = reference_example("policy_restricted_query.json");
@@ -228,6 +245,24 @@ fn a_policy_conflict_is_raised_before_any_evidence_is_selected() {
     raw["policy"] = json!(["commercial-use"]);
     raw["budgets"]["max_facts"] = json!(1);
     let query = Query::from_json(raw).expect("query loads");
+
+    assert!(matches!(
+        compile(&restricted_world(), &query),
+        Err(FiberError::Policy(PolicyViolation::Conflict { .. }))
+    ));
+}
+
+/// Admission must precede analytical execution, including validation performed by a later pass.
+///
+/// The malformed tolerance is only reachable after parsing because it is mutated on the typed
+/// query. Before the policy gate moved to the top of `compile`, rate-distortion returned its own
+/// error first; a conflicting caller could therefore observe work from a pass it was not admitted
+/// to run.
+#[test]
+fn a_policy_conflict_precedes_later_analysis_errors() {
+    let mut query = rate_distortion_query();
+    query.policy = vec!["commercial-use".into()];
+    query.distortion_tolerance = Some(-1.0);
 
     assert!(matches!(
         compile(&restricted_world(), &query),

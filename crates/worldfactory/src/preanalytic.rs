@@ -107,7 +107,8 @@ impl Stage {
 
     /// Stages that receive the specimen after this one.
     pub fn downstream(self) -> Vec<Stage> {
-        Stage::PIPELINE[self.position() + 1..].to_vec()
+        let start = self.position().saturating_add(1);
+        Stage::PIPELINE.get(start..).unwrap_or_default().to_vec()
     }
 }
 

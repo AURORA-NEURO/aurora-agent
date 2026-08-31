@@ -8,15 +8,17 @@ use crate::artifact_registry::ArtifactRecord;
 use bioprism_ids::ContentHash;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 pub const DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_QUERY_SCHEMA: &str =
     "bioprism-devplat-domain-evidence-provider-external-payload-query/0.1";
 pub const DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_QUERY_WORKFLOW: &str =
     "domain_evidence_provider_external_payload_evidence_query";
 pub const MAX_DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_QUERY_ITEMS: usize = 128;
+const MAX_TEXT_BYTES: usize = 512;
+const MAX_ARRAY_VALUES: usize = 256;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct DomainEvidenceProviderExternalPayloadEvidenceQueryRequest {
     #[serde(default)]
@@ -35,6 +37,19 @@ pub struct DomainEvidenceProviderExternalPayloadEvidenceQueryRequest {
 
 fn default_max_items() -> usize {
     100
+}
+
+impl Default for DomainEvidenceProviderExternalPayloadEvidenceQueryRequest {
+    fn default() -> Self {
+        Self {
+            group_id: None,
+            domain: None,
+            subject_id: None,
+            after: None,
+            max_items: default_max_items(),
+            include_artifacts: false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -94,34 +109,147 @@ struct PartialRow {
     receipt_artifact: Option<Value>,
     lineage_artifact: Option<Value>,
     execution_artifact: Option<Value>,
+    lineage_seen: bool,
+    execution_seen: bool,
 }
 
-fn text(value: Option<&Value>) -> Option<String> {
-    value.and_then(Value::as_str).map(ToOwned::to_owned)
+fn valid_text(value: &str) -> bool {
+    let trimmed = value.trim();
+    !trimmed.is_empty()
+        && value == trimmed
+        && value.len() <= MAX_TEXT_BYTES
+        && !value.chars().any(char::is_control)
 }
 
-fn digest(value: Option<&Value>) -> Option<String> {
-    text(value).filter(|value| ContentHash::parse(value.to_owned()).is_ok())
+fn valid_digest(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        && ContentHash::parse(value.to_owned()).is_ok()
 }
 
-fn array_text(value: Option<&Value>) -> Vec<String> {
-    value
-        .and_then(Value::as_array)
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(|item| item.as_str().map(ToOwned::to_owned))
-                .collect()
+fn text(value: Option<&Value>, field: &str) -> Result<Option<String>, String> {
+    match value {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(value)) if valid_text(value) => Ok(Some(value.clone())),
+        Some(Value::String(_)) => Err(format!("{field} must be bounded visible text")),
+        Some(_) => Err(format!("{field} must be text or null")),
+    }
+}
+
+fn required_text(value: Option<&Value>, field: &str) -> Result<String, String> {
+    text(value, field)?.ok_or_else(|| format!("{field} is required for a joined evidence row"))
+}
+
+fn digest(value: Option<&Value>, field: &str) -> Result<Option<String>, String> {
+    match value {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(value)) if valid_digest(value) => Ok(Some(value.clone())),
+        Some(Value::String(_)) => Err(format!("{field} must be a lowercase SHA-256 digest")),
+        Some(_) => Err(format!("{field} must be a digest or null")),
+    }
+}
+
+fn array_text(value: Option<&Value>, field: &str) -> Result<Vec<String>, String> {
+    let Some(value) = value else {
+        return Ok(Vec::new());
+    };
+    let items = value
+        .as_array()
+        .ok_or_else(|| format!("{field} must be an array"))?;
+    if items.len() > MAX_ARRAY_VALUES {
+        return Err(format!(
+            "{field} must contain at most {MAX_ARRAY_VALUES} entries"
+        ));
+    }
+    let domain_values = field.ends_with("domains");
+    let digest_values = field.ends_with("parent_digests");
+    let mut seen = BTreeSet::new();
+    let values = items
+        .iter()
+        .enumerate()
+        .map(|(index, item)| {
+            let value = text(Some(item), &format!("{field}[{index}]"))?
+                .ok_or_else(|| format!("{field}[{index}] must not be null"))?;
+            if digest_values && !valid_digest(&value) {
+                return Err(format!(
+                    "{field}[{index}] must be a lowercase SHA-256 digest"
+                ));
+            }
+            let identity = if domain_values {
+                value.to_ascii_lowercase()
+            } else {
+                value.clone()
+            };
+            if !seen.insert(identity) {
+                return Err(format!(
+                    "{field} must not contain duplicate or case-colliding values"
+                ));
+            }
+            Ok(value)
         })
-        .unwrap_or_default()
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut canonical = values.clone();
+    canonical.sort();
+    if values != canonical {
+        return Err(format!("{field} must use canonical sorted order"));
+    }
+    Ok(values)
+}
+
+fn required_array_text(value: Option<&Value>, field: &str) -> Result<Vec<String>, String> {
+    let values = array_text(value, field)?;
+    if values.is_empty() {
+        return Err(format!("{field} must contain at least one value"));
+    }
+    Ok(values)
+}
+
+fn merge_text(slot: &mut String, value: String, field: &str) -> Result<(), String> {
+    if slot.is_empty() {
+        *slot = value;
+        return Ok(());
+    }
+    if *slot != value {
+        return Err(format!(
+            "joined {field} values conflict for one receipt digest"
+        ));
+    }
+    Ok(())
+}
+
+fn merge_texts(slot: &mut Vec<String>, values: Vec<String>, field: &str) -> Result<(), String> {
+    if slot.is_empty() {
+        *slot = values;
+        return Ok(());
+    }
+    if *slot != values {
+        return Err(format!(
+            "joined {field} values conflict for one receipt digest"
+        ));
+    }
+    Ok(())
+}
+
+fn merge_artifact(slot: &mut Option<Value>, value: Value, field: &str) -> Result<(), String> {
+    if slot.as_ref().is_some_and(|existing| existing != &value) {
+        return Err(format!(
+            "joined {field} artifacts conflict for one receipt digest"
+        ));
+    }
+    if slot.is_none() {
+        *slot = Some(value);
+    }
+    Ok(())
 }
 
 fn row_digest(row: &DomainEvidenceProviderExternalPayloadEvidenceRow) -> Result<String, String> {
     let mut value = serde_json::to_value(row).map_err(|error| error.to_string())?;
-    value
-        .as_object_mut()
-        .expect("evidence row serializes as an object")
-        .remove("row_digest");
+    let Some(object) = value.as_object_mut() else {
+        return Err("evidence row did not serialize as an object".into());
+    };
+    object.remove("row_digest");
     ContentHash::of_value(&value)
         .map(|digest| digest.to_string())
         .map_err(|error| error.to_string())
@@ -131,16 +259,24 @@ fn add_record(
     rows: &mut BTreeMap<String, PartialRow>,
     record: &ArtifactRecord,
     include_artifacts: bool,
-) {
+) -> Result<(), String> {
     let artifact = &record.artifact;
+    if !valid_digest(&record.content_digest) {
+        return Err("record.content_digest must be a lowercase SHA-256 digest".into());
+    }
     let (receipt_digest, receipt, kind) = match record.kind.as_str() {
-        "domain_evidence_provider_external_payload" => {
-            (digest(artifact.get("receipt_digest")), artifact, "receipt")
-        }
+        "domain_evidence_provider_external_payload" => (
+            digest(artifact.get("receipt_digest"), "receipt_digest")?,
+            artifact,
+            "receipt",
+        ),
         "domain_evidence_provider_external_payload_lineage_audit" => {
             let receipt = artifact.get("receipt").and_then(Value::as_object);
             (
-                receipt.and_then(|value| digest(value.get("receipt_digest"))),
+                receipt
+                    .map(|value| digest(value.get("receipt_digest"), "receipt.receipt_digest"))
+                    .transpose()?
+                    .flatten(),
                 artifact,
                 "lineage",
             )
@@ -148,15 +284,18 @@ fn add_record(
         "domain_evidence_provider_external_payload_execution_evidence" => {
             let receipt = artifact.get("receipt").and_then(Value::as_object);
             (
-                receipt.and_then(|value| digest(value.get("receipt_digest"))),
+                receipt
+                    .map(|value| digest(value.get("receipt_digest"), "receipt.receipt_digest"))
+                    .transpose()?
+                    .flatten(),
                 artifact,
                 "execution",
             )
         }
-        _ => return,
+        _ => return Ok(()),
     };
     let Some(receipt_digest) = receipt_digest else {
-        return;
+        return Ok(());
     };
     let entry = rows
         .entry(receipt_digest.clone())
@@ -166,48 +305,88 @@ fn add_record(
         });
     if kind == "receipt" {
         entry.receipt_present = true;
-        entry.subject_id = text(artifact.get("subject_id")).unwrap_or_default();
-        entry.group_id = text(artifact.get("group_id")).unwrap_or_default();
-        entry.domains = array_text(artifact.get("domains"));
-        entry.parent_digests = array_text(artifact.get("parent_digests"));
+        merge_text(
+            &mut entry.subject_id,
+            required_text(artifact.get("subject_id"), "subject_id")?,
+            "subject_id",
+        )?;
+        merge_text(
+            &mut entry.group_id,
+            required_text(artifact.get("group_id"), "group_id")?,
+            "group_id",
+        )?;
+        merge_texts(
+            &mut entry.domains,
+            required_array_text(artifact.get("domains"), "domains")?,
+            "domains",
+        )?;
+        merge_texts(
+            &mut entry.parent_digests,
+            array_text(artifact.get("parent_digests"), "parent_digests")?,
+            "parent_digests",
+        )?;
         if include_artifacts {
-            entry.receipt_artifact = Some(receipt.clone());
+            merge_artifact(&mut entry.receipt_artifact, receipt.clone(), "receipt")?;
         }
     } else {
-        let nested_receipt = artifact.get("receipt").and_then(Value::as_object);
-        if entry.subject_id.is_empty() {
-            entry.subject_id = nested_receipt
-                .and_then(|value| text(value.get("subject_id")))
-                .unwrap_or_default();
-        }
-        if entry.group_id.is_empty() {
-            entry.group_id = nested_receipt
-                .and_then(|value| text(value.get("group_id")))
-                .unwrap_or_default();
-        }
-        if entry.domains.is_empty() {
-            entry.domains = nested_receipt
-                .map(|value| array_text(value.get("domains")))
-                .unwrap_or_default();
-        }
+        let nested_receipt = artifact
+            .get("receipt")
+            .and_then(Value::as_object)
+            .ok_or_else(|| {
+                "joined lineage or execution evidence requires a receipt object".to_string()
+            })?;
+        merge_text(
+            &mut entry.subject_id,
+            required_text(nested_receipt.get("subject_id"), "receipt.subject_id")?,
+            "subject_id",
+        )?;
+        merge_text(
+            &mut entry.group_id,
+            required_text(nested_receipt.get("group_id"), "receipt.group_id")?,
+            "group_id",
+        )?;
+        merge_texts(
+            &mut entry.domains,
+            required_array_text(nested_receipt.get("domains"), "receipt.domains")?,
+            "domains",
+        )?;
         if kind == "lineage" {
-            entry.lineage_status = text(artifact.get("lineage_status"));
-            entry.lineage_digest = digest(artifact.get("lineage_digest"));
+            let lineage_status = text(artifact.get("lineage_status"), "lineage_status")?;
+            let lineage_digest = digest(artifact.get("lineage_digest"), "lineage_digest")?;
+            if entry.lineage_seen
+                && (entry.lineage_status != lineage_status
+                    || entry.lineage_digest != lineage_digest)
+            {
+                return Err("joined lineage evidence conflicts for one receipt digest".into());
+            }
+            entry.lineage_seen = true;
+            entry.lineage_status = lineage_status;
+            entry.lineage_digest = lineage_digest;
             if include_artifacts {
-                entry.lineage_artifact = Some(artifact.clone());
+                merge_artifact(&mut entry.lineage_artifact, artifact.clone(), "lineage")?;
             }
         } else {
-            entry.execution_evidence_status = text(artifact.get("evidence_status"));
-            entry.execution_status = artifact
-                .get("execution_status")
-                .and_then(Value::as_str)
-                .map(ToOwned::to_owned);
-            entry.evidence_digest = digest(artifact.get("evidence_digest"));
+            let execution_evidence_status =
+                text(artifact.get("evidence_status"), "evidence_status")?;
+            let execution_status = text(artifact.get("execution_status"), "execution_status")?;
+            let evidence_digest = digest(artifact.get("evidence_digest"), "evidence_digest")?;
+            if entry.execution_seen
+                && (entry.execution_evidence_status != execution_evidence_status
+                    || entry.execution_status != execution_status
+                    || entry.evidence_digest != evidence_digest)
+            {
+                return Err("joined execution evidence conflicts for one receipt digest".into());
+            }
+            entry.execution_seen = true;
+            entry.execution_evidence_status = execution_evidence_status;
+            entry.execution_status = execution_status;
+            entry.evidence_digest = evidence_digest;
             if include_artifacts {
-                entry.execution_artifact = Some(artifact.clone());
+                merge_artifact(&mut entry.execution_artifact, artifact.clone(), "execution")?;
             }
         }
     }
+    Ok(())
 }
 
 /// Build a deterministic joined projection from validated registry records.
@@ -229,18 +408,20 @@ pub fn query_domain_evidence_provider_external_payload_evidence(
         ("domain", request.domain.as_ref()),
         ("subject_id", request.subject_id.as_ref()),
     ] {
-        if value.is_some_and(|value| value.trim().is_empty() || value.len() > 512) {
+        if value.is_some_and(|value| !valid_text(value) || value != value.trim()) {
             return Err(format!(
-                "{name} must be non-empty text of at most 512 bytes"
+                "{name} must be bounded visible text without surrounding whitespace"
             ));
         }
     }
     if let Some(after) = request.after.as_deref() {
-        digest(Some(&Value::String(after.to_owned()))).ok_or("after must be a digest")?;
+        if !valid_digest(after) {
+            return Err("after must be a lowercase SHA-256 digest".into());
+        }
     }
     let mut partial_rows = BTreeMap::new();
     for record in records {
-        add_record(&mut partial_rows, record, request.include_artifacts);
+        add_record(&mut partial_rows, record, request.include_artifacts)?;
     }
     let mut rows = Vec::new();
     for (_, partial) in partial_rows {
@@ -396,5 +577,241 @@ mod tests {
         );
         assert!(!report.has_more);
         assert!(!report.readiness_claimed);
+    }
+
+    #[test]
+    fn query_rejects_invalid_nested_identity_and_digest_values() {
+        let records = vec![record(
+            "domain_evidence_provider_external_payload",
+            json!({
+                "receipt_digest": "A".repeat(64),
+                "subject_id": "subject-1",
+                "group_id": "biological_domains",
+                "domains": ["oncology"],
+                "parent_digests": []
+            }),
+        )];
+        let error = query_domain_evidence_provider_external_payload_evidence(
+            &records,
+            1,
+            DomainEvidenceProviderExternalPayloadEvidenceQueryRequest {
+                max_items: 1,
+                ..Default::default()
+            },
+        )
+        .expect_err("uppercase receipt digests must be rejected");
+        assert!(error.contains("receipt_digest"));
+
+        let records = vec![record(
+            "domain_evidence_provider_external_payload",
+            json!({
+                "receipt_digest": "b".repeat(64),
+                "subject_id": "subject\n1",
+                "group_id": "biological_domains",
+                "domains": ["oncology"],
+                "parent_digests": []
+            }),
+        )];
+        let error = query_domain_evidence_provider_external_payload_evidence(
+            &records,
+            1,
+            DomainEvidenceProviderExternalPayloadEvidenceQueryRequest {
+                max_items: 1,
+                ..Default::default()
+            },
+        )
+        .expect_err("control-bearing identity must not be projected");
+        assert!(error.contains("subject_id"));
+    }
+
+    #[test]
+    fn query_rejects_noncanonical_join_identity_arrays() {
+        let receipt_digest = "b".repeat(64);
+        let mut artifact = json!({
+            "receipt_digest": receipt_digest,
+            "subject_id": "subject-1",
+            "group_id": "biological_domains",
+            "domains": ["oncology", "genomics"],
+            "parent_digests": []
+        });
+        let error = query_domain_evidence_provider_external_payload_evidence(
+            &[record(
+                "domain_evidence_provider_external_payload",
+                artifact.clone(),
+            )],
+            1,
+            DomainEvidenceProviderExternalPayloadEvidenceQueryRequest::default(),
+        )
+        .expect_err("joined domains must use canonical order");
+        assert!(error.contains("domains"));
+
+        artifact["domains"] = json!(["oncology"]);
+        artifact["parent_digests"] = json!(["d".repeat(64), "c".repeat(64)]);
+        let error = query_domain_evidence_provider_external_payload_evidence(
+            &[record(
+                "domain_evidence_provider_external_payload",
+                artifact.clone(),
+            )],
+            1,
+            DomainEvidenceProviderExternalPayloadEvidenceQueryRequest::default(),
+        )
+        .expect_err("joined parents must use canonical order");
+        assert!(error.contains("parent_digests"));
+
+        artifact["parent_digests"] = json!([]);
+        artifact["domains"] = json!(["oncology", "oncology"]);
+        let error = query_domain_evidence_provider_external_payload_evidence(
+            &[record(
+                "domain_evidence_provider_external_payload",
+                artifact,
+            )],
+            1,
+            DomainEvidenceProviderExternalPayloadEvidenceQueryRequest::default(),
+        )
+        .expect_err("joined domain duplicates must not be silently collapsed");
+        assert!(error.contains("domains"));
+    }
+
+    #[test]
+    fn query_rejects_missing_and_conflicting_join_identity() {
+        let receipt_digest = "b".repeat(64);
+        let missing_subject = vec![record(
+            "domain_evidence_provider_external_payload",
+            json!({
+                "receipt_digest": receipt_digest.clone(),
+                "group_id": "biological_domains",
+                "domains": ["oncology"],
+                "parent_digests": []
+            }),
+        )];
+        let error = query_domain_evidence_provider_external_payload_evidence(
+            &missing_subject,
+            1,
+            DomainEvidenceProviderExternalPayloadEvidenceQueryRequest {
+                max_items: 1,
+                ..Default::default()
+            },
+        )
+        .expect_err("receipt identity must not default to an empty subject");
+        assert!(error.contains("subject_id"));
+
+        let conflicting = vec![
+            record(
+                "domain_evidence_provider_external_payload",
+                json!({
+                    "receipt_digest": receipt_digest.clone(),
+                    "subject_id": "subject-1",
+                    "group_id": "biological_domains",
+                    "domains": ["oncology"],
+                    "parent_digests": []
+                }),
+            ),
+            record(
+                "domain_evidence_provider_external_payload_lineage_audit",
+                json!({
+                    "receipt": {
+                        "receipt_digest": receipt_digest,
+                        "subject_id": "subject-2",
+                        "group_id": "biological_domains",
+                        "domains": ["oncology"]
+                    },
+                    "lineage_status": "matched",
+                    "lineage_digest": "c".repeat(64)
+                }),
+            ),
+        ];
+        let error = query_domain_evidence_provider_external_payload_evidence(
+            &conflicting,
+            1,
+            DomainEvidenceProviderExternalPayloadEvidenceQueryRequest {
+                max_items: 1,
+                ..Default::default()
+            },
+        )
+        .expect_err("conflicting joined identities must be refused");
+        assert!(error.contains("subject_id"));
+    }
+
+    #[test]
+    fn query_rejects_conflicting_duplicate_join_records_instead_of_overwriting() {
+        let receipt_digest = "b".repeat(64);
+        let records = vec![
+            record(
+                "domain_evidence_provider_external_payload_lineage_audit",
+                json!({
+                    "receipt": {
+                        "receipt_digest": receipt_digest.clone(),
+                        "subject_id": "subject-1",
+                        "group_id": "biological_domains",
+                        "domains": ["oncology"]
+                    },
+                    "lineage_status": "matched",
+                    "lineage_digest": "c".repeat(64),
+                    "operator_note": "first"
+                }),
+            ),
+            record(
+                "domain_evidence_provider_external_payload_lineage_audit",
+                json!({
+                    "receipt": {
+                        "receipt_digest": receipt_digest.clone(),
+                        "subject_id": "subject-1",
+                        "group_id": "biological_domains",
+                        "domains": ["oncology"]
+                    },
+                    "lineage_status": "matched",
+                    "lineage_digest": "c".repeat(64),
+                    "operator_note": "second"
+                }),
+            ),
+        ];
+        let error = query_domain_evidence_provider_external_payload_evidence(
+            &records,
+            1,
+            DomainEvidenceProviderExternalPayloadEvidenceQueryRequest {
+                include_artifacts: true,
+                ..Default::default()
+            },
+        )
+        .expect_err("conflicting retained lineage artifacts must not be overwritten");
+        assert!(error.contains("lineage artifacts"));
+
+        let records = vec![
+            record(
+                "domain_evidence_provider_external_payload_execution_evidence",
+                json!({
+                    "receipt": {
+                        "receipt_digest": receipt_digest.clone(),
+                        "subject_id": "subject-1",
+                        "group_id": "biological_domains",
+                        "domains": ["oncology"]
+                    },
+                    "evidence_status": "partial",
+                    "execution_status": "transferred",
+                    "evidence_digest": "d".repeat(64)
+                }),
+            ),
+            record(
+                "domain_evidence_provider_external_payload_execution_evidence",
+                json!({
+                    "receipt": {
+                        "receipt_digest": receipt_digest,
+                        "subject_id": "subject-1",
+                        "group_id": "biological_domains",
+                        "domains": ["oncology"]
+                    },
+                    "evidence_status": "mismatch",
+                    "execution_status": "transferred",
+                    "evidence_digest": "d".repeat(64)
+                }),
+            ),
+        ];
+        let error = query_domain_evidence_provider_external_payload_evidence(
+            &records,
+            1,
+            DomainEvidenceProviderExternalPayloadEvidenceQueryRequest::default(),
+        )
+        .expect_err("conflicting execution projections must not be overwritten");
+        assert!(error.contains("execution evidence"));
     }
 }

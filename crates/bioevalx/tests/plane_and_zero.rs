@@ -49,9 +49,12 @@ fn folding_a_plane_with_an_unscored_dimension_refuses_rather_than_imputing() {
 
 #[test]
 fn a_capability_the_system_cannot_have_is_excluded_not_zeroed() {
-    let mut plane =
-        ScorePlane::declare("predictor", CapabilityTier::FixedInputModel, three_dimensions())
-            .expect("declaration is well formed");
+    let mut plane = ScorePlane::declare(
+        "predictor",
+        CapabilityTier::FixedInputModel,
+        three_dimensions(),
+    )
+    .expect("declaration is well formed");
     plane.score("task_success", 1.0).expect("in tier");
     plane.score("evidence_quality", 1.0).expect("in tier");
 
@@ -59,7 +62,10 @@ fn a_capability_the_system_cannot_have_is_excluded_not_zeroed() {
         .fold(FoldPolicy::ExcludeInapplicable)
         .expect("only out-of-tier dimensions remain");
 
-    assert_eq!(fold.value, 1.0, "an excluded dimension must not drag the fold");
+    assert_eq!(
+        fold.value, 1.0,
+        "an excluded dimension must not drag the fold"
+    );
     assert_eq!(fold.excluded.len(), 1);
     assert_eq!(fold.excluded[0].id, "action_value");
     assert_eq!(fold.included, vec!["task_success", "evidence_quality"]);
@@ -67,9 +73,12 @@ fn a_capability_the_system_cannot_have_is_excluded_not_zeroed() {
 
 #[test]
 fn scoring_a_dimension_the_system_cannot_reach_is_refused_at_the_point_of_offer() {
-    let mut plane =
-        ScorePlane::declare("predictor", CapabilityTier::FixedInputModel, three_dimensions())
-            .expect("declaration is well formed");
+    let mut plane = ScorePlane::declare(
+        "predictor",
+        CapabilityTier::FixedInputModel,
+        three_dimensions(),
+    )
+    .expect("declaration is well formed");
 
     match plane.score("action_value", 0.0) {
         Err(PlaneError::OutOfTier {
@@ -93,14 +102,19 @@ fn two_folds_over_different_dimension_sets_report_that_they_are_not_the_same_bas
     for dimension in ["task_success", "evidence_quality", "action_value"] {
         agent.score(dimension, 0.5).expect("in tier");
     }
-    let mut predictor =
-        ScorePlane::declare("predictor", CapabilityTier::FixedInputModel, three_dimensions())
-            .expect("declaration is well formed");
+    let mut predictor = ScorePlane::declare(
+        "predictor",
+        CapabilityTier::FixedInputModel,
+        three_dimensions(),
+    )
+    .expect("declaration is well formed");
     for dimension in ["task_success", "evidence_quality"] {
         predictor.score(dimension, 0.5).expect("in tier");
     }
 
-    let a = agent.fold(FoldPolicy::ExcludeInapplicable).expect("complete");
+    let a = agent
+        .fold(FoldPolicy::ExcludeInapplicable)
+        .expect("complete");
     let b = predictor
         .fold(FoldPolicy::ExcludeInapplicable)
         .expect("complete");
@@ -127,6 +141,76 @@ fn a_score_outside_the_unit_interval_cannot_be_constructed_or_deserialized() {
         round_trip.is_err(),
         "deserialization must go through the same gate as construction"
     );
+}
+
+#[test]
+fn a_persisted_plane_cannot_forge_its_cell_map_or_tier_state() {
+    let plane = ScorePlane::declare("predictor", CapabilityTier::FixedInputModel, three_dimensions())
+        .expect("declaration is well formed");
+    let mut missing_cell = serde_json::to_value(&plane).expect("plane serializes");
+    missing_cell["cells"]
+        .as_object_mut()
+        .expect("cells object")
+        .remove("task_success");
+    let parsed_missing: Result<ScorePlane, _> = serde_json::from_value(missing_cell);
+    assert!(parsed_missing.is_err());
+
+    let mut forged_state = serde_json::to_value(&plane).expect("plane serializes");
+    forged_state["cells"]["action_value"] =
+        serde_json::json!({"state": "scored", "score": 0.0});
+    let parsed_forged: Result<ScorePlane, _> = serde_json::from_value(forged_state);
+    assert!(parsed_forged.is_err());
+}
+
+#[test]
+fn persisted_unscored_reasons_are_validated_with_the_plane() {
+    let plane = ScorePlane::declare("agent", CapabilityTier::ToolUsingAgent, three_dimensions())
+        .expect("declaration is well formed");
+    let mut encoded = serde_json::to_value(&plane).expect("plane serializes");
+    encoded["cells"]["evidence_quality"] = serde_json::json!({
+        "state": "unscored",
+        "reason": "evaluator_unhealthy",
+        "evaluator": " "
+    });
+
+    let parsed: Result<ScorePlane, _> = serde_json::from_value(encoded);
+    assert!(parsed.is_err());
+}
+
+#[test]
+fn finite_but_overflowing_weights_cannot_produce_a_fake_fold() {
+    let mut plane = ScorePlane::declare(
+        "agent",
+        CapabilityTier::ToolUsingAgent,
+        vec![
+            Dimension::universal("a").weighing(f64::MAX),
+            Dimension::universal("b").weighing(f64::MAX),
+        ],
+    )
+    .expect("individual weights are finite");
+    plane.score("a", 1.0).expect("in range");
+    plane.score("b", 1.0).expect("in range");
+
+    assert!(matches!(
+        plane.fold(FoldPolicy::ExcludeInapplicable),
+        Err(PlaneError::FoldOverflow)
+    ));
+}
+
+#[test]
+fn invalid_plane_and_dimension_identity_is_rejected_at_declaration() {
+    assert!(matches!(
+        ScorePlane::declare(" agent", CapabilityTier::ToolUsingAgent, vec![]),
+        Err(PlaneError::InvalidSystem(_))
+    ));
+    assert!(matches!(
+        ScorePlane::declare(
+            "agent",
+            CapabilityTier::ToolUsingAgent,
+            vec![Dimension::universal("evidence\n")]
+        ),
+        Err(PlaneError::InvalidDimension { .. })
+    ));
 }
 
 #[test]
@@ -194,7 +278,10 @@ fn imputations(file: &str, text: &str) -> Vec<String> {
 /// health for files it never opened, and nothing announces that it has stopped checking anything.
 fn source_files() -> Vec<PathBuf> {
     let mut found = Vec::new();
-    collect_rust_files(&Path::new(env!("CARGO_MANIFEST_DIR")).join("src"), &mut found);
+    collect_rust_files(
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("src"),
+        &mut found,
+    );
     found.sort();
     found
 }
@@ -217,11 +304,19 @@ fn the_imputation_scanner_sees_a_planted_violation() {
     // A scanner that detects nothing is worse than no scanner: it certifies the crate clean
     // forever, including after the rule stops being true.
     assert_eq!(
-        imputations("plane.rs", "        let value = cell.score().unwrap_or(0.0);").len(),
+        imputations(
+            "plane.rs",
+            "        let value = cell.score().unwrap_or(0.0);"
+        )
+        .len(),
         1
     );
     assert_eq!(
-        imputations("fold.rs", "    let total: f64 = measured.unwrap_or_default();").len(),
+        imputations(
+            "fold.rs",
+            "    let total: f64 = measured.unwrap_or_default();"
+        )
+        .len(),
         1
     );
     assert_eq!(
@@ -271,4 +366,3 @@ fn every_capability_tier_admits_exactly_the_tiers_at_or_below_it() {
         }
     }
 }
-

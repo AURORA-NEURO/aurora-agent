@@ -24,6 +24,7 @@ pub const DOMAIN_WORKFLOW_RECONCILE_SCHEMA_VERSION: &str =
 pub const MAX_DOMAIN_WORKFLOW_RECONCILE_BYTES: usize = 20_000_000;
 pub const MAX_DOMAIN_WORKFLOW_RECONCILE_STEPS: usize = 128;
 pub const MAX_DOMAIN_WORKFLOW_RECONCILE_FINDINGS: usize = 512;
+const MAX_TEXT_BYTES: usize = 4_096;
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum DomainWorkflowReconcileError {
@@ -57,6 +58,26 @@ fn digest(value: &Value) -> Result<String, DomainWorkflowReconcileError> {
         .map_err(|error| DomainWorkflowReconcileError::Canonicalisation(error.to_string()))
 }
 
+fn valid_text(value: &str) -> bool {
+    let trimmed = value.trim();
+    !trimmed.is_empty()
+        && value == trimmed
+        && value.len() <= MAX_TEXT_BYTES
+        && !value.chars().any(char::is_control)
+}
+
+fn valid_identifier(value: &str) -> bool {
+    valid_text(value) && value == value.trim()
+}
+
+fn valid_digest(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        && ContentHash::parse(value.to_owned()).is_ok()
+}
+
 fn text_field<'a>(
     object: &'a Map<String, Value>,
     field: &str,
@@ -64,7 +85,7 @@ fn text_field<'a>(
     object
         .get(field)
         .and_then(Value::as_str)
-        .filter(|value| !value.trim().is_empty())
+        .filter(|value| valid_text(value))
         .ok_or_else(|| {
             DomainWorkflowReconcileError::InvalidRequest(format!(
                 "{field} must be a non-empty string"
@@ -77,6 +98,11 @@ fn require_digest(
     field: &str,
 ) -> Result<String, DomainWorkflowReconcileError> {
     let value = text_field(object, field)?;
+    if !valid_digest(value) {
+        return Err(DomainWorkflowReconcileError::InvalidRequest(format!(
+            "{field} must be a lowercase 64-character SHA-256 digest"
+        )));
+    }
     ContentHash::parse(value.to_string()).map_err(|_| {
         DomainWorkflowReconcileError::InvalidRequest(format!(
             "{field} must be a lowercase 64-character SHA-256 digest"
@@ -96,7 +122,18 @@ fn finding(code: &str, severity: &str, message: impl Into<String>, step_id: Opti
 
 fn append_finding(findings: &mut Vec<Value>, value: Value) {
     if findings.len() < MAX_DOMAIN_WORKFLOW_RECONCILE_FINDINGS {
-        findings.push(value);
+        if findings.len() == MAX_DOMAIN_WORKFLOW_RECONCILE_FINDINGS - 1 {
+            findings.push(finding(
+                "finding_overflow",
+                "error",
+                format!(
+                    "more than {MAX_DOMAIN_WORKFLOW_RECONCILE_FINDINGS} findings were generated; reconciliation is incomplete"
+                ),
+                None,
+            ));
+        } else {
+            findings.push(value);
+        }
     }
 }
 
@@ -118,26 +155,101 @@ fn step_contract_ids(
         )));
     }
     let mut ids = BTreeSet::new();
+    let mut normalized_ids = BTreeSet::new();
     for (index, step) in steps.iter().enumerate() {
         let id = step
             .get("step_id")
             .and_then(Value::as_str)
-            .filter(|value| !value.trim().is_empty())
+            .filter(|value| valid_identifier(value))
             .ok_or_else(|| {
                 DomainWorkflowReconcileError::InvalidRequest(format!(
                     "instantiation.evidence_plan.steps[{index}].step_id must be a non-empty string"
                 ))
             })?;
-        if !ids.insert(id.to_string()) {
+        if !normalized_ids.insert(id.to_ascii_lowercase()) || !ids.insert(id.to_string()) {
             return Err(DomainWorkflowReconcileError::InvalidRequest(format!(
-                "evidence plan contains duplicate step id {id:?}"
+                "evidence plan contains duplicate or case-colliding step id {id:?}"
             )));
         }
     }
     Ok(ids)
 }
 
+fn validate_instantiation_binding(
+    instantiation: &Map<String, Value>,
+    workflow_id: &str,
+    workflow_digest: &str,
+    catalog_digest: &str,
+    domain_contract_digest: &str,
+) -> Result<(), DomainWorkflowReconcileError> {
+    let mission = instantiation
+        .get("mission")
+        .and_then(Value::as_object)
+        .ok_or_else(|| {
+            DomainWorkflowReconcileError::InvalidRequest(
+                "instantiation.mission must be an object".into(),
+            )
+        })?;
+    let binding = mission
+        .get("workflow_binding")
+        .and_then(Value::as_object)
+        .ok_or_else(|| {
+            DomainWorkflowReconcileError::InvalidRequest(
+                "instantiation.mission.workflow_binding must be an object".into(),
+            )
+        })?;
+    for (field, expected) in [
+        ("workflow_id", workflow_id),
+        ("workflow_digest", workflow_digest),
+        ("catalog_digest", catalog_digest),
+        ("domain_contract_digest", domain_contract_digest),
+    ] {
+        if binding.get(field).and_then(Value::as_str) != Some(expected) {
+            return Err(DomainWorkflowReconcileError::InvalidRequest(format!(
+                "instantiation.mission.workflow_binding.{field} does not match the instantiation"
+            )));
+        }
+    }
+    let evidence_plan = binding.get("evidence_plan").ok_or_else(|| {
+        DomainWorkflowReconcileError::InvalidRequest(
+            "instantiation.mission.workflow_binding.evidence_plan is required".into(),
+        )
+    })?;
+    if instantiation.get("evidence_plan") != Some(evidence_plan) {
+        return Err(DomainWorkflowReconcileError::InvalidRequest(
+            "instantiation evidence_plan does not match mission.workflow_binding.evidence_plan"
+                .into(),
+        ));
+    }
+    let evidence_plan_digest = require_digest(binding, "evidence_plan_digest")?;
+    if digest(evidence_plan)? != evidence_plan_digest {
+        return Err(DomainWorkflowReconcileError::InvalidRequest(
+            "mission.workflow_binding.evidence_plan_digest does not match evidence_plan".into(),
+        ));
+    }
+    if instantiation.get("domain_contract") != binding.get("domain_contract") {
+        return Err(DomainWorkflowReconcileError::InvalidRequest(
+            "instantiation domain_contract does not match mission.workflow_binding.domain_contract"
+                .into(),
+        ));
+    }
+    Ok(())
+}
+
 fn trace_audit(report: &MissionReport, findings: &mut Vec<Value>) -> Value {
+    let schema_valid =
+        report.execution_trace_schema_version == crate::mission::MISSION_TRACE_SCHEMA_VERSION;
+    if !schema_valid {
+        append_finding(
+            findings,
+            finding(
+                "trace_schema_mismatch",
+                "error",
+                "execution trace schema version is not the mission trace schema",
+                None,
+            ),
+        );
+    }
     let contiguous = report
         .execution_trace
         .iter()
@@ -153,6 +265,153 @@ fn trace_audit(report: &MissionReport, findings: &mut Vec<Value>) -> Value {
                 None,
             ),
         );
+    }
+    let planned = report
+        .plan
+        .steps
+        .iter()
+        .map(|step| (step.id.as_str(), step))
+        .collect::<BTreeMap<_, _>>();
+    let result_by_id = report
+        .results
+        .iter()
+        .map(|result| (result.id.as_str(), result))
+        .collect::<BTreeMap<_, _>>();
+    let mut event_shapes_valid = true;
+    let mut step_bindings_valid = true;
+    let mut terminal_bindings_valid = true;
+    let mut terminal_steps = BTreeSet::new();
+    for event in &report.execution_trace {
+        match event.event.as_str() {
+            "mission.started" | "mission.completed" | "mission.cancelled" => {
+                if event.wave.is_some() || event.step_id.is_some() || event.tool.is_some() {
+                    event_shapes_valid = false;
+                    append_finding(
+                        findings,
+                        finding(
+                            "trace_mission_event_shape_invalid",
+                            "error",
+                            "mission lifecycle events must not carry wave or step identity",
+                            None,
+                        ),
+                    );
+                }
+            }
+            "wave.started" | "wave.completed" => {
+                if event.wave.is_none() || event.step_id.is_some() || event.tool.is_some() {
+                    event_shapes_valid = false;
+                    append_finding(
+                        findings,
+                        finding(
+                            "trace_wave_event_shape_invalid",
+                            "error",
+                            "wave lifecycle events must carry only a wave identity",
+                            None,
+                        ),
+                    );
+                }
+            }
+            "step.started" | "step.completed" | "step.refused" | "step.blocked"
+            | "step.cancelled" => {
+                let Some(step_id) = event.step_id.as_deref() else {
+                    step_bindings_valid = false;
+                    append_finding(
+                        findings,
+                        finding(
+                            "trace_step_identity_missing",
+                            "error",
+                            "step trace events must identify a step",
+                            None,
+                        ),
+                    );
+                    continue;
+                };
+                let Some(expected) = planned.get(step_id) else {
+                    step_bindings_valid = false;
+                    append_finding(
+                        findings,
+                        finding(
+                            "trace_unknown_step",
+                            "error",
+                            "execution trace refers to an unplanned step",
+                            Some(step_id),
+                        ),
+                    );
+                    continue;
+                };
+                if event.tool.as_deref() != Some(expected.tool.as_str()) {
+                    step_bindings_valid = false;
+                    append_finding(
+                        findings,
+                        finding(
+                            "trace_step_tool_mismatch",
+                            "error",
+                            "execution trace step tool does not match the plan",
+                            Some(step_id),
+                        ),
+                    );
+                }
+                let terminal_status = match event.event.as_str() {
+                    "step.completed" => Some("succeeded"),
+                    "step.refused" => Some("refused"),
+                    "step.blocked" => Some("blocked"),
+                    "step.cancelled" => Some("cancelled"),
+                    _ => None,
+                };
+                if let Some(terminal_status) = terminal_status {
+                    if event.status.as_deref() != Some(terminal_status) {
+                        terminal_bindings_valid = false;
+                        append_finding(
+                            findings,
+                            finding(
+                                "trace_terminal_status_mismatch",
+                                "error",
+                                "execution trace event status does not match its terminal event type",
+                                Some(step_id),
+                            ),
+                        );
+                    }
+                    if !terminal_steps.insert(step_id.to_string()) {
+                        terminal_bindings_valid = false;
+                        append_finding(
+                            findings,
+                            finding(
+                                "trace_duplicate_terminal_step",
+                                "error",
+                                "execution trace contains more than one terminal event for a step",
+                                Some(step_id),
+                            ),
+                        );
+                    }
+                    if let Some(result) = result_by_id.get(step_id) {
+                        if result.status != terminal_status {
+                            terminal_bindings_valid = false;
+                            append_finding(
+                                findings,
+                                finding(
+                                    "trace_terminal_status_mismatch",
+                                    "error",
+                                    "execution trace terminal status does not match the retained result",
+                                    Some(step_id),
+                                ),
+                            );
+                        }
+                    }
+                }
+            }
+            _ => {
+                event_shapes_valid = false;
+                append_finding(
+                    findings,
+                    finding(
+                        "trace_event_unknown",
+                        "error",
+                        "execution trace contains an unknown event type",
+                        None,
+                    ),
+                );
+            }
+        }
     }
     let starts = report
         .execution_trace
@@ -178,9 +437,13 @@ fn trace_audit(report: &MissionReport, findings: &mut Vec<Value>) -> Value {
     json!({
         "present": !report.execution_trace.is_empty(),
         "event_count": report.execution_trace.len(),
+        "schema_valid": schema_valid,
         "contiguous": contiguous,
         "starts_with_mission_started": starts,
         "ends_with_mission_completed": ends,
+        "event_shapes_valid": event_shapes_valid,
+        "step_bindings_valid": step_bindings_valid,
+        "terminal_bindings_valid": terminal_bindings_valid,
     })
 }
 
@@ -249,7 +512,7 @@ fn result_row(
         );
     }
     if let Some(arguments_digest) = result.arguments_digest.as_deref() {
-        if ContentHash::parse(arguments_digest.to_string()).is_err() {
+        if !valid_digest(arguments_digest) {
             append_finding(
                 findings,
                 finding(
@@ -407,6 +670,44 @@ fn reconcile_report(
             "mission_report does not match MissionReport: {error}"
         ))
     })?;
+    let expected_execution = if expected_request.policy.execute {
+        "executed"
+    } else {
+        "planned"
+    };
+    if report.execution != expected_execution {
+        append_finding(
+            findings,
+            finding(
+                "mission_execution_posture_mismatch",
+                "error",
+                format!(
+                    "mission report execution `{}` does not match instantiated policy `{expected_execution}`",
+                    report.execution
+                ),
+                None,
+            ),
+        );
+    }
+    let valid_mission_status = if report.execution == "planned" {
+        report.mission_status == "planned" && report.results.is_empty()
+    } else {
+        matches!(
+            report.mission_status.as_str(),
+            "succeeded" | "partial" | "failed" | "cancelled"
+        )
+    };
+    if !valid_mission_status {
+        append_finding(
+            findings,
+            finding(
+                "mission_status_invalid",
+                "error",
+                "mission report status is inconsistent with its execution posture or retained results",
+                None,
+            ),
+        );
+    }
     if report.plan.mission_id != expected_request.mission_id {
         append_finding(
             findings,
@@ -671,6 +972,14 @@ pub fn reconcile_domain_workflow(request: &Value) -> Result<Value, DomainWorkflo
     let workflow_digest = require_digest(instantiation_object, "workflow_digest")?;
     let catalog_digest = require_digest(instantiation_object, "catalog_digest")?;
     let domain_contract_digest = require_digest(instantiation_object, "domain_contract_digest")?;
+    let contract_step_ids = step_contract_ids(instantiation)?;
+    validate_instantiation_binding(
+        instantiation_object,
+        &workflow_id,
+        &workflow_digest,
+        &catalog_digest,
+        &domain_contract_digest,
+    )?;
     let mission_value = instantiation_object.get("mission").ok_or_else(|| {
         DomainWorkflowReconcileError::InvalidRequest("instantiation.mission is required".into())
     })?;
@@ -685,7 +994,6 @@ pub fn reconcile_domain_workflow(request: &Value) -> Result<Value, DomainWorkflo
             "instantiated mission cannot be planned: {error}"
         ))
     })?;
-    let contract_step_ids = step_contract_ids(instantiation)?;
     let expected_step_ids = expected_plan
         .steps
         .iter()
@@ -744,6 +1052,32 @@ pub fn reconcile_domain_workflow(request: &Value) -> Result<Value, DomainWorkflo
             .cloned()
             .unwrap_or(Value::Null);
         bundle_verification = verification;
+        if report_input.is_some() {
+            if let Some(report_value) = report_value.as_ref() {
+                let report_digest = digest(report_value)?;
+                let bundle_result_digest = bundle_verification
+                    .get("recomputed_result_digest")
+                    .and_then(Value::as_str)
+                    .or_else(|| {
+                        bundle_verification
+                            .get("result_digest")
+                            .and_then(Value::as_str)
+                    });
+                if let Some(bundle_result_digest) = bundle_result_digest {
+                    if bundle_result_digest != report_digest {
+                        append_finding(
+                            &mut findings,
+                            finding(
+                                "evidence_bundle_result_mismatch",
+                                "error",
+                                "mission_report and evidence_bundle do not identify the same retained result",
+                                None,
+                            ),
+                        );
+                    }
+                }
+            }
+        }
         if report_value.is_none() {
             if bundle_object
                 .get("result")
@@ -830,13 +1164,15 @@ pub fn reconcile_domain_workflow(request: &Value) -> Result<Value, DomainWorkflo
         );
     }
 
+    let bundle_integrity_valid = if bundle_input.is_some() {
+        bundle_verification.get("valid").and_then(Value::as_bool) == Some(true)
+    } else {
+        true
+    };
     let integrity_valid = findings
         .iter()
         .all(|finding| finding["severity"] != "error")
-        && bundle_verification
-            .get("valid")
-            .and_then(Value::as_bool)
-            .unwrap_or(true);
+        && bundle_integrity_valid;
     let required_success = evidence_summary["required_success"]
         .as_bool()
         .unwrap_or(false);
@@ -1099,6 +1435,75 @@ mod tests {
     }
 
     #[test]
+    fn trace_step_events_must_bind_to_planned_tool_and_result_status() {
+        let instantiation = instantiation();
+        let mut tampered = report(&instantiation, "succeeded", Some(json!({"ok": true})));
+        tampered["execution_trace"] = json!([
+            {"sequence": 0, "event": "mission.started", "wave": null, "step_id": null, "tool": null, "status": "running", "arguments_digest": null, "bytes": 0, "detail": null},
+            {"sequence": 1, "event": "step.completed", "wave": 0, "step_id": "boundary", "tool": "forged_tool", "status": "refused", "arguments_digest": null, "bytes": 0, "detail": null},
+            {"sequence": 2, "event": "mission.completed", "wave": null, "step_id": null, "tool": null, "status": "succeeded", "arguments_digest": null, "bytes": 12, "detail": null}
+        ]);
+        let reconciled = reconcile_domain_workflow(&json!({
+            "instantiation": instantiation,
+            "mission_report": tampered
+        }))
+        .unwrap();
+        assert_eq!(reconciled["integrity"]["valid"], false);
+        assert!(reconciled["integrity"]["findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["code"] == "trace_step_tool_mismatch"));
+        assert!(reconciled["integrity"]["findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["code"] == "trace_terminal_status_mismatch"));
+    }
+
+    #[test]
+    fn refuses_instantiation_binding_drift_before_reconciliation() {
+        let original = instantiation();
+        let mut tampered = original.clone();
+        tampered["mission"]["workflow_binding"]["catalog_digest"] = json!("e".repeat(64));
+        let error = reconcile_domain_workflow(&json!({
+            "instantiation": tampered.clone(),
+            "mission_report": report(&original, "succeeded", Some(json!({"ok": true})))
+        }))
+        .expect_err("nested workflow binding drift must be refused");
+        assert!(error.to_string().contains("catalog_digest"));
+
+        let mut tampered = original.clone();
+        tampered["mission"]["workflow_binding"]["evidence_plan"]["steps"][0]["tool"] =
+            json!("forged_tool");
+        let error = reconcile_domain_workflow(&json!({
+            "instantiation": tampered.clone(),
+            "mission_report": report(&original, "succeeded", Some(json!({"ok": true})))
+        }))
+        .expect_err("nested evidence-plan drift must be refused");
+        assert!(error.to_string().contains("evidence_plan"));
+    }
+
+    #[test]
+    fn execution_posture_must_match_the_instantiated_mission_policy() {
+        let instantiation = instantiation();
+        let mut forged = report(&instantiation, "succeeded", Some(json!({"ok": true})));
+        forged["execution"] = json!("planned");
+
+        let reconciled = reconcile_domain_workflow(&json!({
+            "instantiation": instantiation,
+            "mission_report": forged
+        }))
+        .unwrap();
+        assert_eq!(reconciled["integrity"]["valid"], false);
+        assert!(reconciled["integrity"]["findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["code"] == "mission_execution_posture_mismatch"));
+    }
+
+    #[test]
     fn route_review_provenance_must_match_the_instantiated_workflow() {
         let instantiation = reviewed_instantiation();
         let mut tampered = report(&instantiation, "succeeded", Some(json!({"ok": true})));
@@ -1161,5 +1566,102 @@ mod tests {
             output["evidence"]["rows"][0]["evidence_state"],
             "summary_only_result_omitted"
         );
+    }
+
+    #[test]
+    fn report_and_bundle_must_bind_to_the_same_result_digest() {
+        let instantiation = instantiation();
+        let mission_report = report(&instantiation, "succeeded", Some(json!({"ok": true})));
+        let mut bundle = json!({
+            "schema": "bioprism-api/mission-evidence-bundle/0.1",
+            "workflow": "mission_evidence_bundle_export",
+            "mission_id": "reconcile-1",
+            "retention": {
+                "mode": "full",
+                "result_retained": true,
+                "result_included": true,
+                "summary_retained": false
+            },
+            "result": mission_report.clone(),
+            "result_digest": ContentHash::of_value(&mission_report).unwrap().to_string(),
+            "trace": [],
+            "export": {
+                "format": "json",
+                "include_result": true,
+                "include_trace": false,
+                "trace_included": false,
+                "include_fixtures": false,
+                "max_items": 128,
+                "execution": "not_started",
+                "digest_algorithm": "sha256"
+            }
+        });
+        bundle["bundle_digest"] = json!(ContentHash::of_value(&bundle).unwrap().to_string());
+
+        let mut mismatched_bundle = bundle.clone();
+        mismatched_bundle["result"]["returned_bytes"] = json!(99);
+        let result_digest = ContentHash::of_value(&mismatched_bundle["result"])
+            .unwrap()
+            .to_string();
+        mismatched_bundle["result_digest"] = json!(result_digest);
+        mismatched_bundle
+            .as_object_mut()
+            .unwrap()
+            .remove("bundle_digest");
+        mismatched_bundle["bundle_digest"] = json!(ContentHash::of_value(&mismatched_bundle)
+            .unwrap()
+            .to_string());
+
+        let output = reconcile_domain_workflow(&json!({
+            "instantiation": instantiation,
+            "mission_report": mission_report,
+            "evidence_bundle": mismatched_bundle
+        }))
+        .unwrap();
+        assert_eq!(output["bundle_verification"]["valid"], true);
+        assert_eq!(output["integrity"]["valid"], false);
+        assert!(output["integrity"]["findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["code"] == "evidence_bundle_result_mismatch"));
+    }
+
+    #[test]
+    fn reconciliation_rejects_noncanonical_result_digests() {
+        let original = instantiation();
+        let mut mission_report = report(&original, "succeeded", Some(json!({"ok": true})));
+        mission_report["results"][0]["arguments_digest"] = json!("A".repeat(64));
+        let output = reconcile_domain_workflow(&json!({
+            "instantiation": original,
+            "mission_report": mission_report
+        }))
+        .unwrap();
+        assert_eq!(output["integrity"]["valid"], false);
+        assert!(output["integrity"]["findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["code"] == "arguments_digest_invalid"));
+    }
+
+    #[test]
+    fn reconciliation_rejects_case_colliding_evidence_plan_ids() {
+        let mut value = instantiation();
+        let mut duplicate = value["evidence_plan"]["steps"][0].clone();
+        duplicate["step_id"] = json!("BOUNDARY");
+        value["evidence_plan"]["steps"]
+            .as_array_mut()
+            .expect("steps")
+            .push(duplicate);
+
+        let error = reconcile_domain_workflow(&json!({
+            "instantiation": value,
+            "mission_report": report(&instantiation(), "succeeded", Some(json!({"ok": true})))
+        }))
+        .expect_err("case-colliding evidence plan must be refused");
+        assert!(error
+            .to_string()
+            .contains("duplicate or case-colliding step id"));
     }
 }

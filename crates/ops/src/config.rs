@@ -81,9 +81,7 @@ use std::fmt;
 /// The order is a property of the type. A caller cannot reorder layers, and adding a layer means
 /// deciding where it sits relative to every other one at the point of definition rather than at the
 /// point of use.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Layer {
     /// Compiled-in defaults. The only layer at which a permission may not grant.
@@ -131,9 +129,7 @@ impl fmt::Display for Layer {
 /// dependency here — it owns schema evolution and a second classifier is exactly what this
 /// workspace must not grow — so the rule is restated rather than imported, and the restatement is
 /// visible here so a reader can check the two against each other.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Influence {
     /// Changing this value changes the bytes of some emitted artifact, so it changes that
@@ -607,10 +603,13 @@ impl ConfigStack {
 
             for source in self.sources.iter().filter(|s| s.layer == layer) {
                 for (key, binding) in &source.bindings {
-                    let spec = self.schema.get(key).ok_or_else(|| OpsError::UnknownSetting {
-                        key: key.to_string(),
-                        origin: source.origin.clone(),
-                    })?;
+                    let spec = self
+                        .schema
+                        .get(key)
+                        .ok_or_else(|| OpsError::UnknownSetting {
+                            key: key.to_string(),
+                            origin: source.origin.clone(),
+                        })?;
 
                     if let Err((expected, actual)) = spec.accepts(binding) {
                         return Err(OpsError::TypeMismatch {
@@ -655,7 +654,14 @@ impl ConfigStack {
             }
 
             for (key, (binding, origin)) in at_this_layer {
-                resolved.insert(key, Resolution { binding, layer, origin });
+                resolved.insert(
+                    key,
+                    Resolution {
+                        binding,
+                        layer,
+                        origin,
+                    },
+                );
             }
         }
 
@@ -715,7 +721,9 @@ impl EffectiveConfig {
 
     /// Whether a permission is granted. An absent permission is denied, never unknown.
     pub fn granted(&self, key: &SettingKey) -> bool {
-        self.value(key).and_then(SettingValue::as_bool).unwrap_or(false)
+        self.value(key)
+            .and_then(SettingValue::as_bool)
+            .unwrap_or(false)
     }
 
     pub fn schema(&self) -> &Schema {
@@ -938,7 +946,10 @@ mod tests {
             .expect("resolves");
         assert!(!effective.granted(&key("allow.unreviewed_packs")));
         assert_eq!(
-            effective.get(&key("allow.unreviewed_packs")).unwrap().origin,
+            effective
+                .get(&key("allow.unreviewed_packs"))
+                .unwrap()
+                .origin,
             "implicit-deny"
         );
     }
@@ -959,10 +970,12 @@ mod tests {
     fn a_higher_layer_may_grant_a_permission_the_defaults_deny() {
         let effective = ConfigStack::new(base_schema())
             .push(defaults())
-            .push(Source::new(Layer::CommandLine, "--allow-unreviewed-packs").bind(
-                key("allow.unreviewed_packs"),
-                Binding::Value(SettingValue::Bool(true)),
-            ))
+            .push(
+                Source::new(Layer::CommandLine, "--allow-unreviewed-packs").bind(
+                    key("allow.unreviewed_packs"),
+                    Binding::Value(SettingValue::Bool(true)),
+                ),
+            )
             .resolve()
             .expect("resolves");
         assert!(effective.granted(&key("allow.unreviewed_packs")));
@@ -972,14 +985,14 @@ mod tests {
     fn two_sources_in_one_layer_disagreeing_about_a_key_is_a_failure_not_a_coin_flip() {
         let error = ConfigStack::new(base_schema())
             .push(defaults())
-            .push(
-                Source::new(Layer::Environment, "BIOPRISM_STORE")
-                    .bind(key("store.root"), Binding::Value(SettingValue::Text("/a".into()))),
-            )
-            .push(
-                Source::new(Layer::Environment, "BIOPRISM_STORE_ROOT")
-                    .bind(key("store.root"), Binding::Value(SettingValue::Text("/b".into()))),
-            )
+            .push(Source::new(Layer::Environment, "BIOPRISM_STORE").bind(
+                key("store.root"),
+                Binding::Value(SettingValue::Text("/a".into())),
+            ))
+            .push(Source::new(Layer::Environment, "BIOPRISM_STORE_ROOT").bind(
+                key("store.root"),
+                Binding::Value(SettingValue::Text("/b".into())),
+            ))
             .resolve()
             .unwrap_err();
         match error {
@@ -992,14 +1005,14 @@ mod tests {
     fn two_sources_in_one_layer_agreeing_about_a_key_resolve_without_complaint() {
         let effective = ConfigStack::new(base_schema())
             .push(defaults())
-            .push(
-                Source::new(Layer::Environment, "BIOPRISM_STORE")
-                    .bind(key("store.root"), Binding::Value(SettingValue::Text("/a".into()))),
-            )
-            .push(
-                Source::new(Layer::Environment, "BIOPRISM_STORE_ROOT")
-                    .bind(key("store.root"), Binding::Value(SettingValue::Text("/a".into()))),
-            )
+            .push(Source::new(Layer::Environment, "BIOPRISM_STORE").bind(
+                key("store.root"),
+                Binding::Value(SettingValue::Text("/a".into())),
+            ))
+            .push(Source::new(Layer::Environment, "BIOPRISM_STORE_ROOT").bind(
+                key("store.root"),
+                Binding::Value(SettingValue::Text("/a".into())),
+            ))
             .resolve()
             .expect("agreement is not ambiguity");
         assert_eq!(
@@ -1011,22 +1024,25 @@ mod tests {
     #[test]
     fn precedence_follows_the_type_order_not_the_order_layers_were_pushed() {
         let effective = ConfigStack::new(base_schema())
-            .push(
-                Source::new(Layer::CommandLine, "--store-root")
-                    .bind(key("store.root"), Binding::Value(SettingValue::Text("/cli".into()))),
-            )
+            .push(Source::new(Layer::CommandLine, "--store-root").bind(
+                key("store.root"),
+                Binding::Value(SettingValue::Text("/cli".into())),
+            ))
             .push(defaults())
-            .push(
-                Source::new(Layer::Environment, "BIOPRISM_STORE")
-                    .bind(key("store.root"), Binding::Value(SettingValue::Text("/env".into()))),
-            )
+            .push(Source::new(Layer::Environment, "BIOPRISM_STORE").bind(
+                key("store.root"),
+                Binding::Value(SettingValue::Text("/env".into())),
+            ))
             .resolve()
             .expect("resolves");
         assert_eq!(
             effective.value(&key("store.root")),
             Some(&SettingValue::Text("/cli".into()))
         );
-        assert_eq!(effective.get(&key("store.root")).unwrap().layer, Layer::CommandLine);
+        assert_eq!(
+            effective.get(&key("store.root")).unwrap().layer,
+            Layer::CommandLine
+        );
     }
 
     #[test]
@@ -1102,21 +1118,24 @@ mod tests {
     fn the_same_value_from_a_different_origin_is_a_different_configuration() {
         let from_file = ConfigStack::new(base_schema())
             .push(defaults())
-            .push(
-                Source::new(Layer::ProjectFile, "bioprism.toml")
-                    .bind(key("store.root"), Binding::Value(SettingValue::Text("/x".into()))),
-            )
+            .push(Source::new(Layer::ProjectFile, "bioprism.toml").bind(
+                key("store.root"),
+                Binding::Value(SettingValue::Text("/x".into())),
+            ))
             .resolve()
             .unwrap();
         let from_cli = ConfigStack::new(base_schema())
             .push(defaults())
-            .push(
-                Source::new(Layer::CommandLine, "--store-root")
-                    .bind(key("store.root"), Binding::Value(SettingValue::Text("/x".into()))),
-            )
+            .push(Source::new(Layer::CommandLine, "--store-root").bind(
+                key("store.root"),
+                Binding::Value(SettingValue::Text("/x".into())),
+            ))
             .resolve()
             .unwrap();
-        assert_ne!(from_file.fingerprint().unwrap(), from_cli.fingerprint().unwrap());
+        assert_ne!(
+            from_file.fingerprint().unwrap(),
+            from_cli.fingerprint().unwrap()
+        );
         assert_eq!(
             from_file.emitted_fingerprint().unwrap(),
             from_cli.emitted_fingerprint().unwrap()
@@ -1191,10 +1210,10 @@ mod tests {
     fn a_layer_binding_an_undeclared_key_names_the_source_that_did_it() {
         let error = ConfigStack::new(base_schema())
             .push(defaults())
-            .push(
-                Source::new(Layer::Environment, "BIOPRISM_TYPO")
-                    .bind(key("store.rooot"), Binding::Value(SettingValue::Text("/x".into()))),
-            )
+            .push(Source::new(Layer::Environment, "BIOPRISM_TYPO").bind(
+                key("store.rooot"),
+                Binding::Value(SettingValue::Text("/x".into())),
+            ))
             .resolve()
             .unwrap_err();
         match error {

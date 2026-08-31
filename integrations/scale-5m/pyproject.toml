@@ -1,0 +1,9 @@
+[project]
+name = "aurora-scale-5m"
+version = "0.1.0"
+description = "Bounded streaming repository scale/index primitives for Aurora"
+requires-python = ">=3.10"
+dependencies = []
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

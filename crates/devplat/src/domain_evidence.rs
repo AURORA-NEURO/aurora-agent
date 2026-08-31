@@ -139,23 +139,40 @@ pub fn harmonize_domain_evidence(request: &Value) -> Result<Value, DomainEvidenc
             "qualifies" => qualification_link_count += 1,
             "contradicts" => contradiction_link_count += 1,
             "context" => context_link_count += 1,
-            _ => unreachable!("links are validated above"),
+            _ => {
+                return Err(DomainEvidenceError::InvalidRole {
+                    index: link.report_index,
+                    role: link.role.clone(),
+                });
+            }
         }
-        link_rows.push(json!({
+        let Some(report) = reports.get(link.report_index) else {
+            return Err(DomainEvidenceError::LinkReportOutOfRange {
+                index: link.report_index,
+                report_index: link.report_index,
+                report_count: reports.len(),
+            });
+        };
+        let mut row = json!({
             "report_index": link.report_index,
-            "report_digest": reports[link.report_index].digest,
-            "role": link.role,
-            "note": link.note
-        }));
+            "report_digest": report.digest,
+            "role": link.role
+        });
+        if !link.note.is_empty() {
+            row["note"] = json!(link.note);
+        }
+        link_rows.push(row);
     }
     let report_rows = reports
         .iter()
         .enumerate()
         .map(|(index, report)| {
-            let object = report
-                .report
-                .as_object()
-                .expect("canonical domain report is an object");
+            let Some(object) = report.report.as_object() else {
+                return Err(DomainEvidenceError::InvalidReport {
+                    index,
+                    error: "canonical domain report is not an object".into(),
+                });
+            };
             let roles = linked_roles.get(&index).cloned().unwrap_or_default();
             let bridge_metadata = classify_domain_report_bridge(&report.report);
             let report_class = bridge_metadata.report_class;
@@ -176,7 +193,7 @@ pub fn harmonize_domain_evidence(request: &Value) -> Result<Value, DomainEvidenc
             } else {
                 reports_without_lineage_parents += 1;
             }
-            json!({
+            Ok(json!({
                 "index": index,
                 "digest": report.digest,
                 "group_id": object.get("group_id"),
@@ -193,9 +210,9 @@ pub fn harmonize_domain_evidence(request: &Value) -> Result<Value, DomainEvidenc
                 "lineage_parent_count": parent_digests,
                 "link_roles": roles,
                 "link_count": linked_roles.get(&index).map_or(0, Vec::len)
-            })
+            }))
         })
-        .collect::<Vec<_>>();
+        .collect::<Result<Vec<_>, DomainEvidenceError>>()?;
     let claim_statuses = reports
         .iter()
         .filter_map(|report| {
@@ -310,6 +327,9 @@ pub fn validate_domain_evidence_harmonization(value: &Value) -> Result<(), Domai
         return Err(DomainEvidenceError::InvalidField("reports".into()));
     }
     let mut report_digests = Vec::with_capacity(report_rows.len());
+    let mut seen_report_digests = BTreeSet::new();
+    let mut report_link_roles = Vec::with_capacity(report_rows.len());
+    let mut claim_statuses = BTreeSet::new();
     let mut observed_groups = BTreeSet::new();
     let mut observed_domains = BTreeSet::new();
     let mut report_class_counts: BTreeMap<String, usize> = BTreeMap::new();
@@ -332,6 +352,11 @@ pub fn validate_domain_evidence_harmonization(value: &Value) -> Result<(), Domai
                 "reports[{index}].digest"
             )));
         }
+        if !seen_report_digests.insert(digest.clone()) {
+            return Err(DomainEvidenceError::InvalidField(format!(
+                "reports[{index}].digest"
+            )));
+        }
         report_digests.push(digest);
         required_text(row, "group_id")?;
         let group_id = required_text(row, "group_id")?;
@@ -350,9 +375,31 @@ pub fn validate_domain_evidence_harmonization(value: &Value) -> Result<(), Domai
         }
         let report_class = required_text(row, "report_class")?;
         *report_class_counts.entry(report_class).or_default() += 1;
+        match row.get("claim_status") {
+            Some(Value::String(status)) => {
+                claim_statuses.insert(strict_text(
+                    &format!("reports[{index}].claim_status"),
+                    status,
+                )?);
+            }
+            Some(Value::Null) => {}
+            Some(_) => {
+                return Err(DomainEvidenceError::InvalidField(format!(
+                    "reports[{index}].claim_status"
+                )))
+            }
+            None => {
+                return Err(DomainEvidenceError::InvalidField(format!(
+                    "reports[{index}].claim_status"
+                )))
+            }
+        }
         let bridge_mode = match row.get("bridge_mode") {
             None | Some(Value::Null) => None,
-            Some(Value::String(value)) if !value.trim().is_empty() => Some(value.clone()),
+            Some(Value::String(value)) => Some(strict_text(
+                &format!("reports[{index}].bridge_mode"),
+                value,
+            )?),
             Some(_) => {
                 return Err(DomainEvidenceError::InvalidField(format!(
                     "reports[{index}].bridge_mode"
@@ -368,6 +415,16 @@ pub fn validate_domain_evidence_harmonization(value: &Value) -> Result<(), Domai
             .ok_or_else(|| {
                 DomainEvidenceError::InvalidField(format!("reports[{index}].parent_digests"))
             })?;
+        if parent_digests.iter().any(|parent| {
+            parent
+                .as_str()
+                .map(|digest| !is_sha256_digest(digest))
+                .unwrap_or(true)
+        }) {
+            return Err(DomainEvidenceError::InvalidField(format!(
+                "reports[{index}].parent_digests"
+            )));
+        }
         let parent_count = row
             .get("lineage_parent_count")
             .and_then(Value::as_u64)
@@ -386,7 +443,7 @@ pub fn validate_domain_evidence_harmonization(value: &Value) -> Result<(), Domai
         } else {
             reports_without_lineage_parents += 1;
         }
-        let _ = text_array(row, "link_roles", MAX_DOMAIN_EVIDENCE_LINKS)?;
+        report_link_roles.push(text_array(row, "link_roles", MAX_DOMAIN_EVIDENCE_LINKS)?);
     }
     let links = object
         .get("links")
@@ -400,6 +457,9 @@ pub fn validate_domain_evidence_harmonization(value: &Value) -> Result<(), Domai
     }
     let mut linked_reports = BTreeSet::new();
     let mut role_counts = BTreeMap::new();
+    let mut seen_links = BTreeSet::new();
+    let mut previous_link_key: Option<(usize, String, String)> = None;
+    let mut expected_report_link_roles = BTreeMap::<usize, Vec<String>>::new();
     for (index, link) in links.iter().enumerate() {
         let link = link
             .as_object()
@@ -427,8 +487,8 @@ pub fn validate_domain_evidence_harmonization(value: &Value) -> Result<(), Domai
             return Err(DomainEvidenceError::ReportDigestMismatch { index });
         }
         let note = match link.get("note") {
-            None => "",
-            Some(Value::String(value)) if value.len() <= MAX_DOMAIN_EVIDENCE_TEXT_BYTES => value,
+            None => "".to_string(),
+            Some(Value::String(value)) => strict_text(&format!("links[{index}].note"), value)?,
             Some(_) => {
                 return Err(DomainEvidenceError::InvalidField(format!(
                     "links[{index}].note"
@@ -438,8 +498,40 @@ pub fn validate_domain_evidence_harmonization(value: &Value) -> Result<(), Domai
         if note.is_empty() && matches!(role.as_str(), "qualifies" | "contradicts") {
             return Err(DomainEvidenceError::LinkNoteRequired { index, role });
         }
+        let link_key = (report_index, role.clone(), note.clone());
+        if !seen_links.insert(link_key.clone()) {
+            return Err(DomainEvidenceError::DuplicateLink { index });
+        }
+        if previous_link_key
+            .as_ref()
+            .is_some_and(|previous| previous >= &link_key)
+        {
+            return Err(DomainEvidenceError::InvalidField(format!("links[{index}]")));
+        }
+        previous_link_key = Some(link_key);
         linked_reports.insert(report_index);
+        expected_report_link_roles
+            .entry(report_index)
+            .or_default()
+            .push(role.clone());
         *role_counts.entry(role).or_insert(0usize) += 1;
+    }
+    for (index, expected) in &mut expected_report_link_roles {
+        expected.sort();
+        if report_link_roles.get(*index) != Some(expected) {
+            return Err(DomainEvidenceError::InvalidField(format!(
+                "reports[{index}].link_roles"
+            )));
+        }
+    }
+    for index in 0..report_count {
+        if !expected_report_link_roles.contains_key(&index)
+            && report_link_roles.get(index) != Some(&Vec::new())
+        {
+            return Err(DomainEvidenceError::InvalidField(format!(
+                "reports[{index}].link_roles"
+            )));
+        }
     }
     let required_group_ids = text_array(
         object,
@@ -565,12 +657,35 @@ pub fn validate_domain_evidence_harmonization(value: &Value) -> Result<(), Domai
             "posture.qualification_declared".into(),
         ));
     }
+    if posture.get("claim_statuses") != Some(&json!(claim_statuses))
+        || posture.get("interpretation").and_then(Value::as_str) != Some("not_run")
+        || posture.get("requires_human_review") != Some(&Value::Bool(true))
+    {
+        return Err(DomainEvidenceError::InvalidField(
+            "posture.claim_statuses_or_interpretation".into(),
+        ));
+    }
     if object.get("readiness_claimed") != Some(&Value::Bool(false)) {
         return Err(DomainEvidenceError::InvalidField(
             "readiness_claimed".into(),
         ));
     }
     exact_text(object, "execution", "not_started")?;
+    for field in ["guarantees", "does_not_claim"] {
+        let values = object
+            .get(field)
+            .and_then(Value::as_array)
+            .ok_or_else(|| DomainEvidenceError::InvalidField(field.into()))?;
+        if values.is_empty()
+            || values.iter().enumerate().any(|(index, value)| {
+                value
+                    .as_str()
+                    .is_none_or(|text| strict_text(&format!("{field}[{index}]"), text).is_err())
+            })
+        {
+            return Err(DomainEvidenceError::InvalidField(field.into()));
+        }
+    }
     let mut digest_input = object.clone();
     digest_input.remove("harmonization_digest");
     let recomputed = ContentHash::of_value(&Value::Object(digest_input))
@@ -600,6 +715,7 @@ fn canonical_reports(
     if values.is_empty() || values.len() > MAX_DOMAIN_EVIDENCE_REPORTS {
         return Err(DomainEvidenceError::InvalidField("reports".into()));
     }
+    let mut seen_digests = BTreeSet::new();
     values
         .iter()
         .enumerate()
@@ -650,6 +766,12 @@ fn canonical_reports(
             let digest = ContentHash::of_value(&report)
                 .map_err(|error| DomainEvidenceError::Canonicalisation(error.to_string()))?
                 .to_string();
+            if !seen_digests.insert(digest.clone()) {
+                return Err(DomainEvidenceError::InvalidReport {
+                    index,
+                    error: "duplicate canonical report digest".into(),
+                });
+            }
             if let Some(declared) = object
                 .get("artifact_registry")
                 .and_then(Value::as_object)
@@ -744,38 +866,28 @@ fn claim(value: Option<&Value>) -> Result<Value, DomainEvidenceError> {
     let id = object
         .get("id")
         .and_then(Value::as_str)
-        .filter(|value| !value.trim().is_empty())
         .ok_or(DomainEvidenceError::ClaimIdRequired)?;
-    if id.len() > MAX_DOMAIN_EVIDENCE_TEXT_BYTES {
-        return Err(DomainEvidenceError::TextTooLarge {
-            field: "claim.id".into(),
-            maximum: MAX_DOMAIN_EVIDENCE_TEXT_BYTES,
-        });
-    }
+    let id = strict_text("claim.id", id)?;
     let mut result = Map::new();
-    result.insert("id".into(), Value::String(id.to_string()));
+    result.insert("id".into(), Value::String(id));
     for field in ["statement", "scope"] {
         if let Some(value) = object.get(field) {
             match field {
                 "statement" => {
-                    let value = value
-                        .as_str()
-                        .filter(|value| !value.trim().is_empty())
-                        .ok_or_else(|| {
-                            DomainEvidenceError::InvalidField(format!("claim.{field}"))
-                        })?;
-                    if value.len() > MAX_DOMAIN_EVIDENCE_TEXT_BYTES {
-                        return Err(DomainEvidenceError::TextTooLarge {
-                            field: format!("claim.{field}"),
-                            maximum: MAX_DOMAIN_EVIDENCE_TEXT_BYTES,
-                        });
-                    }
-                    result.insert(field.into(), Value::String(value.to_string()));
+                    let value = value.as_str().ok_or_else(|| {
+                        DomainEvidenceError::InvalidField(format!("claim.{field}"))
+                    })?;
+                    result.insert(
+                        field.into(),
+                        Value::String(strict_text(&format!("claim.{field}"), value)?),
+                    );
                 }
                 "scope" => {
                     result.insert(field.into(), Value::String(required_text(object, field)?));
                 }
-                _ => unreachable!(),
+                _ => {
+                    return Err(DomainEvidenceError::InvalidField(format!("claim.{field}")));
+                }
             }
         }
     }
@@ -818,18 +930,21 @@ fn text_array_value(
         });
     }
     let mut result = BTreeSet::new();
+    let mut aliases = BTreeMap::new();
     for value in values {
         let value = value
             .as_str()
-            .filter(|value| !value.trim().is_empty())
             .ok_or_else(|| DomainEvidenceError::InvalidField(field.into()))?;
-        if value.len() > MAX_DOMAIN_EVIDENCE_TEXT_BYTES {
-            return Err(DomainEvidenceError::TextTooLarge {
-                field: field.into(),
-                maximum: MAX_DOMAIN_EVIDENCE_TEXT_BYTES,
-            });
+        let value = strict_text(field, value)?;
+        let identity_key = value.to_ascii_lowercase();
+        if let Some(existing) = aliases.get(&identity_key) {
+            if existing != &value {
+                return Err(DomainEvidenceError::InvalidField(field.into()));
+            }
+        } else {
+            aliases.insert(identity_key, value.clone());
         }
-        result.insert(value.to_string());
+        result.insert(value);
     }
     Ok(result.into_iter().collect())
 }
@@ -838,8 +953,14 @@ fn required_text(object: &Map<String, Value>, field: &str) -> Result<String, Dom
     let value = object
         .get(field)
         .and_then(Value::as_str)
-        .filter(|value| !value.trim().is_empty())
         .ok_or_else(|| DomainEvidenceError::InvalidField(field.into()))?;
+    strict_text(field, value)
+}
+
+fn strict_text(field: &str, value: &str) -> Result<String, DomainEvidenceError> {
+    if value.trim().is_empty() || value != value.trim() || value.chars().any(char::is_control) {
+        return Err(DomainEvidenceError::InvalidField(field.into()));
+    }
     if value.len() > MAX_DOMAIN_EVIDENCE_TEXT_BYTES {
         return Err(DomainEvidenceError::TextTooLarge {
             field: field.into(),
@@ -865,6 +986,7 @@ fn is_sha256_digest(value: &str) -> bool {
         && value
             .chars()
             .all(|character| character.is_ascii_hexdigit() && !character.is_ascii_uppercase())
+        && ContentHash::parse(value.to_owned()).is_ok()
 }
 
 fn ensure_size(value: &Value) -> Result<(), DomainEvidenceError> {
@@ -939,6 +1061,10 @@ mod tests {
         );
         assert_eq!(result["readiness_claimed"], false);
         validate_domain_evidence_harmonization(&result).unwrap();
+
+        let mut reordered = result.clone();
+        reordered["links"].as_array_mut().unwrap().reverse();
+        assert!(validate_domain_evidence_harmonization(&reseal(reordered)).is_err());
     }
 
     #[test]
@@ -1007,6 +1133,34 @@ mod tests {
     }
 
     #[test]
+    fn refuses_ambiguous_policy_labels_and_padded_identity_text() {
+        let observed = report(
+            "subject-1",
+            "modality_catalog",
+            "biological_domains",
+            "modalities",
+        );
+        let mut aliased = json!({
+            "subject_id": "subject-1",
+            "claim": {"id": "claim-1"},
+            "reports": [observed.clone()],
+            "required_domains": ["modalities", "MODALITIES"],
+            "links": [{"report_index": 0, "role": "context"}]
+        });
+        assert!(matches!(
+            harmonize_domain_evidence(&aliased),
+            Err(DomainEvidenceError::InvalidField(field)) if field == "required_domains"
+        ));
+
+        aliased["subject_id"] = json!(" subject-1");
+        aliased["required_domains"] = json!(["modalities"]);
+        assert!(matches!(
+            harmonize_domain_evidence(&aliased),
+            Err(DomainEvidenceError::InvalidField(field)) if field == "subject_id"
+        ));
+    }
+
+    #[test]
     fn refuses_digest_mismatched_projection_wrapper_and_duplicate_links() {
         let wrapped_report = report(
             "subject-1",
@@ -1045,6 +1199,79 @@ mod tests {
                 ]
             })),
             Err(DomainEvidenceError::DuplicateLink { .. })
+        ));
+    }
+
+    fn reseal(mut value: Value) -> Value {
+        value
+            .as_object_mut()
+            .expect("harmonization fixture must be an object")
+            .remove("harmonization_digest");
+        let digest = ContentHash::of_value(&value).unwrap();
+        value["harmonization_digest"] = json!(digest.to_string());
+        value
+    }
+
+    #[test]
+    fn validation_rejects_invalid_parent_digest_and_unbound_projected_roles() {
+        let mut source = report(
+            "subject-1",
+            "literature_bind_check",
+            "biological_domains",
+            "oncology",
+        );
+        source["parent_digests"] = json!(["b".repeat(64)]);
+        let result = harmonize_domain_evidence(&json!({
+            "subject_id": "subject-1",
+            "claim": {"id": "claim-1"},
+            "reports": [source],
+            "links": [{"report_index": 0, "role": "supports"}]
+        }))
+        .unwrap();
+
+        let mut bad_parent = result.clone();
+        bad_parent["reports"][0]["parent_digests"] = json!(["not-a-digest"]);
+        assert!(validate_domain_evidence_harmonization(&reseal(bad_parent)).is_err());
+
+        let mut bad_roles = result;
+        bad_roles["reports"][0]["link_roles"] = json!(["context"]);
+        assert!(validate_domain_evidence_harmonization(&reseal(bad_roles)).is_err());
+
+        let mut bad_note = harmonize_domain_evidence(&json!({
+            "subject_id": "subject-1",
+            "claim": {"id": "claim-note"},
+            "reports": [report(
+                "subject-1",
+                "modality_catalog",
+                "biological_domains",
+                "modalities",
+            )],
+            "links": [{"report_index": 0, "role": "context", "note": "caller"}]
+        }))
+        .unwrap();
+        bad_note["links"][0]["note"] = json!(" caller");
+        assert!(validate_domain_evidence_harmonization(&reseal(bad_note)).is_err());
+    }
+
+    #[test]
+    fn duplicate_canonical_reports_are_refused_before_harmonization() {
+        let duplicate = report(
+            "subject-1",
+            "modality_catalog",
+            "biological_domains",
+            "modalities",
+        );
+        assert!(matches!(
+            harmonize_domain_evidence(&json!({
+                "subject_id": "subject-1",
+                "claim": {"id": "claim-duplicate"},
+                "reports": [duplicate.clone(), duplicate],
+                "links": [
+                    {"report_index": 0, "role": "context"},
+                    {"report_index": 1, "role": "context"}
+                ]
+            })),
+            Err(DomainEvidenceError::InvalidReport { .. })
         ));
     }
 }

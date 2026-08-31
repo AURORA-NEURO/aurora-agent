@@ -126,11 +126,17 @@ pub enum EvidencePlane {
 #[serde(tag = "verdict", rename_all = "snake_case")]
 pub enum Verdict {
     Pass,
-    Fail { reason: String },
+    Fail {
+        reason: String,
+    },
     /// 25.18: "An oracle can abstain." A first-class outcome, not a missing one.
-    Abstain { reason: String },
+    Abstain {
+        reason: String,
+    },
     /// Two positions, neither dominant.
-    Underdetermined { positions: Vec<String> },
+    Underdetermined {
+        positions: Vec<String>,
+    },
 }
 
 impl Verdict {
@@ -194,11 +200,7 @@ pub struct OracleIr {
 
 impl OracleIr {
     pub fn validate(&self) -> Result<(), OracleIrError> {
-        if let Some(plane) = self
-            .establishes
-            .intersection(&self.cannot_establish)
-            .next()
-        {
+        if let Some(plane) = self.establishes.intersection(&self.cannot_establish).next() {
             return Err(OracleIrError::PlaneClaimedAndDisclaimed {
                 oracle: self.oracle_id.clone(),
                 plane: format!("{plane:?}").to_lowercase(),

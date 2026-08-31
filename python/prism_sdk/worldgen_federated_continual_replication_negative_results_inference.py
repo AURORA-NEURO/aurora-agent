@@ -1,0 +1,5 @@
+from .worldgen_replication_negative_results_support import *
+FEATURE_ID="AFA-worldgen-P15-F04"; CONTRACT_VERSION="worldgen-federated_continual-replication-negative-results/1.0"
+def worldgen_federated_continual_replication_negative_results_inference_manifest():return manifest(feature_id=FEATURE_ID,contract_version=CONTRACT_VERSION,scale="federated continual autonomous")
+def qualify_worldgen_federated_continual_replication_negative_results_replication(request):return qualify(request,feature_id=FEATURE_ID,contract_version=CONTRACT_VERSION)
+

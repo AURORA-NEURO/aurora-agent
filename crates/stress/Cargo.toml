@@ -8,6 +8,7 @@ repository.workspace = true
 description = "Biological stress program: prevalence shift, batch and site effects, assay uncertainty"
 
 [dependencies]
+bioprism-foundation = { workspace = true }
 bioprism-ids = { workspace = true }
 bioprism-worldgen = { workspace = true }
 serde = { workspace = true }

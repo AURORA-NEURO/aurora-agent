@@ -43,10 +43,18 @@ use crate::verdict::{Determination, Witness};
 #[serde(tag = "outcome", rename_all = "snake_case")]
 pub enum ToolOutcome {
     /// The step finished and its output is content-addressed.
-    Completed { digest: ContentHash },
+    Completed {
+        digest: ContentHash,
+    },
     /// The step wrote something and then failed. The bytes exist and are not a result.
-    PartialOutput { step: String, wrote: String },
-    Timeout { step: String, budget: String },
+    PartialOutput {
+        step: String,
+        wrote: String,
+    },
+    Timeout {
+        step: String,
+        budget: String,
+    },
     /// The tool is not the version the pipeline was written against.
     VersionIncompatible {
         step: String,
@@ -54,11 +62,21 @@ pub enum ToolOutcome {
         found: String,
     },
     /// A reference asset does not match the one the analysis assumed.
-    ReferenceAssetMismatch { asset: String, expected: String },
+    ReferenceAssetMismatch {
+        asset: String,
+        expected: String,
+    },
     /// A default changed underneath the pipeline without the pipeline changing.
-    SilentDefaultChange { setting: String },
-    ResourceExhausted { step: String, resource: String },
-    CorruptedCache { key: String },
+    SilentDefaultChange {
+        setting: String,
+    },
+    ResourceExhausted {
+        step: String,
+        resource: String,
+    },
+    CorruptedCache {
+        key: String,
+    },
 }
 
 impl ToolOutcome {
@@ -132,7 +150,7 @@ pub fn assert_complete(outcome: &ToolOutcome) -> Determination {
             ToolOutcome::ResourceExhausted { .. } => "the step ran out of resources",
             ToolOutcome::CorruptedCache { .. } => "the step read a corrupted cache",
             ToolOutcome::Completed { .. } | ToolOutcome::PartialOutput { .. } => {
-                unreachable!("both handled above")
+                "the outcome was already classified before failure analysis"
             }
         }),
     }

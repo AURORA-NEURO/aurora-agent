@@ -50,8 +50,13 @@ pub enum Projection {
     ///
     /// Kept as a distinct variant rather than expanded at parse time, because expanding it needs the
     /// schema and the parser deliberately does not have one.
-    Everything { span: Span },
-    Fields { paths: Vec<Path>, span: Span },
+    Everything {
+        span: Span,
+    },
+    Fields {
+        paths: Vec<Path>,
+        span: Span,
+    },
 }
 
 impl Projection {
@@ -300,12 +305,17 @@ impl Expr {
     /// The number of comparison and membership tests, used by the static cost estimate.
     pub fn predicate_count(&self) -> u64 {
         match self {
-            Expr::Binary { op, left, right, .. } => {
+            Expr::Binary {
+                op, left, right, ..
+            } => {
                 let own = u64::from(op.is_predicate());
-                own + left.predicate_count() + right.predicate_count()
+                own.saturating_add(left.predicate_count())
+                    .saturating_add(right.predicate_count())
             }
             Expr::Unary { operand, .. } => operand.predicate_count(),
-            Expr::Set { items, .. } => items.iter().map(Expr::predicate_count).sum(),
+            Expr::Set { items, .. } => items.iter().fold(0, |total, item| {
+                total.saturating_add(item.predicate_count())
+            }),
             Expr::Literal { .. } | Expr::Field { .. } => 0,
         }
     }
@@ -316,8 +326,12 @@ impl Expr {
 pub enum Literal {
     /// Struct variants throughout, not newtypes: an internally tagged enum cannot serialize a
     /// newtype variant wrapping a primitive, and the canonical encoder is not negotiable.
-    Bool { value: bool },
-    Text { value: String },
+    Bool {
+        value: bool,
+    },
+    Text {
+        value: String,
+    },
     /// A number, with the unit suffix the parser resolved through the standards unit table.
     ///
     /// `unit: None` is a bare number, which is comparable only to another bare number or to an
@@ -330,7 +344,10 @@ pub enum Literal {
         integral: bool,
     },
     /// `instant "2026-03-01T09:00:00Z"`. A literal instant belongs to no clock.
-    Instant { rfc3339: String, nanos_utc: i128 },
+    Instant {
+        rfc3339: String,
+        nanos_utc: i128,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

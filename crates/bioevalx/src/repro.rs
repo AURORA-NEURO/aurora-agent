@@ -42,6 +42,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::ReproError;
 
+const MAX_REPRO_TEXT_BYTES: usize = 256;
+const MAX_OUTPUTS: usize = 4096;
+const MAX_OBSERVATIONS: usize = 4096;
+
 /// What kind of thing was compared.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -77,6 +81,7 @@ impl OutputSpec {
     /// A numeric output with a stated absolute tolerance.
     pub fn numeric(id: impl Into<String>, tolerance: f64) -> Result<Self, ReproError> {
         let id = id.into();
+        validate_output_id(&id)?;
         if !tolerance.is_finite() || tolerance < 0.0 {
             return Err(ReproError::BadTolerance {
                 output: id,
@@ -98,6 +103,23 @@ impl OutputSpec {
             tolerance: 0.0,
         }
     }
+
+    fn validate(&self) -> Result<(), ReproError> {
+        validate_output_id(&self.id)?;
+        if !self.tolerance.is_finite() || self.tolerance < 0.0 {
+            return Err(ReproError::BadTolerance {
+                output: self.id.clone(),
+                tolerance: self.tolerance,
+            });
+        }
+        if !matches!(self.kind, OutputKind::Numeric) && self.tolerance != 0.0 {
+            return Err(ReproError::InvalidOutput {
+                output_id: self.id.clone(),
+                detail: "exact and derived outputs require zero tolerance".into(),
+            });
+        }
+        Ok(())
+    }
 }
 
 /// What a rerun produced for one output.
@@ -111,6 +133,27 @@ pub enum Observed {
     /// The rerun did not produce this output at all. Distinct from a mismatch: a missing output is
     /// a broken workflow, and calling it a numerical disagreement would misdirect the reader.
     Absent,
+}
+
+impl Observed {
+    fn validate(&self, output_id: &str) -> Result<(), ReproError> {
+        match self {
+            Observed::Digests { original, rerun } => {
+                validate_observation_text(output_id, "original digest", original)?;
+                validate_observation_text(output_id, "rerun digest", rerun)?;
+            }
+            Observed::Numbers { original, rerun } => {
+                if !original.is_finite() || !rerun.is_finite() {
+                    return Err(ReproError::InvalidObservation {
+                        output_id: output_id.to_string(),
+                        detail: "numeric observations must be finite".into(),
+                    });
+                }
+            }
+            Observed::Absent => {}
+        }
+        Ok(())
+    }
 }
 
 /// How one output came out.
@@ -130,7 +173,7 @@ impl OutputVerdict {
 }
 
 /// A declared set of outputs and the rerun to check against them.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Reexecution {
     /// The workflow that was rerun, as an opaque identifier.
     pub workflow: String,
@@ -141,6 +184,32 @@ pub struct Reexecution {
     observations: Vec<(String, Observed)>,
 }
 
+#[derive(Deserialize)]
+struct ReexecutionWire {
+    workflow: String,
+    environment_pinned: bool,
+    specs: Vec<OutputSpec>,
+    observations: Vec<(String, Observed)>,
+}
+
+impl<'de> Deserialize<'de> for Reexecution {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let wire = ReexecutionWire::deserialize(deserializer)?;
+        let mut reexecution =
+            Reexecution::declaring(wire.workflow, wire.environment_pinned, wire.specs)
+                .map_err(serde::de::Error::custom)?;
+        for (output, observed) in wire.observations {
+            reexecution
+                .observe(output, observed)
+                .map_err(serde::de::Error::custom)?;
+        }
+        Ok(reexecution)
+    }
+}
+
 impl Reexecution {
     /// Declare the outputs a rerun must reproduce.
     pub fn declaring(
@@ -148,14 +217,20 @@ impl Reexecution {
         environment_pinned: bool,
         specs: Vec<OutputSpec>,
     ) -> Result<Self, ReproError> {
+        let workflow = workflow.into();
+        validate_output_id(&workflow)?;
+        if specs.len() > MAX_OUTPUTS {
+            return Err(ReproError::TooManyOutputs(MAX_OUTPUTS));
+        }
         let mut seen = BTreeSet::new();
         for spec in &specs {
+            spec.validate()?;
             if !seen.insert(spec.id.clone()) {
                 return Err(ReproError::DuplicateOutput(spec.id.clone()));
             }
         }
         Ok(Reexecution {
-            workflow: workflow.into(),
+            workflow,
             environment_pinned,
             specs,
             observations: Vec::new(),
@@ -169,9 +244,17 @@ impl Reexecution {
         observed: Observed,
     ) -> Result<(), ReproError> {
         let output = output.into();
+        validate_output_id(&output)?;
+        if !self.specs.iter().any(|spec| spec.id == output) {
+            return Err(ReproError::UnknownOutput(output));
+        }
         if self.observations.iter().any(|(id, _)| *id == output) {
             return Err(ReproError::DuplicateOutput(output));
         }
+        if self.observations.len() >= MAX_OBSERVATIONS {
+            return Err(ReproError::TooManyObservations(MAX_OBSERVATIONS));
+        }
+        observed.validate(&output)?;
         self.observations.push((output, observed));
         Ok(())
     }
@@ -181,6 +264,7 @@ impl Reexecution {
     /// An output that was declared and never observed becomes [`OutputVerdict::Missing`] rather
     /// than being skipped, so a rerun cannot improve its match rate by producing fewer outputs.
     pub fn certify(&self) -> Result<Certificate, ReproError> {
+        self.validate()?;
         if self.specs.is_empty() {
             return Err(ReproError::NothingCompared);
         }
@@ -233,13 +317,42 @@ impl Reexecution {
     pub fn specs(&self) -> &[OutputSpec] {
         &self.specs
     }
+
+    fn validate(&self) -> Result<(), ReproError> {
+        validate_output_id(&self.workflow)?;
+        if self.specs.len() > MAX_OUTPUTS {
+            return Err(ReproError::TooManyOutputs(MAX_OUTPUTS));
+        }
+        let mut declared = BTreeSet::new();
+        for spec in &self.specs {
+            spec.validate()?;
+            if !declared.insert(&spec.id) {
+                return Err(ReproError::DuplicateOutput(spec.id.clone()));
+            }
+        }
+        if self.observations.len() > MAX_OBSERVATIONS {
+            return Err(ReproError::TooManyObservations(MAX_OBSERVATIONS));
+        }
+        let mut observed_ids = BTreeSet::new();
+        for (output, observed) in &self.observations {
+            validate_output_id(output)?;
+            if !declared.contains(output) {
+                return Err(ReproError::UnknownOutput(output.clone()));
+            }
+            if !observed_ids.insert(output) {
+                return Err(ReproError::DuplicateOutput(output.clone()));
+            }
+            observed.validate(output)?;
+        }
+        Ok(())
+    }
 }
 
 /// The receipt: what matched, what did not, and where it first went wrong.
 ///
 /// There is deliberately no field or method on this type that says anything about whether the
 /// workflow computed the right thing.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Certificate {
     pub workflow: String,
     pub environment_pinned: bool,
@@ -291,4 +404,50 @@ impl Certificate {
     pub fn portability_demonstrated(&self) -> bool {
         self.reproduced() && !self.environment_pinned
     }
+}
+
+fn validate_output_id(id: &str) -> Result<(), ReproError> {
+    if id.trim().is_empty() {
+        return Err(ReproError::InvalidOutput {
+            output_id: id.to_string(),
+            detail: "identifier must not be empty".into(),
+        });
+    }
+    if id != id.trim() {
+        return Err(ReproError::InvalidOutput {
+            output_id: id.to_string(),
+            detail: "identifier must not have leading or trailing whitespace".into(),
+        });
+    }
+    if id.len() > MAX_REPRO_TEXT_BYTES {
+        return Err(ReproError::InvalidOutput {
+            output_id: id.to_string(),
+            detail: format!("identifier exceeds {MAX_REPRO_TEXT_BYTES} bytes"),
+        });
+    }
+    if id.chars().any(char::is_control) {
+        return Err(ReproError::InvalidOutput {
+            output_id: id.to_string(),
+            detail: "identifier contains a control character".into(),
+        });
+    }
+    Ok(())
+}
+
+fn validate_observation_text(
+    output_id: &str,
+    field: &str,
+    value: &str,
+) -> Result<(), ReproError> {
+    if value.trim().is_empty()
+        || value != value.trim()
+        || value.len() > MAX_REPRO_TEXT_BYTES
+        || value.chars().any(char::is_control)
+    {
+        return Err(ReproError::InvalidObservation {
+            output_id: output_id.to_string(),
+            detail: format!("{field} must be bounded, trimmed, and control-free"),
+        });
+    }
+    Ok(())
 }

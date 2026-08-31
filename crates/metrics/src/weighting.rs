@@ -90,10 +90,9 @@ impl DeclaredWeighting {
 
     /// Takes over a `bioprism-atlas` policy, revalidating it and computing its digest.
     ///
-    /// Revalidation is not paranoia: `WeightingPolicy` derives `Deserialize`, so a policy that
-    /// arrived as JSON has not passed through `WeightingPolicy::declare` and may carry an empty or
-    /// non-positive weight set. Rebuilding through the validating constructor closes that door
-    /// without reaching into another crate's internals.
+    /// Revalidation keeps this boundary independent of the atlas representation: a policy that
+    /// arrives from a caller is rebuilt through the validating constructor before its digest is
+    /// computed, so the digest never blesses an invalid weighting map.
     pub fn adopt(policy: WeightingPolicy) -> Result<Self, MetricsError> {
         let weights: Vec<(CapabilityId, f64)> = policy
             .weights()

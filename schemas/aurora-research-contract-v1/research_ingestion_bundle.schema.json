@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aurora-neuro.org/schemas/aurora-research-contract-v1/research-ingestion-bundle.json",
+  "title": "AURORA research ingestion bundle",
+  "description": "Conformance-certified normalized ingestion metadata; raw source bytes remain local.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "feature_id", "source_id", "adapter", "adapter_version", "source_digest", "ingestion_digest", "artifact", "conformance", "raw_data_local", "boundary"],
+  "properties": {
+    "schema_version": { "const": "aurora-research-contract/1.0" },
+    "feature_id": { "const": "AFA-adapter-P06-F01" },
+    "source_id": { "type": "string", "minLength": 1 },
+    "adapter": { "type": "string", "minLength": 1 },
+    "adapter_version": { "type": "string", "minLength": 1 },
+    "source_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "ingestion_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "artifact": { "type": "object", "required": ["content_hash"], "properties": { "content_hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" } } },
+    "conformance": { "type": "object", "required": ["verified"], "properties": { "verified": { "const": true } } },
+    "raw_data_local": { "const": true },
+    "boundary": { "const": "preclinical-research-only; no human-subject or clinical-source data; no diagnosis, treatment, triage, enrollment, or clinical decisions" }
+  }
+}

@@ -45,6 +45,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::BurdenError;
 
+const MAX_BURDEN_TEXT_BYTES: usize = 256;
+const MAX_RESOURCES: usize = 4096;
+const MAX_BRANCHES: usize = 4096;
+const MAX_DRAWS_PER_BRANCH: usize = 4096;
+
 /// What kind of thing is being spent.
 ///
 /// The seven categories are 26.06's own "Evaluation target" list. The distinction that matters is
@@ -197,7 +202,7 @@ impl BranchLedger {
             .iter()
             .filter(|d| d.resource == resource)
             .map(|d| d.amount)
-            .sum()
+            .fold(0, |total, amount| total.saturating_add(amount))
     }
 
     /// Total drawn on this branch that funded an action which then failed.
@@ -206,7 +211,7 @@ impl BranchLedger {
             .iter()
             .filter(|d| d.resource == resource && d.outcome == DrawOutcome::Wasted)
             .map(|d| d.amount)
-            .sum()
+            .fold(0, |total, amount| total.saturating_add(amount))
     }
 
     /// The draws recorded on this branch, in order.
@@ -216,7 +221,9 @@ impl BranchLedger {
 }
 
 /// The resource state of a whole fork tree.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// A derived resource ledger. It serializes for reporting but is rebuilt through checked resource,
+/// branch, and draw admission so persisted branch maps cannot overwrite or bypass invariants.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Ledger {
     resources: BTreeMap<String, Resource>,
     branches: BTreeMap<String, BranchLedger>,
@@ -243,6 +250,12 @@ impl Ledger {
 
     /// Declare a pool.
     pub fn declare(&mut self, resource: Resource) -> Result<(), BurdenError> {
+        validate_resource(&resource)?;
+        if self.resources.len() >= MAX_RESOURCES {
+            return Err(BurdenError::TooManyResources {
+                limit: MAX_RESOURCES,
+            });
+        }
         if self.resources.contains_key(&resource.id) {
             return Err(BurdenError::DuplicateResource(resource.id));
         }
@@ -255,9 +268,21 @@ impl Ledger {
     /// is built on.
     pub fn fork(&mut self, parent: &str, child: impl Into<String>) -> Result<(), BurdenError> {
         if !self.branches.contains_key(parent) {
-            return Err(BurdenError::UnknownResource(parent.to_string()));
+            return Err(BurdenError::UnknownBranch(parent.to_string()));
         }
         let child = child.into();
+        validate_burden_text(&child).map_err(|detail| BurdenError::InvalidBranch {
+            branch: child.clone(),
+            detail,
+        })?;
+        if self.branches.len() >= MAX_BRANCHES {
+            return Err(BurdenError::TooManyBranches {
+                limit: MAX_BRANCHES,
+            });
+        }
+        if self.branches.contains_key(&child) {
+            return Err(BurdenError::DuplicateBranch(child));
+        }
         self.branches.insert(
             child.clone(),
             BranchLedger {
@@ -274,6 +299,11 @@ impl Ledger {
     /// "Inherited remainder" walks to the root: a child branch starts from whatever its ancestors
     /// had left, not from the pool's initial size.
     pub fn draw(&mut self, branch: &str, draw: Draw) -> Result<(), BurdenError> {
+        validate_burden_text(branch).map_err(|detail| BurdenError::InvalidBranch {
+            branch: branch.to_string(),
+            detail,
+        })?;
+        validate_draw(&draw)?;
         let resource = self
             .resources
             .get(&draw.resource)
@@ -286,7 +316,7 @@ impl Ledger {
             });
         }
         if !self.branches.contains_key(branch) {
-            return Err(BurdenError::UnknownResource(branch.to_string()));
+            return Err(BurdenError::UnknownBranch(branch.to_string()));
         }
         let remaining = self.remaining(branch, &draw.resource)?;
         if draw.amount > remaining {
@@ -297,16 +327,24 @@ impl Ledger {
                 remaining,
             });
         }
-        self.branches
-            .get_mut(branch)
-            .expect("branch presence checked above")
-            .draws
-            .push(draw);
+        let Some(ledger) = self.branches.get_mut(branch) else {
+            return Err(BurdenError::UnknownBranch(branch.to_string()));
+        };
+        if ledger.draws.len() >= MAX_DRAWS_PER_BRANCH {
+            return Err(BurdenError::TooManyDraws {
+                limit: MAX_DRAWS_PER_BRANCH,
+            });
+        }
+        ledger.draws.push(draw);
         Ok(())
     }
 
     /// What is left of `resource` on `branch`, after everything this branch and its ancestors spent.
     pub fn remaining(&self, branch: &str, resource: &str) -> Result<u64, BurdenError> {
+        validate_burden_text(branch).map_err(|detail| BurdenError::InvalidBranch {
+            branch: branch.to_string(),
+            detail,
+        })?;
         let pool = self
             .resources
             .get(resource)
@@ -332,12 +370,16 @@ impl Ledger {
     /// failure. Renewable pools do not conflict: two branches each buying an hour of compute is
     /// two hours of compute, not a contradiction.
     pub fn joint_feasibility(&self, branches: &[&str]) -> Result<(), BurdenError> {
+        let mut seen_branches = BTreeSet::new();
         let mut claimants: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
         for branch in branches {
+            if !seen_branches.insert(*branch) {
+                return Err(BurdenError::DuplicateBranchReference((*branch).to_string()));
+            }
             let ledger = self
                 .branches
                 .get(*branch)
-                .ok_or_else(|| BurdenError::UnknownResource((*branch).to_string()))?;
+                .ok_or_else(|| BurdenError::UnknownBranch((*branch).to_string()))?;
             let mut touched = BTreeSet::new();
             for draw in &ledger.draws {
                 if !draw.destructive {
@@ -357,12 +399,17 @@ impl Ledger {
             }
         }
         for (resource, who) in claimants {
-            if who.len() > 1 {
-                return Err(BurdenError::ForkDoubleSpend {
-                    fork: who[0].to_string(),
-                    other: who[1].to_string(),
-                    resource: resource.to_string(),
-                });
+            for (index, left) in who.iter().enumerate() {
+                for right in who.iter().skip(index + 1) {
+                    if self.is_ancestor(left, right) || self.is_ancestor(right, left) {
+                        continue;
+                    }
+                    return Err(BurdenError::ForkDoubleSpend {
+                        fork: (*left).to_string(),
+                        other: (*right).to_string(),
+                        resource: resource.to_string(),
+                    });
+                }
             }
         }
         Ok(())
@@ -405,4 +452,59 @@ impl Ledger {
     pub fn branch(&self, branch: &str) -> Option<&BranchLedger> {
         self.branches.get(branch)
     }
+
+    fn is_ancestor(&self, ancestor: &str, descendant: &str) -> bool {
+        let mut cursor = self
+            .branches
+            .get(descendant)
+            .and_then(|branch| branch.parent.as_deref());
+        while let Some(branch) = cursor {
+            if branch == ancestor {
+                return true;
+            }
+            cursor = self
+                .branches
+                .get(branch)
+                .and_then(|parent| parent.parent.as_deref());
+        }
+        false
+    }
+}
+
+fn validate_burden_text(value: &str) -> Result<(), String> {
+    if value.trim().is_empty()
+        || value != value.trim()
+        || value.len() > MAX_BURDEN_TEXT_BYTES
+        || value.chars().any(char::is_control)
+    {
+        return Err("value must be a bounded, trimmed, control-free string".into());
+    }
+    Ok(())
+}
+
+fn validate_resource(resource: &Resource) -> Result<(), BurdenError> {
+    for (name, value) in [
+        ("id", resource.id.as_str()),
+        ("unit", resource.unit.as_str()),
+    ] {
+        validate_burden_text(value).map_err(|detail| BurdenError::InvalidResource {
+            resource: resource.id.clone(),
+            detail: format!("{name} is invalid: {detail}"),
+        })?;
+    }
+    Ok(())
+}
+
+fn validate_draw(draw: &Draw) -> Result<(), BurdenError> {
+    for (name, value) in [
+        ("action", draw.action.as_str()),
+        ("resource", draw.resource.as_str()),
+        ("unit", draw.unit.as_str()),
+    ] {
+        validate_burden_text(value).map_err(|detail| BurdenError::InvalidDraw {
+            action: draw.action.clone(),
+            detail: format!("{name} is invalid: {detail}"),
+        })?;
+    }
+    Ok(())
 }

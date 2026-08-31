@@ -154,18 +154,36 @@ impl TriggerOutcome {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "trigger")]
 pub enum Trigger {
-    ReversibilityAtLeast { level: Reversibility },
-    PermissionAtLeast { level: PermissionLevel },
-    ValueAtStakeAtLeast { band: ValueBand },
-    UnseparatedHypothesesAtLeast { count: usize },
-    UnmetMandatoryObligationsAtLeast { count: usize },
+    ReversibilityAtLeast {
+        level: Reversibility,
+    },
+    PermissionAtLeast {
+        level: PermissionLevel,
+    },
+    ValueAtStakeAtLeast {
+        band: ValueBand,
+    },
+    UnseparatedHypothesesAtLeast {
+        count: usize,
+    },
+    UnmetMandatoryObligationsAtLeast {
+        count: usize,
+    },
     /// Fires when the measured rate is at or above `rate`, and is
     /// [`TriggerOutcome::Undetermined`] when no rate was measured.
-    HistoricalFailureRateAtLeast { rate: f64 },
+    HistoricalFailureRateAtLeast {
+        rate: f64,
+    },
     NoVerifierAvailable,
-    All { of: Vec<Trigger> },
-    Any { of: Vec<Trigger> },
-    Not { of: Box<Trigger> },
+    All {
+        of: Vec<Trigger>,
+    },
+    Any {
+        of: Vec<Trigger>,
+    },
+    Not {
+        of: Box<Trigger>,
+    },
 }
 
 impl Trigger {
@@ -506,7 +524,10 @@ pub enum BranchVerdict {
     /// No decision triggered a rule. The controller spent nothing and proved nothing.
     NothingTriggered,
     /// Escalations happened and caught nothing. Checked before every other positive arm.
-    PaidAndCaughtNothing { spent: BranchCost, escalations: usize },
+    PaidAndCaughtNothing {
+        spent: BranchCost,
+        escalations: usize,
+    },
     /// Escalations caught something, and some spent nothing useful. Both numbers, always.
     Mixed {
         spent: BranchCost,
@@ -681,10 +702,12 @@ mod tests {
             BranchPolicy::new(
                 ceiling(),
                 UndeterminedPolicy::Escalate,
-                vec![
-                    BranchRule::new("wide", Trigger::NoVerifierAvailable, BranchAction::ForkSuffixes)
-                        .spending(9, 0)
-                ],
+                vec![BranchRule::new(
+                    "wide",
+                    Trigger::NoVerifierAvailable,
+                    BranchAction::ForkSuffixes
+                )
+                .spending(9, 0)],
             ),
             Err(LabError::BranchCeilingExceeded {
                 requested: 9,
@@ -759,7 +782,10 @@ mod tests {
             .spending(0, 1)],
         )
         .unwrap();
-        assert_eq!(policy.plan(&features).action, BranchAction::ProceedSinglePath);
+        assert_eq!(
+            policy.plan(&features).action,
+            BranchAction::ProceedSinglePath
+        );
     }
 
     #[test]

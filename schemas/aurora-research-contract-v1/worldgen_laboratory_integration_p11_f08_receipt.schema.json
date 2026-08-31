@@ -1,0 +1,140 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "type": "object",
+  "$id": "https://aurora-neuro.org/schemas/aurora-research-contract-v1/worldgen-laboratory-integration-p11-f08.json",
+  "title": "AFA-worldgen-P11-F08 receipt",
+  "required": [
+    "schema_version",
+    "contract_version",
+    "feature_id",
+    "request_id",
+    "consumer",
+    "producer",
+    "namespace",
+    "semantic_profile",
+    "negotiated_version",
+    "compatibility",
+    "disposition",
+    "field_order",
+    "retained_field_order",
+    "missing_field_order",
+    "omitted_field_order",
+    "semantic_loss_order",
+    "replay_identity",
+    "contract_digest",
+    "effect_receipts",
+    "raw_data_local",
+    "aggregate_only",
+    "boundary",
+    "artifact"
+  ],
+  "properties": {
+    "aggregate_only": {
+      "const": true
+    },
+    "retained_field_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "artifact": {
+      "type": "object",
+      "required": [
+        "content_type",
+        "content_hash",
+        "boundary"
+      ],
+      "properties": {
+        "boundary": {
+          "type": "string"
+        },
+        "content_type": {
+          "const": "application/vnd.aurora.worldgen.laboratory-integration-contract-receipt+json"
+        },
+        "content_hash": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "disposition": {
+      "type": "string"
+    },
+    "namespace": {
+      "type": "string"
+    },
+    "consumer": {
+      "type": "string"
+    },
+    "compatibility": {
+      "type": "string"
+    },
+    "omitted_field_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "contract_version": {
+      "const": "worldgen-federated-continual-laboratory-integration-contract/1.0"
+    },
+    "replay_identity": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "field_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "boundary": {
+      "type": "string"
+    },
+    "request_id": {
+      "type": "string"
+    },
+    "schema_version": {
+      "type": "string"
+    },
+    "semantic_loss_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "contract_digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "raw_data_local": {
+      "const": true
+    },
+    "producer": {
+      "type": "string"
+    },
+    "semantic_profile": {
+      "type": "string"
+    },
+    "missing_field_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "feature_id": {
+      "const": "AFA-worldgen-P11-F08"
+    },
+    "effect_receipts": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "negotiated_version": {
+      "type": "string"
+    }
+  }
+}

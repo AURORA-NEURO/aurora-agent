@@ -21,7 +21,24 @@ pub mod capsule;
 pub mod continuation;
 pub mod kernel;
 pub mod ledger;
-
+pub mod resource_control_plane;
+pub mod capability_manifest_integrity_support;
+pub mod local_capability_manifest_integrity_inference;
+pub mod multimodal_capability_manifest_integrity_inference;
+pub mod throughput_capability_manifest_integrity_inference;
+pub mod federated_continual_capability_manifest_integrity_inference;
+pub mod local_capability_manifest_integrity_contract_model;
+pub mod multimodal_capability_manifest_integrity_contract_model;
+pub mod throughput_capability_manifest_integrity_contract_model;
+pub mod federated_continual_capability_manifest_integrity_contract_model;
+pub mod local_capability_manifest_integrity_research_copilot;
+pub mod multimodal_capability_manifest_integrity_research_copilot;
+pub mod throughput_capability_manifest_integrity_research_copilot;
+pub mod federated_continual_capability_manifest_integrity_research_copilot;
+pub mod local_capability_manifest_integrity_workflow_fabric;
+pub mod multimodal_capability_manifest_integrity_workflow_fabric;
+pub mod throughput_capability_manifest_integrity_workflow_fabric;
+pub mod federated_continual_capability_manifest_integrity_workflow_fabric;
 pub use act::{Act, ActKind};
 pub use authority::{AuthorityError, AuthorityTable, Capability, Grant};
 pub use budget::{Budget, BudgetError, Resource};
@@ -31,4 +48,16 @@ pub use kernel::{Kernel, KernelError, Participant};
 pub use ledger::{
     commitments, epistemic_state, ChainStatus, Commitment, CommitmentState, EpistemicEntry, Ledger,
     LedgerEvent,
+};
+pub use resource_control_plane::{
+    operate_resource_control_plane, ResourceControlDisposition, ResourceControlError,
+    ResourceControlPlaneReceipt, ResourceControlPlaneRequest,
+    CONTRACT_VERSION as RESOURCE_CONTROL_PLANE_CONTRACT_VERSION,
+    FEATURE_ID as RESOURCE_CONTROL_PLANE_FEATURE_ID,
+};
+pub use capability_manifest_integrity_support::{
+    admit as admit_capability_manifest_integrity,
+    manifest as capability_manifest_integrity_manifest,
+    CapabilityArtifact4, CapabilityCandidate4, CapabilityManifestCard7,
+    CapabilityManifestIntegrityError, CapabilityManifestRequest4,
 };

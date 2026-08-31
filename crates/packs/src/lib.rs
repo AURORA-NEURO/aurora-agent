@@ -42,8 +42,10 @@ pub mod coverage;
 pub mod error;
 pub mod health;
 pub mod ir;
+pub mod local_quality_control_assurance;
 pub mod portfolio;
 pub mod taxonomy;
+pub mod protocol_simulation_workbench;
 
 pub use calibration::{
     CalibrationPolicy, DifficultyCalibration, Discrimination, SystemObservation,
@@ -58,9 +60,24 @@ pub use ir::{
     InstanceSource, PackContent, PackDependency, PackId, PackIr, PackManifest, PackVersion,
     ParentEnvironment, PublicCounts, SchemaRange, SeedRange,
 };
+pub use local_quality_control_assurance::{
+    assure_packs_quality_control, packs_local_quality_control_manifest,
+    PacksQualityControlError, PacksQualityEvidenceState, PacksQualityObservation2,
+    PacksQualityVerdict7, PacksQualityVerdict7Artifact, PacksResearchObject1,
+    CONTRACT_VERSION as PACKS_LOCAL_QUALITY_CONTROL_CONTRACT_VERSION,
+    FEATURE_ID as PACKS_LOCAL_QUALITY_CONTROL_FEATURE_ID,
+    INPUT_SCHEMA as PACKS_LOCAL_QUALITY_CONTROL_INPUT_SCHEMA,
+    OUTPUT_SCHEMA as PACKS_LOCAL_QUALITY_CONTROL_OUTPUT_SCHEMA,
+};
 pub use portfolio::PackDefinition;
 pub use taxonomy::{
     AgentCapability, BioCapability, CapabilityFamily, Domain, OracleTier, PackAxis, ReleaseWave,
+};
+pub use protocol_simulation_workbench::{
+    packs_protocol_workbench_manifest, simulate_packs_protocol_workbench,
+    PacksProtocolWorkbenchError, PacksProtocolWorkbenchReport9,
+    CONTRACT_VERSION as PACKS_PROTOCOL_WORKBENCH_CONTRACT_VERSION,
+    FEATURE_ID as PACKS_PROTOCOL_WORKBENCH_FEATURE_ID,
 };
 
 /// Re-exported because they appear in this crate's public types: a pack addresses itself with a

@@ -432,6 +432,14 @@ impl SandboxManifest {
                 continue;
             }
             artifacts.insert(artifact.id.clone(), artifact);
+            if artifact.inputs.len() > MAX_LIST {
+                bound(
+                    &mut issues,
+                    "artifact.inputs",
+                    artifact.inputs.len(),
+                    MAX_LIST,
+                );
+            }
             if !valid_text(&artifact.id)
                 || !valid_text(&artifact.source)
                 || !valid_text(&artifact.producer)
@@ -491,6 +499,27 @@ impl SandboxManifest {
                     "record the content-addressed inputs that produced the artifact",
                 );
             }
+        }
+        let mut visited_artifacts = BTreeSet::new();
+        let mut cyclic_artifacts = BTreeSet::new();
+        for artifact_id in artifacts.keys() {
+            let mut path = Vec::new();
+            artifact_lineage_cycle_nodes(
+                artifact_id,
+                &artifacts,
+                &mut path,
+                &mut visited_artifacts,
+                &mut cyclic_artifacts,
+            );
+        }
+        for artifact_id in &cyclic_artifacts {
+            blocking(
+                &mut issues,
+                "artifact_lineage_cycle",
+                artifact_id,
+                "artifact parent lineage contains a cycle",
+                "retain an acyclic source-to-derived artifact graph",
+            );
         }
 
         for capability in &self.capabilities {
@@ -552,6 +581,13 @@ impl SandboxManifest {
                 continue;
             }
             profiles.insert(profile.id.clone(), profile);
+            for (field, count) in [
+                ("profile.network_allowlist", profile.network_allowlist.len()),
+                ("profile.mounts", profile.mounts.len()),
+                ("profile.capabilities", profile.capabilities.len()),
+            ] {
+                bound(&mut issues, field, count, MAX_LIST);
+            }
             let artifact_valid = artifacts.contains_key(&profile.artifact);
             if !artifact_valid {
                 blocking(
@@ -640,7 +676,7 @@ impl SandboxManifest {
             }
             let mut mount_ids = BTreeSet::new();
             for mount in &profile.mounts {
-                if !mount_ids.insert(mount.id.clone()) {
+                if !mount_ids.insert(mount.id.to_ascii_lowercase()) {
                     blocking(
                         &mut issues,
                         "mount_duplicate",
@@ -762,6 +798,14 @@ impl SandboxManifest {
                 continue;
             }
             outputs.insert(output.id.clone(), output);
+            if output.parents.len() > MAX_LIST {
+                bound(
+                    &mut issues,
+                    "output.parents",
+                    output.parents.len(),
+                    MAX_LIST,
+                );
+            }
             let profile_valid = profiles.contains_key(&output.profile);
             let artifact_valid = artifacts.contains_key(&output.artifact);
             if !profile_valid || !artifact_valid {
@@ -817,12 +861,12 @@ impl SandboxManifest {
                     "make quarantine a mandatory predecessor of release",
                 );
             }
-            if output.destination.trim().is_empty() || output.destination == "*" {
+            if !valid_text(&output.destination) || output.destination == "*" {
                 blocking(
                     &mut issues,
                     "output_destination_unbounded",
                     &output.id,
-                    "output destination is empty or wildcarded",
+                    "output destination is empty, invalid, or wildcarded",
                     "name the bounded destination and its release purpose",
                 );
             }
@@ -838,6 +882,7 @@ impl SandboxManifest {
                     .inputs
                     .iter()
                     .all(|input| artifacts.contains_key(input))
+                    && !cyclic_artifacts.contains(&artifact.id)
                     && (!self.policies.require_lineage
                         || artifact.kind == SandboxArtifactKind::SourceCode
                         || !artifact.inputs.is_empty());
@@ -1082,19 +1127,57 @@ impl SandboxManifest {
 }
 
 fn valid_text(value: &str) -> bool {
-    !value.trim().is_empty() && value.len() <= 256
+    !value.trim().is_empty()
+        && value == value.trim()
+        && value.len() <= 256
+        && !value.chars().any(char::is_control)
 }
 
 fn valid_digest(value: &str) -> bool {
-    value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        && ContentHash::parse(value.to_owned()).is_ok()
 }
 
 fn valid_digest_option(value: Option<&String>) -> bool {
     value.map(|digest| valid_digest(digest)).unwrap_or(false)
 }
 
+fn artifact_lineage_cycle_nodes(
+    artifact_id: &str,
+    artifacts: &BTreeMap<String, &SandboxArtifact>,
+    path: &mut Vec<String>,
+    visited: &mut BTreeSet<String>,
+    cyclic: &mut BTreeSet<String>,
+) -> bool {
+    if let Some(start) = path.iter().position(|current| current == artifact_id) {
+        cyclic.extend(path[start..].iter().cloned());
+        return true;
+    }
+    if visited.contains(artifact_id) {
+        return false;
+    }
+    path.push(artifact_id.to_string());
+    let found = artifacts
+        .get(artifact_id)
+        .map(|artifact| {
+            artifact.inputs.iter().any(|input| {
+                artifacts.contains_key(input)
+                    && artifact_lineage_cycle_nodes(input, artifacts, path, visited, cyclic)
+            })
+        })
+        .unwrap_or(false);
+    path.pop();
+    visited.insert(artifact_id.to_string());
+    found
+}
+
 fn valid_path(value: &str) -> bool {
-    value.starts_with('/')
+    value == value.trim()
+        && !value.chars().any(char::is_control)
+        && value.starts_with('/')
         && value != "/"
         && !value.contains("..")
         && !value.contains('\\')
@@ -1126,7 +1209,10 @@ fn insert_unique<T>(
     kind: &str,
     issues: &mut Vec<SandboxIssue>,
 ) -> bool {
-    if map.contains_key(id) {
+    if map
+        .keys()
+        .any(|existing| existing == id || existing.eq_ignore_ascii_case(id))
+    {
         blocking(
             issues,
             "duplicate_identifier",
@@ -1305,5 +1391,83 @@ mod tests {
             .issues
             .iter()
             .any(|issue| issue.code == "released_output_not_quarantined"));
+    }
+
+    #[test]
+    fn artifact_parent_cycles_are_not_admitted_as_lineage() {
+        let mut value = manifest();
+        value.artifacts[1].inputs = vec!["dataset".into()];
+
+        let audit = value.audit().expect("audit");
+        assert!(!audit.valid);
+        assert!(audit
+            .issues
+            .iter()
+            .any(|issue| issue.code == "artifact_lineage_cycle"));
+        assert!(!audit.artifact_audits[1].lineage_valid);
+        assert!(!audit.artifact_audits[1].ready);
+    }
+
+    #[test]
+    fn sandbox_admission_rejects_noncanonical_digests_and_control_metadata() {
+        let mut value = manifest();
+        value.system.owner = "platform\u{0000}runner".into();
+        value.artifacts[0].digest = "A".repeat(64);
+        value.profiles[0].image_digest = Some("B".repeat(64));
+        value.outputs[0].digest = "C".repeat(64);
+        value.outputs[0].destination = "quarantine\u{000b}store".into();
+
+        let audit = value.audit().expect("audit");
+        assert!(!audit.valid);
+        for code in [
+            "system_identity_missing",
+            "artifact_digest_invalid",
+            "reproducible_environment_missing",
+            "output_digest_invalid",
+            "output_destination_unbounded",
+        ] {
+            assert!(
+                audit.issues.iter().any(|issue| issue.code == code),
+                "missing {code}"
+            );
+        }
+        assert!(!valid_digest(&"A".repeat(64)));
+        assert!(valid_digest(&"a".repeat(64)));
+    }
+
+    #[test]
+    fn sandbox_admission_rejects_case_colliding_artifacts() {
+        let mut value = manifest();
+        let mut duplicate = value.artifacts[0].clone();
+        duplicate.id = "SOURCE".into();
+        value.artifacts.push(duplicate);
+
+        let audit = value.audit().expect("audit");
+        assert!(!audit.valid);
+        assert!(audit
+            .issues
+            .iter()
+            .any(|issue| issue.code == "duplicate_identifier"));
+    }
+
+    #[test]
+    fn sandbox_admission_rejects_padded_and_controlled_mount_targets() {
+        let mut padded = manifest();
+        padded.profiles[0].mounts[0].target = "/inputs/data ".into();
+        let audit = padded.audit().expect("audit");
+        assert!(!audit.valid);
+        assert!(audit
+            .issues
+            .iter()
+            .any(|issue| issue.code == "mount_target_unsafe"));
+
+        let mut controlled = manifest();
+        controlled.profiles[0].mounts[0].target = "/inputs/data\n".into();
+        let audit = controlled.audit().expect("audit");
+        assert!(!audit.valid);
+        assert!(audit
+            .issues
+            .iter()
+            .any(|issue| issue.code == "mount_target_unsafe"));
     }
 }

@@ -1,0 +1,35 @@
+"""Deterministic Python parity for Obligation P32 closure-gate cards."""
+from __future__ import annotations
+import hashlib,json,re
+from typing import Any,Mapping
+from .research_contracts import RESEARCH_CONTRACT_SCHEMA_VERSION,ResearchContractError
+BOUNDARY="preclinical-research-only; no human-subject or clinical-source data; no diagnosis, treatment, triage, enrollment, or clinical decisions";CONTENT_TYPE="application/vnd.aurora.obligation.closure-gate-card-1+json"
+def _hash(v:Any)->str:return hashlib.sha256(json.dumps(v,sort_keys=True,separators=(",",":"),ensure_ascii=False).encode()).hexdigest()
+def _digest(v:Any)->bool:return isinstance(v,str) and re.fullmatch(r"[0-9a-f]{64}",v) is not None
+def _ordered(v:list[str])->bool:return isinstance(v,list) and v==sorted(set(v))
+def manifest(*,feature_id:str,contract_version:str,scale:str,mode:str)->dict[str,Any]:return {"schema_version":RESEARCH_CONTRACT_SCHEMA_VERSION,"capability_id":feature_id,"version":contract_version,"owner_crate":"obligation","consumers":["action gate","token budget controller","workflow compiler","release auditor"],"behavior":f"certify obligation prerequisite closure at {scale} ({mode})","value":"blocks high-regret actions when prerequisites are missing, unknown, stale, or contradictory","input_schema":"ClosureGateRequest4@1","output_schema":"ClosureGateCard7@1","effects":["emit:closure-gate-card","retain:unmet-obligations","block:unsafe-action"],"permissions":["read:local-obligation-predicates"],"determinism":"byte_stable","autonomy_tier":"A1","boundary":BOUNDARY}
+def validate(o:Mapping[str,Any],*,feature_id:str|None=None)->None:
+ a=o.get("artifact",{});bad=o.get("schema_version")!=RESEARCH_CONTRACT_SCHEMA_VERSION or feature_id is not None and o.get("feature_id")!=feature_id or o.get("boundary")!=BOUNDARY or o.get("raw_data_local") is not True or o.get("aggregate_only") is not True or not o.get("predicate_order") or not _digest(o.get("replay_identity")) or not _digest(o.get("closure_digest")) or a.get("content_type")!=CONTENT_TYPE or a.get("content_hash")!=o.get("closure_digest") or a.get("boundary")!=BOUNDARY
+ if bad:raise ResearchContractError("closure identity, locality, digest, artifact, or boundary is incomplete")
+ for k in ("predicate_order","satisfied_order","unsatisfied_order","unknown_order","omitted_order","obligation_order","action_order","influence_order","negative_evidence_order","effect_receipts"):
+  if not _ordered(o.get(k,[])):raise ResearchContractError("closure vectors are not canonical")
+ states=set(o["satisfied_order"])|set(o["unsatisfied_order"])|set(o["unknown_order"])|set(o["omitted_order"])
+ if len(o["predicate_order"])!=len(set(o["predicate_order"])) or states!=set(o["predicate_order"]):raise ResearchContractError("predicate states do not partition")
+def certify(request:Mapping[str,Any],*,feature_id:str,contract_version:str,scale:str,mode:str)->dict[str,Any]:
+ if not isinstance(request.get("request_id"),str) or not request["request_id"].strip() or not isinstance(request.get("purpose"),str) or not request["purpose"].strip() or not request.get("predicates") or not request.get("required_obligation_order") or not request.get("required_action_order") or not _digest(request.get("replay_identity")) or request.get("boundary")!=BOUNDARY or request.get("raw_data_local") is not True or request.get("aggregate_only") is not True or not _ordered(request["required_obligation_order"]) or not _ordered(request["required_action_order"]) or not _ordered(request.get("adversarial_events",[])):raise ResearchContractError("closure identity, requirements, digest, ordering, locality, or boundary is invalid")
+ rows=sorted(request["predicates"],key=lambda p:p.get("obligation_id",""));order=[];satisfied=set();unsatisfied=set();unknown=set();omitted=set();obligations=set();actions=set();influences=set();negative=set();digests=set()
+ for p in rows:
+  oid=p.get("obligation_id","")
+  if oid in order or not isinstance(oid,str) or not oid.strip() or not isinstance(p.get("action_id"),str) or not p["action_id"].strip() or not isinstance(p.get("prerequisite"),str) or not p["prerequisite"].strip() or not _digest(p.get("evidence_digest")) or not isinstance(p.get("influence"),str) or not p["influence"].strip() or p.get("local") is not True or p.get("aggregate_only") is not True:raise ResearchContractError("predicate identity, evidence, influence, or locality is invalid")
+  order.append(oid);obligations.add(oid);actions.add(p["action_id"]);influences.add(p["influence"]);digests.add(p["evidence_digest"])
+  if p.get("negative_result") is True:negative.add(f"{oid}:negative-result")
+  if p.get("policy_epoch",0)==0:unknown.add(oid)
+  elif p.get("satisfied") is not True or oid not in request["required_obligation_order"] or p["action_id"] not in request["required_action_order"]:unsatisfied.add(oid)
+  elif p["evidence_digest"]==request["replay_identity"]:omitted.add(oid)
+  else:satisfied.add(oid)
+ global_block=not all(request.get(k) is True for k in ("policy_allowed","protected_closure","signed_approval","raw_data_local","aggregate_only")) or bool(request.get("adversarial_events")) or request.get("action_count",0)>request.get("action_budget",0)
+ if global_block:omitted.update(order);satisfied.clear();unsatisfied.clear();unknown.clear()
+ missing=not set(request["required_obligation_order"])<=obligations or not set(request["required_action_order"])<=actions;disposition="blocked" if global_block else "unknown" if missing else "partial" if unsatisfied or unknown or omitted else "qualified"
+ payload={"schema_version":RESEARCH_CONTRACT_SCHEMA_VERSION,"contract_version":contract_version,"feature_id":feature_id,"mode":mode,"scale":scale,"request_id":request["request_id"],"purpose":request["purpose"],"disposition":disposition,"predicate_order":order,"satisfied_order":sorted(satisfied),"unsatisfied_order":sorted(unsatisfied),"unknown_order":sorted(unknown),"omitted_order":sorted(omitted),"obligation_order":sorted(obligations),"action_order":sorted(actions),"influence_order":sorted(influences),"negative_evidence_order":sorted(negative),"replay_identity":request["replay_identity"],"raw_data_local":True,"aggregate_only":True,"boundary":BOUNDARY};d=_hash(payload);payload["closure_digest"]=d;payload["artifact"]={"artifact_id":f"obligation-closure:{request['request_id']}","content_type":CONTENT_TYPE,"content_hash":d,"semantic_loss":sorted(payload["omitted_order"]),"predicate_digests":sorted(digests),"boundary":BOUNDARY};payload["effect_receipts"]=[f"emit:closure-gate:{request['request_id']}"] if disposition=="qualified" else ["block:unsafe-action"];validate(payload,feature_id=feature_id);return payload
+ObligationPredicate4=dict[str,Any];ClosureGateRequest4=dict[str,Any];ClosureGateCard7=dict[str,Any];ClosureGateArtifact4=dict[str,Any];ClosureGateError=ResearchContractError
+__all__=["BOUNDARY","CONTENT_TYPE","ObligationPredicate4","ClosureGateRequest4","ClosureGateCard7","ClosureGateArtifact4","ClosureGateError","manifest","certify","validate"]

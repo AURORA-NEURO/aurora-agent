@@ -27,6 +27,8 @@ const DEFAULT_ROUTE_CANDIDATES: usize = 10;
 const MAX_ROUTE_CANDIDATES: usize = 50;
 const DEFAULT_ROUTE_TOOLS: usize = 128;
 const MAX_ROUTE_TOOLS: usize = 256;
+const MAX_GROUP_VALUE_BYTES: usize = 4_096;
+const MAX_GROUP_VALUES: usize = 512;
 
 fn default_max_items() -> usize {
     DEFAULT_MAX_ITEMS
@@ -56,10 +58,7 @@ fn validate_filter(field: &'static str, value: &Option<String>) -> Result<(), Ca
                 maximum: MAX_FILTER_BYTES,
             });
         }
-        if value
-            .chars()
-            .any(|character| character == '\0' || character == '\n' || character == '\r')
-        {
+        if value != value.trim() || value.chars().any(char::is_control) {
             return Err(CapabilityError::ControlCharacter { field });
         }
     }
@@ -75,7 +74,59 @@ fn tokens(value: &str) -> Vec<String> {
 }
 
 fn normalized(value: &str) -> String {
-    value.to_ascii_lowercase()
+    value.trim().to_ascii_lowercase()
+}
+
+fn validate_group_values(
+    group: &CapabilityGroup,
+    field: &'static str,
+    values: &[String],
+) -> Result<(), CapabilityError> {
+    if values.len() > MAX_GROUP_VALUES {
+        return Err(CapabilityError::TooManyGroupValues {
+            group: group.id.clone(),
+            field,
+            count: values.len(),
+            maximum: MAX_GROUP_VALUES,
+        });
+    }
+    let mut seen = BTreeSet::new();
+    for value in values {
+        if value.trim().is_empty() || value != value.trim() {
+            if field == "mcp_tools" {
+                return Err(CapabilityError::EmptyTool {
+                    group: group.id.clone(),
+                });
+            }
+            return Err(CapabilityError::EmptyGroupValue {
+                group: group.id.clone(),
+                field,
+            });
+        }
+        if value.len() > MAX_GROUP_VALUE_BYTES {
+            return Err(CapabilityError::GroupValueTooLong {
+                group: group.id.clone(),
+                field,
+                bytes: value.len(),
+                maximum: MAX_GROUP_VALUE_BYTES,
+            });
+        }
+        if value.chars().any(char::is_control) {
+            return Err(CapabilityError::GroupValueControlCharacter {
+                group: group.id.clone(),
+                field,
+            });
+        }
+        let normalized_value = normalized(value);
+        if !seen.insert(normalized_value) {
+            return Err(CapabilityError::DuplicateGroupValue {
+                group: group.id.clone(),
+                field,
+                value: value.clone(),
+            });
+        }
+    }
+    Ok(())
 }
 
 /// One explicit cross-domain capability group from the workspace catalogue.
@@ -226,7 +277,7 @@ impl CapabilityRouteRequest {
         let mut ids = BTreeSet::new();
         for need in &self.needs {
             validate_filter("need_id", &Some(need.id.clone()))?;
-            if !ids.insert(need.id.clone()) {
+            if !ids.insert(need.id.to_ascii_lowercase()) {
                 return Err(CapabilityError::DuplicateRouteNeed {
                     id: need.id.clone(),
                 });
@@ -263,19 +314,40 @@ impl CapabilityCatalogue {
         }
         let mut ids = BTreeSet::new();
         for group in &groups {
-            if group.id.trim().is_empty() {
+            if group.id.trim().is_empty() || group.id != group.id.trim() {
                 return Err(CapabilityError::EmptyGroupId);
             }
-            if !ids.insert(group.id.clone()) {
+            if group.id.len() > MAX_GROUP_VALUE_BYTES {
+                return Err(CapabilityError::GroupValueTooLong {
+                    group: group.id.clone(),
+                    field: "id",
+                    bytes: group.id.len(),
+                    maximum: MAX_GROUP_VALUE_BYTES,
+                });
+            }
+            if group.id.chars().any(char::is_control) {
+                return Err(CapabilityError::GroupValueControlCharacter {
+                    group: group.id.clone(),
+                    field: "id",
+                });
+            }
+            if !ids.insert(normalized(&group.id)) {
                 return Err(CapabilityError::DuplicateGroup {
                     id: group.id.clone(),
                 });
             }
-            if group.mcp_tools.iter().any(|tool| tool.trim().is_empty()) {
-                return Err(CapabilityError::EmptyTool {
+            if group.status.trim().is_empty() {
+                return Err(CapabilityError::EmptyGroupValue {
                     group: group.id.clone(),
+                    field: "status",
                 });
             }
+            validate_group_values(group, "domains", &group.domains)?;
+            validate_group_values(group, "crates", &group.crates)?;
+            validate_group_values(group, "mcp_tools", &group.mcp_tools)?;
+            validate_group_values(group, "cli_entrypoints", &group.cli_entrypoints)?;
+            validate_group_values(group, "python_artifacts", &group.python_artifacts)?;
+            validate_group_values(group, "status", std::slice::from_ref(&group.status))?;
         }
         let encoded = serde_json::to_value(&groups)
             .map_err(|error| CapabilityError::Canonicalisation(error.to_string()))?;
@@ -455,6 +527,32 @@ pub enum CapabilityError {
     DuplicateGroup { id: String },
     #[error("capability group `{group}` contains an empty MCP tool name")]
     EmptyTool { group: String },
+    #[error("capability group `{group}` field `{field}` contains an empty value")]
+    EmptyGroupValue { group: String, field: &'static str },
+    #[error("capability group `{group}` field `{field}` contains a control character")]
+    GroupValueControlCharacter { group: String, field: &'static str },
+    #[error(
+        "capability group `{group}` field `{field}` contains a value of {bytes} bytes; maximum is {maximum}"
+    )]
+    GroupValueTooLong {
+        group: String,
+        field: &'static str,
+        bytes: usize,
+        maximum: usize,
+    },
+    #[error("capability group `{group}` field `{field}` contains too many values: {count}; maximum is {maximum}")]
+    TooManyGroupValues {
+        group: String,
+        field: &'static str,
+        count: usize,
+        maximum: usize,
+    },
+    #[error("capability group `{group}` field `{field}` contains duplicate value `{value}`")]
+    DuplicateGroupValue {
+        group: String,
+        field: &'static str,
+        value: String,
+    },
     #[error("{field} filter must be non-empty when supplied")]
     EmptyFilter { field: &'static str },
     #[error("{field} filter contains a control character")]
@@ -581,6 +679,13 @@ mod tests {
             Err(CapabilityError::EmptyFilter { .. })
                 | Err(CapabilityError::ControlCharacter { .. })
         ));
+        assert!(matches!(
+            catalogue().search(&CapabilityQuery {
+                domain: Some(" oncology".into()),
+                ..CapabilityQuery::default()
+            }),
+            Err(CapabilityError::ControlCharacter { .. })
+        ));
     }
 
     #[test]
@@ -597,6 +702,45 @@ mod tests {
         assert!(matches!(
             CapabilityCatalogue::from_value(&value),
             Err(CapabilityError::EmptyTool { .. })
+        ));
+    }
+
+    #[test]
+    fn catalogue_rejects_case_collisions_duplicate_values_and_controls() {
+        let value = json!([
+            {"id": "One", "domains": ["oncology"]},
+            {"id": "one", "domains": ["other"]}
+        ]);
+        assert!(matches!(
+            CapabilityCatalogue::from_value(&value),
+            Err(CapabilityError::DuplicateGroup { .. })
+        ));
+
+        let value = json!([{
+            "id": "one",
+            "domains": ["oncology", "ONCOLOGY"]
+        }]);
+        assert!(matches!(
+            CapabilityCatalogue::from_value(&value),
+            Err(CapabilityError::DuplicateGroupValue {
+                field: "domains",
+                ..
+            })
+        ));
+
+        let value = json!([{"id": "one", "crates": ["bioprism\tunsafe"]}]);
+        assert!(matches!(
+            CapabilityCatalogue::from_value(&value),
+            Err(CapabilityError::GroupValueControlCharacter {
+                field: "crates",
+                ..
+            })
+        ));
+
+        let value = json!([{"id": " one", "domains": ["oncology"]}]);
+        assert!(matches!(
+            CapabilityCatalogue::from_value(&value),
+            Err(CapabilityError::EmptyGroupId)
         ));
     }
 
@@ -634,6 +778,23 @@ mod tests {
         };
         assert!(matches!(
             duplicate.validate(),
+            Err(CapabilityError::DuplicateRouteNeed { .. })
+        ));
+        let case_duplicate = CapabilityRouteRequest {
+            needs: vec![
+                CapabilityRouteNeed {
+                    id: "Same".into(),
+                    query: CapabilityQuery::default(),
+                },
+                CapabilityRouteNeed {
+                    id: "same".into(),
+                    query: CapabilityQuery::default(),
+                },
+            ],
+            ..request.clone()
+        };
+        assert!(matches!(
+            case_duplicate.validate(),
             Err(CapabilityError::DuplicateRouteNeed { .. })
         ));
         let nested = CapabilityRouteRequest {

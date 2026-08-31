@@ -37,6 +37,11 @@ pub fn fork_tape(
     step: u64,
     child_run: RunId,
 ) -> Result<WorldTape, RuntimeError> {
+    if child_run == *parent.run() {
+        return Err(RuntimeError::InvariantViolation {
+            detail: "a fork must receive a distinct child run identity".into(),
+        });
+    }
     if step > parent.len() {
         return Err(RuntimeError::ForkBeyondEnd {
             step,

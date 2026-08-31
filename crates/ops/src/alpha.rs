@@ -562,7 +562,9 @@ mod tests {
         assert!(Finding::new(
             Criterion::CleanCheckoutDemo,
             Verdict::Refuted,
-            Basis::NoObserver { because: "cannot see" },
+            Basis::NoObserver {
+                because: "cannot see"
+            },
             "",
         )
         .is_err());

@@ -43,6 +43,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::GroundingError;
 
+const MAX_GROUNDING_TEXT_BYTES: usize = 256;
+const MAX_CLAIMS: usize = 8192;
+const MAX_EVIDENCE: usize = 8192;
+const MAX_EDGES: usize = 16384;
+const MAX_LINEAGE: usize = 256;
+
 /// Whether anyone actually checked that an evidence locator resolves.
 ///
 /// Three states, and the middle one is the point: "nobody checked" is not "resolves".
@@ -144,7 +150,9 @@ pub enum ClaimState {
 }
 
 /// A claim, its evidence, and the edges between them.
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+/// A derived claim-evidence graph. It serializes for reporting but is intentionally rebuilt
+/// through the checked admission methods so persisted edges cannot bypass endpoint validation.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize)]
 pub struct Grounding {
     claims: BTreeSet<String>,
     evidence: BTreeMap<String, Evidence>,
@@ -160,6 +168,13 @@ impl Grounding {
     /// Add an atomic claim.
     pub fn claim(&mut self, id: impl Into<String>) -> Result<(), GroundingError> {
         let id = id.into();
+        validate_grounding_text(&id).map_err(|detail| GroundingError::InvalidClaim {
+            claim: id.clone(),
+            detail,
+        })?;
+        if self.claims.len() >= MAX_CLAIMS {
+            return Err(GroundingError::TooManyClaims { limit: MAX_CLAIMS });
+        }
         if !self.claims.insert(id.clone()) {
             return Err(GroundingError::DuplicateClaim(id));
         }
@@ -168,6 +183,12 @@ impl Grounding {
 
     /// Add an evidence object.
     pub fn evidence(&mut self, evidence: Evidence) -> Result<(), GroundingError> {
+        validate_evidence(&evidence)?;
+        if self.evidence.len() >= MAX_EVIDENCE {
+            return Err(GroundingError::TooManyEvidence {
+                limit: MAX_EVIDENCE,
+            });
+        }
         if self.evidence.contains_key(&evidence.id) {
             return Err(GroundingError::DuplicateEvidence(evidence.id));
         }
@@ -177,11 +198,22 @@ impl Grounding {
 
     /// Add an edge, refusing one whose endpoints are not both declared.
     pub fn link(&mut self, edge: SupportEdge) -> Result<(), GroundingError> {
+        validate_edge(&edge)?;
         if !self.claims.contains(&edge.claim) {
             return Err(GroundingError::UnknownClaim(edge.claim));
         }
         if !self.evidence.contains_key(&edge.evidence) {
             return Err(GroundingError::UnknownEvidence(edge.evidence));
+        }
+        if self.edges.len() >= MAX_EDGES {
+            return Err(GroundingError::TooManyEdges { limit: MAX_EDGES });
+        }
+        if self.edges.iter().any(|existing| existing == &edge) {
+            return Err(GroundingError::DuplicateEdge {
+                claim: edge.claim,
+                evidence: edge.evidence,
+                kind: format!("{:?}", edge.kind),
+            });
         }
         self.edges.push(edge);
         Ok(())
@@ -223,12 +255,7 @@ impl Grounding {
     pub fn states(&self) -> BTreeMap<&str, ClaimState> {
         self.claims
             .iter()
-            .map(|claim| {
-                (
-                    claim.as_str(),
-                    self.state(claim).expect("claim is in the claim set"),
-                )
-            })
+            .filter_map(|claim| self.state(claim).map(|state| (claim.as_str(), state)))
             .collect()
     }
 
@@ -282,6 +309,73 @@ impl Grounding {
     pub fn edges(&self) -> &[SupportEdge] {
         &self.edges
     }
+}
+
+fn validate_grounding_text(value: &str) -> Result<(), String> {
+    if value.trim().is_empty()
+        || value != value.trim()
+        || value.len() > MAX_GROUNDING_TEXT_BYTES
+        || value.chars().any(char::is_control)
+    {
+        return Err("value must be a bounded, trimmed, control-free string".into());
+    }
+    Ok(())
+}
+
+fn validate_evidence(evidence: &Evidence) -> Result<(), GroundingError> {
+    validate_grounding_text(&evidence.id).map_err(|detail| GroundingError::InvalidEvidence {
+        evidence: evidence.id.clone(),
+        detail,
+    })?;
+    if evidence.lineage.len() > MAX_LINEAGE {
+        return Err(GroundingError::InvalidEvidence {
+            evidence: evidence.id.clone(),
+            detail: format!("lineage may contain at most {MAX_LINEAGE} ancestors"),
+        });
+    }
+    let mut ancestors = BTreeSet::new();
+    for ancestor in &evidence.lineage {
+        validate_grounding_text(ancestor).map_err(|detail| GroundingError::InvalidEvidence {
+            evidence: evidence.id.clone(),
+            detail: format!("lineage entry is invalid: {detail}"),
+        })?;
+        if !ancestors.insert(ancestor.clone()) {
+            return Err(GroundingError::InvalidEvidence {
+                evidence: evidence.id.clone(),
+                detail: "lineage entries must be unique".into(),
+            });
+        }
+    }
+    match &evidence.locator_status {
+        LocatorStatus::Resolved { digest } => {
+            validate_grounding_text(digest).map_err(|detail| GroundingError::InvalidEvidence {
+                evidence: evidence.id.clone(),
+                detail: format!("resolved digest is invalid: {detail}"),
+            })?;
+        }
+        LocatorStatus::Unresolvable { detail } => {
+            validate_grounding_text(detail).map_err(|detail| GroundingError::InvalidEvidence {
+                evidence: evidence.id.clone(),
+                detail: format!("unresolvable detail is invalid: {detail}"),
+            })?;
+        }
+        LocatorStatus::NotChecked => {}
+    }
+    Ok(())
+}
+
+fn validate_edge(edge: &SupportEdge) -> Result<(), GroundingError> {
+    validate_grounding_text(&edge.claim).map_err(|detail| GroundingError::InvalidEdge {
+        claim: edge.claim.clone(),
+        evidence: edge.evidence.clone(),
+        detail: format!("claim endpoint is invalid: {detail}"),
+    })?;
+    validate_grounding_text(&edge.evidence).map_err(|detail| GroundingError::InvalidEdge {
+        claim: edge.claim.clone(),
+        evidence: edge.evidence.clone(),
+        detail: format!("evidence endpoint is invalid: {detail}"),
+    })?;
+    Ok(())
 }
 
 /// The partition of claims by state.

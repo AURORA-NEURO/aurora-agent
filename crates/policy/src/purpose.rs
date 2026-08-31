@@ -188,7 +188,12 @@ mod tests {
     #[test]
     fn a_purpose_name_that_merely_resembles_a_known_one_fails_to_parse() {
         assert!(Purpose::parse("research_analysis").is_ok());
-        for impostor in ["research", "Research_Analysis", "research analysis", "research_analysis "] {
+        for impostor in [
+            "research",
+            "Research_Analysis",
+            "research analysis",
+            "research_analysis ",
+        ] {
             assert!(
                 Purpose::parse(impostor).is_err(),
                 "{impostor:?} must not mint a purpose"

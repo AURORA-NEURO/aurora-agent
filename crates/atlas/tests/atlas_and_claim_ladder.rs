@@ -139,7 +139,10 @@ fn an_unmeasured_capability_serialises_without_any_score_field() {
     let value = serde_json::to_value(&cell).unwrap();
     let object = value.as_object().expect("a JSON object");
 
-    assert_eq!(object.get("state").and_then(|v| v.as_str()), Some("unmeasured"));
+    assert_eq!(
+        object.get("state").and_then(|v| v.as_str()),
+        Some("unmeasured")
+    );
     assert_eq!(object.len(), 2, "state and reason only: {object:?}");
     for forbidden in ["score", "value", "passes", "failures", "measurement"] {
         assert!(
@@ -413,8 +416,10 @@ fn a_claim_is_refused_above_the_tier_its_evidence_supports() {
     let permitted = bioprism_atlas::permitted_claim(&atlas, &cap("agent"));
     assert_eq!(permitted, ClaimTier::PublicObservedWorlds);
 
-    assert!(bioprism_atlas::license_claim(&atlas, &cap("agent"), ClaimTier::PublicObservedWorlds)
-        .is_ok());
+    assert!(
+        bioprism_atlas::license_claim(&atlas, &cap("agent"), ClaimTier::PublicObservedWorlds)
+            .is_ok()
+    );
     match bioprism_atlas::license_claim(&atlas, &cap("agent"), ClaimTier::ControlledHiddenMultiSite)
     {
         Err(AtlasError::ClaimAboveEvidence {
@@ -720,7 +725,9 @@ fn coverage_debt_names_the_families_with_no_evidence_at_all() {
     assert_eq!(debt.measured, 1);
     assert_eq!(debt.unmeasured, 2);
     assert!(debt.dark_families.contains(&CapabilityFamily::ToolUse));
-    assert!(!debt.dark_families.contains(&CapabilityFamily::EvidenceAcquisition));
+    assert!(!debt
+        .dark_families
+        .contains(&CapabilityFamily::EvidenceAcquisition));
     assert!((debt.ratio() - 2.0 / 3.0).abs() < 1e-12);
 }
 

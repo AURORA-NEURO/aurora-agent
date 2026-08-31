@@ -49,12 +49,14 @@
 //! estimators.
 
 use crate::conditions::MeasurementConditions;
+use crate::conditions::Subject;
 use crate::error::MetricsError;
 use crate::grid::CapabilityGrid;
 use crate::interval::{weighted_mean, Estimate, Interval, NoIntervalReason};
 use crate::weighting::DeclaredWeighting;
 use bioprism_atlas::{CapabilityId, UnmeasuredReason};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
 
 /// An aggregate value with nothing attached.
 ///
@@ -140,10 +142,47 @@ impl Coverage {
         holes_closed_by_declaration: Vec<UnmeasuredCell>,
         measured_but_excluded: Vec<CapabilityId>,
     ) -> Result<Self, MetricsError> {
-        let accounted = contributed.len()
-            + blocking_holes.len()
-            + holes_closed_by_declaration.len()
-            + measured_but_excluded.len();
+        let mut seen = BTreeSet::new();
+        for capability in &contributed {
+            if !seen.insert(capability.clone()) {
+                return Err(MetricsError::DuplicateCoverageCell {
+                    grid: "coverage".to_string(),
+                    capability: capability.to_string(),
+                });
+            }
+        }
+        for cell in &blocking_holes {
+            if !seen.insert(cell.capability.clone()) {
+                return Err(MetricsError::DuplicateCoverageCell {
+                    grid: "coverage".to_string(),
+                    capability: cell.capability.to_string(),
+                });
+            }
+        }
+        for cell in &holes_closed_by_declaration {
+            if !seen.insert(cell.capability.clone()) {
+                return Err(MetricsError::DuplicateCoverageCell {
+                    grid: "coverage".to_string(),
+                    capability: cell.capability.to_string(),
+                });
+            }
+        }
+        for capability in &measured_but_excluded {
+            if !seen.insert(capability.clone()) {
+                return Err(MetricsError::DuplicateCoverageCell {
+                    grid: "coverage".to_string(),
+                    capability: capability.to_string(),
+                });
+            }
+        }
+        let accounted = contributed
+            .len()
+            .checked_add(blocking_holes.len())
+            .and_then(|count| count.checked_add(holes_closed_by_declaration.len()))
+            .and_then(|count| count.checked_add(measured_but_excluded.len()))
+            .ok_or_else(|| MetricsError::CoverageAccountingOverflow {
+                grid: "coverage".to_string(),
+            })?;
         if accounted != cells {
             return Err(MetricsError::CoverageAccountingMismatch {
                 grid: "coverage".to_string(),
@@ -152,7 +191,12 @@ impl Coverage {
                 unmeasured: accounted - contributed.len(),
             });
         }
-        let in_scope = contributed.len() + blocking_holes.len();
+        let in_scope = contributed
+            .len()
+            .checked_add(blocking_holes.len())
+            .ok_or_else(|| MetricsError::CoverageAccountingOverflow {
+                grid: "coverage".to_string(),
+            })?;
         Ok(Coverage {
             fraction_of_grid: fraction(contributed.len(), cells),
             fraction_of_scope: fraction(contributed.len(), in_scope),
@@ -252,6 +296,44 @@ impl TryFrom<CoveredAggregateFields> for CoveredAggregate {
         if fields.coverage.contributed.is_empty() {
             return Err(MetricsError::AggregateOverNothing { grid: fields.grid });
         }
+        let subject = match &fields.conditions.subject {
+            Subject::Grid { label } if label == &fields.grid => None,
+            subject => Some(subject.to_string()),
+        };
+        if let Some(subject) = subject {
+            return Err(MetricsError::AggregateSubjectMismatch {
+                grid: fields.grid.clone(),
+                subject,
+            });
+        }
+        if !fields.worst.value.is_finite() {
+            return Err(MetricsError::InvalidWorstCellValue {
+                value: fields.worst.value,
+            });
+        }
+        if !fields.spread.is_finite() || fields.spread < 0.0 {
+            return Err(MetricsError::InvalidSpread {
+                value: fields.spread,
+            });
+        }
+        if !fields
+            .coverage
+            .contributed
+            .iter()
+            .any(|capability| capability == &fields.worst.capability)
+        {
+            return Err(MetricsError::WorstCellNotContributing {
+                capability: fields.worst.capability.to_string(),
+            });
+        }
+        if matches!(&fields.rule, AggregationRule::WorstMeasured)
+            && fields.estimate.value() != fields.worst.value
+        {
+            return Err(MetricsError::WorstEstimateMismatch {
+                estimate: fields.estimate.value(),
+                worst: fields.worst.value,
+            });
+        }
         let coverage = Coverage::derive(
             fields.coverage.cells,
             fields.coverage.contributed,
@@ -271,6 +353,17 @@ impl TryFrom<CoveredAggregateFields> for CoveredAggregate {
                 contributed,
                 unmeasured,
             },
+            MetricsError::CoverageAccountingOverflow { .. } => {
+                MetricsError::CoverageAccountingOverflow {
+                    grid: fields.grid.clone(),
+                }
+            }
+            MetricsError::DuplicateCoverageCell { capability, .. } => {
+                MetricsError::DuplicateCoverageCell {
+                    grid: fields.grid.clone(),
+                    capability,
+                }
+            }
             other => other,
         })?;
         Ok(CoveredAggregate {
@@ -306,6 +399,7 @@ impl From<CoveredAggregate> for CoveredAggregateFields {
 impl CoveredAggregate {
     /// Unweighted mean over every measured cell.
     pub fn mean(grid: &CapabilityGrid) -> Result<Self, MetricsError> {
+        grid.validate()?;
         let weights = uniform_weights(grid)?;
         combine(
             grid,
@@ -321,6 +415,7 @@ impl CoveredAggregate {
     /// Refuses otherwise and names the holes. This is the only rule under which "an aggregate over
     /// the grid" is a literally true description of the result.
     pub fn complete_mean(grid: &CapabilityGrid) -> Result<Self, MetricsError> {
+        grid.validate()?;
         let blocking: Vec<String> = grid
             .holes()
             .filter(|(_, reason)| !reason.supports_claim())
@@ -352,6 +447,7 @@ impl CoveredAggregate {
         grid: &CapabilityGrid,
         weighting: &DeclaredWeighting,
     ) -> Result<Self, MetricsError> {
+        grid.validate()?;
         let mut weights = Vec::new();
         for (capability, weight) in weighting.weights() {
             let Some(cell) = grid.cell(capability) else {
@@ -387,6 +483,7 @@ impl CoveredAggregate {
     /// not only the mean", and a worst-domain number whose coverage listed one cell would hide the
     /// fact that the other ten were checked.
     pub fn worst(grid: &CapabilityGrid) -> Result<Self, MetricsError> {
+        grid.validate()?;
         let weights = uniform_weights(grid)?;
         combine(
             grid,
@@ -519,6 +616,11 @@ fn combine(
                 reason: reason.to_string(),
             });
         };
+        if cell.effective_size() == Some(0) {
+            return Err(MetricsError::MalformedIntervalBasis {
+                detail: format!("effective size for measured capability {capability} is zero"),
+            });
+        }
         let value = estimate.value();
         total += weight;
         accumulated += weight * value;

@@ -9,7 +9,7 @@
 use crate::domain_report::{project_domain_report, validate_domain_report};
 use bioprism_ids::ContentHash;
 use serde_json::{json, Map, Value};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
 pub const DOMAIN_EVIDENCE_INTAKE_SCHEMA_VERSION: &str =
@@ -138,14 +138,14 @@ pub fn intake_domain_evidence(request: &Value) -> Result<Value, DomainEvidenceIn
         "readiness_claimed": false,
         "execution": "not_started",
         "guarantees": [
+            "intake records a supplied envelope without executing or interpreting the source tool",
             "request and response JSON are retained under exact canonical digests",
-            "the canonical domain report preserves the caller-declared outcome and claim posture",
-            "intake records a supplied envelope without executing or interpreting the source tool"
+            "the canonical domain report preserves the caller-declared outcome and claim posture"
         ],
         "does_not_claim": [
+            "intake proves provenance completeness, reproducibility, release readiness, or external effects",
             "a response or outcome label proves scientific, clinical, causal, or operational truth",
-            "a source-tool membership check proves that the tool was executed or authorized",
-            "intake proves provenance completeness, reproducibility, release readiness, or external effects"
+            "a source-tool membership check proves that the tool was executed or authorized"
         ]
     });
     ensure_size(&result)?;
@@ -181,6 +181,13 @@ pub fn validate_domain_evidence_intake(value: &Value) -> Result<(), DomainEviden
     }
     let parent_digests =
         digest_array(object, "parent_digests", MAX_DOMAIN_EVIDENCE_INTAKE_PARENTS)?;
+    if let Some(source_plan_digest) = &source_plan_digest {
+        if !parent_digests.contains(source_plan_digest) {
+            return Err(DomainEvidenceIntakeError::InvalidField(
+                "parent_digests must contain source_plan_digest".into(),
+            ));
+        }
+    }
     let report = object
         .get("report")
         .ok_or_else(|| DomainEvidenceIntakeError::InvalidField("report".into()))?;
@@ -302,6 +309,13 @@ fn required_digest(
     field: &str,
 ) -> Result<String, DomainEvidenceIntakeError> {
     let value = required_text(object, field)?;
+    if value.len() != 64
+        || !value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        return Err(DomainEvidenceIntakeError::DigestMismatch(field.into()));
+    }
     ContentHash::parse(value.clone())
         .map_err(|_| DomainEvidenceIntakeError::DigestMismatch(field.into()))?;
     Ok(value)
@@ -318,6 +332,13 @@ fn optional_digest(
                 .as_str()
                 .filter(|value| !value.trim().is_empty())
                 .ok_or_else(|| DomainEvidenceIntakeError::InvalidField(field.into()))?;
+            if digest.len() != 64
+                || !digest
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+            {
+                return Err(DomainEvidenceIntakeError::DigestMismatch(field.into()));
+            }
             ContentHash::parse(digest.to_string())
                 .map_err(|_| DomainEvidenceIntakeError::DigestMismatch(field.into()))?;
             Ok(Some(digest.to_string()))
@@ -338,6 +359,13 @@ fn digest_array(
         .ok_or_else(|| DomainEvidenceIntakeError::InvalidField(field.into()))?;
     let values = text_array_value(values, field, maximum)?;
     for value in &values {
+        if value.len() != 64
+            || !value
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        {
+            return Err(DomainEvidenceIntakeError::DigestMismatch(field.into()));
+        }
         ContentHash::parse(value.clone())
             .map_err(|_| DomainEvidenceIntakeError::DigestMismatch(field.into()))?;
     }
@@ -368,6 +396,7 @@ fn text_array_value(
         });
     }
     let mut result = BTreeSet::new();
+    let mut identity_keys = BTreeMap::new();
     for value in values {
         let text = value
             .as_str()
@@ -378,6 +407,16 @@ fn text_array_value(
                 field: field.into(),
                 maximum: MAX_DOMAIN_EVIDENCE_INTAKE_TEXT_BYTES,
             });
+        }
+        if text.chars().any(char::is_control) || text != text.trim() {
+            return Err(DomainEvidenceIntakeError::InvalidField(field.into()));
+        }
+        let identity_key = text.to_ascii_lowercase();
+        if identity_keys
+            .insert(identity_key, text.to_string())
+            .is_some()
+        {
+            return Err(DomainEvidenceIntakeError::InvalidField(field.into()));
         }
         result.insert(text.to_string());
     }
@@ -398,6 +437,9 @@ fn required_text(
             field: field.into(),
             maximum: MAX_DOMAIN_EVIDENCE_INTAKE_TEXT_BYTES,
         });
+    }
+    if value.chars().any(char::is_control) || value != value.trim() {
+        return Err(DomainEvidenceIntakeError::InvalidField(field.into()));
     }
     Ok(value.to_string())
 }
@@ -433,7 +475,7 @@ mod tests {
     fn request() -> Value {
         json!({
             "group_id": "biological_domains",
-            "domains": ["modalities", "modalities"],
+            "domains": ["modalities", "genomics"],
             "subject_id": "subject-1",
             "source_tool": "modality_catalog",
             "request": {"modality": "single_cell"},
@@ -514,6 +556,51 @@ mod tests {
         assert!(matches!(
             validate_domain_evidence_intake(&tampered),
             Err(DomainEvidenceIntakeError::DigestMismatch(_))
+        ));
+    }
+
+    #[test]
+    fn intake_rejects_a_source_plan_claim_without_a_parent_edge() {
+        let mut value = request();
+        value["source_plan_digest"] = json!("f".repeat(64));
+        let mut result = intake_domain_evidence(&value).unwrap();
+        result["parent_digests"] = json!([]);
+        result["report"]["parent_digests"] = json!([]);
+        assert!(matches!(
+            validate_domain_evidence_intake(&result),
+            Err(DomainEvidenceIntakeError::InvalidField(field))
+                if field == "parent_digests must contain source_plan_digest"
+        ));
+    }
+
+    #[test]
+    fn intake_rejects_control_identity_case_aliases_and_noncanonical_digests() {
+        let mut invalid = request();
+        invalid["subject_id"] = json!("subject\nunsafe");
+        assert!(matches!(
+            intake_domain_evidence(&invalid),
+            Err(DomainEvidenceIntakeError::InvalidField(field)) if field == "subject_id"
+        ));
+
+        let mut invalid = request();
+        invalid["domains"] = json!(["Modalities", "modalities"]);
+        assert!(matches!(
+            intake_domain_evidence(&invalid),
+            Err(DomainEvidenceIntakeError::InvalidField(field)) if field == "domains"
+        ));
+
+        let mut invalid = request();
+        invalid["domains"] = json!(["modalities", "modalities"]);
+        assert!(matches!(
+            intake_domain_evidence(&invalid),
+            Err(DomainEvidenceIntakeError::InvalidField(field)) if field == "domains"
+        ));
+
+        let mut invalid = request();
+        invalid["source_plan_digest"] = json!("A".repeat(64));
+        assert!(matches!(
+            intake_domain_evidence(&invalid),
+            Err(DomainEvidenceIntakeError::DigestMismatch(field)) if field == "source_plan_digest"
         ));
     }
 }

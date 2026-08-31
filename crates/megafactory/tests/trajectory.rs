@@ -3,6 +3,7 @@
 use bioprism_megafactory::{
     CaptureError, CaptureSession, Completeness, Field, RedactionPolicy, Span, SpanKind,
 };
+use serde_json::json;
 
 const SECRET: &str = "MRN-4471-QX";
 
@@ -266,6 +267,35 @@ fn redaction_removes_values_and_never_removes_spans() {
         released.completeness(),
         Completeness::Gapped { missing: vec![2] },
         "a gap survives redaction; withholding a value is not the same as losing a span"
+    );
+}
+
+#[test]
+fn deserializing_an_out_of_order_capture_session_is_refused() {
+    let session = session_with(SECRET);
+    let mut document = serde_json::to_value(&session).expect("serialisable");
+    let spans = document["spans"].as_array().expect("spans array");
+    document["spans"] = json!([spans[1].clone(), spans[0].clone()]);
+
+    let error = serde_json::from_value::<CaptureSession>(document).expect_err("must refuse");
+    assert!(error.to_string().contains("follows"), "{error}");
+}
+
+#[test]
+fn deserializing_redacted_session_with_forged_accounting_is_refused() {
+    let released = session_with(SECRET)
+        .redact(&policy())
+        .expect("policy applies");
+    let mut document = serde_json::to_value(&released).expect("serialisable");
+    document["redacted_fields"] = json!(released.redacted_fields + 1);
+
+    let error = serde_json::from_value::<bioprism_megafactory::RedactedSession>(document)
+        .expect_err("must refuse");
+    assert!(
+        error
+            .to_string()
+            .contains("inconsistent redaction accounting"),
+        "{error}"
     );
 }
 

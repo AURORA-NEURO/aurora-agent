@@ -242,6 +242,1023 @@ export type {
 } from "./autonomous-execution-policy.js";
 export { parseSse } from "./sse.js";
 export {
+  PRECLINICAL_BOUNDARY,
+  RESEARCH_CONTRACT_SCHEMA_VERSION,
+  RESEARCH_FEATURE_ID,
+  RELEASE_REVIEW_FEATURE_ID,
+  RESEARCH_INGESTION_FEATURE_ID,
+  EXPERIMENT_DESIGN_FEATURE_ID,
+  PROTOCOL_SIMULATION_FEATURE_ID,
+  REPLICATION_FEATURE_ID,
+  QUALITY_CONTROL_FEATURE_ID,
+  RESEARCH_CONTEXT_FEATURE_ID,
+  REPLAY_AUDIT_FEATURE_ID,
+  WORKFLOW_EXECUTION_FEATURE_ID,
+  EVALUATION_OBSERVABILITY_FEATURE_ID,
+  RESEARCH_RELEASE_FEATURE_ID,
+  INSTRUMENT_PREFLIGHT_FEATURE_ID,
+  MULTIMODAL_HARMONIZATION_FEATURE_ID,
+  ANALYSIS_QUALIFICATION_FEATURE_ID,
+  researchArtifactDigest,
+  researchIngestionBundleDigest,
+  experimentDesignPlanDigest,
+  protocolSimulationReportDigest,
+  replicationReportDigest,
+  qualityControlReceiptDigest,
+  researchContextReceiptDigest,
+  replayAuditReceiptDigest,
+  workflowExecutionReceiptDigest,
+  evaluationCardReceiptDigest,
+  researchReleaseReceiptDigest,
+  instrumentPreflightReceiptDigest,
+  harmonizedResearchObjectDigest,
+  qualifiedAnalysisResultDigest,
+  protocolMatrixReceiptDigest,
+  multimodalReplicationReportDigest,
+  qualityDriftReceiptDigest,
+  designFrontierReceiptDigest,
+  batchAdmissionReceiptDigest,
+  releaseReviewDigest,
+  validateEvidenceReceipt,
+  validatePolicyReceipt,
+  validateReleaseReview,
+  validateResearchIngestionBundle,
+  validateExperimentDesignPlan,
+  validateProtocolSimulationReport,
+  validateReplicationReport,
+  validateQualityControlReceipt,
+  validateResearchContextReceipt,
+  validateReplayAuditReceipt,
+  validateWorkflowExecutionReceipt,
+  validateEvaluationCardReceipt,
+  validateResearchReleaseReceipt,
+  validateInstrumentPreflightReceipt,
+  validateHarmonizedResearchObject,
+  validateQualifiedAnalysisResult,
+  PROTOCOL_MATRIX_FEATURE_ID,
+  validateProtocolMatrixReceipt,
+  MULTIMODAL_REPLICATION_FEATURE_ID,
+  validateMultimodalReplicationReport,
+  validateQualityDriftReceipt,
+  QUALITY_DRIFT_FEATURE_ID,
+  DESIGN_FRONTIER_FEATURE_ID,
+  validateDesignFrontierReceipt,
+  AUTONOMY_BATCH_FEATURE_ID,
+  validateBatchAdmissionReceipt,
+  WORKFLOW_BATCH_FEATURE_ID,
+  workflowBatchReceiptDigest,
+  validateWorkflowBatchReceipt,
+  RESEARCH_RELEASE_BATCH_FEATURE_ID,
+  researchReleaseBatchReceiptDigest,
+  validateResearchReleaseBatchReceipt,
+  FEDERATED_EVALUATION_FEATURE_ID,
+  federatedEvaluationReceiptDigest,
+  validateFederatedEvaluationReceipt,
+  RESOURCE_WORKBENCH_FEATURE_ID,
+  qualifiedResourceSetDigest,
+  validateQualifiedResourceSet,
+  RESOURCE_DISCOVERY_CONTRACT_FEATURE_ID,
+  RESOURCE_DISCOVERY_CONTRACT_VERSION,
+  resourceDiscoveryContractReceiptDigest,
+  validateResourceDiscoveryContractReceipt,
+  GOVERNANCE_RESEARCH_RELEASE_FEATURE_ID,
+  GOVERNANCE_RESEARCH_RELEASE_CONTRACT_VERSION,
+  signedResearchObjectReceiptDigest,
+  validateSignedResearchObjectReceipt,
+  RELEASE_HARNESS_FEATURE_ID,
+  RELEASE_HARNESS_CONTRACT_VERSION,
+  releaseHarnessReceiptDigest,
+  validateReleaseHarnessReceipt,
+  PROTOCOL_ASSURANCE_FEATURE_ID,
+  PROTOCOL_ASSURANCE_CONTRACT_VERSION,
+  protocolAssuranceReceiptDigest,
+  validateProtocolAssuranceReceipt,
+  FEDERATED_MULTIMODAL_ASSURANCE_FEATURE_ID,
+  FEDERATED_MULTIMODAL_ASSURANCE_CONTRACT_VERSION,
+  federatedMultimodalAssuranceReceiptDigest,
+  validateFederatedMultimodalAssuranceReceipt,
+  FEDERATED_KNOWLEDGE_GATEWAY_FEATURE_ID,
+  FEDERATED_KNOWLEDGE_GATEWAY_CONTRACT_VERSION,
+  federatedKnowledgeGatewayReceiptDigest,
+  validateFederatedKnowledgeGatewayReceipt,
+  FEDERATED_LENS_ASSURANCE_FEATURE_ID,
+  FEDERATED_LENS_ASSURANCE_CONTRACT_VERSION,
+  federatedLensAssuranceReceiptDigest,
+  validateFederatedLensAssuranceReceipt,
+  SEMANTIC_PARITY_FEATURE_ID,
+  SEMANTIC_PARITY_CONTRACT_VERSION,
+  labSemanticParityReceiptDigest,
+  validateLabSemanticParityReceipt,
+  FEDERATED_RETRIEVAL_ASSURANCE_FEATURE_ID,
+  FEDERATED_RETRIEVAL_ASSURANCE_CONTRACT_VERSION,
+  federatedRetrievalAssuranceReceiptDigest,
+  validateFederatedRetrievalAssuranceReceipt,
+  FEDERATED_CONTINUAL_RETRIEVAL_FEATURE_ID,
+  FEDERATED_CONTINUAL_RETRIEVAL_CONTRACT_VERSION,
+  federatedContinualRetrievalReceiptDigest,
+  validateFederatedContinualRetrievalReceipt,
+  CONTEXT_COMPILATION_ASSURANCE_FEATURE_ID,
+  CONTEXT_COMPILATION_ASSURANCE_CONTRACT_VERSION,
+  contextCompilationAssuranceReceiptDigest,
+  validateContextCompilationAssuranceReceipt,
+  KNOWLEDGE_REPRESENTATION_ASSURANCE_FEATURE_ID,
+  KNOWLEDGE_REPRESENTATION_ASSURANCE_CONTRACT_VERSION,
+  knowledgeRepresentationAssuranceReceiptDigest,
+  validateKnowledgeRepresentationAssuranceReceipt,
+  RESOURCE_CONTROL_PLANE_FEATURE_ID,
+  RESOURCE_CONTROL_PLANE_CONTRACT_VERSION,
+  resourceControlPlaneReceiptDigest,
+  validateResourceControlPlaneReceipt,
+  WEAVELANG_RELEASE_ASSURANCE_FEATURE_ID,
+  WEAVELANG_RELEASE_ASSURANCE_CONTRACT_VERSION,
+  weaveLangReleaseAssuranceReceiptDigest,
+  validateWeaveLangReleaseAssuranceReceipt,
+  MECHANISM_CONTROL_PLANE_FEATURE_ID,
+  MECHANISM_CONTROL_PLANE_CONTRACT_VERSION,
+  mechanismControlPlaneReceiptDigest,
+  validateMechanismControlPlaneReceipt,
+  MECHANISM_GATEWAY_FEATURE_ID,
+  MECHANISM_GATEWAY_CONTRACT_VERSION,
+  mechanismGatewayReceiptDigest,
+  validateMechanismGatewayReceipt,
+  EVIDENCE_SURVEILLANCE_FEATURE_ID,
+  EVIDENCE_SURVEILLANCE_CONTRACT_VERSION,
+  evidenceSurveillanceReceiptDigest,
+  validateEvidenceSurveillanceReceipt,
+  RETRIEVAL_SYNTHESIS_FEATURE_ID,
+  RETRIEVAL_SYNTHESIS_CONTRACT_VERSION,
+  retrievalSynthesisReceiptDigest,
+  validateRetrievalSynthesisReceipt,
+  ADAPTER_CONTEXT_COMPILATION_FEATURE_ID,
+  ADAPTER_CONTEXT_COMPILATION_CONTRACT_VERSION,
+  adapterContextCompilationReceiptDigest,
+  validateAdapterContextCompilationReceipt,
+  KNOWLEDGE_WORKFLOW_FEATURE_ID,
+  KNOWLEDGE_WORKFLOW_CONTRACT_VERSION,
+  knowledgeWorkflowReceiptDigest,
+  validateKnowledgeWorkflowReceipt,
+  RESOURCE_WORKBENCH_CONTRACT_VERSION,
+  resourceWorkbenchReceiptDigest,
+  validateResourceWorkbenchReceipt,
+  INGESTION_GATEWAY_FEATURE_ID,
+  INGESTION_GATEWAY_CONTRACT_VERSION,
+  ingestionGatewayReceiptDigest,
+  validateIngestionGatewayReceipt,
+  QUALITY_ENVELOPE_FEATURE_ID,
+  QUALITY_ENVELOPE_CONTRACT_VERSION,
+  qualityEnvelopeReceiptDigest,
+  validateQualityEnvelopeReceipt,
+  EXPERIMENT_DESIGN_CONTROL_FEATURE_ID,
+  EXPERIMENT_DESIGN_CONTROL_CONTRACT_VERSION,
+  experimentDesignReceiptDigest,
+  validateExperimentDesignReceipt,
+  PROTOCOL_SIMULATION_CONTRACT_VERSION,
+  protocolSimulationReceiptDigest,
+  validateProtocolSimulationReceipt,
+  INSTRUMENT_MESH_FEATURE_ID,
+  INSTRUMENT_MESH_CONTRACT_VERSION,
+  instrumentMeshReceiptDigest,
+  validateInstrumentMeshReceipt,
+  EXECUTION_CONTROL_FEATURE_ID,
+  EXECUTION_CONTROL_CONTRACT_VERSION,
+  computationalExecutionReceiptDigest,
+  validateComputationalExecutionReceipt,
+  ANALYSIS_PORTFOLIO_FEATURE_ID,
+  ANALYSIS_PORTFOLIO_CONTRACT_VERSION,
+  analysisPortfolioReceiptDigest,
+  validateAnalysisPortfolioReceipt,
+  INTERPRETATION_ASSURANCE_FEATURE_ID,
+  INTERPRETATION_ASSURANCE_CONTRACT_VERSION,
+  interpretationAssuranceReceiptDigest,
+  validateInterpretationAssuranceReceipt,
+  REPLICATION_ASSURANCE_FEATURE_ID,
+  REPLICATION_ASSURANCE_CONTRACT_VERSION,
+  replicationAssuranceReceiptDigest,
+  validateReplicationAssuranceReceipt,
+  RELEASE_ASSURANCE_FEATURE_ID,
+  RELEASE_ASSURANCE_CONTRACT_VERSION,
+  releaseAssuranceReceiptDigest,
+  validateReleaseAssuranceReceipt,
+  DETERMINISM_GATEWAY_FEATURE_ID,
+  DETERMINISM_GATEWAY_CONTRACT_VERSION,
+  determinismGatewayReceiptDigest,
+  validateDeterminismGatewayReceipt,
+  PROVENANCE_ASSURANCE_FEATURE_ID,
+  PROVENANCE_ASSURANCE_CONTRACT_VERSION,
+  provenanceAssuranceReceiptDigest,
+  validateProvenanceAssuranceReceipt,
+  POLICY_GATEWAY_FEATURE_ID,
+  POLICY_GATEWAY_CONTRACT_VERSION,
+  policyGatewayReceiptDigest,
+  validatePolicyGatewayReceipt,
+  FEDERATION_WORKFLOW_FEATURE_ID,
+  FEDERATION_WORKFLOW_CONTRACT_VERSION,
+  federationWorkflowReceiptDigest,
+  validateFederationWorkflowReceipt,
+  RELIABILITY_COPILOT_FEATURE_ID,
+  RELIABILITY_COPILOT_CONTRACT_VERSION,
+  reliabilityCopilotReceiptDigest,
+  validateReliabilityCopilotReceipt,
+  INTEROPERABILITY_GATEWAY_FEATURE_ID,
+  INTEROPERABILITY_GATEWAY_CONTRACT_VERSION,
+  interoperabilityGatewayReceiptDigest,
+  validateInteroperabilityGatewayReceipt,
+  EVALUATION_ASSURANCE_FEATURE_ID,
+  EVALUATION_ASSURANCE_CONTRACT_VERSION,
+  evaluationAssuranceReceiptDigest,
+  validateEvaluationAssuranceReceipt,
+  RESEARCH_WORKBENCH_FEATURE_ID,
+  RESEARCH_WORKBENCH_CONTRACT_VERSION,
+  researchWorkbenchReceiptDigest,
+  validateResearchWorkbenchReceipt,
+  CONTRACT_FRONTIER_FEATURE_ID,
+  CONTRACT_FRONTIER_CONTRACT_VERSION,
+  contractFrontierReceiptDigest,
+  validateContractFrontierReceipt,
+  LIMITATION_CLOSURE_FEATURE_ID,
+  LIMITATION_CLOSURE_CONTRACT_VERSION,
+  limitationClosureReceiptDigest,
+  validateLimitationClosureReceipt,
+  DEPENDENCY_COMPOSITION_FEATURE_ID,
+  DEPENDENCY_COMPOSITION_CONTRACT_VERSION,
+  adapterCompositionReceiptDigest,
+  validateAdapterCompositionReceipt,
+  ADAPTER_SEMANTIC_PARITY_FEATURE_ID,
+  ADAPTER_SEMANTIC_PARITY_CONTRACT_VERSION,
+  adapterSemanticParityReceiptDigest,
+  validateAdapterSemanticParityReceipt,
+  ADAPTER_SCALE_FRONTIER_FEATURE_ID,
+  ADAPTER_SCALE_FRONTIER_CONTRACT_VERSION,
+  scaleFrontierReceiptDigest,
+  validateScaleFrontierReceipt,
+  ADVERSARIAL_RECOVERY_FEATURE_ID,
+  ADVERSARIAL_RECOVERY_CONTRACT_VERSION,
+  adversarialRecoveryReceiptDigest,
+  validateAdversarialRecoveryReceipt,
+  FEDERATED_COMMONS_FEATURE_ID,
+  FEDERATED_COMMONS_CONTRACT_VERSION,
+  federatedCommonsReceiptDigest,
+  validateFederatedCommonsReceipt,
+  BOUNDED_EVOLUTION_FEATURE_ID,
+  BOUNDED_EVOLUTION_CONTRACT_VERSION,
+  boundedEvolutionReceiptDigest,
+  validateBoundedEvolutionReceipt,
+  EVOLUTION_IDENTITY_FEATURE_ID,
+  EVOLUTION_IDENTITY_CONTRACT_VERSION,
+  evolutionIdentityReceiptDigest,
+  validateEvolutionIdentityReceipt,
+  EVOLUTION_ASSURANCE_FEATURE_ID,
+  EVOLUTION_ASSURANCE_CONTRACT_VERSION,
+  EVOLUTION_ASSURANCE_REQUIRED_CHECKS,
+  evolutionAssuranceReceiptDigest,
+  validateEvolutionAssuranceReceipt,
+  INTERPRETATION_PLANE_FEATURE_ID,
+  INTERPRETATION_PLANE_CONTRACT_VERSION,
+  interpretationPlaneReceiptDigest,
+  validateInterpretationPlaneReceipt,
+  KNOWLEDGE_GATEWAY_FEATURE_ID,
+  KNOWLEDGE_GATEWAY_CONTRACT_VERSION,
+  knowledgeGatewayReceiptDigest,
+  validateKnowledgeGatewayReceipt,
+  ORACLE_ASSURANCE_FEATURE_ID,
+  ORACLE_ASSURANCE_CONTRACT_VERSION,
+  oracleCapabilityManifestReceiptDigest,
+  validateOracleCapabilityManifestReceipt,
+  FEDERATED_INGESTION_FEATURE_ID,
+  FEDERATED_INGESTION_CONTRACT_VERSION,
+  federatedMultimodalIngestionReceiptDigest,
+  validateFederatedMultimodalIngestionReceipt,
+  QUALITY_ASSURANCE_FEATURE_ID,
+  QUALITY_ASSURANCE_CONTRACT_VERSION,
+  qualityAssuranceReceiptDigest,
+  validateQualityAssuranceReceipt,
+  MECHANISM_CONTROL_FEATURE_ID,
+  MECHANISM_CONTROL_CONTRACT_VERSION,
+  mechanismControlReceiptDigest,
+  validateMechanismControlReceipt,
+  EVIDENCE_WORKBENCH_FEATURE_ID,
+  EVIDENCE_WORKBENCH_CONTRACT_VERSION,
+  evidenceWorkbenchReceiptDigest,
+  validateEvidenceWorkbenchReceipt,
+  ANALYSIS_CONTROL_FEATURE_ID,
+  ANALYSIS_CONTROL_CONTRACT_VERSION,
+  analysisControlReceiptDigest,
+  validateAnalysisControlReceipt,
+  CONTEXT_ASSURANCE_FEATURE_ID,
+  CONTEXT_ASSURANCE_CONTRACT_VERSION,
+  contextAssuranceReceiptDigest,
+  validateContextAssuranceReceipt,
+  EVALUATION_ASSURANCE_BIOWORLDS_FEATURE_ID,
+  EVALUATION_ASSURANCE_BIOWORLDS_CONTRACT_VERSION,
+  bioworldsEvaluationAssuranceReceiptDigest,
+  validateBioworldsEvaluationAssuranceReceipt,
+  QUALITY_WORKBENCH_BIOLANG_FEATURE_ID,
+  QUALITY_WORKBENCH_BIOLANG_CONTRACT_VERSION,
+  biolangQualityWorkbenchReceiptDigest,
+  validateBiolangQualityWorkbenchReceipt,
+  RETRIEVAL_ASSURANCE_BIOLANG_FEATURE_ID,
+  RETRIEVAL_ASSURANCE_BIOLANG_CONTRACT_VERSION,
+  biolangRetrievalAssuranceReceiptDigest,
+  validateBiolangRetrievalAssuranceReceipt,
+  CLI_KNOWLEDGE_INTEROPERABILITY_FEATURE_ID,
+  CLI_KNOWLEDGE_INTEROPERABILITY_CONTRACT_VERSION,
+  cliKnowledgeInteroperabilityReceiptDigest,
+  validateCliKnowledgeInteroperabilityReceipt,
+  LAB_EVIDENCE_SURVEILLANCE_FEATURE_ID,
+  LAB_EVIDENCE_SURVEILLANCE_CONTRACT_VERSION,
+  labEvidenceSurveillanceReceiptDigest,
+  validateLabEvidenceSurveillanceReceipt,
+  FIBER_MECHANISM_ASSURANCE_FEATURE_ID,
+  FIBER_MECHANISM_ASSURANCE_CONTRACT_VERSION,
+  fiberMechanismAssuranceReceiptDigest,
+  validateFiberMechanismAssuranceReceipt,
+  HUBAPI_QUALITY_ASSURANCE_FEATURE_ID,
+  HUBAPI_QUALITY_ASSURANCE_CONTRACT_VERSION,
+  hubapiQualityAssuranceReceiptDigest,
+  validateHubapiQualityAssuranceReceipt,
+  REGISTRY_RESOURCE_DISCOVERY_ASSURANCE_FEATURE_ID,
+  REGISTRY_RESOURCE_DISCOVERY_ASSURANCE_CONTRACT_VERSION,
+  registryResourceDiscoveryAssuranceReceiptDigest,
+  validateRegistryResourceDiscoveryAssuranceReceipt,
+  SERVICES_MECHANISM_WORKBENCH_FEATURE_ID,
+  SERVICES_MECHANISM_WORKBENCH_CONTRACT_VERSION,
+  servicesMechanismWorkbenchReceiptDigest,
+  validateServicesMechanismWorkbenchReceipt,
+  GOVERNANCE_INTERPRETATION_ASSURANCE_FEATURE_ID,
+  GOVERNANCE_INTERPRETATION_ASSURANCE_CONTRACT_VERSION,
+  governanceInterpretationAssuranceReceiptDigest,
+  validateGovernanceInterpretationAssuranceReceipt,
+  ORACLE_INGESTION_CONTROL_FEATURE_ID,
+  ORACLE_INGESTION_CONTROL_CONTRACT_VERSION,
+  oracleIngestionControlReceiptDigest,
+  validateOracleIngestionControlReceipt,
+  STEWARDSHIP_RELEASE_WORKBENCH_FEATURE_ID,
+  STEWARDSHIP_RELEASE_WORKBENCH_CONTRACT_VERSION,
+  stewardshipReleaseWorkbenchReceiptDigest,
+  validateStewardshipReleaseWorkbenchReceipt,
+  API_ANALYSIS_ASSURANCE_FEATURE_ID,
+  API_ANALYSIS_ASSURANCE_CONTRACT_VERSION,
+  apiAnalysisAssuranceReceiptDigest,
+  validateApiAnalysisAssuranceReceipt,
+  STORE_EVIDENCE_OPERATIONS_FEATURE_ID,
+  STORE_EVIDENCE_OPERATIONS_CONTRACT_VERSION,
+  storeEvidenceOperationsReceiptDigest,
+  validateStoreEvidenceOperationsReceipt,
+  POLICY_INTEROPERABILITY_CONTROL_FEATURE_ID,
+  POLICY_INTEROPERABILITY_CONTROL_CONTRACT_VERSION,
+  policyInteroperabilityControlReceiptDigest,
+  validatePolicyInteroperabilityControlReceipt,
+  SAFETY_MECHANISM_WORKFLOW_FEATURE_ID,
+  SAFETY_MECHANISM_WORKFLOW_CONTRACT_VERSION,
+  safetyMechanismWorkflowReceiptDigest,
+  validateSafetyMechanismWorkflowReceipt,
+  HUBAPI_INTERPRETATION_ASSURANCE_FEATURE_ID,
+  HUBAPI_INTERPRETATION_ASSURANCE_CONTRACT_VERSION,
+  hubapiMultimodalInterpretationAssuranceReceiptDigest,
+  validateHubapiMultimodalInterpretationAssuranceReceipt,
+  BIOLANG_PUBLICATION_COPILOT_FEATURE_ID,
+  BIOLANG_PUBLICATION_COPILOT_CONTRACT_VERSION,
+  biolangPublicationCopilotReceiptDigest,
+  validateBiolangPublicationCopilotReceipt,
+  API_RELEASE_ASSURANCE_FEATURE_ID,
+  API_RELEASE_ASSURANCE_CONTRACT_VERSION,
+  apiReleaseAssuranceReceiptDigest,
+  validateApiReleaseAssuranceReceipt,
+  BIOEVALX_FEDERATION_GATEWAY_FEATURE_ID,
+  BIOEVALX_FEDERATION_GATEWAY_CONTRACT_VERSION,
+  bioevalxFederationGatewayReceiptDigest,
+  validateBioevalxFederationGatewayReceipt,
+  SECTION_INTERPRETATION_ASSURANCE_FEATURE_ID,
+  SECTION_INTERPRETATION_ASSURANCE_CONTRACT_VERSION,
+  sectionInterpretationAssuranceReceiptDigest,
+  validateSectionInterpretationAssuranceReceipt,
+  OPS_RETRIEVAL_ASSURANCE_FEATURE_ID,
+  OPS_RETRIEVAL_ASSURANCE_CONTRACT_VERSION,
+  opsRetrievalAssuranceReceiptDigest,
+  validateOpsRetrievalAssuranceReceipt,
+  CONFORMANCE_KNOWLEDGE_WORLD_ASSURANCE_FEATURE_ID,
+  CONFORMANCE_KNOWLEDGE_WORLD_ASSURANCE_CONTRACT_VERSION,
+  conformanceKnowledgeWorldAssuranceReceiptDigest,
+  validateConformanceKnowledgeWorldAssuranceReceipt,
+  BRAIN_EVIDENCE_SURVEILLANCE_FEATURE_ID,
+  BRAIN_EVIDENCE_SURVEILLANCE_CONTRACT_VERSION,
+  brainEvidenceSurveillanceReceiptDigest,
+  validateBrainEvidenceSurveillanceReceipt,
+  BRAIN_MULTIMODAL_EVIDENCE_SURVEILLANCE_FEATURE_ID,
+  BRAIN_MULTIMODAL_EVIDENCE_SURVEILLANCE_CONTRACT_VERSION,
+  brainMultimodalEvidenceSurveillanceReceiptDigest,
+  validateBrainMultimodalEvidenceSurveillanceReceipt,
+  HIGH_THROUGHPUT_EVIDENCE_SURVEILLANCE_FEATURE_ID,
+  HIGH_THROUGHPUT_EVIDENCE_SURVEILLANCE_CONTRACT_VERSION,
+  brainHighThroughputEvidenceReceiptDigest,
+  validateBrainHighThroughputEvidenceReceipt,
+  FEDERATED_EVIDENCE_SURVEILLANCE_FEATURE_ID,
+  FEDERATED_EVIDENCE_SURVEILLANCE_CONTRACT_VERSION,
+  brainFederatedEvidenceReceiptDigest,
+  validateBrainFederatedEvidenceReceipt,
+  EVIDENCE_CONTRACT_MODEL_FEATURE_ID,
+  EVIDENCE_CONTRACT_MODEL_CONTRACT_VERSION,
+  brainEvidenceContractModelReceiptDigest,
+  validateBrainEvidenceContractModelReceipt,
+  MULTIMODAL_CONTRACT_MODEL_FEATURE_ID,
+  MULTIMODAL_CONTRACT_MODEL_CONTRACT_VERSION,
+  brainMultimodalContractModelReceiptDigest,
+  validateBrainMultimodalContractModelReceipt,
+  THROUGHPUT_CONTRACT_MODEL_FEATURE_ID,
+  THROUGHPUT_CONTRACT_MODEL_CONTRACT_VERSION,
+  brainThroughputContractModelReceiptDigest,
+  validateBrainThroughputContractModelReceipt,
+  FEDERATED_CONTRACT_MODEL_FEATURE_ID,
+  FEDERATED_CONTRACT_MODEL_CONTRACT_VERSION,
+  brainFederatedContractModelReceiptDigest,
+  validateBrainFederatedContractModelReceipt,
+  EVIDENCE_RESEARCH_COPILOT_FEATURE_ID,
+  EVIDENCE_RESEARCH_COPILOT_CONTRACT_VERSION,
+  brainEvidenceResearchCopilotReceiptDigest,
+  validateBrainEvidenceResearchCopilotReceipt,
+  MULTIMODAL_EVIDENCE_COPILOT_FEATURE_ID,
+  MULTIMODAL_EVIDENCE_COPILOT_CONTRACT_VERSION,
+  brainMultimodalEvidenceResearchCopilotReceiptDigest,
+  validateBrainMultimodalEvidenceResearchCopilotReceipt,
+  HIGH_THROUGHPUT_EVIDENCE_COPILOT_FEATURE_ID,
+  HIGH_THROUGHPUT_EVIDENCE_COPILOT_CONTRACT_VERSION,
+  brainHighThroughputEvidenceResearchCopilotReceiptDigest,
+  validateBrainHighThroughputEvidenceResearchCopilotReceipt,
+  FEDERATED_EVIDENCE_COPILOT_FEATURE_ID,
+  FEDERATED_EVIDENCE_COPILOT_CONTRACT_VERSION,
+  brainFederatedEvidenceResearchCopilotReceiptDigest,
+  validateBrainFederatedEvidenceResearchCopilotReceipt,
+  EVIDENCE_WORKFLOW_FABRIC_FEATURE_ID,
+  EVIDENCE_WORKFLOW_FABRIC_CONTRACT_VERSION,
+  brainEvidenceWorkflowFabricReceiptDigest,
+  validateBrainEvidenceWorkflowFabricReceipt,
+  MULTIMODAL_EVIDENCE_WORKFLOW_FABRIC_FEATURE_ID,
+  MULTIMODAL_EVIDENCE_WORKFLOW_FABRIC_CONTRACT_VERSION,
+  brainMultimodalEvidenceWorkflowFabricReceiptDigest,
+  validateBrainMultimodalEvidenceWorkflowFabricReceipt,
+  HIGH_THROUGHPUT_EVIDENCE_WORKFLOW_FABRIC_FEATURE_ID,
+  HIGH_THROUGHPUT_EVIDENCE_WORKFLOW_FABRIC_CONTRACT_VERSION,
+  brainHighThroughputEvidenceWorkflowFabricReceiptDigest,
+  validateBrainHighThroughputEvidenceWorkflowFabricReceipt,
+  FEDERATED_EVIDENCE_WORKFLOW_FABRIC_FEATURE_ID,
+  FEDERATED_EVIDENCE_WORKFLOW_FABRIC_CONTRACT_VERSION,
+  brainFederatedEvidenceWorkflowFabricReceiptDigest,
+  validateBrainFederatedEvidenceWorkflowFabricReceipt,
+  EVIDENCE_RESEARCH_WORKBENCH_FEATURE_ID,
+  EVIDENCE_RESEARCH_WORKBENCH_CONTRACT_VERSION,
+  brainEvidenceResearchWorkbenchReceiptDigest,
+  validateBrainEvidenceResearchWorkbenchReceipt,
+  MULTIMODAL_RESEARCH_WORKBENCH_FEATURE_ID,
+  MULTIMODAL_RESEARCH_WORKBENCH_CONTRACT_VERSION,
+  brainMultimodalResearchWorkbenchReceiptDigest,
+  validateBrainMultimodalResearchWorkbenchReceipt,
+  THROUGHPUT_RESEARCH_WORKBENCH_FEATURE_ID,
+  THROUGHPUT_RESEARCH_WORKBENCH_CONTRACT_VERSION,
+  brainThroughputResearchWorkbenchReceiptDigest,
+  validateBrainThroughputResearchWorkbenchReceipt,
+  FEDERATED_RESEARCH_WORKBENCH_FEATURE_ID,
+  FEDERATED_RESEARCH_WORKBENCH_CONTRACT_VERSION,
+  brainFederatedResearchWorkbenchReceiptDigest,
+  validateBrainFederatedResearchWorkbenchReceipt,
+  EVIDENCE_PROTOCOL_ADAPTER_FEATURE_ID,
+  EVIDENCE_PROTOCOL_ADAPTER_CONTRACT_VERSION,
+  brainEvidenceProtocolReceiptDigest,
+  validateBrainEvidenceProtocolReceipt,
+  MULTIMODAL_PROTOCOL_ADAPTER_FEATURE_ID,
+  MULTIMODAL_PROTOCOL_ADAPTER_CONTRACT_VERSION,
+  brainMultimodalProtocolReceiptDigest,
+  validateBrainMultimodalProtocolReceipt,
+  THROUGHPUT_PROTOCOL_ADAPTER_FEATURE_ID,
+  THROUGHPUT_PROTOCOL_ADAPTER_CONTRACT_VERSION,
+  brainThroughputProtocolReceiptDigest,
+  validateBrainThroughputProtocolReceipt,
+  FEDERATED_PROTOCOL_ADAPTER_FEATURE_ID,
+  FEDERATED_PROTOCOL_ADAPTER_CONTRACT_VERSION,
+  brainFederatedProtocolReceiptDigest,
+  validateBrainFederatedProtocolReceipt,
+  EVIDENCE_SAFETY_ASSURANCE_FEATURE_ID,
+  EVIDENCE_SAFETY_ASSURANCE_CONTRACT_VERSION,
+  brainEvidenceAssuranceReceiptDigest,
+  validateBrainEvidenceAssuranceReceipt,
+  MULTIMODAL_SAFETY_ASSURANCE_FEATURE_ID,
+  MULTIMODAL_SAFETY_ASSURANCE_CONTRACT_VERSION,
+  brainMultimodalAssuranceReceiptDigest,
+  validateBrainMultimodalAssuranceReceipt,
+  THROUGHPUT_SAFETY_ASSURANCE_FEATURE_ID,
+  THROUGHPUT_SAFETY_ASSURANCE_CONTRACT_VERSION,
+  brainThroughputAssuranceReceiptDigest,
+  validateBrainThroughputAssuranceReceipt,
+  FEDERATED_SAFETY_ASSURANCE_FEATURE_ID,
+  FEDERATED_SAFETY_ASSURANCE_CONTRACT_VERSION,
+  brainFederatedAssuranceReceiptDigest,
+  validateBrainFederatedAssuranceReceipt,
+  EVIDENCE_OPERATIONS_CONTROL_PLANE_FEATURE_ID,
+  EVIDENCE_OPERATIONS_CONTROL_PLANE_CONTRACT_VERSION,
+  brainEvidenceOperationsReceiptDigest,
+  validateBrainEvidenceOperationsReceipt,
+  MULTIMODAL_OPERATIONS_CONTROL_PLANE_FEATURE_ID,
+  MULTIMODAL_OPERATIONS_CONTROL_PLANE_CONTRACT_VERSION,
+  brainMultimodalOperationsReceiptDigest,
+  validateBrainMultimodalOperationsReceipt,
+  THROUGHPUT_OPERATIONS_CONTROL_PLANE_FEATURE_ID,
+  THROUGHPUT_OPERATIONS_CONTROL_PLANE_CONTRACT_VERSION,
+  brainThroughputOperationsReceiptDigest,
+  validateBrainThroughputOperationsReceipt,
+  FEDERATED_OPERATIONS_CONTROL_PLANE_FEATURE_ID,
+  FEDERATED_OPERATIONS_CONTROL_PLANE_CONTRACT_VERSION,
+  brainFederatedOperationsReceiptDigest,
+  validateBrainFederatedOperationsReceipt,
+  brainEvidenceSynthesisDigest,
+  validateBrainEvidenceSynthesis,
+  MULTIMODAL_RETRIEVAL_SYNTHESIS_FEATURE_ID,
+  MULTIMODAL_RETRIEVAL_SYNTHESIS_CONTRACT_VERSION,
+  brainMultimodalEvidenceSynthesisDigest,
+  validateBrainMultimodalEvidenceSynthesis,
+  THROUGHPUT_RETRIEVAL_SYNTHESIS_FEATURE_ID,
+  THROUGHPUT_RETRIEVAL_SYNTHESIS_CONTRACT_VERSION,
+  brainThroughputEvidenceSynthesisDigest,
+  validateBrainThroughputEvidenceSynthesis,
+  FEDERATED_RETRIEVAL_SYNTHESIS_FEATURE_ID,
+  FEDERATED_RETRIEVAL_SYNTHESIS_CONTRACT_VERSION,
+  brainFederatedEvidenceSynthesisDigest,
+  validateBrainFederatedEvidenceSynthesis,
+  RETRIEVAL_CONTRACT_MODEL_FEATURE_ID,
+  RETRIEVAL_CONTRACT_MODEL_CONTRACT_VERSION,
+  brainRetrievalContractModelReceiptDigest,
+  validateBrainRetrievalContractModelReceipt,
+  MULTIMODAL_RETRIEVAL_CONTRACT_MODEL_FEATURE_ID,
+  MULTIMODAL_RETRIEVAL_CONTRACT_MODEL_CONTRACT_VERSION,
+  brainMultimodalRetrievalContractModelReceiptDigest,
+  validateBrainMultimodalRetrievalContractModelReceipt,
+  THROUGHPUT_RETRIEVAL_CONTRACT_MODEL_FEATURE_ID,
+  THROUGHPUT_RETRIEVAL_CONTRACT_MODEL_CONTRACT_VERSION,
+  brainThroughputRetrievalContractModelReceiptDigest,
+  validateBrainThroughputRetrievalContractModelReceipt,
+  FEDERATED_RETRIEVAL_CONTRACT_MODEL_FEATURE_ID,
+  FEDERATED_RETRIEVAL_CONTRACT_MODEL_CONTRACT_VERSION,
+  brainFederatedRetrievalContractModelReceiptDigest,
+  validateBrainFederatedRetrievalContractModelReceipt,
+  RETRIEVAL_RESEARCH_COPILOT_FEATURE_ID,
+  RETRIEVAL_RESEARCH_COPILOT_CONTRACT_VERSION,
+  brainRetrievalCopilotReceiptDigest,
+  validateBrainRetrievalCopilotReceipt,
+  MULTIMODAL_RETRIEVAL_COPILOT_FEATURE_ID,
+  MULTIMODAL_RETRIEVAL_COPILOT_CONTRACT_VERSION,
+  brainMultimodalRetrievalCopilotReceiptDigest,
+  validateBrainMultimodalRetrievalCopilotReceipt,
+  THROUGHPUT_RETRIEVAL_COPILOT_FEATURE_ID,
+  THROUGHPUT_RETRIEVAL_COPILOT_CONTRACT_VERSION,
+  brainThroughputRetrievalCopilotReceiptDigest,
+  validateBrainThroughputRetrievalCopilotReceipt,
+  FEDERATED_RETRIEVAL_COPILOT_FEATURE_ID,
+  FEDERATED_RETRIEVAL_COPILOT_CONTRACT_VERSION,
+  brainFederatedRetrievalCopilotReceiptDigest,
+  validateBrainFederatedRetrievalCopilotReceipt,
+  RETRIEVAL_WORKFLOW_FABRIC_FEATURE_ID,
+  RETRIEVAL_WORKFLOW_FABRIC_CONTRACT_VERSION,
+  brainRetrievalWorkflowFabricReceiptDigest,
+  validateBrainRetrievalWorkflowFabricReceipt,
+  MULTIMODAL_RETRIEVAL_WORKFLOW_FABRIC_FEATURE_ID,
+  MULTIMODAL_RETRIEVAL_WORKFLOW_FABRIC_CONTRACT_VERSION,
+  brainMultimodalRetrievalWorkflowFabricReceiptDigest,
+  validateBrainMultimodalRetrievalWorkflowFabricReceipt,
+  THROUGHPUT_RETRIEVAL_WORKFLOW_FABRIC_FEATURE_ID,
+  THROUGHPUT_RETRIEVAL_WORKFLOW_FABRIC_CONTRACT_VERSION,
+  brainThroughputRetrievalWorkflowFabricReceiptDigest,
+  validateBrainThroughputRetrievalWorkflowFabricReceipt,
+  FEDERATED_RETRIEVAL_WORKFLOW_FABRIC_FEATURE_ID,
+  FEDERATED_RETRIEVAL_WORKFLOW_FABRIC_CONTRACT_VERSION,
+  brainFederatedRetrievalWorkflowFabricReceiptDigest,
+  validateBrainFederatedRetrievalWorkflowFabricReceipt,
+  RETRIEVAL_RESEARCH_WORKBENCH_FEATURE_ID,
+  RETRIEVAL_RESEARCH_WORKBENCH_CONTRACT_VERSION,
+  brainRetrievalResearchWorkbenchReceiptDigest,
+  validateBrainRetrievalResearchWorkbenchReceipt,
+  MULTIMODAL_RETRIEVAL_WORKBENCH_FEATURE_ID,
+  MULTIMODAL_RETRIEVAL_WORKBENCH_CONTRACT_VERSION,
+  brainMultimodalRetrievalWorkbenchReceiptDigest,
+  validateBrainMultimodalRetrievalWorkbenchReceipt,
+  THROUGHPUT_RETRIEVAL_WORKBENCH_FEATURE_ID,
+  THROUGHPUT_RETRIEVAL_WORKBENCH_CONTRACT_VERSION,
+  brainThroughputRetrievalWorkbenchReceiptDigest,
+  validateBrainThroughputRetrievalWorkbenchReceipt,
+  FEDERATED_RETRIEVAL_WORKBENCH_FEATURE_ID,
+  FEDERATED_RETRIEVAL_WORKBENCH_CONTRACT_VERSION,
+  brainFederatedRetrievalWorkbenchReceiptDigest,
+  validateBrainFederatedRetrievalWorkbenchReceipt,
+  RETRIEVAL_PROTOCOL_FEATURE_ID,
+  RETRIEVAL_PROTOCOL_CONTRACT_VERSION,
+  RETRIEVAL_PROTOCOL_STAGE_ORDER,
+  brainRetrievalProtocolReceiptDigest,
+  validateBrainRetrievalProtocolReceipt,
+  MULTIMODAL_RETRIEVAL_PROTOCOL_FEATURE_ID,
+  MULTIMODAL_RETRIEVAL_PROTOCOL_CONTRACT_VERSION,
+  brainMultimodalRetrievalProtocolReceiptDigest,
+  validateBrainMultimodalRetrievalProtocolReceipt,
+  THROUGHPUT_RETRIEVAL_PROTOCOL_FEATURE_ID,
+  THROUGHPUT_RETRIEVAL_PROTOCOL_CONTRACT_VERSION,
+  brainThroughputRetrievalProtocolReceiptDigest,
+  validateBrainThroughputRetrievalProtocolReceipt,
+  FEDERATED_RETRIEVAL_PROTOCOL_FEATURE_ID,
+  FEDERATED_RETRIEVAL_PROTOCOL_CONTRACT_VERSION,
+  brainFederatedRetrievalProtocolReceiptDigest,
+  validateBrainFederatedRetrievalProtocolReceipt,
+  RETRIEVAL_ASSURANCE_FEATURE_ID,
+  RETRIEVAL_ASSURANCE_CONTRACT_VERSION,
+  brainRetrievalAssuranceReceiptDigest,
+  validateBrainRetrievalAssuranceReceipt,
+  MULTIMODAL_RETRIEVAL_ASSURANCE_FEATURE_ID,
+  MULTIMODAL_RETRIEVAL_ASSURANCE_CONTRACT_VERSION,
+  brainMultimodalRetrievalAssuranceReceiptDigest,
+  validateBrainMultimodalRetrievalAssuranceReceipt,
+  THROUGHPUT_RETRIEVAL_ASSURANCE_FEATURE_ID,
+  THROUGHPUT_RETRIEVAL_ASSURANCE_CONTRACT_VERSION,
+  brainThroughputRetrievalAssuranceReceiptDigest,
+  validateBrainThroughputRetrievalAssuranceReceipt,
+  brainFederatedRetrievalAssuranceReceiptDigest,
+  validateBrainFederatedRetrievalAssuranceReceipt,
+  RETRIEVAL_CONTROL_PLANE_FEATURE_ID,
+  RETRIEVAL_CONTROL_PLANE_CONTRACT_VERSION,
+  RETRIEVAL_CONTROL_ACTION_ORDER,
+  brainRetrievalFederatedControlPlaneReceiptDigest,
+  validateBrainRetrievalFederatedControlPlaneReceipt,
+  MULTIMODAL_RETRIEVAL_CONTROL_PLANE_FEATURE_ID,
+  MULTIMODAL_RETRIEVAL_CONTROL_PLANE_CONTRACT_VERSION,
+  MULTIMODAL_RETRIEVAL_CONTROL_ACTION_ORDER,
+  brainMultimodalRetrievalControlPlaneReceiptDigest,
+  validateBrainMultimodalRetrievalControlPlaneReceipt,
+  THROUGHPUT_RETRIEVAL_CONTROL_PLANE_FEATURE_ID,
+  THROUGHPUT_RETRIEVAL_CONTROL_PLANE_CONTRACT_VERSION,
+  THROUGHPUT_RETRIEVAL_CONTROL_ACTION_ORDER,
+  brainThroughputRetrievalControlPlaneReceiptDigest,
+  validateBrainThroughputRetrievalControlPlaneReceipt,
+  FEDERATED_RETRIEVAL_CONTROL_PLANE_FEATURE_ID,
+  FEDERATED_RETRIEVAL_CONTROL_PLANE_CONTRACT_VERSION,
+  FEDERATED_RETRIEVAL_CONTROL_ACTION_ORDER,
+  brainFederatedRetrievalControlPlaneReceiptDigest,
+  validateBrainFederatedRetrievalControlPlaneReceipt,
+  CONTEXT_COMPILATION_FEATURE_ID,
+  CONTEXT_COMPILATION_CONTRACT_VERSION,
+  brainResearchContextCompilationReceiptDigest,
+  validateBrainResearchContextCompilationReceipt,
+  MULTIMODAL_CONTEXT_COMPILATION_FEATURE_ID,
+  MULTIMODAL_CONTEXT_COMPILATION_CONTRACT_VERSION,
+  brainMultimodalContextCompilationReceiptDigest,
+  validateBrainMultimodalContextCompilationReceipt,
+  THROUGHPUT_CONTEXT_COMPILATION_FEATURE_ID,
+  THROUGHPUT_CONTEXT_COMPILATION_CONTRACT_VERSION,
+  brainThroughputContextCompilationReceiptDigest,
+  validateBrainThroughputContextCompilationReceipt,
+  FEDERATED_CONTEXT_COMPILATION_FEATURE_ID,
+  FEDERATED_CONTEXT_COMPILATION_CONTRACT_VERSION,
+  brainFederatedContextCompilationReceiptDigest,
+  validateBrainFederatedContextCompilationReceipt,
+  CONTEXT_OMISSION_ADJUDICATION_FEATURE_ID,
+  CONTEXT_OMISSION_ADJUDICATION_CONTRACT_VERSION,
+  brainContextOmissionAdjudicationReceiptDigest,
+  validateBrainContextOmissionAdjudicationReceipt,
+  CONTEXT_RELEASE_ADMISSION_FEATURE_ID,
+  CONTEXT_RELEASE_ADMISSION_CONTRACT_VERSION,
+  CONTEXT_RELEASE_ACTION,
+  brainContextReleaseAdmissionReceiptDigest,
+  validateBrainContextReleaseAdmissionReceipt,
+  CONTEXT_FRESHNESS_DRIFT_FEATURE_ID,
+  CONTEXT_FRESHNESS_DRIFT_CONTRACT_VERSION,
+  brainContextFreshnessDriftReceiptDigest,
+  validateBrainContextFreshnessDriftReceipt,
+  CONTEXT_UNCERTAINTY_ENVELOPE_FEATURE_ID,
+  CONTEXT_UNCERTAINTY_ENVELOPE_CONTRACT_VERSION,
+  brainContextUncertaintyEnvelopeReceiptDigest,
+  validateBrainContextUncertaintyEnvelopeReceipt,
+  CONTEXT_CONTRADICTION_RESOLUTION_FEATURE_ID,
+  CONTEXT_CONTRADICTION_RESOLUTION_CONTRACT_VERSION,
+  brainContextContradictionResolutionReceiptDigest,
+  validateBrainContextContradictionResolutionReceipt,
+  CONTEXT_DEPENDENCY_CLOSURE_FEATURE_ID,
+  CONTEXT_DEPENDENCY_CLOSURE_CONTRACT_VERSION,
+  brainContextDependencyClosureReceiptDigest,
+  validateBrainContextDependencyClosureReceipt,
+  CONTEXT_DECISION_PROJECTION_FEATURE_ID,
+  CONTEXT_DECISION_PROJECTION_CONTRACT_VERSION,
+  brainContextDecisionProjectionReceiptDigest,
+  validateBrainContextDecisionProjectionReceipt,
+  FEDERATED_DECISION_PROJECTION_FEATURE_ID,
+  FEDERATED_DECISION_PROJECTION_CONTRACT_VERSION,
+  brainFederatedDecisionProjectionReceiptDigest,
+  validateBrainFederatedDecisionProjectionReceipt,
+  CONTEXT_WORKFLOW_FABRIC_FEATURE_ID,
+  CONTEXT_WORKFLOW_FABRIC_CONTRACT_VERSION,
+  brainContextWorkflowReceiptDigest,
+  validateBrainContextWorkflowReceipt,
+  MULTIMODAL_CONTEXT_WORKFLOW_FABRIC_FEATURE_ID,
+  MULTIMODAL_CONTEXT_WORKFLOW_FABRIC_CONTRACT_VERSION,
+  brainMultimodalContextWorkflowReceiptDigest,
+  validateBrainMultimodalContextWorkflowReceipt,
+  THROUGHPUT_CONTEXT_WORKFLOW_FABRIC_FEATURE_ID,
+  THROUGHPUT_CONTEXT_WORKFLOW_FABRIC_CONTRACT_VERSION,
+  brainThroughputContextWorkflowReceiptDigest,
+  validateBrainThroughputContextWorkflowReceipt,
+  FEDERATED_CONTEXT_WORKFLOW_FABRIC_FEATURE_ID,
+  FEDERATED_CONTEXT_WORKFLOW_FABRIC_CONTRACT_VERSION,
+  brainFederatedContextWorkflowReceiptDigest,
+  validateBrainFederatedContextWorkflowReceipt,
+  CONTEXT_RESEARCH_WORKBENCH_FEATURE_ID,
+  CONTEXT_RESEARCH_WORKBENCH_CONTRACT_VERSION,
+  brainContextWorkbenchReceiptDigest,
+  validateBrainContextWorkbenchReceipt,
+  MULTIMODAL_CONTEXT_WORKBENCH_FEATURE_ID,
+  MULTIMODAL_CONTEXT_WORKBENCH_CONTRACT_VERSION,
+  brainMultimodalContextWorkbenchReceiptDigest,
+  validateBrainMultimodalContextWorkbenchReceipt,
+  THROUGHPUT_CONTEXT_WORKBENCH_FEATURE_ID,
+  THROUGHPUT_CONTEXT_WORKBENCH_CONTRACT_VERSION,
+  brainThroughputContextWorkbenchReceiptDigest,
+  validateBrainThroughputContextWorkbenchReceipt,
+  FEDERATED_CONTEXT_WORKBENCH_FEATURE_ID,
+  FEDERATED_CONTEXT_WORKBENCH_CONTRACT_VERSION,
+  brainFederatedContextWorkbenchReceiptDigest,
+  validateBrainFederatedContextWorkbenchReceipt,
+  CONTEXT_PROTOCOL_ADAPTER_FEATURE_ID,
+  CONTEXT_PROTOCOL_ADAPTER_CONTRACT_VERSION,
+  CONTEXT_PROTOCOL_VERSION,
+  CONTEXT_PROTOCOL_ROUTE,
+  CONTEXT_PROTOCOL_METHOD,
+  CONTEXT_PROTOCOL_RESPONSE_SCHEMA,
+  brainContextProtocolReceiptDigest,
+  validateBrainContextProtocolReceipt,
+  MULTIMODAL_CONTEXT_PROTOCOL_ADAPTER_FEATURE_ID,
+  MULTIMODAL_CONTEXT_PROTOCOL_ADAPTER_CONTRACT_VERSION,
+  MULTIMODAL_CONTEXT_PROTOCOL_VERSION,
+  MULTIMODAL_CONTEXT_PROTOCOL_ROUTE,
+  MULTIMODAL_CONTEXT_PROTOCOL_METHOD,
+  MULTIMODAL_CONTEXT_PROTOCOL_RESPONSE_SCHEMA,
+  brainMultimodalContextProtocolReceiptDigest,
+  validateBrainMultimodalContextProtocolReceipt,
+  THROUGHPUT_CONTEXT_PROTOCOL_ADAPTER_FEATURE_ID,
+  THROUGHPUT_CONTEXT_PROTOCOL_ADAPTER_CONTRACT_VERSION,
+  THROUGHPUT_CONTEXT_PROTOCOL_VERSION,
+  THROUGHPUT_CONTEXT_PROTOCOL_ROUTE,
+  THROUGHPUT_CONTEXT_PROTOCOL_METHOD,
+  THROUGHPUT_CONTEXT_PROTOCOL_RESPONSE_SCHEMA,
+  brainThroughputContextProtocolReceiptDigest,
+  validateBrainThroughputContextProtocolReceipt,
+  FEDERATED_CONTEXT_PROTOCOL_ADAPTER_FEATURE_ID,
+  FEDERATED_CONTEXT_PROTOCOL_ADAPTER_CONTRACT_VERSION,
+  FEDERATED_CONTEXT_PROTOCOL_VERSION,
+  FEDERATED_CONTEXT_PROTOCOL_ROUTE,
+  FEDERATED_CONTEXT_PROTOCOL_METHOD,
+  FEDERATED_CONTEXT_PROTOCOL_RESPONSE_SCHEMA,
+  brainFederatedContextProtocolReceiptDigest,
+  validateBrainFederatedContextProtocolReceipt,
+  brainContextCompilationAssuranceReceiptDigest,
+  validateBrainContextCompilationAssuranceReceipt,
+  MULTIMODAL_CONTEXT_COMPILATION_ASSURANCE_FEATURE_ID,
+  MULTIMODAL_CONTEXT_COMPILATION_ASSURANCE_CONTRACT_VERSION,
+  brainMultimodalContextCompilationAssuranceReceiptDigest,
+  validateBrainMultimodalContextCompilationAssuranceReceipt,
+  THROUGHPUT_CONTEXT_COMPILATION_ASSURANCE_FEATURE_ID,
+  THROUGHPUT_CONTEXT_COMPILATION_ASSURANCE_CONTRACT_VERSION,
+  brainThroughputContextCompilationAssuranceReceiptDigest,
+  validateBrainThroughputContextCompilationAssuranceReceipt,
+  FEDERATED_CONTINUAL_CONTEXT_COMPILATION_ASSURANCE_FEATURE_ID,
+  FEDERATED_CONTINUAL_CONTEXT_COMPILATION_ASSURANCE_CONTRACT_VERSION,
+  brainFederatedContinualContextCompilationAssuranceReceiptDigest,
+  validateBrainFederatedContinualContextCompilationAssuranceReceipt,
+  LOCAL_CONTEXT_COMPILATION_FEDERATED_CONTROL_PLANE_FEATURE_ID,
+  LOCAL_CONTEXT_COMPILATION_FEDERATED_CONTROL_PLANE_CONTRACT_VERSION,
+  brainLocalContextCompilationFederatedControlPlaneReceiptDigest,
+  validateBrainLocalContextCompilationFederatedControlPlaneReceipt,
+  MULTIMODAL_CONTEXT_COMPILATION_FEDERATED_CONTROL_PLANE_FEATURE_ID,
+  MULTIMODAL_CONTEXT_COMPILATION_FEDERATED_CONTROL_PLANE_CONTRACT_VERSION,
+  brainMultimodalContextCompilationFederatedControlPlaneReceiptDigest,
+  validateBrainMultimodalContextCompilationFederatedControlPlaneReceipt,
+  THROUGHPUT_CONTEXT_COMPILATION_FEDERATED_CONTROL_PLANE_FEATURE_ID,
+  THROUGHPUT_CONTEXT_COMPILATION_FEDERATED_CONTROL_PLANE_CONTRACT_VERSION,
+  brainThroughputContextCompilationFederatedControlPlaneReceiptDigest,
+  validateBrainThroughputContextCompilationFederatedControlPlaneReceipt,
+  FEDERATED_CONTINUAL_CONTEXT_COMPILATION_FEDERATED_CONTROL_PLANE_FEATURE_ID,
+  FEDERATED_CONTINUAL_CONTEXT_COMPILATION_FEDERATED_CONTROL_PLANE_CONTRACT_VERSION,
+  brainFederatedContinualContextCompilationFederatedControlPlaneReceiptDigest,
+  validateBrainFederatedContinualContextCompilationFederatedControlPlaneReceipt,
+  LOCAL_KNOWLEDGE_REPRESENTATION_INFERENCE_ENGINE_FEATURE_ID,
+  LOCAL_KNOWLEDGE_REPRESENTATION_INFERENCE_ENGINE_CONTRACT_VERSION,
+  brainLocalKnowledgeRepresentationInferenceEngineReceiptDigest,
+  validateBrainLocalKnowledgeRepresentationInferenceEngineReceipt,
+  MULTIMODAL_KNOWLEDGE_REPRESENTATION_INFERENCE_ENGINE_FEATURE_ID,
+  MULTIMODAL_KNOWLEDGE_REPRESENTATION_INFERENCE_ENGINE_CONTRACT_VERSION,
+  brainMultimodalKnowledgeRepresentationInferenceEngineReceiptDigest,
+  validateBrainMultimodalKnowledgeRepresentationInferenceEngineReceipt,
+  THROUGHPUT_KNOWLEDGE_REPRESENTATION_INFERENCE_ENGINE_FEATURE_ID,
+  THROUGHPUT_KNOWLEDGE_REPRESENTATION_INFERENCE_ENGINE_CONTRACT_VERSION,
+  brainThroughputKnowledgeRepresentationInferenceEngineReceiptDigest,
+  validateBrainThroughputKnowledgeRepresentationInferenceEngineReceipt,
+  FEDERATED_CONTINUAL_KNOWLEDGE_REPRESENTATION_INFERENCE_ENGINE_FEATURE_ID,
+  FEDERATED_CONTINUAL_KNOWLEDGE_REPRESENTATION_INFERENCE_ENGINE_CONTRACT_VERSION,
+  brainFederatedContinualKnowledgeRepresentationInferenceEngineReceiptDigest,
+  validateBrainFederatedContinualKnowledgeRepresentationInferenceEngineReceipt,
+} from "./research-contracts.js";
+
+export {
+  WORLDGEN_LOCAL_EVIDENCE_SURVEILLANCE_OPERATIONS_FEATURE_ID,
+  WORLDGEN_LOCAL_EVIDENCE_SURVEILLANCE_OPERATIONS_CONTRACT_VERSION,
+  WORLDGEN_LOCAL_EVIDENCE_SURVEILLANCE_OPERATIONS_INPUT_SCHEMA,
+  WORLDGEN_LOCAL_EVIDENCE_SURVEILLANCE_OPERATIONS_OUTPUT_SCHEMA,
+  WORLDGEN_MULTIMODAL_EVIDENCE_SURVEILLANCE_OPERATIONS_FEATURE_ID,
+  WORLDGEN_MULTIMODAL_EVIDENCE_SURVEILLANCE_OPERATIONS_CONTRACT_VERSION,
+  WORLDGEN_MULTIMODAL_EVIDENCE_SURVEILLANCE_OPERATIONS_INPUT_SCHEMA,
+  WORLDGEN_MULTIMODAL_EVIDENCE_SURVEILLANCE_OPERATIONS_OUTPUT_SCHEMA,
+  WORLDGEN_THROUGHPUT_EVIDENCE_SURVEILLANCE_OPERATIONS_FEATURE_ID,
+  WORLDGEN_THROUGHPUT_EVIDENCE_SURVEILLANCE_OPERATIONS_CONTRACT_VERSION,
+  WORLDGEN_THROUGHPUT_EVIDENCE_SURVEILLANCE_OPERATIONS_INPUT_SCHEMA,
+  WORLDGEN_THROUGHPUT_EVIDENCE_SURVEILLANCE_OPERATIONS_OUTPUT_SCHEMA,
+  WORLDGEN_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_OPERATIONS_FEATURE_ID,
+  WORLDGEN_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_OPERATIONS_CONTRACT_VERSION,
+  WORLDGEN_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_OPERATIONS_INPUT_SCHEMA,
+  WORLDGEN_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_OPERATIONS_OUTPUT_SCHEMA,
+  WORLDGEN_OPERATIONS_CONTENT_TYPE,
+  worldgenLocalEvidenceSurveillanceOperationsDigest,
+  worldgenMultimodalEvidenceSurveillanceOperationsDigest,
+  worldgenThroughputEvidenceSurveillanceOperationsDigest,
+  worldgenFederatedContinualEvidenceSurveillanceOperationsDigest,
+  validateWorldgenLocalEvidenceSurveillanceOperationsReceipt,
+  validateWorldgenMultimodalEvidenceSurveillanceOperationsReceipt,
+  validateWorldgenThroughputEvidenceSurveillanceOperationsReceipt,
+  validateWorldgenFederatedContinualEvidenceSurveillanceOperationsReceipt,
+} from "./research-contracts.js";
+export type { WorldgenOperationsReceipt } from "./research-contracts.js";
+export {
+  LOCAL_KNOWLEDGE_REPRESENTATION_CONTRACT_MODEL_FEATURE_ID,
+  LOCAL_KNOWLEDGE_REPRESENTATION_CONTRACT_MODEL_CONTRACT_VERSION,
+  brainLocalKnowledgeRepresentationContractModelReceiptDigest,
+  validateBrainLocalKnowledgeRepresentationContractModelReceipt,
+} from "./research-contracts.js";
+export type { EvidenceOmission, EvidenceReceipt, EvidenceState, PolicyDecision, PolicyReceipt, ReleaseReview, ResearchIngestionBundle, ExperimentDesignPlan, ProtocolSimulationReport, ProtocolSimulationReceipt, ReplicationReport, QualityControlReceipt, QualityDriftReceipt, DesignFrontierReceipt, BatchAdmissionReceipt, WorkflowBatchReceipt, ResearchReleaseBatchReceipt, FederatedEvaluationReceipt, QualifiedResourceSet, ResourceDiscoveryContractReceipt, SignedResearchObjectReceipt, ReleaseHarnessReceipt, ProtocolAssuranceReceipt, FederatedMultimodalAssuranceReceipt, FederatedKnowledgeGatewayReceipt, FederatedLensAssuranceReceipt, LabSemanticParityReceipt, FederatedRetrievalAssuranceReceipt, FederatedContinualRetrievalReceipt, RetrievalSourceUpdate, ContextCompilationAssuranceReceipt, KnowledgeRepresentationAssuranceReceipt, ResourceControlPlaneReceipt, WeaveLangReleaseAssuranceReceipt, MechanismControlPlaneReceipt, MechanismGatewayReceipt, EvidenceSurveillanceReceipt, RetrievalSynthesisReceipt, AdapterContextCompilationReceipt, KnowledgeWorkflowReceipt, ResourceWorkbenchReceipt, IngestionGatewayReceipt, QualityEnvelopeReceipt, ExperimentDesignReceipt, InstrumentMeshReceipt, ComputationalExecutionReceipt, AnalysisPortfolioReceipt, InterpretationAssuranceReceipt, ReplicationAssuranceReceipt, ReleaseAssuranceReceipt, DeterminismGatewayReceipt, ProvenanceAssuranceReceipt, PolicyGatewayReceipt, FederationWorkflowReceipt, ReliabilityCopilotReceipt, InteroperabilityGatewayReceipt, EvaluationAssuranceReceipt, ResearchWorkbenchReceipt, ContractFrontierReceipt, LimitationClosureReceipt, AdapterCompositionReceipt, AdapterSemanticParityReceipt, ScaleFrontierReceipt, AdversarialRecoveryReceipt, FederatedCommonsReceipt, BoundedEvolutionReceipt, EvolutionIdentityReceipt, EvolutionAssuranceReceipt, InterpretationPlaneReceipt, KnowledgeGatewayReceipt, OracleCapabilityManifestReceipt, FederatedMultimodalIngestionReceipt, QualityAssuranceReceipt, MechanismControlReceipt, EvidenceWorkbenchReceipt, ResearchContextReceipt, ReplayAuditReceipt, WorkflowExecutionReceipt, EvaluationCardReceipt, ResearchReleaseReceipt, InstrumentPreflightReceipt, HarmonizedResearchObject, QualifiedAnalysisResult, ProtocolMatrixReceipt, MultimodalReplicationReport } from "./research-contracts.js";
+export type { AnalysisControlReceipt } from "./research-contracts.js";
+export type { BrainThroughputContextCompilationReceipt } from "./research-contracts.js";
+export type { BrainFederatedContextProtocolReceipt } from "./research-contracts.js";
+export type { BrainContextCompilationAssuranceReceipt } from "./research-contracts.js";
+export type { BrainMultimodalContextCompilationAssuranceReceipt } from "./research-contracts.js";
+export type { BrainThroughputContextCompilationAssuranceReceipt } from "./research-contracts.js";
+export type { BrainFederatedContinualContextCompilationAssuranceReceipt } from "./research-contracts.js";
+export type { BrainLocalContextCompilationFederatedControlPlaneReceipt } from "./research-contracts.js";
+export type { BrainMultimodalContextCompilationFederatedControlPlaneReceipt } from "./research-contracts.js";
+export type { BrainThroughputContextCompilationFederatedControlPlaneReceipt } from "./research-contracts.js";
+export type { BrainFederatedContinualContextCompilationFederatedControlPlaneReceipt } from "./research-contracts.js";
+export type { BrainLocalKnowledgeRepresentationInferenceEngineReceipt } from "./research-contracts.js";
+export type { BrainMultimodalKnowledgeRepresentationInferenceEngineReceipt } from "./research-contracts.js";
+export type { BrainThroughputKnowledgeRepresentationInferenceEngineReceipt } from "./research-contracts.js";
+export type { BrainFederatedContinualKnowledgeRepresentationInferenceEngineReceipt } from "./research-contracts.js";
+export type { BrainLocalKnowledgeRepresentationContractModelReceipt } from "./research-contracts.js";
+export {
+  MULTIMODAL_KNOWLEDGE_REPRESENTATION_CONTRACT_MODEL_FEATURE_ID,
+  MULTIMODAL_KNOWLEDGE_REPRESENTATION_CONTRACT_MODEL_CONTRACT_VERSION,
+  brainMultimodalKnowledgeRepresentationContractModelReceiptDigest,
+  validateBrainMultimodalKnowledgeRepresentationContractModelReceipt,
+} from "./research-contracts.js";
+export type { BrainMultimodalKnowledgeRepresentationContractModelReceipt } from "./research-contracts.js";
+export {
+  ORACLEX_PUBLICATION_RELEASE_FEATURE_ID,
+  ORACLEX_PUBLICATION_RELEASE_CONTRACT_VERSION,
+  ORACLEX_PUBLICATION_RELEASE_INPUT_SCHEMA,
+  ORACLEX_PUBLICATION_RELEASE_OUTPUT_SCHEMA,
+  oraclexPublicationReleaseReceiptDigest,
+  validateOraclexPublicationReleaseReceipt,
+} from "./research-contracts.js";
+export type { OraclexPublicationReleaseReceipt } from "./research-contracts.js";
+export {
+  INTERWEAVE_FRONTIER_CONTROL_FEATURE_ID,
+  INTERWEAVE_FRONTIER_CONTROL_CONTRACT_VERSION,
+  INTERWEAVE_FRONTIER_CONTROL_INPUT_SCHEMA,
+  INTERWEAVE_FRONTIER_CONTROL_OUTPUT_SCHEMA,
+  interweaveFrontierControlReceiptDigest,
+  validateInterweaveFrontierControlReceipt,
+} from "./research-contracts.js";
+export type { InterweaveFrontierControlReceipt } from "./research-contracts.js";
+export {
+  THROUGHPUT_KNOWLEDGE_REPRESENTATION_CONTRACT_MODEL_FEATURE_ID,
+  THROUGHPUT_KNOWLEDGE_REPRESENTATION_CONTRACT_MODEL_CONTRACT_VERSION,
+  brainThroughputKnowledgeRepresentationContractModelReceiptDigest,
+  validateBrainThroughputKnowledgeRepresentationContractModelReceipt,
+} from "./research-contracts.js";
+export type { BrainThroughputKnowledgeRepresentationContractModelReceipt } from "./research-contracts.js";
+export {
+  FEDERATED_CONTINUAL_KNOWLEDGE_REPRESENTATION_CONTRACT_MODEL_FEATURE_ID,
+  FEDERATED_CONTINUAL_KNOWLEDGE_REPRESENTATION_CONTRACT_MODEL_CONTRACT_VERSION,
+  brainFederatedContinualKnowledgeRepresentationContractModelReceiptDigest,
+  validateBrainFederatedContinualKnowledgeRepresentationContractModelReceipt,
+} from "./research-contracts.js";
+export type { BrainFederatedContinualKnowledgeRepresentationContractModelReceipt } from "./research-contracts.js";
+export type { BrainFederatedContextCompilationReceipt } from "./research-contracts.js";
+export type { BrainContextOmissionAdjudicationReceipt } from "./research-contracts.js";
+export type { BrainContextReleaseAdmissionReceipt } from "./research-contracts.js";
+export type { BrainContextFreshnessDriftReceipt } from "./research-contracts.js";
+export type { BrainContextUncertaintyEnvelopeReceipt } from "./research-contracts.js";
+export type { BrainContextContradictionResolutionReceipt } from "./research-contracts.js";
+export type { BrainContextDependencyClosureReceipt } from "./research-contracts.js";
+export type { BrainContextDecisionProjectionReceipt } from "./research-contracts.js";
+export type { PeerDecisionAttestation, BrainFederatedDecisionProjectionReceipt } from "./research-contracts.js";
+export type { BrainContextWorkflowReceipt } from "./research-contracts.js";
+export type { BrainThroughputContextWorkbenchReceipt } from "./research-contracts.js";
+export type { BrainFederatedContextWorkbenchReceipt } from "./research-contracts.js";
+export type { BrainContextProtocolReceipt } from "./research-contracts.js";
+export type { BrainMultimodalContextProtocolReceipt } from "./research-contracts.js";
+export type { BrainThroughputContextProtocolReceipt } from "./research-contracts.js";
+export type { ModalContextInput, BrainMultimodalContextWorkflowReceipt } from "./research-contracts.js";
+export type { BrainThroughputContextWorkflowReceipt } from "./research-contracts.js";
+export type { BrainFederatedContextWorkflowReceipt } from "./research-contracts.js";
+export type { BrainContextWorkbenchReceipt } from "./research-contracts.js";
+export type { BrainMultimodalContextWorkbenchReceipt } from "./research-contracts.js";
+export type { BrainMultimodalEvidenceSurveillanceReceipt } from "./research-contracts.js";
+export type { BrainHighThroughputEvidenceReceipt } from "./research-contracts.js";
+export type { BrainFederatedEvidenceReceipt } from "./research-contracts.js";
+export type { BrainEvidenceContractModelReceipt } from "./research-contracts.js";
+export type { BrainMultimodalContractModelReceipt } from "./research-contracts.js";
+export type { BrainThroughputContractModelReceipt } from "./research-contracts.js";
+export type { BrainFederatedContractModelReceipt } from "./research-contracts.js";
+export type { BrainEvidenceResearchCopilotReceipt } from "./research-contracts.js";
+export type { BrainMultimodalEvidenceResearchCopilotReceipt } from "./research-contracts.js";
+export type { BrainHighThroughputEvidenceResearchCopilotReceipt } from "./research-contracts.js";
+export type { BrainFederatedEvidenceResearchCopilotReceipt } from "./research-contracts.js";
+export type { BrainEvidenceWorkflowFabricReceipt } from "./research-contracts.js";
+export type { BrainMultimodalEvidenceWorkflowFabricReceipt } from "./research-contracts.js";
+export type { BrainHighThroughputEvidenceWorkflowFabricReceipt } from "./research-contracts.js";
+export type { BrainFederatedEvidenceWorkflowFabricReceipt } from "./research-contracts.js";
+export type { BrainEvidenceResearchWorkbenchReceipt } from "./research-contracts.js";
+export type { BrainMultimodalResearchWorkbenchReceipt } from "./research-contracts.js";
+export type { BrainThroughputResearchWorkbenchReceipt } from "./research-contracts.js";
+export type { BrainFederatedResearchWorkbenchReceipt } from "./research-contracts.js";
+export type { BrainEvidenceProtocolReceipt } from "./research-contracts.js";
+export type { BrainMultimodalProtocolReceipt } from "./research-contracts.js";
+export type { BrainThroughputProtocolReceipt } from "./research-contracts.js";
+export type { BrainFederatedProtocolReceipt } from "./research-contracts.js";
+export type { BrainEvidenceAssuranceReceipt } from "./research-contracts.js";
+export type { BrainMultimodalAssuranceReceipt } from "./research-contracts.js";
+export type { BrainThroughputAssuranceReceipt } from "./research-contracts.js";
+export type { BrainFederatedAssuranceReceipt } from "./research-contracts.js";
+export type { BrainEvidenceOperationsReceipt } from "./research-contracts.js";
+export type { BrainMultimodalOperationsReceipt } from "./research-contracts.js";
+export type { BrainThroughputOperationsReceipt } from "./research-contracts.js";
+export type { BrainFederatedOperationsReceipt } from "./research-contracts.js";
+export type { BrainEvidenceSynthesis } from "./research-contracts.js";
+export type { BrainMultimodalEvidenceSynthesis } from "./research-contracts.js";
+export type { BrainThroughputEvidenceSynthesis } from "./research-contracts.js";
+export type { BrainFederatedEvidenceSynthesis } from "./research-contracts.js";
+export type { BrainRetrievalContractModelReceipt } from "./research-contracts.js";
+export type { BrainMultimodalRetrievalContractModelReceipt } from "./research-contracts.js";
+export type { BrainThroughputRetrievalContractModelReceipt } from "./research-contracts.js";
+export type { BrainFederatedRetrievalContractModelReceipt } from "./research-contracts.js";
+export type { BrainRetrievalCopilotReceipt } from "./research-contracts.js";
+export type { BrainMultimodalRetrievalCopilotReceipt } from "./research-contracts.js";
+export type { BrainThroughputRetrievalCopilotReceipt } from "./research-contracts.js";
+export type { BrainFederatedRetrievalCopilotReceipt } from "./research-contracts.js";
+export type { BrainRetrievalWorkflowFabricReceipt } from "./research-contracts.js";
+export type { BrainMultimodalRetrievalWorkflowFabricReceipt } from "./research-contracts.js";
+export type { BrainThroughputRetrievalWorkflowFabricReceipt } from "./research-contracts.js";
+export type { BrainFederatedRetrievalWorkflowFabricReceipt } from "./research-contracts.js";
+export type { BrainRetrievalResearchWorkbenchReceipt } from "./research-contracts.js";
+export type { BrainMultimodalRetrievalWorkbenchReceipt } from "./research-contracts.js";
+export type { BrainThroughputRetrievalWorkbenchReceipt } from "./research-contracts.js";
+export type { BrainFederatedRetrievalWorkbenchReceipt } from "./research-contracts.js";
+export type { BrainRetrievalProtocolReceipt } from "./research-contracts.js";
+export type { BrainMultimodalRetrievalProtocolReceipt } from "./research-contracts.js";
+export type { BrainThroughputRetrievalProtocolReceipt } from "./research-contracts.js";
+export type { BrainFederatedRetrievalProtocolReceipt } from "./research-contracts.js";
+export type { BrainRetrievalAssuranceReceipt } from "./research-contracts.js";
+export type { BrainMultimodalRetrievalAssuranceReceipt } from "./research-contracts.js";
+export type { BrainThroughputRetrievalAssuranceReceipt } from "./research-contracts.js";
+export type { BrainFederatedRetrievalAssuranceReceipt } from "./research-contracts.js";
+export type { BrainRetrievalFederatedControlPlaneReceipt } from "./research-contracts.js";
+export type { BrainMultimodalRetrievalControlPlaneReceipt } from "./research-contracts.js";
+export type { BrainThroughputRetrievalControlPlaneReceipt } from "./research-contracts.js";
+export type { BrainFederatedRetrievalControlPlaneReceipt } from "./research-contracts.js";
+export type { BrainResearchContextCompilationReceipt } from "./research-contracts.js";
+export type { BrainMultimodalContextCompilationReceipt } from "./research-contracts.js";
+export type { ContextAssuranceReceipt } from "./research-contracts.js";
+export type { BioworldsEvaluationAssuranceReceipt } from "./research-contracts.js";
+export type { BiolangQualityWorkbenchReceipt } from "./research-contracts.js";
+export type { BiolangRetrievalAssuranceReceipt } from "./research-contracts.js";
+export type { CliKnowledgeInteroperabilityReceipt } from "./research-contracts.js";
+export type { LabEvidenceSurveillanceReceipt } from "./research-contracts.js";
+export type { FiberMechanismAssuranceReceipt } from "./research-contracts.js";
+export type { HubapiQualityAssuranceReceipt } from "./research-contracts.js";
+export type { RegistryResourceDiscoveryAssuranceReceipt } from "./research-contracts.js";
+export type { ServicesMechanismWorkbenchReceipt } from "./research-contracts.js";
+export type { GovernanceInterpretationAssuranceReceipt } from "./research-contracts.js";
+export type { OracleIngestionControlReceipt } from "./research-contracts.js";
+export type { StewardshipReleaseWorkbenchReceipt } from "./research-contracts.js";
+export type { ApiAnalysisAssuranceReceipt } from "./research-contracts.js";
+export type { StoreEvidenceOperationsReceipt } from "./research-contracts.js";
+export type { PolicyInteroperabilityControlReceipt } from "./research-contracts.js";
+export type { SafetyMechanismWorkflowReceipt } from "./research-contracts.js";
+export type { HubapiMultimodalInterpretationAssuranceReceipt } from "./research-contracts.js";
+export type { BiolangPublicationCopilotReceipt } from "./research-contracts.js";
+export type { ApiReleaseAssuranceReceipt } from "./research-contracts.js";
+export type { BioevalxFederationGatewayReceipt } from "./research-contracts.js";
+export type { SectionInterpretationAssuranceReceipt } from "./research-contracts.js";
+export type { OpsRetrievalAssuranceReceipt } from "./research-contracts.js";
+export type { ConformanceKnowledgeWorldAssuranceReceipt } from "./research-contracts.js";
+export type { BrainEvidenceSurveillanceReceipt } from "./research-contracts.js";
+export {
   AUTONOMOUS_MODEL_CONTINUATION_SCHEMA,
   AUTONOMOUS_MODEL_CONTINUATION_STATE_SCHEMA,
   MAX_AUTONOMOUS_MODEL_CONTINUATION_FAILOVERS,
@@ -3532,6 +4549,398 @@ export {
   taskFacetDigests,
   validateAutonomousMemorySnapshot,
 } from "./autonomous-memory.js";
+
+export {
+  CLI_FEDERATED_RETRIEVAL_FEATURE_ID,
+  CLI_FEDERATED_RETRIEVAL_CONTRACT_VERSION,
+  CLI_FEDERATED_RETRIEVAL_INPUT_SCHEMA,
+  CLI_FEDERATED_RETRIEVAL_OUTPUT_SCHEMA,
+  validateCliFederatedRetrievalAssuranceReceipt,
+  cliFederatedRetrievalAssuranceReceiptDigest,
+} from "./research-contracts.js";
+export type { CliFederatedRetrievalAssuranceReceipt } from "./research-contracts.js";
+
+export {
+  CLI_PROTOCOL_SIMULATION_ASSURANCE_FEATURE_ID,
+  CLI_PROTOCOL_SIMULATION_ASSURANCE_CONTRACT_VERSION,
+  CLI_PROTOCOL_SIMULATION_ASSURANCE_INPUT_SCHEMA,
+  CLI_PROTOCOL_SIMULATION_ASSURANCE_OUTPUT_SCHEMA,
+  cliProtocolSimulationAssuranceReceiptDigest,
+  validateCliProtocolSimulationAssuranceReceipt,
+} from "./research-contracts.js";
+export type { CliProtocolSimulationAssuranceReceipt } from "./research-contracts.js";
+export {
+  FEDERATED_MECHANISM_CONTROL_FEATURE_ID,
+  FEDERATED_MECHANISM_CONTROL_VERSION,
+  FEDERATED_MECHANISM_CONTROL_INPUT_SCHEMA,
+  FEDERATED_MECHANISM_CONTROL_OUTPUT_SCHEMA,
+  federatedMechanismReceiptDigest,
+  validateFederatedMechanismReceipt,
+} from "./research-contracts.js";
+export type { FederatedMechanismReceipt } from "./research-contracts.js";
+export {
+  MEGAFACTORY_MECHANISM_EXPLORATION_FEATURE_ID,
+  MEGAFACTORY_MECHANISM_EXPLORATION_CONTRACT_VERSION,
+  MEGAFACTORY_MECHANISM_EXPLORATION_INPUT_SCHEMA,
+  MEGAFACTORY_MECHANISM_EXPLORATION_OUTPUT_SCHEMA,
+  megafactoryMechanismExplorationReceiptDigest,
+  validateMegafactoryMechanismExplorationReceipt,
+} from "./research-contracts.js";
+export type { MegafactoryMechanismExplorationReceipt } from "./research-contracts.js";
+export {
+  FEDERATED_ANALYSIS_ASSURANCE_FEATURE_ID,
+  FEDERATED_ANALYSIS_ASSURANCE_CONTRACT_VERSION,
+  FEDERATED_ANALYSIS_ASSURANCE_INPUT_SCHEMA,
+  FEDERATED_ANALYSIS_ASSURANCE_OUTPUT_SCHEMA,
+  federatedAnalysisReceiptDigest,
+  validateFederatedAnalysisReceipt,
+} from "./research-contracts.js";
+export type { FederatedAnalysisReceipt } from "./research-contracts.js";
+
+export {
+  CONFORMANCE_CONTEXT_COMPILATION_FEDERATED_CONTROL_FEATURE_ID,
+  CONFORMANCE_CONTEXT_COMPILATION_FEDERATED_CONTROL_CONTRACT_VERSION,
+  CONFORMANCE_CONTEXT_COMPILATION_FEDERATED_CONTROL_INPUT_SCHEMA,
+  CONFORMANCE_CONTEXT_COMPILATION_FEDERATED_CONTROL_OUTPUT_SCHEMA,
+  conformanceContextCompilationFederatedControlReceiptDigest,
+  validateConformanceContextCompilationFederatedControlReceipt,
+} from "./research-contracts.js";
+export type { ConformanceContextCompilationFederatedControlReceipt } from "./research-contracts.js";
+
+export {
+  SERVICES_FEDERATED_PUBLICATION_RELEASE_INFERENCE_FEATURE_ID,
+  SERVICES_FEDERATED_PUBLICATION_RELEASE_INFERENCE_CONTRACT_VERSION,
+  SERVICES_FEDERATED_PUBLICATION_RELEASE_INFERENCE_INPUT_SCHEMA,
+  SERVICES_FEDERATED_PUBLICATION_RELEASE_INFERENCE_OUTPUT_SCHEMA,
+  servicesFederatedPublicationReleaseInferenceReceiptDigest,
+  validateServicesFederatedPublicationReleaseInferenceReceipt,
+} from "./research-contracts.js";
+export type { ServicesFederatedPublicationReleaseInferenceReceipt } from "./research-contracts.js";
+export {
+  MUTATION_KNOWLEDGE_FEDERATED_CONTROL_FEATURE_ID,
+  MUTATION_KNOWLEDGE_FEDERATED_CONTROL_CONTRACT_VERSION,
+  MUTATION_KNOWLEDGE_FEDERATED_CONTROL_INPUT_SCHEMA,
+  MUTATION_KNOWLEDGE_FEDERATED_CONTROL_OUTPUT_SCHEMA,
+  mutationKnowledgeFederatedReceiptDigest,
+  validateMutationKnowledgeFederatedReceipt,
+} from "./research-contracts.js";
+export type { MutationKnowledgeFederatedReceipt } from "./research-contracts.js";
+
+export {
+  ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_INFERENCE_ENGINE_FEATURE_ID,
+  ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_INFERENCE_ENGINE_CONTRACT_VERSION,
+  adapterLocalEvidenceSurveillanceInferenceEngineReceiptDigest,
+  validateAdapterLocalEvidenceSurveillanceInferenceEngineReceipt,
+} from "./research-contracts.js";
+export type { AdapterLocalEvidenceSurveillanceInferenceEngineReceipt } from "./research-contracts.js";
+export {
+  ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_INFERENCE_ENGINE_FEATURE_ID,
+  ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_INFERENCE_ENGINE_CONTRACT_VERSION,
+  adapterMultimodalEvidenceSurveillanceInferenceEngineReceiptDigest,
+  validateAdapterMultimodalEvidenceSurveillanceInferenceEngineReceipt,
+} from "./research-contracts.js";
+export type { AdapterMultimodalEvidenceSurveillanceInferenceEngineReceipt } from "./research-contracts.js";
+export {
+  ADAPTER_THROUGHPUT_EVIDENCE_SURVEILLANCE_INFERENCE_ENGINE_FEATURE_ID,
+  ADAPTER_THROUGHPUT_EVIDENCE_SURVEILLANCE_INFERENCE_ENGINE_CONTRACT_VERSION,
+  adapterThroughputEvidenceSurveillanceInferenceEngineReceiptDigest,
+  validateAdapterThroughputEvidenceSurveillanceInferenceEngineReceipt,
+} from "./research-contracts.js";
+export type { AdapterThroughputEvidenceSurveillanceInferenceEngineReceipt } from "./research-contracts.js";
+export {
+  ADAPTER_FEDERATED_EVIDENCE_SURVEILLANCE_INFERENCE_ENGINE_FEATURE_ID,
+  ADAPTER_FEDERATED_EVIDENCE_SURVEILLANCE_INFERENCE_ENGINE_CONTRACT_VERSION,
+  adapterFederatedEvidenceSurveillanceInferenceEngineReceiptDigest,
+  validateAdapterFederatedEvidenceSurveillanceInferenceEngineReceipt,
+} from "./research-contracts.js";
+export type { AdapterFederatedEvidenceSurveillanceInferenceEngineReceipt } from "./research-contracts.js";
+export {
+  ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_FEATURE_ID,
+  ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_CONTRACT_VERSION,
+  adapterLocalEvidenceSurveillanceContractModelReceiptDigest,
+  validateAdapterLocalEvidenceSurveillanceContractModelReceipt,
+} from "./research-contracts.js";
+export type { AdapterLocalEvidenceSurveillanceContractModelReceipt } from "./research-contracts.js";
+export {
+  ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_FEATURE_ID,
+  ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_CONTRACT_VERSION,
+  adapterMultimodalEvidenceSurveillanceContractModelReceiptDigest,
+  validateAdapterMultimodalEvidenceSurveillanceContractModelReceipt,
+} from "./research-contracts.js";
+export type { AdapterMultimodalEvidenceSurveillanceContractModelReceipt } from "./research-contracts.js";
+export {
+  ADAPTER_THROUGHPUT_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_FEATURE_ID,
+  ADAPTER_THROUGHPUT_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_CONTRACT_VERSION,
+  adapterThroughputEvidenceSurveillanceContractModelReceiptDigest,
+  validateAdapterThroughputEvidenceSurveillanceContractModelReceipt,
+} from "./research-contracts.js";
+export type { AdapterThroughputEvidenceSurveillanceContractModelReceipt } from "./research-contracts.js";
+export {
+  ADAPTER_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_FEATURE_ID,
+  ADAPTER_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_CONTRACT_VERSION,
+  adapterFederatedContinualEvidenceSurveillanceContractModelReceiptDigest,
+  validateAdapterFederatedContinualEvidenceSurveillanceContractModelReceipt,
+} from "./research-contracts.js";
+export type { AdapterFederatedContinualEvidenceSurveillanceContractModelReceipt } from "./research-contracts.js";
+export {
+  ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_FEATURE_ID,
+  ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_CONTRACT_VERSION,
+  adapterLocalEvidenceSurveillanceResearchCopilotReceiptDigest,
+  validateAdapterLocalEvidenceSurveillanceResearchCopilotReceipt,
+} from "./research-contracts.js";
+export type { AdapterLocalEvidenceSurveillanceResearchCopilotReceipt } from "./research-contracts.js";
+export {
+  ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_FEATURE_ID,
+  ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_CONTRACT_VERSION,
+  adapterMultimodalEvidenceSurveillanceResearchCopilotReceiptDigest,
+  validateAdapterMultimodalEvidenceSurveillanceResearchCopilotReceipt,
+  ADAPTER_THROUGHPUT_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_FEATURE_ID,
+  ADAPTER_THROUGHPUT_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_CONTRACT_VERSION,
+  adapterThroughputEvidenceSurveillanceResearchCopilotReceiptDigest,
+  validateAdapterThroughputEvidenceSurveillanceResearchCopilotReceipt,
+  ADAPTER_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_FEATURE_ID,
+  ADAPTER_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_CONTRACT_VERSION,
+  adapterFederatedContinualEvidenceSurveillanceResearchCopilotReceiptDigest,
+  validateAdapterFederatedContinualEvidenceSurveillanceResearchCopilotReceipt,
+  ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_FEATURE_ID,
+  ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_CONTRACT_VERSION,
+  adapterLocalEvidenceSurveillanceWorkflowFabricReceiptDigest,
+  validateAdapterLocalEvidenceSurveillanceWorkflowFabricReceipt,
+  ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_FEATURE_ID,
+  ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_CONTRACT_VERSION,
+  adapterMultimodalEvidenceSurveillanceWorkflowFabricReceiptDigest,
+  validateAdapterMultimodalEvidenceSurveillanceWorkflowFabricReceipt,
+} from "./research-contracts.js";
+export type { AdapterMultimodalEvidenceSurveillanceResearchCopilotReceipt } from "./research-contracts.js";
+export type { AdapterThroughputEvidenceSurveillanceResearchCopilotReceipt } from "./research-contracts.js";
+export type { AdapterFederatedContinualEvidenceSurveillanceResearchCopilotReceipt } from "./research-contracts.js";
+export type { AdapterLocalEvidenceSurveillanceWorkflowFabricReceipt } from "./research-contracts.js";
+export type { AdapterMultimodalEvidenceSurveillanceWorkflowFabricReceipt } from "./research-contracts.js";
+export type { AdapterThroughputEvidenceSurveillanceWorkflowFabricReceipt } from "./research-contracts.js";
+export {
+  CLI_RETRIEVAL_SYNTHESIS_ASSURANCE_FEATURE_ID,
+  CLI_RETRIEVAL_SYNTHESIS_ASSURANCE_CONTRACT_VERSION,
+  CLI_RETRIEVAL_SYNTHESIS_ASSURANCE_INPUT_SCHEMA,
+  CLI_RETRIEVAL_SYNTHESIS_ASSURANCE_OUTPUT_SCHEMA,
+  cliRetrievalSynthesisAssuranceReceiptDigest,
+  validateCliRetrievalSynthesisAssuranceReceipt,
+} from "./research-contracts.js";
+export type { CliRetrievalEvidenceCandidate, CliRetrievalSynthesisAssuranceReceipt } from "./research-contracts.js";
+export {
+  API_MULTIMODAL_INTERPRETATION_WORKFLOW_FEATURE_ID,
+  API_MULTIMODAL_INTERPRETATION_WORKFLOW_CONTRACT_VERSION,
+  API_MULTIMODAL_INTERPRETATION_WORKFLOW_INPUT_SCHEMA,
+  API_MULTIMODAL_INTERPRETATION_WORKFLOW_OUTPUT_SCHEMA,
+  apiMultimodalInterpretationWorkflowReceiptDigest,
+  validateApiMultimodalInterpretationWorkflowReceipt,
+} from "./research-contracts.js";
+export type { ApiInterpretationStudy, ApiMultimodalInterpretationWorkflowReceipt } from "./research-contracts.js";
+export {
+  POLICY_FEDERATED_COMMONS_INTEROPERABILITY_FEATURE_ID,
+  POLICY_FEDERATED_COMMONS_INTEROPERABILITY_CONTRACT_VERSION,
+  POLICY_FEDERATED_COMMONS_INTEROPERABILITY_INPUT_SCHEMA,
+  POLICY_FEDERATED_COMMONS_INTEROPERABILITY_OUTPUT_SCHEMA,
+  policyFederatedCommonsEnvelopeDigest,
+  validatePolicyFederatedCommonsEnvelope,
+} from "./research-contracts.js";
+export type { PolicyFederationArtifactCandidate, PolicyFederatedCommonsEnvelope } from "./research-contracts.js";
+export {
+  CLI_COMPUTATIONAL_EXECUTION_ASSURANCE_FEATURE_ID,
+  CLI_COMPUTATIONAL_EXECUTION_ASSURANCE_CONTRACT_VERSION,
+  CLI_COMPUTATIONAL_EXECUTION_ASSURANCE_INPUT_SCHEMA,
+  CLI_COMPUTATIONAL_EXECUTION_ASSURANCE_OUTPUT_SCHEMA,
+  cliComputationalExecutionAssuranceReceiptDigest,
+  validateCliComputationalExecutionAssuranceReceipt,
+} from "./research-contracts.js";
+export type { CliExecutionNode, CliComputationalExecutionAssuranceReceipt } from "./research-contracts.js";
+export {
+  ADAPTER_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_FEATURE_ID,
+  ADAPTER_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_CONTRACT_VERSION,
+  adapterFederatedContinualEvidenceSurveillanceWorkflowFabricReceiptDigest,
+  validateAdapterFederatedContinualEvidenceSurveillanceWorkflowFabricReceipt,
+} from "./research-contracts.js";
+export type { AdapterFederatedContinualEvidenceSurveillanceWorkflowFabricReceipt } from "./research-contracts.js";
+export {
+  ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_FEATURE_ID,
+  ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_CONTRACT_VERSION,
+  adapterLocalEvidenceSurveillanceResearchWorkbenchReceiptDigest,
+  validateAdapterLocalEvidenceSurveillanceResearchWorkbenchReceipt,
+} from "./research-contracts.js";
+export type { AdapterLocalEvidenceSurveillanceResearchWorkbenchReceipt } from "./research-contracts.js";
+export {
+  ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_FEATURE_ID,
+  ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_CONTRACT_VERSION,
+  adapterMultimodalEvidenceSurveillanceResearchWorkbenchReceiptDigest,
+  validateAdapterMultimodalEvidenceSurveillanceResearchWorkbenchReceipt,
+} from "./research-contracts.js";
+export type { AdapterMultimodalEvidenceSurveillanceResearchWorkbenchReceipt } from "./research-contracts.js";
+export {
+  ADAPTER_THROUGHPUT_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_FEATURE_ID,
+  ADAPTER_THROUGHPUT_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_CONTRACT_VERSION,
+  adapterThroughputEvidenceSurveillanceResearchWorkbenchReceiptDigest,
+  validateAdapterThroughputEvidenceSurveillanceResearchWorkbenchReceipt,
+} from "./research-contracts.js";
+export type { AdapterThroughputEvidenceSurveillanceResearchWorkbenchReceipt } from "./research-contracts.js";
+export {
+  ADAPTER_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_FEATURE_ID,
+  ADAPTER_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_CONTRACT_VERSION,
+  adapterFederatedContinualEvidenceSurveillanceResearchWorkbenchReceiptDigest,
+  validateAdapterFederatedContinualEvidenceSurveillanceResearchWorkbenchReceipt,
+} from "./research-contracts.js";
+export type { AdapterFederatedContinualEvidenceSurveillanceResearchWorkbenchReceipt } from "./research-contracts.js";
+export {
+  ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_FEATURE_ID,
+  ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_CONTRACT_VERSION,
+  adapterLocalRetrievalSynthesisInferenceEngineReceiptDigest,
+  validateAdapterLocalRetrievalSynthesisInferenceEngineReceipt,
+} from "./research-contracts.js";
+export type { AdapterLocalRetrievalSynthesisInferenceEngineReceipt } from "./research-contracts.js";
+export {
+  ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_FEATURE_ID,
+  ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_CONTRACT_VERSION,
+  adapterLocalRetrievalSynthesisContractModelReceiptDigest,
+  validateAdapterLocalRetrievalSynthesisContractModelReceipt,
+} from "./research-contracts.js";
+export type { AdapterLocalRetrievalSynthesisContractModelReceipt } from "./research-contracts.js";
+export {
+  ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_RESEARCH_COPILOT_FEATURE_ID,
+  ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_RESEARCH_COPILOT_CONTRACT_VERSION,
+  adapterLocalRetrievalSynthesisResearchCopilotReceiptDigest,
+  validateAdapterLocalRetrievalSynthesisResearchCopilotReceipt,
+} from "./research-contracts.js";
+export type { AdapterLocalRetrievalSynthesisResearchCopilotReceipt } from "./research-contracts.js";
+export {
+  ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_RESEARCH_COPILOT_FEATURE_ID,
+  ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_RESEARCH_COPILOT_CONTRACT_VERSION,
+  adapterMultimodalRetrievalSynthesisResearchCopilotReceiptDigest,
+  validateAdapterMultimodalRetrievalSynthesisResearchCopilotReceipt,
+} from "./research-contracts.js";
+export type { AdapterMultimodalRetrievalSynthesisResearchCopilotReceipt } from "./research-contracts.js";
+export {
+  ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_RESEARCH_COPILOT_FEATURE_ID,
+  ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_RESEARCH_COPILOT_CONTRACT_VERSION,
+  adapterThroughputRetrievalSynthesisResearchCopilotReceiptDigest,
+  validateAdapterThroughputRetrievalSynthesisResearchCopilotReceipt,
+} from "./research-contracts.js";
+export type { AdapterThroughputRetrievalSynthesisResearchCopilotReceipt } from "./research-contracts.js";
+export {
+  ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_RESEARCH_COPILOT_FEATURE_ID,
+  ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_RESEARCH_COPILOT_CONTRACT_VERSION,
+  adapterFederatedContinualRetrievalSynthesisResearchCopilotReceiptDigest,
+  validateAdapterFederatedContinualRetrievalSynthesisResearchCopilotReceipt,
+} from "./research-contracts.js";
+export type { AdapterFederatedContinualRetrievalSynthesisResearchCopilotReceipt } from "./research-contracts.js";
+export {
+  ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_FEATURE_ID,
+  ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_CONTRACT_VERSION,
+  adapterLocalRetrievalSynthesisWorkflowFabricReceiptDigest,
+  validateAdapterLocalRetrievalSynthesisWorkflowFabricReceipt,
+} from "./research-contracts.js";
+export type { AdapterLocalRetrievalSynthesisWorkflowFabricReceipt } from "./research-contracts.js";
+export {
+  ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_FEATURE_ID,
+  ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_CONTRACT_VERSION,
+  adapterMultimodalRetrievalSynthesisWorkflowFabricReceiptDigest,
+  validateAdapterMultimodalRetrievalSynthesisWorkflowFabricReceipt,
+} from "./research-contracts.js";
+export type { AdapterMultimodalRetrievalSynthesisWorkflowFabricReceipt } from "./research-contracts.js";
+export {
+  ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_FEATURE_ID,
+  ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_CONTRACT_VERSION,
+  adapterThroughputRetrievalSynthesisWorkflowFabricReceiptDigest,
+  validateAdapterThroughputRetrievalSynthesisWorkflowFabricReceipt,
+} from "./research-contracts.js";
+export type { AdapterThroughputRetrievalSynthesisWorkflowFabricReceipt } from "./research-contracts.js";
+export {
+  ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_FEATURE_ID,
+  ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_CONTRACT_VERSION,
+  adapterFederatedContinualRetrievalSynthesisWorkflowFabricReceiptDigest,
+  validateAdapterFederatedContinualRetrievalSynthesisWorkflowFabricReceipt,
+} from "./research-contracts.js";
+export type { AdapterFederatedContinualRetrievalSynthesisWorkflowFabricReceipt } from "./research-contracts.js";
+export {
+  ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_RESEARCH_WORKBENCH_FEATURE_ID,
+  ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_RESEARCH_WORKBENCH_CONTRACT_VERSION,
+  adapterLocalRetrievalSynthesisResearchWorkbenchReceiptDigest,
+  validateAdapterLocalRetrievalSynthesisResearchWorkbenchReceipt,
+} from "./research-contracts.js";
+export type { AdapterLocalRetrievalSynthesisResearchWorkbenchReceipt } from "./research-contracts.js";
+export {
+  ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_RESEARCH_WORKBENCH_FEATURE_ID,
+  ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_RESEARCH_WORKBENCH_CONTRACT_VERSION,
+  adapterMultimodalRetrievalSynthesisResearchWorkbenchReceiptDigest,
+  validateAdapterMultimodalRetrievalSynthesisResearchWorkbenchReceipt,
+} from "./research-contracts.js";
+export type { AdapterMultimodalRetrievalSynthesisResearchWorkbenchReceipt } from "./research-contracts.js";
+export { ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_RESEARCH_WORKBENCH_FEATURE_ID, ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_RESEARCH_WORKBENCH_CONTRACT_VERSION, adapterThroughputRetrievalSynthesisResearchWorkbenchReceiptDigest, validateAdapterThroughputRetrievalSynthesisResearchWorkbenchReceipt } from "./research-contracts.js";
+export type { AdapterThroughputRetrievalSynthesisResearchWorkbenchReceipt } from "./research-contracts.js";
+export { ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_RESEARCH_WORKBENCH_FEATURE_ID, ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_RESEARCH_WORKBENCH_CONTRACT_VERSION, adapterFederatedContinualRetrievalSynthesisResearchWorkbenchReceiptDigest, validateAdapterFederatedContinualRetrievalSynthesisResearchWorkbenchReceipt } from "./research-contracts.js";
+export type { AdapterFederatedContinualRetrievalSynthesisResearchWorkbenchReceipt } from "./research-contracts.js";
+export { ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_INTEROPERABILITY_GATEWAY_FEATURE_ID, ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_INTEROPERABILITY_GATEWAY_CONTRACT_VERSION, adapterLocalRetrievalSynthesisInteroperabilityGatewayReceiptDigest, validateAdapterLocalRetrievalSynthesisInteroperabilityGatewayReceipt } from "./research-contracts.js";
+export type { AdapterLocalRetrievalSynthesisInteroperabilityGatewayReceipt } from "./research-contracts.js";
+export { ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_INTEROPERABILITY_GATEWAY_FEATURE_ID, ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_INTEROPERABILITY_GATEWAY_CONTRACT_VERSION, adapterMultimodalRetrievalSynthesisInteroperabilityGatewayReceiptDigest, validateAdapterMultimodalRetrievalSynthesisInteroperabilityGatewayReceipt } from "./research-contracts.js";
+export type { AdapterMultimodalRetrievalSynthesisInteroperabilityGatewayReceipt } from "./research-contracts.js";
+export { ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_INTEROPERABILITY_GATEWAY_FEATURE_ID, ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_INTEROPERABILITY_GATEWAY_CONTRACT_VERSION, adapterThroughputRetrievalSynthesisInteroperabilityGatewayReceiptDigest, validateAdapterThroughputRetrievalSynthesisInteroperabilityGatewayReceipt } from "./research-contracts.js";
+export type { AdapterThroughputRetrievalSynthesisInteroperabilityGatewayReceipt } from "./research-contracts.js";
+export { ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_INTEROPERABILITY_GATEWAY_FEATURE_ID, ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_INTEROPERABILITY_GATEWAY_CONTRACT_VERSION, adapterFederatedContinualRetrievalSynthesisInteroperabilityGatewayReceiptDigest, validateAdapterFederatedContinualRetrievalSynthesisInteroperabilityGatewayReceipt } from "./research-contracts.js";
+export type { AdapterFederatedContinualRetrievalSynthesisInteroperabilityGatewayReceipt } from "./research-contracts.js";
+export { ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_FEATURE_ID, ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_CONTRACT_VERSION, adapterLocalRetrievalSynthesisAssuranceHarnessReceiptDigest, validateAdapterLocalRetrievalSynthesisAssuranceHarnessReceipt } from "./research-contracts.js";
+export type { AdapterLocalRetrievalSynthesisAssuranceHarnessReceipt } from "./research-contracts.js";
+export { ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_FEATURE_ID, ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_CONTRACT_VERSION, adapterMultimodalRetrievalSynthesisAssuranceHarnessReceiptDigest, validateAdapterMultimodalRetrievalSynthesisAssuranceHarnessReceipt } from "./research-contracts.js";
+export type { AdapterMultimodalRetrievalSynthesisAssuranceHarnessReceipt } from "./research-contracts.js";
+export { ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_FEATURE_ID, ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_CONTRACT_VERSION, adapterThroughputRetrievalSynthesisAssuranceHarnessReceiptDigest, validateAdapterThroughputRetrievalSynthesisAssuranceHarnessReceipt } from "./research-contracts.js";
+export type { AdapterThroughputRetrievalSynthesisAssuranceHarnessReceipt } from "./research-contracts.js";
+export { ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_FEATURE_ID, ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_CONTRACT_VERSION, adapterFederatedContinualRetrievalSynthesisAssuranceHarnessReceiptDigest, validateAdapterFederatedContinualRetrievalSynthesisAssuranceHarnessReceipt } from "./research-contracts.js";
+export type { AdapterFederatedContinualRetrievalSynthesisAssuranceHarnessReceipt } from "./research-contracts.js";
+export { ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_FEATURE_ID, ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_CONTRACT_VERSION, adapterLocalRetrievalSynthesisFederatedControlPlaneReceiptDigest, validateAdapterLocalRetrievalSynthesisFederatedControlPlaneReceipt } from "./research-contracts.js";
+export { ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_FEATURE_ID, ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_CONTRACT_VERSION, adapterMultimodalRetrievalSynthesisFederatedControlPlaneReceiptDigest, validateAdapterMultimodalRetrievalSynthesisFederatedControlPlaneReceipt } from "./research-contracts.js";
+export { ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_FEATURE_ID, ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_CONTRACT_VERSION, adapterThroughputRetrievalSynthesisFederatedControlPlaneReceiptDigest, validateAdapterThroughputRetrievalSynthesisFederatedControlPlaneReceipt } from "./research-contracts.js";
+export { ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_FEATURE_ID, ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_CONTRACT_VERSION, adapterFederatedContinualRetrievalSynthesisFederatedControlPlaneReceiptDigest, validateAdapterFederatedContinualRetrievalSynthesisFederatedControlPlaneReceipt } from "./research-contracts.js";
+export { FOUNDATION_MECHANISM_EXPLORATION_ASSURANCE_FEATURE_ID, FOUNDATION_MECHANISM_EXPLORATION_ASSURANCE_CONTRACT_VERSION, foundationMechanismExplorationAssuranceReceiptDigest, validateFoundationMechanismExplorationAssuranceReceipt } from "./research-contracts.js";
+export { EVALENGINE_LOCAL_MECHANISM_EXPLORATION_FEATURE_ID, EVALENGINE_LOCAL_MECHANISM_EXPLORATION_CONTRACT_VERSION, EVALENGINE_LOCAL_MECHANISM_EXPLORATION_INPUT_SCHEMA, EVALENGINE_LOCAL_MECHANISM_EXPLORATION_OUTPUT_SCHEMA, EVALENGINE_LOCAL_MECHANISM_EXPLORATION_CONTENT_TYPE, evalengineLocalMechanismExplorationDigest, validateEvalengineLocalMechanismExplorationReceipt } from "./research-contracts.js";
+export type { EvalengineMechanismPortfolio7 } from "./research-contracts.js";
+export { PACKS_LOCAL_QUALITY_CONTROL_FEATURE_ID, PACKS_LOCAL_QUALITY_CONTROL_CONTRACT_VERSION, PACKS_LOCAL_QUALITY_CONTROL_INPUT_SCHEMA, PACKS_LOCAL_QUALITY_CONTROL_OUTPUT_SCHEMA, PACKS_LOCAL_QUALITY_CONTROL_CONTENT_TYPE, packsLocalQualityControlDigest, validatePacksLocalQualityControlReceipt } from "./research-contracts.js";
+export type { PacksQualityVerdict7 } from "./research-contracts.js";
+export { ATLASHUB_MECHANISM_EXPLORATION_ASSURANCE_FEATURE_ID, ATLASHUB_MECHANISM_EXPLORATION_ASSURANCE_CONTRACT_VERSION, ATLASHUB_MECHANISM_EXPLORATION_ASSURANCE_INPUT_SCHEMA, ATLASHUB_MECHANISM_EXPLORATION_ASSURANCE_OUTPUT_SCHEMA, atlashubMechanismExplorationAssuranceReceiptDigest, validateAtlashubMechanismExplorationAssuranceReceipt } from "./research-contracts.js";
+export type { AtlashubMechanismExplorationAssuranceReceipt } from "./research-contracts.js";
+export { INFLUENCE_FEDERATED_CONTINUAL_INTERPRETATION_FEATURE_ID, INFLUENCE_FEDERATED_CONTINUAL_INTERPRETATION_CONTRACT_VERSION, INFLUENCE_FEDERATED_CONTINUAL_INTERPRETATION_INPUT_SCHEMA, INFLUENCE_FEDERATED_CONTINUAL_INTERPRETATION_OUTPUT_SCHEMA, influenceFederatedContinualInterpretationReceiptDigest, validateInfluenceFederatedContinualInterpretationReceipt } from "./research-contracts.js";
+export type { InfluenceFederatedContinualInterpretationReceipt } from "./research-contracts.js";
+export type { AdapterLocalRetrievalSynthesisFederatedControlPlaneReceipt } from "./research-contracts.js";
+export {
+  ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_FEATURE_ID,
+  ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_CONTRACT_VERSION,
+  adapterMultimodalRetrievalSynthesisInferenceEngineReceiptDigest,
+  validateAdapterMultimodalRetrievalSynthesisInferenceEngineReceipt,
+} from "./research-contracts.js";
+export type { AdapterMultimodalRetrievalSynthesisInferenceEngineReceipt } from "./research-contracts.js";
+export {
+  ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_FEATURE_ID,
+  ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_CONTRACT_VERSION,
+  adapterThroughputRetrievalSynthesisInferenceEngineReceiptDigest,
+  validateAdapterThroughputRetrievalSynthesisInferenceEngineReceipt,
+} from "./research-contracts.js";
+export type { AdapterThroughputRetrievalSynthesisInferenceEngineReceipt } from "./research-contracts.js";
+export {
+  ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_FEATURE_ID,
+  ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_CONTRACT_VERSION,
+  adapterThroughputRetrievalSynthesisContractModelReceiptDigest,
+  validateAdapterThroughputRetrievalSynthesisContractModelReceipt,
+} from "./research-contracts.js";
+export type { AdapterThroughputRetrievalSynthesisContractModelReceipt } from "./research-contracts.js";
+export {
+  ADAPTER_FEDERATED_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_FEATURE_ID,
+  ADAPTER_FEDERATED_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_CONTRACT_VERSION,
+  adapterFederatedRetrievalSynthesisInferenceEngineReceiptDigest,
+  validateAdapterFederatedRetrievalSynthesisInferenceEngineReceipt,
+} from "./research-contracts.js";
+export type { AdapterFederatedRetrievalSynthesisInferenceEngineReceipt } from "./research-contracts.js";
+export {
+  ADAPTER_FEDERATED_RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_FEATURE_ID,
+  ADAPTER_FEDERATED_RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_CONTRACT_VERSION,
+  adapterFederatedRetrievalSynthesisContractModelReceiptDigest,
+  validateAdapterFederatedRetrievalSynthesisContractModelReceipt,
+} from "./research-contracts.js";
+export type { AdapterFederatedRetrievalSynthesisContractModelReceipt } from "./research-contracts.js";
 export {
   AUTONOMOUS_MEMORY_CONSOLIDATION_LESSON_SCHEMA,
   AUTONOMOUS_MEMORY_CONSOLIDATION_SCHEMA,
@@ -3845,6 +5254,2983 @@ export type {
   AutonomousMemorySnapshot,
   AutonomousMemoryStats,
 } from "./autonomous-memory.js";
+
+export {
+  FIBER_FEDERATED_PROTOCOL_SIMULATION_FEATURE_ID,
+  FIBER_FEDERATED_PROTOCOL_SIMULATION_CONTRACT_VERSION,
+  FIBER_FEDERATED_PROTOCOL_SIMULATION_INPUT_SCHEMA,
+  FIBER_FEDERATED_PROTOCOL_SIMULATION_OUTPUT_SCHEMA,
+  fiberFederatedProtocolSimulationReceiptDigest,
+  validateFiberFederatedProtocolSimulationReceipt,
+} from "./research-contracts.js";
+export type { FiberFederatedProtocolSimulationReceipt } from "./research-contracts.js";
+export {
+  EVALENGINE_PROTOCOL_SIMULATION_COPILOT_FEATURE_ID,
+  EVALENGINE_PROTOCOL_SIMULATION_COPILOT_CONTRACT_VERSION,
+  EVALENGINE_PROTOCOL_SIMULATION_COPILOT_INPUT_SCHEMA,
+  EVALENGINE_PROTOCOL_SIMULATION_COPILOT_OUTPUT_SCHEMA,
+  evalengineProtocolSimulationCopilotDigest,
+  validateEvalengineProtocolSimulationReport,
+} from "./research-contracts.js";
+export type { EvalengineProtocolSimulationReport } from "./research-contracts.js";
+export {
+  FIBER_FEDERATED_EXECUTION_INTEROPERABILITY_FEATURE_ID,
+  FIBER_FEDERATED_EXECUTION_INTEROPERABILITY_CONTRACT_VERSION,
+  FIBER_FEDERATED_EXECUTION_INTEROPERABILITY_INPUT_SCHEMA,
+  FIBER_FEDERATED_EXECUTION_INTEROPERABILITY_OUTPUT_SCHEMA,
+  fiberFederatedExecutionInteroperabilityEnvelopeDigest,
+  validateFiberFederatedExecutionInteroperabilityEnvelope,
+} from "./research-contracts.js";
+export type { FiberFederatedExecutionInteroperabilityEnvelope } from "./research-contracts.js";
+export {
+  INTERWEAVE_FEDERATED_DEPENDENCY_COMPOSITION_FEATURE_ID,
+  INTERWEAVE_FEDERATED_DEPENDENCY_COMPOSITION_CONTRACT_VERSION,
+  INTERWEAVE_FEDERATED_DEPENDENCY_COMPOSITION_INPUT_SCHEMA,
+  INTERWEAVE_FEDERATED_DEPENDENCY_COMPOSITION_OUTPUT_SCHEMA,
+  interweaveFederatedDependencyCompositionReceiptDigest,
+  validateInterweaveFederatedDependencyCompositionReceipt,
+} from "./research-contracts.js";
+export type { InterweaveFederatedDependencyCompositionReceipt } from "./research-contracts.js";
+export {
+  EXAMPLES_STATISTICAL_ANALYSIS_WORKFLOW_FEATURE_ID,
+  EXAMPLES_STATISTICAL_ANALYSIS_WORKFLOW_CONTRACT_VERSION,
+  EXAMPLES_STATISTICAL_ANALYSIS_WORKFLOW_INPUT_SCHEMA,
+  EXAMPLES_STATISTICAL_ANALYSIS_WORKFLOW_OUTPUT_SCHEMA,
+  examplesStatisticalAnalysisWorkflowRunDigest,
+  validateExamplesStatisticalAnalysisWorkflowRun,
+} from "./research-contracts.js";
+export type { ExamplesStatisticalAnalysisWorkflowRun } from "./research-contracts.js";
+export {
+  CLI_QUALITY_CONTROL_WORKFLOW_FEATURE_ID,
+  CLI_QUALITY_CONTROL_WORKFLOW_CONTRACT_VERSION,
+  CLI_QUALITY_CONTROL_WORKFLOW_INPUT_SCHEMA,
+  CLI_QUALITY_CONTROL_WORKFLOW_OUTPUT_SCHEMA,
+  cliQualityControlWorkflowRunDigest,
+  validateCliQualityControlWorkflowRun,
+} from "./research-contracts.js";
+export type { CliQualityControlWorkflowRun } from "./research-contracts.js";
+
+export {
+  BIOEVALX_MECHANISM_ASSURANCE_FEATURE_ID,
+  BIOEVALX_MECHANISM_ASSURANCE_CONTRACT_VERSION,
+  BIOEVALX_MECHANISM_ASSURANCE_INPUT_SCHEMA,
+  BIOEVALX_MECHANISM_ASSURANCE_OUTPUT_SCHEMA,
+  bioevalxMechanismAssuranceReportDigest,
+  validateBioevalxMechanismAssuranceReport,
+} from "./research-contracts.js";
+export type { BioevalxMechanismAssuranceReport } from "./research-contracts.js";
+
+export {
+  HUBAPI_CONTEXT_ASSURANCE_FEATURE_ID,
+  HUBAPI_CONTEXT_ASSURANCE_CONTRACT_VERSION,
+  HUBAPI_CONTEXT_ASSURANCE_INPUT_SCHEMA,
+  HUBAPI_CONTEXT_ASSURANCE_OUTPUT_SCHEMA,
+  hubapiContextAssuranceReportDigest,
+  validateHubapiContextAssuranceReport,
+} from "./research-contracts.js";
+export type { HubapiContextAssuranceReport } from "./research-contracts.js";
+
+export {
+  CLI_INTERPRETATION_GATEWAY_FEATURE_ID,
+  CLI_INTERPRETATION_GATEWAY_CONTRACT_VERSION,
+  CLI_INTERPRETATION_GATEWAY_INPUT_SCHEMA,
+  CLI_INTERPRETATION_GATEWAY_OUTPUT_SCHEMA,
+  cliInterpretationGatewayEnvelopeDigest,
+  validateCliInterpretationGatewayEnvelope,
+} from "./research-contracts.js";
+export type { CliInterpretationGatewayEnvelope } from "./research-contracts.js";
+
+export {
+  SAFETY_EVIDENCE_SURVEILLANCE_FEATURE_ID,
+  SAFETY_EVIDENCE_SURVEILLANCE_CONTRACT_VERSION,
+  SAFETY_EVIDENCE_SURVEILLANCE_INPUT_SCHEMA,
+  SAFETY_EVIDENCE_SURVEILLANCE_OUTPUT_SCHEMA,
+  safetyEvidenceSurveillanceSetDigest,
+  validateSafetyEvidenceSurveillanceSet,
+} from "./research-contracts.js";
+export type { SafetyQualifiedEvidenceSet } from "./research-contracts.js";
+
+export {
+  CLI_MECHANISM_CONTROL_FEATURE_ID,
+  CLI_MECHANISM_CONTROL_CONTRACT_VERSION,
+  CLI_MECHANISM_CONTROL_INPUT_SCHEMA,
+  CLI_MECHANISM_CONTROL_OUTPUT_SCHEMA,
+  cliMechanismPortfolioDigest,
+  validateCliMechanismPortfolio,
+} from "./research-contracts.js";
+export type { CliMechanismPortfolio } from "./research-contracts.js";
+
+export {
+  CLI_EXPERIMENT_DESIGN_ASSURANCE_FEATURE_ID,
+  CLI_EXPERIMENT_DESIGN_ASSURANCE_CONTRACT_VERSION,
+  CLI_EXPERIMENT_DESIGN_ASSURANCE_INPUT_SCHEMA,
+  CLI_EXPERIMENT_DESIGN_ASSURANCE_OUTPUT_SCHEMA,
+  cliExperimentDesignAssuranceDigest,
+  validateCliExperimentDesignAssurance,
+} from "./research-contracts.js";
+export type { CliExperimentDesignAssurance } from "./research-contracts.js";
+
+export {
+  ORACLE_EXPERIMENT_DESIGN_COPILOT_FEATURE_ID,
+  ORACLE_EXPERIMENT_DESIGN_COPILOT_CONTRACT_VERSION,
+  ORACLE_EXPERIMENT_DESIGN_COPILOT_INPUT_SCHEMA,
+  ORACLE_EXPERIMENT_DESIGN_COPILOT_OUTPUT_SCHEMA,
+  oracleExperimentDesignCopilotDigest,
+  validateOracleExperimentDesignCopilot,
+} from "./research-contracts.js";
+export type { OracleExperimentDesignCopilotReceipt } from "./research-contracts.js";
+
+export {
+  ORACLE_CONTEXT_FEDERATION_FEATURE_ID,
+  ORACLE_CONTEXT_FEDERATION_CONTRACT_VERSION,
+  ORACLE_CONTEXT_FEDERATION_INPUT_SCHEMA,
+  ORACLE_CONTEXT_FEDERATION_OUTPUT_SCHEMA,
+  oracleContextFederationDigest,
+  validateOracleContextFederationEnvelope,
+} from "./research-contracts.js";
+export type { OracleContextFederationEnvelope } from "./research-contracts.js";
+
+export {
+  OBLIGATION_EVIDENCE_GATEWAY_FEATURE_ID,
+  OBLIGATION_EVIDENCE_GATEWAY_CONTRACT_VERSION,
+  OBLIGATION_EVIDENCE_GATEWAY_INPUT_SCHEMA,
+  OBLIGATION_EVIDENCE_GATEWAY_OUTPUT_SCHEMA,
+  obligationEvidenceGatewayDigest,
+  validateObligationEvidenceGatewaySet,
+} from "./research-contracts.js";
+export type { ObligationQualifiedEvidenceSet } from "./research-contracts.js";
+
+export {
+  BIOIR_LABORATORY_CONTROL_FEATURE_ID,
+  BIOIR_LABORATORY_CONTROL_CONTRACT_VERSION,
+  BIOIR_LABORATORY_CONTROL_INPUT_SCHEMA,
+  BIOIR_LABORATORY_CONTROL_OUTPUT_SCHEMA,
+  bioirLaboratoryControlDigest,
+  validateBioirInstrumentActionReceipt,
+} from "./research-contracts.js";
+export type { BioirInstrumentActionReceipt } from "./research-contracts.js";
+
+export {
+  BIOLANG_CONTRACT_FRONTIER_FEATURE_ID,
+  BIOLANG_CONTRACT_FRONTIER_CONTRACT_VERSION,
+  BIOLANG_CONTRACT_FRONTIER_INPUT_SCHEMA,
+  BIOLANG_CONTRACT_FRONTIER_OUTPUT_SCHEMA,
+  biolangContractFrontierDigest,
+  validateBiolangCapabilityManifest,
+} from "./research-contracts.js";
+export type { BiolangCapabilityManifest } from "./research-contracts.js";
+
+export {
+  IDS_THROUGHPUT_EVIDENCE_FEATURE_ID,
+  IDS_THROUGHPUT_EVIDENCE_CONTRACT_VERSION,
+  IDS_THROUGHPUT_EVIDENCE_INPUT_SCHEMA,
+  IDS_THROUGHPUT_EVIDENCE_OUTPUT_SCHEMA,
+  idsThroughputEvidenceSurveillanceDigest,
+  validateIdsEvidenceSurveillanceContractReceipt,
+} from "./research-contracts.js";
+export type { IdsEvidenceSurveillanceContractReceipt } from "./research-contracts.js";
+
+export {
+  BIOIR_PERFORMANCE_RELIABILITY_FEATURE_ID,
+  BIOIR_PERFORMANCE_RELIABILITY_CONTRACT_VERSION,
+  BIOIR_PERFORMANCE_RELIABILITY_INPUT_SCHEMA,
+  BIOIR_PERFORMANCE_RELIABILITY_OUTPUT_SCHEMA,
+  bioirPerformanceReliabilityDigest,
+  validateBioirReliableCapabilityResult,
+} from "./research-contracts.js";
+export type { BioirReliableCapabilityResult } from "./research-contracts.js";
+
+export {
+  BASELINE_INTERPRETATION_ASSURANCE_FEATURE_ID,
+  BASELINE_INTERPRETATION_ASSURANCE_CONTRACT_VERSION,
+  BASELINE_INTERPRETATION_ASSURANCE_INPUT_SCHEMA,
+  BASELINE_INTERPRETATION_ASSURANCE_OUTPUT_SCHEMA,
+  baselineInterpretationAssuranceDigest,
+  validateBaselineInterpretationAssuranceReceipt,
+} from "./research-contracts.js";
+export type { BaselineInterpretationAssuranceReceipt } from "./research-contracts.js";
+
+export {
+  IDS_RESOURCE_INTEROPERABILITY_FEATURE_ID,
+  IDS_RESOURCE_INTEROPERABILITY_CONTRACT_VERSION,
+  IDS_RESOURCE_INTEROPERABILITY_INPUT_SCHEMA,
+  IDS_RESOURCE_INTEROPERABILITY_OUTPUT_SCHEMA,
+  IDS_RESOURCE_INTEROPERABILITY_CONTENT_TYPE,
+  idsResourceInteroperabilityDigest,
+  validateIdsQualifiedResourceSet6,
+} from "./research-contracts.js";
+export type { IdsQualifiedResourceSet6 } from "./research-contracts.js";
+
+export {
+  ONCOWORLDS_RESOURCE_DISCOVERY_FEATURE_ID,
+  ONCOWORLDS_RESOURCE_DISCOVERY_CONTRACT_VERSION,
+  ONCOWORLDS_RESOURCE_DISCOVERY_INPUT_SCHEMA,
+  ONCOWORLDS_RESOURCE_DISCOVERY_OUTPUT_SCHEMA,
+  oncoworldsResourceDiscoveryDigest,
+  validateOncoworldsQualifiedResourceSet7,
+} from "./research-contracts.js";
+export type { OncoworldsQualifiedResourceSet7 } from "./research-contracts.js";
+
+export {
+  GOVERNANCE_FEDERATED_CONTINUAL_INTERPRETATION_FEATURE_ID,
+  GOVERNANCE_FEDERATED_CONTINUAL_INTERPRETATION_CONTRACT_VERSION,
+  GOVERNANCE_FEDERATED_CONTINUAL_INTERPRETATION_INPUT_SCHEMA,
+  GOVERNANCE_FEDERATED_CONTINUAL_INTERPRETATION_OUTPUT_SCHEMA,
+  governanceFederatedInterpretationDigest,
+  validateGovernanceFederatedInterpretationReceipt,
+} from "./research-contracts.js";
+export type { GovernanceFederatedInterpretationReceipt } from "./research-contracts.js";
+
+export {
+  METRICS_EXPERIMENT_DESIGN_FEATURE_ID,
+  METRICS_EXPERIMENT_DESIGN_CONTRACT_VERSION,
+  METRICS_EXPERIMENT_DESIGN_INPUT_SCHEMA,
+  METRICS_EXPERIMENT_DESIGN_OUTPUT_SCHEMA,
+  metricsExperimentDesignDigest,
+  validateMetricsExecutableExperimentDesign,
+} from "./research-contracts.js";
+export type { MetricsExecutableExperimentDesign } from "./research-contracts.js";
+
+export {
+  BIOETHICS_DEPENDENCY_COMPOSITION_FEATURE_ID,
+  BIOETHICS_DEPENDENCY_COMPOSITION_CONTRACT_VERSION,
+  BIOETHICS_DEPENDENCY_COMPOSITION_INPUT_SCHEMA,
+  BIOETHICS_DEPENDENCY_COMPOSITION_OUTPUT_SCHEMA,
+  bioethicsDependencyCompositionDigest,
+  validateBioethicsCompositionReceipt,
+} from "./research-contracts.js";
+export type { BioethicsCompositionReceipt } from "./research-contracts.js";
+
+export {
+  FIBER_MECHANISM_CONTRACT_MODEL_FEATURE_ID,
+  FIBER_MECHANISM_CONTRACT_MODEL_CONTRACT_VERSION,
+  FIBER_MECHANISM_CONTRACT_MODEL_INPUT_SCHEMA,
+  FIBER_MECHANISM_CONTRACT_MODEL_OUTPUT_SCHEMA,
+  fiberMechanismContractDigest,
+  validateFiberMechanismPortfolioContract,
+} from "./research-contracts.js";
+export type { FiberMechanismPortfolioContract } from "./research-contracts.js";
+
+export {
+  BIOETHICS_CONTRACT_FRONTIER_FEATURE_ID,
+  BIOETHICS_CONTRACT_FRONTIER_CONTRACT_VERSION,
+  BIOETHICS_CONTRACT_FRONTIER_INPUT_SCHEMA,
+  BIOETHICS_CONTRACT_FRONTIER_OUTPUT_SCHEMA,
+  bioethicsContractFrontierDigest,
+  validateBioethicsCapabilityManifestResult,
+} from "./research-contracts.js";
+export type { BioethicsCapabilityManifestResult } from "./research-contracts.js";
+
+export {
+  OPS_REPLICATION_NEGATIVE_RESULTS_FEATURE_ID,
+  OPS_REPLICATION_NEGATIVE_RESULTS_CONTRACT_VERSION,
+  OPS_REPLICATION_NEGATIVE_RESULTS_INPUT_SCHEMA,
+  OPS_REPLICATION_NEGATIVE_RESULTS_OUTPUT_SCHEMA,
+  opsReplicationDigest,
+  validateOpsReplicationRecord,
+} from "./research-contracts.js";
+export type { OpsReplicationRecord } from "./research-contracts.js";
+
+export {
+  ONCOWORLDS_REPLICATION_ASSURANCE_FEATURE_ID,
+  ONCOWORLDS_REPLICATION_ASSURANCE_CONTRACT_VERSION,
+  ONCOWORLDS_REPLICATION_ASSURANCE_INPUT_SCHEMA,
+  ONCOWORLDS_REPLICATION_ASSURANCE_OUTPUT_SCHEMA,
+  oncoworldsReplicationDigest,
+  validateOncoworldsReplicationRecord,
+} from "./research-contracts.js";
+export type { OncoworldsReplicationRecord } from "./research-contracts.js";
+
+export {
+  FIBER_SEMANTIC_PARITY_FEATURE_ID,
+  FIBER_SEMANTIC_PARITY_CONTRACT_VERSION,
+  FIBER_SEMANTIC_PARITY_INPUT_SCHEMA,
+  FIBER_SEMANTIC_PARITY_OUTPUT_SCHEMA,
+  fiberSemanticParityDigest,
+  validateFiberParityWitness,
+} from "./research-contracts.js";
+export type { FiberParityWitness } from "./research-contracts.js";
+
+export {
+  LAB_FEDERATED_RETRIEVAL_SYNTHESIS_FEATURE_ID,
+  LAB_FEDERATED_RETRIEVAL_SYNTHESIS_CONTRACT_VERSION,
+  LAB_FEDERATED_RETRIEVAL_SYNTHESIS_INPUT_SCHEMA,
+  LAB_FEDERATED_RETRIEVAL_SYNTHESIS_OUTPUT_SCHEMA,
+  labFederatedRetrievalSynthesisDigest,
+  validateLabEvidenceSynthesis,
+} from "./research-contracts.js";
+export type { LabEvidenceSynthesis } from "./research-contracts.js";
+
+export {
+  WEAVELANG_LIMITATION_CLOSURE_FEATURE_ID,
+  WEAVELANG_LIMITATION_CLOSURE_CONTRACT_VERSION,
+  WEAVELANG_LIMITATION_CLOSURE_INPUT_SCHEMA,
+  WEAVELANG_LIMITATION_CLOSURE_OUTPUT_SCHEMA,
+  weavelangLimitationClosureDigest,
+  validateWeavelangClosureReceipt,
+} from "./research-contracts.js";
+export type { WeavelangClosureReceipt } from "./research-contracts.js";
+
+export {
+  BUNDLE_RETRIEVAL_ASSURANCE_FEATURE_ID,
+  BUNDLE_RETRIEVAL_ASSURANCE_CONTRACT_VERSION,
+  BUNDLE_RETRIEVAL_ASSURANCE_INPUT_SCHEMA,
+  BUNDLE_RETRIEVAL_ASSURANCE_OUTPUT_SCHEMA,
+  bundleRetrievalAssuranceDigest,
+  validateBundleEvidenceSynthesis,
+} from "./research-contracts.js";
+export type { BundleEvidenceSynthesis } from "./research-contracts.js";
+
+export {
+  MCP_MULTIMODAL_INGESTION_ASSURANCE_FEATURE_ID,
+  MCP_MULTIMODAL_INGESTION_ASSURANCE_CONTRACT_VERSION,
+  MCP_MULTIMODAL_INGESTION_ASSURANCE_INPUT_SCHEMA,
+  MCP_MULTIMODAL_INGESTION_ASSURANCE_OUTPUT_SCHEMA,
+  mcpMultimodalIngestionAssuranceDigest,
+  validateMcpMultimodalIngestionReceipt,
+} from "./research-contracts.js";
+export type { McpMultimodalIngestionReceipt } from "./research-contracts.js";
+
+export {
+  WEAVELANG_COMPUTATIONAL_EXECUTION_ASSURANCE_FEATURE_ID,
+  WEAVELANG_COMPUTATIONAL_EXECUTION_ASSURANCE_CONTRACT_VERSION,
+  WEAVELANG_COMPUTATIONAL_EXECUTION_ASSURANCE_INPUT_SCHEMA,
+  WEAVELANG_COMPUTATIONAL_EXECUTION_ASSURANCE_OUTPUT_SCHEMA,
+  weavelangComputationalExecutionAssuranceDigest,
+  validateWeavelangExecutionRunReceipt,
+} from "./research-contracts.js";
+export type { WeavelangExecutionRunReceipt } from "./research-contracts.js";
+
+export {
+  MCP_KNOWLEDGE_REPRESENTATION_CONTRACT_FEATURE_ID,
+  MCP_KNOWLEDGE_REPRESENTATION_CONTRACT_VERSION,
+  MCP_KNOWLEDGE_REPRESENTATION_INPUT_SCHEMA,
+  MCP_KNOWLEDGE_REPRESENTATION_OUTPUT_SCHEMA,
+  mcpKnowledgeRepresentationDigest,
+  validateMcpTypedKnowledgeWorldReceipt,
+} from "./research-contracts.js";
+export type { McpTypedKnowledgeWorldReceipt } from "./research-contracts.js";
+
+export {
+  REGISTRY_SCALE_FRONTIER_FEATURE_ID,
+  REGISTRY_SCALE_FRONTIER_CONTRACT_VERSION,
+  REGISTRY_SCALE_FRONTIER_INPUT_SCHEMA,
+  REGISTRY_SCALE_FRONTIER_OUTPUT_SCHEMA,
+  registryScaleFrontierDigest,
+  validateRegistryCapacityReport,
+} from "./research-contracts.js";
+export type { RegistryCapacityReport } from "./research-contracts.js";
+
+export {
+  ORACLEX_CONTEXT_COMPILATION_FEATURE_ID,
+  ORACLEX_CONTEXT_COMPILATION_CONTRACT_VERSION,
+  ORACLEX_CONTEXT_COMPILATION_INPUT_SCHEMA,
+  ORACLEX_CONTEXT_COMPILATION_OUTPUT_SCHEMA,
+  oraclexContextCompilationDigest,
+  validateOraclexCertifiedDecisionSection,
+} from "./research-contracts.js";
+export type { OraclexCertifiedDecisionSection } from "./research-contracts.js";
+
+export {
+  REGISTRY_KNOWLEDGE_ASSURANCE_FEATURE_ID,
+  REGISTRY_KNOWLEDGE_ASSURANCE_CONTRACT_VERSION,
+  REGISTRY_KNOWLEDGE_ASSURANCE_INPUT_SCHEMA,
+  REGISTRY_KNOWLEDGE_ASSURANCE_OUTPUT_SCHEMA,
+  registryKnowledgeAssuranceDigest,
+  validateRegistryTypedKnowledgeWorld,
+} from "./research-contracts.js";
+export type { RegistryTypedKnowledgeWorld } from "./research-contracts.js";
+
+export {
+  OPS_CONTEXT_COMPILATION_CONTROL_FEATURE_ID,
+  OPS_CONTEXT_COMPILATION_CONTROL_CONTRACT_VERSION,
+  OPS_CONTEXT_COMPILATION_CONTROL_INPUT_SCHEMA,
+  OPS_CONTEXT_COMPILATION_CONTROL_OUTPUT_SCHEMA,
+  opsContextCompilationControlDigest,
+  validateOpsCertifiedDecisionSection,
+} from "./research-contracts.js";
+export type { OpsCertifiedDecisionSection } from "./research-contracts.js";
+
+export {
+  EPISTEMIC_RETRIEVAL_SYNTHESIS_FEATURE_ID,
+  EPISTEMIC_RETRIEVAL_SYNTHESIS_CONTRACT_VERSION,
+  EPISTEMIC_RETRIEVAL_SYNTHESIS_INPUT_SCHEMA,
+  EPISTEMIC_RETRIEVAL_SYNTHESIS_OUTPUT_SCHEMA,
+  epistemicRetrievalSynthesisDigest,
+  validateEpistemicEvidenceSynthesis8,
+} from "./research-contracts.js";
+export type { EpistemicEvidenceSynthesis8 } from "./research-contracts.js";
+
+export {
+  IDS_CONTEXT_COMPILATION_FEATURE_ID,
+  IDS_CONTEXT_COMPILATION_CONTRACT_VERSION,
+  IDS_CONTEXT_COMPILATION_INPUT_SCHEMA,
+  IDS_CONTEXT_COMPILATION_OUTPUT_SCHEMA,
+  idsContextCompilationDigest,
+  validateIdsCertifiedDecisionSection1,
+} from "./research-contracts.js";
+export type { IdsCertifiedDecisionSection1 } from "./research-contracts.js";
+
+export {
+  IDS_KNOWLEDGE_REPRESENTATION_FEATURE_ID,
+  IDS_KNOWLEDGE_REPRESENTATION_CONTRACT_VERSION,
+  IDS_KNOWLEDGE_REPRESENTATION_INPUT_SCHEMA,
+  IDS_KNOWLEDGE_REPRESENTATION_OUTPUT_SCHEMA,
+  idsKnowledgeRepresentationDigest,
+  validateIdsTypedKnowledgeWorld7,
+} from "./research-contracts.js";
+export type { IdsTypedKnowledgeWorld7 } from "./research-contracts.js";
+
+export {
+  IDS_MULTIMODAL_INGESTION_FEATURE_ID,
+  IDS_MULTIMODAL_INGESTION_CONTRACT_VERSION,
+  IDS_MULTIMODAL_INGESTION_INPUT_SCHEMA,
+  IDS_MULTIMODAL_INGESTION_OUTPUT_SCHEMA,
+  idsMultimodalIngestionDigest,
+  validateIdsHarmonizedResearchObject8,
+} from "./research-contracts.js";
+export type { IdsHarmonizedResearchObject8 } from "./research-contracts.js";
+
+export {
+  IDS_QUALITY_CONTROL_FEATURE_ID,
+  IDS_QUALITY_CONTROL_CONTRACT_VERSION,
+  IDS_QUALITY_CONTROL_INPUT_SCHEMA,
+  IDS_QUALITY_CONTROL_OUTPUT_SCHEMA,
+  idsQualityControlDigest,
+  validateIdsQualityControlReport8,
+} from "./research-contracts.js";
+export type { IdsQualityControlReport8 } from "./research-contracts.js";
+
+export {
+  IDS_MECHANISM_EXPLORATION_FEATURE_ID,
+  IDS_MECHANISM_EXPLORATION_CONTRACT_VERSION,
+  IDS_MECHANISM_EXPLORATION_INPUT_SCHEMA,
+  IDS_MECHANISM_EXPLORATION_OUTPUT_SCHEMA,
+  idsMechanismExplorationDigest,
+  validateIdsMechanismPortfolio7,
+} from "./research-contracts.js";
+export type { IdsMechanismPortfolio7 } from "./research-contracts.js";
+
+export {
+  IDS_EXPERIMENT_DESIGN_FEATURE_ID,
+  IDS_EXPERIMENT_DESIGN_CONTRACT_VERSION,
+  IDS_EXPERIMENT_DESIGN_INPUT_SCHEMA,
+  IDS_EXPERIMENT_DESIGN_OUTPUT_SCHEMA,
+  idsExperimentDesignDigest,
+  validateIdsDesignFrontier8,
+} from "./research-contracts.js";
+export type { IdsDesignFrontier8 } from "./research-contracts.js";
+
+export {
+  IDS_PROTOCOL_SIMULATION_FEATURE_ID,
+  IDS_PROTOCOL_SIMULATION_CONTRACT_VERSION,
+  IDS_PROTOCOL_SIMULATION_INPUT_SCHEMA,
+  IDS_PROTOCOL_SIMULATION_OUTPUT_SCHEMA,
+  idsProtocolSimulationWorkbenchDigest,
+  validateIdsProtocolWorkbenchReport9,
+} from "./research-contracts.js";
+export type { IdsProtocolWorkbenchReport9 } from "./research-contracts.js";
+
+export {
+  IDS_LABORATORY_INTEGRATION_FEATURE_ID,
+  IDS_LABORATORY_INTEGRATION_CONTRACT_VERSION,
+  IDS_LABORATORY_INTEGRATION_INPUT_SCHEMA,
+  IDS_LABORATORY_INTEGRATION_OUTPUT_SCHEMA,
+  idsLaboratoryIntegrationDigest,
+  validateIdsLaboratoryIntegrationReport9,
+} from "./research-contracts.js";
+export type { IdsLaboratoryIntegrationReport9 } from "./research-contracts.js";
+
+export {
+  IDS_COMPUTATIONAL_EXECUTION_FEATURE_ID,
+  IDS_COMPUTATIONAL_EXECUTION_CONTRACT_VERSION,
+  IDS_COMPUTATIONAL_EXECUTION_INPUT_SCHEMA,
+  IDS_COMPUTATIONAL_EXECUTION_OUTPUT_SCHEMA,
+  idsComputationalExecutionDigest,
+  validateIdsComputationalExecutionReport9,
+} from "./research-contracts.js";
+export type { IdsComputationalExecutionReport9 } from "./research-contracts.js";
+
+export {
+  IDS_STATISTICAL_CAUSAL_ML_FEATURE_ID,
+  IDS_STATISTICAL_CAUSAL_ML_CONTRACT_VERSION,
+  IDS_STATISTICAL_CAUSAL_ML_INPUT_SCHEMA,
+  IDS_STATISTICAL_CAUSAL_ML_OUTPUT_SCHEMA,
+  idsStatisticalCausalMlDigest,
+  validateIdsQualifiedAnalysisResult10,
+} from "./research-contracts.js";
+export type { IdsQualifiedAnalysisResult10 } from "./research-contracts.js";
+
+export {
+  IDS_RETRIEVAL_SYNTHESIS_ASSURANCE_FEATURE_ID,
+  IDS_RETRIEVAL_SYNTHESIS_ASSURANCE_CONTRACT_VERSION,
+  IDS_RETRIEVAL_SYNTHESIS_ASSURANCE_INPUT_SCHEMA,
+  IDS_RETRIEVAL_SYNTHESIS_ASSURANCE_OUTPUT_SCHEMA,
+  idsRetrievalSynthesisAssuranceDigest,
+  validateIdsEvidenceSynthesis11,
+} from "./research-contracts.js";
+export type { IdsEvidenceSynthesis11 } from "./research-contracts.js";
+
+export {
+  IDS_REPLICATION_INTEROPERABILITY_FEATURE_ID,
+  IDS_REPLICATION_INTEROPERABILITY_CONTRACT_VERSION,
+  IDS_REPLICATION_INTEROPERABILITY_INPUT_SCHEMA,
+  IDS_REPLICATION_INTEROPERABILITY_OUTPUT_SCHEMA,
+  idsReplicationInteroperabilityDigest,
+  validateIdsReplicationRecord9,
+} from "./research-contracts.js";
+export type { IdsReplicationRecord9 } from "./research-contracts.js";
+
+export {
+  IDS_PUBLICATION_RELEASE_FEATURE_ID,
+  IDS_PUBLICATION_RELEASE_CONTRACT_VERSION,
+  IDS_PUBLICATION_RELEASE_INPUT_SCHEMA,
+  IDS_PUBLICATION_RELEASE_OUTPUT_SCHEMA,
+  IDS_PUBLICATION_RELEASE_CONTENT_TYPE,
+  idsPublicationReleaseDigest,
+  validateIdsSignedResearchObject11,
+} from "./research-contracts.js";
+export type { IdsSignedResearchObject11 } from "./research-contracts.js";
+
+export {
+  IDS_TYPED_DETERMINISM_FEATURE_ID,
+  IDS_TYPED_DETERMINISM_CONTRACT_VERSION,
+  IDS_TYPED_DETERMINISM_INPUT_SCHEMA,
+  IDS_TYPED_DETERMINISM_OUTPUT_SCHEMA,
+  IDS_TYPED_DETERMINISM_CONTENT_TYPE,
+  idsTypedDeterminismDigest,
+  validateIdsTypedDeterminismReceipt8,
+} from "./research-contracts.js";
+export type { IdsTypedDeterminismReceipt8 } from "./research-contracts.js";
+
+export {
+  IDS_TYPED_DETERMINISM_ASSURANCE_FEATURE_ID,
+  IDS_TYPED_DETERMINISM_ASSURANCE_CONTRACT_VERSION,
+  IDS_TYPED_DETERMINISM_ASSURANCE_INPUT_SCHEMA,
+  IDS_TYPED_DETERMINISM_ASSURANCE_OUTPUT_SCHEMA,
+  IDS_TYPED_DETERMINISM_ASSURANCE_CONTENT_TYPE,
+  idsTypedDeterminismAssuranceOutput7Digest,
+  validateIdsTypedDeterminismAssuranceOutput7,
+} from "./research-contracts.js";
+export type { CanonicalCapabilityOutput7 } from "./research-contracts.js";
+
+export {
+  IDS_PROSPECTIVE_PROVENANCE_FEATURE_ID,
+  IDS_PROSPECTIVE_PROVENANCE_CONTRACT_VERSION,
+  IDS_PROSPECTIVE_PROVENANCE_INPUT_SCHEMA,
+  IDS_PROSPECTIVE_PROVENANCE_OUTPUT_SCHEMA,
+  IDS_PROSPECTIVE_PROVENANCE_CONTENT_TYPE,
+  idsProspectiveProvenanceEnvelope7Digest,
+  validateIdsProspectiveProvenanceEnvelope7,
+} from "./research-contracts.js";
+export type { SignedProvenanceEnvelope7 } from "./research-contracts.js";
+export { DATAOPS_PROVENANCE_SIGNING_WORKFLOW_FABRIC_FEATURE_ID, DATAOPS_PROVENANCE_SIGNING_WORKFLOW_FABRIC_CONTRACT_VERSION, DATAOPS_PROVENANCE_SIGNING_WORKFLOW_FABRIC_INPUT_SCHEMA, DATAOPS_PROVENANCE_SIGNING_WORKFLOW_FABRIC_OUTPUT_SCHEMA, DATAOPS_PROVENANCE_SIGNING_WORKFLOW_FABRIC_CONTENT_TYPE, dataopsProvenanceSigningWorkflowReceiptDigest, validateDataopsProvenanceSigningWorkflowReceipt } from "./research-contracts.js";
+export type { DataopsProvenanceSigningWorkflowReceipt } from "./research-contracts.js";
+
+export {
+  IDS_POLICY_AUTONOMY_WORKBENCH_FEATURE_ID,
+  IDS_POLICY_AUTONOMY_WORKBENCH_CONTRACT_VERSION,
+  IDS_POLICY_AUTONOMY_WORKBENCH_INPUT_SCHEMA,
+  IDS_POLICY_AUTONOMY_WORKBENCH_OUTPUT_SCHEMA,
+  IDS_POLICY_AUTONOMY_WORKBENCH_CONTENT_TYPE,
+  idsPolicyReceipt5Digest,
+  validateIdsPolicyReceipt5,
+} from "./research-contracts.js";
+export type { PolicyReceipt5 } from "./research-contracts.js";
+
+export {
+  IDS_FEDERATION_SECURITY_FEATURE_ID,
+  IDS_FEDERATION_SECURITY_CONTRACT_VERSION,
+  IDS_FEDERATION_SECURITY_INPUT_SCHEMA,
+  IDS_FEDERATION_SECURITY_OUTPUT_SCHEMA,
+  IDS_FEDERATION_SECURITY_CONTENT_TYPE,
+  idsFederationEnvelope2Digest,
+  validateIdsFederationEnvelope2,
+} from "./research-contracts.js";
+export type { FederationEnvelope2 } from "./research-contracts.js";
+
+export {
+  IDS_PERFORMANCE_RELIABILITY_FEATURE_ID,
+  IDS_PERFORMANCE_RELIABILITY_CONTRACT_VERSION,
+  IDS_PERFORMANCE_RELIABILITY_INPUT_SCHEMA,
+  IDS_PERFORMANCE_RELIABILITY_OUTPUT_SCHEMA,
+  IDS_PERFORMANCE_RELIABILITY_CONTENT_TYPE,
+  idsReliableCapabilityResult6Digest,
+  validateIdsReliableCapabilityResult6,
+} from "./research-contracts.js";
+export {
+  ORACLEX_STATISTICAL_ANALYSIS_RESEARCH_WORKBENCH_FEATURE_ID,
+  ORACLEX_STATISTICAL_ANALYSIS_RESEARCH_WORKBENCH_CONTRACT_VERSION,
+  ORACLEX_STATISTICAL_ANALYSIS_RESEARCH_WORKBENCH_INPUT_SCHEMA,
+  ORACLEX_STATISTICAL_ANALYSIS_RESEARCH_WORKBENCH_OUTPUT_SCHEMA,
+  ORACLEX_STATISTICAL_ANALYSIS_RESEARCH_WORKBENCH_CONTENT_TYPE,
+  qualifiedAnalysisResult5Digest,
+  validateQualifiedAnalysisResult5,
+} from "./research-contracts.js";
+export type { QualifiedAnalysisResult5 } from "./research-contracts.js";
+
+export {
+  IDS_PROVENANCE_SIGNING_FEATURE_ID,
+  IDS_PROVENANCE_SIGNING_CONTRACT_VERSION,
+  IDS_PROVENANCE_SIGNING_INPUT_SCHEMA,
+  IDS_PROVENANCE_SIGNING_OUTPUT_SCHEMA,
+  IDS_PROVENANCE_SIGNING_CONTENT_TYPE,
+  idsProvenanceSigningDigest,
+  validateIdsSignedProvenanceReceipt9,
+} from "./research-contracts.js";
+export type { IdsSignedProvenanceReceipt9 } from "./research-contracts.js";
+
+export {
+  IDS_POLICY_AUTONOMY_FEATURE_ID,
+  IDS_POLICY_AUTONOMY_CONTRACT_VERSION,
+  IDS_POLICY_AUTONOMY_INPUT_SCHEMA,
+  IDS_POLICY_AUTONOMY_OUTPUT_SCHEMA,
+  IDS_POLICY_AUTONOMY_CONTENT_TYPE,
+  idsPolicyAutonomyDigest,
+  validateIdsAutonomyPolicyReceipt9,
+} from "./research-contracts.js";
+export type { IdsAutonomyPolicyReceipt9 } from "./research-contracts.js";
+
+export {
+  IDS_FEDERATED_WORKFLOW_FEATURE_ID,
+  IDS_FEDERATED_WORKFLOW_CONTRACT_VERSION,
+  IDS_FEDERATED_WORKFLOW_INPUT_SCHEMA,
+  IDS_FEDERATED_WORKFLOW_OUTPUT_SCHEMA,
+  IDS_FEDERATED_WORKFLOW_CONTENT_TYPE,
+  idsFederatedWorkflowDigest,
+  validateIdsFederatedWorkflowReceipt9,
+} from "./research-contracts.js";
+export type { IdsFederatedWorkflowReceipt9 } from "./research-contracts.js";
+
+export {
+  IDS_RELIABILITY_COPILOT_FEATURE_ID,
+  IDS_RELIABILITY_COPILOT_CONTRACT_VERSION,
+  IDS_RELIABILITY_COPILOT_INPUT_SCHEMA,
+  IDS_RELIABILITY_COPILOT_OUTPUT_SCHEMA,
+  IDS_RELIABILITY_COPILOT_CONTENT_TYPE,
+  idsReliabilityCopilotDigest,
+  validateIdsReliableCapabilityResult9,
+} from "./research-contracts.js";
+export type { IdsReliableCapabilityResult9 } from "./research-contracts.js";
+
+export {
+  IDS_INTEROPERABILITY_GATEWAY_FEATURE_ID,
+  IDS_INTEROPERABILITY_GATEWAY_CONTRACT_VERSION,
+  IDS_INTEROPERABILITY_GATEWAY_INPUT_SCHEMA,
+  IDS_INTEROPERABILITY_GATEWAY_OUTPUT_SCHEMA,
+  IDS_INTEROPERABILITY_GATEWAY_CONTENT_TYPE,
+  idsInteroperabilityGatewayDigest,
+  validateIdsNegotiatedIntegration9,
+} from "./research-contracts.js";
+export type { IdsNegotiatedIntegration9 } from "./research-contracts.js";
+
+export {
+  IDS_EVALUATION_ASSURANCE_FEATURE_ID,
+  IDS_EVALUATION_ASSURANCE_CONTRACT_VERSION,
+  IDS_EVALUATION_ASSURANCE_INPUT_SCHEMA,
+  IDS_EVALUATION_ASSURANCE_OUTPUT_SCHEMA,
+  IDS_EVALUATION_ASSURANCE_CONTENT_TYPE,
+  idsEvaluationAssuranceDigest,
+  validateIdsEvaluationCard9,
+} from "./research-contracts.js";
+export type { IdsEvaluationCard9 } from "./research-contracts.js";
+
+export {
+  IDS_RESEARCH_WORKBENCH_FEATURE_ID,
+  IDS_RESEARCH_WORKBENCH_CONTRACT_VERSION,
+  IDS_RESEARCH_WORKBENCH_INPUT_SCHEMA,
+  IDS_RESEARCH_WORKBENCH_OUTPUT_SCHEMA,
+  IDS_RESEARCH_WORKBENCH_CONTENT_TYPE,
+  idsResearchWorkbenchDigest,
+  validateIdsInteractiveResearchWorkspace9,
+} from "./research-contracts.js";
+export type { IdsInteractiveResearchWorkspace9 } from "./research-contracts.js";
+
+export {
+  IDS_CONTRACT_FRONTIER_FEATURE_ID,
+  IDS_CONTRACT_FRONTIER_CONTRACT_VERSION,
+  IDS_CONTRACT_FRONTIER_INPUT_SCHEMA,
+  IDS_CONTRACT_FRONTIER_OUTPUT_SCHEMA,
+  IDS_CONTRACT_FRONTIER_CONTENT_TYPE,
+  idsContractFrontierDigest,
+  validateIdsCapabilityManifest9,
+} from "./research-contracts.js";
+export type { IdsCapabilityManifest9 } from "./research-contracts.js";
+
+export {
+  IDS_LIMITATION_CLOSURE_FEATURE_ID,
+  IDS_LIMITATION_CLOSURE_CONTRACT_VERSION,
+  IDS_LIMITATION_CLOSURE_INPUT_SCHEMA,
+  IDS_LIMITATION_CLOSURE_OUTPUT_SCHEMA,
+  IDS_LIMITATION_CLOSURE_CONTENT_TYPE,
+  idsLimitationClosureDigest,
+  validateIdsClosureReceipt9,
+} from "./research-contracts.js";
+export type { IdsClosureReceipt9 } from "./research-contracts.js";
+
+export {
+  IDS_DEPENDENCY_COMPOSITION_FEATURE_ID,
+  IDS_DEPENDENCY_COMPOSITION_CONTRACT_VERSION,
+  IDS_DEPENDENCY_COMPOSITION_INPUT_SCHEMA,
+  IDS_DEPENDENCY_COMPOSITION_OUTPUT_SCHEMA,
+  IDS_DEPENDENCY_COMPOSITION_CONTENT_TYPE,
+  idsDependencyCompositionDigest,
+  validateIdsCompositionReceipt9,
+} from "./research-contracts.js";
+export type { IdsCompositionReceipt9 } from "./research-contracts.js";
+
+export {
+  IDS_SEMANTIC_PARITY_FEATURE_ID,
+  IDS_SEMANTIC_PARITY_CONTRACT_VERSION,
+  IDS_SEMANTIC_PARITY_INPUT_SCHEMA,
+  IDS_SEMANTIC_PARITY_OUTPUT_SCHEMA,
+  IDS_SEMANTIC_PARITY_CONTENT_TYPE,
+  idsSemanticParityDigest,
+  validateIdsParityWitness9,
+} from "./research-contracts.js";
+export type { IdsParityWitness9 } from "./research-contracts.js";
+
+export {
+  IDS_SCALE_FRONTIER_FEATURE_ID,
+  IDS_SCALE_FRONTIER_CONTRACT_VERSION,
+  IDS_SCALE_FRONTIER_INPUT_SCHEMA,
+  IDS_SCALE_FRONTIER_OUTPUT_SCHEMA,
+  IDS_SCALE_FRONTIER_CONTENT_TYPE,
+  idsScaleFrontierDigest,
+  validateIdsCapacityReport9,
+} from "./research-contracts.js";
+export type { IdsCapacityReport9 } from "./research-contracts.js";
+
+export {
+  IDS_ADVERSARIAL_RECOVERY_FEATURE_ID,
+  IDS_ADVERSARIAL_RECOVERY_CONTRACT_VERSION,
+  IDS_ADVERSARIAL_RECOVERY_INPUT_SCHEMA,
+  IDS_ADVERSARIAL_RECOVERY_OUTPUT_SCHEMA,
+  IDS_ADVERSARIAL_RECOVERY_CONTENT_TYPE,
+  idsAdversarialRecoveryDigest,
+  validateIdsAdversarialRecoveryReceipt10,
+} from "./research-contracts.js";
+export type { IdsAdversarialRecoveryReceipt10 } from "./research-contracts.js";
+
+export {
+  IDS_FEDERATED_COMMONS_FEATURE_ID,
+  IDS_FEDERATED_COMMONS_CONTRACT_VERSION,
+  IDS_FEDERATED_COMMONS_INPUT_SCHEMA,
+  IDS_FEDERATED_COMMONS_OUTPUT_SCHEMA,
+  IDS_FEDERATED_COMMONS_CONTENT_TYPE,
+  idsFederatedCommonsDigest,
+  validateIdsFederatedCommonsReceipt10,
+} from "./research-contracts.js";
+export type { IdsFederatedCommonsReceipt10 } from "./research-contracts.js";
+
+export {
+  IDS_BOUNDED_EVOLUTION_FEATURE_ID,
+  IDS_BOUNDED_EVOLUTION_CONTRACT_VERSION,
+  IDS_BOUNDED_EVOLUTION_INPUT_SCHEMA,
+  IDS_BOUNDED_EVOLUTION_OUTPUT_SCHEMA,
+  IDS_BOUNDED_EVOLUTION_CONTENT_TYPE,
+  idsBoundedEvolutionDigest,
+  validateIdsEvolutionReceipt10,
+} from "./research-contracts.js";
+export type { IdsEvolutionReceipt10 } from "./research-contracts.js";
+
+export {
+  WORLDGEN_MULTIMODAL_INGESTION_FEATURE_ID,
+  WORLDGEN_MULTIMODAL_INGESTION_CONTRACT_VERSION,
+  WORLDGEN_MULTIMODAL_INGESTION_INPUT_SCHEMA,
+  WORLDGEN_MULTIMODAL_INGESTION_OUTPUT_SCHEMA,
+  WORLDGEN_MULTIMODAL_INGESTION_CONTENT_TYPE,
+  worldgenMultimodalIngestionDigest,
+  validateWorldgenHarmonizedIngestionReceipt10,
+} from "./research-contracts.js";
+export type { WorldgenHarmonizedIngestionReceipt10 } from "./research-contracts.js";
+
+export {
+  WORLDGEN_MULTIMODAL_EXECUTION_FEATURE_ID,
+  WORLDGEN_MULTIMODAL_EXECUTION_CONTRACT_VERSION,
+  WORLDGEN_MULTIMODAL_EXECUTION_INPUT_SCHEMA,
+  WORLDGEN_MULTIMODAL_EXECUTION_OUTPUT_SCHEMA,
+  WORLDGEN_MULTIMODAL_EXECUTION_CONTENT_TYPE,
+  worldgenMultimodalExecutionDigest,
+  validateWorldgenExecutionRun7,
+} from "./research-contracts.js";
+export type { WorldgenExecutionRun7 } from "./research-contracts.js";
+
+export {
+  ATLASX_MECHANISM_CONTRACT_FEATURE_ID,
+  ATLASX_MECHANISM_CONTRACT_VERSION,
+  ATLASX_MECHANISM_CONTRACT_INPUT_SCHEMA,
+  ATLASX_MECHANISM_CONTRACT_OUTPUT_SCHEMA,
+  ATLASX_MECHANISM_CONTRACT_CONTENT_TYPE,
+  atlasxMechanismPortfolioDigest,
+  validateAtlasxMechanismPortfolio2,
+} from "./research-contracts.js";
+export type { AtlasxMechanismPortfolio2 } from "./research-contracts.js";
+
+export {
+  ROUTING_EXECUTION_COPILOT_FEATURE_ID,
+  ROUTING_EXECUTION_COPILOT_CONTRACT_VERSION,
+  ROUTING_EXECUTION_COPILOT_INPUT_SCHEMA,
+  ROUTING_EXECUTION_COPILOT_OUTPUT_SCHEMA,
+  ROUTING_EXECUTION_COPILOT_CONTENT_TYPE,
+  executionRoutingReceiptDigest,
+  validateExecutionRoutingReceipt9,
+} from "./research-contracts.js";
+export type { ExecutionRoutingReceipt9 } from "./research-contracts.js";
+
+export {
+  LAB_RETRIEVAL_SYNTHESIS_OPERATIONS_FEATURE_ID,
+  LAB_RETRIEVAL_SYNTHESIS_OPERATIONS_CONTRACT_VERSION,
+  LAB_RETRIEVAL_SYNTHESIS_OPERATIONS_INPUT_SCHEMA,
+  LAB_RETRIEVAL_SYNTHESIS_OPERATIONS_OUTPUT_SCHEMA,
+  LAB_RETRIEVAL_SYNTHESIS_OPERATIONS_CONTENT_TYPE,
+  retrievalOperationsDigest,
+  validateRetrievalOperationsReceipt9,
+} from "./research-contracts.js";
+export type { RetrievalOperationsReceipt9 } from "./research-contracts.js";
+
+export {
+  BIOETHICS_EVIDENCE_SURVEILLANCE_FEATURE_ID,
+  BIOETHICS_EVIDENCE_SURVEILLANCE_CONTRACT_VERSION,
+  BIOETHICS_EVIDENCE_SURVEILLANCE_INPUT_SCHEMA,
+  BIOETHICS_EVIDENCE_SURVEILLANCE_OUTPUT_SCHEMA,
+  BIOETHICS_EVIDENCE_SURVEILLANCE_CONTENT_TYPE,
+  bioethicsEvidenceSurveillanceDigest,
+  validateBioethicsEvidenceReceipt,
+} from "./research-contracts.js";
+export type { BioethicsEvidenceReceipt } from "./research-contracts.js";
+
+export {
+  SCALE_FEDERATION_TRUST_FEATURE_ID,
+  SCALE_FEDERATION_TRUST_CONTRACT_VERSION,
+  SCALE_FEDERATION_TRUST_INPUT_SCHEMA,
+  SCALE_FEDERATION_TRUST_OUTPUT_SCHEMA,
+  SCALE_FEDERATION_TRUST_CONTENT_TYPE,
+  federationTrustEnvelopeDigest,
+  validateFederationEnvelope8,
+} from "./research-contracts.js";
+export type { FederationEnvelope8 } from "./research-contracts.js";
+
+export {
+  SERVICES_MULTIMODAL_INTERPRETATION_FEATURE_ID,
+  SERVICES_MULTIMODAL_INTERPRETATION_CONTRACT_VERSION,
+  SERVICES_MULTIMODAL_INTERPRETATION_INPUT_SCHEMA,
+  SERVICES_MULTIMODAL_INTERPRETATION_OUTPUT_SCHEMA,
+  SERVICES_MULTIMODAL_INTERPRETATION_CONTENT_TYPE,
+  interactiveInterpretationDigest,
+  validateInteractiveInterpretation1,
+} from "./research-contracts.js";
+export type { InteractiveInterpretation1 } from "./research-contracts.js";
+
+export {
+  FEDERATED_QUALITY_CONTROL_FEATURE_ID,
+  FEDERATED_QUALITY_CONTROL_CONTRACT_VERSION,
+  FEDERATED_QUALITY_CONTROL_INPUT_SCHEMA,
+  FEDERATED_QUALITY_CONTROL_OUTPUT_SCHEMA,
+  FEDERATED_QUALITY_CONTROL_CONTENT_TYPE,
+  qualityVerdict7Digest,
+  validateQualityVerdict7,
+} from "./research-contracts.js";
+export type { QualityVerdict7 } from "./research-contracts.js";
+
+export {
+  ONCO_FEDERATED_PROVENANCE_FEATURE_ID,
+  ONCO_FEDERATED_PROVENANCE_CONTRACT_VERSION,
+  ONCO_FEDERATED_PROVENANCE_INPUT_SCHEMA,
+  ONCO_FEDERATED_PROVENANCE_OUTPUT_SCHEMA,
+  ONCO_FEDERATED_PROVENANCE_CONTENT_TYPE,
+  signedProvenanceWorkflow9Digest,
+  validateSignedProvenanceWorkflow9,
+} from "./research-contracts.js";
+export type { SignedProvenanceWorkflow9 } from "./research-contracts.js";
+
+export {
+  MUTATION_PUBLICATION_RELEASE_FEATURE_ID,
+  MUTATION_PUBLICATION_RELEASE_CONTRACT_VERSION,
+  MUTATION_PUBLICATION_RELEASE_INPUT_SCHEMA,
+  MUTATION_PUBLICATION_RELEASE_OUTPUT_SCHEMA,
+  MUTATION_PUBLICATION_RELEASE_CONTENT_TYPE,
+  mutationPublicationReleaseDigest,
+  validateMutationPublicationReleaseReceipt9,
+} from "./research-contracts.js";
+export type { MutationPublicationReleaseReceipt9 } from "./research-contracts.js";
+
+export {
+  FACTORY_PROSPECTIVE_EVIDENCE_FEATURE_ID,
+  FACTORY_PROSPECTIVE_EVIDENCE_CONTRACT_VERSION,
+  FACTORY_PROSPECTIVE_EVIDENCE_INPUT_SCHEMA,
+  FACTORY_PROSPECTIVE_EVIDENCE_OUTPUT_SCHEMA,
+  FACTORY_PROSPECTIVE_EVIDENCE_CONTENT_TYPE,
+  evidenceSurveillanceReceipt9Digest,
+  validateEvidenceSurveillanceReceipt9,
+} from "./research-contracts.js";
+export type { EvidenceSurveillanceReceipt9 } from "./research-contracts.js";
+
+export {
+  FIBER_FEDERATED_RESOURCE_FEATURE_ID,
+  FIBER_FEDERATED_RESOURCE_CONTRACT_VERSION,
+  FIBER_FEDERATED_RESOURCE_INPUT_SCHEMA,
+  FIBER_FEDERATED_RESOURCE_OUTPUT_SCHEMA,
+  FIBER_FEDERATED_RESOURCE_CONTENT_TYPE,
+  federatedResourceWorkbenchDigest,
+  validateFederatedResourceWorkbenchReceipt8,
+} from "./research-contracts.js";
+export type { FederatedResourceWorkbenchReceipt8 } from "./research-contracts.js";
+
+export {
+  OBLIGATION_PROSPECTIVE_RELEASE_FEATURE_ID,
+  OBLIGATION_PROSPECTIVE_RELEASE_CONTRACT_VERSION,
+  OBLIGATION_PROSPECTIVE_RELEASE_INPUT_SCHEMA,
+  OBLIGATION_PROSPECTIVE_RELEASE_OUTPUT_SCHEMA,
+  OBLIGATION_PROSPECTIVE_RELEASE_CONTENT_TYPE,
+  prospectiveReleaseAssuranceDigest,
+  validateProspectiveReleaseAssuranceReceipt9,
+} from "./research-contracts.js";
+export type { ProspectiveReleaseAssuranceRequest3, ProspectiveReleaseAssuranceReceipt9 } from "./research-contracts.js";
+
+export {
+  ATLASX_FEDERATED_EXECUTION_FEATURE_ID,
+  ATLASX_FEDERATED_EXECUTION_CONTRACT_VERSION,
+  ATLASX_FEDERATED_EXECUTION_INPUT_SCHEMA,
+  ATLASX_FEDERATED_EXECUTION_OUTPUT_SCHEMA,
+  ATLASX_FEDERATED_EXECUTION_CONTENT_TYPE,
+  executionRun8Digest,
+  validateExecutionRun8,
+} from "./research-contracts.js";
+export type { ExecutionRun8 } from "./research-contracts.js";
+
+export {
+  POLICY_ANALYSIS_COPILOT_FEATURE_ID,
+  POLICY_ANALYSIS_COPILOT_CONTRACT_VERSION,
+  POLICY_ANALYSIS_COPILOT_INPUT_SCHEMA,
+  POLICY_ANALYSIS_COPILOT_OUTPUT_SCHEMA,
+  POLICY_ANALYSIS_COPILOT_CONTENT_TYPE,
+  qualifiedAnalysisResult3Digest,
+  validateQualifiedAnalysisResult3,
+} from "./research-contracts.js";
+export type { QualifiedAnalysisResult3 } from "./research-contracts.js";
+
+export {
+  ATLASX_CONTEXT_COMPILATION_FEATURE_ID,
+  ATLASX_CONTEXT_COMPILATION_CONTRACT_VERSION,
+  ATLASX_CONTEXT_COMPILATION_INPUT_SCHEMA,
+  ATLASX_CONTEXT_COMPILATION_OUTPUT_SCHEMA,
+  ATLASX_CONTEXT_COMPILATION_CONTENT_TYPE,
+  compiledResearchContext6Digest,
+  validateCompiledResearchContext6,
+} from "./research-contracts.js";
+export type { CompiledResearchContext6 } from "./research-contracts.js";
+
+export {
+  WORLDGEN_LOCAL_CONTEXT_COMPILATION_WORKBENCH_FEATURE_ID, WORLDGEN_LOCAL_CONTEXT_COMPILATION_WORKBENCH_CONTRACT_VERSION,
+  WORLDGEN_MULTIMODAL_CONTEXT_COMPILATION_WORKBENCH_FEATURE_ID, WORLDGEN_MULTIMODAL_CONTEXT_COMPILATION_WORKBENCH_CONTRACT_VERSION,
+  WORLDGEN_THROUGHPUT_CONTEXT_COMPILATION_WORKBENCH_FEATURE_ID, WORLDGEN_THROUGHPUT_CONTEXT_COMPILATION_WORKBENCH_CONTRACT_VERSION,
+  WORLDGEN_FEDERATED_CONTINUAL_CONTEXT_COMPILATION_WORKBENCH_FEATURE_ID, WORLDGEN_FEDERATED_CONTINUAL_CONTEXT_COMPILATION_WORKBENCH_CONTRACT_VERSION,
+  validateWorldgenLocalContextCompilationWorkbenchReceipt, validateWorldgenMultimodalContextCompilationWorkbenchReceipt,
+  validateWorldgenThroughputContextCompilationWorkbenchReceipt, validateWorldgenFederatedContinualContextCompilationWorkbenchReceipt,
+  worldgenLocalContextCompilationWorkbenchDigest, worldgenMultimodalContextCompilationWorkbenchDigest,
+  worldgenThroughputContextCompilationWorkbenchDigest, worldgenFederatedContinualContextCompilationWorkbenchDigest,
+} from "./research-contracts.js";
+export type { WorldgenContextWorkbenchReceipt } from "./research-contracts.js";
+
+export {
+  WORLDGEN_LOCAL_CONTEXT_COMPILATION_GATEWAY_FEATURE_ID, WORLDGEN_LOCAL_CONTEXT_COMPILATION_GATEWAY_CONTRACT_VERSION,
+  WORLDGEN_MULTIMODAL_CONTEXT_COMPILATION_GATEWAY_FEATURE_ID, WORLDGEN_MULTIMODAL_CONTEXT_COMPILATION_GATEWAY_CONTRACT_VERSION,
+  WORLDGEN_THROUGHPUT_CONTEXT_COMPILATION_GATEWAY_FEATURE_ID, WORLDGEN_THROUGHPUT_CONTEXT_COMPILATION_GATEWAY_CONTRACT_VERSION,
+  WORLDGEN_FEDERATED_CONTINUAL_CONTEXT_COMPILATION_GATEWAY_FEATURE_ID, WORLDGEN_FEDERATED_CONTINUAL_CONTEXT_COMPILATION_GATEWAY_CONTRACT_VERSION,
+  validateWorldgenLocalContextCompilationGatewayReceipt, validateWorldgenMultimodalContextCompilationGatewayReceipt,
+  validateWorldgenThroughputContextCompilationGatewayReceipt, validateWorldgenFederatedContinualContextCompilationGatewayReceipt,
+  worldgenLocalContextCompilationGatewayDigest, worldgenMultimodalContextCompilationGatewayDigest,
+  worldgenThroughputContextCompilationGatewayDigest, worldgenFederatedContinualContextCompilationGatewayDigest,
+} from "./research-contracts.js";
+export type { WorldgenContextInteroperabilityReceipt } from "./research-contracts.js";
+
+export {
+  WORLDGEN_LOCAL_CONTEXT_COMPILATION_ASSURANCE_FEATURE_ID, WORLDGEN_LOCAL_CONTEXT_COMPILATION_ASSURANCE_CONTRACT_VERSION,
+  WORLDGEN_MULTIMODAL_CONTEXT_COMPILATION_ASSURANCE_FEATURE_ID, WORLDGEN_MULTIMODAL_CONTEXT_COMPILATION_ASSURANCE_CONTRACT_VERSION,
+  WORLDGEN_THROUGHPUT_CONTEXT_COMPILATION_ASSURANCE_FEATURE_ID, WORLDGEN_THROUGHPUT_CONTEXT_COMPILATION_ASSURANCE_CONTRACT_VERSION,
+  WORLDGEN_FEDERATED_CONTINUAL_CONTEXT_COMPILATION_ASSURANCE_FEATURE_ID, WORLDGEN_FEDERATED_CONTINUAL_CONTEXT_COMPILATION_ASSURANCE_CONTRACT_VERSION,
+  validateWorldgenLocalContextCompilationAssuranceReceipt, validateWorldgenMultimodalContextCompilationAssuranceReceipt,
+  validateWorldgenThroughputContextCompilationAssuranceReceipt, validateWorldgenFederatedContinualContextCompilationAssuranceReceipt,
+  worldgenLocalContextCompilationAssuranceDigest, worldgenMultimodalContextCompilationAssuranceDigest,
+  worldgenThroughputContextCompilationAssuranceDigest, worldgenFederatedContinualContextCompilationAssuranceDigest,
+} from "./research-contracts.js";
+export type { WorldgenContextAssuranceReceipt } from "./research-contracts.js";
+
+export {
+  WORLDGEN_LOCAL_CONTEXT_COMPILATION_CONTROL_FEATURE_ID, WORLDGEN_LOCAL_CONTEXT_COMPILATION_CONTROL_CONTRACT_VERSION,
+  WORLDGEN_MULTIMODAL_CONTEXT_COMPILATION_CONTROL_FEATURE_ID, WORLDGEN_MULTIMODAL_CONTEXT_COMPILATION_CONTROL_CONTRACT_VERSION,
+  WORLDGEN_THROUGHPUT_CONTEXT_COMPILATION_CONTROL_FEATURE_ID, WORLDGEN_THROUGHPUT_CONTEXT_COMPILATION_CONTROL_CONTRACT_VERSION,
+  WORLDGEN_FEDERATED_CONTINUAL_CONTEXT_COMPILATION_CONTROL_FEATURE_ID, WORLDGEN_FEDERATED_CONTINUAL_CONTEXT_COMPILATION_CONTROL_CONTRACT_VERSION,
+  validateWorldgenLocalContextCompilationControlReceipt, validateWorldgenMultimodalContextCompilationControlReceipt,
+  validateWorldgenThroughputContextCompilationControlReceipt, validateWorldgenFederatedContinualContextCompilationControlReceipt,
+  worldgenLocalContextCompilationControlDigest, worldgenMultimodalContextCompilationControlDigest,
+  worldgenThroughputContextCompilationControlDigest, worldgenFederatedContinualContextCompilationControlDigest,
+} from "./research-contracts.js";
+export type { WorldgenContextControlPlaneReceipt } from "./research-contracts.js";
+
+export {
+  WORLDGEN_LOCAL_CONTEXT_COMPILATION_COPILOT_FEATURE_ID,
+  WORLDGEN_LOCAL_CONTEXT_COMPILATION_COPILOT_CONTRACT_VERSION,
+  WORLDGEN_MULTIMODAL_CONTEXT_COMPILATION_COPILOT_FEATURE_ID,
+  WORLDGEN_MULTIMODAL_CONTEXT_COMPILATION_COPILOT_CONTRACT_VERSION,
+  WORLDGEN_THROUGHPUT_CONTEXT_COMPILATION_COPILOT_FEATURE_ID,
+  WORLDGEN_THROUGHPUT_CONTEXT_COMPILATION_COPILOT_CONTRACT_VERSION,
+  WORLDGEN_FEDERATED_CONTINUAL_CONTEXT_COMPILATION_COPILOT_FEATURE_ID,
+  WORLDGEN_FEDERATED_CONTINUAL_CONTEXT_COMPILATION_COPILOT_CONTRACT_VERSION,
+  WORLDGEN_CONTEXT_COMPILATION_COPILOT_CONTENT_TYPE,
+  validateWorldgenLocalContextCompilationCopilotReceipt,
+  validateWorldgenMultimodalContextCompilationCopilotReceipt,
+  validateWorldgenThroughputContextCompilationCopilotReceipt,
+  validateWorldgenFederatedContinualContextCompilationCopilotReceipt,
+  worldgenLocalContextCompilationCopilotDigest,
+  worldgenMultimodalContextCompilationCopilotDigest,
+  worldgenThroughputContextCompilationCopilotDigest,
+  worldgenFederatedContinualContextCompilationCopilotDigest,
+} from "./research-contracts.js";
+export type { WorldgenContextCompilationCopilotReceipt } from "./research-contracts.js";
+
+export {
+  WORLDGEN_LOCAL_CONTEXT_COMPILATION_WORKFLOW_FEATURE_ID,
+  WORLDGEN_LOCAL_CONTEXT_COMPILATION_WORKFLOW_CONTRACT_VERSION,
+  WORLDGEN_MULTIMODAL_CONTEXT_COMPILATION_WORKFLOW_FEATURE_ID,
+  WORLDGEN_MULTIMODAL_CONTEXT_COMPILATION_WORKFLOW_CONTRACT_VERSION,
+  WORLDGEN_THROUGHPUT_CONTEXT_COMPILATION_WORKFLOW_FEATURE_ID,
+  WORLDGEN_THROUGHPUT_CONTEXT_COMPILATION_WORKFLOW_CONTRACT_VERSION,
+  WORLDGEN_FEDERATED_CONTINUAL_CONTEXT_COMPILATION_WORKFLOW_FEATURE_ID,
+  WORLDGEN_FEDERATED_CONTINUAL_CONTEXT_COMPILATION_WORKFLOW_CONTRACT_VERSION,
+  WORLDGEN_CONTEXT_WORKFLOW_CONTENT_TYPE,
+  validateWorldgenLocalContextCompilationWorkflowReceipt,
+  validateWorldgenMultimodalContextCompilationWorkflowReceipt,
+  validateWorldgenThroughputContextCompilationWorkflowReceipt,
+  validateWorldgenFederatedContinualContextCompilationWorkflowReceipt,
+  worldgenLocalContextCompilationWorkflowDigest,
+  worldgenMultimodalContextCompilationWorkflowDigest,
+  worldgenThroughputContextCompilationWorkflowDigest,
+  worldgenFederatedContinualContextCompilationWorkflowDigest,
+} from "./research-contracts.js";
+export type { WorldgenContextCompilationWorkflowReceipt } from "./research-contracts.js";
+
+export {
+  WORLDGEN_LOCAL_RETRIEVAL_SYNTHESIS_OPERATIONS_FEATURE_ID,
+  WORLDGEN_LOCAL_RETRIEVAL_SYNTHESIS_OPERATIONS_CONTRACT_VERSION,
+  WORLDGEN_MULTIMODAL_RETRIEVAL_SYNTHESIS_OPERATIONS_FEATURE_ID,
+  WORLDGEN_MULTIMODAL_RETRIEVAL_SYNTHESIS_OPERATIONS_CONTRACT_VERSION,
+  WORLDGEN_THROUGHPUT_RETRIEVAL_SYNTHESIS_OPERATIONS_FEATURE_ID,
+  WORLDGEN_THROUGHPUT_RETRIEVAL_SYNTHESIS_OPERATIONS_CONTRACT_VERSION,
+  WORLDGEN_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_OPERATIONS_FEATURE_ID,
+  WORLDGEN_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_OPERATIONS_CONTRACT_VERSION,
+  WORLDGEN_RETRIEVAL_OPERATIONS_CONTENT_TYPE,
+  validateWorldgenLocalRetrievalSynthesisOperationsReceipt,
+  validateWorldgenMultimodalRetrievalSynthesisOperationsReceipt,
+  validateWorldgenThroughputRetrievalSynthesisOperationsReceipt,
+  validateWorldgenFederatedContinualRetrievalSynthesisOperationsReceipt,
+  worldgenLocalRetrievalSynthesisOperationsDigest,
+  worldgenMultimodalRetrievalSynthesisOperationsDigest,
+  worldgenThroughputRetrievalSynthesisOperationsDigest,
+  worldgenFederatedContinualRetrievalSynthesisOperationsDigest,
+} from "./research-contracts.js";
+export type { WorldgenRetrievalOperationsReceipt } from "./research-contracts.js";
+
+export {
+  WORLDGEN_LOCAL_RESEARCH_CONTEXT_COMPILATION_FEATURE_ID,
+  WORLDGEN_LOCAL_RESEARCH_CONTEXT_COMPILATION_CONTRACT_VERSION,
+  WORLDGEN_MULTIMODAL_RESEARCH_CONTEXT_COMPILATION_FEATURE_ID,
+  WORLDGEN_MULTIMODAL_RESEARCH_CONTEXT_COMPILATION_CONTRACT_VERSION,
+  WORLDGEN_THROUGHPUT_RESEARCH_CONTEXT_COMPILATION_FEATURE_ID,
+  WORLDGEN_THROUGHPUT_RESEARCH_CONTEXT_COMPILATION_CONTRACT_VERSION,
+  WORLDGEN_FEDERATED_CONTINUAL_RESEARCH_CONTEXT_COMPILATION_FEATURE_ID,
+  WORLDGEN_FEDERATED_CONTINUAL_RESEARCH_CONTEXT_COMPILATION_CONTRACT_VERSION,
+  WORLDGEN_RESEARCH_CONTEXT_CONTENT_TYPE,
+  validateWorldgenLocalResearchContextCompilationReceipt,
+  validateWorldgenMultimodalResearchContextCompilationReceipt,
+  validateWorldgenThroughputResearchContextCompilationReceipt,
+  validateWorldgenFederatedContinualResearchContextCompilationReceipt,
+  worldgenLocalResearchContextCompilationDigest,
+  worldgenMultimodalResearchContextCompilationDigest,
+  worldgenThroughputResearchContextCompilationDigest,
+  worldgenFederatedContinualResearchContextCompilationDigest,
+} from "./research-contracts.js";
+export type { WorldgenContextCompilationReceipt } from "./research-contracts.js";
+
+export {
+  WORLDGEN_LOCAL_CONTEXT_CONTRACT_FEATURE_ID,
+  WORLDGEN_LOCAL_CONTEXT_CONTRACT_CONTRACT_VERSION,
+  WORLDGEN_MULTIMODAL_CONTEXT_CONTRACT_FEATURE_ID,
+  WORLDGEN_MULTIMODAL_CONTEXT_CONTRACT_CONTRACT_VERSION,
+  WORLDGEN_THROUGHPUT_CONTEXT_CONTRACT_FEATURE_ID,
+  WORLDGEN_THROUGHPUT_CONTEXT_CONTRACT_CONTRACT_VERSION,
+  WORLDGEN_FEDERATED_CONTINUAL_CONTEXT_CONTRACT_FEATURE_ID,
+  WORLDGEN_FEDERATED_CONTINUAL_CONTEXT_CONTRACT_CONTRACT_VERSION,
+  WORLDGEN_CONTEXT_CONTRACT_CONTENT_TYPE,
+  validateWorldgenLocalContextContractReceipt,
+  validateWorldgenMultimodalContextContractReceipt,
+  validateWorldgenThroughputContextContractReceipt,
+  validateWorldgenFederatedContinualContextContractReceipt,
+  worldgenLocalContextContractDigest,
+  worldgenMultimodalContextContractDigest,
+  worldgenThroughputContextContractDigest,
+  worldgenFederatedContinualContextContractDigest,
+} from "./research-contracts.js";
+export type { WorldgenContextContractReceipt } from "./research-contracts.js";
+
+export {
+  WORLDGEN_LOCAL_RETRIEVAL_SYNTHESIS_FEATURE_ID,
+  WORLDGEN_LOCAL_RETRIEVAL_SYNTHESIS_CONTRACT_VERSION,
+  WORLDGEN_LOCAL_RETRIEVAL_SYNTHESIS_INPUT_SCHEMA,
+  WORLDGEN_RETRIEVAL_SYNTHESIS_CONTENT_TYPE,
+  worldgenLocalRetrievalSynthesisDigest,
+  validateWorldgenLocalRetrievalSynthesisReceipt,
+  WORLDGEN_MULTIMODAL_RETRIEVAL_SYNTHESIS_FEATURE_ID,
+  WORLDGEN_MULTIMODAL_RETRIEVAL_SYNTHESIS_CONTRACT_VERSION,
+  WORLDGEN_MULTIMODAL_RETRIEVAL_SYNTHESIS_INPUT_SCHEMA,
+  worldgenMultimodalRetrievalSynthesisDigest,
+  validateWorldgenMultimodalRetrievalSynthesisReceipt,
+  WORLDGEN_THROUGHPUT_RETRIEVAL_SYNTHESIS_FEATURE_ID,
+  WORLDGEN_THROUGHPUT_RETRIEVAL_SYNTHESIS_CONTRACT_VERSION,
+  WORLDGEN_THROUGHPUT_RETRIEVAL_SYNTHESIS_INPUT_SCHEMA,
+  worldgenThroughputRetrievalSynthesisDigest,
+  validateWorldgenThroughputRetrievalSynthesisReceipt,
+  WORLDGEN_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_FEATURE_ID,
+  WORLDGEN_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_CONTRACT_VERSION,
+  WORLDGEN_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_INPUT_SCHEMA,
+  worldgenFederatedContinualRetrievalSynthesisDigest,
+  validateWorldgenFederatedContinualRetrievalSynthesisReceipt,
+} from "./research-contracts.js";
+export type { WorldgenRetrievalSynthesisReceipt } from "./research-contracts.js";
+
+export {
+  WORLDGEN_LOCAL_RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_FEATURE_ID,
+  WORLDGEN_LOCAL_RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_CONTRACT_VERSION,
+  WORLDGEN_MULTIMODAL_RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_FEATURE_ID,
+  WORLDGEN_MULTIMODAL_RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_CONTRACT_VERSION,
+  WORLDGEN_THROUGHPUT_RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_FEATURE_ID,
+  WORLDGEN_THROUGHPUT_RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_CONTRACT_VERSION,
+  WORLDGEN_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_FEATURE_ID,
+  WORLDGEN_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_CONTRACT_VERSION,
+  WORLDGEN_RETRIEVAL_CONTRACT_CONTENT_TYPE,
+  worldgenLocalRetrievalSynthesisContractDigest,
+  worldgenMultimodalRetrievalSynthesisContractDigest,
+  worldgenThroughputRetrievalSynthesisContractDigest,
+  worldgenFederatedContinualRetrievalSynthesisContractDigest,
+  validateWorldgenLocalRetrievalSynthesisContractReceipt,
+  validateWorldgenMultimodalRetrievalSynthesisContractReceipt,
+  validateWorldgenThroughputRetrievalSynthesisContractReceipt,
+  validateWorldgenFederatedContinualRetrievalSynthesisContractReceipt,
+} from "./research-contracts.js";
+export type { WorldgenRetrievalContractReceipt } from "./research-contracts.js";
+
+export {
+  WORLDGEN_LOCAL_RETRIEVAL_SYNTHESIS_COPILOT_FEATURE_ID,
+  WORLDGEN_LOCAL_RETRIEVAL_SYNTHESIS_COPILOT_CONTRACT_VERSION,
+  WORLDGEN_MULTIMODAL_RETRIEVAL_SYNTHESIS_COPILOT_FEATURE_ID,
+  WORLDGEN_MULTIMODAL_RETRIEVAL_SYNTHESIS_COPILOT_CONTRACT_VERSION,
+  WORLDGEN_THROUGHPUT_RETRIEVAL_SYNTHESIS_COPILOT_FEATURE_ID,
+  WORLDGEN_THROUGHPUT_RETRIEVAL_SYNTHESIS_COPILOT_CONTRACT_VERSION,
+  WORLDGEN_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_COPILOT_FEATURE_ID,
+  WORLDGEN_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_COPILOT_CONTRACT_VERSION,
+  WORLDGEN_RETRIEVAL_COPILOT_CONTENT_TYPE,
+  worldgenLocalRetrievalSynthesisCopilotDigest,
+  worldgenMultimodalRetrievalSynthesisCopilotDigest,
+  worldgenThroughputRetrievalSynthesisCopilotDigest,
+  worldgenFederatedContinualRetrievalSynthesisCopilotDigest,
+  validateWorldgenLocalRetrievalSynthesisCopilotReceipt,
+  validateWorldgenMultimodalRetrievalSynthesisCopilotReceipt,
+  validateWorldgenThroughputRetrievalSynthesisCopilotReceipt,
+  validateWorldgenFederatedContinualRetrievalSynthesisCopilotReceipt,
+} from "./research-contracts.js";
+export type { WorldgenRetrievalCopilotReceipt } from "./research-contracts.js";
+export {
+  WORLDGEN_LOCAL_RETRIEVAL_SYNTHESIS_WORKFLOW_FEATURE_ID,
+  WORLDGEN_LOCAL_RETRIEVAL_SYNTHESIS_WORKFLOW_CONTRACT_VERSION,
+  WORLDGEN_MULTIMODAL_RETRIEVAL_SYNTHESIS_WORKFLOW_FEATURE_ID,
+  WORLDGEN_MULTIMODAL_RETRIEVAL_SYNTHESIS_WORKFLOW_CONTRACT_VERSION,
+  WORLDGEN_THROUGHPUT_RETRIEVAL_SYNTHESIS_WORKFLOW_FEATURE_ID,
+  WORLDGEN_THROUGHPUT_RETRIEVAL_SYNTHESIS_WORKFLOW_CONTRACT_VERSION,
+  WORLDGEN_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_WORKFLOW_FEATURE_ID,
+  WORLDGEN_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_WORKFLOW_CONTRACT_VERSION,
+  WORLDGEN_RETRIEVAL_WORKFLOW_CONTENT_TYPE,
+  worldgenLocalRetrievalSynthesisWorkflowDigest,
+  worldgenMultimodalRetrievalSynthesisWorkflowDigest,
+  worldgenThroughputRetrievalSynthesisWorkflowDigest,
+  worldgenFederatedContinualRetrievalSynthesisWorkflowDigest,
+  validateWorldgenLocalRetrievalSynthesisWorkflowReceipt,
+  validateWorldgenMultimodalRetrievalSynthesisWorkflowReceipt,
+  validateWorldgenThroughputRetrievalSynthesisWorkflowReceipt,
+  validateWorldgenFederatedContinualRetrievalSynthesisWorkflowReceipt,
+} from "./research-contracts.js";
+export type { WorldgenRetrievalWorkflowReceipt } from "./research-contracts.js";
+
+export {
+  WORLDGEN_LOCAL_RETRIEVAL_SYNTHESIS_WORKBENCH_FEATURE_ID,
+  WORLDGEN_LOCAL_RETRIEVAL_SYNTHESIS_WORKBENCH_CONTRACT_VERSION,
+  WORLDGEN_MULTIMODAL_RETRIEVAL_SYNTHESIS_WORKBENCH_FEATURE_ID,
+  WORLDGEN_MULTIMODAL_RETRIEVAL_SYNTHESIS_WORKBENCH_CONTRACT_VERSION,
+  WORLDGEN_THROUGHPUT_RETRIEVAL_SYNTHESIS_WORKBENCH_FEATURE_ID,
+  WORLDGEN_THROUGHPUT_RETRIEVAL_SYNTHESIS_WORKBENCH_CONTRACT_VERSION,
+  WORLDGEN_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_WORKBENCH_FEATURE_ID,
+  WORLDGEN_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_WORKBENCH_CONTRACT_VERSION,
+  WORLDGEN_RETRIEVAL_WORKBENCH_CONTENT_TYPE,
+  worldgenLocalRetrievalSynthesisWorkbenchDigest,
+  worldgenMultimodalRetrievalSynthesisWorkbenchDigest,
+  worldgenThroughputRetrievalSynthesisWorkbenchDigest,
+  worldgenFederatedContinualRetrievalSynthesisWorkbenchDigest,
+  validateWorldgenLocalRetrievalSynthesisWorkbenchReceipt,
+  validateWorldgenMultimodalRetrievalSynthesisWorkbenchReceipt,
+  validateWorldgenThroughputRetrievalSynthesisWorkbenchReceipt,
+  validateWorldgenFederatedContinualRetrievalSynthesisWorkbenchReceipt,
+} from "./research-contracts.js";
+export type { WorldgenRetrievalWorkbenchReceipt } from "./research-contracts.js";
+
+export {
+  WORLDGEN_LOCAL_RETRIEVAL_SYNTHESIS_INTEROPERABILITY_FEATURE_ID,
+  WORLDGEN_LOCAL_RETRIEVAL_SYNTHESIS_INTEROPERABILITY_CONTRACT_VERSION,
+  WORLDGEN_MULTIMODAL_RETRIEVAL_SYNTHESIS_INTEROPERABILITY_FEATURE_ID,
+  WORLDGEN_MULTIMODAL_RETRIEVAL_SYNTHESIS_INTEROPERABILITY_CONTRACT_VERSION,
+  WORLDGEN_THROUGHPUT_RETRIEVAL_SYNTHESIS_INTEROPERABILITY_FEATURE_ID,
+  WORLDGEN_THROUGHPUT_RETRIEVAL_SYNTHESIS_INTEROPERABILITY_CONTRACT_VERSION,
+  WORLDGEN_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_INTEROPERABILITY_FEATURE_ID,
+  WORLDGEN_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_INTEROPERABILITY_CONTRACT_VERSION,
+  WORLDGEN_RETRIEVAL_INTEROPERABILITY_CONTENT_TYPE,
+  worldgenLocalRetrievalSynthesisInteroperabilityDigest,
+  worldgenMultimodalRetrievalSynthesisInteroperabilityDigest,
+  worldgenThroughputRetrievalSynthesisInteroperabilityDigest,
+  worldgenFederatedContinualRetrievalSynthesisInteroperabilityDigest,
+  validateWorldgenLocalRetrievalSynthesisInteroperabilityReceipt,
+  validateWorldgenMultimodalRetrievalSynthesisInteroperabilityReceipt,
+  validateWorldgenThroughputRetrievalSynthesisInteroperabilityReceipt,
+  validateWorldgenFederatedContinualRetrievalSynthesisInteroperabilityReceipt,
+} from "./research-contracts.js";
+export type { WorldgenRetrievalInteroperabilityReceipt } from "./research-contracts.js";
+
+export {
+  WORLDGEN_LOCAL_RETRIEVAL_SYNTHESIS_ASSURANCE_FEATURE_ID,
+  WORLDGEN_LOCAL_RETRIEVAL_SYNTHESIS_ASSURANCE_CONTRACT_VERSION,
+  WORLDGEN_MULTIMODAL_RETRIEVAL_SYNTHESIS_ASSURANCE_FEATURE_ID,
+  WORLDGEN_MULTIMODAL_RETRIEVAL_SYNTHESIS_ASSURANCE_CONTRACT_VERSION,
+  WORLDGEN_THROUGHPUT_RETRIEVAL_SYNTHESIS_ASSURANCE_FEATURE_ID,
+  WORLDGEN_THROUGHPUT_RETRIEVAL_SYNTHESIS_ASSURANCE_CONTRACT_VERSION,
+  WORLDGEN_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_ASSURANCE_FEATURE_ID,
+  WORLDGEN_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_ASSURANCE_CONTRACT_VERSION,
+  WORLDGEN_RETRIEVAL_ASSURANCE_CONTENT_TYPE,
+  worldgenLocalRetrievalSynthesisAssuranceDigest,
+  worldgenMultimodalRetrievalSynthesisAssuranceDigest,
+  worldgenThroughputRetrievalSynthesisAssuranceDigest,
+  worldgenFederatedContinualRetrievalSynthesisAssuranceDigest,
+  validateWorldgenLocalRetrievalSynthesisAssuranceReceipt,
+  validateWorldgenMultimodalRetrievalSynthesisAssuranceReceipt,
+  validateWorldgenThroughputRetrievalSynthesisAssuranceReceipt,
+  validateWorldgenFederatedContinualRetrievalSynthesisAssuranceReceipt,
+} from "./research-contracts.js";
+export type { WorldgenRetrievalAssuranceReceipt } from "./research-contracts.js";
+
+export {
+  WORLDGEN_LOCAL_EVIDENCE_SURVEILLANCE_ASSURANCE_FEATURE_ID,
+  WORLDGEN_LOCAL_EVIDENCE_SURVEILLANCE_ASSURANCE_CONTRACT_VERSION,
+  WORLDGEN_LOCAL_EVIDENCE_SURVEILLANCE_ASSURANCE_INPUT_SCHEMA,
+  WORLDGEN_LOCAL_EVIDENCE_SURVEILLANCE_ASSURANCE_OUTPUT_SCHEMA,
+  WORLDGEN_LOCAL_EVIDENCE_SURVEILLANCE_ASSURANCE_CONTENT_TYPE,
+  worldgenLocalEvidenceSurveillanceAssuranceDigest,
+  validateWorldgenLocalEvidenceSurveillanceAssuranceReceipt,
+  WORLDGEN_MULTIMODAL_EVIDENCE_SURVEILLANCE_ASSURANCE_FEATURE_ID,
+  WORLDGEN_MULTIMODAL_EVIDENCE_SURVEILLANCE_ASSURANCE_CONTRACT_VERSION,
+  WORLDGEN_MULTIMODAL_EVIDENCE_SURVEILLANCE_ASSURANCE_INPUT_SCHEMA,
+  WORLDGEN_MULTIMODAL_EVIDENCE_SURVEILLANCE_ASSURANCE_OUTPUT_SCHEMA,
+  WORLDGEN_MULTIMODAL_EVIDENCE_SURVEILLANCE_ASSURANCE_CONTENT_TYPE,
+  worldgenMultimodalEvidenceSurveillanceAssuranceDigest,
+  validateWorldgenMultimodalEvidenceSurveillanceAssuranceReceipt,
+  WORLDGEN_THROUGHPUT_EVIDENCE_SURVEILLANCE_ASSURANCE_FEATURE_ID,
+  WORLDGEN_THROUGHPUT_EVIDENCE_SURVEILLANCE_ASSURANCE_CONTRACT_VERSION,
+  WORLDGEN_THROUGHPUT_EVIDENCE_SURVEILLANCE_ASSURANCE_INPUT_SCHEMA,
+  WORLDGEN_THROUGHPUT_EVIDENCE_SURVEILLANCE_ASSURANCE_OUTPUT_SCHEMA,
+  WORLDGEN_THROUGHPUT_EVIDENCE_SURVEILLANCE_ASSURANCE_CONTENT_TYPE,
+  worldgenThroughputEvidenceSurveillanceAssuranceDigest,
+  validateWorldgenThroughputEvidenceSurveillanceAssuranceReceipt,
+  WORLDGEN_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_ASSURANCE_FEATURE_ID,
+  WORLDGEN_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_ASSURANCE_CONTRACT_VERSION,
+  WORLDGEN_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_ASSURANCE_INPUT_SCHEMA,
+  WORLDGEN_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_ASSURANCE_OUTPUT_SCHEMA,
+  WORLDGEN_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_ASSURANCE_CONTENT_TYPE,
+  worldgenFederatedContinualEvidenceSurveillanceAssuranceDigest,
+  validateWorldgenFederatedContinualEvidenceSurveillanceAssuranceReceipt,
+} from "./research-contracts.js";
+export type {
+  WorldgenEvidenceSurveillanceAssuranceReceipt,
+  WorldgenLocalQualifiedEvidenceSet,
+  WorldgenMultimodalQualifiedEvidenceSet,
+  WorldgenThroughputQualifiedEvidenceSet,
+  WorldgenFederatedContinualQualifiedEvidenceSet,
+} from "./research-contracts.js";
+
+export {
+  WORLDGEN_LOCAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_FEATURE_ID,
+  WORLDGEN_LOCAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_CONTRACT_VERSION,
+  WORLDGEN_LOCAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_INPUT_SCHEMA,
+  WORLDGEN_LOCAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_OUTPUT_SCHEMA,
+  WORLDGEN_LOCAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_CONTENT_TYPE,
+  worldgenLocalEvidenceSurveillanceWorkflowFabricDigest,
+  validateWorldgenLocalEvidenceSurveillanceWorkflowReceipt,
+} from "./research-contracts.js";
+export type { WorldgenLocalEvidenceSurveillanceWorkflowReceipt } from "./research-contracts.js";
+
+export {
+  WORLDGEN_MULTIMODAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_FEATURE_ID,
+  WORLDGEN_MULTIMODAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_CONTRACT_VERSION,
+  WORLDGEN_MULTIMODAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_INPUT_SCHEMA,
+  WORLDGEN_MULTIMODAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_OUTPUT_SCHEMA,
+  WORLDGEN_MULTIMODAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_CONTENT_TYPE,
+  worldgenMultimodalEvidenceSurveillanceWorkflowFabricDigest,
+  validateWorldgenMultimodalEvidenceSurveillanceWorkflowReceipt,
+} from "./research-contracts.js";
+export type { WorldgenMultimodalEvidenceSurveillanceWorkflowReceipt } from "./research-contracts.js";
+
+export {
+  WORLDGEN_THROUGHPUT_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_FEATURE_ID,
+  WORLDGEN_THROUGHPUT_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_CONTRACT_VERSION,
+  WORLDGEN_THROUGHPUT_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_INPUT_SCHEMA,
+  WORLDGEN_THROUGHPUT_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_OUTPUT_SCHEMA,
+  WORLDGEN_THROUGHPUT_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_CONTENT_TYPE,
+  worldgenThroughputEvidenceSurveillanceWorkflowFabricDigest,
+  validateWorldgenThroughputEvidenceSurveillanceWorkflowReceipt,
+} from "./research-contracts.js";
+export type { WorldgenThroughputEvidenceSurveillanceWorkflowReceipt } from "./research-contracts.js";
+
+export {
+  WORLDGEN_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_FEATURE_ID,
+  WORLDGEN_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_CONTRACT_VERSION,
+  WORLDGEN_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_INPUT_SCHEMA,
+  WORLDGEN_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_OUTPUT_SCHEMA,
+  WORLDGEN_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_CONTENT_TYPE,
+  worldgenFederatedContinualEvidenceSurveillanceWorkflowFabricDigest,
+  validateWorldgenFederatedContinualEvidenceSurveillanceWorkflowReceipt,
+} from "./research-contracts.js";
+export type { WorldgenFederatedContinualEvidenceSurveillanceWorkflowReceipt } from "./research-contracts.js";
+
+export {
+  WORLDGEN_LOCAL_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_FEATURE_ID,
+  WORLDGEN_LOCAL_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_CONTRACT_VERSION,
+  WORLDGEN_LOCAL_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_INPUT_SCHEMA,
+  WORLDGEN_LOCAL_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_OUTPUT_SCHEMA,
+  WORLDGEN_LOCAL_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_CONTENT_TYPE,
+  worldgenLocalEvidenceSurveillanceResearchWorkbenchDigest,
+  validateWorldgenLocalEvidenceSurveillanceResearchWorkbenchReceipt,
+} from "./research-contracts.js";
+export type { WorldgenLocalEvidenceSurveillanceResearchWorkbenchReceipt } from "./research-contracts.js";
+
+export {
+  WORLDGEN_MULTIMODAL_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_FEATURE_ID,
+  WORLDGEN_MULTIMODAL_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_CONTRACT_VERSION,
+  WORLDGEN_MULTIMODAL_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_INPUT_SCHEMA,
+  WORLDGEN_MULTIMODAL_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_OUTPUT_SCHEMA,
+  WORLDGEN_MULTIMODAL_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_CONTENT_TYPE,
+  worldgenMultimodalEvidenceSurveillanceResearchWorkbenchDigest,
+  validateWorldgenMultimodalEvidenceSurveillanceResearchWorkbenchReceipt,
+} from "./research-contracts.js";
+export type { WorldgenMultimodalEvidenceSurveillanceResearchWorkbenchReceipt } from "./research-contracts.js";
+
+export {
+  WORLDGEN_THROUGHPUT_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_FEATURE_ID,
+  WORLDGEN_THROUGHPUT_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_CONTRACT_VERSION,
+  WORLDGEN_THROUGHPUT_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_INPUT_SCHEMA,
+  WORLDGEN_THROUGHPUT_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_OUTPUT_SCHEMA,
+  WORLDGEN_THROUGHPUT_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_CONTENT_TYPE,
+  worldgenThroughputEvidenceSurveillanceResearchWorkbenchDigest,
+  validateWorldgenThroughputEvidenceSurveillanceResearchWorkbenchReceipt,
+} from "./research-contracts.js";
+export type { WorldgenThroughputEvidenceSurveillanceResearchWorkbenchReceipt } from "./research-contracts.js";
+
+export {
+  WORLDGEN_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_FEATURE_ID,
+  WORLDGEN_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_CONTRACT_VERSION,
+  WORLDGEN_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_INPUT_SCHEMA,
+  WORLDGEN_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_OUTPUT_SCHEMA,
+  WORLDGEN_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_CONTENT_TYPE,
+  worldgenFederatedContinualEvidenceSurveillanceResearchWorkbenchDigest,
+  validateWorldgenFederatedContinualEvidenceSurveillanceResearchWorkbenchReceipt,
+} from "./research-contracts.js";
+export type { WorldgenFederatedContinualEvidenceSurveillanceResearchWorkbenchReceipt } from "./research-contracts.js";
+export {
+  WORLDGEN_LOCAL_EVIDENCE_SURVEILLANCE_INTEROPERABILITY_GATEWAY_FEATURE_ID,
+  WORLDGEN_LOCAL_EVIDENCE_SURVEILLANCE_INTEROPERABILITY_GATEWAY_CONTRACT_VERSION,
+  WORLDGEN_LOCAL_EVIDENCE_SURVEILLANCE_INTEROPERABILITY_GATEWAY_INPUT_SCHEMA,
+  WORLDGEN_LOCAL_EVIDENCE_SURVEILLANCE_INTEROPERABILITY_GATEWAY_OUTPUT_SCHEMA,
+  WORLDGEN_LOCAL_EVIDENCE_SURVEILLANCE_INTEROPERABILITY_GATEWAY_CONTENT_TYPE,
+  worldgenLocalEvidenceSurveillanceInteroperabilityGatewayDigest,
+  validateWorldgenLocalEvidenceSurveillanceInteroperabilityGatewayReceipt,
+} from "./research-contracts.js";
+export type { WorldgenLocalEvidenceSurveillanceInteroperabilityGatewayReceipt } from "./research-contracts.js";
+
+export {
+  WORLDGEN_MULTIMODAL_EVIDENCE_SURVEILLANCE_INTEROPERABILITY_GATEWAY_FEATURE_ID,
+  WORLDGEN_MULTIMODAL_EVIDENCE_SURVEILLANCE_INTEROPERABILITY_GATEWAY_CONTRACT_VERSION,
+  WORLDGEN_MULTIMODAL_EVIDENCE_SURVEILLANCE_INTEROPERABILITY_GATEWAY_INPUT_SCHEMA,
+  WORLDGEN_MULTIMODAL_EVIDENCE_SURVEILLANCE_INTEROPERABILITY_GATEWAY_OUTPUT_SCHEMA,
+  WORLDGEN_MULTIMODAL_EVIDENCE_SURVEILLANCE_INTEROPERABILITY_GATEWAY_CONTENT_TYPE,
+  worldgenMultimodalEvidenceSurveillanceInteroperabilityGatewayDigest,
+  validateWorldgenMultimodalEvidenceSurveillanceInteroperabilityGatewayReceipt,
+} from "./research-contracts.js";
+export type { WorldgenMultimodalEvidenceSurveillanceInteroperabilityGatewayReceipt } from "./research-contracts.js";
+
+export {
+  WORLDGEN_THROUGHPUT_EVIDENCE_SURVEILLANCE_INTEROPERABILITY_GATEWAY_FEATURE_ID,
+  WORLDGEN_THROUGHPUT_EVIDENCE_SURVEILLANCE_INTEROPERABILITY_GATEWAY_CONTRACT_VERSION,
+  WORLDGEN_THROUGHPUT_EVIDENCE_SURVEILLANCE_INTEROPERABILITY_GATEWAY_INPUT_SCHEMA,
+  WORLDGEN_THROUGHPUT_EVIDENCE_SURVEILLANCE_INTEROPERABILITY_GATEWAY_OUTPUT_SCHEMA,
+  WORLDGEN_THROUGHPUT_EVIDENCE_SURVEILLANCE_INTEROPERABILITY_GATEWAY_CONTENT_TYPE,
+  worldgenThroughputEvidenceSurveillanceInteroperabilityGatewayDigest,
+  validateWorldgenThroughputEvidenceSurveillanceInteroperabilityGatewayReceipt,
+} from "./research-contracts.js";
+export type { WorldgenThroughputEvidenceSurveillanceInteroperabilityGatewayReceipt } from "./research-contracts.js";
+
+export {
+  WORLDGEN_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_INTEROPERABILITY_GATEWAY_FEATURE_ID,
+  WORLDGEN_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_INTEROPERABILITY_GATEWAY_CONTRACT_VERSION,
+  WORLDGEN_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_INTEROPERABILITY_GATEWAY_INPUT_SCHEMA,
+  WORLDGEN_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_INTEROPERABILITY_GATEWAY_OUTPUT_SCHEMA,
+  WORLDGEN_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_INTEROPERABILITY_GATEWAY_CONTENT_TYPE,
+  worldgenFederatedContinualEvidenceSurveillanceInteroperabilityGatewayDigest,
+  validateWorldgenFederatedContinualEvidenceSurveillanceInteroperabilityGatewayReceipt,
+} from "./research-contracts.js";
+export type { WorldgenFederatedContinualEvidenceSurveillanceInteroperabilityGatewayReceipt } from "./research-contracts.js";
+
+export {
+  DEVPLAT_HIGH_THROUGHPUT_QUALITY_CONTROL_FEATURE_ID,
+  DEVPLAT_HIGH_THROUGHPUT_QUALITY_CONTROL_CONTRACT_VERSION,
+  DEVPLAT_HIGH_THROUGHPUT_QUALITY_CONTROL_INPUT_SCHEMA,
+  DEVPLAT_HIGH_THROUGHPUT_QUALITY_CONTROL_OUTPUT_SCHEMA,
+  DEVPLAT_HIGH_THROUGHPUT_QUALITY_CONTROL_CONTENT_TYPE,
+  devplatQualityControlPlaneReceiptDigest,
+  validateDevplatQualityControlPlaneReceipt7,
+} from "./research-contracts.js";
+export type { DevplatQualityControlPlaneReceipt7 } from "./research-contracts.js";
+
+export {
+  STANDARDS_MECHANISM_EXPLORATION_INFERENCE_FEATURE_ID,
+  STANDARDS_MECHANISM_EXPLORATION_INFERENCE_CONTRACT_VERSION,
+  STANDARDS_MECHANISM_EXPLORATION_INFERENCE_INPUT_SCHEMA,
+  STANDARDS_MECHANISM_EXPLORATION_INFERENCE_OUTPUT_SCHEMA,
+  STANDARDS_MECHANISM_EXPLORATION_INFERENCE_CONTENT_TYPE,
+  standardsMechanismInferenceReceipt8Digest,
+  validateStandardsMechanismInferenceReceipt8,
+} from "./research-contracts.js";
+export type { StandardsMechanismInferenceReceipt8 } from "./research-contracts.js";
+
+export {
+  ORACLE_SEMANTIC_PARITY_FEATURE_ID,
+  ORACLE_SEMANTIC_PARITY_CONTRACT_VERSION,
+  ORACLE_SEMANTIC_PARITY_INPUT_SCHEMA,
+  ORACLE_SEMANTIC_PARITY_OUTPUT_SCHEMA,
+  ORACLE_SEMANTIC_PARITY_CONTENT_TYPE,
+  oracleSemanticParityReceipt7Digest,
+  validateOracleSemanticParityReceipt7,
+} from "./research-contracts.js";
+export type { OracleSemanticParityReceipt7 } from "./research-contracts.js";
+
+export {
+  POLICY_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_FEATURE_ID,
+  POLICY_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_CONTRACT_VERSION,
+  POLICY_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_CONTENT_TYPE,
+  policyFederatedContinualEvidenceSurveillanceContractModelReceiptDigest,
+  validatePolicyFederatedContinualEvidenceSurveillanceContractModelReceipt,
+} from "./research-contracts.js";
+export type { PolicyFederatedContinualEvidenceSurveillanceContractModelReceipt } from "./research-contracts.js";
+
+export {
+  BIOETHICS_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_FEATURE_ID,
+  BIOETHICS_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_CONTRACT_VERSION,
+  BIOETHICS_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_CONTENT_TYPE,
+  bioethicsFederatedContinualEvidenceSurveillanceContractModelReceiptDigest,
+  validateBioethicsFederatedContinualEvidenceSurveillanceContractModelReceipt,
+} from "./research-contracts.js";
+export type { BioethicsFederatedContinualEvidenceSurveillanceContractModelReceipt } from "./research-contracts.js";
+
+export {
+  FOUNDATION_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_FEATURE_ID,
+  FOUNDATION_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_CONTRACT_VERSION,
+  FOUNDATION_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_CONTENT_TYPE,
+  foundationFederatedContinualEvidenceSurveillanceContractModelReceiptDigest,
+  validateFoundationFederatedContinualEvidenceSurveillanceContractModelReceipt,
+} from "./research-contracts.js";
+export type { FoundationFederatedContinualEvidenceSurveillanceContractModelReceipt } from "./research-contracts.js";
+
+export {
+  WORLDGEN_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_FEATURE_ID,
+  WORLDGEN_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_CONTRACT_VERSION,
+  WORLDGEN_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_CONTENT_TYPE,
+  worldgenFederatedContinualEvidenceSurveillanceContractModelReceiptDigest,
+  validateWorldgenFederatedContinualEvidenceSurveillanceContractModelReceipt,
+} from "./research-contracts.js";
+export type { WorldgenFederatedContinualEvidenceSurveillanceContractModelReceipt } from "./research-contracts.js";
+
+export {
+  WORLDGEN_LOCAL_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_FEATURE_ID,
+  WORLDGEN_LOCAL_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_CONTRACT_VERSION,
+  worldgenLocalEvidenceSurveillanceResearchCopilotReceiptDigest,
+  validateWorldgenLocalEvidenceSurveillanceResearchCopilotReceipt,
+} from "./research-contracts.js";
+export type { WorldgenLocalEvidenceSurveillanceResearchCopilotReceipt } from "./research-contracts.js";
+export {
+  WORLDGEN_MULTIMODAL_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_FEATURE_ID,
+  WORLDGEN_MULTIMODAL_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_CONTRACT_VERSION,
+  worldgenMultimodalEvidenceSurveillanceResearchCopilotReceiptDigest,
+  validateWorldgenMultimodalEvidenceSurveillanceResearchCopilotReceipt,
+} from "./research-contracts.js";
+export type { WorldgenMultimodalEvidenceSurveillanceResearchCopilotReceipt } from "./research-contracts.js";
+export {
+  WORLDGEN_THROUGHPUT_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_FEATURE_ID,
+  WORLDGEN_THROUGHPUT_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_CONTRACT_VERSION,
+  worldgenThroughputEvidenceSurveillanceResearchCopilotReceiptDigest,
+  validateWorldgenThroughputEvidenceSurveillanceResearchCopilotReceipt,
+} from "./research-contracts.js";
+export type { WorldgenThroughputEvidenceSurveillanceResearchCopilotReceipt } from "./research-contracts.js";
+export {
+  WORLDGEN_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_FEATURE_ID,
+  WORLDGEN_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_CONTRACT_VERSION,
+  worldgenFederatedContinualEvidenceSurveillanceResearchCopilotReceiptDigest,
+  validateWorldgenFederatedContinualEvidenceSurveillanceResearchCopilotReceipt,
+} from "./research-contracts.js";
+export type { WorldgenFederatedContinualEvidenceSurveillanceResearchCopilotReceipt } from "./research-contracts.js";
+
+export {
+  CONFORMANCE_INTERPRETATION_VISUALIZATION_GATEWAY_FEATURE_ID,
+  CONFORMANCE_INTERPRETATION_VISUALIZATION_GATEWAY_CONTRACT_VERSION,
+  CONFORMANCE_INTERPRETATION_VISUALIZATION_GATEWAY_INPUT_SCHEMA,
+  CONFORMANCE_INTERPRETATION_VISUALIZATION_GATEWAY_OUTPUT_SCHEMA,
+  CONFORMANCE_INTERPRETATION_VISUALIZATION_GATEWAY_CONTENT_TYPE,
+  conformanceInterpretationVisualizationGatewayDigest,
+  validateConformanceInterpretationVisualizationGateway,
+} from "./research-contracts.js";
+export type { FederatedInterpretationVisualizationEnvelope10 } from "./research-contracts.js";
+
+export {
+  GOVERNANCE_COMPUTATIONAL_EXECUTION_CONTRACT_MODEL_FEATURE_ID,
+  GOVERNANCE_COMPUTATIONAL_EXECUTION_CONTRACT_MODEL_CONTRACT_VERSION,
+  GOVERNANCE_COMPUTATIONAL_EXECUTION_CONTRACT_MODEL_INPUT_SCHEMA,
+  GOVERNANCE_COMPUTATIONAL_EXECUTION_CONTRACT_MODEL_OUTPUT_SCHEMA,
+  GOVERNANCE_COMPUTATIONAL_EXECUTION_CONTRACT_MODEL_CONTENT_TYPE,
+  governanceComputationalExecutionContractDigest,
+  validateGovernanceComputationalExecutionContract,
+} from "./research-contracts.js";
+export type { GovernanceExecutionContract8 } from "./research-contracts.js";
+
+export {
+  WORLDFACTORY_COMPUTATIONAL_EXECUTION_FEDERATED_CONTROL_FEATURE_ID,
+  WORLDFACTORY_COMPUTATIONAL_EXECUTION_FEDERATED_CONTROL_CONTRACT_VERSION,
+  WORLDFACTORY_COMPUTATIONAL_EXECUTION_FEDERATED_CONTROL_INPUT_SCHEMA,
+  WORLDFACTORY_COMPUTATIONAL_EXECUTION_FEDERATED_CONTROL_OUTPUT_SCHEMA,
+  WORLDFACTORY_COMPUTATIONAL_EXECUTION_FEDERATED_CONTROL_CONTENT_TYPE,
+  computationalExecutionRun9Digest,
+  validateComputationalExecutionRun9,
+} from "./research-contracts.js";
+export type { ComputationalExecutionRun9 } from "./research-contracts.js";
+
+export {
+  CLI_QUALITY_CONTROL_INFERENCE_FEATURE_ID,
+  CLI_QUALITY_CONTROL_INFERENCE_CONTRACT_VERSION,
+  CLI_QUALITY_CONTROL_INFERENCE_INPUT_SCHEMA,
+  CLI_QUALITY_CONTROL_INFERENCE_OUTPUT_SCHEMA,
+  CLI_QUALITY_CONTROL_INFERENCE_CONTENT_TYPE,
+  qualityInferenceReceipt7Digest,
+  validateQualityInferenceReceipt7,
+} from "./research-contracts.js";
+export type { QualityInferenceReceipt7 } from "./research-contracts.js";
+
+export {
+  ROUTING_FEDERATED_REPLICATION_NEGATIVE_RESULTS_FEATURE_ID,
+  ROUTING_FEDERATED_REPLICATION_NEGATIVE_RESULTS_CONTRACT_VERSION,
+  ROUTING_FEDERATED_REPLICATION_NEGATIVE_RESULTS_INPUT_SCHEMA,
+  ROUTING_FEDERATED_REPLICATION_NEGATIVE_RESULTS_OUTPUT_SCHEMA,
+  ROUTING_FEDERATED_REPLICATION_NEGATIVE_RESULTS_CONTENT_TYPE,
+  replicationCopilotReceipt8Digest,
+  validateReplicationCopilotReceipt8,
+} from "./research-contracts.js";
+export type { ReplicationCopilotReceipt8 } from "./research-contracts.js";
+
+export {
+  ADAPTIVE_MECHANISM_EXPLORATION_ASSURANCE_FEATURE_ID,
+  ADAPTIVE_MECHANISM_EXPLORATION_ASSURANCE_CONTRACT_VERSION,
+  ADAPTIVE_MECHANISM_EXPLORATION_ASSURANCE_INPUT_SCHEMA,
+  ADAPTIVE_MECHANISM_EXPLORATION_ASSURANCE_OUTPUT_SCHEMA,
+  ADAPTIVE_MECHANISM_EXPLORATION_ASSURANCE_CONTENT_TYPE,
+  mechanismAssuranceReceipt8Digest,
+  validateMechanismAssuranceReceipt8,
+} from "./research-contracts.js";
+export type { MechanismAssuranceReceipt8 } from "./research-contracts.js";
+
+export {
+  API_CONTEXT_COMPILATION_ASSURANCE_FEATURE_ID,
+  API_CONTEXT_COMPILATION_ASSURANCE_CONTRACT_VERSION,
+  API_CONTEXT_COMPILATION_ASSURANCE_INPUT_SCHEMA,
+  API_CONTEXT_COMPILATION_ASSURANCE_OUTPUT_SCHEMA,
+  API_CONTEXT_COMPILATION_ASSURANCE_CONTENT_TYPE,
+  contextAssuranceReceipt7Digest,
+  validateContextAssuranceReceipt7,
+} from "./research-contracts.js";
+export type { ContextAssuranceReceipt7 } from "./research-contracts.js";
+
+export {
+  ADAPTIVE_EXPERIMENT_DESIGN_ASSURANCE_FEATURE_ID,
+  ADAPTIVE_EXPERIMENT_DESIGN_ASSURANCE_CONTRACT_VERSION,
+  ADAPTIVE_EXPERIMENT_DESIGN_ASSURANCE_INPUT_SCHEMA,
+  ADAPTIVE_EXPERIMENT_DESIGN_ASSURANCE_OUTPUT_SCHEMA,
+  ADAPTIVE_EXPERIMENT_DESIGN_ASSURANCE_CONTENT_TYPE,
+  experimentDesignAssuranceReceipt9Digest,
+  validateExperimentDesignAssuranceReceipt9,
+} from "./research-contracts.js";
+export type { ExperimentDesignAssuranceReceipt9 } from "./research-contracts.js";
+
+export {
+  ORACLEX_PERFORMANCE_RELIABILITY_INTEROPERABILITY_GATEWAY_FEATURE_ID,
+  ORACLEX_PERFORMANCE_RELIABILITY_INTEROPERABILITY_GATEWAY_CONTRACT_VERSION,
+  ORACLEX_PERFORMANCE_RELIABILITY_INTEROPERABILITY_GATEWAY_INPUT_SCHEMA,
+  ORACLEX_PERFORMANCE_RELIABILITY_INTEROPERABILITY_GATEWAY_OUTPUT_SCHEMA,
+  ORACLEX_PERFORMANCE_RELIABILITY_INTEROPERABILITY_GATEWAY_CONTENT_TYPE,
+  reliableCapabilityResult6Digest,
+  validateReliableCapabilityResult6,
+} from "./research-contracts.js";
+export type { ReliableCapabilityResult6 } from "./research-contracts.js";
+
+export {
+  OBLIGATION_SECURITY_FEDERATION_INTEROPERABILITY_GATEWAY_FEATURE_ID,
+  OBLIGATION_SECURITY_FEDERATION_INTEROPERABILITY_GATEWAY_CONTRACT_VERSION,
+  OBLIGATION_SECURITY_FEDERATION_INTEROPERABILITY_GATEWAY_INPUT_SCHEMA,
+  OBLIGATION_SECURITY_FEDERATION_INTEROPERABILITY_GATEWAY_OUTPUT_SCHEMA,
+  OBLIGATION_SECURITY_FEDERATION_INTEROPERABILITY_GATEWAY_CONTENT_TYPE,
+  federationEnvelope6Digest,
+  validateFederationEnvelope6,
+} from "./research-contracts.js";
+export type { FederationEnvelope6 } from "./research-contracts.js";
+
+export {
+  EPISTEMIC_EXPERIMENT_DESIGN_RESEARCH_WORKBENCH_FEATURE_ID,
+  EPISTEMIC_EXPERIMENT_DESIGN_RESEARCH_WORKBENCH_CONTRACT_VERSION,
+  EPISTEMIC_EXPERIMENT_DESIGN_RESEARCH_WORKBENCH_INPUT_SCHEMA,
+  EPISTEMIC_EXPERIMENT_DESIGN_RESEARCH_WORKBENCH_OUTPUT_SCHEMA,
+  EPISTEMIC_EXPERIMENT_DESIGN_RESEARCH_WORKBENCH_CONTENT_TYPE,
+  executableExperimentDesign5Digest,
+  validateExecutableExperimentDesign5,
+} from "./research-contracts.js";
+export type { ExecutableExperimentDesign5 } from "./research-contracts.js";
+
+export {
+  SCALE_INTERPRETATION_VISUALIZATION_FEATURE_ID,
+  SCALE_INTERPRETATION_VISUALIZATION_CONTRACT_VERSION,
+  SCALE_INTERPRETATION_VISUALIZATION_INPUT_SCHEMA,
+  SCALE_INTERPRETATION_VISUALIZATION_OUTPUT_SCHEMA,
+  SCALE_INTERPRETATION_VISUALIZATION_CONTENT_TYPE,
+  interactiveInterpretation7Digest,
+  validateInteractiveInterpretation7,
+} from "./research-contracts.js";
+export type { InteractiveInterpretation7 } from "./research-contracts.js";
+
+export {
+  SCALE_INTERPRETATION_INTEROPERABILITY_FEATURE_ID,
+  SCALE_INTERPRETATION_INTEROPERABILITY_CONTRACT_VERSION,
+  SCALE_INTERPRETATION_INTEROPERABILITY_INPUT_SCHEMA,
+  SCALE_INTERPRETATION_INTEROPERABILITY_OUTPUT_SCHEMA,
+  SCALE_INTERPRETATION_INTEROPERABILITY_CONTENT_TYPE,
+  interactiveInterpretation6Digest,
+  validateInteractiveInterpretation6,
+} from "./research-contracts.js";
+export type { InteractiveInterpretation6 } from "./research-contracts.js";
+
+export {
+  BIOETHICS_EXPERIMENT_DESIGN_WORKFLOW_FEATURE_ID,
+  BIOETHICS_EXPERIMENT_DESIGN_WORKFLOW_CONTRACT_VERSION,
+  BIOETHICS_EXPERIMENT_DESIGN_WORKFLOW_INPUT_SCHEMA,
+  BIOETHICS_EXPERIMENT_DESIGN_WORKFLOW_OUTPUT_SCHEMA,
+  BIOETHICS_EXPERIMENT_DESIGN_WORKFLOW_CONTENT_TYPE,
+  executableExperimentDesign4Digest,
+  validateExecutableExperimentDesign4,
+} from "./research-contracts.js";
+export type { ExecutableExperimentDesign4 } from "./research-contracts.js";
+
+export {
+  ONCO_COMPUTATIONAL_EXECUTION_CONTRACT_FEATURE_ID,
+  ONCO_COMPUTATIONAL_EXECUTION_CONTRACT_VERSION,
+  ONCO_COMPUTATIONAL_EXECUTION_CONTRACT_INPUT_SCHEMA,
+  ONCO_COMPUTATIONAL_EXECUTION_CONTRACT_OUTPUT_SCHEMA,
+  ONCO_COMPUTATIONAL_EXECUTION_CONTRACT_CONTENT_TYPE,
+  executionRun2Digest,
+  validateExecutionRun2,
+} from "./research-contracts.js";
+export type { ExecutionRun2 } from "./research-contracts.js";
+
+export {
+  ORACLE_INTEROPERABILITY_WORKBENCH_FEATURE_ID,
+  ORACLE_INTEROPERABILITY_WORKBENCH_CONTRACT_VERSION,
+  ORACLE_INTEROPERABILITY_WORKBENCH_INPUT_SCHEMA,
+  ORACLE_INTEROPERABILITY_WORKBENCH_OUTPUT_SCHEMA,
+  ORACLE_INTEROPERABILITY_WORKBENCH_CONTENT_TYPE,
+  negotiatedIntegration5Digest,
+  validateNegotiatedIntegration5,
+} from "./research-contracts.js";
+export type { NegotiatedIntegration5 } from "./research-contracts.js";
+
+export {
+  ATLASHUB_PROVENANCE_SIGNING_INFERENCE_FEATURE_ID,
+  ATLASHUB_PROVENANCE_SIGNING_INFERENCE_CONTRACT_VERSION,
+  ATLASHUB_PROVENANCE_SIGNING_INFERENCE_INPUT_SCHEMA,
+  ATLASHUB_PROVENANCE_SIGNING_INFERENCE_OUTPUT_SCHEMA,
+  ATLASHUB_PROVENANCE_SIGNING_INFERENCE_CONTENT_TYPE,
+  signedProvenanceEnvelope1Digest,
+  validateSignedProvenanceEnvelope1,
+} from "./research-contracts.js";
+export type { SignedProvenanceEnvelope1 } from "./research-contracts.js";
+
+export {
+  HUB_POLICY_AUTONOMY_INFERENCE_FEATURE_ID,
+  HUB_POLICY_AUTONOMY_INFERENCE_CONTRACT_VERSION,
+  HUB_POLICY_AUTONOMY_INFERENCE_INPUT_SCHEMA,
+  HUB_POLICY_AUTONOMY_INFERENCE_OUTPUT_SCHEMA,
+  HUB_POLICY_AUTONOMY_INFERENCE_CONTENT_TYPE,
+  policyReceipt1Digest,
+  validatePolicyReceipt1,
+} from "./research-contracts.js";
+export type { PolicyReceipt1 } from "./research-contracts.js";
+
+export {
+  SCOPE_FEDERATED_INTEROPERABILITY_FEATURE_ID,
+  SCOPE_FEDERATED_INTEROPERABILITY_CONTRACT_VERSION,
+  SCOPE_FEDERATED_INTEROPERABILITY_INPUT_SCHEMA,
+  SCOPE_FEDERATED_INTEROPERABILITY_OUTPUT_SCHEMA,
+  SCOPE_FEDERATED_INTEROPERABILITY_CONTENT_TYPE,
+  scopeFederationGatewayReceipt10Digest,
+  validateScopeFederationGatewayReceipt10,
+} from "./research-contracts.js";
+export type { ScopeFederationGatewayReceipt10 } from "./research-contracts.js";
+
+export {
+  HUBAPI_EXPERIMENT_DESIGN_ASSURANCE_FEATURE_ID,
+  HUBAPI_EXPERIMENT_DESIGN_ASSURANCE_CONTRACT_VERSION,
+  HUBAPI_EXPERIMENT_DESIGN_ASSURANCE_INPUT_SCHEMA,
+  HUBAPI_EXPERIMENT_DESIGN_ASSURANCE_OUTPUT_SCHEMA,
+  HUBAPI_EXPERIMENT_DESIGN_ASSURANCE_CONTENT_TYPE,
+  executableExperimentDesign7Digest,
+  validateExecutableExperimentDesign7,
+} from "./research-contracts.js";
+export type { ExecutableExperimentDesign7 } from "./research-contracts.js";
+
+export {
+  FABRIC_EXPERIMENT_DESIGN_CONTRACT_MODEL_FEATURE_ID,
+  FABRIC_EXPERIMENT_DESIGN_CONTRACT_MODEL_CONTRACT_VERSION,
+  FABRIC_EXPERIMENT_DESIGN_CONTRACT_MODEL_INPUT_SCHEMA,
+  FABRIC_EXPERIMENT_DESIGN_CONTRACT_MODEL_OUTPUT_SCHEMA,
+  FABRIC_EXPERIMENT_DESIGN_CONTRACT_MODEL_CONTENT_TYPE,
+  executableExperimentDesign2Digest,
+  validateExecutableExperimentDesign2,
+} from "./research-contracts.js";
+export type { ExecutableExperimentDesign2 } from "./research-contracts.js";
+
+export {
+  BIOETHICS_MULTIMODAL_CONTEXT_COMPILATION_FEATURE_ID,
+  BIOETHICS_MULTIMODAL_CONTEXT_COMPILATION_CONTRACT_VERSION,
+  BIOETHICS_MULTIMODAL_CONTEXT_COMPILATION_INPUT_SCHEMA,
+  BIOETHICS_MULTIMODAL_CONTEXT_COMPILATION_OUTPUT_SCHEMA,
+  BIOETHICS_MULTIMODAL_CONTEXT_COMPILATION_CONTENT_TYPE,
+  certifiedDecisionSection7Digest,
+  validateCertifiedDecisionSection7,
+} from "./research-contracts.js";
+export type { CertifiedDecisionSection7 } from "./research-contracts.js";
+
+export {
+  BIOETHICS_STATISTICAL_ANALYSIS_ASSURANCE_FEATURE_ID,
+  BIOETHICS_STATISTICAL_ANALYSIS_ASSURANCE_CONTRACT_VERSION,
+  BIOETHICS_STATISTICAL_ANALYSIS_ASSURANCE_INPUT_SCHEMA,
+  BIOETHICS_STATISTICAL_ANALYSIS_ASSURANCE_OUTPUT_SCHEMA,
+  BIOETHICS_STATISTICAL_ANALYSIS_ASSURANCE_CONTENT_TYPE,
+  qualifiedAnalysisResult7Digest,
+  validateQualifiedAnalysisResult7,
+} from "./research-contracts.js";
+export type { QualifiedAnalysisResult7 } from "./research-contracts.js";
+
+export {
+  PRISM_LABORATORY_INTEGRATION_COPILOT_FEATURE_ID,
+  PRISM_LABORATORY_INTEGRATION_COPILOT_CONTRACT_VERSION,
+  PRISM_LABORATORY_INTEGRATION_COPILOT_INPUT_SCHEMA,
+  PRISM_LABORATORY_INTEGRATION_COPILOT_OUTPUT_SCHEMA,
+  PRISM_LABORATORY_INTEGRATION_COPILOT_CONTENT_TYPE,
+  instrumentActionReceipt3Digest,
+  validateInstrumentActionReceipt3,
+} from "./research-contracts.js";
+export type { InstrumentActionReceipt3 } from "./research-contracts.js";
+
+export {
+  CONFORMANCE_RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_FEATURE_ID,
+  CONFORMANCE_RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_CONTRACT_VERSION,
+  CONFORMANCE_RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_INPUT_SCHEMA,
+  CONFORMANCE_RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_OUTPUT_SCHEMA,
+  CONFORMANCE_RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_CONTENT_TYPE,
+  evidenceSynthesis2Digest,
+  validateEvidenceSynthesis2,
+} from "./research-contracts.js";
+export type { EvidenceSynthesis2, RetrievalCandidate3, ScopedRetrievalQuery3 } from "./research-contracts.js";
+
+export {
+  WEAVELANG_FEDERATED_COMMONS_ASSURANCE_FEATURE_ID,
+  WEAVELANG_FEDERATED_COMMONS_ASSURANCE_CONTRACT_VERSION,
+  WEAVELANG_FEDERATED_COMMONS_ASSURANCE_INPUT_SCHEMA,
+  WEAVELANG_FEDERATED_COMMONS_ASSURANCE_OUTPUT_SCHEMA,
+  WEAVELANG_FEDERATED_COMMONS_ASSURANCE_CONTENT_TYPE,
+  weavelangFederationEnvelope8Digest,
+  validateWeavelangFederationEnvelope8,
+} from "./research-contracts.js";
+export type { WeaveCapability5, WeavelangFederationEnvelope8 } from "./research-contracts.js";
+
+export {
+  BACKENDS_FEDERATED_RETRIEVAL_SYNTHESIS_WORKFLOW_FEATURE_ID,
+  BACKENDS_FEDERATED_RETRIEVAL_SYNTHESIS_WORKFLOW_CONTRACT_VERSION,
+  BACKENDS_FEDERATED_RETRIEVAL_SYNTHESIS_WORKFLOW_INPUT_SCHEMA,
+  BACKENDS_FEDERATED_RETRIEVAL_SYNTHESIS_WORKFLOW_OUTPUT_SCHEMA,
+  BACKENDS_FEDERATED_RETRIEVAL_SYNTHESIS_WORKFLOW_CONTENT_TYPE,
+  federatedRetrievalSynthesisRun8Digest,
+  validateFederatedRetrievalSynthesisRun8,
+} from "./research-contracts.js";
+export type { FederatedRetrievalSynthesisRun8 } from "./research-contracts.js";
+
+export {
+  DEVX_EVIDENCE_SURVEILLANCE_CONTROL_FEATURE_ID,
+  DEVX_EVIDENCE_SURVEILLANCE_CONTROL_CONTRACT_VERSION,
+  DEVX_EVIDENCE_SURVEILLANCE_CONTROL_INPUT_SCHEMA,
+  DEVX_EVIDENCE_SURVEILLANCE_CONTROL_OUTPUT_SCHEMA,
+  DEVX_EVIDENCE_SURVEILLANCE_CONTROL_CONTENT_TYPE,
+  devxEvidenceControlReceipt8Digest,
+  validateDevxEvidenceControlReceipt8,
+} from "./research-contracts.js";
+export type { DevxEvidenceControlReceipt8 } from "./research-contracts.js";
+
+export {
+  ORACLE_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_FEATURE_ID,
+  ORACLE_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_CONTRACT_VERSION,
+  ORACLE_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_INPUT_SCHEMA,
+  ORACLE_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_OUTPUT_SCHEMA,
+  ORACLE_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_CONTENT_TYPE,
+  ORACLE_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_STAGES,
+  oracleEvidenceSurveillanceWorkflowDigest,
+  validateOracleQualifiedEvidenceSet4,
+} from "./research-contracts.js";
+export type { OracleQualifiedEvidenceSet4 } from "./research-contracts.js";
+
+export {
+  IDS_LOCAL_EVIDENCE_SURVEILLANCE_INFERENCE_FEATURE_ID,
+  IDS_LOCAL_EVIDENCE_SURVEILLANCE_INFERENCE_CONTRACT_VERSION,
+  IDS_LOCAL_EVIDENCE_SURVEILLANCE_INFERENCE_INPUT_SCHEMA,
+  IDS_LOCAL_EVIDENCE_SURVEILLANCE_INFERENCE_OUTPUT_SCHEMA,
+  IDS_LOCAL_EVIDENCE_SURVEILLANCE_INFERENCE_CONTENT_TYPE,
+  idsLocalEvidenceSurveillanceInferenceDigest,
+  validateIdsQualifiedEvidenceSet1,
+} from "./research-contracts.js";
+export type { IdsQualifiedEvidenceSet1 } from "./research-contracts.js";
+
+export {
+  SCOPE_FEDERATED_EVIDENCE_CONTROL_FEATURE_ID,
+  SCOPE_FEDERATED_EVIDENCE_CONTROL_CONTRACT_VERSION,
+  SCOPE_FEDERATED_EVIDENCE_CONTROL_INPUT_SCHEMA,
+  SCOPE_FEDERATED_EVIDENCE_CONTROL_OUTPUT_SCHEMA,
+  SCOPE_FEDERATED_EVIDENCE_CONTROL_CONTENT_TYPE,
+  scopeFederatedEvidenceControlDigest,
+  validateFederatedEvidenceControlReceipt9,
+} from "./research-contracts.js";
+export type { FederatedEvidenceControlReceipt9 } from "./research-contracts.js";
+
+export {
+  PACKS_PROTOCOL_WORKBENCH_FEATURE_ID,
+  PACKS_PROTOCOL_WORKBENCH_CONTRACT_VERSION,
+  PACKS_PROTOCOL_WORKBENCH_INPUT_SCHEMA,
+  PACKS_PROTOCOL_WORKBENCH_OUTPUT_SCHEMA,
+  PACKS_PROTOCOL_WORKBENCH_CONTENT_TYPE,
+  packsProtocolWorkbenchDigest,
+  validatePacksProtocolWorkbenchReport9,
+} from "./research-contracts.js";
+export type { PacksProtocolWorkbenchReport9 } from "./research-contracts.js";
+
+export {
+  MCP_REPLICATION_NEGATIVE_RESULTS_ASSURANCE_FEATURE_ID,
+  MCP_REPLICATION_NEGATIVE_RESULTS_ASSURANCE_CONTRACT_VERSION,
+  MCP_REPLICATION_NEGATIVE_RESULTS_ASSURANCE_INPUT_SCHEMA,
+  MCP_REPLICATION_NEGATIVE_RESULTS_ASSURANCE_OUTPUT_SCHEMA,
+  MCP_REPLICATION_NEGATIVE_RESULTS_ASSURANCE_CONTENT_TYPE,
+  mcpReplicationAssuranceDigest,
+  validateMcpReplicationRecord7,
+} from "./research-contracts.js";
+export type { McpReplicationRecord7 } from "./research-contracts.js";
+
+export {
+  PRISM_PROTOCOL_SIMULATION_ASSURANCE_FEATURE_ID,
+  PRISM_PROTOCOL_SIMULATION_ASSURANCE_CONTRACT_VERSION,
+  PRISM_PROTOCOL_SIMULATION_ASSURANCE_INPUT_SCHEMA,
+  PRISM_PROTOCOL_SIMULATION_ASSURANCE_OUTPUT_SCHEMA,
+  PRISM_PROTOCOL_SIMULATION_ASSURANCE_CONTENT_TYPE,
+  prismProtocolSimulationDigest,
+  validatePrismProtocolSimulationReport,
+} from "./research-contracts.js";
+export type { PrismProtocolSimulationReport } from "./research-contracts.js";
+
+export {
+  SCALE_QUALITY_CONTROL_CONTRACT_MODEL_FEATURE_ID,
+  SCALE_QUALITY_CONTROL_CONTRACT_MODEL_CONTRACT_VERSION,
+  SCALE_QUALITY_CONTROL_CONTRACT_MODEL_INPUT_SCHEMA,
+  SCALE_QUALITY_CONTROL_CONTRACT_MODEL_OUTPUT_SCHEMA,
+  SCALE_QUALITY_CONTROL_CONTRACT_MODEL_CONTENT_TYPE,
+  scaleQualityVerdict2Digest,
+  validateScaleQualityVerdict2,
+} from "./research-contracts.js";
+export type { ScaleQualityVerdict2 } from "./research-contracts.js";
+
+export {
+  BIOETHICS_PROSPECTIVE_COMPUTATIONAL_EXECUTION_FEATURE_ID,
+  BIOETHICS_PROSPECTIVE_COMPUTATIONAL_EXECUTION_CONTRACT_VERSION,
+  BIOETHICS_PROSPECTIVE_COMPUTATIONAL_EXECUTION_CONTENT_TYPE,
+  bioethicsProspectiveComputationalExecutionDigest,
+  validateBioethicsExecutionRun7,
+} from "./research-contracts.js";
+export type { BioethicsExecutionRun7 } from "./research-contracts.js";
+
+export {
+  ONCOWORLDS_ANALYSIS_WORKBENCH_FEATURE_ID,
+  ONCOWORLDS_ANALYSIS_WORKBENCH_CONTRACT_VERSION,
+  ONCOWORLDS_ANALYSIS_WORKBENCH_INPUT_SCHEMA,
+  ONCOWORLDS_ANALYSIS_WORKBENCH_OUTPUT_SCHEMA,
+  ONCOWORLDS_ANALYSIS_WORKBENCH_CONTENT_TYPE,
+  oncoworldsAnalysisWorkbenchDigest,
+  validateOncoworldsAnalysisWorkbenchReceipt9,
+} from "./research-contracts.js";
+export type { OncoworldsAnalysisWorkbenchReceipt9 } from "./research-contracts.js";
+
+export {
+  ONCOWORLDS_EVIDENCE_SURVEILLANCE_COPILOT_FEATURE_ID,
+  ONCOWORLDS_EVIDENCE_SURVEILLANCE_COPILOT_CONTRACT_VERSION,
+  ONCOWORLDS_EVIDENCE_SURVEILLANCE_COPILOT_INPUT_SCHEMA,
+  ONCOWORLDS_EVIDENCE_SURVEILLANCE_COPILOT_OUTPUT_SCHEMA,
+  ONCOWORLDS_EVIDENCE_SURVEILLANCE_COPILOT_CONTENT_TYPE,
+  oncoworldsEvidenceSurveillanceCopilotDigest,
+  validateOncoworldsEvidenceSurveillanceCopilotReceipt,
+} from "./research-contracts.js";
+export type { OncoworldsEvidenceSurveillanceCopilotReceipt } from "./research-contracts.js";
+
+export {
+  BIOWORLDS_FEDERATED_CONTEXT_RESEARCH_WORKBENCH_FEATURE_ID,
+  BIOWORLDS_FEDERATED_CONTEXT_RESEARCH_WORKBENCH_CONTRACT_VERSION,
+  BIOWORLDS_FEDERATED_CONTEXT_RESEARCH_WORKBENCH_CONTENT_TYPE,
+  bioworldsFederatedContextResearchWorkbenchDigest,
+  validateBioworldsFederatedContextResearchWorkbenchReceipt,
+} from "./research-contracts.js";
+export type { BioworldsFederatedContextResearchWorkbenchReceipt } from "./research-contracts.js";
+export { MUTATION_FEDERATED_EVOLUTION_FEATURE_ID, MUTATION_FEDERATED_EVOLUTION_CONTRACT_VERSION, MUTATION_FEDERATED_EVOLUTION_CONTENT_TYPE, mutationFederatedEvolutionDigest, validateMutationFederatedEvolutionReceipt } from "./research-contracts.js";
+export type { MutationFederatedEvolutionReceipt } from "./research-contracts.js";
+export { INFLUENCE_LOCAL_EVIDENCE_SURVEILLANCE_FEATURE_ID, INFLUENCE_LOCAL_EVIDENCE_SURVEILLANCE_CONTRACT_VERSION, INFLUENCE_LOCAL_EVIDENCE_SURVEILLANCE_CONTENT_TYPE, influenceLocalEvidenceSurveillanceDigest, validateInfluenceLocalEvidenceSurveillanceReceipt } from "./research-contracts.js";
+export type { InfluenceLocalEvidenceSurveillanceReceipt } from "./research-contracts.js";
+export { ORACLEX_INTERPRETATION_INFERENCE_FEATURE_ID, ORACLEX_INTERPRETATION_INFERENCE_CONTRACT_VERSION, ORACLEX_INTERPRETATION_INFERENCE_INPUT_SCHEMA, ORACLEX_INTERPRETATION_INFERENCE_OUTPUT_SCHEMA, oraclexInterpretationInferenceDigest, validateOraclexInteractiveInterpretation1 } from "./research-contracts.js";
+export type { OraclexInteractiveInterpretation1 } from "./research-contracts.js";
+export { RUNTIME_INTERPRETATION_ASSURANCE_FEATURE_ID, RUNTIME_INTERPRETATION_ASSURANCE_CONTRACT_VERSION, RUNTIME_INTERPRETATION_ASSURANCE_INPUT_SCHEMA, RUNTIME_INTERPRETATION_ASSURANCE_OUTPUT_SCHEMA, runtimeInterpretationAssuranceDigest, validateRuntimeInterpretationAssuranceReceipt } from "./research-contracts.js";
+export type { RuntimeInterpretationAssuranceReceipt } from "./research-contracts.js";
+export { IDS_INTERPRETATION_VISUALIZATION_FEATURE_ID, IDS_INTERPRETATION_VISUALIZATION_CONTRACT_VERSION, IDS_INTERPRETATION_VISUALIZATION_INPUT_SCHEMA, IDS_INTERPRETATION_VISUALIZATION_OUTPUT_SCHEMA, IDS_INTERPRETATION_VISUALIZATION_CONTENT_TYPE, idsInterpretationVisualizationDigest, validateIdsInterpretationVisualizationReceipt } from "./research-contracts.js";
+export type { IdsInteractiveInterpretation7 } from "./research-contracts.js";
+export { OBLIGATION_KNOWLEDGE_REPRESENTATION_ASSURANCE_FEATURE_ID, OBLIGATION_KNOWLEDGE_REPRESENTATION_ASSURANCE_CONTRACT_VERSION, OBLIGATION_KNOWLEDGE_REPRESENTATION_ASSURANCE_INPUT_SCHEMA, OBLIGATION_KNOWLEDGE_REPRESENTATION_ASSURANCE_OUTPUT_SCHEMA, obligationKnowledgeRepresentationAssuranceDigest, validateObligationTypedKnowledgeWorld7 } from "./research-contracts.js";
+export type { ObligationTypedKnowledgeWorld7 } from "./research-contracts.js";
+
+export {
+  CONFORMANCE_CONTEXT_COMPILATION_ASSURANCE_FEATURE_ID,
+  CONFORMANCE_CONTEXT_COMPILATION_ASSURANCE_CONTRACT_VERSION,
+  CONFORMANCE_CONTEXT_COMPILATION_ASSURANCE_INPUT_SCHEMA,
+  CONFORMANCE_CONTEXT_COMPILATION_ASSURANCE_OUTPUT_SCHEMA,
+  CONFORMANCE_CONTEXT_COMPILATION_ASSURANCE_CONTENT_TYPE,
+  conformanceContextCompilationAssuranceDigest,
+  validateConformanceCertifiedDecisionSection7,
+} from "./research-contracts.js";
+export type { ConformanceCertifiedDecisionSection7 } from "./research-contracts.js";
+
+export {
+  GOVERNANCE_EXPERIMENT_DESIGN_ASSURANCE_FEATURE_ID,
+  GOVERNANCE_EXPERIMENT_DESIGN_ASSURANCE_CONTRACT_VERSION,
+  GOVERNANCE_EXPERIMENT_DESIGN_ASSURANCE_INPUT_SCHEMA,
+  GOVERNANCE_EXPERIMENT_DESIGN_ASSURANCE_OUTPUT_SCHEMA,
+  GOVERNANCE_EXPERIMENT_DESIGN_ASSURANCE_CONTENT_TYPE,
+  governanceExperimentDesignAssuranceDigest,
+  validateGovernanceExperimentDesignAssurance,
+} from "./research-contracts.js";
+export type { GovernanceExperimentDesignAssurance } from "./research-contracts.js";
+
+export {
+  IDS_INTEROPERABILITY_EXTENSIBILITY_FEATURE_ID,
+  IDS_INTEROPERABILITY_EXTENSIBILITY_CONTRACT_VERSION,
+  IDS_INTEROPERABILITY_EXTENSIBILITY_INPUT_SCHEMA,
+  IDS_INTEROPERABILITY_EXTENSIBILITY_OUTPUT_SCHEMA,
+  IDS_INTEROPERABILITY_EXTENSIBILITY_CONTENT_TYPE,
+  idsInteroperabilityExtensibility3Digest,
+  validateIdsInteroperabilityExtensibility3,
+} from "./research-contracts.js";
+export type { NegotiatedIntegration3 } from "./research-contracts.js";
+
+export {
+  ATLASX_COMPUTATIONAL_EXECUTION_ASSURANCE_FEATURE_ID,
+  ATLASX_COMPUTATIONAL_EXECUTION_ASSURANCE_CONTRACT_VERSION,
+  ATLASX_COMPUTATIONAL_EXECUTION_ASSURANCE_INPUT_SCHEMA,
+  ATLASX_COMPUTATIONAL_EXECUTION_ASSURANCE_OUTPUT_SCHEMA,
+  ATLASX_COMPUTATIONAL_EXECUTION_ASSURANCE_CONTENT_TYPE,
+  atlasxExecutionRun7Digest,
+  validateAtlasxExecutionRun7,
+} from "./research-contracts.js";
+export type { AtlasxExecutionRun7 } from "./research-contracts.js";
+
+export {
+  ATLASHUB_QUALITY_CONTROL_COPILOT_FEATURE_ID,
+  ATLASHUB_QUALITY_CONTROL_COPILOT_CONTRACT_VERSION,
+  ATLASHUB_QUALITY_CONTROL_COPILOT_INPUT_SCHEMA,
+  ATLASHUB_QUALITY_CONTROL_COPILOT_OUTPUT_SCHEMA,
+  ATLASHUB_QUALITY_CONTROL_COPILOT_CONTENT_TYPE,
+  atlashubQualityVerdict3Digest,
+  validateAtlashubQualityVerdict3,
+} from "./research-contracts.js";
+export type { AtlashubQualityVerdict3 } from "./research-contracts.js";
+
+export {
+  ATLASHUB_QUALITY_CONTROL_CONTRACT_MODEL_FEATURE_ID,
+  ATLASHUB_QUALITY_CONTROL_CONTRACT_MODEL_CONTRACT_VERSION,
+  ATLASHUB_QUALITY_CONTROL_CONTRACT_MODEL_INPUT_SCHEMA,
+  ATLASHUB_QUALITY_CONTROL_CONTRACT_MODEL_OUTPUT_SCHEMA,
+  ATLASHUB_QUALITY_CONTROL_CONTRACT_MODEL_CONTENT_TYPE,
+  atlashubQualityVerdict2Digest,
+  validateAtlashubQualityVerdict2,
+} from "./research-contracts.js";
+export type { AtlashubQualityVerdict2 } from "./research-contracts.js";
+
+export {
+  MUTATION_RESOURCE_DISCOVERY_FEATURE_ID,
+  MUTATION_RESOURCE_DISCOVERY_CONTRACT_VERSION,
+  MUTATION_RESOURCE_DISCOVERY_INPUT_SCHEMA,
+  MUTATION_RESOURCE_DISCOVERY_OUTPUT_SCHEMA,
+  MUTATION_RESOURCE_DISCOVERY_CONTENT_TYPE,
+  mutationQualifiedResourceSet8Digest,
+  validateMutationQualifiedResourceSet8,
+} from "./research-contracts.js";
+export type { QualifiedResourceSet8 } from "./research-contracts.js";
+
+export {
+  RUNTIME_KNOWLEDGE_REPRESENTATION_FEATURE_ID,
+  RUNTIME_KNOWLEDGE_REPRESENTATION_CONTRACT_VERSION,
+  RUNTIME_KNOWLEDGE_REPRESENTATION_INPUT_SCHEMA,
+  RUNTIME_KNOWLEDGE_REPRESENTATION_OUTPUT_SCHEMA,
+  RUNTIME_KNOWLEDGE_REPRESENTATION_CONTENT_TYPE,
+  runtimeKnowledgeRepresentationDigest,
+  validateRuntimeKnowledgeWorld7,
+} from "./research-contracts.js";
+export type { RuntimeTypedKnowledgeWorld7 } from "./research-contracts.js";
+
+export {
+  FABRIC_EXPERIMENT_DESIGN_GATEWAY_FEATURE_ID,
+  FABRIC_EXPERIMENT_DESIGN_GATEWAY_CONTRACT_VERSION,
+  FABRIC_EXPERIMENT_DESIGN_GATEWAY_INPUT_SCHEMA,
+  FABRIC_EXPERIMENT_DESIGN_GATEWAY_OUTPUT_SCHEMA,
+  FABRIC_EXPERIMENT_DESIGN_GATEWAY_CONTENT_TYPE,
+  executableExperimentDesign8Digest,
+  validateExecutableExperimentDesign8,
+} from "./research-contracts.js";
+export type { ExecutableExperimentDesign8 } from "./research-contracts.js";
+
+export {
+  LAB_EXPERIMENT_DESIGN_INTEROPERABILITY_FEATURE_ID,
+  LAB_EXPERIMENT_DESIGN_INTEROPERABILITY_CONTRACT_VERSION,
+  LAB_EXPERIMENT_DESIGN_INTEROPERABILITY_INPUT_SCHEMA,
+  LAB_EXPERIMENT_DESIGN_INTEROPERABILITY_OUTPUT_SCHEMA,
+  LAB_EXPERIMENT_DESIGN_INTEROPERABILITY_CONTENT_TYPE,
+  labExecutableExperimentDesign8Digest,
+  validateLabExecutableExperimentDesign8,
+} from "./research-contracts.js";
+export type { LabExecutableExperimentDesign8 } from "./research-contracts.js";
+
+export {
+  STRESS_PUBLICATION_RESEARCH_OBJECT_WORKBENCH_FEATURE_ID,
+  STRESS_PUBLICATION_RESEARCH_OBJECT_WORKBENCH_CONTRACT_VERSION,
+  STRESS_PUBLICATION_RESEARCH_OBJECT_WORKBENCH_INPUT_SCHEMA,
+  STRESS_PUBLICATION_RESEARCH_OBJECT_WORKBENCH_OUTPUT_SCHEMA,
+  STRESS_PUBLICATION_RESEARCH_OBJECT_WORKBENCH_CONTENT_TYPE,
+  stressSignedResearchObject5Digest,
+  validateStressSignedResearchObject5,
+} from "./research-contracts.js";
+export type { StressSignedResearchObject5 } from "./research-contracts.js";
+
+export {
+  BIOETHICS_MULTIMODAL_BOUNDED_EVOLUTION_FEATURE_ID,
+  BIOETHICS_MULTIMODAL_BOUNDED_EVOLUTION_CONTRACT_VERSION,
+  BIOETHICS_MULTIMODAL_BOUNDED_EVOLUTION_INPUT_SCHEMA,
+  BIOETHICS_MULTIMODAL_BOUNDED_EVOLUTION_OUTPUT_SCHEMA,
+  BIOETHICS_MULTIMODAL_BOUNDED_EVOLUTION_CONTENT_TYPE,
+  bioethicsEvolutionDecision7Digest,
+  validateBioethicsEvolutionDecision7,
+} from "./research-contracts.js";
+export type { BioethicsEvolutionDecision7 } from "./research-contracts.js";
+
+export {
+  STRESS_FEDERATED_MULTIMODAL_INGESTION_FEATURE_ID,
+  STRESS_FEDERATED_MULTIMODAL_INGESTION_CONTRACT_VERSION,
+  STRESS_FEDERATED_MULTIMODAL_INGESTION_INPUT_SCHEMA,
+  STRESS_FEDERATED_MULTIMODAL_INGESTION_OUTPUT_SCHEMA,
+  STRESS_FEDERATED_MULTIMODAL_INGESTION_CONTENT_TYPE,
+  stressHarmonizedResearchObject2Digest,
+  validateStressHarmonizedResearchObject2,
+} from "./research-contracts.js";
+export type { StressHarmonizedResearchObject2 } from "./research-contracts.js";
+
+export {
+  BIOWORLDS_RESOURCE_DISCOVERY_FEATURE_ID,
+  BIOWORLDS_RESOURCE_DISCOVERY_CONTRACT_VERSION,
+  BIOWORLDS_RESOURCE_DISCOVERY_INPUT_SCHEMA,
+  BIOWORLDS_RESOURCE_DISCOVERY_OUTPUT_SCHEMA,
+  BIOWORLDS_RESOURCE_DISCOVERY_CONTENT_TYPE,
+  qualifiedResourceSet6Digest,
+  validateQualifiedResourceSet6,
+} from "./research-contracts.js";
+export type { QualifiedResourceSet6 } from "./research-contracts.js";
+
+export {
+  LABORATORY_INTEGRATION_FEATURE_ID,
+  LABORATORY_INTEGRATION_CONTRACT_VERSION,
+  LABORATORY_INTEGRATION_INPUT_SCHEMA,
+  LABORATORY_INTEGRATION_OUTPUT_SCHEMA,
+  LABORATORY_INTEGRATION_CONTENT_TYPE,
+  laboratoryIntegrationReceipt7Digest,
+  validateLaboratoryIntegrationReceipt7,
+} from "./research-contracts.js";
+export type { LaboratoryIntegrationReceipt7 } from "./research-contracts.js";
+
+export {
+  SAFETY_PROSPECTIVE_LABORATORY_INTEGRATION_FEATURE_ID,
+  SAFETY_PROSPECTIVE_LABORATORY_INTEGRATION_CONTRACT_VERSION,
+  SAFETY_PROSPECTIVE_LABORATORY_INTEGRATION_CONTENT_TYPE,
+  safetyProspectiveLaboratoryIntegrationReceiptDigest,
+  validateSafetyProspectiveLaboratoryIntegrationReceipt,
+} from "./research-contracts.js";
+export type { SafetyProspectiveLaboratoryIntegrationReceipt } from "./research-contracts.js";
+export { DEVPLAT_MULTIMODAL_LIMITATION_CLOSURE_FEATURE_ID, DEVPLAT_MULTIMODAL_LIMITATION_CLOSURE_CONTRACT_VERSION, DEVPLAT_MULTIMODAL_LIMITATION_CLOSURE_CONTENT_TYPE, devplatMultimodalLimitationClosureReceiptDigest, validateDevplatMultimodalLimitationClosureReceipt } from "./research-contracts.js";
+export type { DevplatMultimodalLimitationClosureReceipt } from "./research-contracts.js";
+export { FACTORY_FEDERATED_QUALITY_WORKBENCH_FEATURE_ID, FACTORY_FEDERATED_QUALITY_WORKBENCH_CONTRACT_VERSION, FACTORY_FEDERATED_QUALITY_WORKBENCH_CONTENT_TYPE, factoryFederatedQualityWorkbenchDigest, validateFactoryQualityVerdict5 } from "./research-contracts.js";
+export type { FactoryQualityVerdict5 } from "./research-contracts.js";
+
+export {
+  PRISM_ANALYSIS_WORKBENCH_FEATURE_ID,
+  PRISM_ANALYSIS_WORKBENCH_CONTRACT_VERSION,
+  PRISM_ANALYSIS_WORKBENCH_INPUT_SCHEMA,
+  PRISM_ANALYSIS_WORKBENCH_OUTPUT_SCHEMA,
+  PRISM_ANALYSIS_WORKBENCH_CONTENT_TYPE,
+  analysisWorkbenchReceipt7Digest,
+  validateAnalysisWorkbenchReceipt7,
+} from "./research-contracts.js";
+export type { AnalysisWorkbenchReceipt7 } from "./research-contracts.js";
+
+export {
+  BIOWORLDS_KNOWLEDGE_WORKFLOW_FEATURE_ID,
+  BIOWORLDS_KNOWLEDGE_WORKFLOW_CONTRACT_VERSION,
+  BIOWORLDS_KNOWLEDGE_WORKFLOW_INPUT_SCHEMA,
+  BIOWORLDS_KNOWLEDGE_WORKFLOW_OUTPUT_SCHEMA,
+  BIOWORLDS_KNOWLEDGE_WORKFLOW_CONTENT_TYPE,
+  knowledgeWorkflowReceipt7Digest,
+  validateKnowledgeWorkflowReceipt7,
+} from "./research-contracts.js";
+export type { KnowledgeWorkflowReceipt7 } from "./research-contracts.js";
+
+export {
+  ADAPTER_FEDERATED_CONTEXT_COPILOT_FEATURE_ID,
+  ADAPTER_FEDERATED_CONTEXT_COPILOT_CONTRACT_VERSION,
+  ADAPTER_FEDERATED_CONTEXT_COPILOT_INPUT_SCHEMA,
+  ADAPTER_FEDERATED_CONTEXT_COPILOT_OUTPUT_SCHEMA,
+  ADAPTER_FEDERATED_CONTEXT_COPILOT_CONTENT_TYPE,
+  federatedContextReceipt7Digest,
+  validateFederatedContextReceipt7,
+} from "./research-contracts.js";
+export type { FederatedContextReceipt7 } from "./research-contracts.js";
+
+export {
+  ROUTING_LIMITATION_CLOSURE_FEATURE_ID,
+  ROUTING_LIMITATION_CLOSURE_CONTRACT_VERSION,
+  ROUTING_LIMITATION_CLOSURE_INPUT_SCHEMA,
+  ROUTING_LIMITATION_CLOSURE_OUTPUT_SCHEMA,
+  ROUTING_LIMITATION_CLOSURE_CONTENT_TYPE,
+  limitationClosureWorkflowReceipt7Digest,
+  validateLimitationClosureWorkflowReceipt7,
+} from "./research-contracts.js";
+export type { LimitationClosureWorkflowReceipt7 } from "./research-contracts.js";
+
+export {
+  INTERWEAVE_FEDERATED_INTERPRETATION_FEATURE_ID,
+  INTERWEAVE_FEDERATED_INTERPRETATION_CONTRACT_VERSION,
+  INTERWEAVE_FEDERATED_INTERPRETATION_INPUT_SCHEMA,
+  INTERWEAVE_FEDERATED_INTERPRETATION_OUTPUT_SCHEMA,
+  INTERWEAVE_FEDERATED_INTERPRETATION_CONTENT_TYPE,
+  interpretationInferenceReceipt7Digest,
+  validateInterpretationInferenceReceipt7,
+} from "./research-contracts.js";
+export type { InterpretationInferenceReceipt7 } from "./research-contracts.js";
+
+export {
+  FIBER_FEDERATED_ANALYSIS_FEATURE_ID,
+  FIBER_FEDERATED_ANALYSIS_CONTRACT_VERSION,
+  FIBER_FEDERATED_ANALYSIS_INPUT_SCHEMA,
+  FIBER_FEDERATED_ANALYSIS_OUTPUT_SCHEMA,
+  FIBER_FEDERATED_ANALYSIS_CONTENT_TYPE,
+  federatedAnalysisControlReceipt9Digest,
+  validateFederatedAnalysisControlReceipt9,
+} from "./research-contracts.js";
+export type { FederatedAnalysisControlReceipt9 } from "./research-contracts.js";
+
+export {
+  DOCGRAPH_INSTRUMENT_ACTION_FEATURE_ID,
+  DOCGRAPH_INSTRUMENT_ACTION_CONTRACT_VERSION,
+  DOCGRAPH_INSTRUMENT_ACTION_INPUT_SCHEMA,
+  DOCGRAPH_INSTRUMENT_ACTION_OUTPUT_SCHEMA,
+  DOCGRAPH_INSTRUMENT_ACTION_CONTENT_TYPE,
+  instrumentActionReceipt2Digest,
+  validateInstrumentActionReceipt2,
+} from "./research-contracts.js";
+export type { InstrumentActionReceipt2 } from "./research-contracts.js";
+
+export {
+  LENS_PROVENANCE_SIGNING_FEATURE_ID,
+  LENS_PROVENANCE_SIGNING_CONTRACT_VERSION,
+  LENS_PROVENANCE_SIGNING_INPUT_SCHEMA,
+  LENS_PROVENANCE_SIGNING_OUTPUT_SCHEMA,
+  LENS_PROVENANCE_SIGNING_CONTENT_TYPE,
+  signedProvenanceEnvelope3Digest,
+  validateSignedProvenanceEnvelope3,
+} from "./research-contracts.js";
+export type { SignedProvenanceEnvelope3 } from "./research-contracts.js";
+
+export {
+  BIOETHICS_SCALE_FRONTIER_FEATURE_ID,
+  BIOETHICS_SCALE_FRONTIER_CONTRACT_VERSION,
+  BIOETHICS_SCALE_FRONTIER_INPUT_SCHEMA,
+  BIOETHICS_SCALE_FRONTIER_OUTPUT_SCHEMA,
+  BIOETHICS_SCALE_FRONTIER_CONTENT_TYPE,
+  bioethicsCapacityReport2Digest,
+  validateBioethicsCapacityReport2,
+} from "./research-contracts.js";
+export type { BioethicsCapacityReport2 } from "./research-contracts.js";
+
+export {
+  SERVICES_CONTEXT_COMPILATION_COPILOT_FEATURE_ID,
+  SERVICES_CONTEXT_COMPILATION_COPILOT_CONTRACT_VERSION,
+  SERVICES_CONTEXT_COMPILATION_COPILOT_INPUT_SCHEMA,
+  SERVICES_CONTEXT_COMPILATION_COPILOT_OUTPUT_SCHEMA,
+  SERVICES_CONTEXT_COMPILATION_COPILOT_CONTENT_TYPE,
+  certifiedDecisionSection3Digest,
+  validateCertifiedDecisionSection3,
+} from "./research-contracts.js";
+export type { CertifiedDecisionSection3 } from "./research-contracts.js";
+
+export {
+  ONCO_INSTRUMENT_RESEARCH_WORKBENCH_FEATURE_ID,
+  ONCO_INSTRUMENT_RESEARCH_WORKBENCH_CONTRACT_VERSION,
+  ONCO_INSTRUMENT_RESEARCH_WORKBENCH_INPUT_SCHEMA,
+  ONCO_INSTRUMENT_RESEARCH_WORKBENCH_OUTPUT_SCHEMA,
+  ONCO_INSTRUMENT_RESEARCH_WORKBENCH_CONTENT_TYPE,
+  oncoInstrumentReceipt5Digest,
+  validateOncoInstrumentReceipt5,
+} from "./research-contracts.js";
+export type { OncoInstrumentReceipt5 } from "./research-contracts.js";
+
+export {
+  INTERWEAVE_FEDERATED_COMMONS_ASSURANCE_FEATURE_ID,
+  INTERWEAVE_FEDERATED_COMMONS_ASSURANCE_CONTRACT_VERSION,
+  INTERWEAVE_FEDERATED_COMMONS_ASSURANCE_INPUT_SCHEMA,
+  INTERWEAVE_FEDERATED_COMMONS_ASSURANCE_OUTPUT_SCHEMA,
+  INTERWEAVE_FEDERATED_COMMONS_ASSURANCE_CONTENT_TYPE,
+  interweaveFederationEnvelope7Digest,
+  validateInterweaveFederationEnvelope7,
+} from "./research-contracts.js";
+export type { InterweaveFederationEnvelope7 } from "./research-contracts.js";
+
+export {
+  REGISTRY_REPLICATION_WORKBENCH_FEATURE_ID,
+  REGISTRY_REPLICATION_WORKBENCH_CONTRACT_VERSION,
+  REGISTRY_REPLICATION_WORKBENCH_INPUT_SCHEMA,
+  REGISTRY_REPLICATION_WORKBENCH_OUTPUT_SCHEMA,
+  REGISTRY_REPLICATION_WORKBENCH_CONTENT_TYPE,
+  registryReplicationWorkbenchDigest,
+  validateReplicationRecord5,
+} from "./research-contracts.js";
+export type { ReplicationRecord5 } from "./research-contracts.js";
+
+export {
+  ROUTING_LABORATORY_INFERENCE_FEATURE_ID,
+  ROUTING_LABORATORY_INFERENCE_CONTRACT_VERSION,
+  ROUTING_LABORATORY_INFERENCE_INPUT_SCHEMA,
+  ROUTING_LABORATORY_INFERENCE_OUTPUT_SCHEMA,
+  ROUTING_LABORATORY_INFERENCE_CONTENT_TYPE,
+  routingLaboratoryInferenceDigest,
+  validateInstrumentActionReceipt1,
+} from "./research-contracts.js";
+export type { InstrumentActionReceipt1 } from "./research-contracts.js";
+
+export {
+  DEVX_CONTEXT_COMPILATION_CONTRACT_FEATURE_ID,
+  DEVX_CONTEXT_COMPILATION_CONTRACT_VERSION,
+  DEVX_CONTEXT_COMPILATION_CONTRACT_INPUT_SCHEMA,
+  DEVX_CONTEXT_COMPILATION_CONTRACT_OUTPUT_SCHEMA,
+  DEVX_CONTEXT_COMPILATION_CONTRACT_CONTENT_TYPE,
+  devxContextCompilationContractDigest,
+} from "./research-contracts.js";
+export {
+  WORLDGEN_KNOWLEDGE_REPRESENTATION_CONTENT_TYPE, WORLDGEN_KNOWLEDGE_CONTRACT_CONTENT_TYPE, WORLDGEN_KNOWLEDGE_COPILOT_CONTENT_TYPE, WORLDGEN_KNOWLEDGE_WORKFLOW_CONTENT_TYPE,
+  WORLDGEN_LOCAL_KNOWLEDGE_REPRESENTATION_FEATURE_ID, WORLDGEN_MULTIMODAL_KNOWLEDGE_REPRESENTATION_FEATURE_ID, WORLDGEN_THROUGHPUT_KNOWLEDGE_REPRESENTATION_FEATURE_ID, WORLDGEN_FEDERATED_KNOWLEDGE_REPRESENTATION_FEATURE_ID,
+  WORLDGEN_LOCAL_KNOWLEDGE_CONTRACT_FEATURE_ID, WORLDGEN_MULTIMODAL_KNOWLEDGE_CONTRACT_FEATURE_ID, WORLDGEN_THROUGHPUT_KNOWLEDGE_CONTRACT_FEATURE_ID, WORLDGEN_FEDERATED_KNOWLEDGE_CONTRACT_FEATURE_ID,
+  WORLDGEN_LOCAL_KNOWLEDGE_COPILOT_FEATURE_ID, WORLDGEN_MULTIMODAL_KNOWLEDGE_COPILOT_FEATURE_ID, WORLDGEN_THROUGHPUT_KNOWLEDGE_COPILOT_FEATURE_ID, WORLDGEN_FEDERATED_KNOWLEDGE_COPILOT_FEATURE_ID,
+  WORLDGEN_LOCAL_KNOWLEDGE_WORKFLOW_FEATURE_ID, WORLDGEN_MULTIMODAL_KNOWLEDGE_WORKFLOW_FEATURE_ID, WORLDGEN_THROUGHPUT_KNOWLEDGE_WORKFLOW_FEATURE_ID, WORLDGEN_FEDERATED_KNOWLEDGE_WORKFLOW_FEATURE_ID,
+  WORLDGEN_LOCAL_KNOWLEDGE_REPRESENTATION_CONTRACT_VERSION, WORLDGEN_MULTIMODAL_KNOWLEDGE_REPRESENTATION_CONTRACT_VERSION, WORLDGEN_THROUGHPUT_KNOWLEDGE_REPRESENTATION_CONTRACT_VERSION, WORLDGEN_FEDERATED_KNOWLEDGE_REPRESENTATION_CONTRACT_VERSION,
+  WORLDGEN_LOCAL_KNOWLEDGE_CONTRACT_VERSION, WORLDGEN_MULTIMODAL_KNOWLEDGE_CONTRACT_VERSION, WORLDGEN_THROUGHPUT_KNOWLEDGE_CONTRACT_VERSION, WORLDGEN_FEDERATED_KNOWLEDGE_CONTRACT_VERSION,
+  WORLDGEN_LOCAL_KNOWLEDGE_COPILOT_VERSION, WORLDGEN_MULTIMODAL_KNOWLEDGE_COPILOT_VERSION, WORLDGEN_THROUGHPUT_KNOWLEDGE_COPILOT_VERSION, WORLDGEN_FEDERATED_KNOWLEDGE_COPILOT_VERSION,
+  WORLDGEN_LOCAL_KNOWLEDGE_WORKFLOW_VERSION, WORLDGEN_MULTIMODAL_KNOWLEDGE_WORKFLOW_VERSION, WORLDGEN_THROUGHPUT_KNOWLEDGE_WORKFLOW_VERSION, WORLDGEN_FEDERATED_KNOWLEDGE_WORKFLOW_VERSION,
+  worldgenKnowledgeRepresentationDigest, worldgenKnowledgeContractDigest, worldgenKnowledgeCopilotDigest, worldgenKnowledgeWorkflowDigest,
+  validateWorldgenKnowledgeRepresentationReceipt, validateWorldgenKnowledgeContractReceipt, validateWorldgenKnowledgeCopilotReceipt, validateWorldgenKnowledgeWorkflowReceipt,
+} from "./research-contracts.js";
+export type { WorldgenKnowledgeRepresentationReceipt, WorldgenKnowledgeContractReceipt, WorldgenKnowledgeCopilotReceipt, WorldgenKnowledgeWorkflowReceipt } from "./research-contracts.js";
+export {
+  WORLDGEN_RESOURCE_DISCOVERY_CONTENT_TYPE, WORLDGEN_RESOURCE_CONTRACT_CONTENT_TYPE, WORLDGEN_RESOURCE_COPILOT_CONTENT_TYPE, WORLDGEN_RESOURCE_WORKFLOW_CONTENT_TYPE,
+  WORLDGEN_LOCAL_RESOURCE_DISCOVERY_FEATURE_ID, WORLDGEN_MULTIMODAL_RESOURCE_DISCOVERY_FEATURE_ID, WORLDGEN_THROUGHPUT_RESOURCE_DISCOVERY_FEATURE_ID, WORLDGEN_FEDERATED_RESOURCE_DISCOVERY_FEATURE_ID,
+  WORLDGEN_LOCAL_RESOURCE_CONTRACT_FEATURE_ID, WORLDGEN_MULTIMODAL_RESOURCE_CONTRACT_FEATURE_ID, WORLDGEN_THROUGHPUT_RESOURCE_CONTRACT_FEATURE_ID, WORLDGEN_FEDERATED_RESOURCE_CONTRACT_FEATURE_ID,
+  WORLDGEN_LOCAL_RESOURCE_COPILOT_FEATURE_ID, WORLDGEN_MULTIMODAL_RESOURCE_COPILOT_FEATURE_ID, WORLDGEN_THROUGHPUT_RESOURCE_COPILOT_FEATURE_ID, WORLDGEN_FEDERATED_RESOURCE_COPILOT_FEATURE_ID,
+  WORLDGEN_LOCAL_RESOURCE_WORKFLOW_FEATURE_ID, WORLDGEN_MULTIMODAL_RESOURCE_WORKFLOW_FEATURE_ID, WORLDGEN_THROUGHPUT_RESOURCE_WORKFLOW_FEATURE_ID, WORLDGEN_FEDERATED_RESOURCE_WORKFLOW_FEATURE_ID,
+  worldgenResourceDiscoveryDigest, worldgenResourceContractDigest, worldgenResourceCopilotDigest, worldgenResourceWorkflowDigest,
+  validateWorldgenResourceDiscoveryReceipt, validateWorldgenResourceContractReceipt, validateWorldgenResourceCopilotReceipt, validateWorldgenResourceWorkflowReceipt,
+} from "./research-contracts.js";
+export type { WorldgenResourceDiscoveryReceipt, WorldgenResourceContractReceipt, WorldgenResourceCopilotReceipt, WorldgenResourceWorkflowReceipt } from "./research-contracts.js";
+export {
+  WORLDGEN_QUALITY_CONTROL_CONTENT_TYPE, WORLDGEN_QUALITY_CONTRACT_CONTENT_TYPE, WORLDGEN_QUALITY_COPILOT_CONTENT_TYPE, WORLDGEN_QUALITY_WORKFLOW_CONTENT_TYPE,
+  WORLDGEN_LOCAL_QUALITY_CONTROL_FEATURE_ID, WORLDGEN_MULTIMODAL_QUALITY_CONTROL_FEATURE_ID, WORLDGEN_THROUGHPUT_QUALITY_CONTROL_FEATURE_ID, WORLDGEN_FEDERATED_QUALITY_CONTROL_FEATURE_ID,
+  WORLDGEN_LOCAL_QUALITY_CONTRACT_FEATURE_ID, WORLDGEN_MULTIMODAL_QUALITY_CONTRACT_FEATURE_ID, WORLDGEN_THROUGHPUT_QUALITY_CONTRACT_FEATURE_ID, WORLDGEN_FEDERATED_QUALITY_CONTRACT_FEATURE_ID,
+  WORLDGEN_LOCAL_QUALITY_COPILOT_FEATURE_ID, WORLDGEN_MULTIMODAL_QUALITY_COPILOT_FEATURE_ID, WORLDGEN_THROUGHPUT_QUALITY_COPILOT_FEATURE_ID, WORLDGEN_FEDERATED_QUALITY_COPILOT_FEATURE_ID,
+  WORLDGEN_LOCAL_QUALITY_WORKFLOW_FEATURE_ID, WORLDGEN_MULTIMODAL_QUALITY_WORKFLOW_FEATURE_ID, WORLDGEN_THROUGHPUT_QUALITY_WORKFLOW_FEATURE_ID, WORLDGEN_FEDERATED_QUALITY_WORKFLOW_FEATURE_ID,
+  worldgenQualityControlDigest, worldgenQualityContractDigest, worldgenQualityCopilotDigest, worldgenQualityWorkflowDigest,
+  validateWorldgenQualityControlReceipt, validateWorldgenQualityContractReceipt, validateWorldgenQualityCopilotReceipt, validateWorldgenQualityWorkflowReceipt,
+} from "./research-contracts.js";
+export type { WorldgenQualityControlReceipt, WorldgenQualityContractReceipt, WorldgenQualityCopilotReceipt, WorldgenQualityWorkflowReceipt } from "./research-contracts.js";
+export {
+ WORLDGEN_MECHANISM_EXPLORATION_CONTENT_TYPE, WORLDGEN_MECHANISM_CONTRACT_CONTENT_TYPE, WORLDGEN_MECHANISM_COPILOT_CONTENT_TYPE, WORLDGEN_MECHANISM_WORKFLOW_CONTENT_TYPE,
+ WORLDGEN_LOCAL_MECHANISM_EXPLORATION_FEATURE_ID, WORLDGEN_MULTIMODAL_MECHANISM_EXPLORATION_FEATURE_ID, WORLDGEN_THROUGHPUT_MECHANISM_EXPLORATION_FEATURE_ID, WORLDGEN_FEDERATED_MECHANISM_EXPLORATION_FEATURE_ID,
+ WORLDGEN_LOCAL_MECHANISM_CONTRACT_FEATURE_ID, WORLDGEN_MULTIMODAL_MECHANISM_CONTRACT_FEATURE_ID, WORLDGEN_THROUGHPUT_MECHANISM_CONTRACT_FEATURE_ID, WORLDGEN_FEDERATED_MECHANISM_CONTRACT_FEATURE_ID,
+ WORLDGEN_LOCAL_MECHANISM_COPILOT_FEATURE_ID, WORLDGEN_MULTIMODAL_MECHANISM_COPILOT_FEATURE_ID, WORLDGEN_THROUGHPUT_MECHANISM_COPILOT_FEATURE_ID, WORLDGEN_FEDERATED_MECHANISM_COPILOT_FEATURE_ID,
+ WORLDGEN_LOCAL_MECHANISM_WORKFLOW_FEATURE_ID, WORLDGEN_MULTIMODAL_MECHANISM_WORKFLOW_FEATURE_ID, WORLDGEN_THROUGHPUT_MECHANISM_WORKFLOW_FEATURE_ID, WORLDGEN_FEDERATED_MECHANISM_WORKFLOW_FEATURE_ID,
+ worldgenMechanismPortfolioDigest, worldgenMechanismContractDigest, worldgenMechanismCopilotDigest, worldgenMechanismWorkflowDigest,
+ validateWorldgenMechanismPortfolio, validateWorldgenMechanismContractReceipt, validateWorldgenMechanismCopilotReceipt, validateWorldgenMechanismWorkflowReceipt,
+} from "./research-contracts.js";
+export type { WorldgenMechanismPortfolio, WorldgenMechanismContractReceipt, WorldgenMechanismCopilotReceipt, WorldgenMechanismWorkflowReceipt } from "./research-contracts.js";
+export {
+ WORLDGEN_EXPERIMENT_DESIGN_CONTENT_TYPE, WORLDGEN_EXPERIMENT_DESIGN_CONTRACT_CONTENT_TYPE, WORLDGEN_EXPERIMENT_DESIGN_COPILOT_CONTENT_TYPE, WORLDGEN_EXPERIMENT_DESIGN_WORKFLOW_CONTENT_TYPE,
+ WORLDGEN_LOCAL_EXPERIMENT_DESIGN_FEATURE_ID, WORLDGEN_MULTIMODAL_EXPERIMENT_DESIGN_FEATURE_ID, WORLDGEN_THROUGHPUT_EXPERIMENT_DESIGN_FEATURE_ID, WORLDGEN_FEDERATED_EXPERIMENT_DESIGN_FEATURE_ID,
+ WORLDGEN_LOCAL_EXPERIMENT_DESIGN_CONTRACT_FEATURE_ID, WORLDGEN_MULTIMODAL_EXPERIMENT_DESIGN_CONTRACT_FEATURE_ID, WORLDGEN_THROUGHPUT_EXPERIMENT_DESIGN_CONTRACT_FEATURE_ID, WORLDGEN_FEDERATED_EXPERIMENT_DESIGN_CONTRACT_FEATURE_ID,
+ WORLDGEN_LOCAL_EXPERIMENT_DESIGN_COPILOT_FEATURE_ID, WORLDGEN_MULTIMODAL_EXPERIMENT_DESIGN_COPILOT_FEATURE_ID, WORLDGEN_THROUGHPUT_EXPERIMENT_DESIGN_COPILOT_FEATURE_ID, WORLDGEN_FEDERATED_EXPERIMENT_DESIGN_COPILOT_FEATURE_ID,
+ WORLDGEN_LOCAL_EXPERIMENT_DESIGN_WORKFLOW_FEATURE_ID, WORLDGEN_MULTIMODAL_EXPERIMENT_DESIGN_WORKFLOW_FEATURE_ID, WORLDGEN_THROUGHPUT_EXPERIMENT_DESIGN_WORKFLOW_FEATURE_ID, WORLDGEN_FEDERATED_EXPERIMENT_DESIGN_WORKFLOW_FEATURE_ID,
+ worldgenExperimentDesignPortfolioDigest, worldgenExperimentDesignContractDigest, worldgenExperimentDesignCopilotDigest, worldgenExperimentDesignWorkflowDigest,
+ validateWorldgenExperimentDesignPortfolio, validateWorldgenExperimentDesignContractReceipt, validateWorldgenExperimentDesignCopilotReceipt, validateWorldgenExperimentDesignWorkflowReceipt,
+} from "./research-contracts.js";
+export type { WorldgenExperimentDesignPortfolio, WorldgenExperimentDesignContractReceipt, WorldgenExperimentDesignCopilotReceipt, WorldgenExperimentDesignWorkflowReceipt } from "./research-contracts.js";
+export {
+ WORLDGEN_PROTOCOL_SIMULATION_CONTENT_TYPE, WORLDGEN_PROTOCOL_SIMULATION_CONTRACT_CONTENT_TYPE, WORLDGEN_PROTOCOL_SIMULATION_COPILOT_CONTENT_TYPE, WORLDGEN_PROTOCOL_SIMULATION_WORKFLOW_CONTENT_TYPE,
+ WORLDGEN_LOCAL_PROTOCOL_SIMULATION_FEATURE_ID, WORLDGEN_MULTIMODAL_PROTOCOL_SIMULATION_FEATURE_ID, WORLDGEN_THROUGHPUT_PROTOCOL_SIMULATION_FEATURE_ID, WORLDGEN_FEDERATED_PROTOCOL_SIMULATION_FEATURE_ID,
+ WORLDGEN_LOCAL_PROTOCOL_SIMULATION_CONTRACT_FEATURE_ID, WORLDGEN_MULTIMODAL_PROTOCOL_SIMULATION_CONTRACT_FEATURE_ID, WORLDGEN_THROUGHPUT_PROTOCOL_SIMULATION_CONTRACT_FEATURE_ID, WORLDGEN_FEDERATED_PROTOCOL_SIMULATION_CONTRACT_FEATURE_ID,
+ WORLDGEN_LOCAL_PROTOCOL_SIMULATION_COPILOT_FEATURE_ID, WORLDGEN_MULTIMODAL_PROTOCOL_SIMULATION_COPILOT_FEATURE_ID, WORLDGEN_THROUGHPUT_PROTOCOL_SIMULATION_COPILOT_FEATURE_ID, WORLDGEN_FEDERATED_PROTOCOL_SIMULATION_COPILOT_FEATURE_ID,
+ WORLDGEN_LOCAL_PROTOCOL_SIMULATION_WORKFLOW_FEATURE_ID, WORLDGEN_MULTIMODAL_PROTOCOL_SIMULATION_WORKFLOW_FEATURE_ID, WORLDGEN_THROUGHPUT_PROTOCOL_SIMULATION_WORKFLOW_FEATURE_ID, WORLDGEN_FEDERATED_PROTOCOL_SIMULATION_WORKFLOW_FEATURE_ID,
+ worldgenProtocolSimulationDigest, worldgenProtocolContractDigest, worldgenProtocolCopilotDigest, worldgenProtocolWorkflowDigest,
+ validateWorldgenProtocolSimulationReport, validateWorldgenProtocolContractReceipt, validateWorldgenProtocolCopilotReceipt, validateWorldgenProtocolWorkflowReceipt,
+} from "./research-contracts.js";
+export type { WorldgenProtocolSimulationReport, WorldgenProtocolContractReceipt, WorldgenProtocolCopilotReceipt, WorldgenProtocolWorkflowReceipt } from "./research-contracts.js";
+export {
+ WORLDGEN_LABORATORY_INTEGRATION_CONTENT_TYPE, WORLDGEN_LABORATORY_INTEGRATION_CONTRACT_CONTENT_TYPE, WORLDGEN_LABORATORY_INTEGRATION_COPILOT_CONTENT_TYPE, WORLDGEN_LABORATORY_INTEGRATION_WORKFLOW_CONTENT_TYPE,
+ WORLDGEN_LOCAL_LABORATORY_INTEGRATION_FEATURE_ID, WORLDGEN_MULTIMODAL_LABORATORY_INTEGRATION_FEATURE_ID, WORLDGEN_THROUGHPUT_LABORATORY_INTEGRATION_FEATURE_ID, WORLDGEN_FEDERATED_LABORATORY_INTEGRATION_FEATURE_ID,
+ WORLDGEN_LOCAL_LABORATORY_INTEGRATION_CONTRACT_FEATURE_ID, WORLDGEN_MULTIMODAL_LABORATORY_INTEGRATION_CONTRACT_FEATURE_ID, WORLDGEN_THROUGHPUT_LABORATORY_INTEGRATION_CONTRACT_FEATURE_ID, WORLDGEN_FEDERATED_LABORATORY_INTEGRATION_CONTRACT_FEATURE_ID,
+ WORLDGEN_LOCAL_LABORATORY_INTEGRATION_COPILOT_FEATURE_ID, WORLDGEN_MULTIMODAL_LABORATORY_INTEGRATION_COPILOT_FEATURE_ID, WORLDGEN_THROUGHPUT_LABORATORY_INTEGRATION_COPILOT_FEATURE_ID, WORLDGEN_FEDERATED_LABORATORY_INTEGRATION_COPILOT_FEATURE_ID,
+ WORLDGEN_LOCAL_LABORATORY_INTEGRATION_WORKFLOW_FEATURE_ID, WORLDGEN_MULTIMODAL_LABORATORY_INTEGRATION_WORKFLOW_FEATURE_ID, WORLDGEN_THROUGHPUT_LABORATORY_INTEGRATION_WORKFLOW_FEATURE_ID, WORLDGEN_FEDERATED_LABORATORY_INTEGRATION_WORKFLOW_FEATURE_ID,
+ worldgenLaboratoryIntegrationDigest, worldgenLaboratoryIntegrationContractDigest, worldgenLaboratoryIntegrationCopilotDigest, worldgenLaboratoryIntegrationWorkflowDigest,
+ validateWorldgenLaboratoryIntegrationReceipt, validateWorldgenLaboratoryIntegrationContractReceipt, validateWorldgenLaboratoryIntegrationCopilotReceipt, validateWorldgenLaboratoryIntegrationWorkflowReceipt,
+} from "./research-contracts.js";
+export type { WorldgenLaboratoryIntegrationReceipt, WorldgenLaboratoryIntegrationContractReceipt, WorldgenLaboratoryIntegrationCopilotReceipt, WorldgenLaboratoryIntegrationWorkflowReceipt } from "./research-contracts.js";
+export {
+ WORLDGEN_COMPUTATIONAL_EXECUTION_CONTENT_TYPE, WORLDGEN_COMPUTATIONAL_EXECUTION_CONTRACT_CONTENT_TYPE, WORLDGEN_COMPUTATIONAL_EXECUTION_COPILOT_CONTENT_TYPE, WORLDGEN_COMPUTATIONAL_EXECUTION_WORKFLOW_CONTENT_TYPE,
+ WORLDGEN_LOCAL_COMPUTATIONAL_EXECUTION_FEATURE_ID, WORLDGEN_MULTIMODAL_COMPUTATIONAL_EXECUTION_FEATURE_ID, WORLDGEN_THROUGHPUT_COMPUTATIONAL_EXECUTION_FEATURE_ID, WORLDGEN_FEDERATED_COMPUTATIONAL_EXECUTION_FEATURE_ID,
+ WORLDGEN_LOCAL_COMPUTATIONAL_EXECUTION_CONTRACT_FEATURE_ID, WORLDGEN_MULTIMODAL_COMPUTATIONAL_EXECUTION_CONTRACT_FEATURE_ID, WORLDGEN_THROUGHPUT_COMPUTATIONAL_EXECUTION_CONTRACT_FEATURE_ID, WORLDGEN_FEDERATED_COMPUTATIONAL_EXECUTION_CONTRACT_FEATURE_ID,
+ WORLDGEN_LOCAL_COMPUTATIONAL_EXECUTION_COPILOT_FEATURE_ID, WORLDGEN_MULTIMODAL_COMPUTATIONAL_EXECUTION_COPILOT_FEATURE_ID, WORLDGEN_THROUGHPUT_COMPUTATIONAL_EXECUTION_COPILOT_FEATURE_ID, WORLDGEN_FEDERATED_COMPUTATIONAL_EXECUTION_COPILOT_FEATURE_ID,
+ WORLDGEN_LOCAL_COMPUTATIONAL_EXECUTION_WORKFLOW_FEATURE_ID, WORLDGEN_MULTIMODAL_COMPUTATIONAL_EXECUTION_WORKFLOW_FEATURE_ID, WORLDGEN_THROUGHPUT_COMPUTATIONAL_EXECUTION_WORKFLOW_FEATURE_ID, WORLDGEN_FEDERATED_COMPUTATIONAL_EXECUTION_WORKFLOW_FEATURE_ID,
+ worldgenComputationalExecutionDigest, worldgenComputationalExecutionContractDigest, worldgenComputationalExecutionCopilotDigest, worldgenComputationalExecutionWorkflowDigest,
+ validateWorldgenComputationalExecutionRun, validateWorldgenComputationalExecutionContractReceipt, validateWorldgenComputationalExecutionCopilotReceipt, validateWorldgenComputationalExecutionWorkflowReceipt,
+} from "./research-contracts.js";
+export type { WorldgenComputationalExecutionRun, WorldgenComputationalExecutionContractReceipt, WorldgenComputationalExecutionCopilotReceipt, WorldgenComputationalExecutionWorkflowReceipt } from "./research-contracts.js";
+export {
+ WORLDGEN_STATISTICAL_CAUSAL_ML_CONTENT_TYPE, WORLDGEN_STATISTICAL_CAUSAL_ML_CONTRACT_CONTENT_TYPE, WORLDGEN_STATISTICAL_CAUSAL_ML_COPILOT_CONTENT_TYPE, WORLDGEN_STATISTICAL_CAUSAL_ML_WORKFLOW_CONTENT_TYPE,
+ WORLDGEN_LOCAL_STATISTICAL_CAUSAL_ML_FEATURE_ID, WORLDGEN_MULTIMODAL_STATISTICAL_CAUSAL_ML_FEATURE_ID, WORLDGEN_THROUGHPUT_STATISTICAL_CAUSAL_ML_FEATURE_ID, WORLDGEN_FEDERATED_STATISTICAL_CAUSAL_ML_FEATURE_ID,
+ WORLDGEN_LOCAL_STATISTICAL_CAUSAL_ML_CONTRACT_FEATURE_ID, WORLDGEN_MULTIMODAL_STATISTICAL_CAUSAL_ML_CONTRACT_FEATURE_ID, WORLDGEN_THROUGHPUT_STATISTICAL_CAUSAL_ML_CONTRACT_FEATURE_ID, WORLDGEN_FEDERATED_STATISTICAL_CAUSAL_ML_CONTRACT_FEATURE_ID,
+ WORLDGEN_LOCAL_STATISTICAL_CAUSAL_ML_COPILOT_FEATURE_ID, WORLDGEN_MULTIMODAL_STATISTICAL_CAUSAL_ML_COPILOT_FEATURE_ID, WORLDGEN_THROUGHPUT_STATISTICAL_CAUSAL_ML_COPILOT_FEATURE_ID, WORLDGEN_FEDERATED_STATISTICAL_CAUSAL_ML_COPILOT_FEATURE_ID,
+ WORLDGEN_LOCAL_STATISTICAL_CAUSAL_ML_WORKFLOW_FEATURE_ID, WORLDGEN_MULTIMODAL_STATISTICAL_CAUSAL_ML_WORKFLOW_FEATURE_ID, WORLDGEN_THROUGHPUT_STATISTICAL_CAUSAL_ML_WORKFLOW_FEATURE_ID, WORLDGEN_FEDERATED_STATISTICAL_CAUSAL_ML_WORKFLOW_FEATURE_ID,
+ worldgenStatisticalCausalMlDigest, worldgenStatisticalCausalMlContractDigest, worldgenStatisticalCausalMlCopilotDigest, worldgenStatisticalCausalMlWorkflowDigest,
+ validateWorldgenLocalStatisticalCausalMlResult, validateWorldgenMultimodalStatisticalCausalMlResult, validateWorldgenThroughputStatisticalCausalMlResult, validateWorldgenFederatedStatisticalCausalMlResult,
+ validateWorldgenStatisticalCausalMlContractReceipt, validateWorldgenStatisticalCausalMlCopilotReceipt, validateWorldgenStatisticalCausalMlWorkflowReceipt,
+} from "./research-contracts.js";
+export type { WorldgenStatisticalCausalMlResult, WorldgenStatisticalCausalMlContractReceipt, WorldgenStatisticalCausalMlCopilotReceipt, WorldgenStatisticalCausalMlWorkflowReceipt } from "./research-contracts.js";
+export {
+ WORLDGEN_INTERPRETATION_VISUALIZATION_CONTENT_TYPE, WORLDGEN_INTERPRETATION_VISUALIZATION_CONTRACT_CONTENT_TYPE, WORLDGEN_INTERPRETATION_VISUALIZATION_COPILOT_CONTENT_TYPE, WORLDGEN_INTERPRETATION_VISUALIZATION_WORKFLOW_CONTENT_TYPE,
+ WORLDGEN_LOCAL_INTERPRETATION_VISUALIZATION_FEATURE_ID, WORLDGEN_MULTIMODAL_INTERPRETATION_VISUALIZATION_FEATURE_ID, WORLDGEN_THROUGHPUT_INTERPRETATION_VISUALIZATION_FEATURE_ID, WORLDGEN_FEDERATED_INTERPRETATION_VISUALIZATION_FEATURE_ID,
+ WORLDGEN_LOCAL_INTERPRETATION_VISUALIZATION_CONTRACT_FEATURE_ID, WORLDGEN_MULTIMODAL_INTERPRETATION_VISUALIZATION_CONTRACT_FEATURE_ID, WORLDGEN_THROUGHPUT_INTERPRETATION_VISUALIZATION_CONTRACT_FEATURE_ID, WORLDGEN_FEDERATED_INTERPRETATION_VISUALIZATION_CONTRACT_FEATURE_ID,
+ WORLDGEN_LOCAL_INTERPRETATION_VISUALIZATION_COPILOT_FEATURE_ID, WORLDGEN_MULTIMODAL_INTERPRETATION_VISUALIZATION_COPILOT_FEATURE_ID, WORLDGEN_THROUGHPUT_INTERPRETATION_VISUALIZATION_COPILOT_FEATURE_ID, WORLDGEN_FEDERATED_INTERPRETATION_VISUALIZATION_COPILOT_FEATURE_ID,
+ WORLDGEN_LOCAL_INTERPRETATION_VISUALIZATION_WORKFLOW_FEATURE_ID, WORLDGEN_MULTIMODAL_INTERPRETATION_VISUALIZATION_WORKFLOW_FEATURE_ID, WORLDGEN_THROUGHPUT_INTERPRETATION_VISUALIZATION_WORKFLOW_FEATURE_ID, WORLDGEN_FEDERATED_INTERPRETATION_VISUALIZATION_WORKFLOW_FEATURE_ID,
+ worldgenInterpretationVisualizationDigest, worldgenInterpretationVisualizationContractDigest, worldgenInterpretationVisualizationCopilotDigest, worldgenInterpretationVisualizationWorkflowDigest,
+ validateWorldgenLocalInterpretationVisualizationResult, validateWorldgenMultimodalInterpretationVisualizationResult, validateWorldgenThroughputInterpretationVisualizationResult, validateWorldgenFederatedInterpretationVisualizationResult,
+ validateWorldgenInterpretationVisualizationContractReceipt, validateWorldgenInterpretationVisualizationCopilotReceipt, validateWorldgenInterpretationVisualizationWorkflowReceipt,
+} from "./research-contracts.js";
+export type { WorldgenInterpretationVisualizationResult, WorldgenInterpretationVisualizationContractReceipt, WorldgenInterpretationVisualizationCopilotReceipt, WorldgenInterpretationVisualizationWorkflowReceipt } from "./research-contracts.js";
+export {
+ WORLDGEN_REPLICATION_NEGATIVE_RESULTS_CONTENT_TYPE, WORLDGEN_REPLICATION_NEGATIVE_RESULTS_CONTRACT_CONTENT_TYPE, WORLDGEN_REPLICATION_NEGATIVE_RESULTS_COPILOT_CONTENT_TYPE, WORLDGEN_REPLICATION_NEGATIVE_RESULTS_WORKFLOW_CONTENT_TYPE,
+ WORLDGEN_LOCAL_REPLICATION_NEGATIVE_RESULTS_FEATURE_ID, WORLDGEN_MULTIMODAL_REPLICATION_NEGATIVE_RESULTS_FEATURE_ID, WORLDGEN_THROUGHPUT_REPLICATION_NEGATIVE_RESULTS_FEATURE_ID, WORLDGEN_FEDERATED_REPLICATION_NEGATIVE_RESULTS_FEATURE_ID,
+ WORLDGEN_LOCAL_REPLICATION_NEGATIVE_RESULTS_CONTRACT_FEATURE_ID, WORLDGEN_MULTIMODAL_REPLICATION_NEGATIVE_RESULTS_CONTRACT_FEATURE_ID, WORLDGEN_THROUGHPUT_REPLICATION_NEGATIVE_RESULTS_CONTRACT_FEATURE_ID, WORLDGEN_FEDERATED_REPLICATION_NEGATIVE_RESULTS_CONTRACT_FEATURE_ID,
+ WORLDGEN_LOCAL_REPLICATION_NEGATIVE_RESULTS_COPILOT_FEATURE_ID, WORLDGEN_MULTIMODAL_REPLICATION_NEGATIVE_RESULTS_COPILOT_FEATURE_ID, WORLDGEN_THROUGHPUT_REPLICATION_NEGATIVE_RESULTS_COPILOT_FEATURE_ID, WORLDGEN_FEDERATED_REPLICATION_NEGATIVE_RESULTS_COPILOT_FEATURE_ID,
+ WORLDGEN_LOCAL_REPLICATION_NEGATIVE_RESULTS_WORKFLOW_FEATURE_ID, WORLDGEN_MULTIMODAL_REPLICATION_NEGATIVE_RESULTS_WORKFLOW_FEATURE_ID, WORLDGEN_THROUGHPUT_REPLICATION_NEGATIVE_RESULTS_WORKFLOW_FEATURE_ID, WORLDGEN_FEDERATED_REPLICATION_NEGATIVE_RESULTS_WORKFLOW_FEATURE_ID,
+ worldgenReplicationNegativeResultsDigest, worldgenReplicationNegativeResultsContractDigest, worldgenReplicationNegativeResultsCopilotDigest, worldgenReplicationNegativeResultsWorkflowDigest,
+ validateWorldgenLocalReplicationNegativeResultsResult, validateWorldgenMultimodalReplicationNegativeResultsResult, validateWorldgenThroughputReplicationNegativeResultsResult, validateWorldgenFederatedReplicationNegativeResultsResult,
+ validateWorldgenReplicationNegativeResultsContractReceipt, validateWorldgenReplicationNegativeResultsCopilotReceipt, validateWorldgenReplicationNegativeResultsWorkflowReceipt,
+} from "./research-contracts.js";
+export type { WorldgenReplicationNegativeResultsResult, WorldgenReplicationNegativeResultsContractReceipt, WorldgenReplicationNegativeResultsCopilotReceipt, WorldgenReplicationNegativeResultsWorkflowReceipt } from "./research-contracts.js";
+export {
+ WORLDGEN_PUBLICATION_RESEARCH_OBJECT_CONTENT_TYPE, WORLDGEN_PUBLICATION_RESEARCH_OBJECT_CONTRACT_CONTENT_TYPE, WORLDGEN_PUBLICATION_RESEARCH_OBJECT_COPILOT_CONTENT_TYPE, WORLDGEN_PUBLICATION_RESEARCH_OBJECT_WORKFLOW_CONTENT_TYPE,
+ WORLDGEN_LOCAL_PUBLICATION_RESEARCH_OBJECT_FEATURE_ID, WORLDGEN_MULTIMODAL_PUBLICATION_RESEARCH_OBJECT_FEATURE_ID, WORLDGEN_THROUGHPUT_PUBLICATION_RESEARCH_OBJECT_FEATURE_ID, WORLDGEN_FEDERATED_PUBLICATION_RESEARCH_OBJECT_FEATURE_ID,
+ WORLDGEN_LOCAL_PUBLICATION_RESEARCH_OBJECT_CONTRACT_FEATURE_ID, WORLDGEN_MULTIMODAL_PUBLICATION_RESEARCH_OBJECT_CONTRACT_FEATURE_ID, WORLDGEN_THROUGHPUT_PUBLICATION_RESEARCH_OBJECT_CONTRACT_FEATURE_ID, WORLDGEN_FEDERATED_PUBLICATION_RESEARCH_OBJECT_CONTRACT_FEATURE_ID,
+ WORLDGEN_LOCAL_PUBLICATION_RESEARCH_OBJECT_COPILOT_FEATURE_ID, WORLDGEN_MULTIMODAL_PUBLICATION_RESEARCH_OBJECT_COPILOT_FEATURE_ID, WORLDGEN_THROUGHPUT_PUBLICATION_RESEARCH_OBJECT_COPILOT_FEATURE_ID, WORLDGEN_FEDERATED_PUBLICATION_RESEARCH_OBJECT_COPILOT_FEATURE_ID,
+ WORLDGEN_LOCAL_PUBLICATION_RESEARCH_OBJECT_WORKFLOW_FEATURE_ID, WORLDGEN_MULTIMODAL_PUBLICATION_RESEARCH_OBJECT_WORKFLOW_FEATURE_ID, WORLDGEN_THROUGHPUT_PUBLICATION_RESEARCH_OBJECT_WORKFLOW_FEATURE_ID, WORLDGEN_FEDERATED_PUBLICATION_RESEARCH_OBJECT_WORKFLOW_FEATURE_ID,
+ worldgenPublicationResearchObjectDigest, worldgenPublicationResearchObjectContractDigest, worldgenPublicationResearchObjectCopilotDigest, worldgenPublicationResearchObjectWorkflowDigest,
+ validateWorldgenLocalPublicationResearchObjectResult, validateWorldgenMultimodalPublicationResearchObjectResult, validateWorldgenThroughputPublicationResearchObjectResult, validateWorldgenFederatedPublicationResearchObjectResult,
+ validateWorldgenPublicationResearchObjectContractReceipt, validateWorldgenPublicationResearchObjectCopilotReceipt, validateWorldgenPublicationResearchObjectWorkflowReceipt,
+} from "./publication-research-object-contracts.js";
+export type { WorldgenPublicationResearchObjectResult, WorldgenPublicationResearchObjectContractReceipt, WorldgenPublicationResearchObjectCopilotReceipt, WorldgenPublicationResearchObjectWorkflowReceipt } from "./publication-research-object-contracts.js";
+export {
+ WORLDGEN_TYPED_DETERMINISM_CONTENT_TYPE, WORLDGEN_TYPED_DETERMINISM_CONTRACT_CONTENT_TYPE, WORLDGEN_TYPED_DETERMINISM_COPILOT_CONTENT_TYPE, WORLDGEN_TYPED_DETERMINISM_WORKFLOW_CONTENT_TYPE,
+ WORLDGEN_LOCAL_TYPED_DETERMINISM_FEATURE_ID, WORLDGEN_MULTIMODAL_TYPED_DETERMINISM_FEATURE_ID, WORLDGEN_THROUGHPUT_TYPED_DETERMINISM_FEATURE_ID, WORLDGEN_FEDERATED_TYPED_DETERMINISM_FEATURE_ID,
+ WORLDGEN_LOCAL_TYPED_DETERMINISM_CONTRACT_FEATURE_ID, WORLDGEN_MULTIMODAL_TYPED_DETERMINISM_CONTRACT_FEATURE_ID, WORLDGEN_THROUGHPUT_TYPED_DETERMINISM_CONTRACT_FEATURE_ID, WORLDGEN_FEDERATED_TYPED_DETERMINISM_CONTRACT_FEATURE_ID,
+ WORLDGEN_LOCAL_TYPED_DETERMINISM_COPILOT_FEATURE_ID, WORLDGEN_MULTIMODAL_TYPED_DETERMINISM_COPILOT_FEATURE_ID, WORLDGEN_THROUGHPUT_TYPED_DETERMINISM_COPILOT_FEATURE_ID, WORLDGEN_FEDERATED_TYPED_DETERMINISM_COPILOT_FEATURE_ID,
+ WORLDGEN_LOCAL_TYPED_DETERMINISM_WORKFLOW_FEATURE_ID, WORLDGEN_MULTIMODAL_TYPED_DETERMINISM_WORKFLOW_FEATURE_ID, WORLDGEN_THROUGHPUT_TYPED_DETERMINISM_WORKFLOW_FEATURE_ID, WORLDGEN_FEDERATED_TYPED_DETERMINISM_WORKFLOW_FEATURE_ID,
+ worldgenTypedDeterminismDigest, worldgenTypedDeterminismContractDigest, worldgenTypedDeterminismCopilotDigest, worldgenTypedDeterminismWorkflowDigest,
+ validateWorldgenLocalTypedDeterminismResult, validateWorldgenMultimodalTypedDeterminismResult, validateWorldgenThroughputTypedDeterminismResult, validateWorldgenFederatedTypedDeterminismResult,
+ validateWorldgenTypedDeterminismContractReceipt, validateWorldgenTypedDeterminismCopilotReceipt, validateWorldgenTypedDeterminismWorkflowReceipt,
+} from "./typed-determinism-contracts.js";
+export type { WorldgenTypedDeterminismResult, WorldgenTypedDeterminismContractReceipt, WorldgenTypedDeterminismCopilotReceipt, WorldgenTypedDeterminismWorkflowReceipt } from "./typed-determinism-contracts.js";
+export {
+ WORLDGEN_PROVENANCE_SIGNING_CONTENT_TYPE, WORLDGEN_PROVENANCE_SIGNING_CONTRACT_CONTENT_TYPE, WORLDGEN_PROVENANCE_SIGNING_COPILOT_CONTENT_TYPE, WORLDGEN_PROVENANCE_SIGNING_WORKFLOW_CONTENT_TYPE,
+ WORLDGEN_LOCAL_PROVENANCE_SIGNING_FEATURE_ID, WORLDGEN_MULTIMODAL_PROVENANCE_SIGNING_FEATURE_ID, WORLDGEN_THROUGHPUT_PROVENANCE_SIGNING_FEATURE_ID, WORLDGEN_FEDERATED_PROVENANCE_SIGNING_FEATURE_ID,
+ WORLDGEN_LOCAL_PROVENANCE_SIGNING_CONTRACT_FEATURE_ID, WORLDGEN_MULTIMODAL_PROVENANCE_SIGNING_CONTRACT_FEATURE_ID, WORLDGEN_THROUGHPUT_PROVENANCE_SIGNING_CONTRACT_FEATURE_ID, WORLDGEN_FEDERATED_PROVENANCE_SIGNING_CONTRACT_FEATURE_ID,
+ WORLDGEN_LOCAL_PROVENANCE_SIGNING_COPILOT_FEATURE_ID, WORLDGEN_MULTIMODAL_PROVENANCE_SIGNING_COPILOT_FEATURE_ID, WORLDGEN_THROUGHPUT_PROVENANCE_SIGNING_COPILOT_FEATURE_ID, WORLDGEN_FEDERATED_PROVENANCE_SIGNING_COPILOT_FEATURE_ID,
+ WORLDGEN_LOCAL_PROVENANCE_SIGNING_WORKFLOW_FEATURE_ID, WORLDGEN_MULTIMODAL_PROVENANCE_SIGNING_WORKFLOW_FEATURE_ID, WORLDGEN_THROUGHPUT_PROVENANCE_SIGNING_WORKFLOW_FEATURE_ID, WORLDGEN_FEDERATED_PROVENANCE_SIGNING_WORKFLOW_FEATURE_ID,
+ worldgenProvenanceSigningDigest, worldgenProvenanceSigningContractDigest, worldgenProvenanceSigningCopilotDigest, worldgenProvenanceSigningWorkflowDigest,
+ validateWorldgenLocalProvenanceSigningResult, validateWorldgenMultimodalProvenanceSigningResult, validateWorldgenThroughputProvenanceSigningResult, validateWorldgenFederatedProvenanceSigningResult,
+ validateWorldgenProvenanceSigningContractReceipt, validateWorldgenProvenanceSigningCopilotReceipt, validateWorldgenProvenanceSigningWorkflowReceipt,
+} from "./provenance-signing-contracts.js";
+export type { WorldgenProvenanceSigningResult, WorldgenProvenanceSigningContractReceipt, WorldgenProvenanceSigningCopilotReceipt, WorldgenProvenanceSigningWorkflowReceipt } from "./provenance-signing-contracts.js";
+export {
+ WORLDGEN_POLICY_AUTONOMY_CONTENT_TYPE, WORLDGEN_POLICY_AUTONOMY_CONTRACT_CONTENT_TYPE, WORLDGEN_POLICY_AUTONOMY_COPILOT_CONTENT_TYPE, WORLDGEN_POLICY_AUTONOMY_WORKFLOW_CONTENT_TYPE,
+ WORLDGEN_LOCAL_POLICY_AUTONOMY_FEATURE_ID, WORLDGEN_MULTIMODAL_POLICY_AUTONOMY_FEATURE_ID, WORLDGEN_THROUGHPUT_POLICY_AUTONOMY_FEATURE_ID, WORLDGEN_FEDERATED_POLICY_AUTONOMY_FEATURE_ID,
+ WORLDGEN_LOCAL_POLICY_AUTONOMY_CONTRACT_FEATURE_ID, WORLDGEN_MULTIMODAL_POLICY_AUTONOMY_CONTRACT_FEATURE_ID, WORLDGEN_THROUGHPUT_POLICY_AUTONOMY_CONTRACT_FEATURE_ID, WORLDGEN_FEDERATED_POLICY_AUTONOMY_CONTRACT_FEATURE_ID,
+ WORLDGEN_LOCAL_POLICY_AUTONOMY_COPILOT_FEATURE_ID, WORLDGEN_MULTIMODAL_POLICY_AUTONOMY_COPILOT_FEATURE_ID, WORLDGEN_THROUGHPUT_POLICY_AUTONOMY_COPILOT_FEATURE_ID, WORLDGEN_FEDERATED_POLICY_AUTONOMY_COPILOT_FEATURE_ID,
+ WORLDGEN_LOCAL_POLICY_AUTONOMY_WORKFLOW_FEATURE_ID, WORLDGEN_MULTIMODAL_POLICY_AUTONOMY_WORKFLOW_FEATURE_ID, WORLDGEN_THROUGHPUT_POLICY_AUTONOMY_WORKFLOW_FEATURE_ID, WORLDGEN_FEDERATED_POLICY_AUTONOMY_WORKFLOW_FEATURE_ID,
+ worldgenPolicyAutonomyDigest, worldgenPolicyAutonomyContractDigest, worldgenPolicyAutonomyCopilotDigest, worldgenPolicyAutonomyWorkflowDigest,
+ validateWorldgenLocalPolicyAutonomyResult, validateWorldgenMultimodalPolicyAutonomyResult, validateWorldgenThroughputPolicyAutonomyResult, validateWorldgenFederatedPolicyAutonomyResult,
+ validateWorldgenPolicyAutonomyContractReceipt, validateWorldgenPolicyAutonomyCopilotReceipt, validateWorldgenPolicyAutonomyWorkflowReceipt,
+} from "./policy-autonomy-contracts.js";
+export type { WorldgenPolicyAutonomyResult, WorldgenPolicyAutonomyContractReceipt, WorldgenPolicyAutonomyCopilotReceipt, WorldgenPolicyAutonomyWorkflowReceipt } from "./policy-autonomy-contracts.js";
+export {
+ WORLDGEN_SECURITY_FEDERATION_CONTENT_TYPE, WORLDGEN_SECURITY_FEDERATION_CONTRACT_CONTENT_TYPE, WORLDGEN_SECURITY_FEDERATION_COPILOT_CONTENT_TYPE, WORLDGEN_SECURITY_FEDERATION_WORKFLOW_CONTENT_TYPE,
+ WORLDGEN_LOCAL_SECURITY_FEDERATION_FEATURE_ID, WORLDGEN_MULTIMODAL_SECURITY_FEDERATION_FEATURE_ID, WORLDGEN_THROUGHPUT_SECURITY_FEDERATION_FEATURE_ID, WORLDGEN_FEDERATED_SECURITY_FEDERATION_FEATURE_ID,
+ WORLDGEN_LOCAL_SECURITY_FEDERATION_CONTRACT_FEATURE_ID, WORLDGEN_MULTIMODAL_SECURITY_FEDERATION_CONTRACT_FEATURE_ID, WORLDGEN_THROUGHPUT_SECURITY_FEDERATION_CONTRACT_FEATURE_ID, WORLDGEN_FEDERATED_SECURITY_FEDERATION_CONTRACT_FEATURE_ID,
+ WORLDGEN_LOCAL_SECURITY_FEDERATION_COPILOT_FEATURE_ID, WORLDGEN_MULTIMODAL_SECURITY_FEDERATION_COPILOT_FEATURE_ID, WORLDGEN_THROUGHPUT_SECURITY_FEDERATION_COPILOT_FEATURE_ID, WORLDGEN_FEDERATED_SECURITY_FEDERATION_COPILOT_FEATURE_ID,
+ WORLDGEN_LOCAL_SECURITY_FEDERATION_WORKFLOW_FEATURE_ID, WORLDGEN_MULTIMODAL_SECURITY_FEDERATION_WORKFLOW_FEATURE_ID, WORLDGEN_THROUGHPUT_SECURITY_FEDERATION_WORKFLOW_FEATURE_ID, WORLDGEN_FEDERATED_SECURITY_FEDERATION_WORKFLOW_FEATURE_ID,
+ worldgenSecurityFederationDigest, worldgenSecurityFederationContractDigest, worldgenSecurityFederationCopilotDigest, worldgenSecurityFederationWorkflowDigest,
+ validateWorldgenLocalSecurityFederationResult, validateWorldgenMultimodalSecurityFederationResult, validateWorldgenThroughputSecurityFederationResult, validateWorldgenFederatedSecurityFederationResult,
+ validateWorldgenSecurityFederationContractReceipt, validateWorldgenSecurityFederationCopilotReceipt, validateWorldgenSecurityFederationWorkflowReceipt,
+} from "./security-federation-contracts.js";
+export type { WorldgenSecurityFederationResult, WorldgenSecurityFederationContractReceipt, WorldgenSecurityFederationCopilotReceipt, WorldgenSecurityFederationWorkflowReceipt } from "./security-federation-contracts.js";
+export {
+ WORLDGEN_PERFORMANCE_RELIABILITY_CONTENT_TYPE, WORLDGEN_PERFORMANCE_RELIABILITY_CONTRACT_CONTENT_TYPE, WORLDGEN_PERFORMANCE_RELIABILITY_COPILOT_CONTENT_TYPE, WORLDGEN_PERFORMANCE_RELIABILITY_WORKFLOW_CONTENT_TYPE,
+ WORLDGEN_LOCAL_PERFORMANCE_RELIABILITY_FEATURE_ID, WORLDGEN_MULTIMODAL_PERFORMANCE_RELIABILITY_FEATURE_ID, WORLDGEN_THROUGHPUT_PERFORMANCE_RELIABILITY_FEATURE_ID, WORLDGEN_FEDERATED_PERFORMANCE_RELIABILITY_FEATURE_ID,
+ WORLDGEN_LOCAL_PERFORMANCE_RELIABILITY_CONTRACT_FEATURE_ID, WORLDGEN_MULTIMODAL_PERFORMANCE_RELIABILITY_CONTRACT_FEATURE_ID, WORLDGEN_THROUGHPUT_PERFORMANCE_RELIABILITY_CONTRACT_FEATURE_ID, WORLDGEN_FEDERATED_PERFORMANCE_RELIABILITY_CONTRACT_FEATURE_ID,
+ WORLDGEN_LOCAL_PERFORMANCE_RELIABILITY_COPILOT_FEATURE_ID, WORLDGEN_MULTIMODAL_PERFORMANCE_RELIABILITY_COPILOT_FEATURE_ID, WORLDGEN_THROUGHPUT_PERFORMANCE_RELIABILITY_COPILOT_FEATURE_ID, WORLDGEN_FEDERATED_PERFORMANCE_RELIABILITY_COPILOT_FEATURE_ID,
+ WORLDGEN_LOCAL_PERFORMANCE_RELIABILITY_WORKFLOW_FEATURE_ID, WORLDGEN_MULTIMODAL_PERFORMANCE_RELIABILITY_WORKFLOW_FEATURE_ID, WORLDGEN_THROUGHPUT_PERFORMANCE_RELIABILITY_WORKFLOW_FEATURE_ID, WORLDGEN_FEDERATED_PERFORMANCE_RELIABILITY_WORKFLOW_FEATURE_ID,
+ worldgenPerformanceReliabilityDigest, worldgenPerformanceReliabilityContractDigest, worldgenPerformanceReliabilityCopilotDigest, worldgenPerformanceReliabilityWorkflowDigest,
+ validateWorldgenLocalPerformanceReliabilityResult, validateWorldgenMultimodalPerformanceReliabilityResult, validateWorldgenThroughputPerformanceReliabilityResult, validateWorldgenFederatedPerformanceReliabilityResult,
+ validateWorldgenPerformanceReliabilityContractReceipt, validateWorldgenPerformanceReliabilityCopilotReceipt, validateWorldgenPerformanceReliabilityWorkflowReceipt,
+} from "./performance-reliability-contracts.js";
+export type { WorldgenPerformanceReliabilityResult, WorldgenPerformanceReliabilityContractReceipt, WorldgenPerformanceReliabilityCopilotReceipt, WorldgenPerformanceReliabilityWorkflowReceipt } from "./performance-reliability-contracts.js";
+export {
+ WORLDGEN_INTEROPERABILITY_EXTENSIBILITY_CONTENT_TYPE, WORLDGEN_LOCAL_INTEROPERABILITY_EXTENSIBILITY_FEATURE_ID, WORLDGEN_MULTIMODAL_INTEROPERABILITY_EXTENSIBILITY_FEATURE_ID, WORLDGEN_THROUGHPUT_INTEROPERABILITY_EXTENSIBILITY_FEATURE_ID, WORLDGEN_FEDERATED_INTEROPERABILITY_EXTENSIBILITY_FEATURE_ID,
+ WORLDGEN_LOCAL_INTEROPERABILITY_EXTENSIBILITY_CONTRACT_FEATURE_ID, WORLDGEN_MULTIMODAL_INTEROPERABILITY_EXTENSIBILITY_CONTRACT_FEATURE_ID, WORLDGEN_THROUGHPUT_INTEROPERABILITY_EXTENSIBILITY_CONTRACT_FEATURE_ID, WORLDGEN_FEDERATED_INTEROPERABILITY_EXTENSIBILITY_CONTRACT_FEATURE_ID,
+ WORLDGEN_LOCAL_INTEROPERABILITY_EXTENSIBILITY_COPILOT_FEATURE_ID, WORLDGEN_MULTIMODAL_INTEROPERABILITY_EXTENSIBILITY_COPILOT_FEATURE_ID, WORLDGEN_THROUGHPUT_INTEROPERABILITY_EXTENSIBILITY_COPILOT_FEATURE_ID, WORLDGEN_FEDERATED_INTEROPERABILITY_EXTENSIBILITY_COPILOT_FEATURE_ID,
+ WORLDGEN_LOCAL_INTEROPERABILITY_EXTENSIBILITY_WORKFLOW_FEATURE_ID, WORLDGEN_MULTIMODAL_INTEROPERABILITY_EXTENSIBILITY_WORKFLOW_FEATURE_ID, WORLDGEN_THROUGHPUT_INTEROPERABILITY_EXTENSIBILITY_WORKFLOW_FEATURE_ID, WORLDGEN_FEDERATED_INTEROPERABILITY_EXTENSIBILITY_WORKFLOW_FEATURE_ID,
+ worldgenInteroperabilityExtensibilityDigest, validateWorldgenLocalInteroperabilityExtensibilityReceipt, validateWorldgenMultimodalInteroperabilityExtensibilityReceipt, validateWorldgenThroughputInteroperabilityExtensibilityReceipt, validateWorldgenFederatedInteroperabilityExtensibilityReceipt,
+} from "./interoperability-extensibility-contracts.js";
+export type { WorldgenInteroperabilityExtensibilityReceipt } from "./interoperability-extensibility-contracts.js";
+export {
+ WORLDGEN_EVALUATION_OBSERVABILITY_CONTENT_TYPE,
+ WORLDGEN_LOCAL_EVALUATION_OBSERVABILITY_FEATURE_ID, WORLDGEN_MULTIMODAL_EVALUATION_OBSERVABILITY_FEATURE_ID, WORLDGEN_THROUGHPUT_EVALUATION_OBSERVABILITY_FEATURE_ID, WORLDGEN_FEDERATED_EVALUATION_OBSERVABILITY_FEATURE_ID,
+ WORLDGEN_LOCAL_EVALUATION_OBSERVABILITY_CONTRACT_FEATURE_ID, WORLDGEN_MULTIMODAL_EVALUATION_OBSERVABILITY_CONTRACT_FEATURE_ID, WORLDGEN_THROUGHPUT_EVALUATION_OBSERVABILITY_CONTRACT_FEATURE_ID, WORLDGEN_FEDERATED_EVALUATION_OBSERVABILITY_CONTRACT_FEATURE_ID,
+ WORLDGEN_LOCAL_EVALUATION_OBSERVABILITY_COPILOT_FEATURE_ID, WORLDGEN_MULTIMODAL_EVALUATION_OBSERVABILITY_COPILOT_FEATURE_ID, WORLDGEN_THROUGHPUT_EVALUATION_OBSERVABILITY_COPILOT_FEATURE_ID, WORLDGEN_FEDERATED_EVALUATION_OBSERVABILITY_COPILOT_FEATURE_ID,
+ WORLDGEN_LOCAL_EVALUATION_OBSERVABILITY_WORKFLOW_FEATURE_ID, WORLDGEN_MULTIMODAL_EVALUATION_OBSERVABILITY_WORKFLOW_FEATURE_ID, WORLDGEN_THROUGHPUT_EVALUATION_OBSERVABILITY_WORKFLOW_FEATURE_ID, WORLDGEN_FEDERATED_EVALUATION_OBSERVABILITY_WORKFLOW_FEATURE_ID,
+ worldgenEvaluationObservabilityDigest, worldgenEvaluationObservabilityContractDigest, worldgenEvaluationObservabilityCopilotDigest, worldgenEvaluationObservabilityWorkflowDigest,
+ validateWorldgenLocalEvaluationObservability, validateWorldgenMultimodalEvaluationObservability, validateWorldgenThroughputEvaluationObservability, validateWorldgenFederatedEvaluationObservability,
+ validateWorldgenEvaluationObservabilityContract, validateWorldgenEvaluationObservabilityCopilot, validateWorldgenEvaluationObservabilityWorkflow,
+} from "./evaluation-observability-contracts.js";
+export type { WorldgenEvaluationObservabilityCard } from "./evaluation-observability-contracts.js";
+export {
+ WORLDGEN_RESEARCHER_ADMIN_EXPERIENCE_CONTENT_TYPE,
+ WORLDGEN_LOCAL_RESEARCHER_ADMIN_EXPERIENCE_FEATURE_ID, WORLDGEN_MULTIMODAL_RESEARCHER_ADMIN_EXPERIENCE_FEATURE_ID, WORLDGEN_THROUGHPUT_RESEARCHER_ADMIN_EXPERIENCE_FEATURE_ID, WORLDGEN_FEDERATED_RESEARCHER_ADMIN_EXPERIENCE_FEATURE_ID,
+ WORLDGEN_LOCAL_RESEARCHER_ADMIN_EXPERIENCE_CONTRACT_FEATURE_ID, WORLDGEN_MULTIMODAL_RESEARCHER_ADMIN_EXPERIENCE_CONTRACT_FEATURE_ID, WORLDGEN_THROUGHPUT_RESEARCHER_ADMIN_EXPERIENCE_CONTRACT_FEATURE_ID, WORLDGEN_FEDERATED_RESEARCHER_ADMIN_EXPERIENCE_CONTRACT_FEATURE_ID,
+ WORLDGEN_LOCAL_RESEARCHER_ADMIN_EXPERIENCE_COPILOT_FEATURE_ID, WORLDGEN_MULTIMODAL_RESEARCHER_ADMIN_EXPERIENCE_COPILOT_FEATURE_ID, WORLDGEN_THROUGHPUT_RESEARCHER_ADMIN_EXPERIENCE_COPILOT_FEATURE_ID, WORLDGEN_FEDERATED_RESEARCHER_ADMIN_EXPERIENCE_COPILOT_FEATURE_ID,
+ WORLDGEN_LOCAL_RESEARCHER_ADMIN_EXPERIENCE_WORKFLOW_FEATURE_ID, WORLDGEN_MULTIMODAL_RESEARCHER_ADMIN_EXPERIENCE_WORKFLOW_FEATURE_ID, WORLDGEN_THROUGHPUT_RESEARCHER_ADMIN_EXPERIENCE_WORKFLOW_FEATURE_ID, WORLDGEN_FEDERATED_RESEARCHER_ADMIN_EXPERIENCE_WORKFLOW_FEATURE_ID,
+ worldgenResearcherAdminExperienceDigest, worldgenResearcherAdminExperienceContractDigest, worldgenResearcherAdminExperienceCopilotDigest, worldgenResearcherAdminExperienceWorkflowDigest,
+ validateWorldgenLocalResearcherAdminExperience, validateWorldgenMultimodalResearcherAdminExperience, validateWorldgenThroughputResearcherAdminExperience, validateWorldgenFederatedResearcherAdminExperience,
+} from "./researcher-admin-experience-contracts.js";
+export type { WorldgenResearchWorkspaceCard } from "./researcher-admin-experience-contracts.js";
+export {
+ WORLDGEN_CONTRACT_FRONTIER_CONTENT_TYPE,
+ WORLDGEN_LOCAL_CONTRACT_FRONTIER_FEATURE_ID, WORLDGEN_MULTIMODAL_CONTRACT_FRONTIER_FEATURE_ID, WORLDGEN_THROUGHPUT_CONTRACT_FRONTIER_FEATURE_ID, WORLDGEN_FEDERATED_CONTRACT_FRONTIER_FEATURE_ID,
+ WORLDGEN_LOCAL_CONTRACT_FRONTIER_CONTRACT_FEATURE_ID, WORLDGEN_MULTIMODAL_CONTRACT_FRONTIER_CONTRACT_FEATURE_ID, WORLDGEN_THROUGHPUT_CONTRACT_FRONTIER_CONTRACT_FEATURE_ID, WORLDGEN_FEDERATED_CONTRACT_FRONTIER_CONTRACT_FEATURE_ID,
+ WORLDGEN_LOCAL_CONTRACT_FRONTIER_COPILOT_FEATURE_ID, WORLDGEN_MULTIMODAL_CONTRACT_FRONTIER_COPILOT_FEATURE_ID, WORLDGEN_THROUGHPUT_CONTRACT_FRONTIER_COPILOT_FEATURE_ID, WORLDGEN_FEDERATED_CONTRACT_FRONTIER_COPILOT_FEATURE_ID,
+ WORLDGEN_LOCAL_CONTRACT_FRONTIER_WORKFLOW_FEATURE_ID, WORLDGEN_MULTIMODAL_CONTRACT_FRONTIER_WORKFLOW_FEATURE_ID, WORLDGEN_THROUGHPUT_CONTRACT_FRONTIER_WORKFLOW_FEATURE_ID, WORLDGEN_FEDERATED_CONTRACT_FRONTIER_WORKFLOW_FEATURE_ID,
+ worldgenContractFrontierDigest, worldgenContractFrontierContractDigest, worldgenContractFrontierCopilotDigest, worldgenContractFrontierWorkflowDigest,
+ validateWorldgenLocalContractFrontier, validateWorldgenMultimodalContractFrontier, validateWorldgenThroughputContractFrontier, validateWorldgenFederatedContractFrontier,
+} from "./contract-frontier-contracts.js";
+export type { WorldgenContractFrontierCard } from "./contract-frontier-contracts.js";
+export {
+ WORLDGEN_LIMITATION_CLOSURE_CONTENT_TYPE,
+ WORLDGEN_LOCAL_LIMITATION_CLOSURE_FEATURE_ID, WORLDGEN_MULTIMODAL_LIMITATION_CLOSURE_FEATURE_ID, WORLDGEN_THROUGHPUT_LIMITATION_CLOSURE_FEATURE_ID, WORLDGEN_FEDERATED_LIMITATION_CLOSURE_FEATURE_ID,
+ WORLDGEN_LOCAL_LIMITATION_CLOSURE_CONTRACT_FEATURE_ID, WORLDGEN_MULTIMODAL_LIMITATION_CLOSURE_CONTRACT_FEATURE_ID, WORLDGEN_THROUGHPUT_LIMITATION_CLOSURE_CONTRACT_FEATURE_ID, WORLDGEN_FEDERATED_LIMITATION_CLOSURE_CONTRACT_FEATURE_ID,
+ WORLDGEN_LOCAL_LIMITATION_CLOSURE_COPILOT_FEATURE_ID, WORLDGEN_MULTIMODAL_LIMITATION_CLOSURE_COPILOT_FEATURE_ID, WORLDGEN_THROUGHPUT_LIMITATION_CLOSURE_COPILOT_FEATURE_ID, WORLDGEN_FEDERATED_LIMITATION_CLOSURE_COPILOT_FEATURE_ID,
+ WORLDGEN_LOCAL_LIMITATION_CLOSURE_WORKFLOW_FEATURE_ID, WORLDGEN_MULTIMODAL_LIMITATION_CLOSURE_WORKFLOW_FEATURE_ID, WORLDGEN_THROUGHPUT_LIMITATION_CLOSURE_WORKFLOW_FEATURE_ID, WORLDGEN_FEDERATED_LIMITATION_CLOSURE_WORKFLOW_FEATURE_ID,
+ worldgenLimitationClosureDigest, worldgenLimitationClosureContractDigest, worldgenLimitationClosureCopilotDigest, worldgenLimitationClosureWorkflowDigest,
+ validateWorldgenLocalLimitationClosure, validateWorldgenMultimodalLimitationClosure, validateWorldgenThroughputLimitationClosure, validateWorldgenFederatedLimitationClosure,
+} from "./limitation-closure-contracts.js";
+export type { WorldgenLimitationClosureCard } from "./limitation-closure-contracts.js";
+export {
+ WORLDGEN_DEPENDENCY_COMPOSITION_CONTENT_TYPE,
+ WORLDGEN_LOCAL_DEPENDENCY_COMPOSITION_FEATURE_ID, WORLDGEN_MULTIMODAL_DEPENDENCY_COMPOSITION_FEATURE_ID, WORLDGEN_THROUGHPUT_DEPENDENCY_COMPOSITION_FEATURE_ID, WORLDGEN_FEDERATED_DEPENDENCY_COMPOSITION_FEATURE_ID,
+ WORLDGEN_LOCAL_DEPENDENCY_COMPOSITION_CONTRACT_FEATURE_ID, WORLDGEN_MULTIMODAL_DEPENDENCY_COMPOSITION_CONTRACT_FEATURE_ID, WORLDGEN_THROUGHPUT_DEPENDENCY_COMPOSITION_CONTRACT_FEATURE_ID, WORLDGEN_FEDERATED_DEPENDENCY_COMPOSITION_CONTRACT_FEATURE_ID,
+ WORLDGEN_LOCAL_DEPENDENCY_COMPOSITION_COPILOT_FEATURE_ID, WORLDGEN_MULTIMODAL_DEPENDENCY_COMPOSITION_COPILOT_FEATURE_ID, WORLDGEN_THROUGHPUT_DEPENDENCY_COMPOSITION_COPILOT_FEATURE_ID, WORLDGEN_FEDERATED_DEPENDENCY_COMPOSITION_COPILOT_FEATURE_ID,
+ WORLDGEN_LOCAL_DEPENDENCY_COMPOSITION_WORKFLOW_FEATURE_ID, WORLDGEN_MULTIMODAL_DEPENDENCY_COMPOSITION_WORKFLOW_FEATURE_ID, WORLDGEN_THROUGHPUT_DEPENDENCY_COMPOSITION_WORKFLOW_FEATURE_ID, WORLDGEN_FEDERATED_DEPENDENCY_COMPOSITION_WORKFLOW_FEATURE_ID,
+ worldgenDependencyCompositionDigest, worldgenDependencyCompositionContractDigest, worldgenDependencyCompositionCopilotDigest, worldgenDependencyCompositionWorkflowDigest,
+ validateWorldgenLocalDependencyComposition, validateWorldgenMultimodalDependencyComposition, validateWorldgenThroughputDependencyComposition, validateWorldgenFederatedDependencyComposition,
+} from "./dependency-composition-contracts.js";
+export type { WorldgenDependencyCompositionCard } from "./dependency-composition-contracts.js";
+export {
+ WORLDGEN_SEMANTIC_PARITY_CONTENT_TYPE,
+ WORLDGEN_LOCAL_SEMANTIC_PARITY_FEATURE_ID, WORLDGEN_MULTIMODAL_SEMANTIC_PARITY_FEATURE_ID, WORLDGEN_THROUGHPUT_SEMANTIC_PARITY_FEATURE_ID, WORLDGEN_FEDERATED_SEMANTIC_PARITY_FEATURE_ID,
+ WORLDGEN_LOCAL_SEMANTIC_PARITY_CONTRACT_FEATURE_ID, WORLDGEN_MULTIMODAL_SEMANTIC_PARITY_CONTRACT_FEATURE_ID, WORLDGEN_THROUGHPUT_SEMANTIC_PARITY_CONTRACT_FEATURE_ID, WORLDGEN_FEDERATED_SEMANTIC_PARITY_CONTRACT_FEATURE_ID,
+ WORLDGEN_LOCAL_SEMANTIC_PARITY_COPILOT_FEATURE_ID, WORLDGEN_MULTIMODAL_SEMANTIC_PARITY_COPILOT_FEATURE_ID, WORLDGEN_THROUGHPUT_SEMANTIC_PARITY_COPILOT_FEATURE_ID, WORLDGEN_FEDERATED_SEMANTIC_PARITY_COPILOT_FEATURE_ID,
+ WORLDGEN_LOCAL_SEMANTIC_PARITY_WORKFLOW_FEATURE_ID, WORLDGEN_MULTIMODAL_SEMANTIC_PARITY_WORKFLOW_FEATURE_ID, WORLDGEN_THROUGHPUT_SEMANTIC_PARITY_WORKFLOW_FEATURE_ID, WORLDGEN_FEDERATED_SEMANTIC_PARITY_WORKFLOW_FEATURE_ID,
+ worldgenSemanticParityDigest, worldgenSemanticParityContractDigest, worldgenSemanticParityCopilotDigest, worldgenSemanticParityWorkflowDigest,
+ validateWorldgenLocalSemanticParity, validateWorldgenMultimodalSemanticParity, validateWorldgenThroughputSemanticParity, validateWorldgenFederatedSemanticParity,
+} from "./semantic-parity-contracts.js";
+export type { WorldgenSemanticParityCard } from "./semantic-parity-contracts.js";
+export {
+ WORLDGEN_SCALE_FRONTIER_CONTENT_TYPE,
+ WORLDGEN_LOCAL_SCALE_FRONTIER_FEATURE_ID, WORLDGEN_MULTIMODAL_SCALE_FRONTIER_FEATURE_ID, WORLDGEN_THROUGHPUT_SCALE_FRONTIER_FEATURE_ID, WORLDGEN_FEDERATED_SCALE_FRONTIER_FEATURE_ID,
+ WORLDGEN_LOCAL_SCALE_FRONTIER_CONTRACT_FEATURE_ID, WORLDGEN_MULTIMODAL_SCALE_FRONTIER_CONTRACT_FEATURE_ID, WORLDGEN_THROUGHPUT_SCALE_FRONTIER_CONTRACT_FEATURE_ID, WORLDGEN_FEDERATED_SCALE_FRONTIER_CONTRACT_FEATURE_ID,
+ WORLDGEN_LOCAL_SCALE_FRONTIER_COPILOT_FEATURE_ID, WORLDGEN_MULTIMODAL_SCALE_FRONTIER_COPILOT_FEATURE_ID, WORLDGEN_THROUGHPUT_SCALE_FRONTIER_COPILOT_FEATURE_ID, WORLDGEN_FEDERATED_SCALE_FRONTIER_COPILOT_FEATURE_ID,
+ WORLDGEN_LOCAL_SCALE_FRONTIER_WORKFLOW_FEATURE_ID, WORLDGEN_MULTIMODAL_SCALE_FRONTIER_WORKFLOW_FEATURE_ID, WORLDGEN_THROUGHPUT_SCALE_FRONTIER_WORKFLOW_FEATURE_ID, WORLDGEN_FEDERATED_SCALE_FRONTIER_WORKFLOW_FEATURE_ID,
+ worldgenScaleFrontierDigest, worldgenScaleFrontierContractDigest, worldgenScaleFrontierCopilotDigest, worldgenScaleFrontierWorkflowDigest,
+ validateWorldgenLocalScaleFrontier, validateWorldgenMultimodalScaleFrontier, validateWorldgenThroughputScaleFrontier, validateWorldgenFederatedScaleFrontier,
+} from "./scale-frontier-contracts.js";
+export type { WorldgenScaleFrontierCard } from "./scale-frontier-contracts.js";
+export {
+ WORLDGEN_ADVERSARIAL_RECOVERY_CONTENT_TYPE,
+ WORLDGEN_LOCAL_ADVERSARIAL_RECOVERY_FEATURE_ID, WORLDGEN_MULTIMODAL_ADVERSARIAL_RECOVERY_FEATURE_ID, WORLDGEN_THROUGHPUT_ADVERSARIAL_RECOVERY_FEATURE_ID, WORLDGEN_FEDERATED_ADVERSARIAL_RECOVERY_FEATURE_ID,
+ WORLDGEN_LOCAL_ADVERSARIAL_RECOVERY_CONTRACT_FEATURE_ID, WORLDGEN_MULTIMODAL_ADVERSARIAL_RECOVERY_CONTRACT_FEATURE_ID, WORLDGEN_THROUGHPUT_ADVERSARIAL_RECOVERY_CONTRACT_FEATURE_ID, WORLDGEN_FEDERATED_ADVERSARIAL_RECOVERY_CONTRACT_FEATURE_ID,
+ WORLDGEN_LOCAL_ADVERSARIAL_RECOVERY_COPILOT_FEATURE_ID, WORLDGEN_MULTIMODAL_ADVERSARIAL_RECOVERY_COPILOT_FEATURE_ID, WORLDGEN_THROUGHPUT_ADVERSARIAL_RECOVERY_COPILOT_FEATURE_ID, WORLDGEN_FEDERATED_ADVERSARIAL_RECOVERY_COPILOT_FEATURE_ID,
+ WORLDGEN_LOCAL_ADVERSARIAL_RECOVERY_WORKFLOW_FEATURE_ID, WORLDGEN_MULTIMODAL_ADVERSARIAL_RECOVERY_WORKFLOW_FEATURE_ID, WORLDGEN_THROUGHPUT_ADVERSARIAL_RECOVERY_WORKFLOW_FEATURE_ID, WORLDGEN_FEDERATED_ADVERSARIAL_RECOVERY_WORKFLOW_FEATURE_ID,
+ worldgenAdversarialRecoveryDigest, worldgenAdversarialRecoveryContractDigest, worldgenAdversarialRecoveryCopilotDigest, worldgenAdversarialRecoveryWorkflowDigest,
+ validateWorldgenLocalAdversarialRecovery, validateWorldgenMultimodalAdversarialRecovery, validateWorldgenThroughputAdversarialRecovery, validateWorldgenFederatedAdversarialRecovery,
+} from "./adversarial-recovery-contracts.js";
+export type { WorldgenAdversarialRecoveryCard } from "./adversarial-recovery-contracts.js";
+export {
+ WORLDGEN_FEDERATED_COMMONS_CONTENT_TYPE,
+ WORLDGEN_LOCAL_FEDERATED_COMMONS_FEATURE_ID, WORLDGEN_MULTIMODAL_FEDERATED_COMMONS_FEATURE_ID, WORLDGEN_THROUGHPUT_FEDERATED_COMMONS_FEATURE_ID, WORLDGEN_FEDERATED_CONTINUAL_COMMONS_FEATURE_ID,
+ WORLDGEN_LOCAL_FEDERATED_COMMONS_CONTRACT_FEATURE_ID, WORLDGEN_MULTIMODAL_FEDERATED_COMMONS_CONTRACT_FEATURE_ID, WORLDGEN_THROUGHPUT_FEDERATED_COMMONS_CONTRACT_FEATURE_ID, WORLDGEN_FEDERATED_CONTINUAL_COMMONS_CONTRACT_FEATURE_ID,
+ WORLDGEN_LOCAL_FEDERATED_COMMONS_COPILOT_FEATURE_ID, WORLDGEN_MULTIMODAL_FEDERATED_COMMONS_COPILOT_FEATURE_ID, WORLDGEN_THROUGHPUT_FEDERATED_COMMONS_COPILOT_FEATURE_ID, WORLDGEN_FEDERATED_CONTINUAL_COMMONS_COPILOT_FEATURE_ID,
+ WORLDGEN_LOCAL_FEDERATED_COMMONS_WORKFLOW_FEATURE_ID, WORLDGEN_MULTIMODAL_FEDERATED_COMMONS_WORKFLOW_FEATURE_ID, WORLDGEN_THROUGHPUT_FEDERATED_COMMONS_WORKFLOW_FEATURE_ID, WORLDGEN_FEDERATED_CONTINUAL_COMMONS_WORKFLOW_FEATURE_ID,
+ worldgenFederatedCommonsDigest, worldgenFederatedCommonsContractDigest, worldgenFederatedCommonsCopilotDigest, worldgenFederatedCommonsWorkflowDigest,
+ validateWorldgenLocalFederatedCommons, validateWorldgenMultimodalFederatedCommons, validateWorldgenThroughputFederatedCommons, validateWorldgenFederatedContinualCommons,
+} from "./federated-commons-contracts.js";
+export type { WorldgenFederatedCommonsCard } from "./federated-commons-contracts.js";
+export {
+ WORLDGEN_BOUNDED_EVOLUTION_CONTENT_TYPE,
+ WORLDGEN_LOCAL_BOUNDED_EVOLUTION_FEATURE_ID, WORLDGEN_MULTIMODAL_BOUNDED_EVOLUTION_FEATURE_ID, WORLDGEN_THROUGHPUT_BOUNDED_EVOLUTION_FEATURE_ID, WORLDGEN_FEDERATED_BOUNDED_EVOLUTION_FEATURE_ID,
+ WORLDGEN_LOCAL_BOUNDED_EVOLUTION_CONTRACT_FEATURE_ID, WORLDGEN_MULTIMODAL_BOUNDED_EVOLUTION_CONTRACT_FEATURE_ID, WORLDGEN_THROUGHPUT_BOUNDED_EVOLUTION_CONTRACT_FEATURE_ID, WORLDGEN_FEDERATED_BOUNDED_EVOLUTION_CONTRACT_FEATURE_ID,
+ WORLDGEN_LOCAL_BOUNDED_EVOLUTION_COPILOT_FEATURE_ID, WORLDGEN_MULTIMODAL_BOUNDED_EVOLUTION_COPILOT_FEATURE_ID, WORLDGEN_THROUGHPUT_BOUNDED_EVOLUTION_COPILOT_FEATURE_ID, WORLDGEN_FEDERATED_BOUNDED_EVOLUTION_COPILOT_FEATURE_ID,
+ WORLDGEN_LOCAL_BOUNDED_EVOLUTION_WORKFLOW_FEATURE_ID, WORLDGEN_MULTIMODAL_BOUNDED_EVOLUTION_WORKFLOW_FEATURE_ID, WORLDGEN_THROUGHPUT_BOUNDED_EVOLUTION_WORKFLOW_FEATURE_ID, WORLDGEN_FEDERATED_BOUNDED_EVOLUTION_WORKFLOW_FEATURE_ID,
+ worldgenBoundedEvolutionDigest, worldgenBoundedEvolutionContractDigest, worldgenBoundedEvolutionCopilotDigest, worldgenBoundedEvolutionWorkflowDigest,
+ validateWorldgenLocalBoundedEvolution, validateWorldgenMultimodalBoundedEvolution, validateWorldgenThroughputBoundedEvolution, validateWorldgenFederatedBoundedEvolution,
+} from "./bounded-evolution-contracts.js";
+export type { WorldgenBoundedEvolutionCard } from "./bounded-evolution-contracts.js";
+export {
+ IDS_IDENTITY_CONTINUITY_CONTENT_TYPE, IDS_IDENTITY_CONTINUITY_BOUNDARY,
+ IDS_LOCAL_IDENTITY_CONTINUITY_FEATURE_ID, IDS_MULTIMODAL_IDENTITY_CONTINUITY_FEATURE_ID, IDS_THROUGHPUT_IDENTITY_CONTINUITY_FEATURE_ID, IDS_FEDERATED_IDENTITY_CONTINUITY_FEATURE_ID,
+ IDS_LOCAL_IDENTITY_CONTINUITY_CONTRACT_FEATURE_ID, IDS_MULTIMODAL_IDENTITY_CONTINUITY_CONTRACT_FEATURE_ID, IDS_THROUGHPUT_IDENTITY_CONTINUITY_CONTRACT_FEATURE_ID, IDS_FEDERATED_IDENTITY_CONTINUITY_CONTRACT_FEATURE_ID,
+ IDS_LOCAL_IDENTITY_CONTINUITY_COPILOT_FEATURE_ID, IDS_MULTIMODAL_IDENTITY_CONTINUITY_COPILOT_FEATURE_ID, IDS_THROUGHPUT_IDENTITY_CONTINUITY_COPILOT_FEATURE_ID, IDS_FEDERATED_IDENTITY_CONTINUITY_COPILOT_FEATURE_ID,
+ IDS_LOCAL_IDENTITY_CONTINUITY_WORKFLOW_FEATURE_ID, IDS_MULTIMODAL_IDENTITY_CONTINUITY_WORKFLOW_FEATURE_ID, IDS_THROUGHPUT_IDENTITY_CONTINUITY_WORKFLOW_FEATURE_ID, IDS_FEDERATED_IDENTITY_CONTINUITY_WORKFLOW_FEATURE_ID,
+ idsIdentityContinuityDigest, idsIdentityContinuityContractDigest, idsIdentityContinuityCopilotDigest, idsIdentityContinuityWorkflowDigest,
+ validateIdsLocalIdentityContinuity, validateIdsMultimodalIdentityContinuity, validateIdsThroughputIdentityContinuity, validateIdsFederatedIdentityContinuity,
+} from "./ids-identity-continuity-contracts.js";
+export type { IdsIdentityContinuityCard } from "./ids-identity-continuity-contracts.js";
+export {
+ SCOPE_CONTINUITY_FRONTIER_CONTENT_TYPE, SCOPE_CONTINUITY_FRONTIER_BOUNDARY,
+ SCOPE_LOCAL_CONTINUITY_FRONTIER_FEATURE_ID, SCOPE_MULTIMODAL_CONTINUITY_FRONTIER_FEATURE_ID, SCOPE_THROUGHPUT_CONTINUITY_FRONTIER_FEATURE_ID, SCOPE_FEDERATED_CONTINUITY_FRONTIER_FEATURE_ID,
+ SCOPE_LOCAL_CONTINUITY_FRONTIER_CONTRACT_FEATURE_ID, SCOPE_MULTIMODAL_CONTINUITY_FRONTIER_CONTRACT_FEATURE_ID, SCOPE_THROUGHPUT_CONTINUITY_FRONTIER_CONTRACT_FEATURE_ID, SCOPE_FEDERATED_CONTINUITY_FRONTIER_CONTRACT_FEATURE_ID,
+ SCOPE_LOCAL_CONTINUITY_FRONTIER_COPILOT_FEATURE_ID, SCOPE_MULTIMODAL_CONTINUITY_FRONTIER_COPILOT_FEATURE_ID, SCOPE_THROUGHPUT_CONTINUITY_FRONTIER_COPILOT_FEATURE_ID, SCOPE_FEDERATED_CONTINUITY_FRONTIER_COPILOT_FEATURE_ID,
+ SCOPE_LOCAL_CONTINUITY_FRONTIER_WORKFLOW_FEATURE_ID, SCOPE_MULTIMODAL_CONTINUITY_FRONTIER_WORKFLOW_FEATURE_ID, SCOPE_THROUGHPUT_CONTINUITY_FRONTIER_WORKFLOW_FEATURE_ID, SCOPE_FEDERATED_CONTINUITY_FRONTIER_WORKFLOW_FEATURE_ID,
+ scopeContinuityFrontierDigest, scopeContinuityFrontierContractDigest, scopeContinuityFrontierCopilotDigest, scopeContinuityFrontierWorkflowDigest,
+ validateScopeLocalContinuityFrontier, validateScopeMultimodalContinuityFrontier, validateScopeThroughputContinuityFrontier, validateScopeFederatedContinuityFrontier,
+} from "./scope-continuity-frontier-contracts.js";
+export type { ScopeContinuityCard } from "./scope-continuity-frontier-contracts.js";
+export {
+ SECTION_CLOSURE_INTEGRITY_CONTENT_TYPE, SECTION_CLOSURE_INTEGRITY_BOUNDARY,
+ SECTION_LOCAL_CLOSURE_INTEGRITY_FEATURE_ID, SECTION_MULTIMODAL_CLOSURE_INTEGRITY_FEATURE_ID, SECTION_THROUGHPUT_CLOSURE_INTEGRITY_FEATURE_ID, SECTION_FEDERATED_CLOSURE_INTEGRITY_FEATURE_ID,
+ SECTION_LOCAL_CLOSURE_INTEGRITY_CONTRACT_FEATURE_ID, SECTION_MULTIMODAL_CLOSURE_INTEGRITY_CONTRACT_FEATURE_ID, SECTION_THROUGHPUT_CLOSURE_INTEGRITY_CONTRACT_FEATURE_ID, SECTION_FEDERATED_CLOSURE_INTEGRITY_CONTRACT_FEATURE_ID,
+ SECTION_LOCAL_CLOSURE_INTEGRITY_COPILOT_FEATURE_ID, SECTION_MULTIMODAL_CLOSURE_INTEGRITY_COPILOT_FEATURE_ID, SECTION_THROUGHPUT_CLOSURE_INTEGRITY_COPILOT_FEATURE_ID, SECTION_FEDERATED_CLOSURE_INTEGRITY_COPILOT_FEATURE_ID,
+ SECTION_LOCAL_CLOSURE_INTEGRITY_WORKFLOW_FEATURE_ID, SECTION_MULTIMODAL_CLOSURE_INTEGRITY_WORKFLOW_FEATURE_ID, SECTION_THROUGHPUT_CLOSURE_INTEGRITY_WORKFLOW_FEATURE_ID, SECTION_FEDERATED_CLOSURE_INTEGRITY_WORKFLOW_FEATURE_ID,
+ sectionClosureIntegrityDigest, sectionClosureIntegrityContractDigest, sectionClosureIntegrityCopilotDigest, sectionClosureIntegrityWorkflowDigest,
+ validateSectionLocalClosureIntegrity, validateSectionMultimodalClosureIntegrity, validateSectionThroughputClosureIntegrity, validateSectionFederatedClosureIntegrity,
+} from "./section-closure-integrity-contracts.js";
+export type { SectionClosureIntegrityCard } from "./section-closure-integrity-contracts.js";
+export {
+ WORLD_CAUSAL_INTEGRITY_CONTENT_TYPE, WORLD_CAUSAL_INTEGRITY_BOUNDARY,
+ WORLD_LOCAL_CAUSAL_INTEGRITY_FEATURE_ID, WORLD_MULTIMODAL_CAUSAL_INTEGRITY_FEATURE_ID, WORLD_THROUGHPUT_CAUSAL_INTEGRITY_FEATURE_ID, WORLD_FEDERATED_CAUSAL_INTEGRITY_FEATURE_ID,
+ WORLD_LOCAL_CAUSAL_INTEGRITY_CONTRACT_FEATURE_ID, WORLD_MULTIMODAL_CAUSAL_INTEGRITY_CONTRACT_FEATURE_ID, WORLD_THROUGHPUT_CAUSAL_INTEGRITY_CONTRACT_FEATURE_ID, WORLD_FEDERATED_CAUSAL_INTEGRITY_CONTRACT_FEATURE_ID,
+ WORLD_LOCAL_CAUSAL_INTEGRITY_COPILOT_FEATURE_ID, WORLD_MULTIMODAL_CAUSAL_INTEGRITY_COPILOT_FEATURE_ID, WORLD_THROUGHPUT_CAUSAL_INTEGRITY_COPILOT_FEATURE_ID, WORLD_FEDERATED_CAUSAL_INTEGRITY_COPILOT_FEATURE_ID,
+ WORLD_LOCAL_CAUSAL_INTEGRITY_WORKFLOW_FEATURE_ID, WORLD_MULTIMODAL_CAUSAL_INTEGRITY_WORKFLOW_FEATURE_ID, WORLD_THROUGHPUT_CAUSAL_INTEGRITY_WORKFLOW_FEATURE_ID, WORLD_FEDERATED_CAUSAL_INTEGRITY_WORKFLOW_FEATURE_ID,
+ worldCausalIntegrityDigest, worldCausalIntegrityContractDigest, worldCausalIntegrityCopilotDigest, worldCausalIntegrityWorkflowDigest,
+ validateWorldLocalCausalIntegrity, validateWorldMultimodalCausalIntegrity, validateWorldThroughputCausalIntegrity, validateWorldFederatedCausalIntegrity,
+} from "./world-causal-integrity-contracts.js";
+export type { WorldCausalIntegrityCard } from "./world-causal-integrity-contracts.js";
+export {
+ FIBER_FIBRATION_INTEGRITY_CONTENT_TYPE, FIBER_FIBRATION_INTEGRITY_BOUNDARY,
+ FIBER_LOCAL_FIBRATION_INTEGRITY_FEATURE_ID, FIBER_MULTIMODAL_FIBRATION_INTEGRITY_FEATURE_ID, FIBER_THROUGHPUT_FIBRATION_INTEGRITY_FEATURE_ID, FIBER_FEDERATED_FIBRATION_INTEGRITY_FEATURE_ID,
+ FIBER_LOCAL_FIBRATION_INTEGRITY_CONTRACT_FEATURE_ID, FIBER_MULTIMODAL_FIBRATION_INTEGRITY_CONTRACT_FEATURE_ID, FIBER_THROUGHPUT_FIBRATION_INTEGRITY_CONTRACT_FEATURE_ID, FIBER_FEDERATED_FIBRATION_INTEGRITY_CONTRACT_FEATURE_ID,
+ FIBER_LOCAL_FIBRATION_INTEGRITY_COPILOT_FEATURE_ID, FIBER_MULTIMODAL_FIBRATION_INTEGRITY_COPILOT_FEATURE_ID, FIBER_THROUGHPUT_FIBRATION_INTEGRITY_COPILOT_FEATURE_ID, FIBER_FEDERATED_FIBRATION_INTEGRITY_COPILOT_FEATURE_ID,
+ FIBER_LOCAL_FIBRATION_INTEGRITY_WORKFLOW_FEATURE_ID, FIBER_MULTIMODAL_FIBRATION_INTEGRITY_WORKFLOW_FEATURE_ID, FIBER_THROUGHPUT_FIBRATION_INTEGRITY_WORKFLOW_FEATURE_ID, FIBER_FEDERATED_FIBRATION_INTEGRITY_WORKFLOW_FEATURE_ID,
+ fiberFibrationIntegrityDigest, fiberFibrationIntegrityContractDigest, fiberFibrationIntegrityCopilotDigest, fiberFibrationIntegrityWorkflowDigest,
+ validateFiberLocalFibrationIntegrity, validateFiberMultimodalFibrationIntegrity, validateFiberThroughputFibrationIntegrity, validateFiberFederatedFibrationIntegrity,
+} from "./fiber-fibration-integrity-contracts.js";
+export type { FiberFibrationIntegrityCard } from "./fiber-fibration-integrity-contracts.js";
+export {
+ PRISM_EVALUATION_INTEGRITY_CONTENT_TYPE, PRISM_EVALUATION_INTEGRITY_BOUNDARY,
+ PRISM_LOCAL_EVALUATION_INTEGRITY_FEATURE_ID, PRISM_MULTIMODAL_EVALUATION_INTEGRITY_FEATURE_ID, PRISM_THROUGHPUT_EVALUATION_INTEGRITY_FEATURE_ID, PRISM_FEDERATED_EVALUATION_INTEGRITY_FEATURE_ID,
+ PRISM_LOCAL_EVALUATION_INTEGRITY_CONTRACT_FEATURE_ID, PRISM_MULTIMODAL_EVALUATION_INTEGRITY_CONTRACT_FEATURE_ID, PRISM_THROUGHPUT_EVALUATION_INTEGRITY_CONTRACT_FEATURE_ID, PRISM_FEDERATED_EVALUATION_INTEGRITY_CONTRACT_FEATURE_ID,
+ PRISM_LOCAL_EVALUATION_INTEGRITY_COPILOT_FEATURE_ID, PRISM_MULTIMODAL_EVALUATION_INTEGRITY_COPILOT_FEATURE_ID, PRISM_THROUGHPUT_EVALUATION_INTEGRITY_COPILOT_FEATURE_ID, PRISM_FEDERATED_EVALUATION_INTEGRITY_COPILOT_FEATURE_ID,
+ PRISM_LOCAL_EVALUATION_INTEGRITY_WORKFLOW_FEATURE_ID, PRISM_MULTIMODAL_EVALUATION_INTEGRITY_WORKFLOW_FEATURE_ID, PRISM_THROUGHPUT_EVALUATION_INTEGRITY_WORKFLOW_FEATURE_ID, PRISM_FEDERATED_EVALUATION_INTEGRITY_WORKFLOW_FEATURE_ID,
+ prismEvaluationIntegrityDigest, prismEvaluationIntegrityContractDigest, prismEvaluationIntegrityCopilotDigest, prismEvaluationIntegrityWorkflowDigest,
+ validatePrismLocalEvaluationIntegrity, validatePrismMultimodalEvaluationIntegrity, validatePrismThroughputEvaluationIntegrity, validatePrismFederatedEvaluationIntegrity,
+} from "./prism-evaluation-integrity-contracts.js";
+export type { PrismEvaluationIntegrityCard } from "./prism-evaluation-integrity-contracts.js";
+export {
+ OBLIGATION_CLOSURE_GATE_CONTENT_TYPE, OBLIGATION_CLOSURE_GATE_BOUNDARY,
+ OBLIGATION_LOCAL_CLOSURE_GATE_FEATURE_ID, OBLIGATION_MULTIMODAL_CLOSURE_GATE_FEATURE_ID, OBLIGATION_THROUGHPUT_CLOSURE_GATE_FEATURE_ID, OBLIGATION_FEDERATED_CLOSURE_GATE_FEATURE_ID,
+ OBLIGATION_LOCAL_CLOSURE_GATE_CONTRACT_FEATURE_ID, OBLIGATION_MULTIMODAL_CLOSURE_GATE_CONTRACT_FEATURE_ID, OBLIGATION_THROUGHPUT_CLOSURE_GATE_CONTRACT_FEATURE_ID, OBLIGATION_FEDERATED_CLOSURE_GATE_CONTRACT_FEATURE_ID,
+ OBLIGATION_LOCAL_CLOSURE_GATE_COPILOT_FEATURE_ID, OBLIGATION_MULTIMODAL_CLOSURE_GATE_COPILOT_FEATURE_ID, OBLIGATION_THROUGHPUT_CLOSURE_GATE_COPILOT_FEATURE_ID, OBLIGATION_FEDERATED_CLOSURE_GATE_COPILOT_FEATURE_ID,
+ OBLIGATION_LOCAL_CLOSURE_GATE_WORKFLOW_FEATURE_ID, OBLIGATION_MULTIMODAL_CLOSURE_GATE_WORKFLOW_FEATURE_ID, OBLIGATION_THROUGHPUT_CLOSURE_GATE_WORKFLOW_FEATURE_ID, OBLIGATION_FEDERATED_CLOSURE_GATE_WORKFLOW_FEATURE_ID,
+ obligationClosureGateDigest, obligationClosureGateContractDigest, obligationClosureGateCopilotDigest, obligationClosureGateWorkflowDigest,
+ validateObligationLocalClosureGate, validateObligationMultimodalClosureGate, validateObligationThroughputClosureGate, validateObligationFederatedClosureGate,
+} from "./obligation-closure-gate-contracts.js";
+export type { ObligationClosureGateCard } from "./obligation-closure-gate-contracts.js";
+export {
+ INFLUENCE_BOUND_INTEGRITY_CONTENT_TYPE, INFLUENCE_BOUND_INTEGRITY_BOUNDARY,
+ INFLUENCE_LOCAL_BOUND_INTEGRITY_FEATURE_ID, INFLUENCE_MULTIMODAL_BOUND_INTEGRITY_FEATURE_ID, INFLUENCE_THROUGHPUT_BOUND_INTEGRITY_FEATURE_ID, INFLUENCE_FEDERATED_BOUND_INTEGRITY_FEATURE_ID,
+ INFLUENCE_LOCAL_BOUND_INTEGRITY_CONTRACT_FEATURE_ID, INFLUENCE_MULTIMODAL_BOUND_INTEGRITY_CONTRACT_FEATURE_ID, INFLUENCE_THROUGHPUT_BOUND_INTEGRITY_CONTRACT_FEATURE_ID, INFLUENCE_FEDERATED_BOUND_INTEGRITY_CONTRACT_FEATURE_ID,
+ INFLUENCE_LOCAL_BOUND_INTEGRITY_COPILOT_FEATURE_ID, INFLUENCE_MULTIMODAL_BOUND_INTEGRITY_COPILOT_FEATURE_ID, INFLUENCE_THROUGHPUT_BOUND_INTEGRITY_COPILOT_FEATURE_ID, INFLUENCE_FEDERATED_BOUND_INTEGRITY_COPILOT_FEATURE_ID,
+ INFLUENCE_LOCAL_BOUND_INTEGRITY_WORKFLOW_FEATURE_ID, INFLUENCE_MULTIMODAL_BOUND_INTEGRITY_WORKFLOW_FEATURE_ID, INFLUENCE_THROUGHPUT_BOUND_INTEGRITY_WORKFLOW_FEATURE_ID, INFLUENCE_FEDERATED_BOUND_INTEGRITY_WORKFLOW_FEATURE_ID,
+ influenceBoundIntegrityDigest, influenceBoundIntegrityContractDigest, influenceBoundIntegrityCopilotDigest, influenceBoundIntegrityWorkflowDigest,
+ validateInfluenceLocalBoundIntegrity, validateInfluenceMultimodalBoundIntegrity, validateInfluenceThroughputBoundIntegrity, validateInfluenceFederatedBoundIntegrity,
+} from "./influence-bound-integrity-contracts.js";
+export type { InfluenceBoundIntegrityCard } from "./influence-bound-integrity-contracts.js";
+export {
+ EPISTEMIC_EVIDENCE_CLOSURE_CONTENT_TYPE, EPISTEMIC_EVIDENCE_CLOSURE_BOUNDARY,
+ EPISTEMIC_LOCAL_EVIDENCE_CLOSURE_FEATURE_ID, EPISTEMIC_MULTIMODAL_EVIDENCE_CLOSURE_FEATURE_ID, EPISTEMIC_THROUGHPUT_EVIDENCE_CLOSURE_FEATURE_ID, EPISTEMIC_FEDERATED_EVIDENCE_CLOSURE_FEATURE_ID,
+ EPISTEMIC_LOCAL_EVIDENCE_CLOSURE_CONTRACT_FEATURE_ID, EPISTEMIC_MULTIMODAL_EVIDENCE_CLOSURE_CONTRACT_FEATURE_ID, EPISTEMIC_THROUGHPUT_EVIDENCE_CLOSURE_CONTRACT_FEATURE_ID, EPISTEMIC_FEDERATED_EVIDENCE_CLOSURE_CONTRACT_FEATURE_ID,
+ EPISTEMIC_LOCAL_EVIDENCE_CLOSURE_COPILOT_FEATURE_ID, EPISTEMIC_MULTIMODAL_EVIDENCE_CLOSURE_COPILOT_FEATURE_ID, EPISTEMIC_THROUGHPUT_EVIDENCE_CLOSURE_COPILOT_FEATURE_ID, EPISTEMIC_FEDERATED_EVIDENCE_CLOSURE_COPILOT_FEATURE_ID,
+ EPISTEMIC_LOCAL_EVIDENCE_CLOSURE_WORKFLOW_FEATURE_ID, EPISTEMIC_MULTIMODAL_EVIDENCE_CLOSURE_WORKFLOW_FEATURE_ID, EPISTEMIC_THROUGHPUT_EVIDENCE_CLOSURE_WORKFLOW_FEATURE_ID, EPISTEMIC_FEDERATED_EVIDENCE_CLOSURE_WORKFLOW_FEATURE_ID,
+ epistemicEvidenceClosureDigest, epistemicEvidenceClosureContractDigest, epistemicEvidenceClosureCopilotDigest, epistemicEvidenceClosureWorkflowDigest,
+ validateEpistemicLocalEvidenceClosure, validateEpistemicMultimodalEvidenceClosure, validateEpistemicThroughputEvidenceClosure, validateEpistemicFederatedEvidenceClosure,
+} from "./epistemic-evidence-closure-contracts.js";
+export type { EpistemicEvidenceClosureCard } from "./epistemic-evidence-closure-contracts.js";
+export {
+ TOKENS_COMPRESSION_INTEGRITY_CONTENT_TYPE, TOKENS_COMPRESSION_INTEGRITY_BOUNDARY,
+ TOKENS_LOCAL_COMPRESSION_INTEGRITY_FEATURE_ID, TOKENS_MULTIMODAL_COMPRESSION_INTEGRITY_FEATURE_ID, TOKENS_THROUGHPUT_COMPRESSION_INTEGRITY_FEATURE_ID, TOKENS_FEDERATED_COMPRESSION_INTEGRITY_FEATURE_ID,
+ TOKENS_LOCAL_COMPRESSION_INTEGRITY_CONTRACT_FEATURE_ID, TOKENS_MULTIMODAL_COMPRESSION_INTEGRITY_CONTRACT_FEATURE_ID, TOKENS_THROUGHPUT_COMPRESSION_INTEGRITY_CONTRACT_FEATURE_ID, TOKENS_FEDERATED_COMPRESSION_INTEGRITY_CONTRACT_FEATURE_ID,
+ TOKENS_LOCAL_COMPRESSION_INTEGRITY_COPILOT_FEATURE_ID, TOKENS_MULTIMODAL_COMPRESSION_INTEGRITY_COPILOT_FEATURE_ID, TOKENS_THROUGHPUT_COMPRESSION_INTEGRITY_COPILOT_FEATURE_ID, TOKENS_FEDERATED_COMPRESSION_INTEGRITY_COPILOT_FEATURE_ID,
+ TOKENS_LOCAL_COMPRESSION_INTEGRITY_WORKFLOW_FEATURE_ID, TOKENS_MULTIMODAL_COMPRESSION_INTEGRITY_WORKFLOW_FEATURE_ID, TOKENS_THROUGHPUT_COMPRESSION_INTEGRITY_WORKFLOW_FEATURE_ID, TOKENS_FEDERATED_COMPRESSION_INTEGRITY_WORKFLOW_FEATURE_ID,
+ tokensCompressionIntegrityDigest, tokensCompressionIntegrityContractDigest, tokensCompressionIntegrityCopilotDigest, tokensCompressionIntegrityWorkflowDigest,
+ validateTokensLocalCompressionIntegrity, validateTokensMultimodalCompressionIntegrity, validateTokensThroughputCompressionIntegrity, validateTokensFederatedCompressionIntegrity,
+} from "./tokens-compression-integrity-contracts.js";
+export type { TokensCompressionIntegrityCard } from "./tokens-compression-integrity-contracts.js";
+export {
+ BASELINE_COUNTERFACTUAL_INTEGRITY_CONTENT_TYPE, BASELINE_COUNTERFACTUAL_INTEGRITY_BOUNDARY,
+ BASELINE_LOCAL_COUNTERFACTUAL_INTEGRITY_FEATURE_ID, BASELINE_MULTIMODAL_COUNTERFACTUAL_INTEGRITY_FEATURE_ID, BASELINE_THROUGHPUT_COUNTERFACTUAL_INTEGRITY_FEATURE_ID, BASELINE_FEDERATED_COUNTERFACTUAL_INTEGRITY_FEATURE_ID,
+ BASELINE_LOCAL_COUNTERFACTUAL_INTEGRITY_CONTRACT_FEATURE_ID, BASELINE_MULTIMODAL_COUNTERFACTUAL_INTEGRITY_CONTRACT_FEATURE_ID, BASELINE_THROUGHPUT_COUNTERFACTUAL_INTEGRITY_CONTRACT_FEATURE_ID, BASELINE_FEDERATED_COUNTERFACTUAL_INTEGRITY_CONTRACT_FEATURE_ID,
+ BASELINE_LOCAL_COUNTERFACTUAL_INTEGRITY_COPILOT_FEATURE_ID, BASELINE_MULTIMODAL_COUNTERFACTUAL_INTEGRITY_COPILOT_FEATURE_ID, BASELINE_THROUGHPUT_COUNTERFACTUAL_INTEGRITY_COPILOT_FEATURE_ID, BASELINE_FEDERATED_COUNTERFACTUAL_INTEGRITY_COPILOT_FEATURE_ID,
+ BASELINE_LOCAL_COUNTERFACTUAL_INTEGRITY_WORKFLOW_FEATURE_ID, BASELINE_MULTIMODAL_COUNTERFACTUAL_INTEGRITY_WORKFLOW_FEATURE_ID, BASELINE_THROUGHPUT_COUNTERFACTUAL_INTEGRITY_WORKFLOW_FEATURE_ID, BASELINE_FEDERATED_COUNTERFACTUAL_INTEGRITY_WORKFLOW_FEATURE_ID,
+ baselineCounterfactualIntegrityDigest, baselineCounterfactualIntegrityContractDigest, baselineCounterfactualIntegrityCopilotDigest, baselineCounterfactualIntegrityWorkflowDigest,
+ validateBaselineLocalCounterfactualIntegrity, validateBaselineMultimodalCounterfactualIntegrity, validateBaselineThroughputCounterfactualIntegrity, validateBaselineFederatedCounterfactualIntegrity,
+} from "./baseline-counterfactual-integrity-contracts.js";
+export type { BaselineCounterfactualIntegrityCard } from "./baseline-counterfactual-integrity-contracts.js";
+export {
+ ADAPTIVE_POSTERIOR_INTEGRITY_CONTENT_TYPE, ADAPTIVE_POSTERIOR_INTEGRITY_BOUNDARY,
+ ADAPTIVE_LOCAL_POSTERIOR_INTEGRITY_FEATURE_ID, ADAPTIVE_MULTIMODAL_POSTERIOR_INTEGRITY_FEATURE_ID, ADAPTIVE_THROUGHPUT_POSTERIOR_INTEGRITY_FEATURE_ID, ADAPTIVE_FEDERATED_POSTERIOR_INTEGRITY_FEATURE_ID,
+ ADAPTIVE_LOCAL_POSTERIOR_INTEGRITY_CONTRACT_FEATURE_ID, ADAPTIVE_MULTIMODAL_POSTERIOR_INTEGRITY_CONTRACT_FEATURE_ID, ADAPTIVE_THROUGHPUT_POSTERIOR_INTEGRITY_CONTRACT_FEATURE_ID, ADAPTIVE_FEDERATED_POSTERIOR_INTEGRITY_CONTRACT_FEATURE_ID,
+ ADAPTIVE_LOCAL_POSTERIOR_INTEGRITY_COPILOT_FEATURE_ID, ADAPTIVE_MULTIMODAL_POSTERIOR_INTEGRITY_COPILOT_FEATURE_ID, ADAPTIVE_THROUGHPUT_POSTERIOR_INTEGRITY_COPILOT_FEATURE_ID, ADAPTIVE_FEDERATED_POSTERIOR_INTEGRITY_COPILOT_FEATURE_ID,
+ ADAPTIVE_LOCAL_POSTERIOR_INTEGRITY_WORKFLOW_FEATURE_ID, ADAPTIVE_MULTIMODAL_POSTERIOR_INTEGRITY_WORKFLOW_FEATURE_ID, ADAPTIVE_THROUGHPUT_POSTERIOR_INTEGRITY_WORKFLOW_FEATURE_ID, ADAPTIVE_FEDERATED_POSTERIOR_INTEGRITY_WORKFLOW_FEATURE_ID,
+ adaptivePosteriorIntegrityDigest, adaptivePosteriorIntegrityContractDigest, adaptivePosteriorIntegrityCopilotDigest, adaptivePosteriorIntegrityWorkflowDigest,
+ validateAdaptiveLocalPosteriorIntegrity, validateAdaptiveMultimodalPosteriorIntegrity, validateAdaptiveThroughputPosteriorIntegrity, validateAdaptiveFederatedPosteriorIntegrity,
+} from "./adaptive-posterior-integrity-contracts.js";
+export type { AdaptivePosteriorIntegrityCard } from "./adaptive-posterior-integrity-contracts.js";
+export {
+ GOVERNANCE_EVOLUTION_INTEGRITY_CONTENT_TYPE, GOVERNANCE_EVOLUTION_INTEGRITY_BOUNDARY,
+ GOVERNANCE_LOCAL_EVOLUTION_INTEGRITY_FEATURE_ID, GOVERNANCE_MULTIMODAL_EVOLUTION_INTEGRITY_FEATURE_ID, GOVERNANCE_THROUGHPUT_EVOLUTION_INTEGRITY_FEATURE_ID, GOVERNANCE_FEDERATED_EVOLUTION_INTEGRITY_FEATURE_ID,
+ GOVERNANCE_LOCAL_EVOLUTION_INTEGRITY_CONTRACT_FEATURE_ID, GOVERNANCE_MULTIMODAL_EVOLUTION_INTEGRITY_CONTRACT_FEATURE_ID, GOVERNANCE_THROUGHPUT_EVOLUTION_INTEGRITY_CONTRACT_FEATURE_ID, GOVERNANCE_FEDERATED_EVOLUTION_INTEGRITY_CONTRACT_FEATURE_ID,
+ GOVERNANCE_LOCAL_EVOLUTION_INTEGRITY_COPILOT_FEATURE_ID, GOVERNANCE_MULTIMODAL_EVOLUTION_INTEGRITY_COPILOT_FEATURE_ID, GOVERNANCE_THROUGHPUT_EVOLUTION_INTEGRITY_COPILOT_FEATURE_ID, GOVERNANCE_FEDERATED_EVOLUTION_INTEGRITY_COPILOT_FEATURE_ID,
+ GOVERNANCE_LOCAL_EVOLUTION_INTEGRITY_WORKFLOW_FEATURE_ID, GOVERNANCE_MULTIMODAL_EVOLUTION_INTEGRITY_WORKFLOW_FEATURE_ID, GOVERNANCE_THROUGHPUT_EVOLUTION_INTEGRITY_WORKFLOW_FEATURE_ID, GOVERNANCE_FEDERATED_EVOLUTION_INTEGRITY_WORKFLOW_FEATURE_ID,
+ governanceEvolutionIntegrityDigest, governanceEvolutionIntegrityContractDigest, governanceEvolutionIntegrityCopilotDigest, governanceEvolutionIntegrityWorkflowDigest,
+ validateGovernanceLocalEvolutionIntegrity, validateGovernanceMultimodalEvolutionIntegrity, validateGovernanceThroughputEvolutionIntegrity, validateGovernanceFederatedEvolutionIntegrity,
+} from "./governance-evolution-integrity-contracts.js";
+export type { GovernanceEvolutionIntegrityCard } from "./governance-evolution-integrity-contracts.js";
+export {
+ SAFETY_CONTROL_INTEGRITY_CONTENT_TYPE, SAFETY_CONTROL_INTEGRITY_BOUNDARY,
+ SAFETY_LOCAL_CONTROL_INTEGRITY_FEATURE_ID, SAFETY_MULTIMODAL_CONTROL_INTEGRITY_FEATURE_ID, SAFETY_THROUGHPUT_CONTROL_INTEGRITY_FEATURE_ID, SAFETY_FEDERATED_CONTROL_INTEGRITY_FEATURE_ID,
+ SAFETY_LOCAL_CONTROL_INTEGRITY_CONTRACT_FEATURE_ID, SAFETY_MULTIMODAL_CONTROL_INTEGRITY_CONTRACT_FEATURE_ID, SAFETY_THROUGHPUT_CONTROL_INTEGRITY_CONTRACT_FEATURE_ID, SAFETY_FEDERATED_CONTROL_INTEGRITY_CONTRACT_FEATURE_ID,
+ SAFETY_LOCAL_CONTROL_INTEGRITY_COPILOT_FEATURE_ID, SAFETY_MULTIMODAL_CONTROL_INTEGRITY_COPILOT_FEATURE_ID, SAFETY_THROUGHPUT_CONTROL_INTEGRITY_COPILOT_FEATURE_ID, SAFETY_FEDERATED_CONTROL_INTEGRITY_COPILOT_FEATURE_ID,
+ SAFETY_LOCAL_CONTROL_INTEGRITY_WORKFLOW_FEATURE_ID, SAFETY_MULTIMODAL_CONTROL_INTEGRITY_WORKFLOW_FEATURE_ID, SAFETY_THROUGHPUT_CONTROL_INTEGRITY_WORKFLOW_FEATURE_ID, SAFETY_FEDERATED_CONTROL_INTEGRITY_WORKFLOW_FEATURE_ID,
+ safetyControlIntegrityDigest, safetyControlIntegrityContractDigest, safetyControlIntegrityCopilotDigest, safetyControlIntegrityWorkflowDigest,
+ validateSafetyLocalControlIntegrity, validateSafetyMultimodalControlIntegrity, validateSafetyThroughputControlIntegrity, validateSafetyFederatedControlIntegrity,
+} from "./safety-control-integrity-contracts.js";
+export type { SafetyIntegrityCard } from "./safety-control-integrity-contracts.js";
+export {
+ CONFORMANCE_REPLAY_INTEGRITY_CONTENT_TYPE, CONFORMANCE_REPLAY_INTEGRITY_BOUNDARY,
+ CONFORMANCE_LOCAL_REPLAY_INTEGRITY_FEATURE_ID, CONFORMANCE_MULTIMODAL_REPLAY_INTEGRITY_FEATURE_ID, CONFORMANCE_THROUGHPUT_REPLAY_INTEGRITY_FEATURE_ID, CONFORMANCE_FEDERATED_REPLAY_INTEGRITY_FEATURE_ID,
+ CONFORMANCE_LOCAL_REPLAY_INTEGRITY_CONTRACT_FEATURE_ID, CONFORMANCE_MULTIMODAL_REPLAY_INTEGRITY_CONTRACT_FEATURE_ID, CONFORMANCE_THROUGHPUT_REPLAY_INTEGRITY_CONTRACT_FEATURE_ID, CONFORMANCE_FEDERATED_REPLAY_INTEGRITY_CONTRACT_FEATURE_ID,
+ CONFORMANCE_LOCAL_REPLAY_INTEGRITY_COPILOT_FEATURE_ID, CONFORMANCE_MULTIMODAL_REPLAY_INTEGRITY_COPILOT_FEATURE_ID, CONFORMANCE_THROUGHPUT_REPLAY_INTEGRITY_COPILOT_FEATURE_ID, CONFORMANCE_FEDERATED_REPLAY_INTEGRITY_COPILOT_FEATURE_ID,
+ CONFORMANCE_LOCAL_REPLAY_INTEGRITY_WORKFLOW_FEATURE_ID, CONFORMANCE_MULTIMODAL_REPLAY_INTEGRITY_WORKFLOW_FEATURE_ID, CONFORMANCE_THROUGHPUT_REPLAY_INTEGRITY_WORKFLOW_FEATURE_ID, CONFORMANCE_FEDERATED_REPLAY_INTEGRITY_WORKFLOW_FEATURE_ID,
+ conformanceReplayIntegrityDigest, conformanceReplayIntegrityContractDigest, conformanceReplayIntegrityCopilotDigest, conformanceReplayIntegrityWorkflowDigest,
+ validateConformanceLocalReplayIntegrity, validateConformanceMultimodalReplayIntegrity, validateConformanceThroughputReplayIntegrity, validateConformanceFederatedReplayIntegrity,
+} from "./conformance-replay-integrity-contracts.js";
+export type { ConformanceReplayIntegrityCard } from "./conformance-replay-integrity-contracts.js";
+export {
+ OPS_RUN_INTEGRITY_CONTENT_TYPE, OPS_RUN_INTEGRITY_BOUNDARY,
+ OPS_LOCAL_RUN_INTEGRITY_FEATURE_ID, OPS_MULTIMODAL_RUN_INTEGRITY_FEATURE_ID, OPS_THROUGHPUT_RUN_INTEGRITY_FEATURE_ID, OPS_FEDERATED_RUN_INTEGRITY_FEATURE_ID,
+ OPS_LOCAL_RUN_INTEGRITY_CONTRACT_FEATURE_ID, OPS_MULTIMODAL_RUN_INTEGRITY_CONTRACT_FEATURE_ID, OPS_THROUGHPUT_RUN_INTEGRITY_CONTRACT_FEATURE_ID, OPS_FEDERATED_RUN_INTEGRITY_CONTRACT_FEATURE_ID,
+ OPS_LOCAL_RUN_INTEGRITY_COPILOT_FEATURE_ID, OPS_MULTIMODAL_RUN_INTEGRITY_COPILOT_FEATURE_ID, OPS_THROUGHPUT_RUN_INTEGRITY_COPILOT_FEATURE_ID, OPS_FEDERATED_RUN_INTEGRITY_COPILOT_FEATURE_ID,
+ OPS_LOCAL_RUN_INTEGRITY_WORKFLOW_FEATURE_ID, OPS_MULTIMODAL_RUN_INTEGRITY_WORKFLOW_FEATURE_ID, OPS_THROUGHPUT_RUN_INTEGRITY_WORKFLOW_FEATURE_ID, OPS_FEDERATED_RUN_INTEGRITY_WORKFLOW_FEATURE_ID,
+ opsRunIntegrityDigest, opsRunIntegrityContractDigest, opsRunIntegrityCopilotDigest, opsRunIntegrityWorkflowDigest,
+ validateOpsLocalRunIntegrity, validateOpsMultimodalRunIntegrity, validateOpsThroughputRunIntegrity, validateOpsFederatedRunIntegrity,
+} from "./ops-run-integrity-contracts.js";
+export type { OpsRunIntegrityCard } from "./ops-run-integrity-contracts.js";
+export {
+ STEWARDSHIP_SNAPSHOT_INTEGRITY_CONTENT_TYPE, STEWARDSHIP_SNAPSHOT_INTEGRITY_BOUNDARY,
+ STEWARDSHIP_LOCAL_SNAPSHOT_INTEGRITY_FEATURE_ID, STEWARDSHIP_MULTIMODAL_SNAPSHOT_INTEGRITY_FEATURE_ID, STEWARDSHIP_THROUGHPUT_SNAPSHOT_INTEGRITY_FEATURE_ID, STEWARDSHIP_FEDERATED_SNAPSHOT_INTEGRITY_FEATURE_ID,
+ STEWARDSHIP_LOCAL_SNAPSHOT_INTEGRITY_CONTRACT_FEATURE_ID, STEWARDSHIP_MULTIMODAL_SNAPSHOT_INTEGRITY_CONTRACT_FEATURE_ID, STEWARDSHIP_THROUGHPUT_SNAPSHOT_INTEGRITY_CONTRACT_FEATURE_ID, STEWARDSHIP_FEDERATED_SNAPSHOT_INTEGRITY_CONTRACT_FEATURE_ID,
+ STEWARDSHIP_LOCAL_SNAPSHOT_INTEGRITY_COPILOT_FEATURE_ID, STEWARDSHIP_MULTIMODAL_SNAPSHOT_INTEGRITY_COPILOT_FEATURE_ID, STEWARDSHIP_THROUGHPUT_SNAPSHOT_INTEGRITY_COPILOT_FEATURE_ID, STEWARDSHIP_FEDERATED_SNAPSHOT_INTEGRITY_COPILOT_FEATURE_ID,
+ STEWARDSHIP_LOCAL_SNAPSHOT_INTEGRITY_WORKFLOW_FEATURE_ID, STEWARDSHIP_MULTIMODAL_SNAPSHOT_INTEGRITY_WORKFLOW_FEATURE_ID, STEWARDSHIP_THROUGHPUT_SNAPSHOT_INTEGRITY_WORKFLOW_FEATURE_ID, STEWARDSHIP_FEDERATED_SNAPSHOT_INTEGRITY_WORKFLOW_FEATURE_ID,
+ stewardshipSnapshotIntegrityDigest, stewardshipSnapshotIntegrityContractDigest, stewardshipSnapshotIntegrityCopilotDigest, stewardshipSnapshotIntegrityWorkflowDigest,
+ validateStewardshipLocalSnapshotIntegrity, validateStewardshipMultimodalSnapshotIntegrity, validateStewardshipThroughputSnapshotIntegrity, validateStewardshipFederatedSnapshotIntegrity,
+} from "./stewardship-snapshot-integrity-contracts.js";
+export type { StewardshipSnapshotIntegrityCard } from "./stewardship-snapshot-integrity-contracts.js";
+export {
+ DATAOPS_INGESTION_INTEGRITY_CONTENT_TYPE, DATAOPS_INGESTION_INTEGRITY_BOUNDARY,
+ DATAOPS_LOCAL_INGESTION_INTEGRITY_FEATURE_ID, DATAOPS_MULTIMODAL_INGESTION_INTEGRITY_FEATURE_ID, DATAOPS_THROUGHPUT_INGESTION_INTEGRITY_FEATURE_ID, DATAOPS_FEDERATED_CONTINUAL_INGESTION_INTEGRITY_FEATURE_ID,
+ DATAOPS_LOCAL_INGESTION_INTEGRITY_CONTRACT_FEATURE_ID, DATAOPS_MULTIMODAL_INGESTION_INTEGRITY_CONTRACT_FEATURE_ID, DATAOPS_THROUGHPUT_INGESTION_INTEGRITY_CONTRACT_FEATURE_ID, DATAOPS_FEDERATED_CONTINUAL_INGESTION_INTEGRITY_CONTRACT_FEATURE_ID,
+ DATAOPS_LOCAL_INGESTION_INTEGRITY_COPILOT_FEATURE_ID, DATAOPS_MULTIMODAL_INGESTION_INTEGRITY_COPILOT_FEATURE_ID, DATAOPS_THROUGHPUT_INGESTION_INTEGRITY_COPILOT_FEATURE_ID, DATAOPS_FEDERATED_CONTINUAL_INGESTION_INTEGRITY_COPILOT_FEATURE_ID,
+ DATAOPS_LOCAL_INGESTION_INTEGRITY_WORKFLOW_FEATURE_ID, DATAOPS_MULTIMODAL_INGESTION_INTEGRITY_WORKFLOW_FEATURE_ID, DATAOPS_THROUGHPUT_INGESTION_INTEGRITY_WORKFLOW_FEATURE_ID, DATAOPS_FEDERATED_CONTINUAL_INGESTION_INTEGRITY_WORKFLOW_FEATURE_ID,
+ dataopsIngestionIntegrityDigest, dataopsIngestionIntegrityContractDigest, dataopsIngestionIntegrityCopilotDigest, dataopsIngestionIntegrityWorkflowDigest,
+ validateDataopsLocalIngestionIntegrity, validateDataopsMultimodalIngestionIntegrity, validateDataopsThroughputIngestionIntegrity, validateDataopsFederatedContinualIngestionIntegrity,
+} from "./dataops-ingestion-integrity-contracts.js";
+export type { DataopsIngestionIntegrityCard } from "./dataops-ingestion-integrity-contracts.js";
+export {
+ RESIDUE_RECONCILIATION_INTEGRITY_CONTENT_TYPE, RESIDUE_RECONCILIATION_INTEGRITY_BOUNDARY,
+ RESIDUE_LOCAL_RECONCILIATION_INTEGRITY_FEATURE_ID, RESIDUE_MULTIMODAL_RECONCILIATION_INTEGRITY_FEATURE_ID, RESIDUE_THROUGHPUT_RECONCILIATION_INTEGRITY_FEATURE_ID, RESIDUE_FEDERATED_CONTINUAL_RECONCILIATION_INTEGRITY_FEATURE_ID,
+ RESIDUE_LOCAL_RECONCILIATION_INTEGRITY_CONTRACT_FEATURE_ID, RESIDUE_MULTIMODAL_RECONCILIATION_INTEGRITY_CONTRACT_FEATURE_ID, RESIDUE_THROUGHPUT_RECONCILIATION_INTEGRITY_CONTRACT_FEATURE_ID, RESIDUE_FEDERATED_CONTINUAL_RECONCILIATION_INTEGRITY_CONTRACT_FEATURE_ID,
+ RESIDUE_LOCAL_RECONCILIATION_INTEGRITY_COPILOT_FEATURE_ID, RESIDUE_MULTIMODAL_RECONCILIATION_INTEGRITY_COPILOT_FEATURE_ID, RESIDUE_THROUGHPUT_RECONCILIATION_INTEGRITY_COPILOT_FEATURE_ID, RESIDUE_FEDERATED_CONTINUAL_RECONCILIATION_INTEGRITY_COPILOT_FEATURE_ID,
+ RESIDUE_LOCAL_RECONCILIATION_INTEGRITY_WORKFLOW_FEATURE_ID, RESIDUE_MULTIMODAL_RECONCILIATION_INTEGRITY_WORKFLOW_FEATURE_ID, RESIDUE_THROUGHPUT_RECONCILIATION_INTEGRITY_WORKFLOW_FEATURE_ID, RESIDUE_FEDERATED_CONTINUAL_RECONCILIATION_INTEGRITY_WORKFLOW_FEATURE_ID,
+ residueReconciliationIntegrityDigest, residueReconciliationIntegrityContractDigest, residueReconciliationIntegrityCopilotDigest, residueReconciliationIntegrityWorkflowDigest,
+ validateResidueLocalReconciliationIntegrity, validateResidueMultimodalReconciliationIntegrity, validateResidueThroughputReconciliationIntegrity, validateResidueFederatedContinualReconciliationIntegrity,
+} from "./residue-reconciliation-integrity-contracts.js";
+export type { ResidueReconciliationIntegrityCard } from "./residue-reconciliation-integrity-contracts.js";
+export {
+ BIOETHICS_BOUNDARY_INTEGRITY_CONTENT_TYPE, BIOETHICS_BOUNDARY_INTEGRITY_BOUNDARY,
+ BIOETHICS_LOCAL_BOUNDARY_INTEGRITY_FEATURE_ID, BIOETHICS_MULTIMODAL_BOUNDARY_INTEGRITY_FEATURE_ID, BIOETHICS_THROUGHPUT_BOUNDARY_INTEGRITY_FEATURE_ID, BIOETHICS_FEDERATED_CONTINUAL_BOUNDARY_INTEGRITY_FEATURE_ID,
+ BIOETHICS_LOCAL_BOUNDARY_INTEGRITY_CONTRACT_FEATURE_ID, BIOETHICS_MULTIMODAL_BOUNDARY_INTEGRITY_CONTRACT_FEATURE_ID, BIOETHICS_THROUGHPUT_BOUNDARY_INTEGRITY_CONTRACT_FEATURE_ID, BIOETHICS_FEDERATED_CONTINUAL_BOUNDARY_INTEGRITY_CONTRACT_FEATURE_ID,
+ BIOETHICS_LOCAL_BOUNDARY_INTEGRITY_COPILOT_FEATURE_ID, BIOETHICS_MULTIMODAL_BOUNDARY_INTEGRITY_COPILOT_FEATURE_ID, BIOETHICS_THROUGHPUT_BOUNDARY_INTEGRITY_COPILOT_FEATURE_ID, BIOETHICS_FEDERATED_CONTINUAL_BOUNDARY_INTEGRITY_COPILOT_FEATURE_ID,
+ BIOETHICS_LOCAL_BOUNDARY_INTEGRITY_WORKFLOW_FEATURE_ID, BIOETHICS_MULTIMODAL_BOUNDARY_INTEGRITY_WORKFLOW_FEATURE_ID, BIOETHICS_THROUGHPUT_BOUNDARY_INTEGRITY_WORKFLOW_FEATURE_ID, BIOETHICS_FEDERATED_CONTINUAL_BOUNDARY_INTEGRITY_WORKFLOW_FEATURE_ID,
+ bioethicsBoundaryIntegrityDigest, bioethicsBoundaryIntegrityContractDigest, bioethicsBoundaryIntegrityCopilotDigest, bioethicsBoundaryIntegrityWorkflowDigest,
+ validateBioethicsLocalBoundaryIntegrity, validateBioethicsMultimodalBoundaryIntegrity, validateBioethicsThroughputBoundaryIntegrity, validateBioethicsFederatedContinualBoundaryIntegrity,
+} from "./bioethics-boundary-integrity-contracts.js";
+export type { BioethicsBoundaryIntegrityCard } from "./bioethics-boundary-integrity-contracts.js";
+export {
+ INFRA_RELIABILITY_INTEGRITY_CONTENT_TYPE, INFRA_RELIABILITY_INTEGRITY_BOUNDARY,
+ INFRA_LOCAL_RELIABILITY_INTEGRITY_FEATURE_ID, INFRA_MULTIMODAL_RELIABILITY_INTEGRITY_FEATURE_ID, INFRA_THROUGHPUT_RELIABILITY_INTEGRITY_FEATURE_ID, INFRA_FEDERATED_CONTINUAL_RELIABILITY_INTEGRITY_FEATURE_ID,
+ INFRA_LOCAL_RELIABILITY_INTEGRITY_CONTRACT_FEATURE_ID, INFRA_MULTIMODAL_RELIABILITY_INTEGRITY_CONTRACT_FEATURE_ID, INFRA_THROUGHPUT_RELIABILITY_INTEGRITY_CONTRACT_FEATURE_ID, INFRA_FEDERATED_CONTINUAL_RELIABILITY_INTEGRITY_CONTRACT_FEATURE_ID,
+ INFRA_LOCAL_RELIABILITY_INTEGRITY_COPILOT_FEATURE_ID, INFRA_MULTIMODAL_RELIABILITY_INTEGRITY_COPILOT_FEATURE_ID, INFRA_THROUGHPUT_RELIABILITY_INTEGRITY_COPILOT_FEATURE_ID, INFRA_FEDERATED_CONTINUAL_RELIABILITY_INTEGRITY_COPILOT_FEATURE_ID,
+ INFRA_LOCAL_RELIABILITY_INTEGRITY_WORKFLOW_FEATURE_ID, INFRA_MULTIMODAL_RELIABILITY_INTEGRITY_WORKFLOW_FEATURE_ID, INFRA_THROUGHPUT_RELIABILITY_INTEGRITY_WORKFLOW_FEATURE_ID, INFRA_FEDERATED_CONTINUAL_RELIABILITY_INTEGRITY_WORKFLOW_FEATURE_ID,
+ infraReliabilityIntegrityDigest, infraReliabilityIntegrityContractDigest, infraReliabilityIntegrityCopilotDigest, infraReliabilityIntegrityWorkflowDigest,
+ validateInfraLocalReliabilityIntegrity, validateInfraMultimodalReliabilityIntegrity, validateInfraThroughputReliabilityIntegrity, validateInfraFederatedContinualReliabilityIntegrity,
+} from "./infra-reliability-integrity-contracts.js";
+export type { InfraReliabilityIntegrityCard } from "./infra-reliability-integrity-contracts.js";
+export {
+ POLICY_GRANT_INTEGRITY_CONTENT_TYPE, POLICY_GRANT_INTEGRITY_BOUNDARY,
+ POLICY_LOCAL_GRANT_INTEGRITY_FEATURE_ID, POLICY_MULTIMODAL_GRANT_INTEGRITY_FEATURE_ID, POLICY_THROUGHPUT_GRANT_INTEGRITY_FEATURE_ID, POLICY_FEDERATED_GRANT_INTEGRITY_FEATURE_ID,
+ POLICY_LOCAL_GRANT_INTEGRITY_CONTRACT_FEATURE_ID, POLICY_MULTIMODAL_GRANT_INTEGRITY_CONTRACT_FEATURE_ID, POLICY_THROUGHPUT_GRANT_INTEGRITY_CONTRACT_FEATURE_ID, POLICY_FEDERATED_GRANT_INTEGRITY_CONTRACT_FEATURE_ID,
+ POLICY_LOCAL_GRANT_INTEGRITY_COPILOT_FEATURE_ID, POLICY_MULTIMODAL_GRANT_INTEGRITY_COPILOT_FEATURE_ID, POLICY_THROUGHPUT_GRANT_INTEGRITY_COPILOT_FEATURE_ID, POLICY_FEDERATED_GRANT_INTEGRITY_COPILOT_FEATURE_ID,
+ POLICY_LOCAL_GRANT_INTEGRITY_WORKFLOW_FEATURE_ID, POLICY_MULTIMODAL_GRANT_INTEGRITY_WORKFLOW_FEATURE_ID, POLICY_THROUGHPUT_GRANT_INTEGRITY_WORKFLOW_FEATURE_ID, POLICY_FEDERATED_GRANT_INTEGRITY_WORKFLOW_FEATURE_ID,
+ policyGrantIntegrityDigest, policyGrantIntegrityContractDigest, policyGrantIntegrityCopilotDigest, policyGrantIntegrityWorkflowDigest,
+ validatePolicyLocalGrantIntegrity, validatePolicyMultimodalGrantIntegrity, validatePolicyThroughputGrantIntegrity, validatePolicyFederatedGrantIntegrity,
+} from "./policy-grant-integrity-contracts.js";
+export type { PolicyGrantIntegrityCard } from "./policy-grant-integrity-contracts.js";
+export {
+ ADAPTER_GATEWAY_INTEGRITY_CONTENT_TYPE, ADAPTER_GATEWAY_INTEGRITY_BOUNDARY,
+ ADAPTER_LOCAL_GATEWAY_INTEGRITY_FEATURE_ID, ADAPTER_MULTIMODAL_GATEWAY_INTEGRITY_FEATURE_ID, ADAPTER_THROUGHPUT_GATEWAY_INTEGRITY_FEATURE_ID, ADAPTER_FEDERATED_CONTINUAL_GATEWAY_INTEGRITY_FEATURE_ID,
+ ADAPTER_LOCAL_GATEWAY_INTEGRITY_CONTRACT_FEATURE_ID, ADAPTER_MULTIMODAL_GATEWAY_INTEGRITY_CONTRACT_FEATURE_ID, ADAPTER_THROUGHPUT_GATEWAY_INTEGRITY_CONTRACT_FEATURE_ID, ADAPTER_FEDERATED_CONTINUAL_GATEWAY_INTEGRITY_CONTRACT_FEATURE_ID,
+ ADAPTER_LOCAL_GATEWAY_INTEGRITY_COPILOT_FEATURE_ID, ADAPTER_MULTIMODAL_GATEWAY_INTEGRITY_COPILOT_FEATURE_ID, ADAPTER_THROUGHPUT_GATEWAY_INTEGRITY_COPILOT_FEATURE_ID, ADAPTER_FEDERATED_CONTINUAL_GATEWAY_INTEGRITY_COPILOT_FEATURE_ID,
+ ADAPTER_LOCAL_GATEWAY_INTEGRITY_WORKFLOW_FEATURE_ID, ADAPTER_MULTIMODAL_GATEWAY_INTEGRITY_WORKFLOW_FEATURE_ID, ADAPTER_THROUGHPUT_GATEWAY_INTEGRITY_WORKFLOW_FEATURE_ID, ADAPTER_FEDERATED_CONTINUAL_GATEWAY_INTEGRITY_WORKFLOW_FEATURE_ID,
+ adapterGatewayIntegrityDigest, adapterGatewayIntegrityContractDigest, adapterGatewayIntegrityCopilotDigest, adapterGatewayIntegrityWorkflowDigest,
+ validateAdapterLocalGatewayIntegrity, validateAdapterMultimodalGatewayIntegrity, validateAdapterThroughputGatewayIntegrity, validateAdapterFederatedContinualGatewayIntegrity,
+} from "./adapter-gateway-integrity-contracts.js";
+export type { AdapterGatewayIntegrityCard } from "./adapter-gateway-integrity-contracts.js";
+export {
+ STANDARDS_MIGRATION_INTEGRITY_CONTENT_TYPE, STANDARDS_MIGRATION_INTEGRITY_BOUNDARY,
+ STANDARDS_LOCAL_MIGRATION_INTEGRITY_FEATURE_ID, STANDARDS_MULTIMODAL_MIGRATION_INTEGRITY_FEATURE_ID, STANDARDS_THROUGHPUT_MIGRATION_INTEGRITY_FEATURE_ID, STANDARDS_FEDERATED_CONTINUAL_MIGRATION_INTEGRITY_FEATURE_ID,
+ STANDARDS_LOCAL_MIGRATION_INTEGRITY_CONTRACT_FEATURE_ID, STANDARDS_MULTIMODAL_MIGRATION_INTEGRITY_CONTRACT_FEATURE_ID, STANDARDS_THROUGHPUT_MIGRATION_INTEGRITY_CONTRACT_FEATURE_ID, STANDARDS_FEDERATED_CONTINUAL_MIGRATION_INTEGRITY_CONTRACT_FEATURE_ID,
+ STANDARDS_LOCAL_MIGRATION_INTEGRITY_COPILOT_FEATURE_ID, STANDARDS_MULTIMODAL_MIGRATION_INTEGRITY_COPILOT_FEATURE_ID, STANDARDS_THROUGHPUT_MIGRATION_INTEGRITY_COPILOT_FEATURE_ID, STANDARDS_FEDERATED_CONTINUAL_MIGRATION_INTEGRITY_COPILOT_FEATURE_ID,
+ STANDARDS_LOCAL_MIGRATION_INTEGRITY_WORKFLOW_FEATURE_ID, STANDARDS_MULTIMODAL_MIGRATION_INTEGRITY_WORKFLOW_FEATURE_ID, STANDARDS_THROUGHPUT_MIGRATION_INTEGRITY_WORKFLOW_FEATURE_ID, STANDARDS_FEDERATED_CONTINUAL_MIGRATION_INTEGRITY_WORKFLOW_FEATURE_ID,
+ standardsMigrationIntegrityDigest, standardsMigrationIntegrityContractDigest, standardsMigrationIntegrityCopilotDigest, standardsMigrationIntegrityWorkflowDigest,
+ validateStandardsLocalMigrationIntegrity, validateStandardsMultimodalMigrationIntegrity, validateStandardsThroughputMigrationIntegrity, validateStandardsFederatedContinualMigrationIntegrity,
+} from "./standards-migration-integrity-contracts.js";
+export type { StandardsMigrationIntegrityCard } from "./standards-migration-integrity-contracts.js";
+export {
+ SWEEP_AUDIT_INTEGRITY_CONTENT_TYPE, SWEEP_AUDIT_INTEGRITY_BOUNDARY,
+ SWEEP_LOCAL_AUDIT_INTEGRITY_FEATURE_ID, SWEEP_MULTIMODAL_AUDIT_INTEGRITY_FEATURE_ID, SWEEP_THROUGHPUT_AUDIT_INTEGRITY_FEATURE_ID, SWEEP_FEDERATED_CONTINUAL_AUDIT_INTEGRITY_FEATURE_ID,
+ SWEEP_LOCAL_AUDIT_INTEGRITY_CONTRACT_FEATURE_ID, SWEEP_MULTIMODAL_AUDIT_INTEGRITY_CONTRACT_FEATURE_ID, SWEEP_THROUGHPUT_AUDIT_INTEGRITY_CONTRACT_FEATURE_ID, SWEEP_FEDERATED_CONTINUAL_AUDIT_INTEGRITY_CONTRACT_FEATURE_ID,
+ SWEEP_LOCAL_AUDIT_INTEGRITY_COPILOT_FEATURE_ID, SWEEP_MULTIMODAL_AUDIT_INTEGRITY_COPILOT_FEATURE_ID, SWEEP_THROUGHPUT_AUDIT_INTEGRITY_COPILOT_FEATURE_ID, SWEEP_FEDERATED_CONTINUAL_AUDIT_INTEGRITY_COPILOT_FEATURE_ID,
+ SWEEP_LOCAL_AUDIT_INTEGRITY_WORKFLOW_FEATURE_ID, SWEEP_MULTIMODAL_AUDIT_INTEGRITY_WORKFLOW_FEATURE_ID, SWEEP_THROUGHPUT_AUDIT_INTEGRITY_WORKFLOW_FEATURE_ID, SWEEP_FEDERATED_CONTINUAL_AUDIT_INTEGRITY_WORKFLOW_FEATURE_ID,
+ sweepAuditIntegrityDigest, sweepAuditIntegrityContractDigest, sweepAuditIntegrityCopilotDigest, sweepAuditIntegrityWorkflowDigest,
+ validateSweepLocalAuditIntegrity, validateSweepMultimodalAuditIntegrity, validateSweepThroughputAuditIntegrity, validateSweepFederatedContinualAuditIntegrity,
+} from "./sweep-audit-integrity-contracts.js";
+export type { SweepAuditIntegrityCard } from "./sweep-audit-integrity-contracts.js";
+export {
+ GRAPH_PROJECTION_INTEGRITY_CONTENT_TYPE, GRAPH_PROJECTION_INTEGRITY_BOUNDARY,
+ GRAPH_LOCAL_PROJECTION_INTEGRITY_FEATURE_ID, GRAPH_MULTIMODAL_PROJECTION_INTEGRITY_FEATURE_ID, GRAPH_THROUGHPUT_PROJECTION_INTEGRITY_FEATURE_ID, GRAPH_FEDERATED_CONTINUAL_PROJECTION_INTEGRITY_FEATURE_ID,
+ GRAPH_LOCAL_PROJECTION_INTEGRITY_CONTRACT_FEATURE_ID, GRAPH_MULTIMODAL_PROJECTION_INTEGRITY_CONTRACT_FEATURE_ID, GRAPH_THROUGHPUT_PROJECTION_INTEGRITY_CONTRACT_FEATURE_ID, GRAPH_FEDERATED_CONTINUAL_PROJECTION_INTEGRITY_CONTRACT_FEATURE_ID,
+ GRAPH_LOCAL_PROJECTION_INTEGRITY_COPILOT_FEATURE_ID, GRAPH_MULTIMODAL_PROJECTION_INTEGRITY_COPILOT_FEATURE_ID, GRAPH_THROUGHPUT_PROJECTION_INTEGRITY_COPILOT_FEATURE_ID, GRAPH_FEDERATED_CONTINUAL_PROJECTION_INTEGRITY_COPILOT_FEATURE_ID,
+ GRAPH_LOCAL_PROJECTION_INTEGRITY_WORKFLOW_FEATURE_ID, GRAPH_MULTIMODAL_PROJECTION_INTEGRITY_WORKFLOW_FEATURE_ID, GRAPH_THROUGHPUT_PROJECTION_INTEGRITY_WORKFLOW_FEATURE_ID, GRAPH_FEDERATED_CONTINUAL_PROJECTION_INTEGRITY_WORKFLOW_FEATURE_ID,
+ graphProjectionIntegrityDigest, graphProjectionIntegrityContractDigest, graphProjectionIntegrityCopilotDigest, graphProjectionIntegrityWorkflowDigest,
+ validateGraphLocalProjectionIntegrity, validateGraphMultimodalProjectionIntegrity, validateGraphThroughputProjectionIntegrity, validateGraphFederatedContinualProjectionIntegrity,
+} from "./graph-projection-integrity-contracts.js";
+export type { GraphProjectionIntegrityCard } from "./graph-projection-integrity-contracts.js";
+export {
+ MUTATION_EVOLUTION_INTEGRITY_CONTENT_TYPE, MUTATION_EVOLUTION_INTEGRITY_BOUNDARY,
+ MUTATION_LOCAL_EVOLUTION_INTEGRITY_FEATURE_ID, MUTATION_MULTIMODAL_EVOLUTION_INTEGRITY_FEATURE_ID, MUTATION_THROUGHPUT_EVOLUTION_INTEGRITY_FEATURE_ID, MUTATION_FEDERATED_CONTINUAL_EVOLUTION_INTEGRITY_FEATURE_ID,
+ MUTATION_LOCAL_EVOLUTION_INTEGRITY_CONTRACT_FEATURE_ID, MUTATION_MULTIMODAL_EVOLUTION_INTEGRITY_CONTRACT_FEATURE_ID, MUTATION_THROUGHPUT_EVOLUTION_INTEGRITY_CONTRACT_FEATURE_ID, MUTATION_FEDERATED_CONTINUAL_EVOLUTION_INTEGRITY_CONTRACT_FEATURE_ID,
+ MUTATION_LOCAL_EVOLUTION_INTEGRITY_COPILOT_FEATURE_ID, MUTATION_MULTIMODAL_EVOLUTION_INTEGRITY_COPILOT_FEATURE_ID, MUTATION_THROUGHPUT_EVOLUTION_INTEGRITY_COPILOT_FEATURE_ID, MUTATION_FEDERATED_CONTINUAL_EVOLUTION_INTEGRITY_COPILOT_FEATURE_ID,
+ MUTATION_LOCAL_EVOLUTION_INTEGRITY_WORKFLOW_FEATURE_ID, MUTATION_MULTIMODAL_EVOLUTION_INTEGRITY_WORKFLOW_FEATURE_ID, MUTATION_THROUGHPUT_EVOLUTION_INTEGRITY_WORKFLOW_FEATURE_ID, MUTATION_FEDERATED_CONTINUAL_EVOLUTION_INTEGRITY_WORKFLOW_FEATURE_ID,
+ mutationEvolutionIntegrityDigest, mutationEvolutionIntegrityContractDigest, mutationEvolutionIntegrityCopilotDigest, mutationEvolutionIntegrityWorkflowDigest,
+ validateMutationLocalEvolutionIntegrity, validateMutationMultimodalEvolutionIntegrity, validateMutationThroughputEvolutionIntegrity, validateMutationFederatedContinualEvolutionIntegrity,
+} from "./mutation-evolution-integrity-contracts.js";
+export type { MutationEvolutionIntegrityCard } from "./mutation-evolution-integrity-contracts.js";
+export {
+ LAB_INSTRUMENT_EXECUTION_INTEGRITY_CONTENT_TYPE, LAB_INSTRUMENT_EXECUTION_INTEGRITY_BOUNDARY,
+ LAB_LOCAL_INSTRUMENT_EXECUTION_INTEGRITY_FEATURE_ID, LAB_MULTIMODAL_INSTRUMENT_EXECUTION_INTEGRITY_FEATURE_ID, LAB_THROUGHPUT_INSTRUMENT_EXECUTION_INTEGRITY_FEATURE_ID, LAB_FEDERATED_CONTINUAL_INSTRUMENT_EXECUTION_INTEGRITY_FEATURE_ID,
+ LAB_LOCAL_INSTRUMENT_EXECUTION_INTEGRITY_CONTRACT_FEATURE_ID, LAB_MULTIMODAL_INSTRUMENT_EXECUTION_INTEGRITY_CONTRACT_FEATURE_ID, LAB_THROUGHPUT_INSTRUMENT_EXECUTION_INTEGRITY_CONTRACT_FEATURE_ID, LAB_FEDERATED_CONTINUAL_INSTRUMENT_EXECUTION_INTEGRITY_CONTRACT_FEATURE_ID,
+ LAB_LOCAL_INSTRUMENT_EXECUTION_INTEGRITY_COPILOT_FEATURE_ID, LAB_MULTIMODAL_INSTRUMENT_EXECUTION_INTEGRITY_COPILOT_FEATURE_ID, LAB_THROUGHPUT_INSTRUMENT_EXECUTION_INTEGRITY_COPILOT_FEATURE_ID, LAB_FEDERATED_CONTINUAL_INSTRUMENT_EXECUTION_INTEGRITY_COPILOT_FEATURE_ID,
+ LAB_LOCAL_INSTRUMENT_EXECUTION_INTEGRITY_WORKFLOW_FEATURE_ID, LAB_MULTIMODAL_INSTRUMENT_EXECUTION_INTEGRITY_WORKFLOW_FEATURE_ID, LAB_THROUGHPUT_INSTRUMENT_EXECUTION_INTEGRITY_WORKFLOW_FEATURE_ID, LAB_FEDERATED_CONTINUAL_INSTRUMENT_EXECUTION_INTEGRITY_WORKFLOW_FEATURE_ID,
+ labInstrumentExecutionIntegrityDigest, labInstrumentExecutionIntegrityContractDigest, labInstrumentExecutionIntegrityCopilotDigest, labInstrumentExecutionIntegrityWorkflowDigest,
+ validateLabLocalInstrumentExecutionIntegrity, validateLabMultimodalInstrumentExecutionIntegrity, validateLabThroughputInstrumentExecutionIntegrity, validateLabFederatedContinualInstrumentExecutionIntegrity,
+} from "./lab-instrument-execution-integrity-contracts.js";
+export type { LabInstrumentExecutionIntegrityCard } from "./lab-instrument-execution-integrity-contracts.js";
+export {
+ METRICS_DISCOVERY_RATE_INTEGRITY_CONTENT_TYPE, METRICS_DISCOVERY_RATE_INTEGRITY_BOUNDARY,
+ METRICS_LOCAL_DISCOVERY_RATE_INTEGRITY_FEATURE_ID, METRICS_MULTIMODAL_DISCOVERY_RATE_INTEGRITY_FEATURE_ID, METRICS_THROUGHPUT_DISCOVERY_RATE_INTEGRITY_FEATURE_ID, METRICS_FEDERATED_CONTINUAL_DISCOVERY_RATE_INTEGRITY_FEATURE_ID,
+ METRICS_LOCAL_DISCOVERY_RATE_INTEGRITY_CONTRACT_FEATURE_ID, METRICS_MULTIMODAL_DISCOVERY_RATE_INTEGRITY_CONTRACT_FEATURE_ID, METRICS_THROUGHPUT_DISCOVERY_RATE_INTEGRITY_CONTRACT_FEATURE_ID, METRICS_FEDERATED_CONTINUAL_DISCOVERY_RATE_INTEGRITY_CONTRACT_FEATURE_ID,
+ METRICS_LOCAL_DISCOVERY_RATE_INTEGRITY_COPILOT_FEATURE_ID, METRICS_MULTIMODAL_DISCOVERY_RATE_INTEGRITY_COPILOT_FEATURE_ID, METRICS_THROUGHPUT_DISCOVERY_RATE_INTEGRITY_COPILOT_FEATURE_ID, METRICS_FEDERATED_CONTINUAL_DISCOVERY_RATE_INTEGRITY_COPILOT_FEATURE_ID,
+ METRICS_LOCAL_DISCOVERY_RATE_INTEGRITY_WORKFLOW_FEATURE_ID, METRICS_MULTIMODAL_DISCOVERY_RATE_INTEGRITY_WORKFLOW_FEATURE_ID, METRICS_THROUGHPUT_DISCOVERY_RATE_INTEGRITY_WORKFLOW_FEATURE_ID, METRICS_FEDERATED_CONTINUAL_DISCOVERY_RATE_INTEGRITY_WORKFLOW_FEATURE_ID,
+ metricsDiscoveryRateIntegrityDigest, metricsDiscoveryRateIntegrityContractDigest, metricsDiscoveryRateIntegrityCopilotDigest, metricsDiscoveryRateIntegrityWorkflowDigest,
+ validateMetricsLocalDiscoveryRateIntegrity, validateMetricsMultimodalDiscoveryRateIntegrity, validateMetricsThroughputDiscoveryRateIntegrity, validateMetricsFederatedContinualDiscoveryRateIntegrity,
+} from "./metrics-discovery-rate-integrity-contracts.js";
+export type { MetricsDiscoveryRateIntegrityCard } from "./metrics-discovery-rate-integrity-contracts.js";
+export {
+ BACKENDS_CAPABILITY_NEGOTIATION_INTEGRITY_CONTENT_TYPE, BACKENDS_CAPABILITY_NEGOTIATION_INTEGRITY_BOUNDARY,
+ BACKENDS_LOCAL_CAPABILITY_NEGOTIATION_INTEGRITY_FEATURE_ID, BACKENDS_MULTIMODAL_CAPABILITY_NEGOTIATION_INTEGRITY_FEATURE_ID, BACKENDS_THROUGHPUT_CAPABILITY_NEGOTIATION_INTEGRITY_FEATURE_ID, BACKENDS_FEDERATED_CONTINUAL_CAPABILITY_NEGOTIATION_INTEGRITY_FEATURE_ID,
+ BACKENDS_LOCAL_CAPABILITY_NEGOTIATION_INTEGRITY_CONTRACT_FEATURE_ID, BACKENDS_MULTIMODAL_CAPABILITY_NEGOTIATION_INTEGRITY_CONTRACT_FEATURE_ID, BACKENDS_THROUGHPUT_CAPABILITY_NEGOTIATION_INTEGRITY_CONTRACT_FEATURE_ID, BACKENDS_FEDERATED_CONTINUAL_CAPABILITY_NEGOTIATION_INTEGRITY_CONTRACT_FEATURE_ID,
+ BACKENDS_LOCAL_CAPABILITY_NEGOTIATION_INTEGRITY_COPILOT_FEATURE_ID, BACKENDS_MULTIMODAL_CAPABILITY_NEGOTIATION_INTEGRITY_COPILOT_FEATURE_ID, BACKENDS_THROUGHPUT_CAPABILITY_NEGOTIATION_INTEGRITY_COPILOT_FEATURE_ID, BACKENDS_FEDERATED_CONTINUAL_CAPABILITY_NEGOTIATION_INTEGRITY_COPILOT_FEATURE_ID,
+ BACKENDS_LOCAL_CAPABILITY_NEGOTIATION_INTEGRITY_WORKFLOW_FEATURE_ID, BACKENDS_MULTIMODAL_CAPABILITY_NEGOTIATION_INTEGRITY_WORKFLOW_FEATURE_ID, BACKENDS_THROUGHPUT_CAPABILITY_NEGOTIATION_INTEGRITY_WORKFLOW_FEATURE_ID, BACKENDS_FEDERATED_CONTINUAL_CAPABILITY_NEGOTIATION_INTEGRITY_WORKFLOW_FEATURE_ID,
+ backendsCapabilityNegotiationIntegrityDigest, backendsCapabilityNegotiationIntegrityContractDigest, backendsCapabilityNegotiationIntegrityCopilotDigest, backendsCapabilityNegotiationIntegrityWorkflowDigest,
+ validateBackendsLocalCapabilityNegotiationIntegrity, validateBackendsMultimodalCapabilityNegotiationIntegrity, validateBackendsThroughputCapabilityNegotiationIntegrity, validateBackendsFederatedContinualCapabilityNegotiationIntegrity,
+} from "./backends-capability-negotiation-integrity-contracts.js";
+export type { BackendsCapabilityNegotiationIntegrityCard } from "./backends-capability-negotiation-integrity-contracts.js";
+export {
+ BENCHCOMPILER_BENCHMARK_COMPILATION_INTEGRITY_CONTENT_TYPE, BENCHCOMPILER_BENCHMARK_COMPILATION_INTEGRITY_BOUNDARY,
+ BENCHCOMPILER_LOCAL_BENCHMARK_COMPILATION_INTEGRITY_FEATURE_ID, BENCHCOMPILER_MULTIMODAL_BENCHMARK_COMPILATION_INTEGRITY_FEATURE_ID, BENCHCOMPILER_THROUGHPUT_BENCHMARK_COMPILATION_INTEGRITY_FEATURE_ID, BENCHCOMPILER_FEDERATED_CONTINUAL_BENCHMARK_COMPILATION_INTEGRITY_FEATURE_ID,
+ BENCHCOMPILER_LOCAL_BENCHMARK_COMPILATION_INTEGRITY_CONTRACT_FEATURE_ID, BENCHCOMPILER_MULTIMODAL_BENCHMARK_COMPILATION_INTEGRITY_CONTRACT_FEATURE_ID, BENCHCOMPILER_THROUGHPUT_BENCHMARK_COMPILATION_INTEGRITY_CONTRACT_FEATURE_ID, BENCHCOMPILER_FEDERATED_CONTINUAL_BENCHMARK_COMPILATION_INTEGRITY_CONTRACT_FEATURE_ID,
+ BENCHCOMPILER_LOCAL_BENCHMARK_COMPILATION_INTEGRITY_COPILOT_FEATURE_ID, BENCHCOMPILER_MULTIMODAL_BENCHMARK_COMPILATION_INTEGRITY_COPILOT_FEATURE_ID, BENCHCOMPILER_THROUGHPUT_BENCHMARK_COMPILATION_INTEGRITY_COPILOT_FEATURE_ID, BENCHCOMPILER_FEDERATED_CONTINUAL_BENCHMARK_COMPILATION_INTEGRITY_COPILOT_FEATURE_ID,
+ BENCHCOMPILER_LOCAL_BENCHMARK_COMPILATION_INTEGRITY_WORKFLOW_FEATURE_ID, BENCHCOMPILER_MULTIMODAL_BENCHMARK_COMPILATION_INTEGRITY_WORKFLOW_FEATURE_ID, BENCHCOMPILER_THROUGHPUT_BENCHMARK_COMPILATION_INTEGRITY_WORKFLOW_FEATURE_ID, BENCHCOMPILER_FEDERATED_CONTINUAL_BENCHMARK_COMPILATION_INTEGRITY_WORKFLOW_FEATURE_ID,
+ benchcompilerBenchmarkCompilationIntegrityDigest, benchcompilerBenchmarkCompilationIntegrityContractDigest, benchcompilerBenchmarkCompilationIntegrityCopilotDigest, benchcompilerBenchmarkCompilationIntegrityWorkflowDigest,
+ validateBenchcompilerLocalBenchmarkCompilationIntegrity, validateBenchcompilerMultimodalBenchmarkCompilationIntegrity, validateBenchcompilerThroughputBenchmarkCompilationIntegrity, validateBenchcompilerFederatedContinualBenchmarkCompilationIntegrity,
+} from "./benchcompiler-benchmark-compilation-integrity-contracts.js";
+export type { BenchcompilerBenchmarkCompilationIntegrityCard } from "./benchcompiler-benchmark-compilation-integrity-contracts.js";
+export {
+ BUNDLE_RESEARCH_BUNDLE_INTEGRITY_CONTENT_TYPE, BUNDLE_RESEARCH_BUNDLE_INTEGRITY_BOUNDARY,
+ BUNDLE_LOCAL_RESEARCH_BUNDLE_INTEGRITY_FEATURE_ID, BUNDLE_MULTIMODAL_RESEARCH_BUNDLE_INTEGRITY_FEATURE_ID, BUNDLE_THROUGHPUT_RESEARCH_BUNDLE_INTEGRITY_FEATURE_ID, BUNDLE_FEDERATED_CONTINUAL_RESEARCH_BUNDLE_INTEGRITY_FEATURE_ID,
+ BUNDLE_LOCAL_RESEARCH_BUNDLE_INTEGRITY_CONTRACT_FEATURE_ID, BUNDLE_MULTIMODAL_RESEARCH_BUNDLE_INTEGRITY_CONTRACT_FEATURE_ID, BUNDLE_THROUGHPUT_RESEARCH_BUNDLE_INTEGRITY_CONTRACT_FEATURE_ID, BUNDLE_FEDERATED_CONTINUAL_RESEARCH_BUNDLE_INTEGRITY_CONTRACT_FEATURE_ID,
+ BUNDLE_LOCAL_RESEARCH_BUNDLE_INTEGRITY_COPILOT_FEATURE_ID, BUNDLE_MULTIMODAL_RESEARCH_BUNDLE_INTEGRITY_COPILOT_FEATURE_ID, BUNDLE_THROUGHPUT_RESEARCH_BUNDLE_INTEGRITY_COPILOT_FEATURE_ID, BUNDLE_FEDERATED_CONTINUAL_RESEARCH_BUNDLE_INTEGRITY_COPILOT_FEATURE_ID,
+ BUNDLE_LOCAL_RESEARCH_BUNDLE_INTEGRITY_WORKFLOW_FEATURE_ID, BUNDLE_MULTIMODAL_RESEARCH_BUNDLE_INTEGRITY_WORKFLOW_FEATURE_ID, BUNDLE_THROUGHPUT_RESEARCH_BUNDLE_INTEGRITY_WORKFLOW_FEATURE_ID, BUNDLE_FEDERATED_CONTINUAL_RESEARCH_BUNDLE_INTEGRITY_WORKFLOW_FEATURE_ID,
+ bundleResearchBundleIntegrityDigest, bundleResearchBundleIntegrityContractDigest, bundleResearchBundleIntegrityCopilotDigest, bundleResearchBundleIntegrityWorkflowDigest,
+ validateBundleLocalResearchBundleIntegrity, validateBundleMultimodalResearchBundleIntegrity, validateBundleThroughputResearchBundleIntegrity, validateBundleFederatedContinualResearchBundleIntegrity,
+} from "./bundle-research-bundle-integrity-contracts.js";
+export type { BundleResearchBundleIntegrityCard } from "./bundle-research-bundle-integrity-contracts.js";
+export {
+ CHOREOGRAPHY_PROTOCOL_EXECUTION_INTEGRITY_CONTENT_TYPE, CHOREOGRAPHY_PROTOCOL_EXECUTION_INTEGRITY_BOUNDARY,
+ CHOREOGRAPHY_LOCAL_PROTOCOL_EXECUTION_INTEGRITY_FEATURE_ID, CHOREOGRAPHY_MULTIMODAL_PROTOCOL_EXECUTION_INTEGRITY_FEATURE_ID, CHOREOGRAPHY_THROUGHPUT_PROTOCOL_EXECUTION_INTEGRITY_FEATURE_ID, CHOREOGRAPHY_FEDERATED_CONTINUAL_PROTOCOL_EXECUTION_INTEGRITY_FEATURE_ID,
+ CHOREOGRAPHY_LOCAL_PROTOCOL_EXECUTION_INTEGRITY_CONTRACT_FEATURE_ID, CHOREOGRAPHY_MULTIMODAL_PROTOCOL_EXECUTION_INTEGRITY_CONTRACT_FEATURE_ID, CHOREOGRAPHY_THROUGHPUT_PROTOCOL_EXECUTION_INTEGRITY_CONTRACT_FEATURE_ID, CHOREOGRAPHY_FEDERATED_CONTINUAL_PROTOCOL_EXECUTION_INTEGRITY_CONTRACT_FEATURE_ID,
+ CHOREOGRAPHY_LOCAL_PROTOCOL_EXECUTION_INTEGRITY_COPILOT_FEATURE_ID, CHOREOGRAPHY_MULTIMODAL_PROTOCOL_EXECUTION_INTEGRITY_COPILOT_FEATURE_ID, CHOREOGRAPHY_THROUGHPUT_PROTOCOL_EXECUTION_INTEGRITY_COPILOT_FEATURE_ID, CHOREOGRAPHY_FEDERATED_CONTINUAL_PROTOCOL_EXECUTION_INTEGRITY_COPILOT_FEATURE_ID,
+ CHOREOGRAPHY_LOCAL_PROTOCOL_EXECUTION_INTEGRITY_WORKFLOW_FEATURE_ID, CHOREOGRAPHY_MULTIMODAL_PROTOCOL_EXECUTION_INTEGRITY_WORKFLOW_FEATURE_ID, CHOREOGRAPHY_THROUGHPUT_PROTOCOL_EXECUTION_INTEGRITY_WORKFLOW_FEATURE_ID, CHOREOGRAPHY_FEDERATED_CONTINUAL_PROTOCOL_EXECUTION_INTEGRITY_WORKFLOW_FEATURE_ID,
+ choreographyProtocolExecutionIntegrityDigest, choreographyProtocolExecutionIntegrityContractDigest, choreographyProtocolExecutionIntegrityCopilotDigest, choreographyProtocolExecutionIntegrityWorkflowDigest,
+ validateChoreographyLocalProtocolExecutionIntegrity, validateChoreographyMultimodalProtocolExecutionIntegrity, validateChoreographyThroughputProtocolExecutionIntegrity, validateChoreographyFederatedContinualProtocolExecutionIntegrity,
+} from "./choreography-protocol-execution-integrity-contracts.js";
+export type { ChoreographyProtocolExecutionIntegrityCard } from "./choreography-protocol-execution-integrity-contracts.js";
+export {
+ HUB_SUBMISSION_RELEASE_INTEGRITY_CONTENT_TYPE, HUB_SUBMISSION_RELEASE_INTEGRITY_BOUNDARY,
+ HUB_LOCAL_SUBMISSION_RELEASE_INTEGRITY_FEATURE_ID, HUB_MULTIMODAL_SUBMISSION_RELEASE_INTEGRITY_FEATURE_ID, HUB_THROUGHPUT_SUBMISSION_RELEASE_INTEGRITY_FEATURE_ID, HUB_FEDERATED_CONTINUAL_SUBMISSION_RELEASE_INTEGRITY_FEATURE_ID,
+ HUB_LOCAL_SUBMISSION_RELEASE_INTEGRITY_CONTRACT_FEATURE_ID, HUB_MULTIMODAL_SUBMISSION_RELEASE_INTEGRITY_CONTRACT_FEATURE_ID, HUB_THROUGHPUT_SUBMISSION_RELEASE_INTEGRITY_CONTRACT_FEATURE_ID, HUB_FEDERATED_CONTINUAL_SUBMISSION_RELEASE_INTEGRITY_CONTRACT_FEATURE_ID,
+ HUB_LOCAL_SUBMISSION_RELEASE_INTEGRITY_COPILOT_FEATURE_ID, HUB_MULTIMODAL_SUBMISSION_RELEASE_INTEGRITY_COPILOT_FEATURE_ID, HUB_THROUGHPUT_SUBMISSION_RELEASE_INTEGRITY_COPILOT_FEATURE_ID, HUB_FEDERATED_CONTINUAL_SUBMISSION_RELEASE_INTEGRITY_COPILOT_FEATURE_ID,
+ HUB_LOCAL_SUBMISSION_RELEASE_INTEGRITY_WORKFLOW_FEATURE_ID, HUB_MULTIMODAL_SUBMISSION_RELEASE_INTEGRITY_WORKFLOW_FEATURE_ID, HUB_THROUGHPUT_SUBMISSION_RELEASE_INTEGRITY_WORKFLOW_FEATURE_ID, HUB_FEDERATED_CONTINUAL_SUBMISSION_RELEASE_INTEGRITY_WORKFLOW_FEATURE_ID,
+ hubSubmissionReleaseIntegrityDigest, hubSubmissionReleaseIntegrityContractDigest, hubSubmissionReleaseIntegrityCopilotDigest, hubSubmissionReleaseIntegrityWorkflowDigest,
+ validateHubLocalSubmissionReleaseIntegrity, validateHubMultimodalSubmissionReleaseIntegrity, validateHubThroughputSubmissionReleaseIntegrity, validateHubFederatedContinualSubmissionReleaseIntegrity,
+} from "./hub-submission-release-integrity-contracts.js";
+export type { HubSubmissionReleaseIntegrityCard } from "./hub-submission-release-integrity-contracts.js";
+export {
+ WEAVE_CAPABILITY_MANIFEST_INTEGRITY_CONTENT_TYPE, WEAVE_CAPABILITY_MANIFEST_INTEGRITY_BOUNDARY,
+ WEAVE_LOCAL_CAPABILITY_MANIFEST_INTEGRITY_FEATURE_ID, WEAVE_MULTIMODAL_CAPABILITY_MANIFEST_INTEGRITY_FEATURE_ID, WEAVE_THROUGHPUT_CAPABILITY_MANIFEST_INTEGRITY_FEATURE_ID, WEAVE_FEDERATED_CONTINUAL_CAPABILITY_MANIFEST_INTEGRITY_FEATURE_ID,
+ WEAVE_LOCAL_CAPABILITY_MANIFEST_INTEGRITY_CONTRACT_FEATURE_ID, WEAVE_MULTIMODAL_CAPABILITY_MANIFEST_INTEGRITY_CONTRACT_FEATURE_ID, WEAVE_THROUGHPUT_CAPABILITY_MANIFEST_INTEGRITY_CONTRACT_FEATURE_ID, WEAVE_FEDERATED_CONTINUAL_CAPABILITY_MANIFEST_INTEGRITY_CONTRACT_FEATURE_ID,
+ WEAVE_LOCAL_CAPABILITY_MANIFEST_INTEGRITY_COPILOT_FEATURE_ID, WEAVE_MULTIMODAL_CAPABILITY_MANIFEST_INTEGRITY_COPILOT_FEATURE_ID, WEAVE_THROUGHPUT_CAPABILITY_MANIFEST_INTEGRITY_COPILOT_FEATURE_ID, WEAVE_FEDERATED_CONTINUAL_CAPABILITY_MANIFEST_INTEGRITY_COPILOT_FEATURE_ID,
+ WEAVE_LOCAL_CAPABILITY_MANIFEST_INTEGRITY_WORKFLOW_FEATURE_ID, WEAVE_MULTIMODAL_CAPABILITY_MANIFEST_INTEGRITY_WORKFLOW_FEATURE_ID, WEAVE_THROUGHPUT_CAPABILITY_MANIFEST_INTEGRITY_WORKFLOW_FEATURE_ID, WEAVE_FEDERATED_CONTINUAL_CAPABILITY_MANIFEST_INTEGRITY_WORKFLOW_FEATURE_ID,
+ weaveCapabilityManifestIntegrityDigest, weaveCapabilityManifestIntegrityContractDigest, weaveCapabilityManifestIntegrityCopilotDigest, weaveCapabilityManifestIntegrityWorkflowDigest,
+ validateWeaveLocalCapabilityManifestIntegrity, validateWeaveMultimodalCapabilityManifestIntegrity, validateWeaveThroughputCapabilityManifestIntegrity, validateWeaveFederatedContinualCapabilityManifestIntegrity,
+ } from "./weave-capability-manifest-integrity-contracts.js";
+export type { WeaveCapabilityManifestIntegrityCard } from "./weave-capability-manifest-integrity-contracts.js";
+export {
+ MEGAFACTORY_FACTORY_LINEAGE_INTEGRITY_CONTENT_TYPE, MEGAFACTORY_FACTORY_LINEAGE_INTEGRITY_BOUNDARY,
+ MEGAFACTORY_LOCAL_FACTORY_LINEAGE_INTEGRITY_FEATURE_ID, MEGAFACTORY_MULTIMODAL_FACTORY_LINEAGE_INTEGRITY_FEATURE_ID, MEGAFACTORY_THROUGHPUT_FACTORY_LINEAGE_INTEGRITY_FEATURE_ID, MEGAFACTORY_FEDERATED_CONTINUAL_FACTORY_LINEAGE_INTEGRITY_FEATURE_ID,
+ MEGAFACTORY_LOCAL_FACTORY_LINEAGE_INTEGRITY_CONTRACT_FEATURE_ID, MEGAFACTORY_MULTIMODAL_FACTORY_LINEAGE_INTEGRITY_CONTRACT_FEATURE_ID, MEGAFACTORY_THROUGHPUT_FACTORY_LINEAGE_INTEGRITY_CONTRACT_FEATURE_ID, MEGAFACTORY_FEDERATED_CONTINUAL_FACTORY_LINEAGE_INTEGRITY_CONTRACT_FEATURE_ID,
+ MEGAFACTORY_LOCAL_FACTORY_LINEAGE_INTEGRITY_COPILOT_FEATURE_ID, MEGAFACTORY_MULTIMODAL_FACTORY_LINEAGE_INTEGRITY_COPILOT_FEATURE_ID, MEGAFACTORY_THROUGHPUT_FACTORY_LINEAGE_INTEGRITY_COPILOT_FEATURE_ID, MEGAFACTORY_FEDERATED_CONTINUAL_FACTORY_LINEAGE_INTEGRITY_COPILOT_FEATURE_ID,
+ MEGAFACTORY_LOCAL_FACTORY_LINEAGE_INTEGRITY_WORKFLOW_FEATURE_ID, MEGAFACTORY_MULTIMODAL_FACTORY_LINEAGE_INTEGRITY_WORKFLOW_FEATURE_ID, MEGAFACTORY_THROUGHPUT_FACTORY_LINEAGE_INTEGRITY_WORKFLOW_FEATURE_ID, MEGAFACTORY_FEDERATED_CONTINUAL_FACTORY_LINEAGE_INTEGRITY_WORKFLOW_FEATURE_ID,
+ megafactoryFactoryLineageIntegrityDigest, megafactoryFactoryLineageIntegrityContractDigest, megafactoryFactoryLineageIntegrityCopilotDigest, megafactoryFactoryLineageIntegrityWorkflowDigest,
+ validateMegafactoryLocalFactoryLineageIntegrity, validateMegafactoryMultimodalFactoryLineageIntegrity, validateMegafactoryThroughputFactoryLineageIntegrity, validateMegafactoryFederatedContinualFactoryLineageIntegrity,
+} from "./megafactory-factory-lineage-integrity-contracts.js";
+export type { MegafactoryFactoryLineageIntegrityCard } from "./megafactory-factory-lineage-integrity-contracts.js";
+export {
+ DOCGRAPH_DOCUMENT_GRAPH_INTEGRITY_CONTENT_TYPE, DOCGRAPH_DOCUMENT_GRAPH_INTEGRITY_BOUNDARY,
+ DOCGRAPH_LOCAL_DOCUMENT_GRAPH_INTEGRITY_FEATURE_ID, DOCGRAPH_MULTIMODAL_DOCUMENT_GRAPH_INTEGRITY_FEATURE_ID, DOCGRAPH_THROUGHPUT_DOCUMENT_GRAPH_INTEGRITY_FEATURE_ID, DOCGRAPH_FEDERATED_CONTINUAL_DOCUMENT_GRAPH_INTEGRITY_FEATURE_ID,
+ DOCGRAPH_LOCAL_DOCUMENT_GRAPH_INTEGRITY_CONTRACT_FEATURE_ID, DOCGRAPH_MULTIMODAL_DOCUMENT_GRAPH_INTEGRITY_CONTRACT_FEATURE_ID, DOCGRAPH_THROUGHPUT_DOCUMENT_GRAPH_INTEGRITY_CONTRACT_FEATURE_ID, DOCGRAPH_FEDERATED_CONTINUAL_DOCUMENT_GRAPH_INTEGRITY_CONTRACT_FEATURE_ID,
+ DOCGRAPH_LOCAL_DOCUMENT_GRAPH_INTEGRITY_COPILOT_FEATURE_ID, DOCGRAPH_MULTIMODAL_DOCUMENT_GRAPH_INTEGRITY_COPILOT_FEATURE_ID, DOCGRAPH_THROUGHPUT_DOCUMENT_GRAPH_INTEGRITY_COPILOT_FEATURE_ID, DOCGRAPH_FEDERATED_CONTINUAL_DOCUMENT_GRAPH_INTEGRITY_COPILOT_FEATURE_ID,
+ DOCGRAPH_LOCAL_DOCUMENT_GRAPH_INTEGRITY_WORKFLOW_FEATURE_ID, DOCGRAPH_MULTIMODAL_DOCUMENT_GRAPH_INTEGRITY_WORKFLOW_FEATURE_ID, DOCGRAPH_THROUGHPUT_DOCUMENT_GRAPH_INTEGRITY_WORKFLOW_FEATURE_ID, DOCGRAPH_FEDERATED_CONTINUAL_DOCUMENT_GRAPH_INTEGRITY_WORKFLOW_FEATURE_ID,
+ docgraphDocumentGraphIntegrityDigest, docgraphDocumentGraphIntegrityContractDigest, docgraphDocumentGraphIntegrityCopilotDigest, docgraphDocumentGraphIntegrityWorkflowDigest,
+ validateDocgraphLocalDocumentGraphIntegrity, validateDocgraphMultimodalDocumentGraphIntegrity, validateDocgraphThroughputDocumentGraphIntegrity, validateDocgraphFederatedContinualDocumentGraphIntegrity,
+} from "./docgraph-document-graph-integrity-contracts.js";
+export type { DocgraphDocumentGraphIntegrityCard } from "./docgraph-document-graph-integrity-contracts.js";
 export type {
   AutonomousMemoryConsolidatedLesson,
   AutonomousMemoryConsolidationDomainProjection,

@@ -9,6 +9,7 @@ description = "Operational contracts of blueprint §40: configuration and featur
 
 [dependencies]
 bioprism-ids = { workspace = true }
+bioprism-foundation = { workspace = true }
 bioprism-scope = { workspace = true }
 bioprism-infra = { workspace = true }
 bioprism-safety = { workspace = true }

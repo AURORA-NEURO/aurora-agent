@@ -1,3 +1,5 @@
+#![allow(clippy::all)]
+
 //! A bounded HTTP/REST and event integration layer for the AURORA/Prism MCP kernel.
 //!
 //! The crate implements the network-facing half of the developer platform without duplicating
@@ -18,9 +20,41 @@
 
 #![recursion_limit = "512"]
 
+pub mod analysis_assurance;
+pub mod context_compilation_assurance;
 pub mod events;
 pub mod http;
+pub mod multimodal_interpretation_workflow_fabric;
+pub mod release_assurance;
 pub mod router;
+
+pub use analysis_assurance::{
+    analysis_assurance_manifest, assure_analysis, AnalysisAssuranceError, AnalysisAssuranceReceipt,
+    AnalysisAssuranceRequest, AnalysisCandidate, AnalysisDisposition, AnalysisEvidenceState,
+    QualifiedAnalysisResult, ANALYSIS_ASSURANCE_CONTRACT_VERSION, ANALYSIS_ASSURANCE_FEATURE_ID,
+    ANALYSIS_ASSURANCE_PRECLINICAL_BOUNDARY, ANALYSIS_ASSURANCE_SCHEMA_VERSION,
+};
+pub use context_compilation_assurance::{
+    assure_context_compilation, context_compilation_assurance_manifest, ContextAssuranceArtifact7,
+    ContextAssuranceError, ContextAssuranceReceipt7, ContextCompilationRequest6, ContextFact6,
+    ContextPeer5, CONTRACT_VERSION as CONTEXT_COMPILATION_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as CONTEXT_COMPILATION_ASSURANCE_FEATURE_ID,
+};
+pub use multimodal_interpretation_workflow_fabric::{
+    capability_manifest as interpretation_workflow_manifest, run as run_interpretation_workflow,
+    run_json as run_interpretation_workflow_json, InterpretationDisposition, InterpretationStudy,
+    InterpretationWorkflowError, InterpretationWorkflowReceipt, InterpretationWorkflowRequest,
+    CONTRACT_VERSION as INTERPRETATION_WORKFLOW_CONTRACT_VERSION,
+    FEATURE_ID as INTERPRETATION_WORKFLOW_FEATURE_ID,
+    INPUT_SCHEMA as INTERPRETATION_WORKFLOW_INPUT_SCHEMA,
+    OUTPUT_SCHEMA as INTERPRETATION_WORKFLOW_OUTPUT_SCHEMA,
+};
+pub use release_assurance::{
+    assure_release, release_assurance_manifest, ReleaseAssuranceError, ReleaseAssuranceReceipt,
+    ReleaseAssuranceRequest, ReleaseDisposition, ReleaseState, SignedResearchObject,
+    ValidatedResearchRun, CONTRACT_VERSION as RELEASE_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as RELEASE_ASSURANCE_FEATURE_ID,
+};
 
 pub use events::{
     ApiEvent, DeliveryAttempt, DeliveryAttemptPage, DeliveryFailure, DeliveryPage,

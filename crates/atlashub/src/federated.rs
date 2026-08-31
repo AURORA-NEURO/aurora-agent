@@ -138,9 +138,7 @@ pub enum DataOrigin {
     /// 34.17's bring-your-own-data case. The world card digest is recorded when the site has one;
     /// `None` is the honest common case and produces an extra unchecked aspect either way, because
     /// a digest the coordinator cannot resolve is not a verification.
-    BringYourOwn {
-        world_card: Option<ContentHash>,
-    },
+    BringYourOwn { world_card: Option<ContentHash> },
 }
 
 /// A site admitted to a federated run.
@@ -345,6 +343,44 @@ impl TryFrom<FederatedResultShadow> for FederatedResult {
         if shadow.contributing.is_empty() {
             return Err(FederatedError::NoSites);
         }
+        if shadow.pack_digest.trim().is_empty() {
+            return Err(FederatedError::InvalidSiteResult {
+                site: "federated-result".into(),
+                reason: "pack digest must be non-empty".into(),
+            });
+        }
+        if shadow
+            .contributing
+            .windows(2)
+            .any(|pair| pair[0].participation.site() >= pair[1].participation.site())
+        {
+            return Err(FederatedError::InvalidSiteResult {
+                site: "federated-result".into(),
+                reason: "contributing sites must be strictly sorted and unique".into(),
+            });
+        }
+        let mut required_unchecked = BTreeSet::from([
+            Unchecked::CohortOverlapAcrossSites,
+            Unchecked::InputDistributionShift,
+        ]);
+        for site in &shadow.contributing {
+            validate_site_result(site)?;
+            if site.participation.pack_digest() != shadow.pack_digest {
+                return Err(FederatedError::NotComparable {
+                    site: site.participation.site().to_string(),
+                    ours: shadow.pack_digest.clone(),
+                    theirs: site.participation.pack_digest().to_string(),
+                });
+            }
+            required_unchecked.extend(site.unchecked().iter().cloned());
+        }
+        if !shadow.unchecked.is_superset(&required_unchecked) {
+            return Err(FederatedError::InvalidSiteResult {
+                site: "federated-result".into(),
+                reason: "result unchecked set does not preserve site and pooling disclosures"
+                    .into(),
+            });
+        }
         Ok(FederatedResult {
             evaluation: shadow.evaluation,
             pack_digest: shadow.pack_digest,
@@ -395,7 +431,11 @@ impl FederatedResult {
     /// [`Unchecked::InputDistributionShift`], added by [`pool`] on every result — and it does not
     /// estimate between-site variance, produce an interval, or apply a random-effects model.
     pub fn weighted_mean(&self) -> Result<f64, FederatedError> {
-        if let Some(site) = self.contributing.iter().find(|s| s.reported.is_suppressed()) {
+        if let Some(site) = self
+            .contributing
+            .iter()
+            .find(|s| s.reported.is_suppressed())
+        {
             return Err(FederatedError::SuppressedCellCannotPool {
                 site: site.participation.site().to_string(),
             });
@@ -406,13 +446,48 @@ impl FederatedResult {
             let (Some(n), Some(v)) = (site.reported.n(), site.reported.value()) else {
                 continue;
             };
-            total_n = total_n.saturating_add(n);
-            total += v * n as f64;
+            if n == 0 || !v.is_finite() {
+                return Err(FederatedError::InvalidAggregate {
+                    site: site.participation.site().to_string(),
+                    reason: if n == 0 {
+                        "sample count must be positive".into()
+                    } else {
+                        "value must be finite".into()
+                    },
+                });
+            }
+            total_n =
+                total_n
+                    .checked_add(n)
+                    .ok_or_else(|| FederatedError::SampleCountOverflow {
+                        site: site.participation.site().to_string(),
+                    })?;
+            let contribution = v * n as f64;
+            if !contribution.is_finite() {
+                return Err(FederatedError::InvalidAggregate {
+                    site: site.participation.site().to_string(),
+                    reason: "weighted contribution is not finite".into(),
+                });
+            }
+            total += contribution;
+            if !total.is_finite() {
+                return Err(FederatedError::InvalidAggregate {
+                    site: site.participation.site().to_string(),
+                    reason: "pooled weighted total is not finite".into(),
+                });
+            }
         }
         if total_n == 0 {
             return Err(FederatedError::NoSites);
         }
-        Ok(total / total_n as f64)
+        let mean = total / total_n as f64;
+        if !mean.is_finite() {
+            return Err(FederatedError::InvalidAggregate {
+                site: "pooled-result".into(),
+                reason: "weighted mean is not finite".into(),
+            });
+        }
+        Ok(mean)
     }
 }
 
@@ -424,6 +499,10 @@ impl FederatedResult {
 pub fn pool(results: &[SiteResult]) -> Result<FederatedResult, FederatedError> {
     if results.is_empty() {
         return Err(FederatedError::NoSites);
+    }
+
+    for result in results {
+        validate_site_result(result)?;
     }
 
     let mut ordered: Vec<&SiteResult> = results.iter().collect();
@@ -462,6 +541,48 @@ pub fn pool(results: &[SiteResult]) -> Result<FederatedResult, FederatedError> {
         contributing: ordered.into_iter().cloned().collect(),
         unchecked,
     })
+}
+
+fn validate_site_result(result: &SiteResult) -> Result<(), FederatedError> {
+    let site = result.participation.site().to_string();
+    if result.participation.pack_digest().trim().is_empty() {
+        return Err(FederatedError::InvalidSiteResult {
+            site,
+            reason: "pack digest must be non-empty".into(),
+        });
+    }
+    if !result.unchecked.contains(&Unchecked::RecordLevelAudit) {
+        return Err(FederatedError::InvalidSiteResult {
+            site,
+            reason: "record-level audit disclosure is mandatory".into(),
+        });
+    }
+    if matches!(&result.origin, DataOrigin::BringYourOwn { .. })
+        && !result.unchecked.contains(&Unchecked::ProvenanceOfLocalData)
+    {
+        return Err(FederatedError::InvalidSiteResult {
+            site,
+            reason: "bring-your-own-data requires provenance disclosure".into(),
+        });
+    }
+    match &result.reported {
+        Reported::Value { n, .. } if *n == 0 => Err(FederatedError::InvalidSiteResult {
+            site,
+            reason: "reported sample count must be positive".into(),
+        }),
+        Reported::Value { value, .. } if !value.is_finite() => {
+            Err(FederatedError::InvalidSiteResult {
+                site,
+                reason: "reported value must be finite".into(),
+            })
+        }
+        Reported::Value { .. } => Ok(()),
+        Reported::Suppressed { below } if *below == 0 => Err(FederatedError::InvalidSiteResult {
+            site,
+            reason: "suppression threshold must be positive".into(),
+        }),
+        Reported::Suppressed { .. } => Ok(()),
+    }
 }
 
 #[cfg(test)]
@@ -630,15 +751,21 @@ mod tests {
 
     #[test]
     fn sites_that_ran_different_pack_digests_are_not_comparable() {
-        let err = pool(&[result_at("a", "d1", 100, 0.8), result_at("b", "d2", 100, 0.7)])
-            .unwrap_err();
+        let err = pool(&[
+            result_at("a", "d1", 100, 0.8),
+            result_at("b", "d2", 100, 0.7),
+        ])
+        .unwrap_err();
         assert!(matches!(err, FederatedError::NotComparable { .. }));
     }
 
     #[test]
     fn the_same_site_may_not_contribute_twice() {
-        let err = pool(&[result_at("a", "d1", 100, 0.8), result_at("a", "d1", 90, 0.7)])
-            .unwrap_err();
+        let err = pool(&[
+            result_at("a", "d1", 100, 0.8),
+            result_at("a", "d1", 90, 0.7),
+        ])
+        .unwrap_err();
         assert_eq!(
             err,
             FederatedError::DuplicateSite {
@@ -672,6 +799,22 @@ mod tests {
     }
 
     #[test]
+    fn weighted_mean_rejects_sample_count_overflow_and_non_finite_values() {
+        let pooled = pool(&[
+            result_at("a", "d1", u64::MAX, 0.8),
+            result_at("b", "d1", 10, 0.6),
+        ])
+        .unwrap();
+        assert!(matches!(
+            pooled.weighted_mean(),
+            Err(FederatedError::SampleCountOverflow { .. })
+        ));
+
+        let pooled = pool(&[result_at("a", "d1", 100, f64::NAN)]).unwrap_err();
+        assert!(matches!(pooled, FederatedError::InvalidSiteResult { .. }));
+    }
+
+    #[test]
     fn a_pooled_result_is_still_federated_however_many_sites_contributed() {
         let pooled = pool(&[
             result_at("a", "d1", 100, 0.8),
@@ -700,5 +843,14 @@ mod tests {
         let back: FederatedResult = serde_json::from_str(&json).unwrap();
         assert_eq!(back.unchecked(), pooled.unchecked());
         assert_eq!(back, pooled);
+    }
+
+    #[test]
+    fn a_received_result_cannot_remove_mandatory_site_disclosures() {
+        let pooled = pool(&[result_at("a", "d1", 100, 0.8)]).unwrap();
+        let mut value = serde_json::to_value(&pooled).unwrap();
+        value["contributing"][0]["unchecked"] = serde_json::json!([]);
+        let error = serde_json::from_value::<FederatedResult>(value).unwrap_err();
+        assert!(error.to_string().contains("record-level audit disclosure"));
     }
 }

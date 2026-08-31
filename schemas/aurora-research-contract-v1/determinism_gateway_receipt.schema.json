@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aurora-neuro.org/schemas/aurora-research-contract-v1/determinism_gateway_receipt.schema.json",
+  "title": "AURORA typed determinism gateway receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "contract_version", "feature_id", "capability_id", "endpoint_id", "negotiated_version", "verdict", "canonical_field_order", "canonical_input_digest", "omissions", "uncertainty", "semantic_loss", "reasons", "effect_receipt", "artifact", "raw_data_local", "boundary"],
+  "properties": {
+    "schema_version": {"const": "aurora-research-contract/1.0"},
+    "contract_version": {"const": "typed-determinism-gateway/1.0"},
+    "feature_id": {"const": "AFA-adapter-P17-F24"},
+    "capability_id": {"type": "string", "minLength": 1},
+    "endpoint_id": {"type": "string", "minLength": 1},
+    "negotiated_version": {"type": "string", "minLength": 1},
+    "verdict": {"enum": ["accepted", "migrated", "approval_required", "incompatible", "blocked"]},
+    "canonical_field_order": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+    "canonical_input_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "omissions": {"type": "array", "items": {"type": "string"}},
+    "uncertainty": {"type": "array", "items": {"type": "string"}},
+    "semantic_loss": {"type": "array", "items": {"type": "object"}},
+    "reasons": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+    "effect_receipt": {"type": "string", "minLength": 1},
+    "artifact": {"type": "object", "required": ["content_hash"], "properties": {"content_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}, "additionalProperties": true},
+    "raw_data_local": {"const": true},
+    "boundary": {"const": "preclinical_research_only"}
+  }
+}

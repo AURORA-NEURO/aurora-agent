@@ -3,11 +3,18 @@
 mod common;
 
 use bioprism_bioeval::{
-    BiologicalErrorClass, ClassifiedError, Conclusion, CorrectnessLayer, Dispersion, LayerVerdict,
-    LayeredOutcome, Prediction, Severity,
+    BiologicalErrorClass, ClassifiedError, Conclusion, CorrectnessLayer, Dispersion, LayerError,
+    LayerVerdict, LayeredOutcome, Prediction, Severity,
 };
 use bioprism_section::OracleStatus;
 use common::{progression_reference, score, PROGRESSION};
+
+fn assess(
+    conclusion: Conclusion,
+    observations: impl IntoIterator<Item = (CorrectnessLayer, LayerVerdict)>,
+) -> LayeredOutcome {
+    LayeredOutcome::assess(conclusion, observations).expect("valid layer observations")
+}
 
 fn wrong_conclusion() -> Conclusion {
     Conclusion::Wrong {
@@ -53,7 +60,7 @@ fn a_benign_class_can_still_be_safety_reaching() {
 
 #[test]
 fn two_runs_with_the_same_wrong_conclusion_are_distinguishable_by_first_failed_layer() {
-    let swapped_tube = LayeredOutcome::assess(
+    let swapped_tube = assess(
         wrong_conclusion(),
         [(
             CorrectnessLayer::SpecimenIdentity,
@@ -65,7 +72,7 @@ fn two_runs_with_the_same_wrong_conclusion_are_distinguishable_by_first_failed_l
             )),
         )],
     );
-    let bad_reasoning = LayeredOutcome::assess(
+    let bad_reasoning = assess(
         wrong_conclusion(),
         [
             (CorrectnessLayer::SpecimenIdentity, LayerVerdict::Correct),
@@ -95,7 +102,7 @@ fn two_runs_with_the_same_wrong_conclusion_are_distinguishable_by_first_failed_l
 
 #[test]
 fn the_regression_family_groups_by_defect_rather_than_by_conclusion() {
-    let outcome = LayeredOutcome::assess(
+    let outcome = assess(
         wrong_conclusion(),
         [(
             CorrectnessLayer::SpecimenIdentity,
@@ -116,7 +123,7 @@ fn the_regression_family_groups_by_defect_rather_than_by_conclusion() {
 
 #[test]
 fn a_layer_downstream_of_a_critical_failure_is_void_rather_than_correct() {
-    let outcome = LayeredOutcome::assess(
+    let outcome = assess(
         wrong_conclusion(),
         [
             (
@@ -144,7 +151,7 @@ fn a_layer_downstream_of_a_critical_failure_is_void_rather_than_correct() {
 
 #[test]
 fn a_material_failure_leaves_downstream_layers_standing() {
-    let outcome = LayeredOutcome::assess(
+    let outcome = assess(
         wrong_conclusion(),
         [
             (
@@ -171,7 +178,7 @@ fn a_material_failure_leaves_downstream_layers_standing() {
 
 #[test]
 fn an_unassessed_layer_is_not_a_passing_layer() {
-    let outcome = LayeredOutcome::assess(
+    let outcome = assess(
         Conclusion::Held {
             statement: "no progression".to_string(),
         },
@@ -186,8 +193,78 @@ fn an_unassessed_layer_is_not_a_passing_layer() {
 }
 
 #[test]
+fn duplicate_layer_observations_are_refused_instead_of_last_write_wins() {
+    let refusal = LayeredOutcome::assess(
+        wrong_conclusion(),
+        [
+            (CorrectnessLayer::EntityIdentifier, LayerVerdict::Correct),
+            (
+                CorrectnessLayer::EntityIdentifier,
+                LayerVerdict::NotAssessed,
+            ),
+        ],
+    )
+    .expect_err("one layer must have one recorded observation");
+
+    assert!(matches!(
+        refusal,
+        LayerError::DuplicateObservation {
+            layer: CorrectnessLayer::EntityIdentifier
+        }
+    ));
+}
+
+#[test]
+fn caller_supplied_void_verdicts_are_refused_before_propagation() {
+    let refusal = LayeredOutcome::assess(
+        wrong_conclusion(),
+        [(
+            CorrectnessLayer::StatisticalEstimand,
+            LayerVerdict::Void {
+                blocked_by: CorrectnessLayer::SpecimenIdentity,
+            },
+        )],
+    )
+    .expect_err("void is a derived state, not an observation");
+
+    assert!(matches!(refusal, LayerError::InvalidVerdict { .. }));
+}
+
+#[test]
+fn a_classified_error_must_name_the_layer_where_it_was_observed() {
+    let refusal = LayeredOutcome::assess(
+        wrong_conclusion(),
+        [(
+            CorrectnessLayer::SpecimenIdentity,
+            LayerVerdict::Failed(ClassifiedError::new(
+                CorrectnessLayer::MechanisticScope,
+                BiologicalErrorClass::SpecimenIdentity,
+                "block B-114",
+                "block B-141",
+            )),
+        )],
+    )
+    .expect_err("a failure cannot be attributed to a different layer");
+
+    assert!(matches!(refusal, LayerError::InvalidVerdict { .. }));
+}
+
+#[test]
+fn unbounded_conclusion_text_is_refused_before_an_outcome_is_built() {
+    let refusal = LayeredOutcome::assess(
+        Conclusion::Held {
+            statement: "\nnot a bounded statement".to_string(),
+        },
+        [],
+    )
+    .expect_err("untrusted conclusion text must not enter a persisted outcome");
+
+    assert!(matches!(refusal, LayerError::InvalidConclusion { .. }));
+}
+
+#[test]
 fn an_abstention_conclusion_is_not_recorded_as_a_wrong_one() {
-    let outcome = LayeredOutcome::assess(
+    let outcome = assess(
         Conclusion::Withheld {
             reason: "insufficient tissue".to_string(),
         },

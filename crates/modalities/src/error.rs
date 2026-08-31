@@ -45,7 +45,9 @@ pub enum Unsupported {
     ///
     /// Not the same failure as [`Unsupported::MissingResolution`], and it is not more permissive
     /// either — the fix is upstream, in the descriptor, rather than in the choice of assay.
-    #[error("{modality} has not declared whether it resolves {axis}; a {claim} claim needs it stated")]
+    #[error(
+        "{modality} has not declared whether it resolves {axis}; a {claim} claim needs it stated"
+    )]
     UndeclaredResolution {
         modality: Modality,
         claim: ClaimKind,
@@ -79,7 +81,10 @@ pub enum Unsupported {
 
     /// The claim needs an intervention and the modality is observational.
     #[error("a {claim} claim requires an interventional design; {modality} is observational")]
-    ObservationalOnly { modality: Modality, claim: ClaimKind },
+    ObservationalOnly {
+        modality: Modality,
+        claim: ClaimKind,
+    },
 
     /// The modality carries both designs and this dataset did not say which.
     ///
@@ -87,7 +92,10 @@ pub enum Unsupported {
     /// the design is a property of the record, not of the modality. The blueprint supplies no rule
     /// for guessing, so the requirement goes back to the caller.
     #[error("{modality} carries both interventional and observational records; declare the design of this dataset before making a {claim} claim")]
-    DesignNotDeclared { modality: Modality, claim: ClaimKind },
+    DesignNotDeclared {
+        modality: Modality,
+        claim: ClaimKind,
+    },
 
     /// Values were counted at one axis and treated as independent replicates at another.
     ///
@@ -255,6 +263,10 @@ pub enum CrossModalIncomparability {
     #[error("{side} reports at {axis} but declares that it does not resolve it")]
     UnreportableAxis { side: Modality, axis: Resolution },
 
+    /// The comparability layers disagreed about the same pair, so the result cannot be admitted.
+    #[error("comparability layers reached an inconsistent state: {detail}")]
+    InvariantViolation { detail: String },
+
     /// The standards layer blocked it first.
     #[error(transparent)]
     Standards(#[from] Incomparability),
@@ -275,6 +287,7 @@ impl CrossModalIncomparability {
             | CrossModalIncomparability::ImputedAgainstMeasured { .. }
             | CrossModalIncomparability::UndeclaredAxis { .. }
             | CrossModalIncomparability::UnreportableAxis { .. } => ScopeClass::Specimen,
+            CrossModalIncomparability::InvariantViolation { .. } => ScopeClass::Unclassified,
             CrossModalIncomparability::Standards(inner) => inner.blocking_class(),
         }
     }

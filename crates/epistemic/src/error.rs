@@ -33,6 +33,9 @@ pub enum EpistemicError {
         models: usize,
     },
 
+    #[error("a decision problem with {actions} actions and {models} models cannot represent its loss matrix on this platform")]
+    DecisionProblemSizeOverflow { actions: usize, models: usize },
+
     #[error("loss entry for action {action} under model {model} is {value}, which is not a finite real; a decision loss that is NaN or infinite has no minimiser")]
     NonFiniteLoss {
         action: usize,
@@ -48,6 +51,9 @@ pub enum EpistemicError {
 
     #[error("the belief has total mass {mass}; it cannot be normalised, and a belief of total mass zero is not the uniform belief")]
     DegenerateBelief { mass: f64 },
+
+    #[error("serialized belief masses sum to {total}, not 1; a belief must be normalized before it can be replayed")]
+    InvalidBeliefNormalization { total: f64 },
 
     #[error("likelihood {value} for model {model} of evidence {item:?} is negative or non-finite")]
     InadmissibleLikelihood {
@@ -166,6 +172,9 @@ pub enum EpistemicError {
 
     #[error("distortion tolerance {value} is negative or non-finite")]
     InadmissibleTolerance { value: f64 },
+
+    #[error("compatibility floor {value} is outside the closed interval [0, 1] or is non-finite")]
+    InadmissibleCompatibilityFloor { value: f64 },
 
     #[error("adaptive acquisition budget {value} is negative or non-finite")]
     InadmissibleAdaptiveBudget { value: f64 },

@@ -8,6 +8,7 @@ repository.workspace = true
 description = "Decision Cells, matched counterfactual forks, state minimization and attested result bundles"
 
 [dependencies]
+bioprism-foundation = { workspace = true }
 bioprism-baseline = { workspace = true }
 bioprism-fiber = { workspace = true }
 bioprism-ids = { workspace = true }

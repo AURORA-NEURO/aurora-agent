@@ -1,0 +1,32 @@
+{
+  "name": "@aurora-neuro/typescript-edge",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Runtime-neutral TypeScript 5 edge parity slice: typed nonzero ids, deterministic SHA-256 abstraction, canonical JSON telemetry, descriptor-only adapter registry, bounded queues, streaming manifest metadata, and boundary type shapes. No live network clients.",
+  "type": "module",
+  "sideEffects": false,
+  "license": "Apache-2.0",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "vectors",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node --test test/core.test.mjs",
+    "verify": "npm run build && node --test test/core.test.mjs"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3"
+  }
+}

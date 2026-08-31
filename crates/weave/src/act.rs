@@ -80,7 +80,12 @@ pub struct Act {
 }
 
 impl Act {
-    pub fn new(kind: ActKind, from: impl Into<String>, to: impl Into<String>, payload: Value) -> Self {
+    pub fn new(
+        kind: ActKind,
+        from: impl Into<String>,
+        to: impl Into<String>,
+        payload: Value,
+    ) -> Self {
         Act {
             kind,
             from: from.into(),

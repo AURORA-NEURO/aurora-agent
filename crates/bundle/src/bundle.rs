@@ -151,10 +151,11 @@ impl ResultBundle {
         if !entry.body.is_inline() {
             return Ok(EmbeddedCertificate::NotCarried);
         }
-        let document = self
-            .contents
-            .get(&entry.name)
-            .expect("inline entries were checked for presence above");
+        let Some(document) = self.contents.get(&entry.name) else {
+            return Err(BundleError::MissingInlineContent {
+                entry: entry.name.clone(),
+            });
+        };
         match ContextCertificate::verify(document)? {
             CertificateVerification::Valid => Ok(EmbeddedCertificate::SelfVerified),
             CertificateVerification::DigestMismatch {

@@ -5,6 +5,7 @@ edition = "2021"
 description = "Platform security and safety: threat model, trust boundaries, prompt injection, poisoning, supply chain, disclosure"
 
 [dependencies]
+bioprism-foundation = { workspace = true }
 bioprism-ids = { workspace = true }
 bioprism-scope = { workspace = true }
 serde = { workspace = true }

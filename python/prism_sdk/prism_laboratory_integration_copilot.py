@@ -1,0 +1,33 @@
+"""Python parity for ``AFA-prism-P11-F12`` laboratory integration copilot."""
+from __future__ import annotations
+from dataclasses import dataclass
+import hashlib,json,re
+from typing import Any,Mapping
+from .research_contracts import PRECLINICAL_BOUNDARY,RESEARCH_CONTRACT_SCHEMA_VERSION,ResearchContractError
+FEATURE_ID="AFA-prism-P11-F12";CONTRACT_VERSION="prism-federated-continual-laboratory-integration-research-copilot/1.0";INPUT_SCHEMA="InstrumentActionRequest4@1";OUTPUT_SCHEMA="InstrumentActionReceipt3@1";CONTENT_TYPE="application/vnd.aurora.prism-instrument-action-receipt-3+json"
+def _hash(v:Any)->str:return hashlib.sha256(json.dumps(v,sort_keys=True,separators=(",",":"),ensure_ascii=False).encode()).hexdigest()
+def _digest(v:Any)->bool:return isinstance(v,str) and re.fullmatch(r"[0-9a-f]{64}",v) is not None
+def _ordered(v:list[str])->bool:return v==sorted(set(v))
+@dataclass(frozen=True)
+class InstrumentActionReceipt3:
+ value:dict[str,Any]
+ def to_dict(self)->dict[str,Any]:return dict(self.value)
+ def validate(self)->None:
+  v=self.value;a=v.get("artifact",{})
+  if v.get("schema_version")!=RESEARCH_CONTRACT_SCHEMA_VERSION or v.get("contract_version")!=CONTRACT_VERSION or v.get("feature_id")!=FEATURE_ID or v.get("boundary")!=PRECLINICAL_BOUNDARY or a.get("boundary")!=PRECLINICAL_BOUNDARY or v.get("raw_data_local") is not True or v.get("aggregate_only") is not True or v.get("disposition") not in {"qualified","blocked"} or not v.get("gate_order") or not v.get("effect_receipts") or not all(str(v.get(k,"")).strip() for k in ("request_id","consumer","purpose","instrument_id","action_id","declared_tool","scope","semantic_profile")):raise ResearchContractError("instrument action identity, locality, gates, or effects are incomplete")
+  for k in ("gate_order","omission_order","uncertainty_order","negative_evidence_order","effect_receipts"):
+   if not _ordered(v.get(k,[])):raise ResearchContractError("instrument action ordering is not canonical")
+  if not all(_digest(v.get(k)) for k in ("replay_identity","action_digest",a.get("content_hash"))) or a.get("content_type")!=CONTENT_TYPE or a.get("content_hash")!=v.get("action_digest") or not all(_digest(x) for x in a.get("provenance_digests",[])):raise ResearchContractError("instrument action digest is invalid")
+  if v["disposition"]=="qualified" and v["effect_receipts"]!=[f"invoke:declared-tool:{v['declared_tool']}"]:raise ResearchContractError("qualified instrument invocation effect is invalid")
+  if v["disposition"]=="blocked" and v["effect_receipts"]!=["block:unsafe-release"]:raise ResearchContractError("blocked instrument action must block")
+def laboratory_integration_copilot_manifest()->dict[str,Any]:return {"schema_version":RESEARCH_CONTRACT_SCHEMA_VERSION,"capability_id":FEATURE_ID,"version":CONTRACT_VERSION,"owner_crate":"prism","consumers":["context compiler engineer","instrument gateway steward","preclinical lab operator"],"behavior":"admit a federated continual instrument action only after signed A4 preflight, interlock, emergency-stop, provenance, replay, policy, federation, budget, and locality gates","value":"turns a research intent into a bounded, auditable declared-tool invocation without hiding unsafe physical-action conditions","input_schema":INPUT_SCHEMA,"output_schema":OUTPUT_SCHEMA,"effects":["execute:local-computation","write:local-artifact"],"permissions":["invoke:declared-tools"],"determinism":"byte_stable","autonomy_tier":"A4","boundary":PRECLINICAL_BOUNDARY}
+def admit_laboratory_integration_action(request:Mapping[str,Any])->InstrumentActionReceipt3:
+ if not all(str(request.get(k,"")).strip() for k in ("request_id","consumer","purpose","instrument_id","action_id","declared_tool","scope","semantic_profile")) or int(request.get("budget_units",0))<=0 or int(request.get("max_budget_units",0))<=0 or not all(_digest(request.get(k)) for k in ("protocol_digest","provenance_digest","replay_identity")) or request.get("raw_data_local") is not True or request.get("aggregate_only") is not True or request.get("boundary")!=PRECLINICAL_BOUNDARY:raise ResearchContractError("instrument action identity, bounds, digests, locality, or boundary is invalid")
+ gates=["preflight:budget","preflight:emergency-stop","preflight:federation","preflight:interlock","preflight:policy","preflight:provenance","preflight:replay","preflight:signed"];om=set();unc=set();neg=set();
+ if request.get("negative_result_context"):neg.add("context:negative-result-preserved")
+ for k,label in (("signed_preflight","gate:signed-preflight-missing"),("interlock_ok","gate:interlock-failed"),("emergency_stop_ready","gate:emergency-stop-unavailable"),("policy_allow","gate:policy-denied"),("protected_closure","gate:protected-closure-incomplete"),("federation_approved","gate:federation-approval-missing")):
+  if request.get(k) is not True:om.add(label)
+ if int(request["budget_units"])>int(request["max_budget_units"]):om.add("gate:budget-exceeded")
+ if om:unc.add("action:not-safe-to-dispatch")
+ disp="blocked" if om else "qualified";checkpoint=_hash({"request_id":request["request_id"],"instrument_id":request["instrument_id"],"action_id":request["action_id"],"protocol_digest":request["protocol_digest"],"replay_identity":request["replay_identity"]});payload={"gate_order":gates,"omission_order":sorted(om),"uncertainty_order":sorted(unc),"negative_evidence_order":sorted(neg),"checkpoint":checkpoint,"replay_identity":request["replay_identity"]};digest=_hash(payload);payload.update({"schema_version":RESEARCH_CONTRACT_SCHEMA_VERSION,"contract_version":CONTRACT_VERSION,"feature_id":FEATURE_ID,"request_id":request["request_id"],"consumer":request["consumer"],"purpose":request["purpose"],"instrument_id":request["instrument_id"],"action_id":request["action_id"],"declared_tool":request["declared_tool"],"scope":request["scope"],"semantic_profile":request["semantic_profile"],"disposition":disp,"action_digest":digest,"artifact":{"artifact_id":f"prism-instrument-action:{request['action_id']}","content_type":CONTENT_TYPE,"content_hash":digest,"semantic_loss":[] if disp=="qualified" else ["physical-action-not-dispatched"],"provenance_digests":[request["provenance_digest"],request["protocol_digest"]],"boundary":PRECLINICAL_BOUNDARY},"effect_receipts":[f"invoke:declared-tool:{request['declared_tool']}"] if disp=="qualified" else ["block:unsafe-release"],"raw_data_local":True,"aggregate_only":True,"boundary":PRECLINICAL_BOUNDARY});r=InstrumentActionReceipt3(payload);r.validate();return r
+__all__=["FEATURE_ID","CONTRACT_VERSION","INPUT_SCHEMA","OUTPUT_SCHEMA","CONTENT_TYPE","InstrumentActionReceipt3","laboratory_integration_copilot_manifest","admit_laboratory_integration_action"]

@@ -5,6 +5,7 @@ edition = "2021"
 description = "Section 23 remainder: interweave modules weave, fabric, choreography and weavelang did not claim"
 
 [dependencies]
+bioprism-foundation = { workspace = true }
 bioprism-section = { workspace = true }
 bioprism-weave = { workspace = true }
 bioprism-fabric = { workspace = true }

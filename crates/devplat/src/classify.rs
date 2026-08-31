@@ -338,11 +338,15 @@ pub fn not_implemented() -> Vec<(&'static str, &'static str, &'static str)> {
     classification()
         .into_iter()
         .filter(|row| !row.verdict.is_citable_here())
-        .map(|row| match row.verdict {
-            Verdict::Process { because } => (row.title, "process", because),
-            Verdict::ForeignArtifact { because, .. } => (row.title, "foreign artifact", because),
-            Verdict::CoveredElsewhere { because, .. } => (row.title, "covered elsewhere", because),
-            Verdict::ImplementedHere { .. } => unreachable!("filtered above"),
+        .filter_map(|row| match row.verdict {
+            Verdict::Process { because } => Some((row.title, "process", because)),
+            Verdict::ForeignArtifact { because, .. } => {
+                Some((row.title, "foreign artifact", because))
+            }
+            Verdict::CoveredElsewhere { because, .. } => {
+                Some((row.title, "covered elsewhere", because))
+            }
+            Verdict::ImplementedHere { .. } => None,
         })
         .collect()
 }

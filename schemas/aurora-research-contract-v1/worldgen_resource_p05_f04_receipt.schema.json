@@ -1,0 +1,184 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aurora-neuro.org/schemas/aurora-research-contract-v1/worldgen-resource-p05-f04.json",
+  "title": "AFA-worldgen-P05-F04 receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "contract_version",
+    "feature_id",
+    "need_id",
+    "consumer",
+    "disposition",
+    "required_capability_order",
+    "candidate_order",
+    "qualified_order",
+    "stale_order",
+    "protected_order",
+    "unavailable_order",
+    "unknown_order",
+    "omitted_order",
+    "resources",
+    "omissions",
+    "uncertainty",
+    "negative_evidence",
+    "replay_identity",
+    "discovery_digest",
+    "effect_receipts",
+    "raw_data_local",
+    "aggregate_only",
+    "boundary",
+    "artifact"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string"
+    },
+    "contract_version": {
+      "const": "worldgen-federated-continual-resource-discovery/1.0"
+    },
+    "feature_id": {
+      "const": "AFA-worldgen-P05-F04"
+    },
+    "raw_data_local": {
+      "const": true
+    },
+    "aggregate_only": {
+      "const": true
+    },
+    "boundary": {
+      "type": "string"
+    },
+    "need_id": {
+      "type": "string"
+    },
+    "consumer": {
+      "type": "string"
+    },
+    "disposition": {
+      "enum": [
+        "qualified",
+        "partial",
+        "unknown",
+        "blocked"
+      ]
+    },
+    "required_capability_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1
+    },
+    "candidate_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1
+    },
+    "qualified_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "stale_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "protected_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "unavailable_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "unknown_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "omitted_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "resources": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "omissions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "uncertainty": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "negative_evidence": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "replay_identity": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "discovery_digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "effect_receipts": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1
+    },
+    "artifact": {
+      "type": "object",
+      "required": [
+        "content_type",
+        "content_hash",
+        "boundary",
+        "raw_candidates"
+      ],
+      "properties": {
+        "content_type": {
+          "const": "application/vnd.aurora.worldgen.resource-discovery-receipt+json"
+        },
+        "content_hash": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "boundary": {
+          "type": "string"
+        },
+        "raw_candidates": {
+          "const": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "x_aurora_boundary": "preclinical-research-only",
+  "x_aurora_feature_tier": "product-capability"
+}

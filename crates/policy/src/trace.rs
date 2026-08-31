@@ -35,10 +35,18 @@ const MAX_EXAMPLES: usize = 5;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "outcome", rename_all = "snake_case")]
 pub enum TraceOutcome {
-    Admitted { admission: Box<Admission> },
-    Refused { refusal: Refusal },
-    Declassified { receipt: Box<DeclassificationReceipt> },
-    Redacted { receipt: Box<RedactionReceipt> },
+    Admitted {
+        admission: Box<Admission>,
+    },
+    Refused {
+        refusal: Refusal,
+    },
+    Declassified {
+        receipt: Box<DeclassificationReceipt>,
+    },
+    Redacted {
+        receipt: Box<RedactionReceipt>,
+    },
 }
 
 /// One entry in the trace.
@@ -132,12 +140,14 @@ impl PolicyTrace {
     }
 
     pub fn admissions(&self) -> impl Iterator<Item = (&str, &Admission)> {
-        self.entries.iter().filter_map(|entry| match &entry.outcome {
-            TraceOutcome::Admitted { admission } => {
-                Some((entry.subject.as_str(), admission.as_ref()))
-            }
-            _ => None,
-        })
+        self.entries
+            .iter()
+            .filter_map(|entry| match &entry.outcome {
+                TraceOutcome::Admitted { admission } => {
+                    Some((entry.subject.as_str(), admission.as_ref()))
+                }
+                _ => None,
+            })
     }
 
     pub fn refusal_count(&self) -> usize {

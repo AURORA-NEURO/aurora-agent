@@ -10,6 +10,7 @@ bioprism-scope = { workspace = true }
 bioprism-scale = { workspace = true }
 bioprism-factory = { workspace = true }
 bioprism-worldgen = { workspace = true }
+bioprism-foundation = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

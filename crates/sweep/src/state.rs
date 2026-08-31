@@ -209,7 +209,15 @@ impl Component {
                 format!("oracle-only visibility belongs to the OracleHidden partition, not {partition:?}"),
             ));
         }
-        Ok(Component { id, partition, visibility, capture, digest, equality, restoration })
+        Ok(Component {
+            id,
+            partition,
+            visibility,
+            capture,
+            digest,
+            equality,
+            restoration,
+        })
     }
 
     pub fn id(&self) -> &str {
@@ -256,7 +264,10 @@ pub struct Delta {
 
 impl Delta {
     pub fn new() -> Self {
-        Delta { upsert: Vec::new(), remove: BTreeSet::new() }
+        Delta {
+            upsert: Vec::new(),
+            remove: BTreeSet::new(),
+        }
     }
 
     pub fn upserting(mut self, component: Component) -> Self {
@@ -300,7 +311,10 @@ impl WorldStateManifest {
         }
         let mut base = BTreeMap::new();
         for component in components {
-            if base.insert(component.id.clone(), component.clone()).is_some() {
+            if base
+                .insert(component.id.clone(), component.clone())
+                .is_some()
+            {
                 return Err(SweepError::malformed(
                     "WorldStateManifest",
                     format!("duplicate component id {}", component.id),
@@ -313,7 +327,11 @@ impl WorldStateManifest {
                 "a manifest with no components would report Exact restoration",
             ));
         }
-        Ok(WorldStateManifest { state_id, base, deltas: Vec::new() })
+        Ok(WorldStateManifest {
+            state_id,
+            base,
+            deltas: Vec::new(),
+        })
     }
 
     pub fn with_delta(mut self, delta: Delta) -> Self {
@@ -366,7 +384,10 @@ impl WorldStateManifest {
 
     /// Whether any resolved component depends on something outside the manifest.
     pub fn has_live_dependency(&self) -> Result<bool, SweepError> {
-        Ok(self.resolve()?.values().any(|c| c.capture.escapes_the_manifest()))
+        Ok(self
+            .resolve()?
+            .values()
+            .any(|c| c.capture.escapes_the_manifest()))
     }
 
     /// The agent's view of this state.
@@ -378,7 +399,10 @@ impl WorldStateManifest {
             .into_iter()
             .filter(|(_, c)| c.visibility != Visibility::OracleOnly)
             .collect();
-        Ok(AgentView { state_id: self.state_id.clone(), visible })
+        Ok(AgentView {
+            state_id: self.state_id.clone(),
+            visible,
+        })
     }
 }
 
@@ -446,7 +470,12 @@ impl EquivalenceClaim {
     ) -> Result<Self, SweepError> {
         let basis = basis.into();
         crate::error::require_nonempty(&basis, "EquivalenceClaim", "basis")?;
-        Ok(EquivalenceClaim { component: component.into(), left, right, basis })
+        Ok(EquivalenceClaim {
+            component: component.into(),
+            left,
+            right,
+            basis,
+        })
     }
 
     fn covers(&self, component: &str, a: &ContentHash, b: &ContentHash) -> bool {
@@ -552,7 +581,12 @@ pub fn compare(
             (Some(_), None) => ComponentVerdict::OneSided { side: Side::Left },
             (None, Some(_)) => ComponentVerdict::OneSided { side: Side::Right },
             (Some(a), Some(b)) => compare_pair(id, a, b, claims),
-            (None, None) => unreachable!("id came from one of the two maps"),
+            (None, None) => {
+                return Err(SweepError::malformed(
+                    "state comparison",
+                    format!("component `{id}` disappeared while comparing the resolved states"),
+                ));
+            }
         };
         components.insert(id.clone(), verdict);
     }
@@ -584,10 +618,10 @@ fn compare_pair(
         EqualityKind::DeclaredEquivalence => {
             if a.digest == b.digest {
                 ComponentVerdict::Equal
-            } else if let Some(claim) =
-                claims.iter().find(|c| c.covers(id, &a.digest, &b.digest))
-            {
-                ComponentVerdict::EquivalentByClaim { basis: claim.basis.clone() }
+            } else if let Some(claim) = claims.iter().find(|c| c.covers(id, &a.digest, &b.digest)) {
+                ComponentVerdict::EquivalentByClaim {
+                    basis: claim.basis.clone(),
+                }
             } else {
                 ComponentVerdict::Unchecked {
                     reason: "nondeterministic component with no equivalence claim for this pair"
@@ -711,7 +745,10 @@ mod tests {
         .unwrap();
         let m = manifest(
             "s1",
-            vec![component("task", Partition::Task, Visibility::AgentVisible), weak],
+            vec![
+                component("task", Partition::Task, Visibility::AgentVisible),
+                weak,
+            ],
         );
         assert_eq!(
             m.restoration().unwrap().level(),
@@ -784,8 +821,14 @@ mod tests {
 
     #[test]
     fn equal_digests_under_a_decidable_kind_compare_equal() {
-        let a = manifest("a", vec![component("f", Partition::Task, Visibility::AgentVisible)]);
-        let b = manifest("b", vec![component("f", Partition::Task, Visibility::AgentVisible)]);
+        let a = manifest(
+            "a",
+            vec![component("f", Partition::Task, Visibility::AgentVisible)],
+        );
+        let b = manifest(
+            "b",
+            vec![component("f", Partition::Task, Visibility::AgentVisible)],
+        );
         assert_eq!(compare(&a, &b, &[]).unwrap().verdict(), StateVerdict::Equal);
     }
 
@@ -811,12 +854,8 @@ mod tests {
             Declaration::equivalent("tape").unwrap(),
         )
         .unwrap();
-        let comparison = compare(
-            &manifest("a", vec![left]),
-            &manifest("b", vec![right]),
-            &[],
-        )
-        .unwrap();
+        let comparison =
+            compare(&manifest("a", vec![left]), &manifest("b", vec![right]), &[]).unwrap();
         assert_eq!(comparison.verdict(), StateVerdict::Indeterminate);
         assert_eq!(comparison.unchecked(), vec!["svc"]);
     }
@@ -861,8 +900,7 @@ mod tests {
 
     #[test]
     fn an_equivalence_claim_does_not_cover_a_different_pair_of_digests() {
-        let claim =
-            EquivalenceClaim::new("svc", hash("a"), hash("b"), "same bodies").unwrap();
+        let claim = EquivalenceClaim::new("svc", hash("a"), hash("b"), "same bodies").unwrap();
         assert!(claim.covers("svc", &hash("b"), &hash("a")));
         assert!(!claim.covers("svc", &hash("a"), &hash("c")));
         assert!(!claim.covers("other", &hash("a"), &hash("b")));
@@ -877,7 +915,10 @@ mod tests {
                 component("g", Partition::Task, Visibility::AgentVisible),
             ],
         );
-        let b = manifest("b", vec![component("f", Partition::Task, Visibility::AgentVisible)]);
+        let b = manifest(
+            "b",
+            vec![component("f", Partition::Task, Visibility::AgentVisible)],
+        );
         let comparison = compare(&a, &b, &[]).unwrap();
         assert_eq!(comparison.verdict(), StateVerdict::Differs);
         assert_eq!(
@@ -892,7 +933,9 @@ mod tests {
         components.insert("a".to_string(), ComponentVerdict::Differs);
         components.insert(
             "b".to_string(),
-            ComponentVerdict::Unchecked { reason: "no claim".into() },
+            ComponentVerdict::Unchecked {
+                reason: "no claim".into(),
+            },
         );
         assert_eq!(
             StateComparison { components }.verdict(),

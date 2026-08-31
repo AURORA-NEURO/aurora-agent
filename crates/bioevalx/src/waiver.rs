@@ -49,6 +49,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::WaiverError;
 
+const MAX_WAIVER_TEXT_BYTES: usize = 256;
+const MAX_GATES: usize = 4096;
+const MAX_WAIVERS: usize = 4096;
+
 /// The kinds of gate 07.13 enumerates under "Gate types".
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -128,13 +132,40 @@ impl Gate {
             verdict,
         }
     }
+
+    fn validate(&self) -> Result<(), WaiverError> {
+        validate_waiver_text(&self.id, "id").map_err(|detail| WaiverError::InvalidGate {
+            id: self.id.clone(),
+            detail,
+        })?;
+        match &self.verdict {
+            GateVerdict::Met => {}
+            GateVerdict::Violated { detail } => {
+                validate_waiver_text(detail, "verdict detail").map_err(|detail| {
+                    WaiverError::InvalidGate {
+                        id: self.id.clone(),
+                        detail,
+                    }
+                })?;
+            }
+            GateVerdict::Unevaluable { missing } => {
+                validate_waiver_text(missing, "missing evidence").map_err(|detail| {
+                    WaiverError::InvalidGate {
+                        id: self.id.clone(),
+                        detail,
+                    }
+                })?;
+            }
+        }
+        Ok(())
+    }
 }
 
 /// A human decision to let a blocking gate through, with everything 07.13 requires.
 ///
 /// The fields are private and [`Waiver::sign`] checks all four, so a `Waiver` in hand is a complete
 /// one. An incomplete waiver is not a weak waiver; it is not a waiver.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Waiver {
     gate: String,
     authoriser: String,
@@ -173,16 +204,13 @@ impl Waiver {
         if waiver.rationale.trim().is_empty() {
             return Err(WaiverError::NoRationale);
         }
-        if waiver
-            .affected_versions
-            .iter()
-            .all(|v| v.trim().is_empty())
-        {
+        if waiver.affected_versions.iter().all(|v| v.trim().is_empty()) {
             return Err(WaiverError::NoAffectedVersion);
         }
         if waiver.follow_up.trim().is_empty() {
             return Err(WaiverError::NoFollowUp);
         }
+        waiver.validate()?;
         Ok(waiver)
     }
 
@@ -191,6 +219,14 @@ impl Waiver {
     /// Three refusals: a gate that was not blocking has nothing to waive, a safety veto cannot be
     /// waived at all, and an expired waiver leaves the gate in force.
     pub fn apply(self, gate: &Gate, at: Timestamp) -> Result<WaivedGate, WaiverError> {
+        self.validate()?;
+        gate.validate()?;
+        if self.gate != gate.id {
+            return Err(WaiverError::GateMismatch {
+                waiver: self.gate,
+                gate: gate.id.clone(),
+            });
+        }
         if !gate.verdict.blocks() {
             return Err(WaiverError::NotBlocking(gate.id.clone()));
         }
@@ -249,13 +285,60 @@ impl Waiver {
     pub fn covers(&self, version: &str) -> bool {
         self.affected_versions.iter().any(|v| v == version)
     }
+
+    fn validate(&self) -> Result<(), WaiverError> {
+        validate_waiver_text(&self.gate, "gate").map_err(|detail| WaiverError::InvalidWaiver {
+            gate: self.gate.clone(),
+            detail,
+        })?;
+        validate_waiver_text(&self.authoriser, "authoriser").map_err(|detail| {
+            WaiverError::InvalidWaiver {
+                gate: self.gate.clone(),
+                detail,
+            }
+        })?;
+        validate_waiver_text(&self.rationale, "rationale").map_err(|detail| {
+            WaiverError::InvalidWaiver {
+                gate: self.gate.clone(),
+                detail,
+            }
+        })?;
+        validate_waiver_text(&self.follow_up, "follow_up").map_err(|detail| {
+            WaiverError::InvalidWaiver {
+                gate: self.gate.clone(),
+                detail,
+            }
+        })?;
+        if self.affected_versions.is_empty() || self.affected_versions.len() > MAX_WAIVERS {
+            return Err(WaiverError::InvalidWaiver {
+                gate: self.gate.clone(),
+                detail: "affected_versions must contain a bounded non-empty list".into(),
+            });
+        }
+        let mut versions = std::collections::BTreeSet::new();
+        for version in &self.affected_versions {
+            validate_waiver_text(version, "affected version").map_err(|detail| {
+                WaiverError::InvalidWaiver {
+                    gate: self.gate.clone(),
+                    detail,
+                }
+            })?;
+            if !versions.insert(version) {
+                return Err(WaiverError::InvalidWaiver {
+                    gate: self.gate.clone(),
+                    detail: format!("affected version {} appears more than once", version),
+                });
+            }
+        }
+        Ok(())
+    }
 }
 
 /// A blocking gate plus the waiver that let it through.
 ///
 /// Carries the original verdict. A reader of this object can always see what the gate said, which
 /// is what makes the waiver auditable rather than merely recorded.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct WaivedGate {
     pub gate: Gate,
     pub waiver: Waiver,
@@ -270,7 +353,7 @@ impl WaivedGate {
 }
 
 /// The set of gates for one release, and the waivers applied to them.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ReleaseDecision {
     pub version: String,
     gates: Vec<Gate>,
@@ -289,6 +372,22 @@ impl ReleaseDecision {
 
     /// Waive one gate, refusing a waiver that does not cover this version.
     pub fn waive(&mut self, waiver: Waiver, at: Timestamp) -> Result<(), WaiverError> {
+        validate_waiver_text(&self.version, "version").map_err(|detail| {
+            WaiverError::InvalidWaiver {
+                gate: waiver.gate.clone(),
+                detail,
+            }
+        })?;
+        if self.gates.len() > MAX_GATES {
+            return Err(WaiverError::TooManyGates(MAX_GATES));
+        }
+        if self.waived.len() >= MAX_WAIVERS {
+            return Err(WaiverError::TooManyWaivers(MAX_WAIVERS));
+        }
+        for gate in &self.gates {
+            gate.validate()?;
+        }
+        waiver.validate()?;
         let gate = self
             .gates
             .iter()
@@ -297,6 +396,11 @@ impl ReleaseDecision {
             .clone();
         if !waiver.covers(&self.version) {
             return Err(WaiverError::NoAffectedVersion);
+        }
+        if self.waived.iter().any(|applied| applied.gate.id == gate.id) {
+            return Err(WaiverError::DuplicateWaiver {
+                gate: gate.id.clone(),
+            });
         }
         self.waived.push(waiver.apply(&gate, at)?);
         Ok(())
@@ -337,4 +441,17 @@ impl ReleaseDecision {
     pub fn gates(&self) -> &[Gate] {
         &self.gates
     }
+}
+
+fn validate_waiver_text(value: &str, field: &str) -> Result<(), String> {
+    if value.trim().is_empty()
+        || value != value.trim()
+        || value.len() > MAX_WAIVER_TEXT_BYTES
+        || value.chars().any(char::is_control)
+    {
+        return Err(format!(
+            "{field} must be bounded, trimmed, and control-free"
+        ));
+    }
+    Ok(())
 }

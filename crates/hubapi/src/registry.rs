@@ -31,7 +31,8 @@
 
 use crate::name::{NameError, Namespace, PackName};
 use bioprism_ids::IdError;
-use serde::{Deserialize, Serialize};
+use serde::de::Error as DeError;
+use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
@@ -86,11 +87,36 @@ impl TryFrom<String> for RegistryId {
 }
 
 /// What a registry declares it may answer for.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Authority {
     registry: RegistryId,
     owned: BTreeSet<Namespace>,
     carried: BTreeMap<Namespace, RegistryId>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AuthorityFields {
+    registry: RegistryId,
+    owned: BTreeSet<Namespace>,
+    carried: BTreeMap<Namespace, RegistryId>,
+}
+
+impl<'de> Deserialize<'de> for Authority {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let fields = AuthorityFields::deserialize(deserializer)?;
+        let authority = Authority {
+            registry: fields.registry,
+            owned: fields.owned,
+            carried: fields.carried,
+        };
+        authority
+            .validate()
+            .map(|()| authority)
+            .map_err(D::Error::custom)
+    }
 }
 
 impl Authority {
@@ -162,6 +188,34 @@ impl Authority {
 
     pub fn carried_namespaces(&self) -> impl Iterator<Item = (&Namespace, &RegistryId)> {
         self.carried.iter()
+    }
+
+    /// Checks the structural invariants that constructors maintain.
+    ///
+    /// The fields are private, but an authority is also a serialized boundary object. Keeping
+    /// this check separate lets deserialization and federation admission use the same predicate,
+    /// so a restored declaration cannot claim a namespace twice or delegate to itself.
+    pub fn validate(&self) -> Result<(), AuthorityError> {
+        for namespace in &self.owned {
+            if let Some(origin) = self.carried.get(namespace) {
+                return Err(AuthorityError::OwnsAndCarries {
+                    registry: self.registry.clone(),
+                    namespace: namespace.to_string(),
+                    origin: origin.clone(),
+                });
+            }
+        }
+        if let Some((namespace, _)) = self
+            .carried
+            .iter()
+            .find(|(_, origin)| *origin == &self.registry)
+        {
+            return Err(AuthorityError::CarriesItself {
+                registry: self.registry.clone(),
+                namespace: namespace.to_string(),
+            });
+        }
+        Ok(())
     }
 
     /// The standing this registry has for one name, or the reason it has none.
@@ -248,9 +302,30 @@ impl fmt::Display for NameAuthority {
 /// which is the offline analogue of an allowlist and is the only trust-establishing act in the
 /// whole crate that is not checked against evidence — because it cannot be. Everything downstream
 /// of it is.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct Federation {
     members: BTreeMap<RegistryId, Authority>,
+}
+
+#[derive(Debug, Deserialize)]
+struct FederationFields {
+    members: BTreeMap<RegistryId, Authority>,
+}
+
+impl<'de> Deserialize<'de> for Federation {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let fields = FederationFields::deserialize(deserializer)?;
+        let federation = Federation {
+            members: fields.members,
+        };
+        federation
+            .validate()
+            .map(|()| federation)
+            .map_err(D::Error::custom)
+    }
 }
 
 impl Federation {
@@ -260,6 +335,7 @@ impl Federation {
 
     /// Admits a registry, refusing a declaration that contradicts one already admitted.
     pub fn admit(&mut self, authority: Authority) -> Result<(), AuthorityError> {
+        authority.validate()?;
         let id = authority.registry.clone();
         if self.members.contains_key(&id) {
             return Err(AuthorityError::DuplicateMember { registry: id });
@@ -273,6 +349,33 @@ impl Federation {
             }
         }
         self.members.insert(id, authority);
+        Ok(())
+    }
+
+    /// Checks the structural invariants of a restored or externally supplied federation.
+    ///
+    /// Dangling carriers are deliberately allowed here: admission is order-independent and a
+    /// carrier may arrive before its origin. [`Federation::audit`] remains the explicit check for
+    /// unresolved delegations once the full member set is known.
+    pub fn validate(&self) -> Result<(), AuthorityError> {
+        let mut owners = BTreeMap::<Namespace, RegistryId>::new();
+        for (key, authority) in &self.members {
+            authority.validate()?;
+            if key != authority.registry() {
+                return Err(AuthorityError::MemberKeyMismatch {
+                    key: key.clone(),
+                    declared: authority.registry().clone(),
+                });
+            }
+            for namespace in authority.owned_namespaces() {
+                if let Some(other) = owners.insert(namespace.clone(), key.clone()) {
+                    return Err(AuthorityError::Contested {
+                        namespace: namespace.to_string(),
+                        claimants: [other, key.clone()],
+                    });
+                }
+            }
+        }
         Ok(())
     }
 
@@ -390,6 +493,12 @@ pub enum AuthorityError {
 
     #[error("{registry} is already a member of this federation")]
     DuplicateMember { registry: RegistryId },
+
+    #[error("federation member key {key} does not match declared registry {declared}")]
+    MemberKeyMismatch {
+        key: RegistryId,
+        declared: RegistryId,
+    },
 }
 
 #[cfg(test)]
@@ -434,6 +543,41 @@ mod tests {
             .standing_for(&name("bioprism/onco-tp53"))
             .expect_err("authority is added deliberately, never assumed");
         assert!(matches!(error, AuthorityError::OutsideAuthority { .. }));
+    }
+
+    #[test]
+    fn authority_deserialization_rechecks_exclusive_and_non_self_delegation() {
+        let authority = Authority::new(id("mirror"))
+            .carrying(ns("bioprism"), id("origin"))
+            .expect("carries");
+        let mut value = serde_json::to_value(&authority).expect("serialises");
+        value["owned"] = serde_json::json!(["bioprism"]);
+        assert!(serde_json::from_value::<Authority>(value).is_err());
+
+        let value = serde_json::json!({
+            "registry": "mirror",
+            "owned": [],
+            "carried": {"bioprism": "mirror"}
+        });
+        assert!(serde_json::from_value::<Authority>(value).is_err());
+    }
+
+    #[test]
+    fn federation_deserialization_rechecks_member_keys_and_exclusive_ownership() {
+        let value = serde_json::json!({
+            "members": {
+                "wrong-key": {"registry": "origin", "owned": ["bioprism"], "carried": {} }
+            }
+        });
+        assert!(serde_json::from_value::<Federation>(value).is_err());
+
+        let value = serde_json::json!({
+            "members": {
+                "origin": {"registry": "origin", "owned": ["bioprism"], "carried": {} },
+                "other": {"registry": "other", "owned": ["bioprism"], "carried": {} }
+            }
+        });
+        assert!(serde_json::from_value::<Federation>(value).is_err());
     }
 
     #[test]

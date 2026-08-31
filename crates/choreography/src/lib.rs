@@ -40,7 +40,25 @@
 
 pub mod adjudicate;
 pub mod check;
+pub mod protocol_execution_integrity_support;
+pub mod local_protocol_execution_integrity_inference;
+pub mod multimodal_protocol_execution_integrity_inference;
+pub mod throughput_protocol_execution_integrity_inference;
+pub mod federated_continual_protocol_execution_integrity_inference;
+pub mod local_protocol_execution_integrity_contract_model;
+pub mod multimodal_protocol_execution_integrity_contract_model;
+pub mod throughput_protocol_execution_integrity_contract_model;
+pub mod federated_continual_protocol_execution_integrity_contract_model;
+pub mod local_protocol_execution_integrity_research_copilot;
+pub mod multimodal_protocol_execution_integrity_research_copilot;
+pub mod throughput_protocol_execution_integrity_research_copilot;
+pub mod federated_continual_protocol_execution_integrity_research_copilot;
+pub mod local_protocol_execution_integrity_workflow_fabric;
+pub mod multimodal_protocol_execution_integrity_workflow_fabric;
+pub mod throughput_protocol_execution_integrity_workflow_fabric;
+pub mod federated_continual_protocol_execution_integrity_workflow_fabric;
 pub mod quorum;
+pub mod retrieval_synthesis_workbench;
 pub mod saga;
 pub mod session;
 
@@ -49,6 +67,11 @@ pub use adjudicate::{
     EvidenceKind, EvidenceRequirement, OpenChallenge, Position, Procedure, Rule, RuleCondition,
     RuleOutcome, Ruling, RulingScope, Side,
 };
+pub use protocol_execution_integrity_support::{
+    execute as execute_protocol_execution_integrity, manifest as protocol_execution_integrity_manifest,
+    ProtocolExecutionArtifact4, ProtocolExecutionCard7, ProtocolExecutionIntegrityError,
+    ProtocolExecutionRequest4, ProtocolStep4,
+};
 pub use check::{
     BoundHit, ChannelState, Counterexample, Event, ExplorationBound, ModelCheckReport, Property,
     RoleState, RoleStatus, StateSummary, System, TraceStep, Verdict,
@@ -56,6 +79,13 @@ pub use check::{
 pub use quorum::{
     CheckedIndependence, Cluster, Correlation, CorrelationReason, EvidenceBasis, Finding, Juror,
     JurorDissent, Jury, Question, QuestionKind, QuorumOutcome, QuorumRule, Vote,
+};
+pub use retrieval_synthesis_workbench::{
+    capability_manifest as retrieval_workbench_capability_manifest,
+    render as render_retrieval_workbench, EvidenceSynthesis, RetrievalCandidate,
+    ScopedRetrievalQuery, WorkbenchError, CONTRACT_VERSION as RETRIEVAL_WORKBENCH_CONTRACT_VERSION,
+    FEATURE_ID as RETRIEVAL_WORKBENCH_FEATURE_ID, INPUT_SCHEMA as RETRIEVAL_WORKBENCH_INPUT_SCHEMA,
+    OUTPUT_SCHEMA as RETRIEVAL_WORKBENCH_OUTPUT_SCHEMA,
 };
 pub use saga::{
     ActionClass, Compensation, CompensationReport, Failure, FailurePolicy, Recovery,

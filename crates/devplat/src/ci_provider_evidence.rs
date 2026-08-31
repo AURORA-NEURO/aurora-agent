@@ -154,11 +154,22 @@ fn finding(
 }
 
 fn valid_text(value: &str) -> bool {
-    !value.trim().is_empty() && value.len() <= MAX_TEXT && !value.chars().any(char::is_control)
+    !value.trim().is_empty()
+        && value == value.trim()
+        && value.len() <= MAX_TEXT
+        && !value.chars().any(char::is_control)
 }
 
 fn valid_digest(value: &str) -> bool {
-    ContentHash::parse(value.to_owned()).is_ok()
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        && ContentHash::parse(value.to_owned()).is_ok()
+}
+
+fn subject_key(value: &str) -> String {
+    value.to_ascii_lowercase()
 }
 
 fn check_known(check: Option<&str>, expected: &BTreeSet<String>) -> bool {
@@ -282,6 +293,22 @@ fn digest_rows<T: Serialize>(rows: &[T]) -> Result<String, CiProviderEvidenceErr
         .map_err(|error| CiProviderEvidenceError::Canonical(error.to_string()))
 }
 
+fn canonical_rows<T>(rows: &[T]) -> Result<Vec<T>, CiProviderEvidenceError>
+where
+    T: Clone + Serialize,
+{
+    let mut keyed = rows
+        .iter()
+        .map(|row| {
+            serde_json::to_string(&row)
+                .map(|key| (key, row))
+                .map_err(|error| CiProviderEvidenceError::Canonical(error.to_string()))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    keyed.sort_by(|left, right| left.0.cmp(&right.0));
+    Ok(keyed.into_iter().map(|(_, row)| row.clone()).collect())
+}
+
 /// Normalize a provider payload, audit its exact CI plan, and bind optional evidence rows.
 pub fn audit_ci_provider_evidence(
     request: &CiProviderEvidenceRequest,
@@ -304,6 +331,9 @@ pub fn audit_ci_provider_evidence(
             count: request.attestations.len(),
         });
     }
+    let artifacts = canonical_rows(&request.artifacts)?;
+    let logs = canonical_rows(&request.logs)?;
+    let attestations = canonical_rows(&request.attestations)?;
 
     let normalized = normalize_ci_provider_payload(&CiProviderNormalizationRequest {
         ci: request.ci.clone(),
@@ -327,6 +357,7 @@ pub fn audit_ci_provider_evidence(
     let mut artifact_ids = BTreeSet::new();
     let mut log_ids = BTreeSet::new();
     let mut known_subjects = BTreeSet::from([normalized.evidence.run_id.clone()]);
+    let mut known_subject_keys = BTreeSet::from([subject_key(&normalized.evidence.run_id)]);
     let mut known_subject_digests = BTreeMap::from([(
         normalized.evidence.run_id.clone(),
         normalized.payload_digest.clone(),
@@ -336,7 +367,7 @@ pub fn audit_ci_provider_evidence(
     let mut local_byte_hash_artifact_count = 0;
     let mut local_byte_hash_log_count = 0;
 
-    for artifact in &request.artifacts {
+    for artifact in &artifacts {
         if !artifact_ids.insert(artifact.id.clone()) {
             finding(
                 &mut findings,
@@ -346,6 +377,16 @@ pub fn audit_ci_provider_evidence(
                 "each provider artifact must have one canonical row",
             );
         }
+        if !known_subject_keys.insert(subject_key(&artifact.id)) {
+            finding(
+                &mut findings,
+                "duplicate_evidence_subject_id",
+                "blocking",
+                artifact.id.clone(),
+                "artifact identifiers must not collide with the normalized run or another artifact/log subject",
+            );
+        }
+        known_subjects.insert(artifact.id.clone());
         bind_row(
             &mut findings,
             &artifact.id,
@@ -387,11 +428,10 @@ pub fn audit_ci_provider_evidence(
         if artifact.check.is_some() {
             linked_artifact_count += 1;
         }
-        known_subjects.insert(artifact.id.clone());
         known_subject_digests.insert(artifact.id.clone(), artifact.digest.clone());
     }
 
-    for log in &request.logs {
+    for log in &logs {
         if !log_ids.insert(log.id.clone()) {
             finding(
                 &mut findings,
@@ -401,6 +441,16 @@ pub fn audit_ci_provider_evidence(
                 "each provider log must have one canonical row",
             );
         }
+        if !known_subject_keys.insert(subject_key(&log.id)) {
+            finding(
+                &mut findings,
+                "duplicate_evidence_subject_id",
+                "blocking",
+                log.id.clone(),
+                "log identifiers must not collide with the normalized run or another artifact/log subject",
+            );
+        }
+        known_subjects.insert(log.id.clone());
         bind_row(
             &mut findings,
             &log.id,
@@ -433,15 +483,17 @@ pub fn audit_ci_provider_evidence(
         if log.check.is_some() {
             linked_log_count += 1;
         }
-        known_subjects.insert(log.id.clone());
         known_subject_digests.insert(log.id.clone(), log.digest.clone());
     }
 
     let mut attestation_ids = BTreeSet::new();
+    let mut attestation_id_keys = BTreeSet::new();
     let mut attestation_subject_count = 0;
     let mut attestation_subject_digest_binding_count = 0;
-    for attestation in &request.attestations {
-        if !attestation_ids.insert(attestation.id.clone()) {
+    for attestation in &attestations {
+        if !attestation_ids.insert(attestation.id.clone())
+            || !attestation_id_keys.insert(subject_key(&attestation.id))
+        {
             finding(
                 &mut findings,
                 "duplicate_attestation_id",
@@ -450,13 +502,17 @@ pub fn audit_ci_provider_evidence(
                 "each provider attestation must have one canonical row",
             );
         }
-        if !valid_text(&attestation.issuer) || !valid_text(&attestation.method) {
+        if !valid_text(&attestation.id)
+            || !valid_text(&attestation.subject)
+            || !valid_text(&attestation.issuer)
+            || !valid_text(&attestation.method)
+        {
             finding(
                 &mut findings,
-                "attestation_metadata_invalid",
+                "attestation_identity_or_metadata_invalid",
                 "blocking",
                 attestation.id.clone(),
-                "attestation issuer and method must be bounded and non-empty",
+                "attestation id, subject, issuer, and method must be bounded and non-empty",
             );
         }
         if !valid_digest(&attestation.statement_digest) {
@@ -511,6 +567,8 @@ pub fn audit_ci_provider_evidence(
         left.subject
             .cmp(&right.subject)
             .then_with(|| left.code.cmp(&right.code))
+            .then_with(|| left.severity.cmp(&right.severity))
+            .then_with(|| left.detail.cmp(&right.detail))
     });
     let normalized_run_id = normalized.evidence.run_id.clone();
     let normalized_evidence = normalized.evidence.clone();
@@ -529,12 +587,12 @@ pub fn audit_ci_provider_evidence(
         plan_digest: ci_evidence.plan_digest.clone(),
         evidence_digest: ci_evidence.evidence_digest.clone(),
         evidence: normalized_evidence,
-        artifact_record_digest: digest_rows(&request.artifacts)?,
-        log_record_digest: digest_rows(&request.logs)?,
-        attestation_record_digest: digest_rows(&request.attestations)?,
-        artifact_count: request.artifacts.len(),
-        log_count: request.logs.len(),
-        attestation_count: request.attestations.len(),
+        artifact_record_digest: digest_rows(&artifacts)?,
+        log_record_digest: digest_rows(&logs)?,
+        attestation_record_digest: digest_rows(&attestations)?,
+        artifact_count: artifacts.len(),
+        log_count: logs.len(),
+        attestation_count: attestations.len(),
         linked_artifact_count,
         linked_log_count,
         attestation_subject_count,
@@ -542,9 +600,9 @@ pub fn audit_ci_provider_evidence(
         local_byte_hash_log_count,
         attestation_subject_digest_binding_count,
         ci_evidence,
-        artifacts: request.artifacts.clone(),
-        logs: request.logs.clone(),
-        attestations: request.attestations.clone(),
+        artifacts,
+        logs,
+        attestations,
         structurally_valid,
         conformance_ready,
         execution: "evidence_supplied_not_executed_here".into(),
@@ -652,6 +710,45 @@ mod tests {
     }
 
     #[test]
+    fn equivalent_provider_rows_have_order_independent_audit_identity() {
+        let mut request = request();
+        request.artifacts.push(CiProviderArtifact {
+            id: "artifact-extra".into(),
+            kind: "coverage".into(),
+            digest: digest("artifact-extra"),
+            check: Some("unit".into()),
+            run_id: Some("99".into()),
+            provider: Some("github_actions".into()),
+            uri: Some("https://example.test/artifact-extra".into()),
+            digest_scope: None,
+        });
+        request.logs.push(CiProviderLog {
+            id: "log-extra".into(),
+            digest: digest("log-extra"),
+            check: Some("unit".into()),
+            run_id: Some("99".into()),
+            provider: Some("github_actions".into()),
+            uri: Some("https://example.test/log-extra".into()),
+            truncated: false,
+            digest_scope: None,
+        });
+        request.attestations.push(CiProviderAttestation {
+            id: "attestation-extra".into(),
+            subject: "artifact-extra".into(),
+            issuer: "caller".into(),
+            statement_digest: digest("statement-extra"),
+            method: "declared_provider_statement".into(),
+            subject_digest: None,
+        });
+        let canonical = audit_ci_provider_evidence(&request).unwrap();
+        request.artifacts.reverse();
+        request.logs.reverse();
+        request.attestations.reverse();
+        let reordered = audit_ci_provider_evidence(&request).unwrap();
+        assert_eq!(canonical, reordered);
+    }
+
+    #[test]
     fn row_binding_and_unknown_attestation_subjects_fail_closed() {
         let mut request = request();
         request.artifacts[0].run_id = Some("wrong-run".into());
@@ -714,5 +811,55 @@ mod tests {
             .findings
             .iter()
             .any(|finding| finding.code == "log_digest_invalid"));
+    }
+
+    #[test]
+    fn evidence_subject_collisions_and_invalid_attestation_identity_are_blocking() {
+        let mut request = request();
+        request.logs[0].id = request.artifacts[0].id.clone();
+        request.attestations[0].subject = "bad\nsubject".into();
+        let audit = audit_ci_provider_evidence(&request).unwrap();
+        assert!(!audit.structurally_valid);
+        assert!(audit
+            .findings
+            .iter()
+            .any(|finding| finding.code == "duplicate_evidence_subject_id"));
+        assert!(audit
+            .findings
+            .iter()
+            .any(|finding| finding.code == "attestation_identity_or_metadata_invalid"));
+    }
+
+    #[test]
+    fn provider_evidence_requires_canonical_digests_and_case_safe_subjects() {
+        let mut request = request();
+        request.logs[0].digest = "A".repeat(64);
+        request.attestations[0].id = "ATTESTATION".into();
+        let mut second = request.attestations[0].clone();
+        second.id = "attestation".into();
+        request.attestations.push(second);
+
+        let audit = audit_ci_provider_evidence(&request).expect("audit");
+        assert!(!audit.structurally_valid);
+        assert!(audit
+            .findings
+            .iter()
+            .any(|finding| finding.code == "log_digest_invalid"));
+        assert!(audit
+            .findings
+            .iter()
+            .any(|finding| finding.code == "duplicate_attestation_id"));
+    }
+
+    #[test]
+    fn provider_evidence_rejects_padded_row_identity_text() {
+        let mut request = request();
+        request.artifacts[0].id = " artifact-unit".into();
+        let audit = audit_ci_provider_evidence(&request).expect("audit");
+        assert!(!audit.structurally_valid);
+        assert!(audit
+            .findings
+            .iter()
+            .any(|finding| finding.code == "row_id_invalid"));
     }
 }

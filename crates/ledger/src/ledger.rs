@@ -253,8 +253,8 @@ impl EventLedger {
         }
 
         let seq = self.next_seq;
-        let id = self.admit(event);
-        let released = self.drain_quarantine();
+        let id = self.admit(event)?;
+        let released = self.drain_quarantine()?;
         Ok(AppendReceipt {
             admission: Admission::Recorded { id, seq },
             released,
@@ -316,11 +316,13 @@ impl EventLedger {
                     })
                 };
             }
-            let held = self
-                .quarantine
-                .iter()
-                .find(|held| held.key == key)
-                .expect("a key reserved but not recorded is held in quarantine");
+            let Some(held) = self.quarantine.iter().find(|held| held.key == key) else {
+                return Err(LedgerError::InvariantViolation {
+                    detail: format!(
+                        "idempotency key `{key}` is reserved but has neither a recorded entry nor a quarantine record"
+                    ),
+                });
+            };
             return if held.event.content_digest() == digest {
                 Ok(Some(Admission::Quarantined {
                     key,
@@ -345,10 +347,15 @@ impl EventLedger {
             .collect()
     }
 
-    fn admit(&mut self, event: Event) -> EventId {
+    fn admit(&mut self, event: Event) -> Result<EventId, LedgerError> {
         let seq = self.next_seq;
-        let id = EventId::parse(format!("evt-{seq:012}"))
-            .expect("generated event ids are non-empty and printable");
+        let next_seq =
+            self.next_seq
+                .checked_add(1)
+                .ok_or_else(|| LedgerError::InvariantViolation {
+                    detail: "event sequence exhausted at u64::MAX".to_string(),
+                })?;
+        let id = EventId::parse(format!("evt-{seq:012}"))?;
         let key = event.idempotency_key();
         let target = event.supersedes.clone();
 
@@ -359,8 +366,8 @@ impl EventLedger {
         if let Some(target) = target {
             self.superseded_by.insert(target, id.clone());
         }
-        self.next_seq += 1;
-        id
+        self.next_seq = next_seq;
+        Ok(id)
     }
 
     /// Admits everything whose blockers have arrived, repeating until nothing more moves.
@@ -368,7 +375,7 @@ impl EventLedger {
     /// The loop is required rather than defensive: releasing one event can supply the parent
     /// another was waiting on, and a chain of out-of-order arrivals should resolve in one pass
     /// from the caller's point of view.
-    fn drain_quarantine(&mut self) -> Vec<EventId> {
+    fn drain_quarantine(&mut self) -> Result<Vec<EventId>, LedgerError> {
         let mut released = Vec::new();
         loop {
             let mut progressed = false;
@@ -383,7 +390,13 @@ impl EventLedger {
                 match self.validate(&self.quarantine[index].event) {
                     Ok(()) => {
                         let held = self.quarantine.remove(index);
-                        released.push(self.admit(held.event));
+                        match self.admit(held.event.clone()) {
+                            Ok(id) => released.push(id),
+                            Err(error) => {
+                                self.quarantine.insert(index, held);
+                                return Err(error);
+                            }
+                        }
                         progressed = true;
                     }
                     Err(refusal) => {
@@ -394,7 +407,7 @@ impl EventLedger {
                 }
             }
             if !progressed {
-                return released;
+                return Ok(released);
             }
         }
     }

@@ -8,10 +8,12 @@ repository.workspace = true
 description = "Equal-engineering context baselines: full-context, k-hop incidence, connected component, lexical top-k, embedding top-k, directed dependency walk, query-graph, and the structural family sweep"
 
 [dependencies]
+bioprism-foundation = { workspace = true }
 bioprism-fiber = { workspace = true }
 bioprism-ids = { workspace = true }
 bioprism-section = { workspace = true }
 bioprism-world = { workspace = true }
 bioprism-worldgen = { workspace = true }
 serde_json = { workspace = true }
+serde = { workspace = true }
 thiserror = { workspace = true }

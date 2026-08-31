@@ -40,6 +40,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::AcquisitionError;
 
+const MAX_ACQUISITION_TEXT_BYTES: usize = 256;
+const MAX_OBLIGATIONS: usize = 8192;
+const MAX_ACTIONS: usize = 8192;
+const MAX_CLOSURES_PER_ACTION: usize = 1024;
+
 /// The kinds of acquisition 26.05 lists under "Evaluation target".
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -127,7 +132,9 @@ impl Action {
 }
 
 /// A sequence of acquisitions against a declared obligation set.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// A trace is a derived ledger. It serializes for reporting but is intentionally rebuilt through
+/// checked obligation and action admission so persisted traces cannot bypass closure validation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Trace {
     obligations: Vec<Obligation>,
     actions: Vec<Action>,
@@ -139,12 +146,29 @@ pub struct Trace {
 
 impl Trace {
     /// Start a trace against a declared obligation set.
-    pub fn against(obligations: Vec<Obligation>) -> Self {
-        Trace {
+    pub fn against(obligations: Vec<Obligation>) -> Result<Self, AcquisitionError> {
+        if obligations.len() > MAX_OBLIGATIONS {
+            return Err(AcquisitionError::TooManyObligations {
+                limit: MAX_OBLIGATIONS,
+            });
+        }
+        let mut ids = BTreeSet::new();
+        for obligation in &obligations {
+            validate_text(&obligation.id).map_err(|detail| {
+                AcquisitionError::InvalidObligation {
+                    id: obligation.id.clone(),
+                    detail,
+                }
+            })?;
+            if !ids.insert(obligation.id.clone()) {
+                return Err(AcquisitionError::DuplicateObligation(obligation.id.clone()));
+            }
+        }
+        Ok(Trace {
             obligations,
             actions: Vec::new(),
             stopped_after: false,
-        }
+        })
     }
 
     /// Append an acquisition, refusing one that claims to close an obligation nobody declared.
@@ -153,6 +177,10 @@ impl Trace {
     /// been credited for work that had no reason to be done, and that credit is what 26.05's
     /// "unnecessary acquisition rate" is trying to catch.
     pub fn perform(&mut self, action: Action) -> Result<(), AcquisitionError> {
+        validate_action(&action)?;
+        if self.actions.len() >= MAX_ACTIONS {
+            return Err(AcquisitionError::TooManyActions { limit: MAX_ACTIONS });
+        }
         if self.actions.iter().any(|a| a.id == action.id) {
             return Err(AcquisitionError::DuplicateAction(action.id));
         }
@@ -255,7 +283,11 @@ impl Trace {
             .collect();
         let mut spent = 0u64;
         for action in &self.actions {
-            if action.closes.iter().any(|id| required.contains(id.as_str())) {
+            if action
+                .closes
+                .iter()
+                .any(|id| required.contains(id.as_str()))
+            {
                 return Some(spent);
             }
             spent = spent.saturating_add(action.cost);
@@ -265,7 +297,9 @@ impl Trace {
 
     /// Total cost of the trace.
     pub fn cost(&self) -> u64 {
-        self.actions.iter().map(|a| a.cost).sum()
+        self.actions
+            .iter()
+            .fold(0, |total, action| total.saturating_add(action.cost))
     }
 
     /// Cost difference against a named reference policy, or a refusal if none is named.
@@ -278,6 +312,12 @@ impl Trace {
         reference: Option<&ReferencePolicy>,
     ) -> Result<Regret, AcquisitionError> {
         let reference = reference.ok_or(AcquisitionError::NoReferencePolicy)?;
+        validate_text(&reference.name).map_err(|detail| {
+            AcquisitionError::InvalidReferencePolicy {
+                name: reference.name.clone(),
+                detail,
+            }
+        })?;
         Ok(Regret {
             policy: reference.name.clone(),
             cost_difference: self.cost() as i128 - reference.cost as i128,
@@ -300,10 +340,44 @@ impl Trace {
     pub fn cost_by_kind(&self) -> BTreeMap<AcquisitionKind, u64> {
         let mut out = BTreeMap::new();
         for action in &self.actions {
-            *out.entry(action.kind).or_insert(0) += action.cost;
+            let total = out.entry(action.kind).or_insert(0u64);
+            *total = (*total).saturating_add(action.cost);
         }
         out
     }
+}
+
+fn validate_text(value: &str) -> Result<(), String> {
+    if value.trim().is_empty()
+        || value != value.trim()
+        || value.len() > MAX_ACQUISITION_TEXT_BYTES
+        || value.chars().any(char::is_control)
+    {
+        return Err("value must be a bounded, trimmed, control-free string".into());
+    }
+    Ok(())
+}
+
+fn validate_action(action: &Action) -> Result<(), AcquisitionError> {
+    validate_text(&action.id).map_err(|detail| AcquisitionError::InvalidAction {
+        id: action.id.clone(),
+        detail,
+    })?;
+    if action.closes.len() > MAX_CLOSURES_PER_ACTION {
+        return Err(AcquisitionError::InvalidAction {
+            id: action.id.clone(),
+            detail: format!(
+                "an action may close at most {MAX_CLOSURES_PER_ACTION} obligations"
+            ),
+        });
+    }
+    for obligation in &action.closes {
+        validate_text(obligation).map_err(|detail| AcquisitionError::InvalidAction {
+            id: action.id.clone(),
+            detail: format!("closed obligation is invalid: {detail}"),
+        })?;
+    }
+    Ok(())
 }
 
 /// A named acquisition policy a trace can be compared against.

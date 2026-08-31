@@ -35,7 +35,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 use crate::error::CreditError;
+use crate::validation::valid_text;
 use crate::wrongness::BiologicalErrorClass;
+
+const MAX_CREDIT_TERMS: usize = 1024;
+const MAX_EVIDENCE_TERMS: usize = 4096;
 
 /// One named thing a prediction can earn credit for.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -71,6 +75,35 @@ impl CreditEvidence {
         self.errors.push(class);
         self
     }
+
+    fn validate(&self, rule_id: &str) -> Result<(), CreditError> {
+        if self.satisfied.len() > MAX_EVIDENCE_TERMS {
+            return Err(CreditError::InvalidEvidence {
+                rule_id: rule_id.to_string(),
+                detail: format!("at most {MAX_EVIDENCE_TERMS} satisfied terms are supported"),
+            });
+        }
+        if self.satisfied.iter().any(|term_id| !valid_text(term_id)) {
+            return Err(CreditError::InvalidEvidence {
+                rule_id: rule_id.to_string(),
+                detail: "satisfied term ids must be bounded, trimmed, control-free strings".into(),
+            });
+        }
+        let mut classes = BTreeSet::new();
+        if self.errors.iter().any(|class| !classes.insert(*class)) {
+            return Err(CreditError::InvalidEvidence {
+                rule_id: rule_id.to_string(),
+                detail: "error classes must be unique".into(),
+            });
+        }
+        Ok(())
+    }
+
+    fn canonical_for_digest(&self) -> Self {
+        let mut canonical = self.clone();
+        canonical.errors.sort();
+        canonical
+    }
 }
 
 /// A named, versioned partial-credit rubric.
@@ -93,22 +126,13 @@ impl CreditRule {
         terms: Vec<CreditTerm>,
     ) -> Result<Self, CreditError> {
         let rule_id = rule_id.into();
-        if terms.is_empty() {
-            return Err(CreditError::NoBasis { rule_id });
-        }
-        for term in &terms {
-            if !term.weight.is_finite() || term.weight <= 0.0 {
-                return Err(CreditError::FractionOutOfRange {
-                    rule_id,
-                    fraction: term.weight,
-                });
-            }
-        }
-        Ok(CreditRule {
+        let rule = CreditRule {
             rule_id,
             version,
             terms,
-        })
+        };
+        rule.validate()?;
+        Ok(rule)
     }
 
     pub fn rule_id(&self) -> &str {
@@ -129,6 +153,8 @@ impl CreditRule {
     /// left unclassified — an unexamined failure cannot be shown to leave a meaningful remainder,
     /// and 26.02's condition for retaining credit is exactly that it does.
     pub fn award(&self, evidence: &CreditEvidence) -> Result<Credit, CreditError> {
+        self.validate()?;
+        evidence.validate(&self.rule_id)?;
         if evidence
             .errors
             .contains(&BiologicalErrorClass::Unclassified)
@@ -168,7 +194,7 @@ impl CreditRule {
             });
         }
 
-        let digest = digest_of(self, evidence)?;
+        let digest = digest_of(self, &evidence.canonical_for_digest())?;
 
         Ok(Credit {
             rule_id: self.rule_id.clone(),
@@ -177,6 +203,62 @@ impl CreditRule {
             basis,
             digest,
         })
+    }
+
+    fn validate(&self) -> Result<(), CreditError> {
+        if !valid_text(&self.rule_id) {
+            return Err(CreditError::InvalidRule {
+                rule_id: self.rule_id.clone(),
+                detail: "rule_id must be a bounded, trimmed, control-free string".into(),
+            });
+        }
+        if self.version == 0 {
+            return Err(CreditError::InvalidRule {
+                rule_id: self.rule_id.clone(),
+                detail: "version must be positive".into(),
+            });
+        }
+        if self.terms.is_empty() {
+            return Err(CreditError::NoBasis {
+                rule_id: self.rule_id.clone(),
+            });
+        }
+        if self.terms.len() > MAX_CREDIT_TERMS {
+            return Err(CreditError::InvalidRule {
+                rule_id: self.rule_id.clone(),
+                detail: format!("at most {MAX_CREDIT_TERMS} terms are supported"),
+            });
+        }
+        let mut term_ids = BTreeSet::new();
+        for term in &self.terms {
+            if !valid_text(&term.term_id) || !valid_text(&term.criterion) {
+                return Err(CreditError::InvalidRule {
+                    rule_id: self.rule_id.clone(),
+                    detail: "term ids and criteria must be bounded, trimmed, control-free strings"
+                        .into(),
+                });
+            }
+            if !term_ids.insert(term.term_id.clone()) {
+                return Err(CreditError::InvalidRule {
+                    rule_id: self.rule_id.clone(),
+                    detail: "term ids must be unique".into(),
+                });
+            }
+            if !term.weight.is_finite() || term.weight <= 0.0 {
+                return Err(CreditError::FractionOutOfRange {
+                    rule_id: self.rule_id.clone(),
+                    fraction: term.weight,
+                });
+            }
+        }
+        let total: f64 = self.terms.iter().map(|term| term.weight).sum();
+        if !total.is_finite() || total <= 0.0 {
+            return Err(CreditError::InvalidRule {
+                rule_id: self.rule_id.clone(),
+                detail: "term weights must have a finite positive total".into(),
+            });
+        }
+        Ok(())
     }
 }
 
@@ -239,10 +321,55 @@ impl Credit {
     /// A `false` here means the credit was not produced by that rule on that evidence, whatever
     /// its `rule_id` says.
     pub fn verify(&self, rule: &CreditRule, evidence: &CreditEvidence) -> bool {
+        if self.validate().is_err() {
+            return false;
+        }
         match rule.award(evidence) {
             Ok(recomputed) => recomputed == *self,
             Err(_) => false,
         }
+    }
+
+    fn validate(&self) -> Result<(), CreditError> {
+        if !valid_text(&self.rule_id) {
+            return Err(CreditError::InvalidAward {
+                rule_id: self.rule_id.clone(),
+                detail: "rule_id must be a bounded, trimmed, control-free string".into(),
+            });
+        }
+        if self.rule_version == 0 {
+            return Err(CreditError::InvalidAward {
+                rule_id: self.rule_id.clone(),
+                detail: "rule version must be positive".into(),
+            });
+        }
+        if !self.fraction.is_finite() || !(0.0..=1.0).contains(&self.fraction) {
+            return Err(CreditError::InvalidAward {
+                rule_id: self.rule_id.clone(),
+                detail: "fraction must be finite and between 0 and 1".into(),
+            });
+        }
+        if self.basis.is_empty() || self.basis.len() > MAX_CREDIT_TERMS {
+            return Err(CreditError::InvalidAward {
+                rule_id: self.rule_id.clone(),
+                detail: "award basis must contain between 1 and the supported term limit entries"
+                    .into(),
+            });
+        }
+        let mut term_ids = BTreeSet::new();
+        for term in &self.basis {
+            if !valid_text(&term.term_id)
+                || !term.weight.is_finite()
+                || term.weight <= 0.0
+                || !term_ids.insert(term.term_id.clone())
+            {
+                return Err(CreditError::InvalidAward {
+                    rule_id: self.rule_id.clone(),
+                    detail: "award basis must contain unique named positive finite terms".into(),
+                });
+            }
+        }
+        Ok(())
     }
 }
 

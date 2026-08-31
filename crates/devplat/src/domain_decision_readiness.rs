@@ -78,6 +78,10 @@ impl ReadinessPolicy {
             .get("policy")
             .and_then(Value::as_object)
             .ok_or_else(|| DomainDecisionReadinessError::InvalidField("policy".into()))?;
+        Self::from_policy(policy)
+    }
+
+    fn from_policy(policy: &Map<String, Value>) -> Result<Self, DomainDecisionReadinessError> {
         let required_group_ids = text_set(
             policy,
             "required_group_ids",
@@ -130,6 +134,96 @@ impl ReadinessPolicy {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+fn build_blockers(
+    policy: &ReadinessPolicy,
+    missing_group_ids: &[Value],
+    missing_domains: &[Value],
+    all_reports_linked: bool,
+    supporting_count: usize,
+    qualifying_count: usize,
+    contradicting: &BTreeSet<String>,
+    refused: &BTreeSet<String>,
+    missing_lineage: &BTreeSet<String>,
+    review_required: &BTreeSet<String>,
+) -> Vec<Value> {
+    let mut blockers = Vec::new();
+    if !missing_group_ids.is_empty() {
+        blockers.push(json!({
+            "code": "required_groups_missing",
+            "severity": "error",
+            "groups": missing_group_ids,
+            "message": "one or more required capability groups have no report"
+        }));
+    }
+    if !missing_domains.is_empty() {
+        blockers.push(json!({
+            "code": "required_domains_missing",
+            "severity": "error",
+            "domains": missing_domains,
+            "message": "one or more required domain labels have no report"
+        }));
+    }
+    if policy.require_all_reports_linked && !all_reports_linked {
+        blockers.push(json!({
+            "code": "reports_unlinked",
+            "severity": "error",
+            "message": "every report must have an explicit evidence role before readiness can be assessed"
+        }));
+    }
+    if supporting_count < policy.minimum_supporting_reports {
+        blockers.push(json!({
+            "code": "support_floor_not_met",
+            "severity": "error",
+            "observed": supporting_count,
+            "required": policy.minimum_supporting_reports,
+            "message": "the explicit support-link floor was not met by observed or derived reports"
+        }));
+    }
+    if qualifying_count < policy.minimum_qualifying_reports {
+        blockers.push(json!({
+            "code": "qualification_floor_not_met",
+            "severity": "error",
+            "observed": qualifying_count,
+            "required": policy.minimum_qualifying_reports,
+            "message": "the explicit qualification-link floor was not met"
+        }));
+    }
+    if policy.reject_contradictions && !contradicting.is_empty() {
+        blockers.push(json!({
+            "code": "contradictory_reports_present",
+            "severity": "error",
+            "report_digests": contradicting,
+            "message": "an explicit contradiction is a fail-closed blocker under this policy"
+        }));
+    }
+    if policy.reject_refused_reports && !refused.is_empty() {
+        blockers.push(json!({
+            "code": "refused_reports_present",
+            "severity": "error",
+            "report_digests": refused,
+            "message": "a refused report cannot be counted as supporting evidence"
+        }));
+    }
+    if policy.require_lineage_parents && !missing_lineage.is_empty() {
+        blockers.push(json!({
+            "code": "lineage_parents_missing",
+            "severity": "error",
+            "report_digests": missing_lineage,
+            "message": "every report must declare at least one parent digest under this policy"
+        }));
+    }
+    if !policy.allow_review_required && !review_required.is_empty() {
+        blockers.push(json!({
+            "code": "human_review_required",
+            "severity": "error",
+            "report_digests": review_required,
+            "message": "review_required claim posture is not admissible under this policy"
+        }));
+    }
+    blockers
+}
+
 /// Evaluate the caller's explicit structural policy over cross-domain reports.
 pub fn audit_domain_decision_readiness(
     request: &Value,
@@ -144,11 +238,7 @@ pub fn audit_domain_decision_readiness(
         .filter(|value| value.is_object())
         .cloned()
         .ok_or_else(|| DomainDecisionReadinessError::InvalidField("claim".into()))?;
-    if claim.get("id").and_then(Value::as_str).is_none() {
-        return Err(DomainDecisionReadinessError::InvalidField(
-            "claim.id".into(),
-        ));
-    }
+    required_text_value(&claim, "id")?;
     let policy = ReadinessPolicy::from_request(object)?;
     let reports = object
         .get("reports")
@@ -185,7 +275,7 @@ pub fn audit_domain_decision_readiness(
 
     let mut roles_by_digest: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     for link in link_rows {
-        let digest = required_text_value(link, "report_digest")?;
+        let digest = required_digest_value(link, "report_digest")?;
         let role = required_text_value(link, "role")?;
         roles_by_digest.entry(digest).or_default().insert(role);
     }
@@ -201,8 +291,12 @@ pub fn audit_domain_decision_readiness(
     let mut report_digest_set = BTreeSet::new();
 
     for row in report_rows {
-        let digest = required_text_value(row, "digest")?;
-        report_digest_set.insert(digest.clone());
+        let digest = required_digest_value(row, "digest")?;
+        if !report_digest_set.insert(digest.clone()) {
+            return Err(DomainDecisionReadinessError::InvalidField(
+                "harmonization.reports.digest".into(),
+            ));
+        }
         let status = required_text_value(row, "claim_status")?;
         *status_counts.entry(status.clone()).or_default() += 1;
         let roles = roles_by_digest.get(&digest).cloned().unwrap_or_default();
@@ -259,92 +353,35 @@ pub fn audit_domain_decision_readiness(
         })?;
     let missing_group_ids = harmonization
         .get("missing_group_ids")
+        .and_then(Value::as_array)
         .cloned()
-        .unwrap_or_else(|| json!([]));
+        .ok_or_else(|| {
+            DomainDecisionReadinessError::InvalidField("harmonization.missing_group_ids".into())
+        })?;
     let missing_domains = harmonization
         .get("missing_domains")
+        .and_then(Value::as_array)
         .cloned()
-        .unwrap_or_else(|| json!([]));
+        .ok_or_else(|| {
+            DomainDecisionReadinessError::InvalidField("harmonization.missing_domains".into())
+        })?;
 
-    let mut blockers = Vec::new();
-    if !missing_group_ids.as_array().is_some_and(Vec::is_empty) {
-        blockers.push(json!({
-            "code": "required_groups_missing",
-            "severity": "error",
-            "groups": missing_group_ids,
-            "message": "one or more required capability groups have no report"
-        }));
-    }
-    if !missing_domains.as_array().is_some_and(Vec::is_empty) {
-        blockers.push(json!({
-            "code": "required_domains_missing",
-            "severity": "error",
-            "domains": missing_domains,
-            "message": "one or more required domain labels have no report"
-        }));
-    }
-    if policy.require_all_reports_linked && !all_reports_linked {
-        blockers.push(json!({
-            "code": "reports_unlinked",
-            "severity": "error",
-            "message": "every report must have an explicit evidence role before readiness can be assessed"
-        }));
-    }
-    if supporting.len() < policy.minimum_supporting_reports {
-        blockers.push(json!({
-            "code": "support_floor_not_met",
-            "severity": "error",
-            "observed": supporting.len(),
-            "required": policy.minimum_supporting_reports,
-            "message": "the explicit support-link floor was not met by observed or derived reports"
-        }));
-    }
-    if qualifying.len() < policy.minimum_qualifying_reports {
-        blockers.push(json!({
-            "code": "qualification_floor_not_met",
-            "severity": "error",
-            "observed": qualifying.len(),
-            "required": policy.minimum_qualifying_reports,
-            "message": "the explicit qualification-link floor was not met"
-        }));
-    }
-    if policy.reject_contradictions && !contradicting.is_empty() {
-        blockers.push(json!({
-            "code": "contradictory_reports_present",
-            "severity": "error",
-            "report_digests": contradicting,
-            "message": "an explicit contradiction is a fail-closed blocker under this policy"
-        }));
-    }
-    if policy.reject_refused_reports && !refused.is_empty() {
-        blockers.push(json!({
-            "code": "refused_reports_present",
-            "severity": "error",
-            "report_digests": refused,
-            "message": "a refused report cannot be counted as supporting evidence"
-        }));
-    }
-    if policy.require_lineage_parents && !missing_lineage.is_empty() {
-        blockers.push(json!({
-            "code": "lineage_parents_missing",
-            "severity": "error",
-            "report_digests": missing_lineage,
-            "message": "every report must declare at least one parent digest under this policy"
-        }));
-    }
-
+    let mut blockers = build_blockers(
+        &policy,
+        &missing_group_ids,
+        &missing_domains,
+        all_reports_linked,
+        supporting.len(),
+        qualifying.len(),
+        &contradicting,
+        &refused,
+        &missing_lineage,
+        &review_required,
+    );
     let review_only = !review_required.is_empty()
         || (!contradicting.is_empty() && !policy.reject_contradictions)
         || (!refused.is_empty() && !policy.reject_refused_reports)
         || (!all_reports_linked && !policy.require_all_reports_linked);
-    if !policy.allow_review_required && !review_required.is_empty() {
-        blockers.push(json!({
-            "code": "human_review_required",
-            "severity": "error",
-            "report_digests": review_required,
-            "message": "review_required claim posture is not admissible under this policy"
-        }));
-    }
     blockers.truncate(MAX_DOMAIN_DECISION_READINESS_BLOCKERS);
 
     let policy_blocker = blockers.iter().any(|blocker| {
@@ -361,12 +398,8 @@ pub fn audit_domain_decision_readiness(
         .iter()
         .any(|blocker| blocker.get("severity").and_then(Value::as_str) == Some("error"))
     {
-        if missing_group_ids
-            .as_array()
-            .is_some_and(|items| !items.is_empty())
-            || missing_domains
-                .as_array()
-                .is_some_and(|items| !items.is_empty())
+        if !missing_group_ids.is_empty()
+            || !missing_domains.is_empty()
             || (!all_reports_linked && policy.require_all_reports_linked)
             || supporting.len() < policy.minimum_supporting_reports
             || qualifying.len() < policy.minimum_qualifying_reports
@@ -438,21 +471,166 @@ pub fn validate_domain_decision_readiness(
     if !object.get("claim").is_some_and(Value::is_object) {
         return Err(DomainDecisionReadinessError::InvalidField("claim".into()));
     }
-    if object
+    let claim = object
         .get("claim")
-        .and_then(|claim| claim.get("id"))
-        .and_then(Value::as_str)
-        .is_none()
-    {
-        return Err(DomainDecisionReadinessError::InvalidField(
-            "claim.id".into(),
-        ));
-    }
+        .ok_or_else(|| DomainDecisionReadinessError::InvalidField("claim".into()))?;
+    required_text_value(claim, "id")?;
+    exact_text(
+        object,
+        "harmonization_schema",
+        DOMAIN_EVIDENCE_HARMONIZATION_SCHEMA_VERSION,
+    )?;
     let harmonization = object
         .get("harmonization")
         .ok_or_else(|| DomainDecisionReadinessError::InvalidField("harmonization".into()))?;
     validate_domain_evidence_harmonization(harmonization)
         .map_err(|error| DomainDecisionReadinessError::Harmonization(error.to_string()))?;
+    let policy_value = object
+        .get("policy")
+        .and_then(Value::as_object)
+        .ok_or_else(|| DomainDecisionReadinessError::InvalidField("policy".into()))?;
+    let policy = ReadinessPolicy::from_policy(policy_value)?;
+    if object.get("policy") != Some(&policy.as_value()) {
+        return Err(DomainDecisionReadinessError::InvalidField("policy".into()));
+    }
+    let harmonization_object = harmonization
+        .as_object()
+        .ok_or_else(|| DomainDecisionReadinessError::InvalidField("harmonization".into()))?;
+    if harmonization_object.get("subject_id") != object.get("subject_id")
+        || harmonization_object.get("required_group_ids") != Some(&json!(policy.required_group_ids))
+        || harmonization_object.get("required_domains") != Some(&json!(policy.required_domains))
+    {
+        return Err(DomainDecisionReadinessError::InvalidField(
+            "harmonization.policy_binding".into(),
+        ));
+    }
+    let report_rows = harmonization_object
+        .get("reports")
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            DomainDecisionReadinessError::InvalidField("harmonization.reports".into())
+        })?;
+    let report_count = object
+        .get("report_count")
+        .and_then(Value::as_u64)
+        .and_then(|value| usize::try_from(value).ok())
+        .ok_or_else(|| DomainDecisionReadinessError::InvalidField("report_count".into()))?;
+    if !(1..=MAX_DOMAIN_DECISION_READINESS_REPORTS).contains(&report_count)
+        || report_count != report_rows.len()
+    {
+        return Err(DomainDecisionReadinessError::InvalidField(
+            "report_count".into(),
+        ));
+    }
+    let assessments = object
+        .get("report_assessments")
+        .and_then(Value::as_array)
+        .ok_or_else(|| DomainDecisionReadinessError::InvalidField("report_assessments".into()))?;
+    if assessments.len() != report_rows.len() {
+        return Err(DomainDecisionReadinessError::InvalidField(
+            "report_assessments".into(),
+        ));
+    }
+    let link_rows = harmonization_object
+        .get("links")
+        .and_then(Value::as_array)
+        .ok_or_else(|| DomainDecisionReadinessError::InvalidField("harmonization.links".into()))?;
+    let mut roles_by_digest = BTreeMap::<String, BTreeSet<String>>::new();
+    for link in link_rows {
+        let digest = required_digest_value(link, "report_digest")?;
+        let role = required_text_value(link, "role")?;
+        roles_by_digest.entry(digest).or_default().insert(role);
+    }
+    let mut supporting = BTreeSet::new();
+    let mut qualifying = BTreeSet::new();
+    let mut contradicting = BTreeSet::new();
+    let mut review_required = BTreeSet::new();
+    let mut refused = BTreeSet::new();
+    let mut missing_lineage = BTreeSet::new();
+    let mut status_counts = BTreeMap::<String, usize>::new();
+    let mut expected_assessments = Vec::with_capacity(report_rows.len());
+    for row in report_rows {
+        let row_object = row.as_object().ok_or_else(|| {
+            DomainDecisionReadinessError::InvalidField("harmonization.reports".into())
+        })?;
+        let digest = required_digest_value(row, "digest")?;
+        let status = required_text_value(row, "claim_status")?;
+        *status_counts.entry(status.clone()).or_default() += 1;
+        let roles = roles_by_digest.get(&digest).cloned().unwrap_or_default();
+        if roles.contains("supports") && matches!(status.as_str(), "observed" | "derived") {
+            supporting.insert(digest.clone());
+        }
+        if roles.contains("qualifies") && matches!(status.as_str(), "observed" | "derived") {
+            qualifying.insert(digest.clone());
+        }
+        if roles.contains("contradicts") {
+            contradicting.insert(digest.clone());
+        }
+        if status == "review_required" {
+            review_required.insert(digest.clone());
+        }
+        if status == "refused" {
+            refused.insert(digest.clone());
+        }
+        let lineage_parent_count = row
+            .get("lineage_parent_count")
+            .and_then(Value::as_u64)
+            .and_then(|value| usize::try_from(value).ok())
+            .ok_or_else(|| {
+                DomainDecisionReadinessError::InvalidField(
+                    "harmonization.reports.lineage_parent_count".into(),
+                )
+            })?;
+        if lineage_parent_count == 0 {
+            missing_lineage.insert(digest.clone());
+        }
+        let expected_roles = roles.iter().cloned().collect::<Vec<_>>();
+        expected_assessments.push(json!({
+            "digest": digest,
+            "group_id": row_object.get("group_id"),
+            "domains": row_object.get("domains"),
+            "source_tool": row_object.get("source_tool"),
+            "claim_status": status,
+            "link_roles": expected_roles,
+            "lineage_parent_count": lineage_parent_count,
+            "structural_contribution": contribution(row, &roles_by_digest)
+        }));
+    }
+    if assessments != &expected_assessments {
+        return Err(DomainDecisionReadinessError::InvalidField(
+            "report_assessments".into(),
+        ));
+    }
+    if object.get("coverage") != harmonization_object.get("coverage")
+        || object.get("posture") != harmonization_object.get("posture")
+    {
+        return Err(DomainDecisionReadinessError::InvalidField(
+            "coverage_or_posture_projection".into(),
+        ));
+    }
+    let counts = object
+        .get("counts")
+        .and_then(Value::as_object)
+        .ok_or_else(|| DomainDecisionReadinessError::InvalidField("counts".into()))?;
+    for (field, expected) in [
+        ("supporting_reports", supporting.len()),
+        ("qualifying_reports", qualifying.len()),
+        ("contradicting_reports", contradicting.len()),
+        ("review_required_reports", review_required.len()),
+        ("refused_reports", refused.len()),
+        ("reports_without_lineage_parents", missing_lineage.len()),
+    ] {
+        if counts.get(field).and_then(Value::as_u64) != Some(expected as u64) {
+            return Err(DomainDecisionReadinessError::InvalidField(format!(
+                "counts.{field}"
+            )));
+        }
+    }
+    if counts.get("claim_statuses") != Some(&json!(status_counts)) {
+        return Err(DomainDecisionReadinessError::InvalidField(
+            "counts.claim_statuses".into(),
+        ));
+    }
     let decision_state = exact_one_of(
         object,
         "decision_state",
@@ -486,8 +664,102 @@ pub fn validate_domain_decision_readiness(
             maximum: MAX_DOMAIN_DECISION_READINESS_BLOCKERS,
         });
     }
+    let missing_group_ids = harmonization_object
+        .get("missing_group_ids")
+        .and_then(Value::as_array)
+        .cloned()
+        .ok_or_else(|| {
+            DomainDecisionReadinessError::InvalidField("harmonization.missing_group_ids".into())
+        })?;
+    let missing_domains = harmonization_object
+        .get("missing_domains")
+        .and_then(Value::as_array)
+        .cloned()
+        .ok_or_else(|| {
+            DomainDecisionReadinessError::InvalidField("harmonization.missing_domains".into())
+        })?;
+    let missing_groups = !missing_group_ids.is_empty();
+    let missing_domains_present = !missing_domains.is_empty();
+    let all_reports_linked = harmonization_object
+        .get("coverage")
+        .and_then(|value| value.get("all_reports_linked"))
+        .and_then(Value::as_bool)
+        .ok_or_else(|| {
+            DomainDecisionReadinessError::InvalidField("coverage.all_reports_linked".into())
+        })?;
+    let expected_blockers = build_blockers(
+        &policy,
+        &missing_group_ids,
+        &missing_domains,
+        all_reports_linked,
+        supporting.len(),
+        qualifying.len(),
+        &contradicting,
+        &refused,
+        &missing_lineage,
+        &review_required,
+    );
+    let expected_blocker_codes = expected_blockers
+        .iter()
+        .filter_map(|blocker| blocker.get("code").and_then(Value::as_str))
+        .collect::<Vec<_>>();
+    let review_only = !review_required.is_empty()
+        || (!contradicting.is_empty() && !policy.reject_contradictions)
+        || (!refused.is_empty() && !policy.reject_refused_reports)
+        || (!all_reports_linked && !policy.require_all_reports_linked);
+    if blockers != &expected_blockers {
+        return Err(DomainDecisionReadinessError::InvalidField(
+            "blockers".into(),
+        ));
+    }
+    let policy_blocker = expected_blocker_codes.iter().any(|code| {
+        matches!(
+            *code,
+            "contradictory_reports_present" | "refused_reports_present" | "human_review_required"
+        )
+    });
+    let expected_state = if policy_blocker {
+        "blocked"
+    } else if !expected_blocker_codes.is_empty() {
+        if missing_groups
+            || missing_domains_present
+            || (!all_reports_linked && policy.require_all_reports_linked)
+            || supporting.len() < policy.minimum_supporting_reports
+            || qualifying.len() < policy.minimum_qualifying_reports
+        {
+            "incomplete"
+        } else {
+            "blocked"
+        }
+    } else if review_only {
+        "review_required"
+    } else {
+        "ready_for_human_review"
+    };
+    if decision_state != expected_state {
+        return Err(DomainDecisionReadinessError::InvalidField(
+            "decision_state".into(),
+        ));
+    }
+    if object.get("guarantees")
+        != Some(&json!([
+            "the decision state is derived only from explicit report fields, link roles, and caller policy",
+            "contradictions, refusals, review-required states, missing coverage, and missing lineage remain separately visible",
+            "the same policy contract can be applied to any selected capability group or to the complete workspace catalogue"
+        ]))
+        || object.get("does_not_claim")
+            != Some(&json!([
+                "policy satisfaction proves a scientific, clinical, causal, regulatory, publication, or release conclusion",
+                "a support link proves that the linked report is true or independently verified",
+                "a complete local packet proves external provenance, execution, identity, consent, or authority"
+            ]))
+    {
+        return Err(DomainDecisionReadinessError::InvalidField(
+            "claim_boundaries".into(),
+        ));
+    }
     let digest = required_text(object, "digest")?;
-    if ContentHash::parse(&digest).is_err() || digest_for(value)? != digest {
+    if !valid_digest(&digest) || digest_for(value)? != digest {
         return Err(DomainDecisionReadinessError::DigestMismatch);
     }
     ensure_size(value)
@@ -605,29 +877,25 @@ fn text_set(
         });
     }
     let mut result = BTreeSet::new();
+    let mut aliases = BTreeSet::new();
     for value in values {
         let text = value
             .as_str()
-            .filter(|text| !text.trim().is_empty())
             .ok_or_else(|| DomainDecisionReadinessError::InvalidField(field.into()))?;
-        if text.len() > MAX_DOMAIN_DECISION_READINESS_TEXT_BYTES {
-            return Err(DomainDecisionReadinessError::TextTooLarge {
-                field: field.into(),
-                maximum: MAX_DOMAIN_DECISION_READINESS_TEXT_BYTES,
-            });
+        let text = strict_text(field, text)?;
+        if !aliases.insert(text.to_ascii_lowercase()) || !result.insert(text.to_string()) {
+            return Err(DomainDecisionReadinessError::InvalidField(field.into()));
         }
-        result.insert(text.to_string());
     }
     Ok(result.into_iter().collect())
 }
 
 fn required_text_value(value: &Value, field: &str) -> Result<String, DomainDecisionReadinessError> {
-    value
+    let text = value
         .get(field)
         .and_then(Value::as_str)
-        .filter(|value| !value.trim().is_empty())
-        .map(str::to_string)
-        .ok_or_else(|| DomainDecisionReadinessError::InvalidField(field.into()))
+        .ok_or_else(|| DomainDecisionReadinessError::InvalidField(field.into()))?;
+    strict_text(field, text)
 }
 
 fn required_text(
@@ -637,8 +905,14 @@ fn required_text(
     let value = object
         .get(field)
         .and_then(Value::as_str)
-        .filter(|value| !value.trim().is_empty())
         .ok_or_else(|| DomainDecisionReadinessError::InvalidField(field.into()))?;
+    strict_text(field, value)
+}
+
+fn strict_text(field: &str, value: &str) -> Result<String, DomainDecisionReadinessError> {
+    if value.trim().is_empty() || value != value.trim() || value.chars().any(char::is_control) {
+        return Err(DomainDecisionReadinessError::InvalidField(field.into()));
+    }
     if value.len() > MAX_DOMAIN_DECISION_READINESS_TEXT_BYTES {
         return Err(DomainDecisionReadinessError::TextTooLarge {
             field: field.into(),
@@ -646,6 +920,25 @@ fn required_text(
         });
     }
     Ok(value.to_string())
+}
+
+fn required_digest_value(
+    value: &Value,
+    field: &str,
+) -> Result<String, DomainDecisionReadinessError> {
+    let digest = required_text_value(value, field)?;
+    if !valid_digest(&digest) {
+        return Err(DomainDecisionReadinessError::InvalidField(field.into()));
+    }
+    Ok(digest)
+}
+
+fn valid_digest(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        && ContentHash::parse(value.to_owned()).is_ok()
 }
 
 fn exact_text(
@@ -837,6 +1130,32 @@ mod tests {
     }
 
     #[test]
+    fn policy_aliases_and_padded_identity_text_are_refused() {
+        let observed = report("subject-1", "biological_domains", "modalities", "observed");
+        let digest = ContentHash::of_value(&observed).unwrap().to_string();
+        let mut aliased = request(
+            vec![observed.clone()],
+            json!([{"report_index": 0, "report_digest": digest, "role": "supports"}]),
+        );
+        aliased["policy"]["required_domains"] = json!(["modalities", "MODALITIES"]);
+        assert!(matches!(
+            audit_domain_decision_readiness(&aliased),
+            Err(DomainDecisionReadinessError::InvalidField(field)) if field == "required_domains"
+        ));
+
+        let digest = ContentHash::of_value(&observed).unwrap().to_string();
+        let mut padded = request(
+            vec![observed],
+            json!([{"report_index": 0, "report_digest": digest, "role": "supports"}]),
+        );
+        padded["subject_id"] = json!(" subject-1");
+        assert!(matches!(
+            audit_domain_decision_readiness(&padded),
+            Err(DomainDecisionReadinessError::InvalidField(field)) if field == "subject_id"
+        ));
+    }
+
+    #[test]
     fn tampering_with_a_retained_digest_is_refused() {
         let observed = report("subject-1", "biological_domains", "modalities", "observed");
         let digest = ContentHash::of_value(&observed).unwrap().to_string();
@@ -849,6 +1168,76 @@ mod tests {
         assert!(matches!(
             validate_domain_decision_readiness(&result),
             Err(DomainDecisionReadinessError::DigestMismatch)
+        ));
+    }
+
+    #[test]
+    fn tampering_with_blocker_details_is_refused_even_after_resealing() {
+        let observed = report("subject-1", "biological_domains", "modalities", "observed");
+        let digest = ContentHash::of_value(&observed).unwrap().to_string();
+        let mut result = audit_domain_decision_readiness(&request(
+            vec![observed],
+            json!([{"report_index": 0, "report_digest": digest, "role": "supports"}]),
+        ))
+        .unwrap();
+        result["blockers"][0]["groups"] = json!(["caller-forged-group"]);
+        result["digest"] = Value::String(digest_for(&result).unwrap());
+
+        assert!(matches!(
+            validate_domain_decision_readiness(&result),
+            Err(DomainDecisionReadinessError::InvalidField(field)) if field == "blockers"
+        ));
+    }
+
+    fn reseal(mut value: Value) -> Value {
+        value
+            .as_object_mut()
+            .expect("readiness fixture must be an object")
+            .remove("digest");
+        value["digest"] = json!(digest_for(&value).unwrap());
+        value
+    }
+
+    #[test]
+    fn digest_valid_projection_tampering_is_refused() {
+        let observed = report("subject-1", "biological_domains", "modalities", "observed");
+        let digest = ContentHash::of_value(&observed).unwrap().to_string();
+        let clean = audit_domain_decision_readiness(&request(
+            vec![observed],
+            json!([{"report_index": 0, "report_digest": digest, "role": "supports"}]),
+        ))
+        .unwrap();
+
+        let mut bad_counts = clean.clone();
+        bad_counts["counts"]["supporting_reports"] = json!(0);
+        assert!(matches!(
+            validate_domain_decision_readiness(&reseal(bad_counts)),
+            Err(DomainDecisionReadinessError::InvalidField(_))
+        ));
+
+        let mut bad_assessment = clean.clone();
+        bad_assessment["report_assessments"][0]["structural_contribution"] = json!("context_only");
+        assert!(matches!(
+            validate_domain_decision_readiness(&reseal(bad_assessment)),
+            Err(DomainDecisionReadinessError::InvalidField(_))
+        ));
+
+        let mut bad_blockers = clean.clone();
+        bad_blockers["blockers"] = json!([{
+            "code": "invented",
+            "severity": "error",
+            "message": "invented blocker"
+        }]);
+        assert!(matches!(
+            validate_domain_decision_readiness(&reseal(bad_blockers)),
+            Err(DomainDecisionReadinessError::InvalidField(_))
+        ));
+
+        let mut bad_boundaries = clean;
+        bad_boundaries["guarantees"][0] = json!("invented guarantee");
+        assert!(matches!(
+            validate_domain_decision_readiness(&reseal(bad_boundaries)),
+            Err(DomainDecisionReadinessError::InvalidField(field)) if field == "claim_boundaries"
         ));
     }
 }

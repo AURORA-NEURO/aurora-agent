@@ -43,9 +43,27 @@
 
 use std::collections::BTreeSet;
 
-use serde::{Deserialize, Serialize};
+use serde::{de::Error as _, Deserialize, Deserializer, Serialize};
 
 use crate::error::TrajectoryError;
+
+const MAX_ACT_BYTES: usize = 512;
+const MAX_PROPERTY_TEXT_BYTES: usize = 512;
+const MAX_STEPS: usize = 100_000;
+const MAX_PROPERTIES: usize = 10_000;
+
+fn validate_text(field: &str, value: &str, max_bytes: usize) -> Result<(), String> {
+    if value.is_empty() || value.trim() != value {
+        return Err(format!("{field} must be non-empty and trimmed"));
+    }
+    if value.len() > max_bytes {
+        return Err(format!("{field} exceeds the {max_bytes}-byte bound"));
+    }
+    if value.chars().any(char::is_control) {
+        return Err(format!("{field} must not contain control characters"));
+    }
+    Ok(())
+}
 
 /// What a step did, at the granularity a path property can reason about.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -92,6 +110,20 @@ impl Step {
         self.progress = Some(progress);
         self
     }
+
+    fn validate(&self, index: usize) -> Result<(), TrajectoryError> {
+        validate_text("act", &self.act, MAX_ACT_BYTES)
+            .map_err(|detail| TrajectoryError::InvalidStep { index, detail })?;
+        if let Some(progress) = self.progress {
+            if !(progress.is_finite() && progress >= 0.0) {
+                return Err(TrajectoryError::InvalidStep {
+                    index,
+                    detail: "progress must be finite and non-negative".into(),
+                });
+            }
+        }
+        Ok(())
+    }
 }
 
 /// A property a legitimate path must satisfy, in one of the three shapes 07.03 exemplifies.
@@ -115,11 +147,27 @@ impl PathProperty {
         match self {
             PathProperty::PrecededBy { before, after } => format!("{after}-before-{before}"),
             PathProperty::NoBlindRetry { act } => format!("no-blind-retry-{act}"),
-            PathProperty::FollowedBy {
-                trigger,
-                follow_up,
-            } => format!("{follow_up}-after-{trigger}"),
+            PathProperty::FollowedBy { trigger, follow_up } => {
+                format!("{follow_up}-after-{trigger}")
+            }
         }
+    }
+
+    fn validate(&self) -> Result<(), TrajectoryError> {
+        let result = match self {
+            PathProperty::PrecededBy { before, after } => {
+                validate_text("before", before, MAX_PROPERTY_TEXT_BYTES)
+                    .and_then(|_| validate_text("after", after, MAX_PROPERTY_TEXT_BYTES))
+            }
+            PathProperty::NoBlindRetry { act } => {
+                validate_text("act", act, MAX_PROPERTY_TEXT_BYTES)
+            }
+            PathProperty::FollowedBy { trigger, follow_up } => {
+                validate_text("trigger", trigger, MAX_PROPERTY_TEXT_BYTES)
+                    .and_then(|_| validate_text("follow_up", follow_up, MAX_PROPERTY_TEXT_BYTES))
+            }
+        };
+        result.map_err(TrajectoryError::InvalidProperty)
     }
 }
 
@@ -165,7 +213,7 @@ impl BoundedSuffix {
 }
 
 /// A sequence of steps, and the properties it is judged against.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Trajectory {
     steps: Vec<Step>,
     properties: Vec<PathProperty>,
@@ -180,13 +228,59 @@ impl Trajectory {
         }
     }
 
+    /// Construct a trajectory only after validating its persisted-input invariants.
+    pub fn try_of(steps: Vec<Step>) -> Result<Self, TrajectoryError> {
+        let trajectory = Self::of(steps);
+        trajectory.validate()?;
+        Ok(trajectory)
+    }
+
+    /// Validate the bounded, replayable trajectory representation.
+    pub fn validate(&self) -> Result<(), TrajectoryError> {
+        if self.steps.len() > MAX_STEPS {
+            return Err(TrajectoryError::TooManySteps(self.steps.len()));
+        }
+        for (index, step) in self.steps.iter().enumerate() {
+            step.validate(index)?;
+        }
+        if self.properties.len() > MAX_PROPERTIES {
+            return Err(TrajectoryError::TooManyProperties(self.properties.len()));
+        }
+        let mut names = BTreeSet::new();
+        for property in &self.properties {
+            property.validate()?;
+            let name = property.name();
+            if !names.insert(name.clone()) {
+                return Err(TrajectoryError::DuplicateProperty(name));
+            }
+        }
+        Ok(())
+    }
+
     /// Add a property, refusing a duplicate name.
     pub fn require(&mut self, property: PathProperty) -> Result<(), TrajectoryError> {
+        self.validate_steps()?;
+        property.validate()?;
+        if self.properties.len() >= MAX_PROPERTIES {
+            return Err(TrajectoryError::TooManyProperties(
+                self.properties.len() + 1,
+            ));
+        }
         let name = property.name();
         if self.properties.iter().any(|p| p.name() == name) {
             return Err(TrajectoryError::DuplicateProperty(name));
         }
         self.properties.push(property);
+        Ok(())
+    }
+
+    fn validate_steps(&self) -> Result<(), TrajectoryError> {
+        if self.steps.len() > MAX_STEPS {
+            return Err(TrajectoryError::TooManySteps(self.steps.len()));
+        }
+        for (index, step) in self.steps.iter().enumerate() {
+            step.validate(index)?;
+        }
         Ok(())
     }
 
@@ -227,10 +321,7 @@ impl Trajectory {
                     }
                 }
             }
-            PathProperty::FollowedBy {
-                trigger,
-                follow_up,
-            } => {
+            PathProperty::FollowedBy { trigger, follow_up } => {
                 for (index, step) in self.steps.iter().enumerate() {
                     if step.act != *trigger || !step.succeeded {
                         continue;
@@ -263,6 +354,7 @@ impl Trajectory {
         step: usize,
         horizon: usize,
     ) -> Result<BoundedSuffix, TrajectoryError> {
+        self.validate()?;
         if step >= self.steps.len() {
             return Err(TrajectoryError::StepOutOfRange(step));
         }
@@ -319,5 +411,30 @@ impl Trajectory {
     /// The declared properties.
     pub fn properties(&self) -> &[PathProperty] {
         &self.properties
+    }
+}
+
+impl<'de> Deserialize<'de> for Trajectory {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct TrajectoryWire {
+            steps: Vec<Step>,
+            properties: Vec<PathProperty>,
+        }
+
+        let wire = TrajectoryWire::deserialize(deserializer)?;
+        let trajectory = Trajectory::of(wire.steps);
+        if trajectory.properties.len() > MAX_PROPERTIES {
+            return Err(D::Error::custom(TrajectoryError::TooManyProperties(
+                trajectory.properties.len(),
+            )));
+        }
+        let mut trajectory = trajectory;
+        trajectory.properties = wire.properties;
+        trajectory.validate().map_err(D::Error::custom)?;
+        Ok(trajectory)
     }
 }

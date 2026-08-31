@@ -1,0 +1,6 @@
+"""Choreography P32 federated_continual research_copilot protocol-compilation integrity feature."""
+from .protocol_execution_integrity_support import ProtocolExecutionCard7,ProtocolExecutionRequest4,ProtocolExecutionIntegrityError,manifest,execute
+FEATURE_ID="AFA-choreography-P32-F12";CONTRACT_VERSION="choreography-federated_continual_protocol_execution_integrity_research_copilot/1.0"
+def federated_continual_protocol_execution_integrity_research_copilot_manifest():return manifest(feature_id=FEATURE_ID,contract_version=CONTRACT_VERSION,scale="federated_continual",mode="research_copilot")
+def execute_federated_continual_protocol_execution_integrity_research_copilot(request:ProtocolExecutionRequest4)->ProtocolExecutionCard7:return execute(request,feature_id=FEATURE_ID,contract_version=CONTRACT_VERSION,scale="federated_continual",mode="research_copilot")
+__all__=["FEATURE_ID","CONTRACT_VERSION","federated_continual_protocol_execution_integrity_research_copilot_manifest","execute_federated_continual_protocol_execution_integrity_research_copilot"]

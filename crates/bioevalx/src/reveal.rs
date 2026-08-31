@@ -49,6 +49,11 @@ use serde_json::Value;
 
 use crate::error::RevealError;
 
+const MAX_REVEAL_TEXT_BYTES: usize = 256;
+const MAX_COMMITMENTS: usize = 4096;
+const MAX_OUTCOMES: usize = 4096;
+const MAX_PREDICTION_BYTES: usize = 1_048_576;
+
 /// What a system committed to before the outcome was known.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Commitment {
@@ -76,13 +81,68 @@ impl Commitment {
             analysis_plan: analysis_plan.into(),
         }
     }
+
+    fn validate(&self) -> Result<(), RevealError> {
+        validate_reveal_text(&self.target, "target").map_err(|detail| {
+            RevealError::InvalidCommitment {
+                target: self.target.clone(),
+                detail,
+            }
+        })?;
+        validate_reveal_text(&self.analysis_plan, "analysis_plan").map_err(|detail| {
+            RevealError::InvalidCommitment {
+                target: self.target.clone(),
+                detail,
+            }
+        })?;
+        let encoded = serde_json::to_vec(&self.prediction).map_err(|error| {
+            RevealError::InvalidCommitment {
+                target: self.target.clone(),
+                detail: format!("prediction cannot be serialized: {error}"),
+            }
+        })?;
+        if encoded.len() > MAX_PREDICTION_BYTES {
+            return Err(RevealError::InvalidCommitment {
+                target: self.target.clone(),
+                detail: format!("prediction exceeds {MAX_PREDICTION_BYTES} bytes"),
+            });
+        }
+        Ok(())
+    }
 }
 
 /// The open state: commitments may be added, nothing may be scored.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Registration {
     pub study: String,
     commitments: BTreeMap<String, Commitment>,
+}
+
+#[derive(Deserialize)]
+struct RegistrationWire {
+    study: String,
+    commitments: BTreeMap<String, Commitment>,
+}
+
+impl<'de> Deserialize<'de> for Registration {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let wire = RegistrationWire::deserialize(deserializer)?;
+        let mut registration = Registration::open(wire.study);
+        for (key, commitment) in wire.commitments {
+            if key != commitment.target {
+                return Err(serde::de::Error::custom(
+                    "commitment map key must equal commitment target",
+                ));
+            }
+            registration
+                .commit(commitment)
+                .map_err(serde::de::Error::custom)?;
+        }
+        Ok(registration)
+    }
 }
 
 impl Registration {
@@ -96,6 +156,11 @@ impl Registration {
 
     /// Add a commitment.
     pub fn commit(&mut self, commitment: Commitment) -> Result<(), RevealError> {
+        validate_reveal_text(&self.study, "study").map_err(RevealError::InvalidStudy)?;
+        commitment.validate()?;
+        if self.commitments.len() >= MAX_COMMITMENTS {
+            return Err(RevealError::TooManyCommitments(MAX_COMMITMENTS));
+        }
         if self.commitments.contains_key(&commitment.target) {
             return Err(RevealError::DuplicateCommitment(commitment.target));
         }
@@ -116,6 +181,10 @@ impl Registration {
         if self.commitments.is_empty() {
             return Err(RevealError::NothingCommitted);
         }
+        validate_reveal_text(&self.study, "study").map_err(RevealError::InvalidStudy)?;
+        for commitment in self.commitments.values() {
+            commitment.validate()?;
+        }
         let rubric_digest = ContentHash::of_value(rubric)
             .map_err(|e| RevealError::RubricChanged {
                 sealed: "<unhashable rubric>".to_string(),
@@ -123,18 +192,19 @@ impl Registration {
             })?
             .as_str()
             .to_string();
-        let commitment_digest = ContentHash::of_value(
-            &serde_json::to_value(&self.commitments).map_err(|e| RevealError::RubricChanged {
-                sealed: "<unserializable commitments>".to_string(),
+        let commitment_digest =
+            ContentHash::of_value(&serde_json::to_value(&self.commitments).map_err(|e| {
+                RevealError::RubricChanged {
+                    sealed: "<unserializable commitments>".to_string(),
+                    presented: e.to_string(),
+                }
+            })?)
+            .map_err(|e| RevealError::RubricChanged {
+                sealed: "<unhashable commitments>".to_string(),
                 presented: e.to_string(),
-            })?,
-        )
-        .map_err(|e| RevealError::RubricChanged {
-            sealed: "<unhashable commitments>".to_string(),
-            presented: e.to_string(),
-        })?
-        .as_str()
-        .to_string();
+            })?
+            .as_str()
+            .to_string();
         Ok(Sealed {
             study: self.study,
             commitments: self.commitments,
@@ -151,7 +221,7 @@ impl Registration {
 }
 
 /// The sealed state: commitments are frozen, the outcome is not yet known.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Sealed {
     pub study: String,
     commitments: BTreeMap<String, Commitment>,
@@ -167,11 +237,21 @@ impl Sealed {
     }
 
     /// Reveal outcomes, consuming the sealed state.
-    pub fn reveal(self, outcomes: Vec<Outcome>) -> Revealed {
-        Revealed {
+    pub fn reveal(self, outcomes: Vec<Outcome>) -> Result<Revealed, RevealError> {
+        if outcomes.len() > MAX_OUTCOMES {
+            return Err(RevealError::TooManyOutcomes(MAX_OUTCOMES));
+        }
+        let mut targets = std::collections::BTreeSet::new();
+        for outcome in &outcomes {
+            outcome.validate()?;
+            if !targets.insert(outcome.target.clone()) {
+                return Err(RevealError::DuplicateOutcome(outcome.target.clone()));
+            }
+        }
+        Ok(Revealed {
             sealed: self,
             outcomes,
-        }
+        })
     }
 
     /// The digest of the rubric that was sealed.
@@ -210,10 +290,17 @@ impl Outcome {
             observed,
         }
     }
+
+    fn validate(&self) -> Result<(), RevealError> {
+        validate_reveal_text(&self.target, "target").map_err(|detail| RevealError::InvalidOutcome {
+            target: self.target.clone(),
+            detail,
+        })
+    }
 }
 
 /// The revealed state: outcomes are known and scoring is possible under the sealed rubric.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Revealed {
     sealed: Sealed,
     outcomes: Vec<Outcome>,
@@ -285,7 +372,7 @@ impl Revealed {
 /// prediction's own state space, which `bioprism-bioeval` owns and which this module has no
 /// business re-deriving. What this module guarantees is that the pair is legitimate: the
 /// prediction was sealed first, and the rubric has not moved.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ScoredCommitment {
     pub target: String,
     pub analysis_plan: String,
@@ -294,7 +381,7 @@ pub struct ScoredCommitment {
 }
 
 /// The admissible pairs, plus the commitments nobody revealed.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Scoring {
     pub study: String,
     pub rubric_digest: String,
@@ -310,4 +397,17 @@ impl Scoring {
     pub fn complete(&self) -> bool {
         self.unrevealed.is_empty()
     }
+}
+
+fn validate_reveal_text(value: &str, field: &str) -> Result<(), String> {
+    if value.trim().is_empty()
+        || value != value.trim()
+        || value.len() > MAX_REVEAL_TEXT_BYTES
+        || value.chars().any(char::is_control)
+    {
+        return Err(format!(
+            "{field} must be bounded, trimmed, and control-free"
+        ));
+    }
+    Ok(())
 }

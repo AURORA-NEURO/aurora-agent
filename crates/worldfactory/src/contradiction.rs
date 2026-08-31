@@ -695,8 +695,17 @@ pub fn pose(left: Reading, right: Reading) -> Result<Contradiction, Contradictio
             return Err(ContradictionRefusal::IncomparableScopes { dimension })
         }
     };
-    let (Some(lv), Some(rv)) = (left.value(), right.value()) else {
-        unreachable!("not-examined readings were rejected above")
+    let Some(lv) = left.value() else {
+        return Err(ContradictionRefusal::InvalidReading {
+            modality: left.modality.to_string(),
+            detail: "the reading was not examined after passing the examined-reading gate".into(),
+        });
+    };
+    let Some(rv) = right.value() else {
+        return Err(ContradictionRefusal::InvalidReading {
+            modality: right.modality.to_string(),
+            detail: "the reading was not examined after passing the examined-reading gate".into(),
+        });
     };
     if lv.agrees_with(rv) {
         return Err(ContradictionRefusal::ReadingsAgree {

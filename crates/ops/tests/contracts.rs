@@ -125,12 +125,10 @@ fn a_variant_flag_and_an_emitted_setting_each_move_the_computation_identity_alon
 
     let deeper = ConfigStack::new(schema())
         .push(defaults())
-        .push(
-            Source::new(Layer::CommandLine, "--max-hops").bind(
-                key("compile.max_hops"),
-                Binding::Value(SettingValue::Integer(5)),
-            ),
-        )
+        .push(Source::new(Layer::CommandLine, "--max-hops").bind(
+            key("compile.max_hops"),
+            Binding::Value(SettingValue::Integer(5)),
+        ))
         .resolve()
         .unwrap();
     let by_config = computation_identity(&deeper, &registry());
@@ -196,12 +194,10 @@ fn every_failure_this_crate_can_raise_names_one_of_the_six_contracts_it_implemen
 fn a_run_that_leases_its_secrets_and_declares_its_effects_passes_both_hardening_predicates() {
     let config = ConfigStack::new(schema())
         .push(defaults())
-        .push(
-            Source::new(Layer::Environment, "BIOPRISM_HUB_TOKEN").bind(
-                key("hub.token"),
-                Binding::Secret(SecretRef::new(SecretSource::Environment, "HUB_TOKEN").unwrap()),
-            ),
-        )
+        .push(Source::new(Layer::Environment, "BIOPRISM_HUB_TOKEN").bind(
+            key("hub.token"),
+            Binding::Secret(SecretRef::new(SecretSource::Environment, "HUB_TOKEN").unwrap()),
+        ))
         .resolve()
         .expect("resolves");
 
@@ -285,8 +281,13 @@ fn no_telemetry_failure_can_invalidate_a_result_however_the_projection_fails() {
 #[test]
 fn a_capacity_headline_and_a_telemetry_metric_both_refuse_to_stand_on_nothing() {
     let projection = CapacityModel::new(
-        Assumption::assumed("work_units_per_epoch", 1000.0, "work-units/epoch", "sized by hand")
-            .unwrap(),
+        Assumption::assumed(
+            "work_units_per_epoch",
+            1000.0,
+            "work-units/epoch",
+            "sized by hand",
+        )
+        .unwrap(),
         1024,
     )
     .project(
@@ -356,7 +357,12 @@ fn saturation_concedes_only_from_a_closed_set_that_contains_no_evidence() {
     .expect("projects");
 
     let plan = DegradationPlan::declare("shed", [Concession::Throughput], "queue_age").unwrap();
-    let saturation = projection.under(&Demand { calls_per_epoch: 50.0 }, &plan);
+    let saturation = projection.under(
+        &Demand {
+            calls_per_epoch: 50.0,
+        },
+        &plan,
+    );
     assert!(saturation.is_saturated());
     for concession in plan.concessions() {
         assert!(Concession::ALL.contains(concession));
@@ -387,7 +393,10 @@ fn a_pinned_run_and_its_configuration_produce_a_reproducible_pair_of_digests() {
 fn the_alpha_report_agrees_with_the_table_the_crate_documentation_prints() {
     let summary = alpha::summary();
     let table = alpha::markdown_table();
-    let refuted_rows = table.lines().filter(|line| line.contains("| refuted |")).count();
+    let refuted_rows = table
+        .lines()
+        .filter(|line| line.contains("| refuted |"))
+        .count();
     let unverifiable_rows = table
         .lines()
         .filter(|line| line.contains("| unverifiable |"))

@@ -29,6 +29,9 @@ const MAX_BINDINGS_PER_CLAIM: usize = 16;
 const MAX_REPLAY_ITEMS: usize = 512;
 const DEFAULT_REPLAY_ITEMS: usize = 128;
 const MAX_CATALOGUE_SNAPSHOT_BYTES: usize = 512 * 1024;
+const MAX_HISTORICAL_ADAPTER_LABELS: usize = 64;
+const MAX_HISTORICAL_ADAPTER_TOOLS: usize = 128;
+const MAX_HISTORICAL_ADAPTER_POINTERS: usize = 32;
 
 fn default_max_items() -> usize {
     DEFAULT_MAX_ITEMS
@@ -54,11 +57,11 @@ fn validate_filter(field: &'static str, value: &Option<String>) -> Result<(), Ev
                 maximum: MAX_FILTER_BYTES,
             });
         }
-        if value
-            .chars()
-            .any(|character| character == '\0' || character == '\n' || character == '\r')
-        {
+        if value.chars().any(char::is_control) {
             return Err(EvaluatorError::ControlCharacter { field });
+        }
+        if value != value.trim() {
+            return Err(EvaluatorError::SurroundingWhitespace { field });
         }
     }
     Ok(())
@@ -73,7 +76,7 @@ fn tokens(value: &str) -> Vec<String> {
 }
 
 fn normalized(value: &str) -> String {
-    value.to_ascii_lowercase()
+    value.trim().to_ascii_lowercase()
 }
 
 fn default_true() -> bool {
@@ -104,14 +107,17 @@ fn valid_json_pointer(pointer: &str) -> bool {
 
 fn visible_text(value: &str, maximum: usize) -> bool {
     !value.trim().is_empty()
+        && value == value.trim()
         && value.len() <= maximum
-        && !value
-            .chars()
-            .any(|character| character == '\0' || character == '\n' || character == '\r')
+        && !value.chars().any(char::is_control)
 }
 
 fn valid_digest(value: &str) -> bool {
-    value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        && ContentHash::parse(value.to_owned()).is_ok()
 }
 
 /// One explicit evaluator candidate. The candidate is descriptive and non-executable.
@@ -513,9 +519,12 @@ impl MissionEvaluatorCatalogue {
                 .ok_or_else(|| EvaluatorError::InvalidReview {
                     reason: "discovery must be an object".into(),
                 })?;
-        if discovery.get("workflow").and_then(Value::as_str) != Some("mission_evaluator_discover") {
+        if discovery.get("ok").and_then(Value::as_bool) != Some(true)
+            || discovery.get("workflow").and_then(Value::as_str)
+                != Some("mission_evaluator_discover")
+        {
             return Err(EvaluatorError::InvalidReview {
-                reason: "discovery.workflow must be mission_evaluator_discover".into(),
+                reason: "discovery must be a successful mission_evaluator_discover response".into(),
             });
         }
         if discovery.get("selection_posture").and_then(Value::as_str) != Some("candidate_only") {
@@ -534,6 +543,23 @@ impl MissionEvaluatorCatalogue {
             return Err(EvaluatorError::StaleDiscovery {
                 expected: self.digest.to_string(),
                 received: catalog_digest.into(),
+            });
+        }
+        let parsed_discovery: MissionEvaluatorSearch =
+            serde_json::from_value(request.discovery.clone()).map_err(|error| {
+                EvaluatorError::InvalidReview {
+                    reason: format!("discovery does not match the evaluator search shape: {error}"),
+                }
+            })?;
+        if parsed_discovery.schema_version != MISSION_EVALUATOR_SCHEMA_VERSION {
+            return Err(EvaluatorError::InvalidReview {
+                reason: "discovery.schema_version is unsupported".into(),
+            });
+        }
+        let expected_discovery = self.search(&parsed_discovery.query)?;
+        if parsed_discovery != expected_discovery {
+            return Err(EvaluatorError::InvalidReview {
+                reason: "discovery rows do not match a deterministic search of the current evaluator catalogue".into(),
             });
         }
         let matches = discovery
@@ -605,7 +631,7 @@ impl MissionEvaluatorCatalogue {
             {
                 row_errors.push("selection.output_pointer must be a valid RFC 6901 pointer");
             }
-            if !ids.insert(selection.id.clone()) {
+            if !ids.insert(selection.id.to_ascii_lowercase()) {
                 row_errors.push("selection.id must be unique within the review");
             }
             let claim_count = claim_counts
@@ -737,7 +763,7 @@ impl MissionEvaluatorCatalogue {
             .and_then(|plan| plan.get("mission_id"))
             .or_else(|| mission.get("mission_id"))
             .and_then(Value::as_str)
-            .filter(|value| !value.trim().is_empty())
+            .filter(|value| visible_text(value, MAX_FILTER_BYTES))
             .ok_or_else(|| EvaluatorError::InvalidReplay {
                 reason: "mission must contain a non-empty mission_id or plan.mission_id".into(),
             })?;
@@ -756,6 +782,13 @@ impl MissionEvaluatorCatalogue {
             .ok_or_else(|| EvaluatorError::InvalidReplay {
                 reason: "mission.claim_lineage.claims must be an array".into(),
             })?;
+        if claims.len() > MAX_REPLAY_ITEMS {
+            return Err(EvaluatorError::InvalidReplay {
+                reason: format!(
+                    "mission.claim_lineage.claims exceeds the {MAX_REPLAY_ITEMS}-claim replay bound"
+                ),
+            });
+        }
         let mut findings = Vec::new();
         let route_review_provenance = mission
             .get("plan")
@@ -783,6 +816,7 @@ impl MissionEvaluatorCatalogue {
         let mut replayed_group_ids = BTreeSet::new();
         let mut returned_bindings = 0usize;
         let mut omitted_bindings = 0usize;
+        let mut claim_ids = BTreeSet::new();
 
         for (claim_index, claim) in claims.iter().enumerate() {
             if claim_index >= request.max_items {
@@ -797,16 +831,37 @@ impl MissionEvaluatorCatalogue {
                 }));
                 continue;
             };
-            let claim_id = claim_object.get("id").and_then(Value::as_str).unwrap_or("");
+            let claim_id = claim_object
+                .get("id")
+                .and_then(Value::as_str)
+                .filter(|value| visible_text(value, MAX_FILTER_BYTES))
+                .ok_or_else(|| EvaluatorError::InvalidReplay {
+                    reason: format!("claim {claim_index} must contain a bounded visible id"),
+                })?;
+            if !claim_ids.insert(claim_id.to_ascii_lowercase()) {
+                findings.push(json!({
+                    "severity": "error",
+                    "code": "duplicate_claim_id",
+                    "claim_id": claim_id,
+                }));
+            }
             let bindings = claim_object
                 .get("evaluator_bindings")
                 .and_then(Value::as_array)
                 .ok_or_else(|| EvaluatorError::InvalidReplay {
                     reason: format!("claim `{claim_id}` evaluator_bindings must be an array"),
                 })?;
+            if bindings.len() > MAX_REPLAY_ITEMS {
+                return Err(EvaluatorError::InvalidReplay {
+                    reason: format!(
+                        "claim `{claim_id}` evaluator_bindings exceeds the {MAX_REPLAY_ITEMS}-binding replay bound"
+                    ),
+                });
+            }
             let mut claim_states = BTreeMap::<String, usize>::new();
             let mut claim_digests = BTreeSet::new();
             let mut claim_returned_bindings = 0usize;
+            let mut binding_ids = BTreeSet::new();
             for (binding_index, binding) in bindings.iter().enumerate() {
                 let include_binding = returned_bindings < request.max_items;
                 if !include_binding {
@@ -828,6 +883,14 @@ impl MissionEvaluatorCatalogue {
                     .get("id")
                     .and_then(Value::as_str)
                     .unwrap_or("");
+                if !binding_ids.insert(binding_id.to_ascii_lowercase()) {
+                    findings.push(json!({
+                        "severity": "error",
+                        "code": "duplicate_binding_id",
+                        "claim_id": claim_id,
+                        "binding_id": binding_id,
+                    }));
+                }
                 let adapter_id = binding_object
                     .get("adapter_id")
                     .and_then(Value::as_str)
@@ -840,8 +903,49 @@ impl MissionEvaluatorCatalogue {
                     .get("outcome_state")
                     .and_then(Value::as_str)
                     .unwrap_or("unreported");
+                if !visible_text(binding_id, MAX_FILTER_BYTES)
+                    || !visible_text(adapter_id, MAX_FILTER_BYTES)
+                    || !visible_text(domain, MAX_FILTER_BYTES)
+                {
+                    findings.push(json!({
+                        "severity": "error",
+                        "code": "binding_identity_invalid",
+                        "claim_id": claim_id,
+                        "binding_id": binding_id,
+                    }));
+                }
+                if !matches!(
+                    outcome_state,
+                    "retained"
+                        | "refused"
+                        | "blocked"
+                        | "cancelled"
+                        | "output_omitted"
+                        | "pointer_missing"
+                        | "missing_step_result"
+                        | "ambiguous_result"
+                        | "unreported"
+                ) {
+                    findings.push(json!({
+                        "severity": "error",
+                        "code": "unknown_outcome_state",
+                        "claim_id": claim_id,
+                        "binding_id": binding_id,
+                        "outcome_state": outcome_state,
+                    }));
+                }
                 *state_counts.entry(outcome_state.to_string()).or_default() += 1;
                 *claim_states.entry(outcome_state.to_string()).or_default() += 1;
+                if let Some(value) = binding_object.get("output_digest") {
+                    if !value.is_null() && value.as_str().is_none() {
+                        findings.push(json!({
+                            "severity": "error",
+                            "code": "invalid_output_digest",
+                            "claim_id": claim_id,
+                            "binding_id": binding_id,
+                        }));
+                    }
+                }
                 if let Some(digest) = binding_object.get("output_digest").and_then(Value::as_str) {
                     if valid_digest(digest) {
                         claim_digests.insert(digest.to_string());
@@ -913,7 +1017,13 @@ impl MissionEvaluatorCatalogue {
                     "replayed_retained"
                 } else if matches!(
                     outcome_state,
-                    "refused" | "blocked" | "cancelled" | "output_omitted" | "pointer_missing"
+                    "refused"
+                        | "blocked"
+                        | "cancelled"
+                        | "output_omitted"
+                        | "pointer_missing"
+                        | "missing_step_result"
+                        | "ambiguous_result"
                 ) {
                     outcome_state
                 } else {
@@ -1272,7 +1382,7 @@ impl MissionEvaluatorCatalogue {
         });
         if let (Some(target), Some(snapshot_diff)) = (
             result.as_object_mut(),
-            self.catalogue_snapshot_diff(historical_snapshot)
+            self.catalogue_snapshot_diff(historical_snapshot, historical_catalog_digest)
                 .as_object(),
         ) {
             for (key, value) in snapshot_diff {
@@ -1282,7 +1392,11 @@ impl MissionEvaluatorCatalogue {
         result
     }
 
-    fn catalogue_snapshot_diff(&self, snapshot: Option<&Value>) -> Value {
+    fn catalogue_snapshot_diff(
+        &self,
+        snapshot: Option<&Value>,
+        expected_catalog_digest: Option<&str>,
+    ) -> Value {
         let Some(snapshot) = snapshot else {
             return json!({
                 "historical_snapshot_present": false,
@@ -1309,6 +1423,19 @@ impl MissionEvaluatorCatalogue {
                 "comparison_scope": "historical_digest_and_current_binding_compatibility"
             });
         };
+        if object.get("schema").and_then(Value::as_str)
+            != Some(MISSION_EVALUATOR_CATALOGUE_SNAPSHOT_SCHEMA_VERSION)
+        {
+            return json!({
+                "historical_snapshot_present": true,
+                "historical_snapshot_valid": false,
+                "historical_catalogue_rows_retained": false,
+                "exact_row_diff_available": false,
+                "row_diff_status": "invalid",
+                "historical_snapshot_invalid_reason": "snapshot.schema is missing or unsupported",
+                "comparison_scope": "historical_digest_and_current_binding_compatibility"
+            });
+        }
         let Some(rows) = object.get("rows").and_then(Value::as_array) else {
             return json!({
                 "historical_snapshot_present": true,
@@ -1334,6 +1461,24 @@ impl MissionEvaluatorCatalogue {
                 "comparison_scope": "historical_digest_and_current_binding_compatibility"
             });
         }
+        let expected_retention = json!({
+            "rows_retained": true,
+            "bounded": true,
+            "maximum_bytes": MAX_CATALOGUE_SNAPSHOT_BYTES
+        });
+        if object.get("execution").and_then(Value::as_str) != Some("not_started")
+            || object.get("retention") != Some(&expected_retention)
+        {
+            return json!({
+                "historical_snapshot_present": true,
+                "historical_snapshot_valid": false,
+                "historical_catalogue_rows_retained": false,
+                "exact_row_diff_available": false,
+                "row_diff_status": "invalid",
+                "historical_snapshot_invalid_reason": "snapshot execution or retention contract is invalid",
+                "comparison_scope": "historical_digest_and_current_binding_compatibility"
+            });
+        }
         let rows_value = Value::Array(rows.clone());
         let recomputed_snapshot_digest = ContentHash::of_value(&rows_value)
             .map(|digest| digest.to_string())
@@ -1346,13 +1491,48 @@ impl MissionEvaluatorCatalogue {
             .get("catalog_digest")
             .and_then(Value::as_str)
             .unwrap_or_default();
+        if let Some(expected_catalog_digest) = expected_catalog_digest {
+            if supplied_catalog_digest != expected_catalog_digest {
+                return json!({
+                    "historical_snapshot_present": true,
+                    "historical_snapshot_valid": false,
+                    "historical_catalogue_rows_retained": false,
+                    "exact_row_diff_available": false,
+                    "row_diff_status": "invalid",
+                    "historical_snapshot_catalog_digest_match": false,
+                    "historical_snapshot_catalog_digest": supplied_catalog_digest,
+                    "expected_review_catalog_digest": expected_catalog_digest,
+                    "historical_snapshot_invalid_reason": "snapshot.catalog_digest does not match review catalog_digest",
+                    "comparison_scope": "historical_digest_and_current_binding_compatibility"
+                });
+            }
+        }
         let mut historical_rows = BTreeMap::<String, Value>::new();
+        let mut historical_id_keys = BTreeSet::new();
+        let mut historical_group_keys = BTreeSet::new();
         let mut invalid_reason = None;
         for row in rows {
             let Ok(adapter) = serde_json::from_value::<MissionEvaluatorAdapter>(row.clone()) else {
                 invalid_reason = Some("snapshot.rows contains an invalid adapter row".to_string());
                 break;
             };
+            if let Err(reason) = validate_historical_adapter(&adapter) {
+                invalid_reason = Some(format!(
+                    "snapshot.rows adapter {:?} is invalid: {reason}",
+                    adapter.id
+                ));
+                break;
+            }
+            if !historical_id_keys.insert(adapter.id.to_ascii_lowercase()) {
+                invalid_reason =
+                    Some("snapshot.rows contains case-colliding adapter IDs".to_string());
+                break;
+            }
+            if !historical_group_keys.insert(adapter.group_id.to_ascii_lowercase()) {
+                invalid_reason =
+                    Some("snapshot.rows contains case-colliding group IDs".to_string());
+                break;
+            }
             if historical_rows
                 .insert(adapter.id.clone(), row.clone())
                 .is_some()
@@ -1360,6 +1540,25 @@ impl MissionEvaluatorCatalogue {
                 invalid_reason = Some("snapshot.rows contains duplicate adapter IDs".to_string());
                 break;
             }
+        }
+        let supplied_row_count = object
+            .get("row_count")
+            .and_then(Value::as_u64)
+            .and_then(|count| usize::try_from(count).ok());
+        if invalid_reason.is_none() && supplied_row_count != Some(rows.len()) {
+            invalid_reason = Some("snapshot.row_count does not match retained rows".to_string());
+        }
+        let historical_group_count = historical_rows
+            .values()
+            .filter_map(|row| row.get("group_id").and_then(Value::as_str))
+            .collect::<BTreeSet<_>>()
+            .len();
+        let supplied_group_count = object
+            .get("group_count")
+            .and_then(Value::as_u64)
+            .and_then(|count| usize::try_from(count).ok());
+        if invalid_reason.is_none() && supplied_group_count != Some(historical_group_count) {
+            invalid_reason = Some("snapshot.group_count does not match retained rows".to_string());
         }
         let snapshot_digest_match = valid_digest(supplied_snapshot_digest)
             && supplied_snapshot_digest == recomputed_snapshot_digest;
@@ -1382,16 +1581,21 @@ impl MissionEvaluatorCatalogue {
                 "comparison_scope": "historical_digest_and_current_binding_compatibility"
             });
         }
-        let current_rows = self
-            .adapters
-            .iter()
-            .map(|adapter| {
-                (
-                    adapter.id.clone(),
-                    to_value(adapter).expect("adapter is serializable"),
-                )
-            })
-            .collect::<BTreeMap<_, _>>();
+        let mut current_rows = BTreeMap::<String, Value>::new();
+        for adapter in &self.adapters {
+            let Ok(row) = to_value(adapter) else {
+                return json!({
+                    "historical_snapshot_present": true,
+                    "historical_snapshot_valid": false,
+                    "historical_catalogue_rows_retained": false,
+                    "exact_row_diff_available": false,
+                    "row_diff_status": "invalid",
+                    "historical_snapshot_invalid_reason": "current catalogue contains an unserialisable adapter row",
+                    "comparison_scope": "historical_digest_and_current_binding_compatibility"
+                });
+            };
+            current_rows.insert(adapter.id.clone(), row);
+        }
         let historical_ids = historical_rows.keys().cloned().collect::<BTreeSet<_>>();
         let current_ids = current_rows.keys().cloned().collect::<BTreeSet<_>>();
         let added_adapter_ids = current_ids
@@ -1406,8 +1610,18 @@ impl MissionEvaluatorCatalogue {
         let mut unchanged_adapter_ids = Vec::new();
         let mut changed_adapter_fields = BTreeMap::<String, Vec<String>>::new();
         for id in historical_ids.intersection(&current_ids) {
-            let historical = historical_rows.get(id).expect("intersection row exists");
-            let current = current_rows.get(id).expect("intersection row exists");
+            let (Some(historical), Some(current)) = (historical_rows.get(id), current_rows.get(id))
+            else {
+                return json!({
+                    "historical_snapshot_present": true,
+                    "historical_snapshot_valid": false,
+                    "historical_catalogue_rows_retained": false,
+                    "exact_row_diff_available": false,
+                    "row_diff_status": "invalid",
+                    "historical_snapshot_invalid_reason": "catalogue row index changed during comparison",
+                    "comparison_scope": "historical_digest_and_current_binding_compatibility"
+                });
+            };
             if historical == current {
                 unchanged_adapter_ids.push(id.clone());
                 continue;
@@ -1438,6 +1652,8 @@ impl MissionEvaluatorCatalogue {
             "historical_snapshot_digest": supplied_snapshot_digest,
             "recomputed_historical_snapshot_digest": recomputed_snapshot_digest,
             "historical_snapshot_digest_match": true,
+            "historical_snapshot_catalog_digest_match": expected_catalog_digest
+                .map(|expected| expected == supplied_catalog_digest),
             "historical_snapshot_row_count": historical_rows.len(),
             "added_adapter_ids": added_adapter_ids,
             "removed_adapter_ids": removed_adapter_ids,
@@ -1447,6 +1663,66 @@ impl MissionEvaluatorCatalogue {
             "comparison_scope": "exact_adapter_row_comparison"
         })
     }
+}
+
+fn validate_historical_adapter(adapter: &MissionEvaluatorAdapter) -> Result<(), String> {
+    for (field, value) in [
+        ("id", adapter.id.as_str()),
+        ("group_id", adapter.group_id.as_str()),
+        ("purpose", adapter.purpose.as_str()),
+        ("status", adapter.status.as_str()),
+    ] {
+        if !visible_text(value, MAX_FILTER_BYTES) {
+            return Err(format!("{field} must be bounded visible text"));
+        }
+    }
+
+    for (field, values, maximum, required) in [
+        (
+            "domains",
+            &adapter.domains,
+            MAX_HISTORICAL_ADAPTER_LABELS,
+            true,
+        ),
+        (
+            "levels",
+            &adapter.levels,
+            MAX_HISTORICAL_ADAPTER_LABELS,
+            true,
+        ),
+        (
+            "candidate_tools",
+            &adapter.candidate_tools,
+            MAX_HISTORICAL_ADAPTER_TOOLS,
+            false,
+        ),
+    ] {
+        if values.len() > maximum || (required && values.is_empty()) {
+            return Err(format!("{field} exceeds its bounded non-empty shape"));
+        }
+        let mut identities = BTreeSet::new();
+        for value in values {
+            if !visible_text(value, MAX_FILTER_BYTES)
+                || !identities.insert(value.to_ascii_lowercase())
+            {
+                return Err(format!("{field} contains invalid or duplicate labels"));
+            }
+        }
+    }
+
+    if adapter.output_pointer_examples.len() > MAX_HISTORICAL_ADAPTER_POINTERS {
+        return Err("output_pointer_examples exceeds its bound".into());
+    }
+    for pointer in &adapter.output_pointer_examples {
+        if pointer.len() > MAX_FILTER_BYTES
+            || pointer != pointer.trim()
+            || pointer.chars().any(char::is_control)
+            || !valid_json_pointer(pointer)
+        {
+            return Err("output_pointer_examples contains an invalid pointer".into());
+        }
+    }
+    Ok(())
 }
 
 fn mission_referenced_adapter_ids(mission: &Value) -> BTreeSet<String> {
@@ -1472,6 +1748,8 @@ pub enum EvaluatorError {
     EmptyFilter { field: &'static str },
     #[error("{field} filter contains a control character")]
     ControlCharacter { field: &'static str },
+    #[error("{field} filter must not contain surrounding whitespace")]
+    SurroundingWhitespace { field: &'static str },
     #[error("{field} filter is {bytes} bytes; maximum is {maximum}")]
     FilterTooLong {
         field: &'static str,
@@ -1601,6 +1879,57 @@ mod tests {
             MissionEvaluatorCatalogue::standard().search(&query),
             Err(EvaluatorError::EmptyFilter { field: "level" })
         ));
+
+        let query = MissionEvaluatorQuery {
+            query: Some(" oncology ".into()),
+            ..MissionEvaluatorQuery::default()
+        };
+        assert!(matches!(
+            MissionEvaluatorCatalogue::standard().search(&query),
+            Err(EvaluatorError::SurroundingWhitespace { field: "query" })
+        ));
+    }
+
+    #[test]
+    fn review_rechecks_discovery_rows_against_the_current_catalogue() {
+        let catalogue = MissionEvaluatorCatalogue::standard();
+        let query = MissionEvaluatorQuery {
+            query: Some("oncology fidelity".into()),
+            ..MissionEvaluatorQuery::default()
+        };
+        let search = catalogue.search(&query).unwrap();
+        let adapter = search.matches[0].adapter.clone();
+        let mut discovery = serde_json::to_value(search).unwrap();
+        discovery["ok"] = json!(true);
+        discovery["workflow"] = json!("mission_evaluator_discover");
+        discovery["selection_posture"] = json!("candidate_only");
+        let request = MissionEvaluatorReviewRequest {
+            discovery: discovery.clone(),
+            selections: vec![MissionEvaluatorSelection {
+                id: "selection-1".into(),
+                claim_id: "claim-1".into(),
+                adapter_id: adapter.id,
+                domain: "oncology".into(),
+                step_id: "step-1".into(),
+                output_pointer: "/output".into(),
+                required: true,
+            }],
+        };
+        assert_eq!(
+            catalogue.review(&request).unwrap()["review_status"],
+            "ready"
+        );
+
+        discovery["matches"][0]["adapter"]["purpose"] =
+            json!("caller-fabricated evaluator purpose");
+        let tampered = MissionEvaluatorReviewRequest {
+            discovery,
+            ..request
+        };
+        assert!(matches!(
+            catalogue.review(&tampered),
+            Err(EvaluatorError::InvalidReview { .. })
+        ));
     }
 
     #[test]
@@ -1632,6 +1961,61 @@ mod tests {
                         .as_str()
                         .is_some_and(|value| value.contains("structural"))
             }));
+    }
+
+    #[test]
+    fn replay_reports_unknown_states_and_malformed_binding_values() {
+        let catalogue = MissionEvaluatorCatalogue::standard();
+        let replay = catalogue
+            .replay(&MissionEvaluatorReplayRequest {
+                mission: json!({
+                    "workflow": "agent_mission",
+                    "plan": {"mission_id": "mission-malformed-replay"},
+                    "claim_lineage": {
+                        "claims": [{
+                            "id": "claim-1",
+                            "evaluator_bindings": [{
+                                "id": "binding-1",
+                                "adapter_id": "unknown.adapter",
+                                "domain": "unknown domain",
+                                "outcome_state": "invented",
+                                "output_digest": true
+                            }]
+                        }]
+                    }
+                }),
+                include_fixtures: false,
+                max_items: 8,
+            })
+            .unwrap();
+        assert_eq!(replay["replay_status"], "blocked");
+        for code in [
+            "unknown_outcome_state",
+            "invalid_output_digest",
+            "unknown_adapter",
+        ] {
+            assert!(
+                replay["findings"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|finding| finding["code"] == code),
+                "missing {code}"
+            );
+        }
+
+        assert!(matches!(
+            catalogue.replay(&MissionEvaluatorReplayRequest {
+                mission: json!({
+                    "workflow": "agent_mission",
+                    "plan": {"mission_id": " mission-padded"},
+                    "claim_lineage": {"claims": []}
+                }),
+                include_fixtures: false,
+                max_items: 1,
+            }),
+            Err(EvaluatorError::InvalidReplay { .. })
+        ));
     }
 
     #[test]
@@ -1683,6 +2067,104 @@ mod tests {
             .any(|finding| { finding["code"] == json!("unknown_adapter") }));
         assert_eq!(replay["fixtures"], json!([]));
         assert_eq!(replay["omitted_fixtures"], json!(29));
+    }
+
+    #[test]
+    fn replay_preserves_explicit_ambiguous_and_missing_result_states() {
+        let catalogue = MissionEvaluatorCatalogue::standard();
+        let replay = catalogue
+            .replay(&MissionEvaluatorReplayRequest {
+                mission: json!({
+                    "workflow": "agent_mission",
+                    "plan": {"mission_id": "mission-explicit-states"},
+                    "claim_lineage": {
+                        "claims": [{
+                            "id": "claim-1",
+                            "evaluator_bindings": [{
+                                "id": "binding-1",
+                                "adapter_id": "oncoworlds.assay_fidelity",
+                                "domain": "oncology",
+                                "outcome_state": "ambiguous_result"
+                            }, {
+                                "id": "binding-2",
+                                "adapter_id": "oncoworlds.assay_fidelity",
+                                "domain": "oncology",
+                                "outcome_state": "missing_step_result"
+                            }],
+                            "evaluator_coverage": {
+                                "outcome_counts": {
+                                    "ambiguous_result": 1,
+                                    "missing_step_result": 1
+                                },
+                                "distinct_output_digests": 0,
+                                "disagreement_posture": "unavailable"
+                            }
+                        }]
+                    }
+                }),
+                include_fixtures: false,
+                max_items: 8,
+            })
+            .unwrap();
+        assert_eq!(replay["replay_status"], json!("ready"));
+        assert!(!replay["findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|finding| finding["code"] == "unknown_outcome_state"));
+        assert_eq!(
+            replay["bindings"][0]["replay_state"],
+            json!("ambiguous_result")
+        );
+        assert_eq!(
+            replay["bindings"][1]["replay_state"],
+            json!("missing_step_result")
+        );
+    }
+
+    #[test]
+    fn replay_rejects_duplicate_claim_and_binding_ids() {
+        let catalogue = MissionEvaluatorCatalogue::standard();
+        let replay = catalogue
+            .replay(&MissionEvaluatorReplayRequest {
+                mission: json!({
+                    "workflow": "agent_mission",
+                    "plan": {"mission_id": "mission-duplicate-lineage"},
+                    "claim_lineage": {
+                        "claims": [{
+                            "id": "claim-1",
+                            "evaluator_bindings": [{
+                                "id": "binding-1",
+                                "adapter_id": "oncoworlds.assay_fidelity",
+                                "domain": "oncology",
+                                "outcome_state": "refused"
+                            }, {
+                                "id": "BINDING-1",
+                                "adapter_id": "oncoworlds.assay_fidelity",
+                                "domain": "oncology",
+                                "outcome_state": "refused"
+                            }]
+                        }, {
+                            "id": "CLAIM-1",
+                            "evaluator_bindings": []
+                        }]
+                    }
+                }),
+                include_fixtures: false,
+                max_items: 8,
+            })
+            .unwrap();
+        assert_eq!(replay["replay_status"], json!("blocked"));
+        assert!(replay["findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|finding| finding["code"] == "duplicate_claim_id"));
+        assert!(replay["findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|finding| finding["code"] == "duplicate_binding_id"));
     }
 
     #[test]
@@ -1825,6 +2307,89 @@ mod tests {
         assert_eq!(unchanged["catalog_drift"]["changed_adapter_ids"], json!([]));
         assert_eq!(unchanged["catalog_drift"]["removed_adapter_ids"], json!([]));
 
+        let mut invalid_metadata_snapshot = catalogue.snapshot();
+        invalid_metadata_snapshot["row_count"] = json!(1);
+        let invalid_metadata_mission = json!({
+            "workflow": "agent_mission",
+            "plan": {"mission_id": "mission-snapshot-invalid-metadata"},
+            "claim_lineage": {
+                "evaluator_review": {
+                    "catalog_digest": catalogue.digest().to_string(),
+                    "review_id": "a".repeat(64),
+                    "discovery_digest": "b".repeat(64),
+                    "catalogue_snapshot": invalid_metadata_snapshot
+                },
+                "claims": []
+            }
+        });
+        let invalid_metadata = catalogue
+            .compare(&MissionEvaluatorReplayCompareRequest {
+                mission: invalid_metadata_mission,
+                include_fixtures: false,
+                max_items: 16,
+            })
+            .unwrap();
+        assert_eq!(
+            invalid_metadata["catalog_drift"]["historical_snapshot_valid"],
+            false
+        );
+        assert_eq!(
+            invalid_metadata["catalog_drift"]["row_diff_status"],
+            "invalid"
+        );
+
+        let mut invalid_row_snapshot = catalogue.snapshot();
+        invalid_row_snapshot["rows"][0]["id"] = json!(" ");
+        let invalid_row = catalogue
+            .compare(&MissionEvaluatorReplayCompareRequest {
+                mission: json!({
+                    "workflow": "agent_mission",
+                    "plan": {"mission_id": "mission-snapshot-invalid-row"},
+                    "claim_lineage": {
+                        "evaluator_review": {
+                            "catalog_digest": catalogue.digest().to_string(),
+                            "review_id": "a".repeat(64),
+                            "discovery_digest": "b".repeat(64),
+                            "catalogue_snapshot": invalid_row_snapshot
+                        },
+                        "claims": []
+                    }
+                }),
+                include_fixtures: false,
+                max_items: 16,
+            })
+            .unwrap();
+        assert_eq!(
+            invalid_row["catalog_drift"]["historical_snapshot_valid"],
+            false
+        );
+
+        let mut invalid_contract_snapshot = catalogue.snapshot();
+        invalid_contract_snapshot["execution"] = json!("executed");
+        let invalid_contract = catalogue
+            .compare(&MissionEvaluatorReplayCompareRequest {
+                mission: json!({
+                    "workflow": "agent_mission",
+                    "plan": {"mission_id": "mission-snapshot-invalid-contract"},
+                    "claim_lineage": {
+                        "evaluator_review": {
+                            "catalog_digest": catalogue.digest().to_string(),
+                            "review_id": "a".repeat(64),
+                            "discovery_digest": "b".repeat(64),
+                            "catalogue_snapshot": invalid_contract_snapshot
+                        },
+                        "claims": []
+                    }
+                }),
+                include_fixtures: false,
+                max_items: 16,
+            })
+            .unwrap();
+        assert_eq!(
+            invalid_contract["catalog_drift"]["historical_snapshot_valid"],
+            false
+        );
+
         let mut changed_snapshot = catalogue.snapshot();
         changed_snapshot["rows"][0]["purpose"] =
             json!("historical purpose before a catalogue revision");
@@ -1871,6 +2436,41 @@ mod tests {
                 .unwrap()
                 .iter()
                 .any(|field| field == "purpose")));
+
+        let contradictory_mission = json!({
+            "workflow": "agent_mission",
+            "plan": {"mission_id": "mission-snapshot-contradictory"},
+            "claim_lineage": {
+                "evaluator_review": {
+                    "catalog_digest": catalogue.digest().to_string(),
+                    "review_id": "a".repeat(64),
+                    "discovery_digest": "b".repeat(64),
+                    "catalogue_snapshot": changed_snapshot
+                },
+                "claims": []
+            }
+        });
+        let contradictory = catalogue
+            .compare(&MissionEvaluatorReplayCompareRequest {
+                mission: contradictory_mission,
+                include_fixtures: false,
+                max_items: 16,
+            })
+            .unwrap();
+        assert_eq!(
+            contradictory["catalog_drift"]["historical_snapshot_valid"],
+            false
+        );
+        assert_eq!(
+            contradictory["catalog_drift"]["historical_snapshot_catalog_digest_match"],
+            false
+        );
+        assert_eq!(contradictory["catalog_drift"]["row_diff_status"], "invalid");
+        assert!(
+            contradictory["catalog_drift"]["historical_snapshot_invalid_reason"]
+                .as_str()
+                .is_some_and(|reason| reason.contains("does not match review catalog_digest"))
+        );
     }
 
     #[test]

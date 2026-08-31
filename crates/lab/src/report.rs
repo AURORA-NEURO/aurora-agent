@@ -60,13 +60,11 @@ impl LabReport {
         let contaminated_attempts = archive
             .contaminated()
             .iter()
-            .map(|card| match card.surface() {
+            .filter_map(|card| match card.surface() {
                 crate::evolution::MeasurementSurface::Contaminated(record) => {
-                    format!("`{}`: {}", card.id, record.refusal)
+                    Some(format!("`{}`: {}", card.id, record.refusal))
                 }
-                crate::evolution::MeasurementSurface::Clean { .. } => {
-                    unreachable!("contaminated() filters to contaminated cards")
-                }
+                crate::evolution::MeasurementSurface::Clean { .. } => None,
             })
             .collect();
         let remaining_budget = ledger

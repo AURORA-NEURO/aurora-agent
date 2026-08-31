@@ -181,3 +181,48 @@ pub const BLUEPRINT_SECTION: &str = "23_AGENT_INTERWEAVE_FABRIC";
 pub const IMPLEMENTED_MODULES: [&str; 9] = [
     "23.24", "23.25", "23.27", "23.28", "23.29", "23.31", "23.33", "23.39", "23.47",
 ];
+pub mod federated_commons_assurance;
+pub mod federated_dependency_contract_model;
+pub mod federated_interpretation_engine;
+pub mod interweave_contract_frontier_federated_control_plane;
+pub mod laboratory_integration_workflow_fabric;
+pub mod semantic_parity_copilot;
+pub use federated_commons_assurance::{
+    assure_federated_commons, federated_commons_assurance_manifest,
+    InterweaveFederationDisposition, InterweaveFederationEnvelope7, InterweaveFederationError,
+    InterweaveFederationRequest3, CONTRACT_VERSION as FEDERATED_COMMONS_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as FEDERATED_COMMONS_ASSURANCE_FEATURE_ID,
+};
+pub use federated_dependency_contract_model::{
+    assure as assure_federated_dependency_composition,
+    capability_manifest as federated_dependency_composition_manifest, CapabilityCompositionReceipt,
+    CapabilityDeclaration, DependencyCompositionError, DependencyCompositionRequest,
+    CONTRACT_VERSION as FEDERATED_DEPENDENCY_COMPOSITION_CONTRACT_VERSION,
+    FEATURE_ID as FEDERATED_DEPENDENCY_COMPOSITION_FEATURE_ID,
+    INPUT_SCHEMA as FEDERATED_DEPENDENCY_COMPOSITION_INPUT_SCHEMA,
+    OUTPUT_SCHEMA as FEDERATED_DEPENDENCY_COMPOSITION_OUTPUT_SCHEMA,
+};
+pub use federated_interpretation_engine::{
+    capability_manifest as federated_interpretation_capability_manifest,
+    compile_interpretation as compile_federated_interpretation, InterpretationEvidence,
+    InterpretationInferenceError, InterpretationInferenceReceipt, InterpretationInferenceRequest,
+    CONTENT_TYPE as FEDERATED_INTERPRETATION_CONTENT_TYPE,
+    CONTRACT_VERSION as FEDERATED_INTERPRETATION_CONTRACT_VERSION,
+    FEATURE_ID as FEDERATED_INTERPRETATION_FEATURE_ID,
+    INPUT_SCHEMA as FEDERATED_INTERPRETATION_INPUT_SCHEMA,
+    OUTPUT_SCHEMA as FEDERATED_INTERPRETATION_OUTPUT_SCHEMA,
+};
+pub use laboratory_integration_workflow_fabric::{
+    capability_manifest as laboratory_integration_capability_manifest,
+    orchestrate as orchestrate_laboratory_workflow, InstrumentAction, InstrumentActionReceipt,
+    InstrumentActionRequest, LaboratoryWorkflowError, StudyBinding,
+    CONTRACT_VERSION as LABORATORY_WORKFLOW_CONTRACT_VERSION,
+    FEATURE_ID as LABORATORY_WORKFLOW_FEATURE_ID, INPUT_SCHEMA as LABORATORY_WORKFLOW_INPUT_SCHEMA,
+    OUTPUT_SCHEMA as LABORATORY_WORKFLOW_OUTPUT_SCHEMA,
+};
+pub use semantic_parity_copilot::{
+    capability_manifest as semantic_parity_capability_manifest, compare as compare_semantic_parity,
+    InterweaveParityFixture, InterweaveParityWitness, SemanticParityError,
+    CONTRACT_VERSION as SEMANTIC_PARITY_CONTRACT_VERSION, FEATURE_ID as SEMANTIC_PARITY_FEATURE_ID,
+    INPUT_SCHEMA as SEMANTIC_PARITY_INPUT_SCHEMA, OUTPUT_SCHEMA as SEMANTIC_PARITY_OUTPUT_SCHEMA,
+};

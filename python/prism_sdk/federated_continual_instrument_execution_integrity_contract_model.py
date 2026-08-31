@@ -1,0 +1,5 @@
+"""Lab P32 federated_continual contract_model instrument-execution integrity feature F08."""
+from .instrument_execution_integrity_support import InstrumentExecutionRequest4,InstrumentExecutionCard7,InstrumentExecutionIntegrityError,manifest,qualify
+FEATURE_ID="AFA-lab-P32-F08";CONTRACT_VERSION="lab-federated_continual_instrument_execution_integrity_contract_model/1.0"
+def federated_continual_instrument_execution_integrity_contract_model_manifest():return manifest(feature_id=FEATURE_ID,contract_version=CONTRACT_VERSION,scale="federated_continual",mode="contract_model")
+def qualify_federated_continual_instrument_execution_integrity_contract_model(request:InstrumentExecutionRequest4)->InstrumentExecutionCard7:return qualify(request,feature_id=FEATURE_ID,contract_version=CONTRACT_VERSION,scale="federated_continual",mode="contract_model")

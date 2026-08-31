@@ -56,7 +56,10 @@ impl Pin {
     pub fn is_exact(&self) -> bool {
         let version = self.version.trim();
         !version.is_empty()
-            && !matches!(version, "latest" | "main" | "master" | "head" | "HEAD" | "*")
+            && !matches!(
+                version,
+                "latest" | "main" | "master" | "head" | "HEAD" | "*"
+            )
     }
 }
 
@@ -78,9 +81,13 @@ pub enum ComponentKind {
 pub enum PromptDisclosure {
     /// No prompt: a tool, a verifier, a deterministic transform.
     NotApplicable,
-    Published { text_digest: String },
+    Published {
+        text_digest: String,
+    },
     /// Withheld, but committed to by digest so a later claim about it is checkable.
-    Hashed { digest: String },
+    Hashed {
+        digest: String,
+    },
 }
 
 impl PromptDisclosure {
@@ -142,8 +149,12 @@ pub struct SystemManifest {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(tag = "delta", rename_all = "snake_case")]
 pub enum ComponentDelta {
-    OnlyInLeft { component: String },
-    OnlyInRight { component: String },
+    OnlyInLeft {
+        component: String,
+    },
+    OnlyInRight {
+        component: String,
+    },
     Repinned {
         component: String,
         left: String,
@@ -152,7 +163,11 @@ pub enum ComponentDelta {
 }
 
 impl SystemManifest {
-    pub fn new(system_id: SystemId, context_policy: impl Into<String>, memory: impl Into<String>) -> Self {
+    pub fn new(
+        system_id: SystemId,
+        context_policy: impl Into<String>,
+        memory: impl Into<String>,
+    ) -> Self {
         SystemManifest {
             system_id,
             components: Vec::new(),

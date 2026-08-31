@@ -1,0 +1,426 @@
+//! Federated continual security contract model (`AFA-ids-P20-F08`).
+//!
+//! This model admits only purpose-bound, aggregate-only exchange metadata. It is a read-only
+//! contract boundary: no network call or raw-data transfer is performed here.
+
+use crate::ContentHash;
+use serde::{Deserialize, Serialize};
+use serde_json::json;
+use std::collections::BTreeSet;
+use thiserror::Error;
+
+pub const FEATURE_ID: &str = "AFA-ids-P20-F08";
+pub const CONTRACT_VERSION: &str = "ids-federated-continual-security-federation-contract-model/1.0";
+pub const INPUT_SCHEMA: &str = "FederationRequest4@1";
+pub const OUTPUT_SCHEMA: &str = "FederationEnvelope2@1";
+pub const CONTENT_TYPE: &str = "application/vnd.aurora.federation-envelope-2+json";
+pub const PRECLINICAL_BOUNDARY: &str = "preclinical-research-only; no human-subject or clinical-source data; no diagnosis, treatment, triage, enrollment, or clinical decisions";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FederationEvidenceState {
+    Proven,
+    Supported,
+    Unknown,
+    Unmeasured,
+    Contradicted,
+    Negative,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FederationContribution5 {
+    pub contribution_id: String,
+    pub origin: String,
+    pub purpose: String,
+    pub semantic_profile: String,
+    pub artifact_digest: ContentHash,
+    pub provenance_digest: ContentHash,
+    pub replay_identity: ContentHash,
+    pub evidence_state: FederationEvidenceState,
+    pub permission_granted: bool,
+    pub revoked: bool,
+    pub local: bool,
+    pub aggregate_only: bool,
+    pub omission_order: Vec<String>,
+    pub negative_result: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FederationRequest4 {
+    pub schema_version: String,
+    pub request_id: String,
+    pub federation_id: String,
+    pub purpose: String,
+    pub scope: String,
+    pub required_contribution_order: Vec<String>,
+    pub contributions: Vec<FederationContribution5>,
+    pub replay_identity: ContentHash,
+    pub policy_allowed: bool,
+    pub protected_closure: bool,
+    pub signed_approval: bool,
+    pub network_available: bool,
+    pub raw_data_local: bool,
+    pub aggregate_only: bool,
+    pub adversarial_events: Vec<String>,
+    pub boundary: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FederationEnvelopeArtifact2 {
+    pub artifact_id: String,
+    pub content_type: String,
+    pub content_hash: ContentHash,
+    pub semantic_loss: Vec<String>,
+    pub provenance_digests: Vec<ContentHash>,
+    pub boundary: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FederationEnvelope2 {
+    pub schema_version: String,
+    pub contract_version: String,
+    pub feature_id: String,
+    pub request_id: String,
+    pub federation_id: String,
+    pub purpose: String,
+    pub scope: String,
+    pub disposition: String,
+    pub contribution_order: Vec<String>,
+    pub accepted_order: Vec<String>,
+    pub denied_order: Vec<String>,
+    pub revoked_order: Vec<String>,
+    pub unresolved_order: Vec<String>,
+    pub missing_order: Vec<String>,
+    pub omission_order: Vec<String>,
+    pub uncertainty_order: Vec<String>,
+    pub negative_evidence_order: Vec<String>,
+    pub replay_identity: ContentHash,
+    pub envelope_digest: ContentHash,
+    pub artifact: FederationEnvelopeArtifact2,
+    pub effect_receipts: Vec<String>,
+    pub raw_data_local: bool,
+    pub aggregate_only: bool,
+    pub boundary: String,
+}
+
+#[derive(Debug, Error, Clone, PartialEq, Eq)]
+pub enum FederationSecurityError {
+    #[error("invalid federation request: {0}")]
+    Invalid(String),
+    #[error("federation envelope failed validation: {0}")]
+    Output(String),
+}
+
+fn nonempty(v: &str) -> bool {
+    !v.trim().is_empty()
+}
+fn ordered(v: &[String]) -> bool {
+    v.windows(2).all(|p| p[0] < p[1])
+}
+fn digest(v: &ContentHash) -> bool {
+    v.as_str().len() == 64 && v.as_str().bytes().all(|b| b.is_ascii_hexdigit())
+}
+
+pub fn federation_security_contract_manifest() -> serde_json::Value {
+    json!({"schema_version":"aurora-research-contract/1.0","capability_id":FEATURE_ID,"version":CONTRACT_VERSION,"owner_crate":"ids","consumers":["federation security steward","researcher","institution operator"],"behavior":"admit purpose-bound aggregate-only federation contributions with typed security evidence","value":"prevents unauthorized, revoked, semantically mismatched, or raw-data federation exchange","input_schema":INPUT_SCHEMA,"output_schema":OUTPUT_SCHEMA,"effects":["exchange:permitted-artifacts","block:unsafe-release"],"permissions":["read:local-research-artifacts"],"autonomy_tier":"A1","boundary":PRECLINICAL_BOUNDARY})
+}
+
+impl FederationEnvelope2 {
+    pub fn validate(&self) -> Result<(), FederationSecurityError> {
+        if self.schema_version != "aurora-research-contract/1.0"
+            || self.contract_version != CONTRACT_VERSION
+            || self.feature_id != FEATURE_ID
+            || self.boundary != PRECLINICAL_BOUNDARY
+            || self.artifact.boundary != PRECLINICAL_BOUNDARY
+            || self.artifact.content_type != CONTENT_TYPE
+            || !self.raw_data_local
+            || !self.aggregate_only
+            || !nonempty(&self.request_id)
+            || !nonempty(&self.federation_id)
+            || !nonempty(&self.purpose)
+            || !nonempty(&self.scope)
+            || self.contribution_order.is_empty()
+            || self.effect_receipts.is_empty()
+            || !["qualified", "unresolved", "blocked"].contains(&self.disposition.as_str())
+        {
+            return Err(FederationSecurityError::Output(
+                "federation identity, locality, contribution, or effect closure is incomplete"
+                    .into(),
+            ));
+        }
+        for v in [
+            &self.contribution_order,
+            &self.accepted_order,
+            &self.denied_order,
+            &self.revoked_order,
+            &self.unresolved_order,
+            &self.missing_order,
+            &self.omission_order,
+            &self.uncertainty_order,
+            &self.negative_evidence_order,
+            &self.effect_receipts,
+        ] {
+            if !ordered(v) {
+                return Err(FederationSecurityError::Output(
+                    "federation ordering is not canonical".into(),
+                ));
+            }
+        }
+        let all = self
+            .contribution_order
+            .iter()
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        let parts = self
+            .accepted_order
+            .iter()
+            .chain(&self.denied_order)
+            .chain(&self.unresolved_order)
+            .cloned()
+            .collect::<Vec<_>>();
+        if all.len() != self.contribution_order.len()
+            || parts.len() != all.len()
+            || BTreeSet::from_iter(parts) != all
+        {
+            return Err(FederationSecurityError::Output(
+                "contribution states do not partition".into(),
+            ));
+        }
+        if !digest(&self.replay_identity)
+            || !digest(&self.envelope_digest)
+            || self.artifact.content_hash != self.envelope_digest
+            || self.artifact.provenance_digests.iter().any(|v| !digest(v))
+        {
+            return Err(FederationSecurityError::Output(
+                "federation digest or artifact metadata is invalid".into(),
+            ));
+        }
+        if self
+            .effect_receipts
+            .iter()
+            .any(|e| e != "block:unsafe-release" && !e.starts_with("exchange:permitted-artifacts:"))
+        {
+            return Err(FederationSecurityError::Output(
+                "effect is outside federation gate".into(),
+            ));
+        }
+        Ok(())
+    }
+    pub fn digest(&self) -> Result<ContentHash, FederationSecurityError> {
+        self.validate()?;
+        ContentHash::of_value(
+            &serde_json::to_value(self)
+                .map_err(|e| FederationSecurityError::Output(e.to_string()))?,
+        )
+        .map_err(|e| FederationSecurityError::Output(e.to_string()))
+    }
+}
+
+fn validate_request(q: &FederationRequest4) -> Result<(), FederationSecurityError> {
+    if q.schema_version != INPUT_SCHEMA
+        || !nonempty(&q.request_id)
+        || !nonempty(&q.federation_id)
+        || !nonempty(&q.purpose)
+        || !nonempty(&q.scope)
+        || q.required_contribution_order.is_empty()
+        || !ordered(&q.required_contribution_order)
+        || q.contributions.is_empty()
+        || !digest(&q.replay_identity)
+        || !ordered(&q.adversarial_events)
+        || q.boundary != PRECLINICAL_BOUNDARY
+        || !q.raw_data_local
+        || !q.aggregate_only
+    {
+        return Err(FederationSecurityError::Invalid(
+            "request identity, contribution order, digest, locality, or boundary is invalid".into(),
+        ));
+    }
+    let mut ids = BTreeSet::new();
+    for c in &q.contributions {
+        if !nonempty(&c.contribution_id)
+            || !nonempty(&c.origin)
+            || !nonempty(&c.purpose)
+            || !nonempty(&c.semantic_profile)
+            || !digest(&c.artifact_digest)
+            || !digest(&c.provenance_digest)
+            || !digest(&c.replay_identity)
+            || !ordered(&c.omission_order)
+            || !ids.insert(c.contribution_id.clone())
+        {
+            return Err(FederationSecurityError::Invalid(
+                "contribution identity, digest, ordering, or uniqueness is invalid".into(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+pub fn admit_federation_security(
+    q: &FederationRequest4,
+) -> Result<FederationEnvelope2, FederationSecurityError> {
+    validate_request(q)?;
+    let mut rows = q.contributions.clone();
+    rows.sort_by(|a, b| a.contribution_id.cmp(&b.contribution_id));
+    let ids = rows
+        .iter()
+        .map(|c| c.contribution_id.clone())
+        .collect::<Vec<_>>();
+    let mut accepted = BTreeSet::new();
+    let mut denied = BTreeSet::new();
+    let mut revoked = BTreeSet::new();
+    let mut unresolved = BTreeSet::new();
+    let mut missing = BTreeSet::new();
+    let mut omission = BTreeSet::new();
+    let mut uncertainty = BTreeSet::new();
+    let mut negative = BTreeSet::new();
+    let mut provenance = BTreeSet::new();
+    for c in &rows {
+        let id = c.contribution_id.clone();
+        provenance.insert(c.provenance_digest.clone());
+        omission.extend(c.omission_order.iter().map(|v| format!("{id}:{v}")));
+        if c.negative_result || c.evidence_state == FederationEvidenceState::Negative {
+            negative.insert(format!("{id}:negative-result"));
+        }
+        if c.revoked {
+            revoked.insert(id.clone());
+            denied.insert(id.clone());
+            omission.insert(format!("{id}:revoked"));
+        } else if c.purpose != q.purpose || !c.permission_granted || !c.local || !c.aggregate_only {
+            denied.insert(id.clone());
+            omission.insert(format!("{id}:purpose-permission-locality"));
+        } else if c.replay_identity != q.replay_identity {
+            unresolved.insert(id.clone());
+            uncertainty.insert(format!("{id}:replay-mismatch"));
+        } else if !matches!(
+            c.evidence_state,
+            FederationEvidenceState::Proven | FederationEvidenceState::Supported
+        ) {
+            unresolved.insert(id.clone());
+            uncertainty.insert(format!("{id}:evidence-not-supported"));
+        } else {
+            accepted.insert(id);
+        }
+    }
+    for id in &q.required_contribution_order {
+        if !ids.contains(id) {
+            missing.insert(id.clone());
+            omission.insert(format!("missing:{id}"));
+        }
+    }
+    let global = !q.policy_allowed
+        || !q.protected_closure
+        || !q.signed_approval
+        || !q.network_available
+        || !q.raw_data_local
+        || !q.aggregate_only
+        || !q.adversarial_events.is_empty();
+    if global {
+        denied.extend(ids.iter().cloned());
+        accepted.clear();
+        unresolved.clear();
+        omission.insert("request:security-or-adversarial-gate-blocked".into());
+    }
+    uncertainty.extend(
+        q.adversarial_events
+            .iter()
+            .map(|e| format!("adversarial:{e}")),
+    );
+    let ao = accepted.iter().cloned().collect::<Vec<_>>();
+    let do_ = denied.iter().cloned().collect::<Vec<_>>();
+    let uo = unresolved.iter().cloned().collect::<Vec<_>>();
+    let disposition = if global || ao.is_empty() && uo.is_empty() {
+        "blocked"
+    } else if !missing.is_empty() || !do_.is_empty() || !uo.is_empty() || !revoked.is_empty() {
+        "unresolved"
+    } else {
+        "qualified"
+    };
+    if disposition != "qualified" {
+        omission.insert("request:federation-closure-not-ready".into());
+    }
+    let mut payload = json!({"schema_version":"aurora-research-contract/1.0","contract_version":CONTRACT_VERSION,"feature_id":FEATURE_ID,"request_id":q.request_id,"federation_id":q.federation_id,"purpose":q.purpose,"scope":q.scope,"disposition":disposition,"contribution_order":ids,"accepted_order":ao,"denied_order":do_,"revoked_order":revoked.iter().cloned().collect::<Vec<_>>(),"unresolved_order":uo,"missing_order":missing.iter().cloned().collect::<Vec<_>>(),"omission_order":omission.iter().cloned().collect::<Vec<_>>(),"uncertainty_order":uncertainty.iter().cloned().collect::<Vec<_>>(),"negative_evidence_order":negative.iter().cloned().collect::<Vec<_>>(),"replay_identity":q.replay_identity,"raw_data_local":true,"aggregate_only":true,"boundary":PRECLINICAL_BOUNDARY});
+    let digest = ContentHash::of_value(&payload)
+        .map_err(|e| FederationSecurityError::Output(e.to_string()))?;
+    payload["envelope_digest"] = json!(digest);
+    payload["artifact"] = json!({"artifact_id":format!("federation-envelope-2:{}",q.request_id),"content_type":CONTENT_TYPE,"content_hash":digest,"semantic_loss":omission.iter().cloned().collect::<Vec<_>>(),"provenance_digests":provenance.iter().cloned().collect::<Vec<_>>(),"boundary":PRECLINICAL_BOUNDARY});
+    payload["effect_receipts"] = json!(if disposition == "qualified" {
+        vec![format!("exchange:permitted-artifacts:{}", q.request_id)]
+    } else {
+        vec!["block:unsafe-release".to_string()]
+    });
+    let output: FederationEnvelope2 = serde_json::from_value(payload)
+        .map_err(|e| FederationSecurityError::Output(e.to_string()))?;
+    output.validate()?;
+    Ok(output)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn h(v: &str) -> ContentHash {
+        ContentHash::of_bytes(v.as_bytes())
+    }
+    fn c(id: &str) -> FederationContribution5 {
+        FederationContribution5 {
+            contribution_id: id.into(),
+            origin: "inst:a".into(),
+            purpose: "benchmark".into(),
+            semantic_profile: "prov-v1".into(),
+            artifact_digest: h(id),
+            provenance_digest: h("p"),
+            replay_identity: h("r"),
+            evidence_state: FederationEvidenceState::Proven,
+            permission_granted: true,
+            revoked: false,
+            local: true,
+            aggregate_only: true,
+            omission_order: vec![],
+            negative_result: false,
+        }
+    }
+    fn q() -> FederationRequest4 {
+        FederationRequest4 {
+            schema_version: INPUT_SCHEMA.into(),
+            request_id: "fed:req".into(),
+            federation_id: "fed:1".into(),
+            purpose: "benchmark".into(),
+            scope: "study:local".into(),
+            required_contribution_order: vec!["a".into(), "b".into()],
+            contributions: vec![c("b"), c("a")],
+            replay_identity: h("r"),
+            policy_allowed: true,
+            protected_closure: true,
+            signed_approval: true,
+            network_available: true,
+            raw_data_local: true,
+            aggregate_only: true,
+            adversarial_events: vec![],
+            boundary: PRECLINICAL_BOUNDARY.into(),
+        }
+    }
+    #[test]
+    fn qualified() {
+        assert_eq!(
+            admit_federation_security(&q()).unwrap().disposition,
+            "qualified"
+        )
+    }
+    #[test]
+    fn revocation_visible() {
+        let mut x = q();
+        x.contributions[0].revoked = true;
+        assert!(!admit_federation_security(&x)
+            .unwrap()
+            .revoked_order
+            .is_empty())
+    }
+    #[test]
+    fn network_blocks() {
+        let mut x = q();
+        x.network_available = false;
+        assert_eq!(
+            admit_federation_security(&x).unwrap().disposition,
+            "blocked"
+        )
+    }
+}

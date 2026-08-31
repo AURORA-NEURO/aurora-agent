@@ -119,7 +119,12 @@ fn check_measurands(
     }
     let note = substitution_failure_mode(left.measurand(), right.measurand())
         .or_else(|| substitution_failure_mode(right.measurand(), left.measurand()))
-        .map(|mode| format!("{} names this — {}: {}", mode.module, mode.label, mode.statement))
+        .map(|mode| {
+            format!(
+                "{} names this — {}: {}",
+                mode.module, mode.label, mode.statement
+            )
+        })
         .unwrap_or_else(|| {
             "two measurements of different quantities are not two estimates of one".to_string()
         });
@@ -210,9 +215,7 @@ pub struct CrossModalReport {
 #[serde(tag = "verdict", rename_all = "snake_case")]
 pub enum CrossModalVerdict {
     Comparable,
-    Blocked {
-        reason: CrossModalIncomparability,
-    },
+    Blocked { reason: CrossModalIncomparability },
 }
 
 impl CrossModalVerdict {
@@ -250,7 +253,11 @@ pub fn report(
             left: left.modality(),
             right: right.modality(),
             verdict: CrossModalVerdict::Comparable,
-            standards: Some(standards_report(&left.measurement, &right.measurement, policy)),
+            standards: Some(standards_report(
+                &left.measurement,
+                &right.measurement,
+                policy,
+            )),
             caveats,
         },
         Err(CrossModalIncomparability::Standards(_)) => {
@@ -259,9 +266,9 @@ pub fn report(
                 bioprism_standards::Verdict::Blocked { reason } => {
                     CrossModalIncomparability::Standards(reason.clone())
                 }
-                bioprism_standards::Verdict::Comparable => {
-                    unreachable!("the standards layer blocked and then did not")
-                }
+                bioprism_standards::Verdict::Comparable => CrossModalIncomparability::InvariantViolation {
+                    detail: "standards_report was comparable after comparable_across_under returned a standards refusal".to_string(),
+                },
             };
             CrossModalReport {
                 left: left.modality(),

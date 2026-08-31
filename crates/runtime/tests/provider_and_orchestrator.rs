@@ -9,7 +9,7 @@ use bioprism_ids::RunId;
 use bioprism_runtime::{
     AttemptId, Capabilities, ContainerProvider, EffectKind, EffectPolicy, ExecutionPlan,
     ExecutorProvider, InProcessProvider, InProcessWorld, RetryClass, RunState, RuntimeError,
-    Sandbox, SubprocessProvider, TerminationReason, Trial, TrialId,
+    Sandbox, SubprocessProvider, TerminationReason, Trial, TrialId, WorldTape,
 };
 
 fn run(id: &str) -> RunId {
@@ -39,8 +39,14 @@ fn an_unavailable_provider_refuses_rather_than_degrading() {
     let plan = plan("trial-1");
 
     for (name, error) in [
-        ("subprocess", subprocess.prepare(&plan).expect_err("declared only")),
-        ("container", container.prepare(&plan).expect_err("declared only")),
+        (
+            "subprocess",
+            subprocess.prepare(&plan).expect_err("declared only"),
+        ),
+        (
+            "container",
+            container.prepare(&plan).expect_err("declared only"),
+        ),
     ] {
         match error {
             RuntimeError::ProviderUnavailable {
@@ -71,10 +77,19 @@ fn an_unavailable_provider_advertises_no_capabilities_so_nothing_selects_it() {
 fn the_in_process_provider_declares_only_the_capabilities_it_has() {
     let capabilities = InProcessProvider::new().capabilities();
 
-    assert!(!capabilities.container_isolation, "there is no container here");
-    assert!(!capabilities.process_isolation, "there is no process boundary here");
+    assert!(
+        !capabilities.container_isolation,
+        "there is no container here"
+    );
+    assert!(
+        !capabilities.process_isolation,
+        "there is no process boundary here"
+    );
     assert!(!capabilities.process_checkpoints);
-    assert!(capabilities.nested_forks, "forking a tape needs no provider help");
+    assert!(
+        capabilities.nested_forks,
+        "forking a tape needs no provider help"
+    );
     assert!(capabilities.network_fixtures);
 }
 
@@ -130,10 +145,15 @@ fn a_checkpoint_commits_to_the_tape_head_it_was_taken_from() {
     provider.start(&handle).expect("known");
 
     let mut host = provider
-        .open(&handle, InProcessWorld::new().with_base_file("/work/in.txt", "x"))
+        .open(
+            &handle,
+            InProcessWorld::new().with_base_file("/work/in.txt", "x"),
+        )
         .expect("started");
-    host.read_file("/work/in.txt").expect("declared and allowed");
-    host.write_file("/work/out.txt", "written").expect("allowed");
+    host.read_file("/work/in.txt")
+        .expect("declared and allowed");
+    host.write_file("/work/out.txt", "written")
+        .expect("allowed");
     let tape = host.into_tape();
     let head = tape.head().to_string();
     provider.commit(&handle, tape).expect("known");
@@ -145,6 +165,107 @@ fn a_checkpoint_commits_to_the_tape_head_it_was_taken_from() {
 
     let resumed = provider.resume(&checkpoint).expect("its own checkpoint");
     assert_eq!(resumed.commitment, head);
+}
+
+#[test]
+fn resuming_a_checkpoint_rewinds_the_provider_owned_tape() {
+    let mut provider = InProcessProvider::new();
+    let handle = provider.prepare(&plan("trial-rewind")).expect("supported");
+    provider.start(&handle).expect("known");
+
+    let mut host = provider
+        .open(&handle, InProcessWorld::new())
+        .expect("started");
+    host.write_file("/work/before.txt", "before")
+        .expect("allowed");
+    provider.commit(&handle, host.into_tape()).expect("known");
+    let checkpoint = provider.checkpoint(&handle).expect("known");
+
+    let mut suffix = provider
+        .open(&handle, InProcessWorld::new())
+        .expect("started");
+    suffix
+        .write_file("/work/after.txt", "after")
+        .expect("allowed");
+    provider.commit(&handle, suffix.into_tape()).expect("known");
+    assert_eq!(provider.tape(&handle).expect("known").len(), 2);
+
+    let resumed = provider.resume(&checkpoint).expect("checkpoint is valid");
+    let tape = provider.tape(&resumed).expect("resumed handle is current");
+    assert_eq!(tape.len(), checkpoint.step);
+    assert_eq!(tape.head(), checkpoint.tape_head);
+}
+
+#[test]
+fn provider_rejects_cross_run_tape_commits() {
+    let mut provider = InProcessProvider::new();
+    let handle = provider
+        .prepare(&plan("trial-run-boundary"))
+        .expect("supported");
+    provider.start(&handle).expect("known");
+
+    let error = provider
+        .commit(&handle, WorldTape::new(run("different-run")))
+        .expect_err("a tape from another run must not be attached");
+    assert!(matches!(error, RuntimeError::InvariantViolation { .. }));
+}
+
+#[test]
+fn provider_rejects_a_same_run_tape_that_discards_its_owned_prefix() {
+    let mut provider = InProcessProvider::new();
+    let handle = provider
+        .prepare(&plan("trial-prefix-boundary"))
+        .expect("supported");
+    provider.start(&handle).expect("known");
+
+    let mut host = provider
+        .open(&handle, InProcessWorld::new())
+        .expect("started");
+    host.write_file("/work/prefix.txt", "prefix")
+        .expect("allowed");
+    provider.commit(&handle, host.into_tape()).expect("known");
+
+    let error = provider
+        .commit(&handle, WorldTape::new(run("run-1")))
+        .expect_err("a same-run tape cannot discard provider-owned history");
+    assert!(matches!(error, RuntimeError::InvariantViolation { .. }));
+    assert_eq!(provider.tape(&handle).expect("known").len(), 1);
+}
+
+#[test]
+fn provider_rejects_duplicate_trial_preparation() {
+    let mut provider = InProcessProvider::new();
+    let plan = plan("trial-duplicate");
+    provider.prepare(&plan).expect("first preparation");
+    let error = provider
+        .prepare(&plan)
+        .expect_err("preparation must not replace a live trial");
+    assert!(matches!(error, RuntimeError::InvariantViolation { .. }));
+}
+
+#[test]
+fn forged_provider_handle_cannot_destroy_a_trial() {
+    let mut provider = InProcessProvider::new();
+    let handle = provider.prepare(&plan("trial-handle")).expect("supported");
+    let mut forged = handle.clone();
+    forged.provider = "forged-provider".into();
+
+    assert!(provider.destroy(&forged).is_err());
+    assert!(provider.tape(&handle).is_ok());
+}
+
+#[test]
+fn a_cancelled_provider_trial_cannot_be_started_again() {
+    let mut provider = InProcessProvider::new();
+    let handle = provider
+        .prepare(&plan("trial-cancelled"))
+        .expect("supported");
+    provider.start(&handle).expect("known");
+    provider.cancel(&handle).expect("cancellation is recorded");
+
+    assert!(provider.start(&handle).is_err());
+    assert!(provider.open(&handle, InProcessWorld::new()).is_err());
+    assert!(provider.checkpoint(&handle).is_err());
 }
 
 #[test]
@@ -162,16 +283,50 @@ fn resuming_a_checkpoint_no_trial_holds_is_refused() {
 }
 
 #[test]
+fn a_checkpoint_id_collision_across_trials_is_refused_as_ambiguous() {
+    let mut provider = InProcessProvider::new();
+    let first = provider
+        .prepare(&plan("trial-shared-run-a"))
+        .expect("supported");
+    let second_plan = ExecutionPlan::new(
+        run("run-1"),
+        trial("trial-shared-run-b"),
+        attempt("attempt-1"),
+    )
+    .with_policy(
+        EffectPolicy::evaluation_default()
+            .declaring([EffectKind::FileRead, EffectKind::FileWrite])
+            .allowing_path("/work/"),
+    );
+    let second = provider.prepare(&second_plan).expect("supported");
+    provider.start(&first).expect("known");
+    provider.start(&second).expect("known");
+
+    let first_checkpoint = provider.checkpoint(&first).expect("known");
+    let second_checkpoint = provider.checkpoint(&second).expect("known");
+    assert_eq!(first_checkpoint.id, second_checkpoint.id);
+
+    let error = provider
+        .resume(&first_checkpoint)
+        .expect_err("a run-scoped collision must not select an arbitrary trial");
+    assert!(matches!(error, RuntimeError::InvariantViolation { .. }));
+}
+
+#[test]
 fn collect_reports_what_was_created_and_what_was_only_read() {
     let mut provider = InProcessProvider::new();
     let handle = provider.prepare(&plan("trial-6")).expect("supported");
     provider.start(&handle).expect("known");
 
     let mut host = provider
-        .open(&handle, InProcessWorld::new().with_base_file("/work/in.txt", "x"))
+        .open(
+            &handle,
+            InProcessWorld::new().with_base_file("/work/in.txt", "x"),
+        )
         .expect("started");
     host.read_file("/work/in.txt").expect("allowed");
-    host.write_file("/work/out.txt", "written").expect("allowed");
+    host.write_file("/work/out.txt", "written")
+        .expect("allowed");
     let tape = host.into_tape();
     provider.commit(&handle, tape).expect("known");
 
@@ -199,7 +354,10 @@ fn the_event_stream_resumes_from_a_cursor() {
     provider.start(&handle).expect("known");
 
     let mut host = provider
-        .open(&handle, InProcessWorld::new().with_base_file("/work/in.txt", "x"))
+        .open(
+            &handle,
+            InProcessWorld::new().with_base_file("/work/in.txt", "x"),
+        )
         .expect("started");
     host.read_file("/work/in.txt").expect("allowed");
     host.write_file("/work/a.txt", "a").expect("allowed");
@@ -209,7 +367,10 @@ fn the_event_stream_resumes_from_a_cursor() {
 
     assert_eq!(provider.events(&handle, 0).expect("known").len(), 3);
     assert_eq!(provider.events(&handle, 2).expect("known")[0].step, 2);
-    assert!(provider.events(&handle, 3).expect("the end is a valid cursor").is_empty());
+    assert!(provider
+        .events(&handle, 3)
+        .expect("the end is a valid cursor")
+        .is_empty());
     assert!(provider.events(&handle, 4).is_err());
 }
 
@@ -295,10 +456,13 @@ fn finalizing_twice_is_idempotent_and_does_not_duplicate_events() {
 fn a_forced_cancellation_records_which_evidence_is_missing() {
     let mut subject = Trial::new(run("run-1"), trial("trial-12"), attempt("attempt-1"));
     subject.dispatch().expect("legal");
-    subject.set_task_millis(4_000);
+    subject.set_task_millis(4_000).expect("task time advances");
 
     let termination = subject
-        .cancel(true, vec!["evaluator output".into(), "final artifacts".into()])
+        .cancel(
+            true,
+            vec!["evaluator output".into(), "final artifacts".into()],
+        )
         .expect("cancellation from running is legal")
         .clone();
 
@@ -325,6 +489,26 @@ fn a_graceful_cancellation_can_state_that_nothing_was_lost() {
         termination.missing_evidence.is_empty(),
         "completeness is stated on the record, not assumed by its reader"
     );
+}
+
+#[test]
+fn lifecycle_time_cannot_move_backward() {
+    let mut subject = Trial::new(run("run-1"), trial("trial-time"), attempt("attempt-1"));
+    subject.set_task_millis(4_000).expect("initial clock set");
+    let error = subject
+        .set_task_millis(3_999)
+        .expect_err("task time is monotonic");
+    assert!(matches!(error, RuntimeError::InvariantViolation { .. }));
+}
+
+#[test]
+fn forced_cancellation_must_name_missing_evidence() {
+    let mut subject = Trial::new(run("run-1"), trial("trial-cancel"), attempt("attempt-1"));
+    subject.dispatch().expect("legal");
+    let error = subject
+        .cancel(true, Vec::new())
+        .expect_err("forced cancellation needs a gap record");
+    assert!(matches!(error, RuntimeError::InvariantViolation { .. }));
 }
 
 #[test]
@@ -366,7 +550,11 @@ fn a_retry_gets_a_new_attempt_id_and_keeps_the_prior_attempts() {
         .retry(attempt("attempt-2"), RetryClass::Infrastructure, "deadbeef")
         .expect("a terminal trial can be retried");
 
-    assert_eq!(second.id(), first.id(), "the trial identity does not change");
+    assert_eq!(
+        second.id(),
+        first.id(),
+        "the trial identity does not change"
+    );
     assert_eq!(second.attempt().as_str(), "attempt-2");
     assert_eq!(second.state(), RunState::Queued);
     assert_eq!(second.prior_attempts().len(), 1);
@@ -387,6 +575,65 @@ fn a_running_trial_cannot_be_retried_out_from_under_itself() {
         .retry(attempt("attempt-2"), RetryClass::Agent, "")
         .expect_err("the first attempt has not finished");
     assert!(matches!(error, RuntimeError::RunNotRunnable { .. }));
+}
+
+#[test]
+fn a_retry_cannot_reuse_an_attempt_identity() {
+    let mut subject = Trial::new(
+        run("run-1"),
+        trial("trial-duplicate-attempt"),
+        attempt("attempt-1"),
+    );
+    subject.dispatch().expect("legal");
+    subject
+        .finalize(
+            TerminationReason::ProviderUnavailable {
+                provider: "container".into(),
+            },
+            Vec::new(),
+        )
+        .expect("legal");
+
+    let error = subject
+        .retry(attempt("attempt-1"), RetryClass::Infrastructure, "deadbeef")
+        .expect_err("attempt identity must not be reused");
+    assert!(matches!(error, RuntimeError::InvariantViolation { .. }));
+}
+
+#[test]
+fn a_serialized_lifecycle_with_a_skipped_event_is_rejected() {
+    let mut subject = Trial::new(
+        run("run-1"),
+        trial("trial-serialized-seq"),
+        attempt("attempt-1"),
+    );
+    subject.dispatch().expect("the happy path is legal");
+    let mut value = serde_json::to_value(&subject).expect("serializes");
+    value["events"][1]["seq"] = serde_json::json!(99);
+
+    assert!(serde_json::from_value::<Trial>(value).is_err());
+}
+
+#[test]
+fn a_serialized_terminal_lifecycle_without_termination_is_rejected() {
+    let mut subject = Trial::new(
+        run("run-1"),
+        trial("trial-serialized-terminal"),
+        attempt("attempt-1"),
+    );
+    subject.dispatch().expect("the happy path is legal");
+    subject
+        .finalize(
+            TerminationReason::TaskFailure {
+                detail: "failed".into(),
+            },
+            Vec::new(),
+        )
+        .expect("finalization is legal");
+    let mut value = serde_json::to_value(&subject).expect("serializes");
+    value["termination"] = serde_json::Value::Null;
+
+    assert!(serde_json::from_value::<Trial>(value).is_err());
 }
 
 #[test]

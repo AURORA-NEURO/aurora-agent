@@ -1,0 +1,141 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aurora-neuro.org/schemas/aurora-research-contract-v1/worldgen-knowledge-f10-receipt.schema.json",
+  "title": "Knowledge copilot multimodal receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "contract_version",
+    "feature_id",
+    "request_id",
+    "disposition",
+    "action_order",
+    "admitted_action_order",
+    "denied_action_order",
+    "knowledge_disposition",
+    "graph_digest",
+    "copilot_digest",
+    "replay_identity",
+    "omissions",
+    "uncertainty",
+    "negative_evidence",
+    "effect_receipts",
+    "raw_data_local",
+    "aggregate_only",
+    "boundary",
+    "artifact"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string"
+    },
+    "contract_version": {
+      "const": "worldgen-multimodal-knowledge-copilot/1.0"
+    },
+    "feature_id": {
+      "const": "AFA-worldgen-P04-F10"
+    },
+    "request_id": {
+      "type": "string"
+    },
+    "disposition": {
+      "enum": [
+        "qualified",
+        "partial",
+        "blocked"
+      ]
+    },
+    "action_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1
+    },
+    "admitted_action_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "denied_action_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "knowledge_disposition": {
+      "type": "string"
+    },
+    "graph_digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "copilot_digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "replay_identity": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "omissions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "uncertainty": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "negative_evidence": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "effect_receipts": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1
+    },
+    "raw_data_local": {
+      "const": true
+    },
+    "aggregate_only": {
+      "const": true
+    },
+    "boundary": {
+      "type": "string"
+    },
+    "artifact": {
+      "type": "object",
+      "required": [
+        "content_type",
+        "content_hash",
+        "boundary"
+      ],
+      "properties": {
+        "content_type": {
+          "const": "application/vnd.aurora.worldgen.knowledge-copilot-receipt+json"
+        },
+        "content_hash": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "boundary": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "x_aurora_boundary": "preclinical-research-only",
+  "x_aurora_feature_tier": "product-capability"
+}

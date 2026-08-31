@@ -42,6 +42,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::MetamorphicError;
 
+const MAX_METAMORPHIC_TEXT_BYTES: usize = 256;
+const MAX_FAMILY_TRIALS: usize = 4096;
+const MAX_SUITE_FAMILIES: usize = 1024;
+
 /// What a mutation declares about how the system's answer should move.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -134,11 +138,32 @@ pub fn verdict(relation: Relation, response: Response) -> TrialVerdict {
 }
 
 /// One mutation family's trials, all declaring the same relation.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Family {
     pub id: String,
     pub relation: Relation,
     trials: Vec<Trial>,
+}
+
+#[derive(Deserialize)]
+struct FamilyWire {
+    id: String,
+    relation: Relation,
+    trials: Vec<Trial>,
+}
+
+impl<'de> Deserialize<'de> for Family {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let wire = FamilyWire::deserialize(deserializer)?;
+        let mut family = Family::declaring(wire.id, wire.relation);
+        for trial in wire.trials {
+            family.record(trial).map_err(serde::de::Error::custom)?;
+        }
+        Ok(family)
+    }
 }
 
 impl Family {
@@ -156,6 +181,11 @@ impl Family {
     /// A family whose members declare different relations has no single consistency figure, and
     /// computing one anyway would average an invariance check with a directional one.
     pub fn record(&mut self, trial: Trial) -> Result<(), MetamorphicError> {
+        validate_family_id(&self.id)?;
+        validate_trial_id(&trial.id)?;
+        if self.trials.len() >= MAX_FAMILY_TRIALS {
+            return Err(MetamorphicError::TooManyTrials(MAX_FAMILY_TRIALS));
+        }
         if self.trials.iter().any(|t| t.id == trial.id) {
             return Err(MetamorphicError::DuplicateTrial(trial.id));
         }
@@ -172,6 +202,7 @@ impl Family {
 
     /// Summarise, refusing an empty family.
     pub fn report(&self) -> Result<FamilyReport, MetamorphicError> {
+        self.validate()?;
         if self.trials.is_empty() {
             return Err(MetamorphicError::EmptyFamily);
         }
@@ -205,10 +236,32 @@ impl Family {
     pub fn trials(&self) -> &[Trial] {
         &self.trials
     }
+
+    fn validate(&self) -> Result<(), MetamorphicError> {
+        validate_family_id(&self.id)?;
+        if self.trials.len() > MAX_FAMILY_TRIALS {
+            return Err(MetamorphicError::TooManyTrials(MAX_FAMILY_TRIALS));
+        }
+        let mut ids = BTreeSet::new();
+        for trial in &self.trials {
+            validate_trial_id(&trial.id)?;
+            if trial.relation != self.relation {
+                return Err(MetamorphicError::RelationMismatch {
+                    trial: trial.id.clone(),
+                    relation: format!("{:?}", trial.relation),
+                    family: format!("{:?}", self.relation),
+                });
+            }
+            if !ids.insert(&trial.id) {
+                return Err(MetamorphicError::DuplicateTrial(trial.id.clone()));
+            }
+        }
+        Ok(())
+    }
 }
 
 /// One family's outcome, with the two failure kinds kept apart.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct FamilyReport {
     pub family: String,
     pub relation: Relation,
@@ -264,9 +317,28 @@ impl FamilyReport {
 /// block says generated descendants "cannot be treated as independent observations merely because
 /// they have different identifiers", and a suite average over families of unequal size is exactly
 /// that treatment. What a suite offers instead is the worst family and the families that failed.
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize)]
 pub struct Suite {
     families: Vec<Family>,
+}
+
+#[derive(Deserialize)]
+struct SuiteWire {
+    families: Vec<Family>,
+}
+
+impl<'de> Deserialize<'de> for Suite {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let wire = SuiteWire::deserialize(deserializer)?;
+        let mut suite = Suite::new();
+        for family in wire.families {
+            suite.add(family).map_err(serde::de::Error::custom)?;
+        }
+        Ok(suite)
+    }
 }
 
 impl Suite {
@@ -276,12 +348,23 @@ impl Suite {
     }
 
     /// Add a family.
-    pub fn add(&mut self, family: Family) {
+    pub fn add(&mut self, family: Family) -> Result<(), MetamorphicError> {
+        family.validate()?;
+        if self.families.len() >= MAX_SUITE_FAMILIES {
+            return Err(MetamorphicError::TooManyFamilies(MAX_SUITE_FAMILIES));
+        }
+        if self.families.iter().any(|existing| existing.id == family.id) {
+            return Err(MetamorphicError::DuplicateFamily(family.id));
+        }
         self.families.push(family);
+        Ok(())
     }
 
     /// One report per family, in the order they were added.
     pub fn reports(&self) -> Result<Vec<FamilyReport>, MetamorphicError> {
+        if self.families.len() > MAX_SUITE_FAMILIES {
+            return Err(MetamorphicError::TooManyFamilies(MAX_SUITE_FAMILIES));
+        }
         self.families.iter().map(Family::report).collect()
     }
 
@@ -301,4 +384,60 @@ impl Suite {
     pub fn relations_covered(&self) -> BTreeSet<Relation> {
         self.families.iter().map(|f| f.relation).collect()
     }
+}
+
+fn validate_family_id(id: &str) -> Result<(), MetamorphicError> {
+    if id.trim().is_empty() {
+        return Err(MetamorphicError::InvalidFamily {
+            id: id.to_string(),
+            detail: "identifier must not be empty".into(),
+        });
+    }
+    if id != id.trim() {
+        return Err(MetamorphicError::InvalidFamily {
+            id: id.to_string(),
+            detail: "identifier must not have leading or trailing whitespace".into(),
+        });
+    }
+    if id.len() > MAX_METAMORPHIC_TEXT_BYTES {
+        return Err(MetamorphicError::InvalidFamily {
+            id: id.to_string(),
+            detail: format!("identifier exceeds {MAX_METAMORPHIC_TEXT_BYTES} bytes"),
+        });
+    }
+    if id.chars().any(char::is_control) {
+        return Err(MetamorphicError::InvalidFamily {
+            id: id.to_string(),
+            detail: "identifier contains a control character".into(),
+        });
+    }
+    Ok(())
+}
+
+fn validate_trial_id(id: &str) -> Result<(), MetamorphicError> {
+    if id.trim().is_empty() {
+        return Err(MetamorphicError::InvalidTrial {
+            id: id.to_string(),
+            detail: "identifier must not be empty".into(),
+        });
+    }
+    if id != id.trim() {
+        return Err(MetamorphicError::InvalidTrial {
+            id: id.to_string(),
+            detail: "identifier must not have leading or trailing whitespace".into(),
+        });
+    }
+    if id.len() > MAX_METAMORPHIC_TEXT_BYTES {
+        return Err(MetamorphicError::InvalidTrial {
+            id: id.to_string(),
+            detail: format!("identifier exceeds {MAX_METAMORPHIC_TEXT_BYTES} bytes"),
+        });
+    }
+    if id.chars().any(char::is_control) {
+        return Err(MetamorphicError::InvalidTrial {
+            id: id.to_string(),
+            detail: "identifier contains a control character".into(),
+        });
+    }
+    Ok(())
 }

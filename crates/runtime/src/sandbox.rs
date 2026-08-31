@@ -42,13 +42,18 @@ pub enum Fault {
     Truncated { keep_bytes: usize },
 }
 
+/// Maximum response size a random-byte request may ask the deterministic world to allocate.
+pub const MAX_RANDOM_BYTES: u32 = 16 * 1024 * 1024;
+
 impl fmt::Display for Fault {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Fault::Timeout => f.write_str("timeout"),
             Fault::Dropped => f.write_str("dropped response"),
             Fault::Delay { millis } => write!(f, "delay of {millis}ms"),
-            Fault::Truncated { keep_bytes } => write!(f, "response truncated to {keep_bytes} bytes"),
+            Fault::Truncated { keep_bytes } => {
+                write!(f, "response truncated to {keep_bytes} bytes")
+            }
         }
     }
 }
@@ -124,12 +129,7 @@ impl InProcessWorld {
         self
     }
 
-    pub fn with_service(
-        mut self,
-        service: &str,
-        operation: &str,
-        response: Value,
-    ) -> Self {
+    pub fn with_service(mut self, service: &str, operation: &str, response: Value) -> Self {
         self.services
             .insert(format!("{service}.{operation}"), response);
         self
@@ -172,7 +172,9 @@ impl InProcessWorld {
         for (path, content) in self.base.iter().chain(self.delta.iter()) {
             manifest.insert(
                 path.clone(),
-                ContentHash::of_bytes(content.as_bytes()).as_str().to_string(),
+                ContentHash::of_bytes(content.as_bytes())
+                    .as_str()
+                    .to_string(),
             );
         }
         manifest
@@ -206,7 +208,11 @@ impl InProcessWorld {
         };
         match fault {
             Fault::Delay { millis } => {
-                self.clock_millis = self.clock_millis.saturating_add(millis);
+                self.clock_millis = self.clock_millis.checked_add(millis).ok_or_else(|| {
+                    RuntimeError::InvariantViolation {
+                        detail: "virtual task clock overflowed during a scheduled delay".into(),
+                    }
+                })?;
                 Ok(())
             }
             // Truncation shapes the answer rather than preventing it, so it is applied at the
@@ -242,19 +248,41 @@ fn truncate(body: &str, keep_bytes: usize) -> String {
 impl EffectSource for InProcessWorld {
     fn perform(&mut self, request: &EffectRequest) -> Result<EffectOutcome, RuntimeError> {
         let call = self.calls;
-        self.calls += 1;
+        self.calls = self
+            .calls
+            .checked_add(1)
+            .ok_or_else(|| RuntimeError::InvariantViolation {
+                detail: "in-process world call counter overflowed".into(),
+            })?;
         self.apply_fault(call)?;
 
         let outcome = match request {
             EffectRequest::ClockNow => {
-                self.clock_millis = self.clock_millis.saturating_add(self.clock_tick_millis);
+                self.clock_millis = self
+                    .clock_millis
+                    .checked_add(self.clock_tick_millis)
+                    .ok_or_else(|| RuntimeError::InvariantViolation {
+                        detail: "virtual task clock overflowed during a clock read".into(),
+                    })?;
                 json!({ "task_millis": self.clock_millis })
             }
             EffectRequest::ClockSleep { millis } => {
-                self.clock_millis = self.clock_millis.saturating_add(*millis);
+                self.clock_millis = self.clock_millis.checked_add(*millis).ok_or_else(|| {
+                    RuntimeError::InvariantViolation {
+                        detail: "virtual task clock overflowed during sleep".into(),
+                    }
+                })?;
                 json!({ "task_millis": self.clock_millis })
             }
             EffectRequest::RandomBytes { count } => {
+                if *count > MAX_RANDOM_BYTES {
+                    return Err(RuntimeError::InvariantViolation {
+                        detail: format!(
+                            "random-byte request exceeds the {} byte sandbox bound",
+                            MAX_RANDOM_BYTES
+                        ),
+                    });
+                }
                 json!({ "hex": self.random_hex(*count) })
             }
             EffectRequest::FileRead { path } => match self.file(path) {

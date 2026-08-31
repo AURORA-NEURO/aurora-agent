@@ -316,15 +316,51 @@ impl AdaptiveExecutionReceipt {
                     "receipt request and observation identities do not reconcile".into(),
                 ));
             }
+            receipt_identifier("request acquisition_id", &row.request.acquisition_id)?;
+            if !row.request.declared_cost.is_finite() || row.request.declared_cost < 0.0 {
+                return Err(AdaptiveExecutionError::InvalidReceipt(
+                    "receipt request declared_cost must be finite and non-negative".into(),
+                ));
+            }
+            receipt_identifier("observation provider", &row.observation.provider)?;
+            if row.observation.provider != self.provider {
+                return Err(AdaptiveExecutionError::InvalidReceipt(
+                    "receipt observation provider does not match receipt provider".into(),
+                ));
+            }
+            receipt_identifier(
+                "observation acquisition_id",
+                &row.observation.acquisition_id,
+            )?;
+            receipt_identifier("observation outcome_label", &row.observation.outcome_label)?;
             ContentHash::parse(row.observation.evidence_digest.clone()).map_err(|_| {
                 AdaptiveExecutionError::InvalidReceipt(
                     "receipt contains a malformed evidence digest".into(),
                 )
             })?;
         }
+
+        match (
+            self.authorization.granted,
+            self.authorization.grant_id.as_deref(),
+            self.authorization.provider.as_deref(),
+        ) {
+            (true, Some(grant_id), Some(provider)) => {
+                receipt_identifier("authorization grant_id", grant_id)?;
+                receipt_identifier("authorization provider", provider)?;
+            }
+            (false, None, None) => {}
+            _ => {
+                return Err(AdaptiveExecutionError::InvalidReceipt(
+                    "receipt authorization summary is internally inconsistent".into(),
+                ));
+            }
+        }
         if self.status == ExecutionStatus::Completed {
             if self.terminal_action.is_none()
                 || self.terminal_risk.is_none()
+                || !self.authorization.granted
+                || self.authorization.provider.as_deref() != Some(self.provider.as_str())
                 || self.refusal.is_some()
                 || self.refusal_detail.is_some()
             {
@@ -332,10 +368,22 @@ impl AdaptiveExecutionReceipt {
                     "completed receipt must have a terminal action and no refusal".into(),
                 ));
             }
-        } else if self.terminal_action.is_some() || self.terminal_risk.is_some() {
-            return Err(AdaptiveExecutionError::InvalidReceipt(
-                "partial or refused receipt cannot claim a terminal action".into(),
-            ));
+        } else {
+            if self.terminal_action.is_some() || self.terminal_risk.is_some() {
+                return Err(AdaptiveExecutionError::InvalidReceipt(
+                    "partial or refused receipt cannot claim a terminal action".into(),
+                ));
+            }
+            if self.refusal.is_none()
+                || self
+                    .refusal_detail
+                    .as_deref()
+                    .is_none_or(|detail| detail.trim().is_empty())
+            {
+                return Err(AdaptiveExecutionError::InvalidReceipt(
+                    "partial or refused receipt must explain why execution stopped".into(),
+                ));
+            }
         }
         Ok(())
     }
@@ -521,23 +569,27 @@ impl AdaptivePlan {
                 receipt.validate_shape()?;
                 Ok(receipt)
             }
-            Err(failure) => Ok(AdaptiveExecutionReceipt {
-                schema: ADAPTIVE_EXECUTION_SCHEMA.into(),
-                plan_digest,
-                provider,
-                status: if observations.is_empty() {
-                    ExecutionStatus::Refused
-                } else {
-                    ExecutionStatus::Partial
-                },
-                authorization,
-                observations,
-                actual_acquisition_cost: actual_cost,
-                terminal_action: None,
-                terminal_risk: None,
-                refusal: Some(failure.0),
-                refusal_detail: Some(failure.1),
-            }),
+            Err(failure) => {
+                let receipt = AdaptiveExecutionReceipt {
+                    schema: ADAPTIVE_EXECUTION_SCHEMA.into(),
+                    plan_digest,
+                    provider,
+                    status: if observations.is_empty() {
+                        ExecutionStatus::Refused
+                    } else {
+                        ExecutionStatus::Partial
+                    },
+                    authorization,
+                    observations,
+                    actual_acquisition_cost: actual_cost,
+                    terminal_action: None,
+                    terminal_risk: None,
+                    refusal: Some(failure.0),
+                    refusal_detail: Some(failure.1),
+                };
+                receipt.validate_shape()?;
+                Ok(receipt)
+            }
         }
     }
 
@@ -631,12 +683,24 @@ pub enum AdaptiveExecutionError {
 }
 
 fn non_empty_identifier(field: &str, value: &str) -> Result<(), AdaptiveExecutionError> {
-    if value.trim().is_empty() || value.len() > 256 {
+    if value.trim().is_empty()
+        || value.len() > 256
+        || value != value.trim()
+        || value.chars().any(char::is_control)
+    {
         return Err(AdaptiveExecutionError::InvalidObservation(format!(
-            "{field} must contain between 1 and 256 bytes"
+            "{field} must contain between 1 and 256 bytes without surrounding whitespace or control characters"
         )));
     }
     Ok(())
+}
+
+fn receipt_identifier(field: &str, value: &str) -> Result<(), AdaptiveExecutionError> {
+    non_empty_identifier(field, value).map_err(|_| {
+        AdaptiveExecutionError::InvalidReceipt(format!(
+            "receipt {field} must be a bounded identifier without surrounding whitespace or control characters"
+        ))
+    })
 }
 
 fn refused_receipt(
@@ -984,6 +1048,64 @@ mod tests {
         assert_eq!(receipt.status, ExecutionStatus::Refused);
         assert_eq!(receipt.refusal, Some(ExecutionRefusal::OutcomeNotDeclared));
         assert!(receipt.observations.is_empty());
+    }
+
+    #[test]
+    fn incomplete_failure_receipts_are_rejected_at_the_boundary() {
+        let plan = plan();
+        let grant = ExecutionGrant::issue("grant-1", plan.digest().unwrap(), "lab").unwrap();
+        let mut executor =
+            ScriptedExecutor::simulated("lab", vec![("screen".into(), "invented".into())]);
+        let mut receipt = plan.execute(Some(&grant), &mut executor).unwrap();
+        receipt.refusal = None;
+        assert!(matches!(
+            receipt.validate_shape(),
+            Err(AdaptiveExecutionError::InvalidReceipt(_))
+        ));
+
+        let mut executor =
+            ScriptedExecutor::simulated("lab", vec![("screen".into(), "invented".into())]);
+        let mut receipt = plan.execute(Some(&grant), &mut executor).unwrap();
+        receipt.refusal_detail = Some("  \n".into());
+        assert!(matches!(
+            receipt.validate_shape(),
+            Err(AdaptiveExecutionError::InvalidReceipt(_))
+        ));
+    }
+
+    #[test]
+    fn receipt_authorization_and_observation_provenance_must_reconcile() {
+        let plan = plan();
+        let grant = ExecutionGrant::issue("grant-1", plan.digest().unwrap(), "lab").unwrap();
+        let mut executor = ScriptedExecutor::simulated(
+            "lab",
+            vec![
+                ("screen".into(), "negative".into()),
+                ("confirm".into(), "negative".into()),
+            ],
+        );
+        let mut receipt = plan.execute(Some(&grant), &mut executor).unwrap();
+        receipt.authorization.granted = false;
+        receipt.authorization.grant_id = None;
+        receipt.authorization.provider = None;
+        assert!(matches!(
+            receipt.validate_shape(),
+            Err(AdaptiveExecutionError::InvalidReceipt(_))
+        ));
+
+        let mut executor = ScriptedExecutor::simulated(
+            "lab",
+            vec![
+                ("screen".into(), "negative".into()),
+                ("confirm".into(), "negative".into()),
+            ],
+        );
+        let mut receipt = plan.execute(Some(&grant), &mut executor).unwrap();
+        receipt.observations[0].observation.provider = "other-provider".into();
+        assert!(matches!(
+            receipt.validate_shape(),
+            Err(AdaptiveExecutionError::InvalidReceipt(_))
+        ));
     }
 
     #[test]

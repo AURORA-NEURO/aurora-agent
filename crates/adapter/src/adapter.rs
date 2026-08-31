@@ -106,6 +106,54 @@ impl AdapterManifest {
             .extend(dimensions.into_iter().map(Into::into));
         self
     }
+
+    pub fn validate(&self) -> Result<(), AdapterError> {
+        if self.name.trim().is_empty() || self.version.trim().is_empty() {
+            return Err(AdapterError::Conformance(
+                "adapter manifest identity is incomplete".into(),
+            ));
+        }
+        for value in [&self.name, &self.version] {
+            if value.len() > 512 || value.chars().any(char::is_control) || value.trim() != value {
+                return Err(AdapterError::Conformance(
+                    "adapter manifest identity is outside its bounded text contract".into(),
+                ));
+            }
+        }
+        for format in &self.accepted_formats {
+            if format.trim().is_empty()
+                || format.len() > 256
+                || format.trim() != format
+                || format.chars().any(char::is_control)
+                || format != &format.to_ascii_lowercase()
+            {
+                return Err(AdapterError::Conformance(
+                    "adapter manifest formats must be normalized and bounded".into(),
+                ));
+            }
+        }
+        if self
+            .accepted_formats
+            .windows(2)
+            .any(|pair| pair[0] >= pair[1])
+        {
+            return Err(AdapterError::Conformance(
+                "adapter manifest formats must be strictly sorted".into(),
+            ));
+        }
+        for dimension in &self.scope_dimensions {
+            if dimension.trim().is_empty()
+                || dimension.len() > 256
+                || dimension.trim() != dimension
+                || dimension.chars().any(char::is_control)
+            {
+                return Err(AdapterError::Conformance(
+                    "adapter manifest scope dimensions are outside their bound".into(),
+                ));
+            }
+        }
+        Ok(())
+    }
 }
 
 /// Normalizes one class of source into validated facts plus a mandatory loss audit.
@@ -155,5 +203,12 @@ mod tests {
         let manifest = AdapterManifest::new("t", "0.1.0", ConformanceLevel::Normalize)
             .declaring([LossKind::UnmappedColumn, LossKind::UnmappedColumn]);
         assert_eq!(manifest.declared_loss_kinds.len(), 1);
+    }
+
+    #[test]
+    fn a_manifest_rejects_noncanonical_formats() {
+        let manifest =
+            AdapterManifest::new("t", "0.1.0", ConformanceLevel::Parse).accepting(["TEXT/CSV"]);
+        assert!(manifest.validate().is_err());
     }
 }

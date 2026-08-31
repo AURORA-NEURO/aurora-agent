@@ -1,0 +1,4 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema","$id":"https://aurora-neuro.org/schemas/aurora-research-contract-v1/worldgen-multimodal-evidence-surveillance-operations.json","title":"AURORA worldgen multimodal evidence surveillance operations receipt","type":"object","additionalProperties":false,
+  "allOf":[{"$ref":"worldgen-local-evidence-surveillance-operations.json"}],"properties":{"contract_version":{"const":"worldgen-multimodal-evidence-surveillance-operations/1.0"},"feature_id":{"const":"AFA-worldgen-P01-F30"},"scale":{"const":"multimodal multi-study"},"input_schema":{"const":"EvidenceFeed2@1"}}
+}

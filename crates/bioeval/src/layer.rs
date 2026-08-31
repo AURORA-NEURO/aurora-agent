@@ -35,6 +35,8 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
+use crate::error::LayerError;
+use crate::validation::valid_text;
 use crate::wrongness::{BiologicalErrorClass, Severity};
 
 /// The levels at which a biological claim can be wrong, ordered upstream to downstream.
@@ -214,7 +216,9 @@ impl FailureSignature {
 ///
 /// Built through [`LayeredOutcome::assess`], which applies critical-failure propagation. There is
 /// no way to hand-assemble one with a `Correct` verdict sitting downstream of a specimen swap.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// A derived outcome. It serializes for reporting but is intentionally rebuilt through
+/// [`LayeredOutcome::assess`] so a persisted verdict map cannot bypass propagation checks.
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct LayeredOutcome {
     verdicts: BTreeMap<CorrectnessLayer, LayerVerdict>,
     conclusion: Conclusion,
@@ -229,12 +233,25 @@ impl LayeredOutcome {
     pub fn assess(
         conclusion: Conclusion,
         observations: impl IntoIterator<Item = (CorrectnessLayer, LayerVerdict)>,
-    ) -> Self {
+    ) -> Result<Self, LayerError> {
+        validate_conclusion(&conclusion)?;
         let mut verdicts: BTreeMap<CorrectnessLayer, LayerVerdict> = CorrectnessLayer::CANONICAL
             .iter()
             .map(|&l| (l, LayerVerdict::NotAssessed))
             .collect();
+        let mut seen = BTreeMap::new();
+        let mut count = 0;
         for (layer, verdict) in observations {
+            count += 1;
+            if count > CorrectnessLayer::CANONICAL.len() {
+                return Err(LayerError::TooManyObservations {
+                    limit: CorrectnessLayer::CANONICAL.len(),
+                });
+            }
+            if seen.insert(layer, ()).is_some() {
+                return Err(LayerError::DuplicateObservation { layer });
+            }
+            validate_verdict(layer, &verdict)?;
             verdicts.insert(layer, verdict);
         }
 
@@ -254,10 +271,10 @@ impl LayeredOutcome {
             }
         }
 
-        LayeredOutcome {
+        Ok(LayeredOutcome {
             verdicts,
             conclusion,
-        }
+        })
     }
 
     pub fn conclusion(&self) -> &Conclusion {
@@ -305,4 +322,48 @@ impl LayeredOutcome {
             conclusion: self.conclusion.as_str(),
         }
     }
+}
+
+fn validate_conclusion(conclusion: &Conclusion) -> Result<(), LayerError> {
+    let value = match conclusion {
+        Conclusion::Held { statement } | Conclusion::Wrong { statement } => statement,
+        Conclusion::Withheld { reason } => reason,
+    };
+    if !valid_text(value) {
+        return Err(LayerError::InvalidConclusion {
+            detail: "conclusion text must be a bounded, trimmed, control-free string".into(),
+        });
+    }
+    Ok(())
+}
+
+fn validate_verdict(layer: CorrectnessLayer, verdict: &LayerVerdict) -> Result<(), LayerError> {
+    match verdict {
+        LayerVerdict::Failed(error) => {
+            if error.layer != layer {
+                return Err(LayerError::InvalidVerdict {
+                    layer,
+                    detail: "classified error layer must match the observed layer".into(),
+                });
+            }
+            if !valid_text(&error.observed)
+                || !valid_text(&error.expected)
+                || error.note.as_deref().is_some_and(|note| !valid_text(note))
+            {
+                return Err(LayerError::InvalidVerdict {
+                    layer,
+                    detail: "classified error text must be bounded, trimmed, control-free strings"
+                        .into(),
+                });
+            }
+        }
+        LayerVerdict::Void { .. } => {
+            return Err(LayerError::InvalidVerdict {
+                layer,
+                detail: "void verdicts are assigned by critical-failure propagation".into(),
+            });
+        }
+        LayerVerdict::Correct | LayerVerdict::NotAssessed => {}
+    }
+    Ok(())
 }

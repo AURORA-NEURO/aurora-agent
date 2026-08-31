@@ -257,7 +257,10 @@ impl FixtureStore {
     /// Unreadable or unparseable files are errors — there is nothing to compare. Digest
     /// mismatches are collected rather than raised, so that a caller can present *all* of them at
     /// once; [`FixtureStore::verify`] is the strict form used by the release gate.
-    pub fn load(root: impl Into<PathBuf>, manifest: &FixtureManifest) -> Result<Self, ConformanceError> {
+    pub fn load(
+        root: impl Into<PathBuf>,
+        manifest: &FixtureManifest,
+    ) -> Result<Self, ConformanceError> {
         let root = root.into();
         let mut documents = BTreeMap::new();
         let mut cards = BTreeMap::new();

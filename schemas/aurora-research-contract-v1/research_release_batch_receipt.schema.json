@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aurora-neuro.org/schemas/aurora-research-contract-v1/research-release-batch-receipt.json",
+  "title": "AURORA high-throughput research-release batch receipt",
+  "description": "Canonical batch ledger for signed research-object publication with explicit published and blocked releases.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "feature_id", "total_releases", "published_releases", "blocked_releases", "entries", "artifact", "boundary"],
+  "properties": {
+    "schema_version": { "const": "aurora-research-contract/1.0" },
+    "feature_id": { "const": "AFA-services-P16-F03" },
+    "total_releases": { "type": "integer", "minimum": 1 },
+    "published_releases": { "type": "integer", "minimum": 0 },
+    "blocked_releases": { "type": "integer", "minimum": 0 },
+    "entries": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["release_id", "disposition", "release_digest", "reasons"],
+        "properties": {
+          "release_id": { "type": "string", "minLength": 1 },
+          "disposition": { "enum": ["published", "blocked"] },
+          "release_digest": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$" },
+          "reasons": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } }
+        }
+      }
+    },
+    "artifact": { "type": "object", "required": ["content_hash"], "properties": { "content_hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" } } },
+    "boundary": { "const": "preclinical-research-only; no human-subject or clinical-source data; no diagnosis, treatment, triage, enrollment, or clinical decisions" }
+  }
+}

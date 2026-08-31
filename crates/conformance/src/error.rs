@@ -129,15 +129,9 @@ pub enum ConformanceError {
     )]
     CertificateDigestMismatch { claimed: String, recomputed: String },
 
-    /// The claimed digest is not a digest at all.
-    ///
-    /// Separate from [`ConformanceError::CertificateDigestMismatch`] because the two accuse
-    /// different parties. A mismatch says the certified body has been edited since it was signed;
-    /// this says the field beside the body does not hold a SHA-256 digest, which is a defect in
-    /// the claim and evidence of nothing about the body.
+    /// The claimed digest is not a canonical lowercase SHA-256 value.
     #[error(
-        "conformance certificate digest is malformed: {claimed:?} is not a 64-character lowercase \
-         hex digest"
+        "conformance certificate digest is malformed: {claimed:?} is not a 64-character lowercase hex digest"
     )]
     CertificateDigestMalformed { claimed: String },
 }

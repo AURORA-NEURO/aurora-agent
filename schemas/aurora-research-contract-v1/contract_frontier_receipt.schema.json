@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aurora-neuro.org/schemas/aurora-research-contract-v1/contract_frontier_receipt.schema.json",
+  "title": "AURORA adapter contract frontier manifest receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "contract_version", "feature_id", "adapter_id", "capability_id", "negotiated_version", "disposition", "input_schema", "output_schema", "modality_order", "effect_order", "permission_order", "artifact_digest_order", "omissions", "uncertainty", "semantic_loss", "checks", "effect_receipts", "artifact", "raw_data_local", "boundary"],
+  "properties": {
+    "schema_version": {"const": "aurora-research-contract/1.0"},
+    "contract_version": {"const": "adapter-contract-frontier/1.0"},
+    "feature_id": {"const": "AFA-adapter-P25-F22"},
+    "adapter_id": {"type": "string", "minLength": 1},
+    "capability_id": {"type": "string", "minLength": 1},
+    "negotiated_version": {"type": "string", "minLength": 1},
+    "disposition": {"enum": ["accepted", "migrated", "approval_required", "blocked", "incompatible", "unknown"]},
+    "input_schema": {"type": "string", "minLength": 1},
+    "output_schema": {"type": "string", "minLength": 1},
+    "modality_order": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+    "effect_order": {"type": "array", "items": {"type": "string", "minLength": 1}},
+    "permission_order": {"type": "array", "items": {"type": "string", "minLength": 1}},
+    "artifact_digest_order": {"type": "array", "items": {"type": "string", "pattern": "^[0-9a-f]{64}$"}},
+    "omissions": {"type": "array", "items": {"type": "string"}},
+    "uncertainty": {"type": "array", "items": {"type": "string"}},
+    "semantic_loss": {"type": "array", "items": {"type": "string"}},
+    "checks": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+    "effect_receipts": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+    "artifact": {"type": "object", "required": ["content_hash"], "properties": {"content_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}, "additionalProperties": true},
+    "raw_data_local": {"const": true},
+    "boundary": {"const": "preclinical_research_only"}
+  }
+}

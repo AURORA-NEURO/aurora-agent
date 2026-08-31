@@ -42,6 +42,7 @@ pub struct WorldBuilder {
     facts: Vec<Value>,
     factors: Vec<Value>,
     events: Vec<Value>,
+    invalid_factor_cost: Option<String>,
 }
 
 impl WorldBuilder {
@@ -57,6 +58,7 @@ impl WorldBuilder {
             facts: Vec::new(),
             factors: Vec::new(),
             events: Vec::new(),
+            invalid_factor_cost: None,
         }
     }
 
@@ -95,6 +97,15 @@ impl WorldBuilder {
         tags: &[&str],
         cost: f64,
     ) -> &mut Self {
+        let cost = match serde_json::Number::from_f64(cost) {
+            Some(number) => Value::Number(number),
+            None => {
+                if self.invalid_factor_cost.is_none() {
+                    self.invalid_factor_cost = Some(id.to_string());
+                }
+                Value::Null
+            }
+        };
         self.factors.push(json!({
             "id": id,
             "inputs": inputs,
@@ -157,6 +168,12 @@ impl WorldBuilder {
 
     /// The document, checked against the reference runtime's acceptance rules.
     pub fn build(&self) -> Result<BioWorld, BioWorldError> {
+        if let Some(factor) = &self.invalid_factor_cost {
+            return Err(BioWorldError::WorldRejected {
+                world_id: self.world_id.clone(),
+                message: format!("factor {factor} has a non-finite cost"),
+            });
+        }
         BioWorld::from_document(self.document())
     }
 }

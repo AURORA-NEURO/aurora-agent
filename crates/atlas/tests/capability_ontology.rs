@@ -81,8 +81,14 @@ fn ancestors_and_descendants_are_inverse_over_the_is_a_hierarchy() {
     )
     .unwrap();
 
-    assert!(ontology.ancestors(&cap("leaf")).unwrap().contains(&cap("root")));
-    assert!(ontology.descendants(&cap("root")).unwrap().contains(&cap("leaf")));
+    assert!(ontology
+        .ancestors(&cap("leaf"))
+        .unwrap()
+        .contains(&cap("root")));
+    assert!(ontology
+        .descendants(&cap("root"))
+        .unwrap()
+        .contains(&cap("leaf")));
     assert!(ontology.ancestors(&cap("root")).unwrap().is_empty());
     assert!(ontology.descendants(&cap("leaf")).unwrap().is_empty());
     assert_eq!(ontology.subtree(&cap("mid")).unwrap().len(), 2);
@@ -121,9 +127,13 @@ fn a_dangling_is_a_parent_is_refused_before_any_query_can_use_it() {
 #[test]
 fn is_a_declared_as_a_loose_relation_is_refused_so_the_hierarchy_has_one_representation() {
     let mut ontology = CapabilityOntology::new(VERSION);
-    ontology.insert(node("parent", CapabilityFamily::Memory)).unwrap();
     ontology
-        .insert(node("child", CapabilityFamily::Memory).with_relation(RelationKind::IsA, cap("parent")))
+        .insert(node("parent", CapabilityFamily::Memory))
+        .unwrap();
+    ontology
+        .insert(
+            node("child", CapabilityFamily::Memory).with_relation(RelationKind::IsA, cap("parent")),
+        )
         .unwrap();
     assert!(matches!(
         ontology.validate(),
@@ -206,7 +216,9 @@ fn an_empty_or_control_bearing_capability_identifier_is_refused() {
 #[test]
 fn declaring_the_same_capability_twice_is_refused() {
     let mut ontology = CapabilityOntology::new(VERSION);
-    ontology.insert(node("a", CapabilityFamily::Memory)).unwrap();
+    ontology
+        .insert(node("a", CapabilityFamily::Memory))
+        .unwrap();
     assert!(matches!(
         ontology.insert(node("a", CapabilityFamily::ToolUse)),
         Err(AtlasError::DuplicateCapability { .. })

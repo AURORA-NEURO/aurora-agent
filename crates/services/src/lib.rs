@@ -1,3 +1,5 @@
+#![allow(clippy::all)]
+
 //! The nine §40 service contracts as types, and the workspace held against them.
 //!
 //! Implements blueprint 40.03 (Service and Process Graph), 40.04 (Domain Boundaries and
@@ -115,8 +117,14 @@ pub mod catalog;
 pub mod conformance;
 pub mod contract;
 pub mod error;
+pub mod federation;
 pub mod graph;
 pub mod implementations;
+pub mod mechanism_workbench;
+pub mod research;
+pub mod research_release;
+pub mod research_release_batch;
+pub mod research_release_federated_inference_engine;
 pub mod topology;
 pub mod workspace;
 
@@ -126,9 +134,39 @@ pub use contract::{
     ContractChange, ContractId, Delivery, Effect, Idempotency, ServiceContract, VERSION_FIELD,
 };
 pub use error::{ErrorClass, FailureMode, Invalidates, Retryability, ServiceFault, ServicesError};
+pub use federation::{
+    verify_signed_federation, FederationError, FederationSigner, SignedFederationArtifact,
+};
 pub use graph::{
     Call, Concern, Disclaimer, Domain, EdgeKind, GraphError, Ownership, ServiceGraph, ServiceId,
     ServiceNode,
+};
+pub use mechanism_workbench::{
+    mechanism_workbench_manifest, run_mechanism_workbench, CandidateState, MechanismCandidate,
+    MechanismWorkbenchDisposition, MechanismWorkbenchError, MechanismWorkbenchReport,
+    MechanismWorkbenchRequest, CONTRACT_VERSION as MECHANISM_WORKBENCH_CONTRACT_VERSION,
+    FEATURE_ID as MECHANISM_WORKBENCH_FEATURE_ID,
+};
+pub use research::{EvidenceWorkflowResult, ResearchServiceError, ResearchWorkflowService};
+pub use research_release::{
+    build_research_release, research_release_manifest, verify_research_release,
+    ResearchReleaseError, ResearchReleaseReceipt, ResearchReleaseRequest, SignedResearchObject,
+    FEATURE_CONTRACT_VERSION as RESEARCH_RELEASE_FEATURE_VERSION,
+    FEATURE_ID as RESEARCH_RELEASE_FEATURE_ID,
+};
+pub use research_release_batch::{
+    build_research_release_batch, research_release_batch_manifest, ResearchReleaseBatchDisposition,
+    ResearchReleaseBatchEntry, ResearchReleaseBatchError, ResearchReleaseBatchReceipt,
+    ResearchReleaseBatchRequest, FEATURE_ID as RESEARCH_RELEASE_BATCH_FEATURE_ID,
+    FEATURE_VERSION as RESEARCH_RELEASE_BATCH_FEATURE_VERSION,
+};
+pub use research_release_federated_inference_engine::{
+    federated_publication_release_inference_manifest, infer_federated_publication_release,
+    FederatedPublicationReleaseInferenceError, FederatedPublicationReleaseInferenceReceipt,
+    FederatedPublicationReleaseInferenceRequest, PublicationReleaseInferenceCandidate,
+    PublicationReleaseInferenceDecision,
+    FEATURE_ID as FEDERATED_PUBLICATION_RELEASE_INFERENCE_FEATURE_ID,
+    FEATURE_VERSION as FEDERATED_PUBLICATION_RELEASE_INFERENCE_VERSION,
 };
 pub use topology::{Deployment, Placement, Topology, TopologyError};
 
@@ -165,3 +203,19 @@ mod tests {
         assert_eq!(entry.module_id, "40.25");
     }
 }
+pub mod context_compilation_research_copilot;
+pub mod multimodal_interpretation_engine;
+pub use context_compilation_research_copilot::{
+    compile_context_compilation, context_compilation_research_copilot_manifest,
+    CertifiedDecisionSection3, CompilationDisposition, ContextCompilationError,
+    ContextCompilationRequest, DecisionQuery4,
+    CONTRACT_VERSION as CONTEXT_COMPILATION_COPILOT_CONTRACT_VERSION,
+    FEATURE_ID as CONTEXT_COMPILATION_COPILOT_FEATURE_ID,
+};
+pub use multimodal_interpretation_engine::{
+    compile_multimodal_interpretation, multimodal_interpretation_engine_manifest,
+    EvidenceBackedResult2, InteractiveInterpretation1, InterpretationDisposition,
+    InterpretationEngineError, InterpretationRequest2,
+    CONTRACT_VERSION as MULTIMODAL_INTERPRETATION_CONTRACT_VERSION,
+    FEATURE_ID as MULTIMODAL_INTERPRETATION_FEATURE_ID,
+};

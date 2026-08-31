@@ -5,6 +5,7 @@ edition = "2021"
 description = "Governance and quality: the checkable parts of section 14, and an honest account of which modules are process rather than code"
 
 [dependencies]
+bioprism-foundation = { workspace = true }
 bioprism-ids = { workspace = true }
 bioprism-governance = { workspace = true }
 bioprism-registry = { workspace = true }

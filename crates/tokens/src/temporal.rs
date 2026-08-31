@@ -170,11 +170,42 @@ impl TimelineEvent {
 }
 
 /// The visibility cutoff, enforced.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct TemporalFirewall {
     pub subject: String,
     pub decision_epoch: DecisionEpoch,
     admitted: Vec<TimelineEvent>,
+}
+
+#[derive(Deserialize)]
+struct TemporalFirewallWire {
+    subject: String,
+    decision_epoch: DecisionEpoch,
+    admitted: Vec<TimelineEvent>,
+}
+
+impl<'de> Deserialize<'de> for TemporalFirewall {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let wire = TemporalFirewallWire::deserialize(deserializer)?;
+        if wire.subject.trim().is_empty() || wire.subject.chars().any(char::is_control) {
+            return Err(serde::de::Error::custom(
+                TemporalError::InvalidIdentity {
+                    field: "firewall subject",
+                    value: wire.subject,
+                },
+            ));
+        }
+        let mut firewall = TemporalFirewall::new(wire.subject, wire.decision_epoch);
+        for event in wire.admitted {
+            firewall
+                .admit(event)
+                .map_err(serde::de::Error::custom)?;
+        }
+        Ok(firewall)
+    }
 }
 
 impl TemporalFirewall {
@@ -191,6 +222,25 @@ impl TemporalFirewall {
     /// Both refusals are checked here rather than at render time, because an event that reached the
     /// timeline is an event some later code will assume was checked.
     pub fn admit(&mut self, event: TimelineEvent) -> Result<(), TemporalError> {
+        for (field, value) in [
+            ("firewall subject", self.subject.as_str()),
+            ("event id", event.event_id.as_str()),
+            ("event subject", event.subject.as_str()),
+        ] {
+            if value.trim().is_empty() || value.chars().any(char::is_control) {
+                return Err(TemporalError::InvalidIdentity {
+                    field,
+                    value: value.to_string(),
+                });
+            }
+        }
+        if event.subject != self.subject {
+            return Err(TemporalError::SubjectMismatch {
+                event: event.event_id,
+                expected: self.subject.clone(),
+                found: event.subject,
+            });
+        }
         if event.occurred_at > self.decision_epoch {
             return Err(TemporalError::FutureLeak {
                 event: event.event_id,
@@ -316,10 +366,48 @@ impl DiagnosisRecord {
 }
 
 /// An append-only diagnosis history.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct DiagnosisHistory {
     pub subject: String,
     records: Vec<DiagnosisRecord>,
+}
+
+#[derive(Deserialize)]
+struct DiagnosisHistoryWire {
+    subject: String,
+    records: Vec<DiagnosisRecord>,
+}
+
+impl<'de> Deserialize<'de> for DiagnosisHistory {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let wire = DiagnosisHistoryWire::deserialize(deserializer)?;
+        if wire.subject.trim().is_empty() {
+            return Err(serde::de::Error::custom(
+                "diagnosis history subject must not be empty",
+            ));
+        }
+        if wire.records.is_empty() {
+            return Err(serde::de::Error::custom(
+                "diagnosis history must contain an original record",
+            ));
+        }
+        if wire
+            .records
+            .windows(2)
+            .any(|pair| pair[0].recorded_at >= pair[1].recorded_at)
+        {
+            return Err(serde::de::Error::custom(
+                "diagnosis history records must be strictly ordered by epoch",
+            ));
+        }
+        Ok(DiagnosisHistory {
+            subject: wire.subject,
+            records: wire.records,
+        })
+    }
 }
 
 impl DiagnosisHistory {
@@ -381,10 +469,15 @@ pub enum ResponseState {
     Progression,
     /// Some lesions improved and others progressed. A real, common state, and the one that becomes
     /// a progression when the vocabulary has no word for it.
-    Mixed { improving: Vec<String>, worsening: Vec<String> },
+    Mixed {
+        improving: Vec<String>,
+        worsening: Vec<String>,
+    },
     /// Assessment could not be made: the confound is unresolved, the interval was wrong, the study
     /// was non-diagnostic. Not a synonym for stable.
-    Unresolved { reason: String },
+    Unresolved {
+        reason: String,
+    },
 }
 
 impl ResponseState {
@@ -446,7 +539,12 @@ mod tests {
     #[test]
     fn an_imaging_event_with_no_treatment_or_steroid_context_is_refused() {
         let mut firewall = firewall();
-        let bare = TimelineEvent::new("mri/bare", "subject/1", DecisionEpoch(4), EventKind::Imaging);
+        let bare = TimelineEvent::new(
+            "mri/bare",
+            "subject/1",
+            DecisionEpoch(4),
+            EventKind::Imaging,
+        );
         assert!(matches!(
             firewall.admit(bare),
             Err(TemporalError::ImagingWithoutClinicalContext { .. })
@@ -468,6 +566,42 @@ mod tests {
         let assay =
             TimelineEvent::new("assay/idh", "subject/1", DecisionEpoch(2), EventKind::Assay);
         assert!(firewall.admit(assay).is_ok());
+    }
+
+    #[test]
+    fn an_event_for_another_subject_cannot_cross_the_firewall() {
+        let mut firewall = firewall();
+        let event = TimelineEvent::new(
+            "assay/other",
+            "subject/2",
+            DecisionEpoch(2),
+            EventKind::Assay,
+        );
+        assert!(matches!(
+            firewall.admit(event),
+            Err(TemporalError::SubjectMismatch {
+                expected,
+                found,
+                ..
+            }) if expected == "subject/1" && found == "subject/2"
+        ));
+        assert!(firewall.timeline().is_empty());
+    }
+
+    #[test]
+    fn deserializing_a_tampered_firewall_replays_admission_checks() {
+        let mut firewall = firewall();
+        firewall
+            .admit(TimelineEvent::new(
+                "assay/1",
+                "subject/1",
+                DecisionEpoch(2),
+                EventKind::Assay,
+            ))
+            .expect("event is admitted");
+        let mut encoded = serde_json::to_value(&firewall).expect("firewall serializes");
+        encoded["admitted"][0]["occurred_at"] = serde_json::json!(20);
+        assert!(serde_json::from_value::<TemporalFirewall>(encoded).is_err());
     }
 
     #[test]
@@ -578,7 +712,10 @@ mod tests {
             history.as_of(DecisionEpoch(5)).map(|r| r.wording.as_str()),
             Some("anaplastic astrocytoma")
         );
-        assert_eq!(history.current().wording, "astrocytoma, IDH-mutant, grade 3");
+        assert_eq!(
+            history.current().wording,
+            "astrocytoma, IDH-mutant, grade 3"
+        );
     }
 
     #[test]
@@ -593,6 +730,35 @@ mod tests {
             Err(TemporalError::HistoricalDiagnosisOverwritten { .. })
         ));
         assert_eq!(history.records().len(), 1);
+    }
+
+    #[test]
+    fn deserializing_an_empty_diagnosis_history_is_refused() {
+        let result = serde_json::from_value::<DiagnosisHistory>(serde_json::json!({
+            "subject": "subject/1",
+            "records": []
+        }));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn deserializing_backordered_diagnosis_records_is_refused() {
+        let result = serde_json::from_value::<DiagnosisHistory>(serde_json::json!({
+            "subject": "subject/1",
+            "records": [
+                {
+                    "recorded_at": 9,
+                    "wording": "later",
+                    "classification_system": "WHO 2021"
+                },
+                {
+                    "recorded_at": 2,
+                    "wording": "earlier",
+                    "classification_system": "WHO 2007"
+                }
+            ]
+        }));
+        assert!(result.is_err());
     }
 
     #[test]

@@ -5,6 +5,7 @@ edition = "2021"
 description = "Graph lens grammar: the typed lens catalogue behind the evaluation hub, and the non-visual contract"
 
 [dependencies]
+bioprism-foundation = { workspace = true }
 bioprism-ids = { workspace = true }
 bioprism-scope = { workspace = true }
 bioprism-section = { workspace = true }

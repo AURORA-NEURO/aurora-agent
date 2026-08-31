@@ -1,0 +1,4 @@
+from .worldgen_computational_execution_copilot_support import ExecutionCopilotRequest, ExecutionCopilotReceipt, run, manifest
+FEATURE_ID="AFA-worldgen-P12-F12"; CONTRACT_VERSION="worldgen-federated_continual-computational_execution-copilot/1.0"
+def worldgen_federated_continual_computational_execution_research_copilot_manifest(): return manifest(feature_id=FEATURE_ID,contract_version=CONTRACT_VERSION,input_schema="ExecutionCopilotRequest1@1",scale="federated continual autonomous",autonomy_tier="A1")
+def run_worldgen_federated_continual_computational_execution_research_copilot(request:ExecutionCopilotRequest)->ExecutionCopilotReceipt: return run(request,feature_id=FEATURE_ID,contract_version=CONTRACT_VERSION,scale="federated continual autonomous",require_approval=False,require_federation=True)

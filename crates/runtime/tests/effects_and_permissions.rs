@@ -7,9 +7,9 @@
 
 use bioprism_ids::RunId;
 use bioprism_runtime::{
-    DecisionOutcome, EffectKind, EffectPolicy, EffectRequest, ExternalActions, Host, InProcessWorld,
-    MaterializationPolicy, Network, NetworkMode, Provenance, RecordingHost, RuntimeError, Sandbox,
-    SecretBroker, SecretRef,
+    DecisionOutcome, EffectKind, EffectPolicy, EffectRequest, ExternalActions, Host,
+    InProcessWorld, MaterializationPolicy, Network, NetworkMode, Provenance, RecordingHost,
+    RuntimeError, Sandbox, SecretBroker, SecretRef,
 };
 use std::collections::BTreeSet;
 
@@ -31,7 +31,10 @@ fn hosts(policy: EffectPolicy) -> RecordingHost<InProcessWorld> {
 
 fn allowlist(hosts: [&str; 1]) -> NetworkMode {
     NetworkMode::Allowlist {
-        hosts: hosts.iter().map(|h| (*h).to_string()).collect::<BTreeSet<_>>(),
+        hosts: hosts
+            .iter()
+            .map(|h| (*h).to_string())
+            .collect::<BTreeSet<_>>(),
     }
 }
 
@@ -73,7 +76,8 @@ fn every_authorization_verdict_is_journalled_including_the_refusals() {
         .allowing_path("/work/");
     let mut host = hosts(policy);
 
-    host.read_file("/work/in.txt").expect("declared and allowed");
+    host.read_file("/work/in.txt")
+        .expect("declared and allowed");
     host.write_file("/etc/passwd", "nope")
         .expect_err("outside the allowlist");
 
@@ -98,6 +102,21 @@ fn a_write_outside_the_path_allowlist_is_refused() {
         .expect_err("the path does not start with an allowed prefix");
     assert!(matches!(error, RuntimeError::PathDenied { .. }));
     assert_eq!(host.source().calls(), 0);
+}
+
+#[test]
+fn a_path_allowlist_matches_components_not_string_prefixes() {
+    let policy = EffectPolicy::evaluation_default()
+        .declaring([EffectKind::FileRead])
+        .allowing_path("/work");
+    let mut host = hosts(policy);
+
+    host.read_file("/work/input.txt")
+        .expect("the exact component is allowed");
+    let error = host
+        .read_file("/workshop/input.txt")
+        .expect_err("a neighbouring component is outside the allowlist");
+    assert!(matches!(error, RuntimeError::PathDenied { .. }));
 }
 
 #[test]
@@ -142,6 +161,22 @@ fn a_relative_path_is_refused_rather_than_guessed_at() {
 }
 
 #[test]
+fn control_characters_in_paths_are_refused_before_the_world_is_called() {
+    let policy = EffectPolicy::evaluation_default()
+        .declaring([EffectKind::FileRead])
+        .allowing_path("/work/");
+    let mut host = hosts(policy);
+
+    for path in ["/work/in.txt\n", "/work/in.txt\u{0}"] {
+        let error = host
+            .read_file(path)
+            .expect_err("control characters must not reach a provider boundary");
+        assert!(matches!(error, RuntimeError::PathDenied { .. }), "{path:?}");
+    }
+    assert_eq!(host.source().calls(), 0);
+}
+
+#[test]
 fn network_mode_denied_refuses_every_outbound_request() {
     let policy = EffectPolicy::evaluation_default().declaring([EffectKind::NetworkFetch]);
     let mut host = hosts(policy);
@@ -165,7 +200,10 @@ fn an_allowlist_permits_its_host_and_refuses_a_neighbour() {
         .with_network(allowlist(["allowed.test"]));
     let mut host = hosts(policy);
 
-    assert_eq!(host.get_body("https://allowed.test/a").expect("listed"), "ok");
+    assert_eq!(
+        host.get_body("https://allowed.test/a").expect("listed"),
+        "ok"
+    );
     let error = host
         .get_body("https://evil.test/a")
         .expect_err("not on the list");
@@ -202,6 +240,87 @@ fn an_allowlist_is_not_fooled_by_a_port_or_by_case() {
     policy
         .authorize(&request)
         .expect("a port and an uppercase host do not change which host it is");
+}
+
+#[test]
+fn an_allowlist_canonicalizes_a_dns_trailing_dot() {
+    let policy = EffectPolicy::evaluation_default()
+        .declaring([EffectKind::NetworkFetch])
+        .with_network(allowlist(["allowed.test"]));
+    let request = EffectRequest::NetworkFetch {
+        method: "GET".into(),
+        url: "https://ALLOWED.TEST./a".into(),
+    };
+
+    assert_eq!(request.target_host().as_deref(), Some("allowed.test"));
+    policy
+        .authorize(&request)
+        .expect("a DNS absolute-name dot does not change the host identity");
+
+    let policy = EffectPolicy::evaluation_default()
+        .declaring([EffectKind::NetworkFetch])
+        .with_network(NetworkMode::Allowlist {
+            hosts: ["ALLOWED.TEST.".into()].into_iter().collect(),
+        });
+    policy
+        .authorize(&request)
+        .expect("allowlist entries use the same canonical host identity");
+}
+
+#[test]
+fn malformed_network_targets_are_refused_before_the_world_is_called() {
+    let policy = EffectPolicy::evaluation_default()
+        .declaring([EffectKind::NetworkFetch])
+        .with_network(NetworkMode::RecordedFixture);
+    let mut host = hosts(policy);
+
+    let error = host
+        .get_body("https://allowed.test:not-a-port/a")
+        .expect_err("an invalid port must not reach the fixture world");
+    assert!(matches!(error, RuntimeError::InvalidNetworkUrl { .. }));
+    assert_eq!(host.source().calls(), 0);
+}
+
+#[test]
+fn whitespace_or_control_characters_in_urls_are_refused_before_the_world_is_called() {
+    let policy = EffectPolicy::evaluation_default()
+        .declaring([EffectKind::NetworkFetch])
+        .with_network(NetworkMode::RecordedFixture);
+    let mut host = hosts(policy);
+
+    for url in ["https://allowed.test/a b", "https://allowed.test/a\r\n"] {
+        let error = host
+            .get_body(url)
+            .expect_err("ambiguous URL bytes must not reach a provider boundary");
+        assert!(
+            matches!(error, RuntimeError::InvalidNetworkUrl { .. }),
+            "{url:?}"
+        );
+    }
+    assert_eq!(host.source().calls(), 0);
+}
+
+#[test]
+fn non_http_network_schemes_are_refused_before_the_world_is_called() {
+    let policy = EffectPolicy::evaluation_default()
+        .declaring([EffectKind::NetworkFetch])
+        .with_network(NetworkMode::RecordedFixture);
+    let mut host = hosts(policy);
+
+    let error = host
+        .get_body("file://allowed.test/a")
+        .expect_err("network fetches must use an HTTP scheme");
+    assert!(matches!(error, RuntimeError::InvalidNetworkUrl { .. }));
+    assert_eq!(host.source().calls(), 0);
+}
+
+#[test]
+fn bracketed_ipv6_targets_keep_their_authority_form() {
+    let request = EffectRequest::NetworkFetch {
+        method: "GET".into(),
+        url: "https://[::1]:8443/a".into(),
+    };
+    assert_eq!(request.target_host().as_deref(), Some("[::1]"));
 }
 
 #[test]
@@ -254,6 +373,22 @@ fn a_simulated_irreversible_effect_is_labelled_and_never_reaches_the_world() {
     let tape = host.into_tape();
     assert_eq!(tape.simulated_steps(), vec![0]);
     assert_eq!(tape.entries()[0].effect.provenance, Provenance::Simulated);
+}
+
+#[test]
+fn simulation_does_not_bypass_network_target_validation() {
+    let policy = EffectPolicy::evaluation_default()
+        .declaring([EffectKind::NetworkFetch])
+        .with_materialization(MaterializationPolicy::Simulate);
+    let request = EffectRequest::NetworkFetch {
+        method: "POST".into(),
+        url: "https://allowed.test/write".into(),
+    };
+
+    assert!(matches!(
+        policy.authorize(&request),
+        Err(RuntimeError::NetworkDenied { .. })
+    ));
 }
 
 #[test]
@@ -317,12 +452,49 @@ fn an_expired_capability_cannot_be_redeemed() {
 #[test]
 fn a_capability_does_not_cover_an_operation_it_was_not_issued_for() {
     let mut broker = SecretBroker::new().with_secret("registry", "value");
-    let capability = broker.issue("registry", "read", 0, 1_000).expect("registered");
+    let capability = broker
+        .issue("registry", "read", 0, 1_000)
+        .expect("registered");
 
     let error = broker
         .redeem(&capability, "write", 0)
         .expect_err("read does not imply write");
     assert!(matches!(error, RuntimeError::OperationNotCovered { .. }));
+}
+
+#[test]
+fn a_forged_capability_cannot_redeem_a_registered_secret() {
+    let mut broker = SecretBroker::new().with_secret("registry", "value");
+    let issued = broker
+        .issue("registry", "read", 0, 1_000)
+        .expect("registered");
+    let mut forged = issued.clone();
+    forged.operation = "write".into();
+
+    let error = broker
+        .redeem(&forged, "write", 0)
+        .expect_err("token fields must be bound to the broker-issued record");
+    assert!(matches!(error, RuntimeError::CapabilityMismatch { .. }));
+
+    let unknown = bioprism_runtime::Capability {
+        id: "cap-forged".into(),
+        resource: "registry".into(),
+        operation: "read".into(),
+        expires_at_task_millis: 1_000,
+    };
+    let error = broker
+        .redeem(&unknown, "read", 0)
+        .expect_err("unknown token ids must not reach a secret");
+    assert!(matches!(error, RuntimeError::UnknownCapability { .. }));
+}
+
+#[test]
+fn capability_expiry_overflow_is_refused() {
+    let mut broker = SecretBroker::new().with_secret("registry", "value");
+    let error = broker
+        .issue("registry", "read", u64::MAX, 1)
+        .expect_err("expiry must remain representable");
+    assert!(matches!(error, RuntimeError::InvariantViolation { .. }));
 }
 
 #[test]
@@ -337,7 +509,9 @@ fn a_capability_cannot_be_issued_for_a_resource_the_broker_does_not_hold() {
 #[test]
 fn cleanup_revokes_every_outstanding_capability() {
     let mut broker = SecretBroker::new().with_secret("registry", "value");
-    let first = broker.issue("registry", "read", 0, 1_000).expect("registered");
+    let first = broker
+        .issue("registry", "read", 0, 1_000)
+        .expect("registered");
     let second = broker
         .issue("registry", "write", 0, 1_000)
         .expect("registered");
@@ -353,9 +527,50 @@ fn cleanup_revokes_every_outstanding_capability() {
 }
 
 #[test]
+fn rotating_a_secret_revokes_only_the_replaced_resource_capabilities() {
+    let mut broker = SecretBroker::new()
+        .with_secret("registry", "old-value")
+        .with_secret("telemetry", "telemetry-value");
+    let registry_capability = broker
+        .issue("registry", "read", 0, 1_000)
+        .expect("registered");
+    let telemetry_capability = broker
+        .issue("telemetry", "read", 0, 1_000)
+        .expect("registered");
+
+    broker = broker.with_secret("registry", "new-value");
+
+    assert!(matches!(
+        broker
+            .redeem(&registry_capability, "read", 0)
+            .expect_err("rotation must invalidate old registry capabilities"),
+        RuntimeError::CapabilityRevoked { .. }
+    ));
+    assert_eq!(
+        broker
+            .redeem(&telemetry_capability, "read", 0)
+            .expect("unrelated resources remain valid")
+            .expose(),
+        "telemetry-value"
+    );
+    let new_capability = broker
+        .issue("registry", "read", 0, 1_000)
+        .expect("the rotated resource remains available");
+    assert_eq!(
+        broker
+            .redeem(&new_capability, "read", 0)
+            .expect("new capabilities use the rotated value")
+            .expose(),
+        "new-value"
+    );
+}
+
+#[test]
 fn a_secret_never_reaches_the_tape() {
     let mut broker = SecretBroker::new().with_secret("registry", "hunter2-super-secret");
-    let capability = broker.issue("registry", "read", 0, 1_000).expect("registered");
+    let capability = broker
+        .issue("registry", "read", 0, 1_000)
+        .expect("registered");
 
     let policy = EffectPolicy::evaluation_default()
         .declaring([EffectKind::ServiceCall, EffectKind::FileWrite])
@@ -374,6 +589,9 @@ fn a_secret_never_reaches_the_tape() {
     .expect("the tool passes its token, not its secret");
 
     let json = host.into_tape().to_json().expect("serializes");
-    assert!(!json.contains("hunter2"), "the tape leaked a secret: {json}");
+    assert!(
+        !json.contains("hunter2"),
+        "the tape leaked a secret: {json}"
+    );
     assert!(json.contains("cap-000000"), "the token id is what travels");
 }

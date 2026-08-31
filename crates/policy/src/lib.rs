@@ -1,3 +1,5 @@
+#![allow(clippy::all)]
+
 //! Policy, privacy and information-flow fibers.
 //!
 //! Implements blueprint 43.33 (policy, privacy and information-flow fibers), together with the
@@ -58,28 +60,116 @@
 //! In 36.01's enforcement architecture this crate is the policy-intersection step, not the trusted
 //! kernel that surrounds it.
 
+pub mod autonomy;
+pub mod autonomy_batch;
 pub mod consent;
 pub mod decision;
 pub mod error;
+pub mod federated_continual_evidence_surveillance_contract_model;
 pub mod flow;
+pub mod interoperability_control;
 pub mod label;
 pub mod lattice;
+pub mod protocol_assurance;
 pub mod purpose;
 pub mod redaction;
 pub mod request;
 pub mod residency;
 pub mod trace;
 
+pub use autonomy::{
+    admit_autonomy, AutonomyAdmissionReceipt, AutonomyAdmissionRequest, AutonomyError,
+};
+pub use autonomy_batch::{
+    admit_autonomy_batch, autonomy_batch_manifest, BatchActionDecision, BatchActionReceipt,
+    BatchAdmissionAction, BatchAdmissionError, BatchAdmissionReceipt, BatchAdmissionRequest,
+    FEATURE_ID as AUTONOMY_BATCH_FEATURE_ID, FEATURE_VERSION as AUTONOMY_BATCH_FEATURE_VERSION,
+};
 pub use consent::{Consent, ConsentStatus};
 pub use decision::{Admission, Decision, ExecutionMode, Obligation, Refusal};
 pub use error::PolicyError;
+pub use federated_continual_evidence_surveillance_contract_model::{
+    federated_continual_evidence_surveillance_contract_model_manifest,
+    model_federated_continual_evidence_surveillance_contract, FederatedContinualContractClaim,
+    FederatedContinualContractCompatibility, FederatedContinualContractDisposition,
+    FederatedContinualEvidenceSurveillanceContractError,
+    FederatedContinualEvidenceSurveillanceContractReceipt,
+    FederatedContinualEvidenceSurveillanceContractRequest,
+    CONTRACT_VERSION as POLICY_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_CONTRACT_VERSION,
+    FEATURE_ID as POLICY_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_FEATURE_ID,
+    INPUT_SCHEMA as POLICY_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_INPUT_SCHEMA,
+    OUTPUT_SCHEMA as POLICY_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_OUTPUT_SCHEMA,
+};
 pub use flow::{
     check_flow, derive, DeclassificationReceipt, DeclassificationRegistry, DeclassificationRule,
+};
+pub use interoperability_control::{
+    interoperability_control_manifest, negotiate_interoperability, ExternalCapabilityOffer,
+    IntegrationDisposition, InteroperabilityControlError, InteroperabilityControlReceipt,
+    InteroperabilityControlRequest, OfferEvidenceState,
+    CONTRACT_VERSION as INTEROPERABILITY_CONTROL_CONTRACT_VERSION,
+    FEATURE_ID as INTEROPERABILITY_CONTROL_FEATURE_ID,
 };
 pub use label::{Classification, ExportPolicy, PolicyLabel, Retention};
 pub use lattice::{
     AdmittedFact, LabelResolution, PolicyLattice, PolicyRule, RefusedFact, Screening,
 };
+pub use protocol_assurance::{
+    assess_protocol_assurance, ProtocolAssuranceDisposition, ProtocolAssuranceError,
+    ProtocolAssuranceReceipt, ProtocolAssuranceRequest,
+    CONTRACT_VERSION as PROTOCOL_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as PROTOCOL_ASSURANCE_FEATURE_ID,
+};
+pub mod analysis_copilot;
+pub mod federated_commons_interoperability_gateway;
+pub mod federated_continual_grant_integrity_contract_model;
+pub mod federated_continual_grant_integrity_inference;
+pub mod federated_continual_grant_integrity_research_copilot;
+pub mod federated_continual_grant_integrity_workflow_fabric;
+pub mod grant_integrity_support;
+pub mod local_grant_integrity_contract_model;
+pub mod local_grant_integrity_inference;
+pub mod local_grant_integrity_research_copilot;
+pub mod local_grant_integrity_workflow_fabric;
+pub mod multimodal_grant_integrity_contract_model;
+pub mod multimodal_grant_integrity_inference;
+pub mod multimodal_grant_integrity_research_copilot;
+pub mod multimodal_grant_integrity_workflow_fabric;
+pub mod throughput_grant_integrity_contract_model;
+pub mod throughput_grant_integrity_inference;
+pub mod throughput_grant_integrity_research_copilot;
+pub mod throughput_grant_integrity_workflow_fabric;
+pub use analysis_copilot::{
+    analysis_copilot_manifest, qualify_analysis_question, AnalysisCandidate5, AnalysisCopilotError,
+    AnalysisDisposition, AnalysisQuestion4, QualifiedAnalysisResult3,
+    CONTRACT_VERSION as ANALYSIS_COPILOT_CONTRACT_VERSION,
+    FEATURE_ID as ANALYSIS_COPILOT_FEATURE_ID,
+};
+pub use federated_commons_interoperability_gateway::{
+    admit as admit_policy_federation, admit_json as admit_policy_federation_json,
+    capability_manifest as federated_commons_manifest, FederationAdmission,
+    FederationArtifactCandidate, PolicyFederationEnvelope, PolicyFederationError,
+    PolicyFederationRequest, CONTRACT_VERSION as FEDERATED_COMMONS_CONTRACT_VERSION,
+    FEATURE_ID as FEDERATED_COMMONS_FEATURE_ID, INPUT_SCHEMA as FEDERATED_COMMONS_INPUT_SCHEMA,
+    OUTPUT_SCHEMA as FEDERATED_COMMONS_OUTPUT_SCHEMA,
+};
+pub use federated_continual_grant_integrity_contract_model::*;
+pub use federated_continual_grant_integrity_inference::*;
+pub use federated_continual_grant_integrity_research_copilot::*;
+pub use federated_continual_grant_integrity_workflow_fabric::*;
+pub use grant_integrity_support::{
+    manifest as grant_integrity_manifest, qualify as qualify_grant_integrity, AutonomyGrant4,
+    GrantIntegrityArtifact4, GrantIntegrityCard7, GrantIntegrityError, GrantIntegrityRequest4,
+    BOUNDARY as GRANT_INTEGRITY_BOUNDARY, CONTENT_TYPE as GRANT_INTEGRITY_CONTENT_TYPE,
+};
+pub use local_grant_integrity_contract_model::*;
+pub use local_grant_integrity_inference::*;
+pub use local_grant_integrity_research_copilot::*;
+pub use local_grant_integrity_workflow_fabric::*;
+pub use multimodal_grant_integrity_contract_model::*;
+pub use multimodal_grant_integrity_inference::*;
+pub use multimodal_grant_integrity_research_copilot::*;
+pub use multimodal_grant_integrity_workflow_fabric::*;
 pub use purpose::{Purpose, PurposeSet};
 pub use redaction::{
     CellRelease, RedactedView, RedactionPlan, RedactionReceipt, RedactionRule, Replacement,
@@ -89,4 +179,8 @@ pub use request::{Authority, Channel, Clearance, Principal, Request};
 pub use residency::{
     declared_residency, propose_transport, Jurisdiction, Residency, RESIDENCY_DIMENSION,
 };
+pub use throughput_grant_integrity_contract_model::*;
+pub use throughput_grant_integrity_inference::*;
+pub use throughput_grant_integrity_research_copilot::*;
+pub use throughput_grant_integrity_workflow_fabric::*;
 pub use trace::{PolicyTrace, TraceEntry, TraceOutcome};

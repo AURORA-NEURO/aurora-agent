@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aurora-neuro.org/schemas/aurora-research-contract-v1/multimodal-replication-report.json",
+  "title": "AURORA multimodal replication report",
+  "description": "Comparability-gated replication evidence for independent preclinical imaging and omics studies with explicit omissions and contradictions.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "feature_id", "capability_id", "claim", "request_digest", "required_modalities", "summary", "studies", "artifact", "boundary"],
+  "properties": {
+    "schema_version": { "const": "aurora-research-contract/1.0" },
+    "feature_id": { "const": "AFA-evalengine-P15-F02" },
+    "capability_id": { "type": "string", "minLength": 1 },
+    "claim": { "type": "string", "minLength": 1 },
+    "request_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "required_modalities": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+    "summary": {
+      "type": "object",
+      "required": ["disposition", "total_observations", "comparable_observations", "independent_sites", "positive_count", "null_count", "negative_count", "inconclusive_count", "omitted_observations", "contradictory_observations", "reasons"],
+      "properties": {
+        "disposition": { "enum": ["replicated", "partially_replicated", "contradicted", "null_result", "insufficient_evidence"] },
+        "total_observations": { "type": "integer", "minimum": 1 },
+        "comparable_observations": { "type": "integer", "minimum": 0 },
+        "independent_sites": { "type": "integer", "minimum": 0 },
+        "positive_count": { "type": "integer", "minimum": 0 },
+        "null_count": { "type": "integer", "minimum": 0 },
+        "negative_count": { "type": "integer", "minimum": 0 },
+        "inconclusive_count": { "type": "integer", "minimum": 0 },
+        "omitted_observations": { "type": "integer", "minimum": 0 },
+        "contradictory_observations": { "type": "integer", "minimum": 0 },
+        "effect_min": { "type": ["number", "null"] },
+        "effect_max": { "type": ["number", "null"] },
+        "reasons": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } }
+      }
+    },
+    "studies": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["study_id", "site", "assay", "comparable", "omitted_modalities", "reasons", "modality_digests"],
+        "properties": {
+          "study_id": { "type": "string", "minLength": 1 },
+          "site": { "type": "string", "minLength": 1 },
+          "assay": { "type": "string", "minLength": 1 },
+          "comparable": { "type": "boolean" },
+          "omitted_modalities": { "type": "array", "items": { "type": "string" } },
+          "reasons": { "type": "array", "items": { "type": "string" } },
+          "modality_digests": { "type": "object", "additionalProperties": { "type": "string", "pattern": "^[0-9a-f]{64}$" } }
+        }
+      }
+    },
+    "artifact": { "type": "object", "required": ["content_hash"], "properties": { "content_hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" } } },
+    "boundary": { "const": "preclinical-research-only; no human-subject or clinical-source data; no diagnosis, treatment, triage, enrollment, or clinical decisions" }
+  }
+}

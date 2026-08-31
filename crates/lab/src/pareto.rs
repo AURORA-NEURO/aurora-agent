@@ -79,9 +79,13 @@ impl Objective {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "state")]
 pub enum AxisValue {
-    Measured { value: f64 },
+    Measured {
+        value: f64,
+    },
     /// No measurement. Categorically distinct from a bad one, and there is no `value_or_zero`.
-    Unmeasured { reason: UnmeasuredReason },
+    Unmeasured {
+        reason: UnmeasuredReason,
+    },
 }
 
 impl AxisValue {
@@ -278,7 +282,9 @@ pub struct Unresolved {
 #[serde(rename_all = "snake_case", tag = "selection")]
 pub enum Selection {
     /// Exactly one member. The only case in which a caller may deploy without deciding anything.
-    Unique { candidate: ConfigurationId },
+    Unique {
+        candidate: ConfigurationId,
+    },
     /// Several members, none dominating another. A real answer: the front is the finding, and
     /// picking among these is a judgement call this crate refuses to make for you.
     Ambiguous {
@@ -581,8 +587,7 @@ mod tests {
     #[test]
     fn a_profile_that_says_nothing_about_an_objective_is_an_error_not_a_hole() {
         let mut front = ParetoFront::new(objectives()).unwrap();
-        let silent =
-            Profile::new(&ConfigurationId::new("silent")).measured("admissible_rate", 0.9);
+        let silent = Profile::new(&ConfigurationId::new("silent")).measured("admissible_rate", 0.9);
         assert_eq!(
             front.insert(silent),
             Err(ParetoError::AxisAbsent {

@@ -104,9 +104,12 @@ fn meet_values(left: &ScopeValue, right: &ScopeValue) -> ValueMeet {
             let intersection: BTreeSet<String> = a.intersection(b).cloned().collect();
             match intersection.len() {
                 0 => ValueMeet::Empty(EmptyReason::DisjointSets),
-                1 => ValueMeet::Value(Exact(
-                    intersection.into_iter().next().expect("length checked"),
-                )),
+                1 => {
+                    let Some(value) = intersection.into_iter().next() else {
+                        return ValueMeet::Empty(EmptyReason::DisjointSets);
+                    };
+                    ValueMeet::Value(Exact(value))
+                }
                 _ => ValueMeet::Value(OneOf(intersection)),
             }
         }

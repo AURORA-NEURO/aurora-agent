@@ -59,17 +59,26 @@ pub enum BioType {
         clock: Option<Clock>,
     },
     /// A scalar magnitude in a declared unit.
-    Quantity { unit: Unit },
+    Quantity {
+        unit: Unit,
+    },
     /// A frame-independent spatial magnitude: a diameter, an area, a volume.
-    Extent { unit: Unit },
+    Extent {
+        unit: Unit,
+    },
     /// A located point, which means nothing without its frame.
-    Point { unit: Unit, frame: FrameBinding },
+    Point {
+        unit: Unit,
+        frame: FrameBinding,
+    },
     /// A genomic locus, which means nothing without its build.
     Locus {
         build: BuildBinding,
         convention: CoordinateConvention,
     },
-    Set { element: Box<BioType> },
+    Set {
+        element: Box<BioType>,
+    },
 }
 
 impl BioType {
@@ -97,7 +106,10 @@ impl BioType {
     pub fn is_measured(&self) -> bool {
         matches!(
             self,
-            BioType::Quantity { .. } | BioType::Extent { .. } | BioType::Point { .. } | BioType::Locus { .. }
+            BioType::Quantity { .. }
+                | BioType::Extent { .. }
+                | BioType::Point { .. }
+                | BioType::Locus { .. }
         )
     }
 
@@ -124,11 +136,9 @@ impl BioType {
             BioType::Extent { unit } => {
                 Observable::Extent(Extent::new(Quantity::new(1.0, unit.clone()))?)
             }
-            BioType::Point { unit, frame } => Observable::Located(Position::new(
-                [1.0, 1.0, 1.0],
-                unit.clone(),
-                frame.clone(),
-            )),
+            BioType::Point { unit, frame } => {
+                Observable::Located(Position::new([1.0, 1.0, 1.0], unit.clone(), frame.clone()))
+            }
             BioType::Locus { build, convention } => Observable::Locus(GenomicPosition::new(
                 build.clone(),
                 SYNTHETIC_CONTIG,

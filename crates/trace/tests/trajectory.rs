@@ -98,6 +98,20 @@ fn a_trace_that_dropped_events_is_not_compilable() {
 }
 
 #[test]
+fn a_trace_with_invalid_ordering_is_not_compilable() {
+    let malformed = from_jsonl(
+        "t",
+        &[
+            line(2, "action", json!({}), &[]),
+            line(2, "result", json!({}), &[]),
+        ]
+        .join("\n"),
+        false,
+    );
+    assert!(!malformed.is_compilable());
+}
+
+#[test]
 fn a_lossless_import_asserts_completeness_rather_than_saying_nothing() {
     let text = [
         line(0, "goal", json!({}), &[]),

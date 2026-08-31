@@ -33,6 +33,8 @@ use std::fmt;
 
 use bioprism_scope::ScopeClass;
 use serde::{Deserialize, Serialize};
+const MAX_BRIDGES: usize = 1024;
+use crate::validation::valid_text;
 
 /// A dimension along which two measurements can fail to be comparable.
 ///
@@ -192,14 +194,28 @@ pub enum Incomparability {
         loss: f64,
         tolerance: f64,
     },
+    /// The requirement itself cannot define a deterministic comparison contract.
+    InvalidRequirement { detail: String },
+    /// A frame declared a value that cannot safely participate in a comparison.
+    InvalidDeclaration {
+        dimension: FrameDimension,
+        side: FrameSide,
+        detail: String,
+    },
+    /// A supplied bridge is malformed or ambiguous before it can be applied.
+    InvalidBridge { bridge_id: String, detail: String },
 }
 
 impl Incomparability {
-    pub fn dimension(&self) -> FrameDimension {
+    pub fn dimension(&self) -> Option<FrameDimension> {
         match self {
             Incomparability::ValueDiffers { dimension, .. }
             | Incomparability::Undeclared { dimension, .. }
-            | Incomparability::BridgeTooLossy { dimension, .. } => *dimension,
+            | Incomparability::BridgeTooLossy { dimension, .. }
+            | Incomparability::InvalidDeclaration { dimension, .. } => Some(*dimension),
+            Incomparability::InvalidRequirement { .. } | Incomparability::InvalidBridge { .. } => {
+                None
+            }
         }
     }
 }
@@ -264,7 +280,7 @@ pub struct AppliedBridge {
 /// The fields are private and there is no public constructor. [`gate`] is the only way to obtain
 /// one, which is what makes "score computed without a comparability check" unrepresentable
 /// rather than merely discouraged.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ComparabilityWitness {
     requirement_id: String,
     reconciled: BTreeMap<FrameDimension, String>,
@@ -312,8 +328,97 @@ pub fn gate(
     let mut reconciled = BTreeMap::new();
     let mut applied = Vec::new();
 
-    for &dimension in &requirement.dimensions {
-        match (prediction.get(dimension), reference.get(dimension)) {
+    if !valid_text(&requirement.requirement_id) {
+        failures.push(Incomparability::InvalidRequirement {
+            detail: "requirement_id must be a bounded, trimmed, control-free string".into(),
+        });
+    }
+    if requirement.dimensions.is_empty() {
+        failures.push(Incomparability::InvalidRequirement {
+            detail: "at least one comparison dimension is required".into(),
+        });
+    }
+    if requirement
+        .dimensions
+        .windows(2)
+        .any(|pair| pair[0] == pair[1])
+        || {
+            let mut dimensions = requirement.dimensions.clone();
+            dimensions.sort();
+            dimensions.windows(2).any(|pair| pair[0] == pair[1])
+        }
+    {
+        failures.push(Incomparability::InvalidRequirement {
+            detail: "comparison dimensions must be unique".into(),
+        });
+    }
+    if !requirement.loss_tolerance.is_finite()
+        || !(0.0..=1.0).contains(&requirement.loss_tolerance)
+    {
+        failures.push(Incomparability::InvalidRequirement {
+            detail: "loss_tolerance must be finite and between 0 and 1".into(),
+        });
+    }
+    if bridges.len() > MAX_BRIDGES {
+        failures.push(Incomparability::InvalidRequirement {
+            detail: format!("at most {MAX_BRIDGES} bridges may be supplied"),
+        });
+    }
+    let mut bridge_ids = std::collections::BTreeSet::new();
+    for bridge in bridges.iter().take(MAX_BRIDGES) {
+        let mut invalid = Vec::new();
+        if !valid_text(&bridge.bridge_id) {
+            invalid.push("bridge_id must be a bounded, trimmed, control-free string");
+        }
+        if !valid_text(&bridge.from) || !valid_text(&bridge.to) {
+            invalid.push("bridge endpoints must be bounded, trimmed, control-free strings");
+        }
+        if bridge.from == bridge.to {
+            invalid.push("bridge endpoints must differ");
+        }
+        if !bridge.loss.is_finite() || !(0.0..=1.0).contains(&bridge.loss) {
+            invalid.push("bridge loss must be finite and between 0 and 1");
+        }
+        if !bridge_ids.insert(bridge.bridge_id.clone()) {
+            invalid.push("bridge_id must be unique");
+        }
+        if !invalid.is_empty() {
+            failures.push(Incomparability::InvalidBridge {
+                bridge_id: bridge.bridge_id.clone(),
+                detail: invalid.join("; "),
+            });
+        }
+    }
+    if !failures.is_empty() {
+        return Err(failures);
+    }
+
+    let mut dimensions = requirement.dimensions.clone();
+    dimensions.sort();
+
+    for dimension in dimensions {
+        let left = prediction.get(dimension);
+        let right = reference.get(dimension);
+        let left_valid = left.is_none_or(valid_text);
+        let right_valid = right.is_none_or(valid_text);
+        if !left_valid {
+            failures.push(Incomparability::InvalidDeclaration {
+                dimension,
+                side: FrameSide::Prediction,
+                detail: "frame value must be a bounded, trimmed, control-free string".into(),
+            });
+        }
+        if !right_valid {
+            failures.push(Incomparability::InvalidDeclaration {
+                dimension,
+                side: FrameSide::Reference,
+                detail: "frame value must be a bounded, trimmed, control-free string".into(),
+            });
+        }
+        if !left_valid || !right_valid {
+            continue;
+        }
+        match (left, right) {
             (None, None) => failures.push(Incomparability::Undeclared {
                 dimension,
                 side: FrameSide::Both,
@@ -332,7 +437,15 @@ pub fn gate(
             (Some(left), Some(right)) => {
                 match bridges
                     .iter()
-                    .find(|b| b.applies_to(dimension, left, right))
+                    .filter(|b| b.applies_to(dimension, left, right))
+                    .min_by(|left_bridge, right_bridge| {
+                        left_bridge
+                            .loss
+                            .total_cmp(&right_bridge.loss)
+                            .then_with(|| left_bridge.bridge_id.cmp(&right_bridge.bridge_id))
+                            .then_with(|| left_bridge.from.cmp(&right_bridge.from))
+                            .then_with(|| left_bridge.to.cmp(&right_bridge.to))
+                    })
                 {
                     Some(bridge) if bridge.loss <= requirement.loss_tolerance => {
                         reconciled.insert(dimension, right.to_string());

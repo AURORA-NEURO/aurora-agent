@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aurora-neuro.org/schemas/aurora-research-contract-v1/registry_resource_discovery_assurance_receipt.schema.json",
+  "title": "AURORA Registry Federated Resource Discovery Assurance Receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "contract_version", "feature_id", "request_id", "federation_id", "requester", "scope", "disposition", "candidate_order", "selected_order", "omitted_order", "semantic_order", "artifact_order", "provenance_order", "checks", "omissions", "uncertainty", "negative_evidence", "replay_identity", "effect_receipts", "federation_manifest", "raw_data_local", "boundary"],
+  "properties": {
+    "schema_version": {"const": "aurora-research-contract/1.0"},
+    "contract_version": {"const": "registry-federated-resource-discovery-assurance/1.0"},
+    "feature_id": {"const": "AFA-registry-P05-F28"},
+    "request_id": {"type": "string", "minLength": 1},
+    "federation_id": {"type": "string", "minLength": 1},
+    "requester": {"type": "string", "minLength": 1},
+    "scope": {"type": "string", "minLength": 1},
+    "disposition": {"enum": ["qualified", "partial", "unknown", "blocked"]},
+    "candidate_order": {"type": "array", "items": {"type": "string", "minLength": 1}, "minItems": 1},
+    "selected_order": {"type": "array", "items": {"type": "string", "minLength": 1}},
+    "omitted_order": {"type": "array", "items": {"type": "string", "minLength": 1}},
+    "semantic_order": {"type": "array", "items": {"$ref": "#/$defs/digest"}},
+    "artifact_order": {"type": "array", "items": {"$ref": "#/$defs/digest"}},
+    "provenance_order": {"type": "array", "items": {"$ref": "#/$defs/digest"}},
+    "checks": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+    "omissions": {"type": "array", "items": {"type": "string"}},
+    "uncertainty": {"type": "array", "items": {"type": "string"}},
+    "negative_evidence": {"type": "array", "items": {"type": "string"}},
+    "replay_identity": {"$ref": "#/$defs/digest"},
+    "effect_receipts": {"type": "array", "items": {"type": "string", "pattern": "^(exchange:signed-resource-manifest:|block:federated-resource-discovery$)"}, "minItems": 1},
+    "federation_manifest": {
+      "type": "object",
+      "required": ["content_hash"],
+      "properties": {"content_hash": {"$ref": "#/$defs/digest"}},
+      "additionalProperties": true
+    },
+    "raw_data_local": {"const": true},
+    "boundary": {"const": "preclinical-research-only; no human-subject or clinical-source data; no diagnosis, treatment, triage, enrollment, or clinical decisions"}
+  },
+  "$defs": {"digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}
+}

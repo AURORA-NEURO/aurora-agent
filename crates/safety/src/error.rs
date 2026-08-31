@@ -23,6 +23,9 @@ use thiserror::Error;
 /// Every failure this crate can produce.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum SafetyError {
+    #[error("safety invariant violated: {detail}")]
+    InvariantViolation { detail: String },
+
     /// A caller treated a mitigation as effective when nothing applies it. 13.01's control
     /// philosophy lists a dozen controls; in this process every one of them that is not a Rust
     /// type is a sentence in a document.
@@ -216,6 +219,7 @@ impl SafetyError {
     /// Which family this failure belongs to.
     pub fn family(&self) -> ErrorFamily {
         match self {
+            SafetyError::InvariantViolation { .. } => ErrorFamily::ModelViolation,
             SafetyError::UnenforcedReliance { .. }
             | SafetyError::UnmitigatedThreat { .. }
             | SafetyError::AnonymousAcceptance { .. }

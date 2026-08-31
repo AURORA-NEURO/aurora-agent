@@ -1,0 +1,508 @@
+//! Multimodal multi-study evidence-surveillance researcher workbench (AFA-adapter-P01-F18).
+//! The workbench is a separately versioned interaction surface over the F10 copilot: it exposes
+//! comparability and modality closure without hiding missing, incomparable, or negative evidence.
+
+use crate::multimodal_evidence_surveillance_research_copilot::{
+    canonical_multimodal_evidence_surveillance_research_copilot_request,
+    run_multimodal_evidence_surveillance_research_copilot,
+    MultimodalEvidenceSurveillanceResearchCopilotRequest, MultimodalResearchCopilotDisposition,
+};
+use bioprism_foundation::{
+    AutonomyTier, CapabilityManifest, Determinism, Effect, EvidenceReference, EvidenceState,
+    ResearchSurface, TypedPort, TypedResearchArtifact, PRECLINICAL_BOUNDARY,
+    RESEARCH_CONTRACT_SCHEMA_VERSION,
+};
+use bioprism_ids::ContentHash;
+use serde::{Deserialize, Serialize};
+use serde_json::json;
+use std::collections::BTreeSet;
+use thiserror::Error;
+
+pub const FEATURE_ID: &str = "AFA-adapter-P01-F18";
+pub const CONTRACT_VERSION: &str =
+    "adapter-multimodal-evidence-surveillance-research-workbench/1.0";
+pub const INPUT_SCHEMA: &str = "EvidenceFeed2@1";
+pub const OUTPUT_SCHEMA: &str = "QualifiedEvidenceSet5@1";
+const VIEWS: [&str; 4] = [
+    "view:study",
+    "view:modality",
+    "view:comparability",
+    "view:provenance",
+];
+const PANELS: [&str; 4] = [
+    "panel:incomparable",
+    "panel:missing",
+    "panel:negative",
+    "panel:selected",
+];
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MultimodalEvidenceSurveillanceResearchWorkbenchRequest {
+    pub copilot_request: MultimodalEvidenceSurveillanceResearchCopilotRequest,
+    pub workbench_id: String,
+    pub scope: String,
+    pub requested_view_order: Vec<String>,
+    pub requested_panel_order: Vec<String>,
+    pub budget_units: u32,
+    pub replay_identity: ContentHash,
+    pub boundary: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MultimodalEvidenceSurveillanceResearchWorkbenchReceipt {
+    pub schema_version: String,
+    pub contract_version: String,
+    pub feature_id: String,
+    pub input: MultimodalEvidenceSurveillanceResearchWorkbenchRequest,
+    pub input_digest: ContentHash,
+    pub request_id: String,
+    pub workbench_id: String,
+    pub scope: String,
+    pub semantic_profile: String,
+    pub disposition: MultimodalResearchCopilotDisposition,
+    pub view_order: Vec<String>,
+    pub panel_order: Vec<String>,
+    pub study_order: Vec<String>,
+    pub modality_order: Vec<String>,
+    pub candidate_order: Vec<String>,
+    pub qualified_order: Vec<String>,
+    pub unknown_order: Vec<String>,
+    pub incomparable_order: Vec<String>,
+    pub missing_order: Vec<String>,
+    pub blocked_order: Vec<String>,
+    pub replay_identity: ContentHash,
+    pub copilot_run_digest: ContentHash,
+    pub workbench_digest: ContentHash,
+    pub omissions: Vec<String>,
+    pub uncertainty: Vec<String>,
+    pub negative_evidence: Vec<String>,
+    pub effect_receipts: Vec<String>,
+    pub artifact: TypedResearchArtifact,
+    pub raw_data_local: bool,
+    pub boundary: String,
+}
+
+#[derive(Debug, Error, Clone, PartialEq, Eq)]
+pub enum MultimodalEvidenceSurveillanceResearchWorkbenchError {
+    #[error("invalid multimodal workbench request: {0}")]
+    Invalid(String),
+    #[error("multimodal workbench artifact failed: {0}")]
+    Artifact(String),
+    #[error("multimodal workbench copilot failed: {0}")]
+    Copilot(String),
+}
+
+impl MultimodalEvidenceSurveillanceResearchWorkbenchReceipt {
+    pub fn validate(&self) -> Result<(), MultimodalEvidenceSurveillanceResearchWorkbenchError> {
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION
+            || self.contract_version != CONTRACT_VERSION
+            || self.feature_id != FEATURE_ID
+            || self.boundary != PRECLINICAL_BOUNDARY
+            || !self.raw_data_local
+            || self.request_id.trim().is_empty()
+            || self.workbench_id.trim().is_empty()
+            || self.scope.trim().is_empty()
+            || self.view_order != VIEWS.iter().map(|v| (*v).to_string()).collect::<Vec<_>>()
+            || self.panel_order != PANELS.iter().map(|v| (*v).to_string()).collect::<Vec<_>>()
+            || self.candidate_order.is_empty()
+            || self.effect_receipts.is_empty()
+        {
+            return Err(MultimodalEvidenceSurveillanceResearchWorkbenchError::Invalid("workbench identity, canonical views, locality, candidates, or effects are incomplete".into()));
+        }
+        for values in [
+            &self.study_order,
+            &self.modality_order,
+            &self.candidate_order,
+            &self.qualified_order,
+            &self.unknown_order,
+            &self.incomparable_order,
+            &self.missing_order,
+            &self.blocked_order,
+            &self.omissions,
+            &self.uncertainty,
+            &self.negative_evidence,
+            &self.effect_receipts,
+        ] {
+            if values.windows(2).any(|p| p[0] >= p[1]) {
+                return Err(
+                    MultimodalEvidenceSurveillanceResearchWorkbenchError::Invalid(
+                        "workbench ordering is not canonical".into(),
+                    ),
+                );
+            }
+        }
+        let classified = self
+            .qualified_order
+            .iter()
+            .chain(self.unknown_order.iter())
+            .chain(self.incomparable_order.iter())
+            .chain(self.missing_order.iter())
+            .chain(self.blocked_order.iter())
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        if classified != self.candidate_order.iter().cloned().collect() {
+            return Err(
+                MultimodalEvidenceSurveillanceResearchWorkbenchError::Invalid(
+                    "workbench states do not partition candidates".into(),
+                ),
+            );
+        }
+        for value in [
+            &self.replay_identity,
+            &self.copilot_run_digest,
+            &self.workbench_digest,
+            &self.artifact.content_hash,
+        ] {
+            if value.as_str().len() != 64 {
+                return Err(
+                    MultimodalEvidenceSurveillanceResearchWorkbenchError::Invalid(
+                        "workbench digest is invalid".into(),
+                    ),
+                );
+            }
+        }
+        if self.effect_receipts.iter().any(|e| {
+            !e.starts_with("view:multimodal-evidence-workbench:") && e != "block:unsafe-release"
+        }) {
+            return Err(
+                MultimodalEvidenceSurveillanceResearchWorkbenchError::Invalid(
+                    "workbench effect is outside read-only gate".into(),
+                ),
+            );
+        }
+        let payload = json!({
+            "schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION,
+            "contract_version": CONTRACT_VERSION,
+            "feature_id": FEATURE_ID,
+            "request_id": self.request_id,
+            "workbench_id": self.workbench_id,
+            "scope": self.scope,
+            "semantic_profile": self.semantic_profile,
+            "disposition": self.disposition,
+            "view_order": self.view_order,
+            "panel_order": self.panel_order,
+            "study_order": self.study_order,
+            "modality_order": self.modality_order,
+            "candidate_order": self.candidate_order,
+            "qualified_order": self.qualified_order,
+            "unknown_order": self.unknown_order,
+            "incomparable_order": self.incomparable_order,
+            "missing_order": self.missing_order,
+            "blocked_order": self.blocked_order,
+            "replay_identity": self.replay_identity,
+            "copilot_run_digest": self.copilot_run_digest,
+            "workbench_digest": self.workbench_digest,
+            "omissions": self.omissions,
+            "uncertainty": self.uncertainty,
+            "negative_evidence": self.negative_evidence,
+            "boundary": PRECLINICAL_BOUNDARY,
+            "raw_data_local": self.raw_data_local,
+        });
+        self.artifact.verify_payload(&payload).map_err(|e| {
+            MultimodalEvidenceSurveillanceResearchWorkbenchError::Artifact(e.to_string())
+        })?;
+        self.artifact.validate_metadata().map_err(|e| {
+            MultimodalEvidenceSurveillanceResearchWorkbenchError::Artifact(e.to_string())
+        })?;
+        if self.input_digest != workbench_input_digest(&self.input)? {
+            return Err(
+                MultimodalEvidenceSurveillanceResearchWorkbenchError::Invalid(
+                    "multimodal workbench retained input digest mismatch".into(),
+                ),
+            );
+        }
+        let expected = build_multimodal_evidence_surveillance_research_workbench(&self.input)?;
+        if self != &expected {
+            return Err(
+                MultimodalEvidenceSurveillanceResearchWorkbenchError::Invalid(
+                    "multimodal workbench receipt does not match its retained input".into(),
+                ),
+            );
+        }
+        Ok(())
+    }
+}
+
+pub fn multimodal_evidence_surveillance_research_workbench_manifest() -> CapabilityManifest {
+    CapabilityManifest { schema_version: RESEARCH_CONTRACT_SCHEMA_VERSION.into(), capability_id: FEATURE_ID.into(), version: CONTRACT_VERSION.into(), owner_crate: "adapter".into(), consumers: ["integration engineer".into(), "preclinical researcher".into()].into(), behavior: "renders a deterministic multimodal multi-study EvidenceFeed2 workbench with study, modality, comparability, missing, incomparable, negative, and provenance panels without external effects".into(), value: "gives integration engineers an accessible, replayable view of cross-study evidence closure while preserving semantic comparability and modality omissions".into(), inputs: vec![TypedPort { name: "multimodal_evidence_workbench_request".into(), schema: INPUT_SCHEMA.into(), required: true }], outputs: vec![TypedPort { name: "qualified_multimodal_evidence_workbench_set".into(), schema: OUTPUT_SCHEMA.into(), required: true }], effects: [Effect::ReadLocalData, Effect::ExecuteLocalComputation].into(), permissions: ["view:authorized-research-state".into()].into(), determinism: Determinism::ByteStable, evidence: vec![EvidenceReference { source_id: "json-schema".into(), state: EvidenceState::Supported, locator: Some("https://json-schema.org/specification".into()) }], authority_requirements: Vec::new(), autonomy_tier: AutonomyTier::A1, surfaces: [ResearchSurface::Ui, ResearchSurface::Api, ResearchSurface::Sdk, ResearchSurface::Cli, ResearchSurface::Operator].into(), boundary: PRECLINICAL_BOUNDARY.into() }
+}
+
+pub fn render_multimodal_evidence_surveillance_research_workbench(
+    request: &MultimodalEvidenceSurveillanceResearchWorkbenchRequest,
+) -> Result<
+    MultimodalEvidenceSurveillanceResearchWorkbenchReceipt,
+    MultimodalEvidenceSurveillanceResearchWorkbenchError,
+> {
+    let receipt = build_multimodal_evidence_surveillance_research_workbench(request)?;
+    receipt.validate()?;
+    Ok(receipt)
+}
+
+fn workbench_input_digest(
+    request: &MultimodalEvidenceSurveillanceResearchWorkbenchRequest,
+) -> Result<ContentHash, MultimodalEvidenceSurveillanceResearchWorkbenchError> {
+    let canonical = canonical_multimodal_evidence_surveillance_research_workbench_request(request);
+    let value = serde_json::to_value(canonical).map_err(|e| {
+        MultimodalEvidenceSurveillanceResearchWorkbenchError::Artifact(e.to_string())
+    })?;
+    ContentHash::of_value(&value)
+        .map_err(|e| MultimodalEvidenceSurveillanceResearchWorkbenchError::Artifact(e.to_string()))
+}
+
+fn canonical_multimodal_evidence_surveillance_research_workbench_request(
+    request: &MultimodalEvidenceSurveillanceResearchWorkbenchRequest,
+) -> MultimodalEvidenceSurveillanceResearchWorkbenchRequest {
+    let mut canonical = request.clone();
+    canonical.copilot_request = canonical_multimodal_evidence_surveillance_research_copilot_request(
+        &canonical.copilot_request,
+    );
+    canonical
+}
+
+fn build_multimodal_evidence_surveillance_research_workbench(
+    request: &MultimodalEvidenceSurveillanceResearchWorkbenchRequest,
+) -> Result<
+    MultimodalEvidenceSurveillanceResearchWorkbenchReceipt,
+    MultimodalEvidenceSurveillanceResearchWorkbenchError,
+> {
+    validate_request(request)?;
+    let copilot = run_multimodal_evidence_surveillance_research_copilot(&request.copilot_request)
+        .map_err(|e| {
+        MultimodalEvidenceSurveillanceResearchWorkbenchError::Copilot(e.to_string())
+    })?;
+    let views = VIEWS.iter().map(|v| (*v).to_string()).collect::<Vec<_>>();
+    let panels = PANELS.iter().map(|v| (*v).to_string()).collect::<Vec<_>>();
+    let candidate = copilot.candidate_order.clone();
+    let qualified = copilot.selected_order.clone();
+    let unknown = copilot.unresolved_order.clone();
+    let incomparable = copilot.incomparable_order.clone();
+    let missing = copilot.missing_cell_order.clone();
+    let blocked = copilot.denied_order.clone();
+    let copilot_value = serde_json::to_value(&copilot).map_err(|e| {
+        MultimodalEvidenceSurveillanceResearchWorkbenchError::Artifact(e.to_string())
+    })?;
+    let copilot_run_digest = ContentHash::of_value(&copilot_value).map_err(|e| {
+        MultimodalEvidenceSurveillanceResearchWorkbenchError::Artifact(e.to_string())
+    })?;
+    let workbench_digest = ContentHash::of_value(&json!({"workbench_id":request.workbench_id,"scope":request.scope,"views":views,"panels":panels,"candidate":candidate,"qualified":qualified,"unknown":unknown,"incomparable":incomparable,"missing":missing,"blocked":blocked,"replay_identity":request.replay_identity,"copilot_run_digest":copilot_run_digest})).map_err(|e| MultimodalEvidenceSurveillanceResearchWorkbenchError::Artifact(e.to_string()))?;
+    let mut omissions = copilot.omissions.clone();
+    omissions.push("workbench:read-only-multimodal-view".into());
+    omissions.sort();
+    omissions.dedup();
+    let payload = json!({"schema_version":RESEARCH_CONTRACT_SCHEMA_VERSION,"contract_version":CONTRACT_VERSION,"feature_id":FEATURE_ID,"request_id":request.copilot_request.request_id,"workbench_id":request.workbench_id,"scope":request.scope,"semantic_profile":request.copilot_request.semantic_profile,"disposition":copilot.disposition,"view_order":views,"panel_order":panels,"study_order":copilot.study_order,"modality_order":copilot.modality_order,"candidate_order":candidate,"qualified_order":qualified,"unknown_order":unknown,"incomparable_order":incomparable,"missing_order":missing,"blocked_order":blocked,"replay_identity":request.replay_identity,"copilot_run_digest":copilot_run_digest,"workbench_digest":workbench_digest,"omissions":omissions,"uncertainty":copilot.uncertainty,"negative_evidence":copilot.negative_evidence,"boundary":PRECLINICAL_BOUNDARY,"raw_data_local":true});
+    let artifact = TypedResearchArtifact::from_payload(
+        format!(
+            "adapter-multimodal-evidence-workbench:{}",
+            request.workbench_id
+        ),
+        "application/vnd.aurora.multimodal-evidence-workbench+json",
+        &payload,
+        vec![],
+        vec![],
+    )
+    .map_err(|e| MultimodalEvidenceSurveillanceResearchWorkbenchError::Artifact(e.to_string()))?;
+    let canonical_request =
+        canonical_multimodal_evidence_surveillance_research_workbench_request(request);
+    let receipt = MultimodalEvidenceSurveillanceResearchWorkbenchReceipt {
+        schema_version: RESEARCH_CONTRACT_SCHEMA_VERSION.into(),
+        contract_version: CONTRACT_VERSION.into(),
+        feature_id: FEATURE_ID.into(),
+        input: canonical_request,
+        input_digest: workbench_input_digest(request)?,
+        request_id: request.copilot_request.request_id.clone(),
+        workbench_id: request.workbench_id.clone(),
+        scope: request.scope.clone(),
+        semantic_profile: request.copilot_request.semantic_profile.clone(),
+        disposition: copilot.disposition,
+        view_order: views,
+        panel_order: panels,
+        study_order: copilot.study_order.clone(),
+        modality_order: copilot.modality_order.clone(),
+        candidate_order: candidate,
+        qualified_order: qualified,
+        unknown_order: unknown,
+        incomparable_order: incomparable,
+        missing_order: missing,
+        blocked_order: blocked,
+        replay_identity: request.replay_identity.clone(),
+        copilot_run_digest,
+        workbench_digest,
+        omissions,
+        uncertainty: copilot.uncertainty.clone(),
+        negative_evidence: copilot.negative_evidence.clone(),
+        effect_receipts: vec![format!(
+            "view:multimodal-evidence-workbench:{}",
+            request.workbench_id
+        )],
+        artifact,
+        raw_data_local: true,
+        boundary: request.boundary.clone(),
+    };
+    Ok(receipt)
+}
+fn validate_request(
+    r: &MultimodalEvidenceSurveillanceResearchWorkbenchRequest,
+) -> Result<(), MultimodalEvidenceSurveillanceResearchWorkbenchError> {
+    if r.workbench_id.trim().is_empty()
+        || r.scope.trim().is_empty()
+        || r.budget_units == 0
+        || r.boundary != PRECLINICAL_BOUNDARY
+        || r.copilot_request.boundary != PRECLINICAL_BOUNDARY
+        || !r.copilot_request.raw_data_local
+        || !r.copilot_request.dry_run
+    {
+        return Err(
+            MultimodalEvidenceSurveillanceResearchWorkbenchError::Invalid(
+                "workbench identity, budget, dry-run, locality, or boundary is invalid".into(),
+            ),
+        );
+    }
+    if r.requested_view_order != VIEWS.iter().map(|v| (*v).to_string()).collect::<Vec<_>>()
+        || r.requested_panel_order != PANELS.iter().map(|v| (*v).to_string()).collect::<Vec<_>>()
+        || r.replay_identity.as_str().len() != 64
+        || r.copilot_request.replay_identity.as_str().len() != 64
+    {
+        return Err(
+            MultimodalEvidenceSurveillanceResearchWorkbenchError::Invalid(
+                "workbench views, panels, or replay identity is invalid".into(),
+            ),
+        );
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::multimodal_evidence_surveillance_research_copilot::MultimodalCopilotEvidenceObservation;
+    use bioprism_foundation::{EvidenceAvailability, EvidenceState};
+    fn request() -> MultimodalEvidenceSurveillanceResearchWorkbenchRequest {
+        let c = MultimodalEvidenceSurveillanceResearchCopilotRequest {
+            request_id: "req-18".into(),
+            agent_id: "integration-18".into(),
+            semantic_profile: "ome-ngff:1".into(),
+            required_studies: vec!["study-18".into(), "study-19".into()],
+            required_modalities: vec!["image".into(), "omics".into()],
+            declared_tools: vec!["evidence.inspect".into()],
+            requested_tool: "evidence.inspect".into(),
+            max_tool_calls: 1,
+            dry_run: true,
+            approval_reference: None,
+            approval_granted: false,
+            observations: vec![
+                MultimodalCopilotEvidenceObservation {
+                    source_id: "source-a".into(),
+                    study_id: "study-18".into(),
+                    modality: "image".into(),
+                    semantic_profile: "ome-ngff:1".into(),
+                    source_type: "image".into(),
+                    locator: "local://source-a".into(),
+                    digest: Some(ContentHash::of_bytes(b"a")),
+                    availability: EvidenceAvailability::Available,
+                    evidence_state: EvidenceState::Supported,
+                    relevance_score: 90,
+                    negative_result: false,
+                },
+                MultimodalCopilotEvidenceObservation {
+                    source_id: "source-b".into(),
+                    study_id: "study-19".into(),
+                    modality: "omics".into(),
+                    semantic_profile: "ome-ngff:1".into(),
+                    source_type: "assay".into(),
+                    locator: "local://source-b".into(),
+                    digest: Some(ContentHash::of_bytes(b"b")),
+                    availability: EvidenceAvailability::Available,
+                    evidence_state: EvidenceState::Supported,
+                    relevance_score: 80,
+                    negative_result: false,
+                },
+            ],
+            min_relevance_score: 50,
+            policy_allow: true,
+            protected_closure: true,
+            raw_data_local: true,
+            replay_identity: ContentHash::of_bytes(b"copilot-18"),
+            boundary: PRECLINICAL_BOUNDARY.into(),
+        };
+        MultimodalEvidenceSurveillanceResearchWorkbenchRequest {
+            copilot_request: c,
+            workbench_id: "wb-18".into(),
+            scope: "studies:study-18".into(),
+            requested_view_order: VIEWS.iter().map(|v| (*v).to_string()).collect(),
+            requested_panel_order: PANELS.iter().map(|v| (*v).to_string()).collect(),
+            budget_units: 4,
+            replay_identity: ContentHash::of_bytes(b"wb-18"),
+            boundary: PRECLINICAL_BOUNDARY.into(),
+        }
+    }
+    #[test]
+    fn manifest_is_a1() {
+        let m = multimodal_evidence_surveillance_research_workbench_manifest();
+        assert_eq!(m.autonomy_tier, AutonomyTier::A1);
+        assert!(m.validate().is_ok())
+    }
+    #[test]
+    fn renders_view() {
+        let r = render_multimodal_evidence_surveillance_research_workbench(&request()).unwrap();
+        assert_eq!(r.feature_id, FEATURE_ID);
+        assert!(r.effect_receipts[0].starts_with("view:multimodal-evidence-workbench:"))
+    }
+    #[test]
+    fn policy_denial_visible() {
+        let mut r = request();
+        r.copilot_request.policy_allow = false;
+        let x = render_multimodal_evidence_surveillance_research_workbench(&r).unwrap();
+        assert_eq!(x.disposition, MultimodalResearchCopilotDisposition::Blocked)
+    }
+    #[test]
+    fn rejects_non_dry_run() {
+        let mut r = request();
+        r.copilot_request.dry_run = false;
+        assert!(render_multimodal_evidence_surveillance_research_workbench(&r).is_err())
+    }
+    #[test]
+    fn rejects_panels() {
+        let mut r = request();
+        r.requested_panel_order.reverse();
+        assert!(render_multimodal_evidence_surveillance_research_workbench(&r).is_err())
+    }
+    #[test]
+    fn replay_stable() {
+        let r = request();
+        assert_eq!(
+            render_multimodal_evidence_surveillance_research_workbench(&r).unwrap(),
+            render_multimodal_evidence_surveillance_research_workbench(&r).unwrap()
+        )
+    }
+
+    #[test]
+    fn reordered_nested_copilot_input_has_stable_identity() {
+        let mut reordered = request();
+        reordered.copilot_request.required_studies.reverse();
+        reordered.copilot_request.required_modalities.reverse();
+        reordered.copilot_request.declared_tools.reverse();
+        reordered.copilot_request.observations.reverse();
+        let first = render_multimodal_evidence_surveillance_research_workbench(&request()).unwrap();
+        let second =
+            render_multimodal_evidence_surveillance_research_workbench(&reordered).unwrap();
+        assert_eq!(first.input_digest, second.input_digest);
+        assert_eq!(first.workbench_digest, second.workbench_digest);
+    }
+
+    #[test]
+    fn receipt_rejects_tampered_payload() {
+        let mut receipt =
+            render_multimodal_evidence_surveillance_research_workbench(&request()).unwrap();
+        receipt.workbench_id = "tampered-workbench".into();
+        assert!(receipt.validate().is_err());
+    }
+
+    #[test]
+    fn receipt_rejects_tampered_retained_request() {
+        let mut receipt =
+            render_multimodal_evidence_surveillance_research_workbench(&request()).unwrap();
+        receipt.input.scope = "studies:tampered".into();
+        let error = receipt.validate().unwrap_err();
+        assert!(error.to_string().contains("retained input digest mismatch"));
+    }
+}

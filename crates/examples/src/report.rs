@@ -90,6 +90,8 @@ pub enum RefusalCode {
     BudgetExceeded,
     /// Subjects sharing an alias have a missing split assignment alongside present ones.
     UnorderableSplitGroups,
+    /// The compiler rejected its own internal invariant instead of emitting a partial result.
+    InvariantViolation,
     /// The query document is not a well-formed `fiber-query/0.1` contract.
     MalformedQuery,
     /// The world document is not a well-formed `fiber-world/0.1` document.

@@ -102,7 +102,9 @@ pub enum Reversibility {
     ///
     /// Matches `bioprism-choreography`'s `SagaOutcome::CompensatedWithResidue`. There is
     /// deliberately no variant that claims compensation restores prior state.
-    CompensatableWithResidue { residue: Vec<String> },
+    CompensatableWithResidue {
+        residue: Vec<String>,
+    },
     Irreversible,
 }
 
@@ -237,9 +239,7 @@ impl ActionDefinition {
             && self.reversibility.is_irreversible()
             && self.idempotence == Idempotence::Idempotent
         {
-            return Err(
-                InterventionError::IrreversibleConsumptionCannotBeIdempotent { action },
-            );
+            return Err(InterventionError::IrreversibleConsumptionCannotBeIdempotent { action });
         }
 
         for precondition in &self.preconditions {

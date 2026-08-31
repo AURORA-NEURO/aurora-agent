@@ -429,16 +429,19 @@ pub fn adaptive_policy_with_cost_vectors(
         item.acquisition.check_against(problem)?;
     }
     let mut nodes_evaluated = 0;
-    let selected = evaluate(
+    let mut context = EvaluationContext {
         problem,
-        belief,
         acquisitions,
+        weights,
+        nodes_evaluated: &mut nodes_evaluated,
+    };
+    let selected = evaluate(
+        &mut context,
+        belief,
         (1u32 << acquisitions.len()) - 1,
         budget,
-        weights,
         max_steps,
         0,
-        &mut nodes_evaluated,
     )?;
     Ok(CostedAdaptivePolicy {
         expected_total: selected.total,
@@ -463,32 +466,35 @@ struct Evaluation {
     node: CostedAdaptiveNode,
 }
 
+struct EvaluationContext<'a> {
+    problem: &'a DecisionProblem,
+    acquisitions: &'a [CostedAcquisition],
+    weights: CostWeights,
+    nodes_evaluated: &'a mut usize,
+}
+
 fn evaluate(
-    problem: &DecisionProblem,
+    context: &mut EvaluationContext<'_>,
     belief: &Belief,
-    acquisitions: &[CostedAcquisition],
     remaining: u32,
     budget: CostVector,
-    weights: CostWeights,
     steps_left: usize,
     depth: usize,
-    nodes_evaluated: &mut usize,
 ) -> Result<Evaluation, EpistemicError> {
-    *nodes_evaluated =
-        nodes_evaluated
-            .checked_add(1)
-            .ok_or(EpistemicError::AdaptivePolicyCapExceeded {
-                nodes: usize::MAX,
-                cap: 65_536,
-            })?;
-    if *nodes_evaluated > 65_536 {
+    *context.nodes_evaluated = (*context.nodes_evaluated).checked_add(1).ok_or(
+        EpistemicError::AdaptivePolicyCapExceeded {
+            nodes: usize::MAX,
+            cap: 65_536,
+        },
+    )?;
+    if *context.nodes_evaluated > 65_536 {
         return Err(EpistemicError::AdaptivePolicyCapExceeded {
-            nodes: *nodes_evaluated,
+            nodes: *context.nodes_evaluated,
             cap: 65_536,
         });
     }
-    let stop_action = problem.bayes_action(belief);
-    let stop_risk = problem.bayes_risk(belief);
+    let stop_action = context.problem.bayes_action(belief);
+    let stop_risk = context.problem.bayes_risk(belief);
     let mut best = Evaluation {
         total: stop_risk,
         terminal_risk: stop_risk,
@@ -504,24 +510,24 @@ fn evaluate(
         return Ok(best);
     }
 
-    for index in 0..acquisitions.len() {
+    for index in 0..context.acquisitions.len() {
         let bit = 1u32 << index;
         if remaining & bit == 0 {
             continue;
         }
-        let acquisition = &acquisitions[index];
+        let acquisition = context.acquisitions[index].clone();
         if !acquisition.cost.fits_within(&budget) {
             continue;
         }
         let next_budget = budget.remaining_after(acquisition.cost)?;
-        let scalarized_cost = weights.scalarize(acquisition.cost);
+        let scalarized_cost = context.weights.scalarize(acquisition.cost);
         let mut expected_total = scalarized_cost;
         let mut expected_terminal_risk = 0.0;
         let mut expected_acquisition_cost = acquisition.cost;
         let mut outcomes = Vec::with_capacity(acquisition.acquisition.outcomes().len());
         let mut selected_depth = depth + 1;
         for outcome in acquisition.acquisition.outcomes() {
-            let joint: Vec<f64> = (0..problem.model_count())
+            let joint: Vec<f64> = (0..context.problem.model_count())
                 .map(|model| belief.mass(model) * outcome.likelihood(model))
                 .collect();
             let probability: f64 = joint.iter().sum();
@@ -539,15 +545,12 @@ fn evaluate(
             }
             let posterior = Belief::new(joint)?;
             let child = evaluate(
-                problem,
+                context,
                 &posterior,
-                acquisitions,
                 remaining ^ bit,
                 next_budget,
-                weights,
                 steps_left - 1,
                 depth + 1,
-                nodes_evaluated,
             )?;
             expected_total += probability * child.total;
             expected_terminal_risk += probability * child.terminal_risk;
@@ -564,7 +567,7 @@ fn evaluate(
         let candidate = Evaluation {
             total: expected_total,
             terminal_risk: expected_terminal_risk,
-            scalarized_cost: weights.scalarize(expected_acquisition_cost),
+            scalarized_cost: context.weights.scalarize(expected_acquisition_cost),
             acquisition_cost: expected_acquisition_cost,
             depth: selected_depth,
             node: CostedAdaptiveNode::Acquire {

@@ -8,8 +8,8 @@
 use bioprism_ids::RunId;
 use bioprism_runtime::{
     cache_reuse, compare_suffixes, fork_tape, observable_state, open_suffix, CachePrefixKey, Clock,
-    EffectKind, EffectPolicy, ExternalActions, Host, InProcessWorld, MaterializationPolicy, Network,
-    NetworkMode, Provenance, RecordingHost, ReuseStatus, RuntimeError, Sandbox, WorldTape,
+    EffectKind, EffectPolicy, ExternalActions, Host, InProcessWorld, MaterializationPolicy,
+    Network, NetworkMode, Provenance, RecordingHost, ReuseStatus, RuntimeError, Sandbox, WorldTape,
     OBSERVABLE_STATE_VERSION,
 };
 
@@ -90,16 +90,26 @@ fn forking_past_the_end_of_a_tape_is_refused() {
 }
 
 #[test]
+fn a_fork_must_have_a_distinct_run_identity() {
+    let parent = parent_tape();
+    let error = fork_tape(&parent, 1, run("run-parent"))
+        .expect_err("a child cannot collapse into its parent run identity");
+    assert!(matches!(error, RuntimeError::InvariantViolation { .. }));
+}
+
+#[test]
 fn a_fork_does_not_re_perform_the_prefix() {
     let parent = parent_tape();
-    let mut suffix = open_suffix(&parent, 3, run("run-child"), branch_world(), policy())
-        .expect("within range");
+    let mut suffix =
+        open_suffix(&parent, 3, run("run-child"), branch_world(), policy()).expect("within range");
 
     suffix.resume_at_fork();
     suffix
         .get_body("https://fixtures.test/suffix")
         .expect("the branch's own fixture");
-    suffix.write_file("/work/child.txt", "child").expect("allowed");
+    suffix
+        .write_file("/work/child.txt", "child")
+        .expect("allowed");
 
     assert_eq!(
         suffix.source().calls(),
@@ -113,8 +123,8 @@ fn a_fork_does_not_re_perform_the_prefix() {
 #[test]
 fn a_forked_suffix_diverges_from_the_parent_only_after_the_fork_point() {
     let parent = parent_tape();
-    let mut suffix = open_suffix(&parent, 3, run("run-child"), branch_world(), policy())
-        .expect("within range");
+    let mut suffix =
+        open_suffix(&parent, 3, run("run-child"), branch_world(), policy()).expect("within range");
     suffix.resume_at_fork();
     suffix
         .write_file("/work/child.txt", "child-only")
@@ -136,8 +146,8 @@ fn a_forked_suffix_diverges_from_the_parent_only_after_the_fork_point() {
 #[test]
 fn re_walking_the_prefix_with_a_different_program_is_caught_at_the_fork_point() {
     let parent = parent_tape();
-    let mut suffix = open_suffix(&parent, 3, run("run-child"), branch_world(), policy())
-        .expect("within range");
+    let mut suffix =
+        open_suffix(&parent, 3, run("run-child"), branch_world(), policy()).expect("within range");
 
     suffix.sleep(100).expect("step 0 matches the parent");
     let error = suffix
@@ -160,8 +170,8 @@ fn re_walking_the_prefix_with_a_different_program_is_caught_at_the_fork_point() 
 #[test]
 fn a_suffix_that_never_reached_the_fork_point_is_refused() {
     let parent = parent_tape();
-    let mut suffix = open_suffix(&parent, 3, run("run-child"), branch_world(), policy())
-        .expect("within range");
+    let mut suffix =
+        open_suffix(&parent, 3, run("run-child"), branch_world(), policy()).expect("within range");
     suffix.sleep(100).expect("step 0 matches");
 
     assert!(suffix.is_replaying());
@@ -258,16 +268,18 @@ fn observable_state_hands_a_continuation_the_prefix_it_did_not_run() {
 fn two_branches_from_the_same_point_are_compared_at_that_point() {
     let parent = parent_tape();
 
-    let mut left = open_suffix(&parent, 2, run("run-left"), branch_world(), policy())
-        .expect("in range");
+    let mut left =
+        open_suffix(&parent, 2, run("run-left"), branch_world(), policy()).expect("in range");
     left.resume_at_fork();
     left.write_file("/work/left.txt", "left").expect("allowed");
     let left = left.finish().expect("reached the fork");
 
-    let mut right = open_suffix(&parent, 2, run("run-right"), branch_world(), policy())
-        .expect("in range");
+    let mut right =
+        open_suffix(&parent, 2, run("run-right"), branch_world(), policy()).expect("in range");
     right.resume_at_fork();
-    right.write_file("/work/right.txt", "right").expect("allowed");
+    right
+        .write_file("/work/right.txt", "right")
+        .expect("allowed");
     let right = right.finish().expect("reached the fork");
 
     let comparison = compare_suffixes(&left, &right);
@@ -295,8 +307,8 @@ fn a_forked_tape_still_loads_after_a_json_round_trip() {
 fn cache_reuse_is_rejected_when_the_tool_schema_changes() {
     let parent = parent_tape();
     let schema = serde_json::json!({ "tools": ["read", "write"] });
-    let recorded = CachePrefixKey::for_fork(&parent, 3, "m1", &schema, "policy-v1")
-        .expect("in range");
+    let recorded =
+        CachePrefixKey::for_fork(&parent, 3, "m1", &schema, "policy-v1").expect("in range");
 
     assert_eq!(
         cache_reuse(&recorded, &recorded.clone()),
@@ -304,8 +316,8 @@ fn cache_reuse_is_rejected_when_the_tool_schema_changes() {
     );
 
     let widened = serde_json::json!({ "tools": ["read", "write", "delete"] });
-    let candidate = CachePrefixKey::for_fork(&parent, 3, "m1", &widened, "policy-v1")
-        .expect("in range");
+    let candidate =
+        CachePrefixKey::for_fork(&parent, 3, "m1", &widened, "policy-v1").expect("in range");
     match cache_reuse(&recorded, &candidate) {
         ReuseStatus::Rejected { reason } => assert_eq!(reason, "tool schema differs"),
         ReuseStatus::Reused => panic!("a different tool schema is a different prefix"),

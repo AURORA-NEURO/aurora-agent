@@ -20,6 +20,7 @@ const MAX_IDENTITIES: usize = 8_192;
 const MAX_THREATS: usize = 8_192;
 const MAX_REVIEWS: usize = 4_096;
 const MAX_LIST: usize = 16_384;
+const MAX_TEXT_BYTES: usize = 4_096;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SecurityPrivacyManifest {
@@ -413,13 +414,15 @@ impl SecurityPrivacyManifest {
             ("system.version", &self.system.version),
             ("system.owner", &self.system.owner),
         ] {
-            if value.trim().is_empty() {
+            if !valid_text(value) {
                 blocking(
                     &mut issues,
-                    "required_field_empty",
+                    "field_invalid",
                     field,
-                    format!("{field} is empty"),
-                    "declare the system identity and accountable owner",
+                    format!(
+                        "{field} must be non-empty, at most {MAX_TEXT_BYTES} bytes, and contain no control characters"
+                    ),
+                    "supply bounded visible metadata for the governed system",
                 );
             }
         }
@@ -430,26 +433,46 @@ impl SecurityPrivacyManifest {
             }
             assets.insert(asset.id.clone(), asset);
             let sensitive = asset.classification.sensitive();
-            if asset.id.trim().is_empty()
-                || asset.name.trim().is_empty()
-                || asset.owner.trim().is_empty()
-                || asset.residency.trim().is_empty()
-            {
-                blocking(
-                    &mut issues,
-                    "asset_incomplete",
-                    &asset.id,
-                    "asset id, name, owner, and residency are required",
-                    "declare accountable ownership and storage jurisdiction",
-                );
+            for (field, value) in [
+                ("id", &asset.id),
+                ("name", &asset.name),
+                ("owner", &asset.owner),
+                ("residency", &asset.residency),
+            ] {
+                let valid = if field == "id" {
+                    valid_identifier(value)
+                } else {
+                    valid_text(value)
+                };
+                if !valid {
+                    blocking(
+                        &mut issues,
+                        "field_invalid",
+                        format!("asset.{}.{}", asset.id, field),
+                        format!(
+                            "asset {field} must be canonical, non-empty, at most {MAX_TEXT_BYTES} bytes, and contain no control characters"
+                        ),
+                        "supply bounded visible asset metadata",
+                    );
+                }
             }
-            if self.policies.require_asset_purpose && asset.purpose.trim().is_empty() {
+            if asset.purpose.trim().is_empty() {
+                if self.policies.require_asset_purpose {
+                    blocking(
+                        &mut issues,
+                        "asset_purpose_missing",
+                        &asset.id,
+                        "asset has no declared purpose",
+                        "state the permitted purpose before retaining the asset",
+                    );
+                }
+            } else if !valid_text(&asset.purpose) {
                 blocking(
                     &mut issues,
-                    "asset_purpose_missing",
+                    "field_invalid",
                     &asset.id,
-                    "asset has no declared purpose",
-                    "state the permitted purpose before retaining the asset",
+                    "asset purpose contains invalid control or oversized text",
+                    "supply bounded visible asset metadata",
                 );
             }
             if self.policies.require_retention && sensitive && asset.retention_days.is_none() {
@@ -466,9 +489,7 @@ impl SecurityPrivacyManifest {
                 && asset
                     .deletion_process
                     .as_deref()
-                    .map(str::trim)
-                    .filter(|v| !v.is_empty())
-                    .is_none()
+                    .is_none_or(|value| !valid_text(value))
             {
                 blocking(
                     &mut issues,
@@ -477,6 +498,17 @@ impl SecurityPrivacyManifest {
                     "sensitive asset has no deletion process",
                     "name how retention expiry or erasure requests are fulfilled",
                 );
+            }
+            if let Some(deletion_process) = asset.deletion_process.as_deref() {
+                if !valid_text(deletion_process) {
+                    blocking(
+                        &mut issues,
+                        "field_invalid",
+                        format!("asset.{}.deletion_process", asset.id),
+                        "asset deletion process contains invalid control or oversized text",
+                        "supply a bounded visible deletion process or omit it",
+                    );
+                }
             }
         }
         if self.assets.is_empty() {
@@ -494,19 +526,38 @@ impl SecurityPrivacyManifest {
                 continue;
             }
             flows.insert(flow.id.clone(), flow);
+            if !valid_identifier(&flow.id) {
+                blocking(
+                    &mut issues,
+                    "field_invalid",
+                    "flow.id",
+                    "flow id must be a canonical, bounded, visible identifier",
+                    "supply a stable flow identifier without control characters or surrounding whitespace",
+                );
+            }
             let asset_valid = assets.contains_key(&flow.asset);
-            let purpose_valid = !flow.purpose.trim().is_empty();
+            let purpose_valid = valid_text(&flow.purpose);
             let legal_basis_present = flow
                 .legal_basis
                 .as_deref()
-                .map(str::trim)
-                .filter(|v| !v.is_empty())
+                .filter(|value| valid_text(value))
                 .is_some();
             let authorization_present = flow
                 .authorization_evidence
                 .as_deref()
                 .map(valid_digest)
                 .unwrap_or(false);
+            if let Some(authorization_evidence) = flow.authorization_evidence.as_deref() {
+                if !valid_digest(authorization_evidence) {
+                    blocking(
+                        &mut issues,
+                        "field_invalid",
+                        format!("flow.{}.authorization_evidence", flow.id),
+                        "flow authorization evidence must be a canonical content digest",
+                        "supply a lowercase 64-character hexadecimal evidence digest or omit it",
+                    );
+                }
+            }
             if !asset_valid {
                 blocking(
                     &mut issues,
@@ -516,15 +567,29 @@ impl SecurityPrivacyManifest {
                     "bind every flow to an inventoried asset",
                 );
             }
-            if flow.source.trim().is_empty() || flow.destination.trim().is_empty() || !purpose_valid
+            if !valid_text(&flow.asset)
+                || !valid_text(&flow.source)
+                || !valid_text(&flow.destination)
+                || !purpose_valid
             {
                 blocking(
                     &mut issues,
                     "flow_incomplete",
                     &flow.id,
-                    "flow source, destination, and purpose are required",
+                    "flow asset, source, destination, and purpose must be bounded visible text",
                     "declare who sends what, where, and for which purpose",
                 );
+            }
+            if let Some(legal_basis) = flow.legal_basis.as_deref() {
+                if !valid_text(legal_basis) {
+                    blocking(
+                        &mut issues,
+                        "field_invalid",
+                        format!("flow.{}.legal_basis", flow.id),
+                        "flow legal basis contains invalid control or oversized text",
+                        "supply bounded visible legal or policy basis text",
+                    );
+                }
             }
             if flow.decision != SecurityPrivacyFlowDecision::Deny && !legal_basis_present {
                 blocking(
@@ -554,20 +619,37 @@ impl SecurityPrivacyManifest {
                 continue;
             }
             identities.insert(identity.id.clone(), identity);
+            if !valid_identifier(&identity.id) {
+                blocking(
+                    &mut issues,
+                    "field_invalid",
+                    "identity.id",
+                    "identity id must be a canonical, bounded, visible identifier",
+                    "supply a stable identity identifier without control characters or surrounding whitespace",
+                );
+            }
+            if identity.assets.len() > MAX_LIST {
+                bound(
+                    &mut issues,
+                    "identity.assets",
+                    identity.assets.len(),
+                    MAX_LIST,
+                );
+            }
             let assets_valid = identity
                 .assets
                 .iter()
                 .all(|asset| assets.contains_key(asset));
-            let authentication_valid = !identity.authentication.trim().is_empty();
+            let authentication_valid = valid_text(&identity.authentication);
             let sensitive_access = identity.assets.iter().any(|asset| {
                 assets
                     .get(asset)
                     .map(|a| a.classification.sensitive())
                     .unwrap_or(false)
             });
-            if identity.id.trim().is_empty()
-                || identity.principal.trim().is_empty()
-                || identity.role.trim().is_empty()
+            if !valid_identifier(&identity.id)
+                || !valid_text(&identity.principal)
+                || !valid_text(&identity.role)
                 || !authentication_valid
             {
                 blocking(
@@ -577,6 +659,17 @@ impl SecurityPrivacyManifest {
                     "identity principal, role, and authentication method are required",
                     "name the principal and its authenticated access path",
                 );
+            }
+            for asset in &identity.assets {
+                if !valid_identifier(asset) {
+                    blocking(
+                        &mut issues,
+                        "field_invalid",
+                        format!("identity.{}.assets", identity.id),
+                        "identity asset references must be canonical, bounded, visible identifiers",
+                        "bind access only to well-formed inventoried asset identifiers",
+                    );
+                }
             }
             if !assets_valid {
                 blocking(
@@ -612,36 +705,71 @@ impl SecurityPrivacyManifest {
                 continue;
             }
             threats.insert(threat.id.clone(), threat);
+            if !valid_identifier(&threat.id) {
+                blocking(
+                    &mut issues,
+                    "field_invalid",
+                    "threat.id",
+                    "threat id must be a canonical, bounded, visible identifier",
+                    "supply a stable threat identifier without control characters or surrounding whitespace",
+                );
+            }
             let high_or_worse = threat.severity.high_or_worse();
             let control_present = threat
                 .control
                 .as_deref()
-                .map(str::trim)
-                .filter(|v| !v.is_empty())
-                .is_some();
+                .is_some_and(|value| valid_identifier(value) && valid_control_name(value));
             let evidence_valid = threat
                 .evidence_digest
                 .as_deref()
                 .map(valid_digest)
                 .unwrap_or(false);
-            let rationale_present = threat
-                .rationale
-                .as_deref()
-                .map(str::trim)
-                .filter(|v| !v.is_empty())
-                .is_some();
+            if let Some(evidence_digest) = threat.evidence_digest.as_deref() {
+                if !valid_digest(evidence_digest) {
+                    blocking(
+                        &mut issues,
+                        "field_invalid",
+                        format!("threat.{}.evidence_digest", threat.id),
+                        "threat evidence must be a canonical content digest",
+                        "supply a lowercase 64-character hexadecimal evidence digest or omit it",
+                    );
+                }
+            }
+            let rationale_present = threat.rationale.as_deref().is_some_and(valid_text);
             let treated = matches!(
                 threat.status,
                 SecurityPrivacyThreatStatus::Mitigated | SecurityPrivacyThreatStatus::Accepted
             );
-            if threat.id.trim().is_empty() || threat.category.trim().is_empty() {
+            if !valid_identifier(&threat.id) || !valid_text(&threat.category) {
                 blocking(
                     &mut issues,
                     "threat_incomplete",
                     &threat.id,
-                    "threat id and category are required",
+                    "threat id and category must be canonical bounded visible text",
                     "name the threat family so treatment can be reviewed",
                 );
+            }
+            if let Some(control) = threat.control.as_deref() {
+                if !valid_identifier(control) {
+                    blocking(
+                        &mut issues,
+                        "field_invalid",
+                        format!("threat.{}.control", threat.id),
+                        "threat control references must be canonical bounded identifiers",
+                        "bind the mitigation to a well-formed declared control",
+                    );
+                }
+            }
+            if let Some(rationale) = threat.rationale.as_deref() {
+                if !valid_text(rationale) {
+                    blocking(
+                        &mut issues,
+                        "field_invalid",
+                        format!("threat.{}.rationale", threat.id),
+                        "threat rationale contains invalid control or oversized text",
+                        "supply bounded visible decision rationale",
+                    );
+                }
             }
             if self.policies.require_threat_treatment && high_or_worse && !treated {
                 blocking(
@@ -661,6 +789,19 @@ impl SecurityPrivacyManifest {
                     &threat.id,
                     "mitigated threat lacks a named control or evidence digest",
                     "bind the mitigation to a control and content-addressed evidence",
+                );
+            }
+            if threat
+                .control
+                .as_deref()
+                .is_some_and(|control| !valid_control_name(control.trim()))
+            {
+                blocking(
+                    &mut issues,
+                    "mitigation_control_unknown",
+                    &threat.id,
+                    "threat names a control outside the declared control catalogue",
+                    "bind the mitigation to one of the explicitly declared security/privacy controls",
                 );
             }
             if threat.status == SecurityPrivacyThreatStatus::Accepted
@@ -699,18 +840,36 @@ impl SecurityPrivacyManifest {
                 continue;
             }
             reviews.insert(review.id.clone(), review);
-            let reviewer_independent =
-                !review.reviewer.trim().is_empty() && review.reviewer != self.system.owner;
+            if !valid_identifier(&review.id) {
+                blocking(
+                    &mut issues,
+                    "field_invalid",
+                    "review.id",
+                    "review id must be a canonical, bounded, visible identifier",
+                    "supply a stable review identifier without control characters or surrounding whitespace",
+                );
+            }
+            let reviewer_independent = valid_text(&review.reviewer)
+                && !review.reviewer.eq_ignore_ascii_case(&self.system.owner);
             let evidence_valid = review
                 .evidence_digest
                 .as_deref()
                 .map(valid_digest)
                 .unwrap_or(false);
+            if let Some(evidence_digest) = review.evidence_digest.as_deref() {
+                if !valid_digest(evidence_digest) {
+                    blocking(
+                        &mut issues,
+                        "field_invalid",
+                        format!("review.{}.evidence_digest", review.id),
+                        "review evidence must be a canonical content digest",
+                        "supply a lowercase 64-character hexadecimal evidence digest or omit it",
+                    );
+                }
+            }
             let current = review.status != SecurityPrivacyReviewStatus::Expired;
             let complete = review.status == SecurityPrivacyReviewStatus::Complete;
-            if review.id.trim().is_empty()
-                || review.scope.trim().is_empty()
-                || !reviewer_independent
+            if !valid_identifier(&review.id) || !valid_text(&review.scope) || !reviewer_independent
             {
                 blocking(
                     &mut issues,
@@ -736,6 +895,28 @@ impl SecurityPrivacyManifest {
                     review.findings.len(),
                     MAX_LIST,
                 );
+            }
+            if let Some(expires_at) = review.expires_at.as_deref() {
+                if !valid_text(expires_at) {
+                    blocking(
+                        &mut issues,
+                        "field_invalid",
+                        format!("review.{}.expires_at", review.id),
+                        "review expiry metadata contains invalid control or oversized text",
+                        "supply bounded visible expiry metadata or omit it",
+                    );
+                }
+            }
+            for finding in &review.findings {
+                if !valid_text(finding) {
+                    blocking(
+                        &mut issues,
+                        "field_invalid",
+                        format!("review.{}.findings", review.id),
+                        "review findings contain invalid control or oversized text",
+                        "supply bounded visible review findings",
+                    );
+                }
             }
         }
         if self.reviews.is_empty() && self.policies.require_reviews {
@@ -810,16 +991,11 @@ impl SecurityPrivacyManifest {
             .iter()
             .map(|asset| {
                 let sensitive = asset.classification.sensitive();
-                let purpose_valid = !asset.purpose.trim().is_empty();
+                let purpose_valid = valid_text(&asset.purpose);
                 let retention_valid = !sensitive || asset.retention_days.is_some();
-                let residency_valid = !asset.residency.trim().is_empty();
-                let deletion_valid = !sensitive
-                    || asset
-                        .deletion_process
-                        .as_deref()
-                        .map(str::trim)
-                        .filter(|v| !v.is_empty())
-                        .is_some();
+                let residency_valid = valid_text(&asset.residency);
+                let deletion_valid =
+                    !sensitive || asset.deletion_process.as_deref().is_some_and(valid_text);
                 SecurityPrivacyAssetAudit {
                     asset_id: asset.id.clone(),
                     purpose_valid,
@@ -836,13 +1012,8 @@ impl SecurityPrivacyManifest {
             .iter()
             .map(|flow| {
                 let asset_valid = assets.contains_key(&flow.asset);
-                let purpose_valid = !flow.purpose.trim().is_empty();
-                let legal_basis_present = flow
-                    .legal_basis
-                    .as_deref()
-                    .map(str::trim)
-                    .filter(|v| !v.is_empty())
-                    .is_some();
+                let purpose_valid = valid_text(&flow.purpose);
+                let legal_basis_present = flow.legal_basis.as_deref().is_some_and(valid_text);
                 let authorization_present = flow
                     .authorization_evidence
                     .as_deref()
@@ -870,7 +1041,7 @@ impl SecurityPrivacyManifest {
                     .assets
                     .iter()
                     .all(|asset| assets.contains_key(asset));
-                let authentication_valid = !identity.authentication.trim().is_empty();
+                let authentication_valid = valid_text(&identity.authentication);
                 let sensitive_access = identity.assets.iter().any(|asset| {
                     assets
                         .get(asset)
@@ -904,20 +1075,13 @@ impl SecurityPrivacyManifest {
                 let control_present = threat
                     .control
                     .as_deref()
-                    .map(str::trim)
-                    .filter(|v| !v.is_empty())
-                    .is_some();
+                    .is_some_and(|value| valid_identifier(value) && valid_control_name(value));
                 let evidence_valid = threat
                     .evidence_digest
                     .as_deref()
                     .map(valid_digest)
                     .unwrap_or(false);
-                let rationale_present = threat
-                    .rationale
-                    .as_deref()
-                    .map(str::trim)
-                    .filter(|v| !v.is_empty())
-                    .is_some();
+                let rationale_present = threat.rationale.as_deref().is_some_and(valid_text);
                 let ready = (!high_or_worse || treated)
                     && match threat.status {
                         SecurityPrivacyThreatStatus::Mitigated => control_present && evidence_valid,
@@ -941,8 +1105,8 @@ impl SecurityPrivacyManifest {
             .reviews
             .iter()
             .map(|review| {
-                let reviewer_independent =
-                    !review.reviewer.trim().is_empty() && review.reviewer != self.system.owner;
+                let reviewer_independent = valid_text(&review.reviewer)
+                    && !review.reviewer.eq_ignore_ascii_case(&self.system.owner);
                 let evidence_valid = review
                     .evidence_digest
                     .as_deref()
@@ -1106,7 +1270,39 @@ fn controls_from(
 }
 
 fn valid_digest(value: &str) -> bool {
-    value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        && ContentHash::parse(value.to_owned()).is_ok()
+}
+
+fn valid_text(value: &str) -> bool {
+    let trimmed = value.trim();
+    !trimmed.is_empty()
+        && value == trimmed
+        && value.len() <= MAX_TEXT_BYTES
+        && !value.chars().any(char::is_control)
+}
+
+fn valid_identifier(value: &str) -> bool {
+    valid_text(value) && value == value.trim()
+}
+
+fn valid_control_name(value: &str) -> bool {
+    matches!(
+        value,
+        "access_control"
+            | "encryption_at_rest"
+            | "encryption_in_transit"
+            | "key_rotation"
+            | "audit_logging"
+            | "vulnerability_management"
+            | "backup_restore"
+            | "incident_response"
+            | "vendor_review"
+            | "data_subject_rights"
+    )
 }
 
 fn insert_unique<T>(
@@ -1115,7 +1311,10 @@ fn insert_unique<T>(
     kind: &str,
     issues: &mut Vec<SecurityPrivacyIssue>,
 ) -> bool {
-    if map.contains_key(id) {
+    if map
+        .keys()
+        .any(|existing| existing == id || existing.eq_ignore_ascii_case(id))
+    {
         blocking(
             issues,
             "duplicate_id",
@@ -1219,7 +1418,7 @@ mod tests {
                 category: "data-exfiltration".into(),
                 severity: SecurityPrivacyThreatSeverity::High,
                 status: SecurityPrivacyThreatStatus::Mitigated,
-                control: Some("dlp".into()),
+                control: Some("vulnerability_management".into()),
                 evidence_digest: Some("a".repeat(64)),
                 rationale: None,
             }],
@@ -1298,5 +1497,99 @@ mod tests {
             .issues
             .iter()
             .any(|issue| issue.code == "accepted_risk_record_missing"));
+    }
+
+    #[test]
+    fn mitigated_threats_must_name_a_declared_control() {
+        let mut value = manifest();
+        value.threats[0].control = Some("invented_control".into());
+
+        let report = value.audit().expect("audit");
+        assert!(!report.valid);
+        assert!(report
+            .issues
+            .iter()
+            .any(|issue| issue.code == "mitigation_control_unknown"));
+        assert!(!report.threat_audits[0].control_present);
+        assert!(!report.threat_audits[0].ready);
+    }
+
+    #[test]
+    fn security_privacy_rejects_noncanonical_evidence_and_control_metadata() {
+        let mut value = manifest();
+        value.flows[0].authorization_evidence = Some("A".repeat(64));
+        value.threats[0].evidence_digest = Some("A".repeat(64));
+        value.reviews[0].evidence_digest = Some("A".repeat(64));
+        value.identities[0].role = "research\noperator".into();
+        value.reviews[0].findings = vec!["f".repeat(MAX_TEXT_BYTES + 1)];
+
+        let report = value.audit().expect("audit");
+        assert!(!report.valid);
+        for code in [
+            "flow_authorization_missing",
+            "mitigation_evidence_missing",
+            "review_evidence_missing",
+            "field_invalid",
+        ] {
+            assert!(
+                report.issues.iter().any(|issue| issue.code == code),
+                "missing {code}"
+            );
+        }
+        for subject in [
+            "flow.api-to-vendor.authorization_evidence",
+            "threat.exfiltration.evidence_digest",
+            "review.pia-1.evidence_digest",
+        ] {
+            assert!(
+                report
+                    .issues
+                    .iter()
+                    .any(|issue| issue.code == "field_invalid" && issue.subject == subject),
+                "missing invalid-evidence issue for {subject}"
+            );
+        }
+        assert!(!valid_digest(&"A".repeat(64)));
+        assert!(valid_digest(&"a".repeat(64)));
+    }
+
+    #[test]
+    fn security_privacy_rejects_case_colliding_identifiers() {
+        let mut value = manifest();
+        value.assets.push(SecurityPrivacyAsset {
+            id: "PATIENT-RECORDS".into(),
+            name: "duplicate records".into(),
+            classification: SecurityPrivacyClassification::Internal,
+            owner: "privacy".into(),
+            purpose: "duplicate test row".into(),
+            retention_days: Some(30),
+            residency: "us".into(),
+            deletion_process: Some("erase workflow".into()),
+        });
+
+        let report = value.audit().expect("audit");
+        assert!(!report.valid);
+        assert!(report
+            .issues
+            .iter()
+            .any(|issue| issue.code == "duplicate_id"));
+    }
+
+    #[test]
+    fn security_privacy_rejects_padded_text_and_case_alias_owner_reviews() {
+        let mut value = manifest();
+        value.assets[0].purpose = " care research".into();
+        value.reviews[0].reviewer = "PLATFORM".into();
+
+        let report = value.audit().expect("audit");
+        assert!(!report.valid);
+        assert!(report
+            .issues
+            .iter()
+            .any(|issue| { issue.code == "field_invalid" && issue.subject == "patient-records" }));
+        assert!(report
+            .issues
+            .iter()
+            .any(|issue| issue.code == "review_independence_missing"));
     }
 }

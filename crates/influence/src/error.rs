@@ -38,7 +38,10 @@ pub enum InfluenceError {
     DegenerateAnswer { mass: f64 },
 
     #[error("answers over scopes {left:?} and {right:?} are not comparable")]
-    IncomparableScopes { left: Vec<String>, right: Vec<String> },
+    IncomparableScopes {
+        left: Vec<String>,
+        right: Vec<String>,
+    },
 
     #[error("rebuilding the perturbed region failed: {message}")]
     PerturbedRegionRejected { message: String },
@@ -54,6 +57,9 @@ pub enum InfluenceError {
 
     #[error("the shipped reference world could not be read: {message}")]
     ReferenceWorldUnreadable { message: String },
+
+    #[error("the influence chain is malformed: {detail}")]
+    InvalidChain { detail: String },
 
     /// A misuse of the abstract-domain machinery of 43.11.
     ///

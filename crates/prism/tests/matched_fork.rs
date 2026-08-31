@@ -1,6 +1,7 @@
 //! Matched forks, minimization and attested bundles.
 
 use bioprism_fiber::Query;
+use bioprism_ids::ContentHash;
 use bioprism_prism::{
     matched_fork, minimize, minimize_world, preserves, render_table, Acceptance, Architecture, Arm,
     ArmFailure, Attestation, DecisionCell, ForkResult, InputRef, Minimization, MinimizeError,
@@ -531,6 +532,29 @@ fn a_bundle_attests_itself_and_detects_tampering() {
     stripped.as_object_mut().unwrap().remove("bundle_sha256");
     assert!(matches!(
         ResultBundle::verify(&stripped),
+        Attestation::Malformed(_)
+    ));
+}
+
+#[test]
+fn a_structurally_invalid_bundle_cannot_become_valid_by_rehashing_it() {
+    let (world_json, query_json) = reference();
+    let cell = leakage_cell(&world_json, &query_json);
+    let world = World::from_json(world_json).unwrap();
+    let query = Query::from_json(query_json).unwrap();
+    let fork = matched_fork(&cell, &world, &query, &Architecture::default_panel());
+    let bundle = ResultBundle::new(cell, fork);
+
+    let mut malformed = bundle.attest();
+    malformed["cell"] = Value::Null;
+    let map = malformed.as_object_mut().unwrap();
+    map.remove("bundle_sha256");
+    let body = Value::Object(map.clone());
+    let digest = ContentHash::of_value(&body).unwrap();
+    map.insert("bundle_sha256".into(), Value::String(digest.to_string()));
+
+    assert!(matches!(
+        ResultBundle::verify(&malformed),
         Attestation::Malformed(_)
     ));
 }

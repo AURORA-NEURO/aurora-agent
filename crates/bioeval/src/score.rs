@@ -59,6 +59,7 @@ use crate::layer::ClassifiedError;
 use crate::reference::{
     Dispersion, ReferenceDistribution, ReferenceStandard, Resolution, MASS_TOLERANCE,
 };
+use crate::validation::valid_text;
 use crate::wrongness::Severity;
 
 /// The proper scoring rule used to compare a prediction with a reference distribution.
@@ -91,28 +92,47 @@ impl PredictedDistribution {
     pub fn new(mass: impl IntoIterator<Item = (String, f64)>) -> Result<Self, PredictionError> {
         let mut table: BTreeMap<String, f64> = BTreeMap::new();
         for (state, m) in mass {
-            if !m.is_finite() {
-                return Err(PredictionError::NonFiniteMass { state });
-            }
-            if m < 0.0 {
-                return Err(PredictionError::NegativeMass { state, mass: m });
-            }
             if table.contains_key(&state) {
                 return Err(PredictionError::DuplicateState { state });
             }
             table.insert(state, m);
         }
-        if table.is_empty() {
+        let prediction = PredictedDistribution { mass: table };
+        prediction.validate()?;
+        Ok(prediction)
+    }
+
+    /// Re-check a deserialized forecast before it participates in a score.
+    pub(crate) fn validate(&self) -> Result<(), PredictionError> {
+        if self.mass.is_empty() {
             return Err(PredictionError::NoPredictedState);
         }
-        let total: f64 = table.values().sum();
-        if (total - 1.0).abs() > MASS_TOLERANCE {
+        for (state, mass) in &self.mass {
+            if !valid_text(state) {
+                return Err(PredictionError::InvalidState {
+                    state: state.clone(),
+                });
+            }
+            if !mass.is_finite() {
+                return Err(PredictionError::NonFiniteMass {
+                    state: state.clone(),
+                });
+            }
+            if *mass < 0.0 {
+                return Err(PredictionError::NegativeMass {
+                    state: state.clone(),
+                    mass: *mass,
+                });
+            }
+        }
+        let total: f64 = self.mass.values().sum();
+        if !total.is_finite() || (total - 1.0).abs() > MASS_TOLERANCE {
             return Err(PredictionError::MassNotNormalised {
                 total,
                 tolerance: MASS_TOLERANCE,
             });
         }
-        Ok(PredictedDistribution { mass: table })
+        Ok(())
     }
 
     pub fn mass_on(&self, state: &str) -> f64 {
@@ -387,6 +407,80 @@ impl BioScore {
         self.parent_world.as_ref()
     }
 
+    /// Re-check the persisted score fields that aggregation reads directly.
+    ///
+    /// `BioScore` remains serializable so a result can be retained, but a deserialised result is
+    /// not trusted merely because its shape parsed. Pooling reads these fields as evidence, so it
+    /// must refuse forged text, non-finite score bands, and impossible reference metadata before
+    /// computing a headline.
+    pub(crate) fn validate_for_aggregation(&self) -> Result<(), String> {
+        for (name, value) in [
+            ("subject", self.subject.as_str()),
+            ("grader_id", self.grader_id.as_str()),
+            ("requirement_id", self.requirement_id.as_str()),
+        ] {
+            if !valid_text(value) {
+                return Err(format!(
+                    "{name} must be a bounded, trimmed, control-free string"
+                ));
+            }
+        }
+
+        for (name, value) in [
+            ("under_aleatoric", self.interval.under_aleatoric),
+            (
+                "under_annotation_error",
+                self.interval.under_annotation_error,
+            ),
+        ] {
+            if !value.is_finite() || !(0.0..=1.0).contains(&value) {
+                return Err(format!(
+                    "interval.{name} must be finite and between 0 and 1"
+                ));
+            }
+        }
+        if !self.reference_entropy_bits.is_finite() || self.reference_entropy_bits < 0.0 {
+            return Err("reference entropy must be finite and non-negative".into());
+        }
+        if !self.bridge_loss.is_finite() || self.bridge_loss < 0.0 {
+            return Err("bridge loss must be finite and non-negative".into());
+        }
+        if self.bridge_loss > crate::comparability::FrameDimension::CANONICAL.len() as f64 {
+            return Err("bridge loss exceeds the maximum number of comparable dimensions".into());
+        }
+        if let Resolution::Distributed { modal_mass } = self.resolution {
+            if !modal_mass.is_finite() || !(0.0..=1.0).contains(&modal_mass) {
+                return Err(
+                    "distributed reference modal mass must be finite and between 0 and 1".into(),
+                );
+            }
+        }
+        if let Dispersion::Mixed { aleatoric_fraction } = self.dispersion {
+            if !aleatoric_fraction.is_finite() || !(0.0..=1.0).contains(&aleatoric_fraction) {
+                return Err(
+                    "mixed reference aleatoric fraction must be finite and between 0 and 1".into(),
+                );
+            }
+        }
+        for error in &self.errors {
+            if !valid_text(&error.observed) || !valid_text(&error.expected) {
+                return Err(
+                    "classified error observations must be bounded, trimmed, control-free strings"
+                        .into(),
+                );
+            }
+            if let Some(note) = &error.note {
+                if !valid_text(note) {
+                    return Err(
+                        "classified error notes must be bounded, trimmed, control-free strings"
+                            .into(),
+                    );
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Declares which BioWorld this case descends from.
     pub fn from_world(mut self, world: WorldId) -> Self {
         self.parent_world = Some(world);
@@ -583,7 +677,33 @@ impl Grader {
         prediction: &Prediction,
         reference: &ReferenceStandard,
     ) -> Result<Grade, ScoreError> {
+        self.validate_configuration()?;
         let subject = subject.into();
+        if !valid_text(&subject) {
+            return Err(ScoreError::InvalidPrediction {
+                reason: "subject must be a bounded, trimmed, control-free string".into(),
+            });
+        }
+        validate_prediction(prediction)?;
+        match reference {
+            ReferenceStandard::Distribution(distribution) => {
+                distribution
+                    .validate()
+                    .map_err(|error| ScoreError::InvalidReference {
+                        reason: error.to_string(),
+                    })?
+            }
+            ReferenceStandard::Unresolved { reason }
+            | ReferenceStandard::NotEvaluable { reason }
+                if !valid_text(reason) =>
+            {
+                return Err(ScoreError::InvalidReference {
+                    reason: "reference reason must be a bounded, trimmed, control-free string"
+                        .into(),
+                });
+            }
+            _ => {}
+        }
         if witness.requirement_id() != self.requirement.requirement_id {
             return Err(ScoreError::WitnessFromDifferentRequirement {
                 expected: self.requirement.requirement_id.clone(),
@@ -636,7 +756,12 @@ impl Grader {
                     d.states().map(|s| (s.to_string(), d.mass_on(s))).collect(),
                 )
             }
-            Prediction::Abstained { .. } => unreachable!("abstention handled above"),
+            Prediction::Abstained { .. } => {
+                return Err(ScoreError::InvalidPrediction {
+                    reason: "abstention reached the scoring branch after its early admission check"
+                        .into(),
+                });
+            }
         };
 
         let modal_state = distribution.mode().0.to_string();
@@ -691,6 +816,51 @@ impl Grader {
             reference_modal_confidence: modal,
             reference_state: reference.as_str().to_string(),
         }
+    }
+
+    fn validate_configuration(&self) -> Result<(), ScoreError> {
+        if !valid_text(&self.grader_id) {
+            return Err(ScoreError::InvalidGrader {
+                reason: "grader_id must be a bounded, trimmed, control-free string".into(),
+            });
+        }
+        if !self.abstention_entropy_threshold.is_finite() || self.abstention_entropy_threshold < 0.0
+        {
+            return Err(ScoreError::InvalidGrader {
+                reason: "abstention entropy threshold must be finite and non-negative".into(),
+            });
+        }
+        if !valid_text(&self.requirement.requirement_id) {
+            return Err(ScoreError::InvalidGrader {
+                reason:
+                    "comparability requirement_id must be a bounded, trimmed, control-free string"
+                        .into(),
+            });
+        }
+        Ok(())
+    }
+}
+
+fn validate_prediction(prediction: &Prediction) -> Result<(), ScoreError> {
+    match prediction {
+        Prediction::Categorical { state } if !valid_text(state) => {
+            Err(ScoreError::InvalidPrediction {
+                reason: "categorical state must be a bounded, trimmed, control-free string".into(),
+            })
+        }
+        Prediction::Abstained { reason } if !valid_text(reason) => {
+            Err(ScoreError::InvalidPrediction {
+                reason: "abstention reason must be a bounded, trimmed, control-free string".into(),
+            })
+        }
+        Prediction::Distributional(distribution) => {
+            distribution
+                .validate()
+                .map_err(|error| ScoreError::InvalidPrediction {
+                    reason: error.to_string(),
+                })
+        }
+        _ => Ok(()),
     }
 }
 

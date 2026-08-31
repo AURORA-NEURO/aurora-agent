@@ -52,7 +52,9 @@ pub enum Scale {
     Linear,
     /// The base is recorded because log2 and log10 fold-changes differ by a factor this crate must
     /// not assume.
-    Log { base: String },
+    Log {
+        base: String,
+    },
 }
 
 /// Whether a concentration refers to everything present or only the free fraction.
@@ -177,7 +179,9 @@ impl ConversionTable {
     }
 
     pub fn factor(&self, from: &str, to: &str) -> Option<f64> {
-        self.factors.get(&(from.to_string(), to.to_string())).copied()
+        self.factors
+            .get(&(from.to_string(), to.to_string()))
+            .copied()
     }
 }
 
@@ -241,7 +245,10 @@ pub fn round_trip(
         Determination::contradicted(
             EvidenceTier::Deterministic,
             Witness::DimensionError {
-                pointer: format!("round trip {} -> {} -> {}", quantity.unit.symbol, via.symbol, quantity.unit.symbol),
+                pointer: format!(
+                    "round trip {} -> {} -> {}",
+                    quantity.unit.symbol, via.symbol, quantity.unit.symbol
+                ),
                 expected: quantity.describe(),
                 found: back.describe(),
             },
@@ -312,10 +319,17 @@ pub fn compare(left: &Quantity, right: &Quantity) -> Result<std::cmp::Ordering, 
             right: format!("{} on {:?}", right.unit.symbol, right.scale),
         });
     }
-    Ok(left
-        .value
-        .partial_cmp(&right.value)
-        .expect("both values were checked finite at construction"))
+    match left.value.partial_cmp(&right.value) {
+        Some(ordering) => Ok(ordering),
+        None => Err(OracleXError::NonFinite {
+            field: "Quantity::value",
+            value: if !left.value.is_finite() {
+                left.value
+            } else {
+                right.value
+            },
+        }),
+    }
 }
 
 /// A categorical call against a cut, with an abstention band the caller's own precision defines.

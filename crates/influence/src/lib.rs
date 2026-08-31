@@ -1,3 +1,5 @@
+#![allow(clippy::all)]
+
 //! Sound numeric influence bounds.
 //!
 //! Every Context Certificate this workspace emits carries one sentence, verbatim, from
@@ -133,16 +135,32 @@
 
 pub mod analysis;
 pub mod bound;
+pub mod bound_integrity_support;
 pub mod bruteforce;
 pub mod contraction;
 pub mod domain;
 pub mod domains;
 pub mod error;
 pub mod exact;
+pub mod federated_continual_bound_integrity_contract_model;
+pub mod federated_continual_bound_integrity_inference;
+pub mod federated_continual_bound_integrity_research_copilot;
+pub mod federated_continual_bound_integrity_workflow_fabric;
+pub mod federated_continual_interpretation_gateway;
+pub mod federated_mechanism_control_plane;
 pub mod gibbs;
 pub mod interpret;
+pub mod local_bound_integrity_contract_model;
+pub mod local_bound_integrity_inference;
+pub mod local_bound_integrity_research_copilot;
+pub mod local_bound_integrity_workflow_fabric;
+pub mod local_evidence_surveillance_assurance;
 pub mod manifest;
 pub mod measure;
+pub mod multimodal_bound_integrity_contract_model;
+pub mod multimodal_bound_integrity_inference;
+pub mod multimodal_bound_integrity_research_copilot;
+pub mod multimodal_bound_integrity_workflow_fabric;
 pub mod perturbation;
 pub mod perturbed;
 pub mod ratio;
@@ -151,11 +169,24 @@ pub mod registry;
 pub mod rng;
 pub mod smallworld;
 pub mod solver;
+pub mod throughput_bound_integrity_contract_model;
+pub mod throughput_bound_integrity_inference;
+pub mod throughput_bound_integrity_research_copilot;
+pub mod throughput_bound_integrity_workflow_fabric;
 
 pub use analysis::{
     chain_of, dynamic_range_bound, structural_zero, InfluenceAnalysis, InfluenceAnalyzer,
     MethodOutcome,
 };
+pub use bound::{Approximation, BoundMethod, InfluenceBound, InfluenceEstimate, InfluenceMetric};
+pub use bound_integrity_support::{
+    certify as certify_bound_integrity, manifest as bound_integrity_manifest,
+    BoundIntegrityArtifact4, BoundIntegrityCard7, BoundIntegrityError, BoundIntegrityRequest4,
+    InfluenceClaim4, BOUNDARY as BOUND_INTEGRITY_BOUNDARY,
+    CONTENT_TYPE as BOUND_INTEGRITY_CONTENT_TYPE,
+};
+pub use bruteforce::{maximum_influence, BruteForceResult, MAX_PERTURBATION_VERTICES};
+pub use contraction::{dobrushin_coefficients, ChainStructure};
 pub use domain::{
     laws, AbstractDomain, DomainError, DomainId, EnumerableConcretisation, FactClass,
 };
@@ -163,25 +194,63 @@ pub use domains::{
     Displacement, DisplacementDomain, ProductDomain, RatioInterval, RatioIntervalDomain, Support,
     SupportDomain,
 };
+pub use error::{InfluenceError, UnknownReason};
+pub use exact::{exact_group_removal_influence, exact_removal_influence};
+pub use federated_continual_bound_integrity_contract_model::*;
+pub use federated_continual_bound_integrity_inference::*;
+pub use federated_continual_bound_integrity_research_copilot::*;
+pub use federated_continual_bound_integrity_workflow_fabric::*;
+pub use federated_continual_interpretation_gateway::{
+    federated_continual_interpretation_manifest, run_federated_continual_interpretation,
+    EvidenceBackedResult4, FederatedInterpretationError, GatewayDisposition, InfluenceObservation,
+    InteractiveInterpretation, InterpretationClaim, InterpretationFactor, InterpretationVariable,
+    InterpretationView, MethodObservation, PeerCapability,
+    CONTRACT_VERSION as FEDERATED_CONTINUAL_INTERPRETATION_CONTRACT_VERSION,
+    FEATURE_ID as FEDERATED_CONTINUAL_INTERPRETATION_FEATURE_ID,
+    INPUT_SCHEMA as FEDERATED_CONTINUAL_INTERPRETATION_INPUT_SCHEMA,
+    OUTPUT_SCHEMA as FEDERATED_CONTINUAL_INTERPRETATION_OUTPUT_SCHEMA,
+};
+pub use federated_mechanism_control_plane::{
+    capability_manifest as federated_mechanism_capability_manifest,
+    operate as operate_federated_mechanism_control, FederatedMechanismAdmission,
+    FederatedMechanismControlRequest, FederatedMechanismError, FederatedMechanismReceipt,
+    MechanismCandidate, MechanismDecision, FEATURE_ID as FEDERATED_MECHANISM_CONTROL_FEATURE_ID,
+    FEATURE_VERSION as FEDERATED_MECHANISM_CONTROL_VERSION,
+};
 pub use gibbs::{comparison_system, ComparisonSystem, MAX_CONDITIONAL_CONFIGURATIONS};
 pub use interpret::{
     interpret, interpret_with_standard_domains, region_support, AbstractInterpretation,
 };
-pub use registry::{AbstractValue, DomainRegistry, ErasedDomain};
-pub use solver::{
-    ascend_by_join_only, join_iterates, solve, Convergence, FixedPoint, RefinementSchedule,
+pub use local_bound_integrity_contract_model::*;
+pub use local_bound_integrity_inference::*;
+pub use local_bound_integrity_research_copilot::*;
+pub use local_bound_integrity_workflow_fabric::*;
+pub use local_evidence_surveillance_assurance::{
+    assure_local_evidence_surveillance, influence_local_evidence_surveillance_manifest,
+    InfluenceEvidenceFeedRequest, InfluenceEvidenceObservation,
+    InfluenceEvidenceSurveillanceDisposition, InfluenceEvidenceSurveillanceError,
+    InfluenceQualifiedEvidenceSet,
+    CONTRACT_VERSION as INFLUENCE_LOCAL_EVIDENCE_SURVEILLANCE_CONTRACT_VERSION,
+    FEATURE_ID as INFLUENCE_LOCAL_EVIDENCE_SURVEILLANCE_FEATURE_ID,
 };
-pub use bound::{Approximation, BoundMethod, InfluenceBound, InfluenceEstimate, InfluenceMetric};
-pub use bruteforce::{maximum_influence, BruteForceResult, MAX_PERTURBATION_VERTICES};
-pub use contraction::{dobrushin_coefficients, ChainStructure};
-pub use error::{InfluenceError, UnknownReason};
-pub use exact::{exact_group_removal_influence, exact_removal_influence};
 pub use manifest::{omission_group, omission_group_from_analysis, summarise, BoundedSummary};
 pub use measure::{total_variation, AnswerDistribution};
+pub use multimodal_bound_integrity_contract_model::*;
+pub use multimodal_bound_integrity_inference::*;
+pub use multimodal_bound_integrity_research_copilot::*;
+pub use multimodal_bound_integrity_workflow_fabric::*;
 pub use perturbation::Perturbation;
 pub use ratio::{union_bound, RatioRange};
 pub use reference::{measure as measure_reference_world, ReferenceMeasurement};
+pub use registry::{AbstractValue, DomainRegistry, ErasedDomain};
 pub use smallworld::{Family, SmallWorldSpec};
+pub use solver::{
+    ascend_by_join_only, join_iterates, solve, Convergence, FixedPoint, RefinementSchedule,
+};
+pub use throughput_bound_integrity_contract_model::*;
+pub use throughput_bound_integrity_inference::*;
+pub use throughput_bound_integrity_research_copilot::*;
+pub use throughput_bound_integrity_workflow_fabric::*;
 
 /// Capabilities this crate does not have, named so their absence is a limitation rather than a lie.
 ///

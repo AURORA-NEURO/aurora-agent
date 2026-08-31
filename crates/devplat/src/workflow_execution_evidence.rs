@@ -67,6 +67,26 @@ pub enum WorkflowExecutionEvidenceError {
         "workflow execution evidence snapshot is {actual} bytes, above the {maximum}-byte bound"
     )]
     SnapshotTooLarge { actual: usize, maximum: usize },
+    #[error("workflow execution evidence generation counter is exhausted")]
+    GenerationExhausted,
+}
+
+/// Bounded, digest-ordered filters for workflow execution evidence registry queries.
+///
+/// Borrowed filter values keep query construction allocation-free while grouping the wire
+/// contract into one extensible input instead of growing a positional argument list.
+#[derive(Debug, Clone, Copy)]
+pub struct WorkflowExecutionEvidenceQuery<'a> {
+    pub workflow_id: Option<&'a str>,
+    pub subject_id: Option<&'a str>,
+    pub domain: Option<&'a str>,
+    pub plan_digest: Option<&'a str>,
+    pub binding_digest: Option<&'a str>,
+    pub receipt_status: Option<&'a str>,
+    pub provenance_mode: Option<&'a str>,
+    pub after: Option<&'a str>,
+    pub max_items: usize,
+    pub include_records: bool,
 }
 
 fn required_text(
@@ -76,7 +96,7 @@ fn required_text(
     let value = object
         .get(field)
         .and_then(Value::as_str)
-        .filter(|value| !value.trim().is_empty())
+        .filter(|value| valid_text(value))
         .ok_or_else(|| WorkflowExecutionEvidenceError::InvalidField(field.into()))?;
     if value.len() > MAX_WORKFLOW_EXECUTION_EVIDENCE_TEXT_BYTES {
         return Err(WorkflowExecutionEvidenceError::TextTooLarge {
@@ -120,10 +140,11 @@ fn bounded_text_set(
         });
     }
     let mut result = BTreeSet::new();
+    let mut identity_keys = BTreeSet::new();
     for (index, value) in values.iter().enumerate() {
         let item = value
             .as_str()
-            .filter(|item| !item.trim().is_empty())
+            .filter(|item| valid_text(item))
             .ok_or_else(|| {
                 WorkflowExecutionEvidenceError::InvalidField(format!("{field}[{index}]"))
             })?;
@@ -133,7 +154,11 @@ fn bounded_text_set(
                 maximum: MAX_WORKFLOW_EXECUTION_EVIDENCE_TEXT_BYTES,
             });
         }
-        result.insert(item.to_string());
+        if !identity_keys.insert(item.to_ascii_lowercase()) || !result.insert(item.to_string()) {
+            return Err(WorkflowExecutionEvidenceError::InvalidField(format!(
+                "{field}[{index}]"
+            )));
+        }
     }
     if required && result.is_empty() {
         return Err(WorkflowExecutionEvidenceError::InvalidField(field.into()));
@@ -147,13 +172,29 @@ fn digest_value(value: &Value) -> Result<String, WorkflowExecutionEvidenceError>
         .map_err(|error| WorkflowExecutionEvidenceError::Canonicalisation(error.to_string()))
 }
 
+fn valid_text(value: &str) -> bool {
+    !value.trim().is_empty()
+        && value == value.trim()
+        && value.len() <= MAX_WORKFLOW_EXECUTION_EVIDENCE_TEXT_BYTES
+        && !value.chars().any(char::is_control)
+}
+
+fn valid_digest(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        && ContentHash::parse(value.to_owned()).is_ok()
+}
+
 fn required_digest(
     object: &Map<String, Value>,
     field: &str,
 ) -> Result<String, WorkflowExecutionEvidenceError> {
     let value = required_text(object, field)?;
-    ContentHash::parse(value.clone())
-        .map_err(|_| WorkflowExecutionEvidenceError::DigestMismatch(field.into()))?;
+    if !valid_digest(&value) {
+        return Err(WorkflowExecutionEvidenceError::DigestMismatch(field.into()));
+    }
     Ok(value)
 }
 
@@ -178,15 +219,21 @@ fn digest_set(
     for (index, value) in values.iter().enumerate() {
         let digest = value
             .as_str()
-            .filter(|digest| !digest.trim().is_empty())
+            .filter(|digest| valid_text(digest))
             .ok_or_else(|| {
                 WorkflowExecutionEvidenceError::InvalidField(format!("{field}[{index}]"))
             })?
             .to_string();
-        ContentHash::parse(digest.clone()).map_err(|_| {
-            WorkflowExecutionEvidenceError::DigestMismatch(format!("{field}[{index}]"))
-        })?;
-        result.insert(digest);
+        if !valid_digest(&digest) {
+            return Err(WorkflowExecutionEvidenceError::DigestMismatch(format!(
+                "{field}[{index}]"
+            )));
+        }
+        if !result.insert(digest) {
+            return Err(WorkflowExecutionEvidenceError::InvalidField(format!(
+                "{field}[{index}]"
+            )));
+        }
     }
     Ok(result.into_iter().collect())
 }
@@ -275,7 +322,7 @@ pub fn build_workflow_execution_evidence(
     domains: &[String],
     parent_digests: &[String],
 ) -> Result<Value, WorkflowExecutionEvidenceError> {
-    if subject_id.trim().is_empty() {
+    if !valid_text(subject_id) {
         return Err(WorkflowExecutionEvidenceError::InvalidField(
             "subject_id".into(),
         ));
@@ -298,8 +345,9 @@ pub fn build_workflow_execution_evidence(
         });
     }
     let mut domain_set = BTreeSet::new();
+    let mut domain_identity_keys = BTreeSet::new();
     for domain in domains {
-        if domain.trim().is_empty() {
+        if !valid_text(domain) {
             return Err(WorkflowExecutionEvidenceError::InvalidField(
                 "domains".into(),
             ));
@@ -310,7 +358,13 @@ pub fn build_workflow_execution_evidence(
                 maximum: MAX_WORKFLOW_EXECUTION_EVIDENCE_TEXT_BYTES,
             });
         }
-        domain_set.insert(domain.clone());
+        if !domain_identity_keys.insert(domain.to_ascii_lowercase())
+            || !domain_set.insert(domain.clone())
+        {
+            return Err(WorkflowExecutionEvidenceError::InvalidField(
+                "domains".into(),
+            ));
+        }
     }
     if parent_digests.len() > MAX_WORKFLOW_EXECUTION_EVIDENCE_PARENTS {
         return Err(WorkflowExecutionEvidenceError::TooManyItems {
@@ -320,9 +374,16 @@ pub fn build_workflow_execution_evidence(
     }
     let mut parents = BTreeSet::new();
     for digest in parent_digests {
-        ContentHash::parse(digest.clone())
-            .map_err(|_| WorkflowExecutionEvidenceError::DigestMismatch("parent_digests".into()))?;
-        parents.insert(digest.clone());
+        if !valid_digest(digest) {
+            return Err(WorkflowExecutionEvidenceError::DigestMismatch(
+                "parent_digests".into(),
+            ));
+        }
+        if !parents.insert(digest.clone()) {
+            return Err(WorkflowExecutionEvidenceError::InvalidField(
+                "parent_digests".into(),
+            ));
+        }
     }
     let (binding, receipt) = parse_receipt_pair(binding_value, receipt_value)?;
     let receipt_digest = digest_value(receipt_value)?;
@@ -356,9 +417,9 @@ pub fn build_workflow_execution_evidence(
         "claim_posture": {
             "status": "review_required",
             "does_not_claim": [
+                "completion of any forbidden workflow effect",
                 "provider authentication or consent",
                 "scientific, clinical, causal, operational, publication, or release validity",
-                "completion of any forbidden workflow effect"
             ],
             "limitations": [
                 "provenance labels are preserved declarations and are not independently authenticated",
@@ -370,8 +431,8 @@ pub fn build_workflow_execution_evidence(
         "execution": "not_started",
         "guarantees": [
             "binding identity, workflow specification, provider, plan, and effect prohibitions were checked before indexing",
-            "the receipt was validated against the binding and its provenance counts are retained without collapse",
-            "the evidence digest covers the canonical record independently of the transport envelope"
+            "the evidence digest covers the canonical record independently of the transport envelope",
+            "the receipt was validated against the binding and its provenance counts are retained without collapse"
         ],
         "does_not_claim": [
             "a valid receipt proves that a provider actually performed an external operation",
@@ -481,10 +542,24 @@ pub fn validate_workflow_execution_evidence(
         .and_then(Value::as_object)
         .ok_or_else(|| WorkflowExecutionEvidenceError::InvalidField("claim_posture".into()))?;
     exact_text(claim_posture, "status", "review_required")?;
-    let _ = bounded_text_set(claim_posture, "does_not_claim", 16, true)?;
-    let _ = bounded_text_set(claim_posture, "limitations", 16, true)?;
-    let _ = bounded_text_set(object, "guarantees", 16, true)?;
-    let _ = bounded_text_set(object, "does_not_claim", 16, true)?;
+    let claim_non_claims = bounded_text_set(claim_posture, "does_not_claim", 16, true)?;
+    let claim_limitations = bounded_text_set(claim_posture, "limitations", 16, true)?;
+    if claim_posture.get("does_not_claim") != Some(&json!(claim_non_claims))
+        || claim_posture.get("limitations") != Some(&json!(claim_limitations))
+    {
+        return Err(WorkflowExecutionEvidenceError::InvalidField(
+            "claim_posture canonical label sets".into(),
+        ));
+    }
+    let guarantees = bounded_text_set(object, "guarantees", 16, true)?;
+    let does_not_claim = bounded_text_set(object, "does_not_claim", 16, true)?;
+    if object.get("guarantees") != Some(&json!(guarantees))
+        || object.get("does_not_claim") != Some(&json!(does_not_claim))
+    {
+        return Err(WorkflowExecutionEvidenceError::InvalidField(
+            "canonical label sets".into(),
+        ));
+    }
     let declared_digest = required_digest(object, "evidence_digest")?;
     let recomputed = digest_value(&without_digest(evidence, "evidence_digest")?)?;
     if declared_digest != recomputed {
@@ -546,7 +621,10 @@ impl WorkflowExecutionEvidenceRegistry {
         if !already_present {
             let mut candidate = self.clone();
             candidate.records.insert(digest.clone(), evidence.clone());
-            candidate.generation = candidate.generation.saturating_add(1);
+            candidate.generation = candidate
+                .generation
+                .checked_add(1)
+                .ok_or(WorkflowExecutionEvidenceError::GenerationExhausted)?;
             candidate.ensure_snapshot_bound()?;
             self.records = candidate.records;
             self.generation = candidate.generation;
@@ -574,9 +652,11 @@ impl WorkflowExecutionEvidenceRegistry {
     }
 
     pub fn get(&self, digest: &str) -> Result<Value, WorkflowExecutionEvidenceError> {
-        ContentHash::parse(digest.to_string()).map_err(|_| {
-            WorkflowExecutionEvidenceError::DigestMismatch("evidence_digest".into())
-        })?;
+        if !valid_digest(digest) {
+            return Err(WorkflowExecutionEvidenceError::DigestMismatch(
+                "evidence_digest".into(),
+            ));
+        }
         let record =
             self.records
                 .get(digest)
@@ -604,17 +684,20 @@ impl WorkflowExecutionEvidenceRegistry {
     /// provider-declared observation payloads even when the registry is only being browsed.
     pub fn query(
         &self,
-        workflow_id: Option<&str>,
-        subject_id: Option<&str>,
-        domain: Option<&str>,
-        plan_digest: Option<&str>,
-        binding_digest: Option<&str>,
-        receipt_status: Option<&str>,
-        provenance_mode: Option<&str>,
-        after: Option<&str>,
-        max_items: usize,
-        include_records: bool,
+        query: &WorkflowExecutionEvidenceQuery<'_>,
     ) -> Result<Value, WorkflowExecutionEvidenceError> {
+        let WorkflowExecutionEvidenceQuery {
+            workflow_id,
+            subject_id,
+            domain,
+            plan_digest,
+            binding_digest,
+            receipt_status,
+            provenance_mode,
+            after,
+            max_items,
+            include_records,
+        } = *query;
         if !(1..=MAX_WORKFLOW_EXECUTION_EVIDENCE_QUERY_ITEMS).contains(&max_items) {
             return Err(WorkflowExecutionEvidenceError::InvalidField(
                 "max_items".into(),
@@ -626,8 +709,20 @@ impl WorkflowExecutionEvidenceRegistry {
             ("after", after),
         ] {
             if let Some(value) = value {
-                ContentHash::parse(value.to_string())
-                    .map_err(|_| WorkflowExecutionEvidenceError::DigestMismatch(field.into()))?;
+                if !valid_digest(value) {
+                    return Err(WorkflowExecutionEvidenceError::DigestMismatch(field.into()));
+                }
+            }
+        }
+        for (field, value) in [
+            ("workflow_id", workflow_id),
+            ("subject_id", subject_id),
+            ("domain", domain),
+            ("receipt_status", receipt_status),
+            ("provenance_mode", provenance_mode),
+        ] {
+            if value.is_some_and(|value| !valid_text(value)) {
+                return Err(WorkflowExecutionEvidenceError::InvalidField(field.into()));
             }
         }
         let mut rows = Vec::new();
@@ -764,6 +859,16 @@ impl WorkflowExecutionEvidenceRegistry {
             "schema",
             WORKFLOW_EXECUTION_EVIDENCE_REGISTRY_SCHEMA_VERSION,
         )?;
+        exact_text(object, "execution", "not_started")?;
+        let expected_retention = json!({
+            "max_records": MAX_WORKFLOW_EXECUTION_EVIDENCE_RECORDS,
+            "max_bytes": MAX_WORKFLOW_EXECUTION_EVIDENCE_BYTES
+        });
+        if object.get("retention") != Some(&expected_retention) {
+            return Err(WorkflowExecutionEvidenceError::InvalidSnapshot(
+                "retention contract does not match the registry bounds".into(),
+            ));
+        }
         let state_digest = required_digest(object, "state_digest")?;
         let unsigned = without_digest(document, "state_digest")?;
         if digest_value(&unsigned)? != state_digest {
@@ -787,6 +892,11 @@ impl WorkflowExecutionEvidenceRegistry {
             return Err(WorkflowExecutionEvidenceError::Full {
                 maximum: MAX_WORKFLOW_EXECUTION_EVIDENCE_RECORDS,
             });
+        }
+        if generation < rows.len() as u64 {
+            return Err(WorkflowExecutionEvidenceError::InvalidSnapshot(
+                "generation cannot be below the retained record count".into(),
+            ));
         }
         if object.get("record_count").and_then(Value::as_u64) != Some(rows.len() as u64) {
             return Err(WorkflowExecutionEvidenceError::InvalidSnapshot(
@@ -920,20 +1030,59 @@ mod tests {
         let restored = WorkflowExecutionEvidenceRegistry::from_snapshot(&snapshot).unwrap();
         assert_eq!(restored.digests_for_audit(), registry.digests_for_audit());
         let query = restored
-            .query(
-                Some("biomedical_research_data_audit"),
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                10,
-                false,
-            )
+            .query(&WorkflowExecutionEvidenceQuery {
+                workflow_id: Some("biomedical_research_data_audit"),
+                subject_id: None,
+                domain: None,
+                plan_digest: None,
+                binding_digest: None,
+                receipt_status: None,
+                provenance_mode: None,
+                after: None,
+                max_items: 10,
+                include_records: false,
+            })
             .unwrap();
         assert_eq!(query["rows"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn snapshot_restore_rejects_contract_drift_and_generation_regression() {
+        let (binding, receipt) = pair();
+        let evidence = build_workflow_execution_evidence(
+            &binding,
+            &receipt,
+            "subject-contract",
+            &["software".into()],
+            &[],
+        )
+        .unwrap();
+        let mut registry = WorkflowExecutionEvidenceRegistry::new();
+        registry.import(&evidence).unwrap();
+        let snapshot = registry.snapshot().unwrap();
+
+        let mut retention_drift = snapshot.clone();
+        retention_drift["retention"]["max_bytes"] = json!(1);
+        retention_drift
+            .as_object_mut()
+            .unwrap()
+            .remove("state_digest");
+        retention_drift["state_digest"] = json!(digest_value(&retention_drift).unwrap());
+        let error = WorkflowExecutionEvidenceRegistry::from_snapshot(&retention_drift)
+            .expect_err("retention drift must be refused");
+        assert!(error.to_string().contains("retention contract"));
+
+        let mut generation_regression = snapshot;
+        generation_regression["generation"] = json!(0);
+        generation_regression
+            .as_object_mut()
+            .unwrap()
+            .remove("state_digest");
+        generation_regression["state_digest"] =
+            json!(digest_value(&generation_regression).unwrap());
+        let error = WorkflowExecutionEvidenceRegistry::from_snapshot(&generation_regression)
+            .expect_err("generation regression must be refused");
+        assert!(error.to_string().contains("generation cannot be below"));
     }
 
     #[test]
@@ -959,5 +1108,135 @@ mod tests {
         .unwrap();
         evidence["subject_id"] = json!("tampered");
         assert!(validate_workflow_execution_evidence(&evidence).is_err());
+    }
+
+    #[test]
+    fn duplicate_domains_and_parent_edges_are_refused() {
+        let (binding, receipt) = pair();
+        assert!(build_workflow_execution_evidence(
+            &binding,
+            &receipt,
+            "subject-1",
+            &["software".into(), "Software".into()],
+            &[]
+        )
+        .is_err());
+        assert!(build_workflow_execution_evidence(
+            &binding,
+            &receipt,
+            "subject-1",
+            &["software".into()],
+            &["a".repeat(64), "a".repeat(64)]
+        )
+        .is_err());
+
+        assert!(build_workflow_execution_evidence(
+            &binding,
+            &receipt,
+            " subject-1",
+            &["software".into()],
+            &[]
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn evidence_rejects_control_metadata_and_noncanonical_digests() {
+        let (binding, receipt) = pair();
+        assert!(build_workflow_execution_evidence(
+            &binding,
+            &receipt,
+            "subject\u{0000}one",
+            &["software".into()],
+            &[]
+        )
+        .is_err());
+        assert!(build_workflow_execution_evidence(
+            &binding,
+            &receipt,
+            "subject-one",
+            &["software".into()],
+            &["A".repeat(64)]
+        )
+        .is_err());
+
+        let mut evidence = build_workflow_execution_evidence(
+            &binding,
+            &receipt,
+            "subject-one",
+            &["software".into()],
+            &[],
+        )
+        .unwrap();
+        evidence["binding_digest"] = json!("A".repeat(64));
+        assert!(validate_workflow_execution_evidence(&evidence).is_err());
+    }
+
+    #[test]
+    fn evidence_rejects_duplicate_parent_edges_after_resealing() {
+        let (binding, receipt) = pair();
+        let parent = "a".repeat(64);
+        let mut evidence = build_workflow_execution_evidence(
+            &binding,
+            &receipt,
+            "subject-one",
+            &["software".into()],
+            std::slice::from_ref(&parent),
+        )
+        .unwrap();
+        evidence["parent_digests"] = json!([parent.clone(), parent]);
+        evidence
+            .as_object_mut()
+            .expect("evidence is an object")
+            .remove("evidence_digest");
+        let digest = digest_value(&evidence).unwrap();
+        evidence["evidence_digest"] = json!(digest);
+        assert!(validate_workflow_execution_evidence(&evidence).is_err());
+    }
+
+    #[test]
+    fn evidence_rejects_noncanonical_claim_metadata_after_resealing() {
+        let (binding, receipt) = pair();
+        let mut evidence = build_workflow_execution_evidence(
+            &binding,
+            &receipt,
+            "subject-one",
+            &["software".into()],
+            &[],
+        )
+        .unwrap();
+        evidence["claim_posture"]["does_not_claim"] = json!([
+            "provider authentication or consent",
+            "scientific, clinical, causal, operational, publication, or release validity",
+            "completion of any forbidden workflow effect"
+        ]);
+        evidence
+            .as_object_mut()
+            .expect("evidence is an object")
+            .remove("evidence_digest");
+        evidence["evidence_digest"] = json!(digest_value(&evidence).unwrap());
+        let error = validate_workflow_execution_evidence(&evidence)
+            .expect_err("resealed noncanonical claim metadata must be refused");
+        assert!(error.to_string().contains("canonical"));
+    }
+
+    #[test]
+    fn registry_lookup_rejects_uppercase_digest_aliases() {
+        let (binding, receipt) = pair();
+        let evidence = build_workflow_execution_evidence(
+            &binding,
+            &receipt,
+            "subject-one",
+            &["software".into()],
+            &[],
+        )
+        .unwrap();
+        let digest = evidence["evidence_digest"].as_str().unwrap();
+        let mut registry = WorkflowExecutionEvidenceRegistry::new();
+        registry.import(&evidence).unwrap();
+        assert!(matches!(
+            registry.get(&digest.to_uppercase()),
+            Err(WorkflowExecutionEvidenceError::DigestMismatch(_))
+        ));
     }
 }

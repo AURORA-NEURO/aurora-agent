@@ -4,9 +4,10 @@ mod common;
 
 use bioprism_bioeval::{
     CollapseError, CollapsePolicy, Dispersion, Prediction, ReferenceDischarge,
-    ReferenceDistribution, ReferenceError, ReferenceStandard, ScoreError,
+    PredictedDistribution, ReferenceDistribution, ReferenceError, ReferenceStandard, ScoreError,
 };
 use bioprism_section::OracleStatus;
+use serde_json::json;
 use common::{
     calibrated_forecast, grader, progression_reference, resolved_reference, score,
     sixty_percent_reference, witness, MIXED, PROGRESSION, TREATMENT_EFFECT,
@@ -416,6 +417,71 @@ fn reference_masses_that_do_not_sum_to_one_are_rejected_rather_than_renormalised
     .expect_err("0.9 is not a distribution");
 
     assert!(matches!(refusal, ReferenceError::MassNotNormalised { .. }));
+}
+
+#[test]
+fn state_labels_are_bounded_at_construction_and_before_scoring() {
+    let refusal = PredictedDistribution::new([(" bad".to_string(), 1.0)])
+        .expect_err("padded prediction labels must be refused");
+    assert!(matches!(
+        refusal,
+        bioprism_bioeval::PredictionError::InvalidState { .. }
+    ));
+
+    let refusal = ReferenceDistribution::new(
+        [("bad\nstate".to_string(), 1.0)],
+        Dispersion::Aleatoric,
+    )
+    .expect_err("control characters must not enter a reference state space");
+    assert!(matches!(refusal, ReferenceError::InvalidState { .. }));
+}
+
+#[test]
+fn deserialized_forecasts_and_references_are_revalidated_before_they_can_panic_or_score() {
+    let forged_prediction: PredictedDistribution = serde_json::from_value(json!({
+        "mass": {"progression": 0.5, "treatment_effect": 0.25}
+    }))
+    .expect("the persistence shape is intentionally deserializable");
+    let refusal = grader()
+        .grade(
+            &witness(),
+            "case-1",
+            &Prediction::Distributional(forged_prediction),
+            &progression_reference(Dispersion::Aleatoric),
+        )
+        .expect_err("deserialized non-normalised forecasts must not be scored");
+    assert!(matches!(refusal, ScoreError::InvalidPrediction { .. }));
+
+    let forged_reference: ReferenceDistribution = serde_json::from_value(json!({
+        "mass": {},
+        "dispersion": {"kind": "aleatoric"}
+    }))
+    .expect("the persistence shape is intentionally deserializable");
+    let refusal = grader()
+        .grade(
+            &witness(),
+            "case-1",
+            &Prediction::categorical(PROGRESSION),
+            &ReferenceStandard::Distribution(forged_reference),
+        )
+        .expect_err("deserialized empty references must be refused before mode lookup");
+    assert!(matches!(refusal, ScoreError::InvalidReference { .. }));
+}
+
+#[test]
+fn invalid_grader_thresholds_cannot_change_abstention_posture() {
+    let refusal = grader()
+        .with_abstention_threshold(-1.0)
+        .grade(
+            &witness(),
+            "case-1",
+            &Prediction::Abstained {
+                reason: "uncertain".into(),
+            },
+            &progression_reference(Dispersion::Aleatoric),
+        )
+        .expect_err("negative entropy thresholds must fail closed");
+    assert!(matches!(refusal, ScoreError::InvalidGrader { .. }));
 }
 
 #[test]

@@ -16,6 +16,12 @@ use thiserror::Error;
 /// substring, which is how error taxonomies rot.
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum LedgerError {
+    /// The in-memory indexes no longer agree with the retained event state. This is surfaced
+    /// rather than guessed through because silently repairing an append-only ledger can hide
+    /// evidence loss.
+    #[error("event ledger invariant violated: {detail}")]
+    InvariantViolation { detail: String },
+
     /// The same idempotency key was offered with a different body (40.09, "duplicate
     /// idempotency key"). Re-offering the *identical* body is not an error; it is a no-op.
     #[error("idempotency key {key:?} was already used by {existing} with a different body")]

@@ -1,0 +1,9 @@
+[project]
+name = "aurora-codex-claude"
+version = "0.1.0"
+description = "Dependency-light, provider-neutral Codex/Claude MCP configuration adapter for Aurora"
+requires-python = ">=3.10"
+dependencies = []
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

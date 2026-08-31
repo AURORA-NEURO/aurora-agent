@@ -6,6 +6,12 @@
 use serde_json::{json, Value};
 
 pub const JSONRPC: &str = "2.0";
+/// Maximum encoded size of one newline-delimited JSON-RPC request.
+///
+/// Individual tools apply tighter, domain-specific limits where appropriate.  This
+/// framing limit keeps the parser from turning an unbounded stdio line into an
+/// arbitrarily large `serde_json::Value` before a tool can enforce its own bound.
+pub const MAX_REQUEST_BYTES: usize = 20_000_000;
 
 /// Error codes. The first four are JSON-RPC standard; the last is ours.
 pub mod code {
@@ -25,6 +31,15 @@ pub struct Request {
 
 impl Request {
     pub fn parse(line: &str) -> Result<Request, Box<Response>> {
+        if line.len() > MAX_REQUEST_BYTES {
+            return Err(Box::new(Response::error(
+                None,
+                code::INVALID_REQUEST,
+                format!("JSON-RPC request exceeds the {MAX_REQUEST_BYTES}-byte safety bound"),
+                None,
+            )));
+        }
+
         let value: Value = serde_json::from_str(line).map_err(|e| {
             Box::new(Response::error(
                 None,
@@ -204,5 +219,15 @@ mod tests {
         .to_json();
         assert!(response.get("result").is_none());
         assert_eq!(response["error"]["data"]["field"], json!("layer"));
+    }
+
+    #[test]
+    fn oversized_request_is_rejected_before_json_deserialization() {
+        let line = "x".repeat(MAX_REQUEST_BYTES + 1);
+        let error = Request::parse(&line).unwrap_err().to_json();
+        assert_eq!(error["error"]["code"], json!(code::INVALID_REQUEST));
+        assert!(error["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("safety bound")));
     }
 }

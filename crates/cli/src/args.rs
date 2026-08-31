@@ -142,6 +142,19 @@ COMMANDS
                     [--after <digest>] [--limit <n>] [--no-children]
                     Trace retained domain-evidence intake digests and explicit registry lineage.
 
+  knowledge interop-verify --request <path> [--receipt-out <path>] [--dry-run]
+                     Verify a multimodal knowledge-representation interoperability request;
+                     retain a typed assurance receipt without executing retrieval or external effects.
+  protocol simulate-verify --request <path> [--receipt-out <path>] [--dry-run]
+                     Verify a typed protocol-simulation assurance request and retain a digest-bound
+                     receipt without dispatching a protocol, instrument, or external effect.
+  retrieval assure  --request <path> [--receipt-out <path>] [--dry-run]
+                     Verify retrieval/synthesis evidence completeness and policy posture without
+                     contacting a provider or executing an external workflow.
+  execution assure  --request <path> [--receipt-out <path>] [--dry-run]
+                     Verify computational execution lineage, budgets, and release gates without
+                     starting a job or moving data.
+
   readiness audit --request <path>
                     Run the offline structural decision-readiness audit in a JSON request.
                     Catalogue binding and artifact retention remain transport responsibilities.
@@ -398,6 +411,26 @@ pub enum Command {
         after: Option<String>,
         limit: usize,
         include_children: bool,
+    },
+    KnowledgeInteropVerify {
+        request: PathBuf,
+        receipt_out: Option<PathBuf>,
+        dry_run: bool,
+    },
+    ProtocolSimulationVerify {
+        request: PathBuf,
+        receipt_out: Option<PathBuf>,
+        dry_run: bool,
+    },
+    RetrievalSynthesisAssure {
+        request: PathBuf,
+        receipt_out: Option<PathBuf>,
+        dry_run: bool,
+    },
+    ComputationalExecutionAssure {
+        request: PathBuf,
+        receipt_out: Option<PathBuf>,
+        dry_run: bool,
     },
     ReadinessAudit {
         request: PathBuf,
@@ -840,6 +873,26 @@ pub fn parse<I: IntoIterator<Item = String>>(arguments: I) -> CliResult<Parsed> 
             },
             include_children: !options.take_switch("--no-children"),
         },
+        ("knowledge", "interop-verify") => Command::KnowledgeInteropVerify {
+            request: options.take_path("--request")?,
+            receipt_out: options.take_optional_path("--receipt-out"),
+            dry_run: options.take_switch("--dry-run"),
+        },
+        ("protocol", "simulate-verify") => Command::ProtocolSimulationVerify {
+            request: options.take_path("--request")?,
+            receipt_out: options.take_optional_path("--receipt-out"),
+            dry_run: options.take_switch("--dry-run"),
+        },
+        ("retrieval", "assure") => Command::RetrievalSynthesisAssure {
+            request: options.take_path("--request")?,
+            receipt_out: options.take_optional_path("--receipt-out"),
+            dry_run: options.take_switch("--dry-run"),
+        },
+        ("execution", "assure") => Command::ComputationalExecutionAssure {
+            request: options.take_path("--request")?,
+            receipt_out: options.take_optional_path("--receipt-out"),
+            dry_run: options.take_switch("--dry-run"),
+        },
         ("readiness", "audit") => Command::ReadinessAudit {
             request: options.take_path("--request")?,
         },
@@ -1157,8 +1210,11 @@ impl Options {
             }
             match cursor.peek() {
                 Some(next) if !next.starts_with("--") => {
-                    let next = cursor.next().expect("peeked CLI option value");
-                    values.push((token, Some(next)));
+                    if let Some(next) = cursor.next() {
+                        values.push((token, Some(next)));
+                    } else {
+                        values.push((token, None));
+                    }
                 }
                 _ => values.push((token, None)),
             }
@@ -1564,6 +1620,41 @@ mod tests {
                 },
             })
         );
+    }
+
+    #[test]
+    fn knowledge_interoperability_verifier_parses_retention_and_dry_run() {
+        let parsed = parse(
+            [
+                "--json",
+                "knowledge",
+                "interop-verify",
+                "--request",
+                "retrieval.json",
+                "--receipt-out",
+                "receipt.json",
+                "--dry-run",
+            ]
+            .into_iter()
+            .map(String::from),
+        )
+        .expect("parse knowledge interoperability verifier");
+        assert_eq!(
+            parsed,
+            Parsed::Run(super::Invocation {
+                json: true,
+                command: Command::KnowledgeInteropVerify {
+                    request: PathBuf::from("retrieval.json"),
+                    receipt_out: Some(PathBuf::from("receipt.json")),
+                    dry_run: true,
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn help_documents_knowledge_interoperability_verification() {
+        assert!(super::help().contains("knowledge interop-verify --request <path>"));
     }
 
     #[test]

@@ -9,8 +9,11 @@ description = "Inference Lab: hypothesis separation, architecture search, Pareto
 
 [dependencies]
 bioprism-atlas = { workspace = true }
+bioprism-foundation = { workspace = true }
+bioprism-ids = { workspace = true }
 bioprism-obligation = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]

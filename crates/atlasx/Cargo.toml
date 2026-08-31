@@ -6,11 +6,10 @@ description = "Capability atlas and public-hub remainder: coverage debt as a der
 
 [dependencies]
 bioprism-atlas = { workspace = true }
+bioprism-foundation = { workspace = true }
 bioprism-hub = { workspace = true }
+bioprism-ids = { workspace = true }
 bioprism-metrics = { workspace = true }
 serde = { workspace = true }
-thiserror = { workspace = true }
-
-[dev-dependencies]
-bioprism-ids = { workspace = true }
 serde_json = { workspace = true }
+thiserror = { workspace = true }

@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aurora-neuro.org/schemas/aurora-research-contract-v1/biolang_retrieval_assurance_receipt.schema.json",
+  "title": "AURORA Biolang Multimodal Retrieval and Synthesis Assurance Receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "contract_version", "feature_id", "request_id", "workflow_id", "query_id", "disposition", "summary", "checks", "omissions", "uncertainty", "negative_evidence", "effect_receipts", "raw_data_local", "boundary"],
+  "properties": {
+    "schema_version": {"const": "aurora-research-contract/1.0"},
+    "contract_version": {"const": "biolang-multimodal-retrieval-synthesis-assurance/1.0"},
+    "feature_id": {"const": "AFA-biolang-P02-F26"},
+    "request_id": {"type": "string", "minLength": 1},
+    "workflow_id": {"type": "string", "minLength": 1},
+    "query_id": {"type": "string", "minLength": 1},
+    "disposition": {"enum": ["passed", "conditional", "unknown", "blocked"]},
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["summary_id", "disposition", "candidate_order", "ranked_order", "selected_order", "blocked_order", "unknown_order", "study_order", "modality_order", "artifact_order", "provenance_order", "selected_count", "blocked_count", "unknown_count", "omissions", "uncertainty", "negative_evidence", "replay_identity", "summary_digest", "boundary"],
+      "properties": {
+        "summary_id": {"type": "string", "minLength": 1},
+        "disposition": {"enum": ["passed", "conditional", "unknown", "blocked"]},
+        "candidate_order": {"type": "array", "items": {"type": "string"}},
+        "ranked_order": {"type": "array", "items": {"type": "string"}},
+        "selected_order": {"type": "array", "items": {"type": "string"}},
+        "blocked_order": {"type": "array", "items": {"type": "string"}},
+        "unknown_order": {"type": "array", "items": {"type": "string"}},
+        "study_order": {"type": "array", "items": {"type": "string"}},
+        "modality_order": {"type": "array", "items": {"type": "string"}},
+        "artifact_order": {"type": "array", "items": {"$ref": "#/$defs/digest"}},
+        "provenance_order": {"type": "array", "items": {"$ref": "#/$defs/digest"}},
+        "selected_count": {"type": "integer", "minimum": 0},
+        "blocked_count": {"type": "integer", "minimum": 0},
+        "unknown_count": {"type": "integer", "minimum": 0},
+        "omissions": {"type": "array", "items": {"type": "string"}},
+        "uncertainty": {"type": "array", "items": {"type": "string"}},
+        "negative_evidence": {"type": "array", "items": {"type": "string"}},
+        "replay_identity": {"$ref": "#/$defs/digest"},
+        "summary_digest": {"$ref": "#/$defs/digest"},
+        "boundary": {"const": "preclinical-research-only; no human-subject or clinical-source data; no diagnosis, treatment, triage, enrollment, or clinical decisions"}
+      }
+    },
+    "checks": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+    "omissions": {"type": "array", "items": {"type": "string"}},
+    "uncertainty": {"type": "array", "items": {"type": "string"}},
+    "negative_evidence": {"type": "array", "items": {"type": "string"}},
+    "effect_receipts": {"type": "array", "items": {"type": "string", "anyOf": [{"pattern": "^evaluate:retrieval-assurance:"}, {"const": "block:unsafe-release"}]}, "minItems": 1},
+    "raw_data_local": {"const": true},
+    "boundary": {"const": "preclinical-research-only; no human-subject or clinical-source data; no diagnosis, treatment, triage, enrollment, or clinical decisions"}
+  },
+  "$defs": {"digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}
+}

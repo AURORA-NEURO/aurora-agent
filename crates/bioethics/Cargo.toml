@@ -5,11 +5,14 @@ edition = "2021"
 description = "Section 36 remainder: biology security, privacy, ethics and governance beyond policy and safety"
 
 [dependencies]
+bioprism-foundation = { workspace = true }
+bioprism-ids = { workspace = true }
 bioprism-scope = { workspace = true }
 bioprism-policy = { workspace = true }
 bioprism-safety = { workspace = true }
 bioprism-onco = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]

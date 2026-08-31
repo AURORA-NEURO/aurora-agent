@@ -5,6 +5,7 @@ edition = "2021"
 description = "Signed result bundles and reproduction: attestation, replay, and what symmetric authentication cannot promise"
 
 [dependencies]
+bioprism-foundation = { workspace = true }
 bioprism-ids = { workspace = true }
 bioprism-section = { workspace = true }
 sha2 = { workspace = true }

@@ -34,6 +34,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use crate::error::ReferenceError;
+use crate::validation::valid_text;
 
 /// Masses are checked against 1.0 to this tolerance.
 ///
@@ -140,44 +141,62 @@ impl ReferenceDistribution {
         mass: impl IntoIterator<Item = (String, f64)>,
         dispersion: Dispersion,
     ) -> Result<Self, ReferenceError> {
-        if let Dispersion::Mixed { aleatoric_fraction } = dispersion {
+        let mut table: BTreeMap<String, f64> = BTreeMap::new();
+        for (state, m) in mass {
+            if table.contains_key(&state) {
+                return Err(ReferenceError::DuplicateState { state });
+            }
+            table.insert(state, m);
+        }
+        let reference = ReferenceDistribution {
+            mass: table,
+            dispersion,
+        };
+        reference.validate()?;
+        Ok(reference)
+    }
+
+    /// Re-check a deserialized or caller-retained distribution before any scoring operation.
+    ///
+    /// `Deserialize` is intentionally available for persistence, so consumers must not assume
+    /// that the constructor was the only path by which a reference entered memory.
+    pub(crate) fn validate(&self) -> Result<(), ReferenceError> {
+        if let Dispersion::Mixed { aleatoric_fraction } = self.dispersion {
             if !(0.0..=1.0).contains(&aleatoric_fraction) || !aleatoric_fraction.is_finite() {
                 return Err(ReferenceError::AleatoricFractionOutOfRange {
                     fraction: aleatoric_fraction,
                 });
             }
         }
-
-        let mut table: BTreeMap<String, f64> = BTreeMap::new();
-        for (state, m) in mass {
-            if !m.is_finite() {
-                return Err(ReferenceError::NonFiniteMass { state });
-            }
-            if m < 0.0 {
-                return Err(ReferenceError::NegativeMass { state, mass: m });
-            }
-            if table.contains_key(&state) {
-                return Err(ReferenceError::DuplicateState { state });
-            }
-            table.insert(state, m);
-        }
-
-        if table.is_empty() {
+        if self.mass.is_empty() {
             return Err(ReferenceError::NoAdmissibleState);
         }
-
-        let total: f64 = table.values().sum();
-        if (total - 1.0).abs() > MASS_TOLERANCE {
+        for (state, mass) in &self.mass {
+            if !valid_text(state) {
+                return Err(ReferenceError::InvalidState {
+                    state: state.clone(),
+                });
+            }
+            if !mass.is_finite() {
+                return Err(ReferenceError::NonFiniteMass {
+                    state: state.clone(),
+                });
+            }
+            if *mass < 0.0 {
+                return Err(ReferenceError::NegativeMass {
+                    state: state.clone(),
+                    mass: *mass,
+                });
+            }
+        }
+        let total: f64 = self.mass.values().sum();
+        if !total.is_finite() || (total - 1.0).abs() > MASS_TOLERANCE {
             return Err(ReferenceError::MassNotNormalised {
                 total,
                 tolerance: MASS_TOLERANCE,
             });
         }
-
-        Ok(ReferenceDistribution {
-            mass: table,
-            dispersion,
-        })
+        Ok(())
     }
 
     /// A reference standard that really does admit one answer: mass 1.0 on a single state.

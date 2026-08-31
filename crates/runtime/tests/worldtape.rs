@@ -6,9 +6,11 @@
 
 use bioprism_ids::RunId;
 use bioprism_runtime::{
-    Clock, EffectKind, EffectPolicy, InProcessWorld, NetworkMode, RecordingHost,
-    RestorationDeclaration, RuntimeError, Sandbox, WorldTape,
+    Clock, Effect, EffectClass, EffectKind, EffectOutcome, EffectPolicy, EffectRequest,
+    InProcessWorld, NetworkMode, Provenance, RecordingHost, RestorationDeclaration, RuntimeError,
+    Sandbox, WorldTape,
 };
+use serde_json::Value;
 
 fn run(id: &str) -> RunId {
     RunId::parse(id).expect("well-formed run id")
@@ -60,7 +62,10 @@ fn a_tape_entry_chains_the_previous_digest_so_an_edit_breaks_the_chain() {
 fn a_tampered_tape_fails_to_load_rather_than_loading_quietly() {
     let tape = recorded("run-tamper");
     let json = tape.to_json().expect("tape serializes");
-    assert!(json.contains("alpha"), "the write is in the serialized form");
+    assert!(
+        json.contains("alpha"),
+        "the write is in the serialized form"
+    );
 
     // Same length, so nothing but the content changes.
     let tampered = json.replace("alpha", "gamma");
@@ -94,7 +99,10 @@ fn the_state_digest_at_a_step_commits_to_exactly_that_prefix() {
         tape.state_digest_at(1).expect("in range"),
         tape.entries()[0].digest
     );
-    assert_eq!(tape.state_digest_at(tape.len()).expect("in range"), tape.head());
+    assert_eq!(
+        tape.state_digest_at(tape.len()).expect("in range"),
+        tape.head()
+    );
 }
 
 #[test]
@@ -158,7 +166,9 @@ fn artifacts_separate_what_a_run_consumed_from_what_it_created() {
 #[test]
 fn a_checkpoint_commits_to_the_tape_head_it_was_taken_from() {
     let mut tape = recorded("run-checkpoint");
-    let checkpoint = tape.checkpoint("in_process", RestorationDeclaration::portable());
+    let checkpoint = tape
+        .checkpoint("in_process", RestorationDeclaration::portable())
+        .expect("checkpoint is within the tape bound");
 
     assert_eq!(checkpoint.step, tape.len());
     assert_eq!(checkpoint.tape_head, tape.head());
@@ -169,18 +179,45 @@ fn a_checkpoint_commits_to_the_tape_head_it_was_taken_from() {
 #[test]
 fn a_checkpoint_from_another_world_line_is_refused() {
     let mut left = recorded("run-ckpt-left");
-    let checkpoint = left.checkpoint("in_process", RestorationDeclaration::portable());
+    let checkpoint = left
+        .checkpoint("in_process", RestorationDeclaration::portable())
+        .expect("checkpoint is within the tape bound");
 
     let mut host = RecordingHost::new(run("run-ckpt-right"), world(), permissive_policy());
     host.sleep(50).expect("declared");
     host.read_file("/work/in.txt").expect("allowed");
-    host.write_file("/work/out.txt", "different").expect("allowed");
+    host.write_file("/work/out.txt", "different")
+        .expect("allowed");
     let right = host.into_tape();
 
     let error = right
         .verify_checkpoint(&checkpoint)
         .expect_err("a checkpoint from another world-line does not describe this one");
     assert!(matches!(error, RuntimeError::CorruptCheckpoint { .. }));
+}
+
+#[test]
+fn a_tampered_fork_lineage_is_rejected_before_use() {
+    let mut host = RecordingHost::new(
+        run("run-lineage-parent"),
+        InProcessWorld::new(),
+        permissive_policy(),
+    );
+    host.sleep(50).expect("declared");
+    let child = bioprism_runtime::fork_tape(&host.into_tape(), 1, run("run-lineage-child"))
+        .expect("fork point is in range");
+    let mut document: Value = serde_json::from_str(&child.to_json().expect("serializes")).unwrap();
+    document["lineage"]["parent_head"] = Value::String("tampered".into());
+
+    let error = WorldTape::from_json(&document.to_string()).expect_err("lineage is authenticated");
+    assert!(matches!(error, RuntimeError::LineageMismatch { .. }));
+}
+
+#[test]
+fn an_oversized_tape_document_is_refused_before_deserialization() {
+    let oversized = "x".repeat(bioprism_runtime::MAX_TAPE_JSON_BYTES + 1);
+    let error = WorldTape::from_json(&oversized).expect_err("the input bound is enforced first");
+    assert!(matches!(error, RuntimeError::TapeTooLarge { .. }));
 }
 
 #[test]
@@ -191,4 +228,28 @@ fn an_empty_tape_has_an_empty_head_and_no_state_to_report() {
     assert_eq!(tape.inherited_steps(), 0);
     assert!(tape.simulated_steps().is_empty());
     tape.verify_chain().expect("an empty chain is intact");
+}
+
+#[test]
+fn an_effect_cannot_relabel_its_request_class_or_simulated_outcome() {
+    let mut class_drift = Effect::performed(
+        EffectRequest::FileWrite {
+            path: "/work/out.txt".into(),
+            content: "content".into(),
+        },
+        EffectOutcome::new(Value::String("ok".into())),
+    );
+    class_drift.class = EffectClass::Pure;
+    assert!(matches!(
+        class_drift.validate(),
+        Err(RuntimeError::InvariantViolation { .. })
+    ));
+
+    let mut simulated_drift = Effect::simulated(EffectRequest::ClockNow);
+    simulated_drift.outcome = EffectOutcome::new(Value::Bool(false));
+    assert_eq!(simulated_drift.provenance, Provenance::Simulated);
+    assert!(matches!(
+        simulated_drift.validate(),
+        Err(RuntimeError::InvariantViolation { .. })
+    ));
 }

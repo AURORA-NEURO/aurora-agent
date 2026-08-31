@@ -52,6 +52,19 @@ pub struct SourceProvenance {
 }
 
 impl SourceProvenance {
+    pub fn validate(&self) -> Result<(), AdapterError> {
+        for (field, value) in [
+            ("provenance.accession", self.accession.as_deref()),
+            ("provenance.version", self.version.as_deref()),
+            ("provenance.retrieved_at", self.retrieved_at.as_deref()),
+        ] {
+            if let Some(value) = value {
+                validate_text(field, value, 512)?;
+            }
+        }
+        Ok(())
+    }
+
     pub fn is_empty(&self) -> bool {
         self.accession.is_none() && self.version.is_none() && self.retrieved_at.is_none()
     }
@@ -87,6 +100,22 @@ pub struct Source {
 }
 
 impl Source {
+    pub fn validate(&self) -> Result<(), AdapterError> {
+        validate_text("source_id", &self.id, 512)?;
+        if let Some(format) = &self.declared_format {
+            validate_text("declared_format", format, 256)?;
+            if format != &format.to_ascii_lowercase() {
+                return Err(AdapterError::InvalidSource(
+                    "declared_format must be lowercase".into(),
+                ));
+            }
+        }
+        if let Some(provenance) = &self.provenance {
+            provenance.validate()?;
+        }
+        Ok(())
+    }
+
     pub fn bytes(id: impl Into<String>, bytes: impl Into<Vec<u8>>) -> Self {
         Source {
             id: id.into(),
@@ -117,6 +146,7 @@ impl Source {
 
     /// The bytes, when this source is a single in-memory artifact.
     pub fn as_bytes(&self, adapter: &'static str) -> Result<&[u8], AdapterError> {
+        self.validate()?;
         match &self.locator {
             Locator::Bytes(bytes) => Ok(bytes),
             Locator::Directory(_) => Err(AdapterError::UnsupportedSource {
@@ -129,6 +159,7 @@ impl Source {
 
     /// The root, when this source is a directory.
     pub fn as_directory(&self, adapter: &'static str) -> Result<&Path, AdapterError> {
+        self.validate()?;
         match &self.locator {
             Locator::Directory(root) => Ok(root),
             Locator::Bytes(_) => Err(AdapterError::UnsupportedSource {
@@ -149,6 +180,7 @@ impl Source {
         adapter: &'static str,
         accepted: &[&str],
     ) -> Result<(), AdapterError> {
+        self.validate()?;
         match &self.declared_format {
             None => Ok(()),
             Some(declared) if accepted.contains(&declared.as_str()) => Ok(()),
@@ -189,6 +221,40 @@ pub struct SourceManifest {
     pub provenance: Option<SourceProvenance>,
 }
 
+impl SourceManifest {
+    pub fn validate(&self) -> Result<(), AdapterError> {
+        validate_text("source_id", &self.source_id, 512)?;
+        validate_text("adapter", &self.adapter, 512)?;
+        validate_text("adapter_version", &self.adapter_version, 256)?;
+        if let Some(format) = &self.declared_format {
+            validate_text("declared_format", format, 256)?;
+            if format != &format.to_ascii_lowercase() {
+                return Err(AdapterError::InvalidSource(
+                    "manifest declared_format must be lowercase".into(),
+                ));
+            }
+        }
+        if let Some(provenance) = &self.provenance {
+            provenance.validate()?;
+        }
+        Ok(())
+    }
+}
+
+fn validate_text(field: &str, value: &str, maximum: usize) -> Result<(), AdapterError> {
+    if value.is_empty() || value.trim() != value {
+        return Err(AdapterError::InvalidSource(format!(
+            "{field} must be non-empty and trimmed"
+        )));
+    }
+    if value.len() > maximum || value.chars().any(char::is_control) {
+        return Err(AdapterError::InvalidSource(format!(
+            "{field} is outside its bounded text contract"
+        )));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -219,5 +285,40 @@ mod tests {
     fn empty_provenance_contributes_no_strings() {
         assert!(SourceProvenance::default().strings().is_empty());
         assert!(SourceProvenance::default().is_empty());
+    }
+
+    #[test]
+    fn source_validation_rejects_noncanonical_format_and_provenance() {
+        let source = Source::bytes("source", Vec::new()).with_format("TEXT/CSV");
+        assert!(matches!(
+            source.validate(),
+            Err(AdapterError::InvalidSource(_))
+        ));
+        let source = Source::bytes("source", Vec::new()).with_provenance(SourceProvenance {
+            accession: Some(" accession".into()),
+            ..Default::default()
+        });
+        assert!(matches!(
+            source.validate(),
+            Err(AdapterError::InvalidSource(_))
+        ));
+    }
+
+    #[test]
+    fn manifest_validation_rejects_missing_adapter_identity() {
+        let manifest = SourceManifest {
+            source_id: "source".into(),
+            declared_format: None,
+            source_digest: ContentHash::of_bytes(b"source"),
+            byte_length: None,
+            adapter: "".into(),
+            adapter_version: "0.1.0".into(),
+            profile_digest: None,
+            provenance: None,
+        };
+        assert!(matches!(
+            manifest.validate(),
+            Err(AdapterError::InvalidSource(_))
+        ));
     }
 }

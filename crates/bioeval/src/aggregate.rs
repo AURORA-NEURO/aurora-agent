@@ -38,14 +38,18 @@
 //! outcome vector of 26.20 is also absent; this module pools one dimension at a time and
 //! deliberately does not know how to trade correctness against burden.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
 use crate::error::AggregationError;
 use crate::reference::{Dispersion, ReferenceDistribution, ReferenceStandard};
 use crate::score::{BioScore, CollapsePolicy};
-use crate::wrongness::BiologicalErrorClass;
+use crate::validation::valid_text;
+use crate::wrongness::{BiologicalErrorClass, Severity};
+
+const MAX_PANEL_RATINGS: usize = 4096;
+const MAX_POOL_SCORES: usize = 4096;
 
 /// One reader's or oracle's position on a case.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -83,6 +87,10 @@ impl Rating {
         self.rationale = Some(rationale.into());
         self
     }
+
+    pub fn worst_flagged(&self) -> Option<Severity> {
+        self.flagged.iter().map(|c| c.severity()).max()
+    }
 }
 
 /// When a panel is permitted to declare consensus.
@@ -103,6 +111,22 @@ impl ConsensusPolicy {
             majority_threshold: 2.0 / 3.0,
             veto_on_safety_reaching: true,
         }
+    }
+
+    fn validate(&self) -> Result<(), AggregationError> {
+        if !valid_text(&self.policy_id) {
+            return Err(AggregationError::InvalidPolicy {
+                detail: "policy_id must be a bounded, trimmed, control-free string".into(),
+            });
+        }
+        if !self.majority_threshold.is_finite()
+            || !(0.0 < self.majority_threshold && self.majority_threshold <= 1.0)
+        {
+            return Err(AggregationError::InvalidPolicy {
+                detail: "majority_threshold must be finite and in (0, 1]".into(),
+            });
+        }
+        Ok(())
     }
 }
 
@@ -164,9 +188,14 @@ impl ConsensusState {
 }
 
 /// A panel with every rating retained.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// A derived panel result. It serializes for reporting but is intentionally not deserializable:
+/// callers must re-tally the retained ratings under the named policy rather than trusting a
+/// persisted tally or consensus field.
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct PanelAggregate {
     policy_id: String,
+    majority_threshold: f64,
+    veto_on_safety_reaching: bool,
     ratings: Vec<Rating>,
     tally: BTreeMap<String, Vec<String>>,
     consensus: ConsensusState,
@@ -181,14 +210,24 @@ impl PanelAggregate {
         policy: &ConsensusPolicy,
         ratings: impl IntoIterator<Item = Rating>,
     ) -> Result<Self, AggregationError> {
-        let ratings: Vec<Rating> = ratings.into_iter().collect();
+        policy.validate()?;
+        let mut ratings: Vec<Rating> = ratings.into_iter().collect();
         if ratings.is_empty() {
             return Err(AggregationError::EmptyPanel);
         }
+        if ratings.len() > MAX_PANEL_RATINGS {
+            return Err(AggregationError::InvalidPanel {
+                detail: format!("at most {MAX_PANEL_RATINGS} ratings may be tallied"),
+            });
+        }
+
+        ratings.sort_by(|left, right| left.rater.cmp(&right.rater));
 
         let mut tally: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        let mut raters = BTreeSet::new();
         for rating in &ratings {
-            if ratings.iter().filter(|r| r.rater == rating.rater).count() > 1 {
+            validate_rating(rating)?;
+            if !raters.insert(rating.rater.clone()) {
                 return Err(AggregationError::DuplicateRater {
                     rater: rating.rater.clone(),
                 });
@@ -218,11 +257,15 @@ impl PanelAggregate {
             Vec::new()
         };
 
-        let (top_position, top_raters) = tally
+        let Some((top_position, top_raters)) = tally
             .iter()
             .max_by(|a, b| a.1.len().cmp(&b.1.len()).then_with(|| b.0.cmp(a.0)))
             .map(|(p, r)| (p.clone(), r.len()))
-            .expect("a non-empty panel has at least one tallied position");
+        else {
+            return Err(AggregationError::InvalidPanel {
+                detail: "the validated rating panel produced no tallied position".into(),
+            });
+        };
         let share = top_raters as f64 / n;
 
         let consensus = if !vetoes.is_empty() {
@@ -247,6 +290,8 @@ impl PanelAggregate {
 
         Ok(PanelAggregate {
             policy_id: policy.policy_id.clone(),
+            majority_threshold: policy.majority_threshold,
+            veto_on_safety_reaching: policy.veto_on_safety_reaching,
             ratings,
             tally,
             consensus,
@@ -255,6 +300,14 @@ impl PanelAggregate {
 
     pub fn policy_id(&self) -> &str {
         &self.policy_id
+    }
+
+    pub fn majority_threshold(&self) -> f64 {
+        self.majority_threshold
+    }
+
+    pub fn veto_on_safety_reaching(&self) -> bool {
+        self.veto_on_safety_reaching
     }
 
     /// Every rating, unmodified. Nothing is summarised away.
@@ -330,7 +383,9 @@ impl PanelAggregate {
 }
 
 /// Several scores pooled without collapsing any of them.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// A derived score pool. It serializes for reporting but must be rebuilt through [`Self::pool`],
+/// which rechecks every score before any aggregate statistic is read.
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct PooledScore {
     requirement_id: String,
     scores: Vec<BioScore>,
@@ -346,6 +401,19 @@ impl PooledScore {
         let Some(first) = scores.first() else {
             return Err(AggregationError::EmptyPanel);
         };
+        if scores.len() > MAX_POOL_SCORES {
+            return Err(AggregationError::PoolTooLarge {
+                limit: MAX_POOL_SCORES,
+            });
+        }
+        for score in &scores {
+            score
+                .validate_for_aggregation()
+                .map_err(|detail| AggregationError::InvalidScore {
+                    subject: score.subject().to_string(),
+                    detail,
+                })?;
+        }
         let requirement_id = first.requirement_id().to_string();
         if let Some(odd) = scores.iter().find(|s| s.requirement_id() != requirement_id) {
             return Err(AggregationError::MixedRequirements {
@@ -455,4 +523,37 @@ impl PooledScore {
         }
         Ok(total / self.scores.len() as f64)
     }
+}
+
+fn validate_rating(rating: &Rating) -> Result<(), AggregationError> {
+    if !valid_text(&rating.rater) {
+        return Err(AggregationError::InvalidRating {
+            rater: rating.rater.clone(),
+            detail: "rater must be a bounded, trimmed, control-free string".into(),
+        });
+    }
+    if !valid_text(&rating.position) {
+        return Err(AggregationError::InvalidRating {
+            rater: rating.rater.clone(),
+            detail: "position must be a bounded, trimmed, control-free string".into(),
+        });
+    }
+    let mut flagged = BTreeSet::new();
+    for class in &rating.flagged {
+        if !flagged.insert(*class) {
+            return Err(AggregationError::InvalidRating {
+                rater: rating.rater.clone(),
+                detail: "flagged error classes must be unique".into(),
+            });
+        }
+    }
+    if let Some(rationale) = &rating.rationale {
+        if !valid_text(rationale) {
+            return Err(AggregationError::InvalidRating {
+                rater: rating.rater.clone(),
+                detail: "rationale must be a bounded, trimmed, control-free string".into(),
+            });
+        }
+    }
+    Ok(())
 }

@@ -63,7 +63,10 @@ pub enum AdapterDirection {
 impl AdapterDirection {
     /// Whether the other system, rather than this one, ran the task.
     pub fn foreign_execution(self) -> bool {
-        matches!(self, AdapterDirection::ImportOnly | AdapterDirection::Execution)
+        matches!(
+            self,
+            AdapterDirection::ImportOnly | AdapterDirection::Execution
+        )
     }
 }
 
@@ -90,7 +93,10 @@ impl Mapping {
     ) -> Result<Self, SweepError> {
         let caveat = caveat.into();
         require_nonempty(&caveat, "Mapping::approximated", "caveat")?;
-        Ok(Mapping::Approximated { to: to.into(), caveat })
+        Ok(Mapping::Approximated {
+            to: to.into(),
+            caveat,
+        })
     }
 
     pub fn unmapped(limitation: impl Into<String>) -> Result<Self, SweepError> {
@@ -107,7 +113,10 @@ pub enum EquivalenceClaim {
     /// Every declared concept mapped cleanly.
     Equivalent,
     /// Some concepts were approximated or dropped. Both lists travel with the claim.
-    Partial { caveats: Vec<String>, limitations: Vec<String> },
+    Partial {
+        caveats: Vec<String>,
+        limitations: Vec<String>,
+    },
     /// Concepts were declared and never given a mapping. Not the same as `Partial`: a partial
     /// translation was audited, this one was not finished.
     Incomplete { unaddressed: Vec<String> },
@@ -166,7 +175,10 @@ impl SemanticMap {
         if caveats.is_empty() && limitations.is_empty() {
             EquivalenceClaim::Equivalent
         } else {
-            EquivalenceClaim::Partial { caveats, limitations }
+            EquivalenceClaim::Partial {
+                caveats,
+                limitations,
+            }
         }
     }
 }
@@ -241,7 +253,10 @@ impl SuiteResult {
     }
 
     pub fn result(&self, case: CompatibilityCase) -> CaseResult {
-        self.results.get(&format!("{case:?}")).copied().unwrap_or(CaseResult::NotRun)
+        self.results
+            .get(&format!("{case:?}"))
+            .copied()
+            .unwrap_or(CaseResult::NotRun)
     }
 
     pub fn not_run(&self) -> Vec<CompatibilityCase> {
@@ -301,7 +316,8 @@ impl VersionMatrix {
 
     /// Declaring a version puts it in preview, never straight into tested.
     pub fn declare(&mut self, framework: &str, version: &str) {
-        self.entries.insert(Self::key(framework, version), Support::Preview);
+        self.entries
+            .insert(Self::key(framework, version), Support::Preview);
     }
 
     /// Promote a version out of preview by supplying a passing suite.
@@ -332,7 +348,7 @@ impl VersionMatrix {
                 state: match status {
                     SuiteStatus::Incomplete => "incomplete",
                     SuiteStatus::Failing => "failing",
-                    SuiteStatus::Passing => unreachable!("handled above"),
+                    SuiteStatus::Passing => "passing",
                 },
             }),
         }
@@ -414,7 +430,10 @@ mod tests {
                 .unwrap(),
         );
         match map.claim() {
-            EquivalenceClaim::Partial { caveats, limitations } => {
+            EquivalenceClaim::Partial {
+                caveats,
+                limitations,
+            } => {
                 assert_eq!(caveats.len(), 1);
                 assert!(caveats[0].contains("excludes setup"));
                 assert!(limitations.is_empty());
@@ -425,9 +444,10 @@ mod tests {
 
     #[test]
     fn an_unmapped_concept_becomes_an_explicit_limitation() {
-        let map = clean_map()
-            .declaring("retries")
-            .mapping("retries", Mapping::unmapped("PRISM has no retry semantics").unwrap());
+        let map = clean_map().declaring("retries").mapping(
+            "retries",
+            Mapping::unmapped("PRISM has no retry semantics").unwrap(),
+        );
         match map.claim() {
             EquivalenceClaim::Partial { limitations, .. } => {
                 assert_eq!(limitations, ["PRISM has no retry semantics"]);
@@ -441,7 +461,9 @@ mod tests {
         let map = clean_map().declaring("artifacts");
         assert_eq!(
             map.claim(),
-            EquivalenceClaim::Incomplete { unaddressed: vec!["artifacts".into()] }
+            EquivalenceClaim::Incomplete {
+                unaddressed: vec!["artifacts".into()]
+            }
         );
     }
 
@@ -468,8 +490,7 @@ mod tests {
 
     #[test]
     fn a_failing_case_dominates_a_case_that_never_ran() {
-        let suite = SuiteResult::new()
-            .recording(CompatibilityCase::Timeout, CaseResult::Fail);
+        let suite = SuiteResult::new().recording(CompatibilityCase::Timeout, CaseResult::Fail);
         assert_eq!(suite.status(), SuiteStatus::Failing);
     }
 
@@ -488,7 +509,13 @@ mod tests {
         let partial =
             passing_suite().recording(CompatibilityCase::NetworkControls, CaseResult::NotRun);
         let err = matrix.promote("inspect", "0.9.0", &partial).unwrap_err();
-        assert!(matches!(err, SweepError::Unproven { state: "incomplete", .. }));
+        assert!(matches!(
+            err,
+            SweepError::Unproven {
+                state: "incomplete",
+                ..
+            }
+        ));
         assert_eq!(matrix.support("inspect", "0.9.0"), Support::Preview);
     }
 
@@ -496,7 +523,9 @@ mod tests {
     fn a_passing_suite_promotes_a_declared_version() {
         let mut matrix = VersionMatrix::new();
         matrix.declare("inspect", "0.9.0");
-        matrix.promote("inspect", "0.9.0", &passing_suite()).unwrap();
+        matrix
+            .promote("inspect", "0.9.0", &passing_suite())
+            .unwrap();
         assert_eq!(matrix.support("inspect", "0.9.0"), Support::Tested);
     }
 
@@ -508,13 +537,8 @@ mod tests {
 
     #[test]
     fn an_execution_adapter_result_without_a_native_log_reference_is_refused() {
-        let err = ExternalResult::new(
-            AdapterDirection::Execution,
-            "harbor",
-            None,
-            &clean_map(),
-        )
-        .unwrap_err();
+        let err = ExternalResult::new(AdapterDirection::Execution, "harbor", None, &clean_map())
+            .unwrap_err();
         assert!(matches!(err, SweepError::UndeclaredPrecondition { .. }));
         assert!(ExternalResult::new(
             AdapterDirection::Execution,
@@ -527,7 +551,9 @@ mod tests {
 
     #[test]
     fn an_export_adapter_needs_no_native_log_because_prism_ran_the_task() {
-        assert!(ExternalResult::new(AdapterDirection::Export, "inspect", None, &clean_map()).is_ok());
+        assert!(
+            ExternalResult::new(AdapterDirection::Export, "inspect", None, &clean_map()).is_ok()
+        );
         assert!(!AdapterDirection::Export.foreign_execution());
         assert!(AdapterDirection::ImportOnly.foreign_execution());
     }

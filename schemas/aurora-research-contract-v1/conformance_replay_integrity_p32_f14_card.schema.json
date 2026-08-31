@@ -1,0 +1,174 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AURORA Conformance Replay Integrity Card F14",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "contract_version",
+    "feature_id",
+    "request_id",
+    "purpose",
+    "disposition",
+    "case_order",
+    "parity_order",
+    "mismatch_order",
+    "unknown_order",
+    "omitted_order",
+    "language_order",
+    "standards_order",
+    "migration_order",
+    "replay_identity",
+    "closure_digest",
+    "raw_data_local",
+    "aggregate_only",
+    "boundary",
+    "effect_receipts",
+    "artifact"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "aurora-research-contract/1.0"
+    },
+    "contract_version": {
+      "type": "string"
+    },
+    "feature_id": {
+      "const": "AFA-conformance-P32-F14"
+    },
+    "request_id": {
+      "type": "string"
+    },
+    "purpose": {
+      "type": "string"
+    },
+    "disposition": {
+      "enum": [
+        "qualified",
+        "partial",
+        "unknown",
+        "blocked"
+      ]
+    },
+    "case_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "parity_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "mismatch_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "unknown_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "omitted_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "language_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "standards_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "migration_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "replay_identity": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "closure_digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "raw_data_local": {
+      "const": true
+    },
+    "aggregate_only": {
+      "const": true
+    },
+    "boundary": {
+      "const": "preclinical-research-only; no human-subject or clinical-source data; no diagnosis, treatment, triage, enrollment, or clinical decisions"
+    },
+    "effect_receipts": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "artifact_id",
+        "content_type",
+        "content_hash",
+        "semantic_loss",
+        "evidence_digests",
+        "boundary"
+      ],
+      "properties": {
+        "artifact_id": {
+          "type": "string"
+        },
+        "content_type": {
+          "const": "application/vnd.aurora.conformance.replay-integrity-card-1+json"
+        },
+        "content_hash": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "semantic_loss": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "evidence_digests": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        },
+        "boundary": {
+          "const": "preclinical-research-only; no human-subject or clinical-source data; no diagnosis, treatment, triage, enrollment, or clinical decisions"
+        }
+      }
+    }
+  }
+}

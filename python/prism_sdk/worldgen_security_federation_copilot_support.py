@@ -1,0 +1,21 @@
+"""Python parity for Worldgen P20 bounded security/federation copilot."""
+from __future__ import annotations
+from typing import Any,Mapping
+from .research_contracts import PRECLINICAL_BOUNDARY,RESEARCH_CONTRACT_SCHEMA_VERSION,ResearchContractError
+from .worldgen_security_federation_support import qualify,_hash,_digest
+CONTENT_TYPE="application/vnd.aurora.worldgen.security-federation-copilot-receipt+json"
+def manifest(*,feature_id:str,contract_version:str,scale:str)->dict[str,Any]:return {"schema_version":RESEARCH_CONTRACT_SCHEMA_VERSION,"capability_id":feature_id,"version":contract_version,"owner_crate":"worldgen","consumers":["security steward","federation operator","research program lead"],"behavior":f"run approval-bounded security/federation actions for {scale}","value":"turns a security receipt into a replayable, approval-gated export decision without hidden effects","input_schema":"SecurityFederationCopilotRequest1@1","output_schema":"SecurityFederationCopilotReceipt1@1","effects":["invoke:bounded-federation-tool","block:unsafe-export"],"permissions":["invoke:declared-federation-tool"],"determinism":"byte_stable","autonomy_tier":"A1","boundary":PRECLINICAL_BOUNDARY}
+def validate_copilot(output:Mapping[str,Any])->None:
+    a=output.get("artifact",{})
+    if output.get("schema_version")!=RESEARCH_CONTRACT_SCHEMA_VERSION or output.get("boundary")!=PRECLINICAL_BOUNDARY or a.get("boundary")!=PRECLINICAL_BOUNDARY or a.get("content_type")!=CONTENT_TYPE or output.get("raw_data_local") is not True or output.get("aggregate_only") is not True or not _digest(output.get("copilot_digest")) or a.get("content_hash")!=output.get("copilot_digest"):raise ResearchContractError("security copilot identity, locality, or digest is incomplete")
+def run(request:Mapping[str,Any],*,feature_id:str,contract_version:str,scale:str,require_approval:bool=True)->dict[str,Any]:
+    if request.get("boundary")!=PRECLINICAL_BOUNDARY or not request.get("action_order") or request["action_order"]!=sorted(set(request["action_order"])) or not request.get("action_budget") or not request.get("security_request",{}).get("raw_data_local") or not request.get("security_request",{}).get("aggregate_only"):raise ResearchContractError("security copilot request is invalid")
+    security=qualify(request["security_request"],feature_id=feature_id,contract_version=contract_version).to_dict();omissions=list(security.get("omission_order",[]))
+    if require_approval and request.get("signed_approval") is not True:omissions.append("copilot:approval-missing")
+    if request.get("dry_run"):omissions.append("copilot:dry-run-no-effect")
+    if request.get("federation_approved") is not True:omissions.append("copilot:federation-approval-missing")
+    if len(request["action_order"])>request["action_budget"]:omissions.append("copilot:action-budget-exceeded")
+    omissions=sorted(set(omissions));safe=security["disposition"]=="admitted" and (not require_approval or request.get("signed_approval") is True) and request.get("federation_approved") is True and len(request["action_order"])<=request["action_budget"];disposition="admitted" if safe else "blocked";admitted=request["action_order"] if safe else [];denied=[] if safe else request["action_order"];effects=[f"invoke:signed-aggregate-federation:{security['federation_digest']}"] if safe else ["block:unsafe-export"]
+    payload={"schema_version":RESEARCH_CONTRACT_SCHEMA_VERSION,"contract_version":contract_version,"feature_id":feature_id,"request_id":request["security_request"]["request_id"],"disposition":disposition,"action_order":request["action_order"],"admitted_action_order":admitted,"denied_action_order":denied,"security_disposition":security["disposition"],"security_digest":security["federation_digest"],"replay_identity":security["replay_identity"],"omissions":omissions,"threat_order":security.get("threat_order",[]),"revocation_order":security.get("revocation_order",[]),"effect_receipts":effects,"raw_data_local":True,"aggregate_only":True,"boundary":PRECLINICAL_BOUNDARY};digest=_hash(payload);payload["copilot_digest"]=digest;payload["artifact"]={"content_type":CONTENT_TYPE,"content_hash":digest,"boundary":PRECLINICAL_BOUNDARY};validate_copilot(payload);return payload
+__all__=["CONTENT_TYPE","manifest","run","validate_copilot"]
+

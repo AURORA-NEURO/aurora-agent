@@ -1,0 +1,5 @@
+"""Bioethics P32 federated continual research-copilot boundary-integrity feature F15."""
+from .bioethics_boundary_integrity_support import BoundaryIntegrityRequest4,BoundaryIntegrityCard7,BoundaryIntegrityError,manifest,qualify
+FEATURE_ID="AFA-bioethics-P32-F15";CONTRACT_VERSION="bioethics-federated_continual_boundary_integrity_research_copilot/1.0"
+def bioethics_federated_continual_boundary_integrity_research_copilot_manifest():return manifest(feature_id=FEATURE_ID,contract_version=CONTRACT_VERSION,scale="federated continual",mode="research-copilot")
+def qualify_bioethics_federated_continual_boundary_integrity_research_copilot(request:BoundaryIntegrityRequest4)->BoundaryIntegrityCard7:return qualify(request,feature_id=FEATURE_ID,contract_version=CONTRACT_VERSION,scale="federated continual",mode="research-copilot")

@@ -194,6 +194,16 @@ impl ScoringRule {
             "fraction of evaluable trials",
         )
     }
+
+    pub fn validate(&self) -> Result<(), String> {
+        if self.name.trim().is_empty() {
+            return Err("scoring rule name must not be empty".to_string());
+        }
+        if self.unit.trim().is_empty() {
+            return Err("scoring rule unit must not be empty".to_string());
+        }
+        Ok(())
+    }
 }
 
 impl fmt::Display for ScoringRule {
@@ -249,6 +259,13 @@ impl Budget {
         self.tool_calls = Some(calls);
         self
     }
+
+    pub fn validate(&self) -> Result<(), String> {
+        if self.label.trim().is_empty() {
+            return Err("budget label must not be empty".to_string());
+        }
+        Ok(())
+    }
 }
 
 impl fmt::Display for Budget {
@@ -297,6 +314,22 @@ impl Stratum {
 
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
+    }
+
+    pub fn validate(&self) -> Result<(), String> {
+        for (dimension, condition) in &self.0 {
+            if dimension.trim().is_empty() {
+                return Err("stratum dimension must not be empty".to_string());
+            }
+            if let Condition::Recorded { value } = condition {
+                if value.trim().is_empty() {
+                    return Err(format!(
+                        "recorded stratum value for {dimension} must not be empty"
+                    ));
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Which of 33.01's fourteen coordinates this stratum, plus the dedicated fields listed in
@@ -362,6 +395,15 @@ impl Subject {
         Subject::Grid {
             label: label.into(),
         }
+    }
+
+    fn validate(&self) -> Result<(), String> {
+        if let Subject::Grid { label } = self {
+            if label.trim().is_empty() {
+                return Err("grid subject label must not be empty".to_string());
+            }
+        }
+        Ok(())
     }
 }
 
@@ -454,6 +496,26 @@ impl MeasurementConditions {
         let mut cloned = self.clone();
         cloned.subject = subject;
         cloned
+    }
+
+    pub fn validate(&self) -> Result<(), String> {
+        self.subject.validate()?;
+        self.scoring_rule.validate()?;
+        for (dimension, condition) in [
+            ("ontology version", &self.ontology_version),
+            ("pack version", &self.pack_version),
+            ("evidence base", &self.evidence_base),
+        ] {
+            if let Condition::Recorded { value } = condition {
+                if value.trim().is_empty() {
+                    return Err(format!("{dimension} must not be recorded as empty"));
+                }
+            }
+        }
+        if let Condition::Recorded { value } = &self.budget {
+            value.validate()?;
+        }
+        self.stratum.validate()
     }
 
     /// The coordinates of 33.01's key that are still unrecorded here.

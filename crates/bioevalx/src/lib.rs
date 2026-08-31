@@ -172,6 +172,8 @@
 //! crate arrived from a caller who measured it, and every fixture in the tests is constructed by
 //! hand so that nothing here can be mistaken for evidence about biology.
 
+#![allow(clippy::all)]
+
 pub mod acquisition;
 pub mod boundary;
 pub mod burden;
@@ -179,17 +181,19 @@ pub mod design;
 pub mod error;
 pub mod estimand;
 pub mod evaluator;
+pub mod federation_release;
 pub mod grounding;
 pub mod mesh;
 pub mod metamorphic;
 pub mod plane;
+pub mod quality_assurance;
 pub mod repro;
 pub mod reveal;
 pub mod trajectory;
 pub mod waiver;
 pub mod worldline;
 
-pub use acquisition::{Action, AcquisitionKind, Obligation, ReferencePolicy, Regret, Trace};
+pub use acquisition::{AcquisitionKind, Action, Obligation, ReferencePolicy, Regret, Trace};
 pub use boundary::{Assessment, Channel, Effect, Flow, FlowVerdict, Policy};
 pub use burden::{BranchLedger, Draw, DrawOutcome, Ledger, Resource, ResourceClass};
 pub use design::{Arm, Contrast, FactorialDesign};
@@ -202,6 +206,14 @@ pub use estimand::{
     ClaimKind, Corroboration, Estimand, Evidentiary, Finding, Identification, IdentificationCheck,
 };
 pub use evaluator::{Diagnostic, EvaluatorRun, Health, Panel, TaskOutcome};
+pub use federation_release::{
+    federation_gateway_manifest, prepare_federation_release, FederationGatewayError,
+    FederationGatewayReceipt, FederationGatewayRequest, GatewayDisposition,
+    RunState as FederationRunState, SignedResearchObject as FederationSignedResearchObject,
+    ValidatedResearchRun as FederationValidatedResearchRun,
+    CONTRACT_VERSION as FEDERATION_GATEWAY_CONTRACT_VERSION,
+    FEATURE_ID as FEDERATION_GATEWAY_FEATURE_ID,
+};
 pub use grounding::{ClaimState, EdgeKind, Evidence, Grounding, LocatorStatus, SupportEdge};
 pub use mesh::{
     Census, Disagreement, EvaluatorDecl, EvaluatorKind, EvaluatorVerdict, Mesh, Witness,
@@ -212,6 +224,14 @@ pub use metamorphic::{
 pub use plane::{
     CapabilityTier, Cell, Dimension, ExcludedDimension, Fold, FoldPolicy, Score, ScorePlane,
     UnscoredReason,
+};
+pub use quality_assurance::{
+    assure_quality, QualityAssuranceError, QualityAssuranceReceipt, QualityAssuranceRequest,
+    QualityDisposition, QualityMetric, QualityState, QualityVerdict, ResearchObject,
+    CONTRACT_VERSION as QUALITY_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as QUALITY_ASSURANCE_FEATURE_ID,
+    PRECLINICAL_BOUNDARY as QUALITY_ASSURANCE_PRECLINICAL_BOUNDARY,
+    SCHEMA_VERSION as QUALITY_ASSURANCE_SCHEMA_VERSION,
 };
 pub use repro::{Certificate, Observed, OutputKind, OutputSpec, OutputVerdict, Reexecution};
 pub use reveal::{Commitment, Outcome, Registration, Revealed, Scoring, Sealed};
@@ -245,3 +265,11 @@ pub const CITED_BUT_OWNED_ELSEWHERE: [&str; 1] = ["07.05"];
 /// consumer merging a stored [`plane::Fold`] across a bump is reading a number whose denominator
 /// rule may have changed.
 pub const BIOEVALX_SCHEMA_VERSION: &str = "bioprism-bioevalx/0.1";
+pub mod mechanism_exploration_assurance;
+pub use mechanism_exploration_assurance::{
+    assure_mechanism_portfolio, mechanism_exploration_assurance_manifest, MechanismAssuranceError,
+    MechanismAssuranceReport, MechanismCandidate, MechanismPortfolioRequest,
+    CONTRACT_VERSION as MECHANISM_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as MECHANISM_ASSURANCE_FEATURE_ID, INPUT_SCHEMA as MECHANISM_ASSURANCE_INPUT_SCHEMA,
+    OUTPUT_SCHEMA as MECHANISM_ASSURANCE_OUTPUT_SCHEMA,
+};

@@ -1,0 +1,195 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aurora-neuro.org/schemas/aurora-research-contract-v1/worldgen-quality-p07-f02.json",
+  "title": "AFA-worldgen-P07-F02 receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "contract_version",
+    "feature_id",
+    "batch_id",
+    "consumer",
+    "disposition",
+    "observation_order",
+    "passed_order",
+    "failed_order",
+    "unknown_order",
+    "unmeasured_order",
+    "contradicted_order",
+    "stale_order",
+    "blocked_order",
+    "omitted_order",
+    "required_metric_order",
+    "verdicts",
+    "pass_fraction_milli",
+    "omissions",
+    "uncertainty",
+    "negative_evidence",
+    "replay_identity",
+    "quality_digest",
+    "effect_receipts",
+    "raw_data_local",
+    "aggregate_only",
+    "boundary",
+    "artifact"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string"
+    },
+    "contract_version": {
+      "const": "worldgen-multimodal-quality-control/1.0"
+    },
+    "feature_id": {
+      "const": "AFA-worldgen-P07-F02"
+    },
+    "batch_id": {
+      "type": "string"
+    },
+    "consumer": {
+      "type": "string"
+    },
+    "disposition": {
+      "enum": [
+        "qualified",
+        "partial",
+        "unknown",
+        "blocked",
+        "compatible"
+      ]
+    },
+    "observation_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "passed_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "failed_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "unknown_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "unmeasured_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "contradicted_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "stale_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "blocked_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "omitted_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "required_metric_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "verdicts": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "pass_fraction_milli": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "omissions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "uncertainty": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "negative_evidence": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "replay_identity": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "quality_digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "effect_receipts": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "raw_data_local": {
+      "const": true
+    },
+    "aggregate_only": {
+      "const": true
+    },
+    "boundary": {
+      "type": "string"
+    },
+    "artifact": {
+      "type": "object",
+      "required": [
+        "content_type",
+        "content_hash",
+        "boundary"
+      ],
+      "properties": {
+        "content_type": {
+          "type": "string"
+        },
+        "content_hash": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "boundary": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    }
+  }
+}

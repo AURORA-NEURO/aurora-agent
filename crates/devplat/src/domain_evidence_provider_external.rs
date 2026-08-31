@@ -77,6 +77,7 @@ pub struct DomainEvidenceProviderExternalPayloadReceiptRequest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct DomainEvidenceProviderExternalPayloadReceipt {
     pub schema: String,
     pub workflow: String,
@@ -169,6 +170,8 @@ pub enum DomainEvidenceProviderExternalPayloadError {
     InvalidLocator,
     #[error("parent digests exceed the {MAX_DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_PARENTS}-item bound")]
     TooManyParents,
+    #[error("parent digests must be unique")]
+    DuplicateParents,
     #[error("handoff_digest must identify the connector handoff")]
     InvalidHandoff,
     #[error("cannot canonicalize external payload receipt: {0}")]
@@ -190,6 +193,17 @@ fn text(
         return Err(DomainEvidenceProviderExternalPayloadError::InvalidText { field });
     }
     Ok(value.to_owned())
+}
+
+fn identifier(
+    field: &'static str,
+    value: &str,
+) -> Result<String, DomainEvidenceProviderExternalPayloadError> {
+    let value = text(field, value)?;
+    if value != value.trim() {
+        return Err(DomainEvidenceProviderExternalPayloadError::InvalidText { field });
+    }
+    Ok(value)
 }
 
 fn digest(
@@ -233,8 +247,13 @@ fn domains(values: &[String]) -> Result<Vec<String>, DomainEvidenceProviderExter
         return Err(DomainEvidenceProviderExternalPayloadError::InvalidDomains);
     }
     let mut result = BTreeSet::new();
+    let mut identity_keys = BTreeSet::new();
     for value in values {
-        result.insert(text("domain", value)?);
+        let value = identifier("domain", value)?;
+        if !identity_keys.insert(value.to_ascii_lowercase()) {
+            return Err(DomainEvidenceProviderExternalPayloadError::InvalidDomains);
+        }
+        result.insert(value);
     }
     if result.len() != values.len() {
         return Err(DomainEvidenceProviderExternalPayloadError::InvalidDomains);
@@ -246,7 +265,16 @@ fn optional_text(
     field: &'static str,
     value: &Option<String>,
 ) -> Result<Option<String>, DomainEvidenceProviderExternalPayloadError> {
-    value.as_deref().map(|value| text(field, value)).transpose()
+    value
+        .as_deref()
+        .map(|value| {
+            let value = text(field, value)?;
+            if value != value.trim() {
+                return Err(DomainEvidenceProviderExternalPayloadError::InvalidText { field });
+            }
+            Ok(value)
+        })
+        .transpose()
 }
 
 fn parent_digests(
@@ -260,7 +288,9 @@ fn parent_digests(
         .map(|value| digest("parent_digest", value))
         .collect::<Result<Vec<_>, _>>()?;
     result.sort();
-    result.dedup();
+    if result.windows(2).any(|values| values[0] == values[1]) {
+        return Err(DomainEvidenceProviderExternalPayloadError::DuplicateParents);
+    }
     Ok(result)
 }
 
@@ -275,19 +305,19 @@ pub fn record_domain_evidence_provider_external_payload(
     request: &DomainEvidenceProviderExternalPayloadReceiptRequest,
 ) -> Result<DomainEvidenceProviderExternalPayloadReceipt, DomainEvidenceProviderExternalPayloadError>
 {
-    let group_id = text("group_id", &request.group_id)?;
+    let group_id = identifier("group_id", &request.group_id)?;
     let domains = domains(&request.domains)?;
-    let subject_id = text("subject_id", &request.subject_id)?;
-    let source_tool = text("source_tool", &request.source_tool)?;
-    let provider = text("provider", &request.provider)?;
-    let connector_kind = text("connector_kind", &request.connector_kind)?;
+    let subject_id = identifier("subject_id", &request.subject_id)?;
+    let source_tool = identifier("source_tool", &request.source_tool)?;
+    let provider = identifier("provider", &request.provider)?;
+    let connector_kind = identifier("connector_kind", &request.connector_kind)?;
     if !CONNECTOR_KINDS.contains(&connector_kind.as_str()) {
         return Err(
             DomainEvidenceProviderExternalPayloadError::UnsupportedConnector(connector_kind),
         );
     }
     let handoff_digest = digest("handoff_digest", &request.handoff_digest)?;
-    let transfer_id = text("transfer_id", &request.transfer_id)?;
+    let transfer_id = identifier("transfer_id", &request.transfer_id)?;
     let payload_digest = digest("payload_digest", &request.payload_digest)?;
     if !(1..=MAX_EXTERNAL_PAYLOAD_BYTES).contains(&request.byte_length) {
         return Err(
@@ -303,6 +333,9 @@ pub fn record_domain_evidence_provider_external_payload(
     )?;
     let locator_kind = choice("locator_kind", &request.locator_kind, LOCATOR_KINDS)?;
     let locator = text("locator", &request.locator)?;
+    if locator != locator.trim() {
+        return Err(DomainEvidenceProviderExternalPayloadError::InvalidLocator);
+    }
     if locator.contains(['\r', '\n']) {
         return Err(DomainEvidenceProviderExternalPayloadError::InvalidLocator);
     }
@@ -323,7 +356,11 @@ pub fn record_domain_evidence_provider_external_payload(
     let parent_digests = parent_digests(&request.parent_digests)?;
     let availability = choice("availability", &request.availability, AVAILABILITY)?;
     let retention = choice("retention", &request.retention, RETENTION)?;
-    let attempt_id = optional_text("attempt_id", &request.attempt_id)?;
+    let attempt_id = request
+        .attempt_id
+        .as_deref()
+        .map(|value| identifier("attempt_id", value))
+        .transpose()?;
     let mut unsigned = json!({
         "schema": DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_SCHEMA,
         "workflow": DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_WORKFLOW,
@@ -542,6 +579,51 @@ mod tests {
         changed.transfer_id = "transfer-2".into();
         let second = record_domain_evidence_provider_external_payload(&changed).unwrap();
         assert_ne!(first.receipt_digest, second.receipt_digest);
+    }
+
+    #[test]
+    fn receipt_rejects_case_colliding_domains_duplicate_parents_and_identity_whitespace() {
+        let mut invalid = request();
+        invalid.domains = vec!["Genomics".into(), "genomics".into()];
+        assert_eq!(
+            record_domain_evidence_provider_external_payload(&invalid).unwrap_err(),
+            DomainEvidenceProviderExternalPayloadError::InvalidDomains
+        );
+
+        let mut invalid = request();
+        invalid.parent_digests = vec!["d".repeat(64), "d".repeat(64)];
+        assert_eq!(
+            record_domain_evidence_provider_external_payload(&invalid).unwrap_err(),
+            DomainEvidenceProviderExternalPayloadError::DuplicateParents
+        );
+
+        let mut invalid = request();
+        invalid.transfer_id = " transfer-1".into();
+        assert_eq!(
+            record_domain_evidence_provider_external_payload(&invalid).unwrap_err(),
+            DomainEvidenceProviderExternalPayloadError::InvalidText {
+                field: "transfer_id"
+            }
+        );
+
+        let mut invalid = request();
+        invalid.content_type = Some(" application/json".into());
+        assert_eq!(
+            record_domain_evidence_provider_external_payload(&invalid).unwrap_err(),
+            DomainEvidenceProviderExternalPayloadError::InvalidText {
+                field: "content_type"
+            }
+        );
+    }
+
+    #[test]
+    fn receipt_artifact_schema_rejects_unknown_fields() {
+        let receipt = record_domain_evidence_provider_external_payload(&request()).unwrap();
+        let mut value = serde_json::to_value(receipt).unwrap();
+        value["unexpected"] = json!(true);
+        assert!(
+            serde_json::from_value::<DomainEvidenceProviderExternalPayloadReceipt>(value).is_err()
+        );
     }
 
     #[test]

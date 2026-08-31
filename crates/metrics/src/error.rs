@@ -41,6 +41,40 @@ pub enum MetricsError {
         unmeasured: usize,
     },
 
+    /// A coverage document cannot be represented safely because its section counts overflowed
+    /// `usize` while being reconstructed.  Refuse it rather than allowing wrapped counts to turn
+    /// into a plausible-looking coverage fraction.
+    #[error("coverage accounting for {grid} overflows the host size limit")]
+    CoverageAccountingOverflow { grid: String },
+
+    /// A capability appears in more than one coverage bucket.  The buckets are a partition of the
+    /// grid, not four independent annotations, so overlap would make the accounting claim false.
+    #[error("coverage for {grid} lists capability {capability} more than once")]
+    DuplicateCoverageCell { grid: String, capability: String },
+
+    /// A report's subject must remain the grid it claims to summarise.  Otherwise a valid score can
+    /// be relabelled as a different grid during deserialization.
+    #[error("aggregate grid {grid} has subject {subject}")]
+    AggregateSubjectMismatch { grid: String, subject: String },
+
+    #[error("aggregate worst-cell value is not finite: {value}")]
+    InvalidWorstCellValue { value: f64 },
+
+    #[error("aggregate spread must be finite and non-negative: {value}")]
+    InvalidSpread { value: f64 },
+
+    #[error("aggregate worst cell {capability} is not among its contributing cells")]
+    WorstCellNotContributing { capability: String },
+
+    #[error("aggregate estimate value {estimate} does not match worst-cell value {worst}")]
+    WorstEstimateMismatch { estimate: f64, worst: f64 },
+
+    #[error("ranking state is malformed: {detail}")]
+    MalformedRanking { detail: String },
+
+    #[error("capability grid is malformed: {detail}")]
+    MalformedGrid { detail: String },
+
     /// The complete-grid rule was requested and the grid is not complete. Naming the holes is the
     /// whole value of the refusal.
     #[error("refusing a complete-grid aggregate over {grid}: {} cells are unmeasured ({})", .unmeasured.len(), .unmeasured.join(", "))]
@@ -62,6 +96,9 @@ pub enum MetricsError {
 
     #[error("confidence level {0} is not strictly between 0 and 1")]
     ConfidenceLevelOutOfRange(f64),
+
+    #[error("interval basis is malformed: {detail}")]
+    MalformedIntervalBasis { detail: String },
 
     /// Interval arithmetic across confidence levels has no defined meaning: a 95% interval and a
     /// 50% interval combine into an interval at no stated level at all.
@@ -140,6 +177,12 @@ impl UnrecordedSide {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Error)]
 #[serde(tag = "blocked_on", rename_all = "snake_case")]
 pub enum ScoreIncomparability {
+    #[error("{side} measurement conditions are malformed: {detail}")]
+    MalformedConditions { side: String, detail: String },
+
+    #[error("{side} capability grid is malformed: {detail}")]
+    MalformedGrid { side: String, detail: String },
+
     /// Different questions. A verification score and a calibration score are not two readings of
     /// one quantity however similar their ranges.
     #[error("subjects differ: {left} versus {right}")]
@@ -192,6 +235,8 @@ impl ScoreIncomparability {
     /// The dimension that blocked, as a stable string for reports and gates.
     pub fn dimension(&self) -> String {
         match self {
+            ScoreIncomparability::MalformedConditions { .. } => "conditions".to_string(),
+            ScoreIncomparability::MalformedGrid { .. } => "grid".to_string(),
             ScoreIncomparability::DifferentSubject { .. } => "subject".to_string(),
             ScoreIncomparability::DifferentScoringRule { .. } => "scoring rule".to_string(),
             ScoreIncomparability::DifferentOntologyVersion { .. } => "ontology version".to_string(),

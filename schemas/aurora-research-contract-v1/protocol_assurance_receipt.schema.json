@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aurora-neuro.org/schemas/aurora-research-contract-v1/protocol-assurance-receipt.json",
+  "title": "AURORA protocol simulation assurance receipt",
+  "description": "Policy-owned admission checks for bounded protocol simulation with explicit blocked and unknown cells.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "feature_id", "contract_version", "request_id", "protocol_id", "disposition", "total_cells", "passed_cells", "blocked_cells", "unknown_cells", "checks", "omissions", "simulation_digest", "artifact", "boundary"],
+  "properties": {
+    "schema_version": { "const": "aurora-research-contract/1.0" },
+    "feature_id": { "const": "AFA-policy-P10-F27" },
+    "contract_version": { "const": "protocol-assurance-harness/1.0" },
+    "request_id": { "type": "string", "minLength": 1 },
+    "protocol_id": { "type": "string", "minLength": 1 },
+    "disposition": { "enum": ["passed", "blocked", "unknown"] },
+    "total_cells": { "type": "integer", "minimum": 1 },
+    "passed_cells": { "type": "integer", "minimum": 0 },
+    "blocked_cells": { "type": "integer", "minimum": 0 },
+    "unknown_cells": { "type": "integer", "minimum": 0 },
+    "checks": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+    "omissions": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "simulation_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "artifact": { "type": "object", "required": ["content_hash"], "properties": { "content_hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" } } },
+    "boundary": { "const": "preclinical-research-only; no human-subject or clinical-source data; no diagnosis, treatment, triage, enrollment, or clinical decisions" }
+  }
+}

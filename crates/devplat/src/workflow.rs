@@ -40,6 +40,7 @@ pub const MAX_DOMAIN_WORKFLOW_TOOLS: usize = 256;
 pub const MAX_DOMAIN_WORKFLOW_STEPS: usize = 128;
 pub const MAX_DOMAIN_WORKFLOW_BYTES: usize = 20_000_000;
 pub const MAX_DOMAIN_WORKFLOW_PORTFOLIO_ITEMS: usize = 64;
+const MAX_DOMAIN_WORKFLOW_TEXT_BYTES: usize = 4_096;
 
 fn readiness_projection(
     object: &Map<String, Value>,
@@ -127,13 +128,29 @@ fn visible_text<'a>(object: &'a Map<String, Value>, field: &str) -> Result<&'a s
         .and_then(Value::as_str)
         .ok_or_else(|| format!("{field} must be a non-empty string"))?;
     if value.trim().is_empty()
-        || value
-            .bytes()
-            .any(|byte| byte == 0 || byte == b'\n' || byte == b'\r')
+        || value != value.trim()
+        || value.len() > MAX_DOMAIN_WORKFLOW_TEXT_BYTES
+        || value.chars().any(char::is_control)
     {
         return Err(format!("{field} must be a non-empty control-free string"));
     }
     Ok(value)
+}
+
+fn valid_text(value: &str) -> bool {
+    let trimmed = value.trim();
+    !trimmed.is_empty()
+        && value == trimmed
+        && value.len() <= MAX_DOMAIN_WORKFLOW_TEXT_BYTES
+        && !value.chars().any(char::is_control)
+}
+
+fn valid_digest(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        && ContentHash::parse(value.to_owned()).is_ok()
 }
 
 fn string_array(
@@ -162,9 +179,18 @@ fn string_array(
     for (index, value) in values.iter().enumerate() {
         let item = value
             .as_str()
-            .filter(|item| !item.trim().is_empty())
+            .filter(|item| {
+                !item.trim().is_empty()
+                    && *item == item.trim()
+                    && item.len() <= MAX_DOMAIN_WORKFLOW_TEXT_BYTES
+            })
             .ok_or_else(|| format!("{field}[{index}] must be a non-empty string"))?;
-        if !seen.insert(item.to_string()) {
+        if item.chars().any(char::is_control) {
+            return Err(format!(
+                "{field}[{index}] must not contain control characters"
+            ));
+        }
+        if !seen.insert(item.to_ascii_lowercase()) {
             return Err(format!("{field} contains duplicate {item:?}"));
         }
         output.push(item.to_string());
@@ -397,19 +423,18 @@ fn tool_definition_records(value: &Value) -> Result<BTreeMap<String, Value>, Dom
         )));
     }
     let mut records = BTreeMap::new();
+    let mut normalized_names = BTreeSet::new();
     for definition in definitions {
         let object = definition.as_object().ok_or_else(|| {
             DomainWorkflowError::InvalidToolDefinition("each definition must be an object".into())
         })?;
-        let name = object
-            .get("name")
-            .and_then(Value::as_str)
-            .filter(|name| !name.trim().is_empty())
-            .ok_or_else(|| {
-                DomainWorkflowError::InvalidToolDefinition(
-                    "each definition must have a non-empty name".into(),
-                )
-            })?;
+        let name =
+            visible_text(object, "name").map_err(DomainWorkflowError::InvalidToolDefinition)?;
+        if !normalized_names.insert(name.to_ascii_lowercase()) {
+            return Err(DomainWorkflowError::InvalidToolDefinition(format!(
+                "duplicate or case-colliding tool name {name:?}"
+            )));
+        }
         if records
             .insert(name.to_string(), definition.clone())
             .is_some()
@@ -479,7 +504,16 @@ fn argument_contract(schema: Option<&Value>) -> Value {
             "additional_properties": "unspecified",
         });
     };
-    let object = schema.as_object().expect("filtered schema is an object");
+    let Some(object) = schema.as_object() else {
+        return json!({
+            "state": "invalid",
+            "required": [],
+            "optional": [],
+            "properties": {},
+            "composition_keywords": [],
+            "additional_properties": "unspecified",
+        });
+    };
     let required = object
         .get("required")
         .and_then(Value::as_array)
@@ -568,6 +602,15 @@ fn group_workflow(
         group: group_index,
         reason,
     })?;
+    let status = match group.get("status") {
+        None => "available",
+        Some(_) => {
+            visible_text(group, "status").map_err(|reason| DomainWorkflowError::InvalidGroup {
+                group: group_index,
+                reason,
+            })?
+        }
+    };
     let domains =
         string_array(group, "domains", true, MAX_DOMAIN_WORKFLOW_GROUPS).map_err(|reason| {
             DomainWorkflowError::InvalidGroup {
@@ -681,7 +724,7 @@ fn group_workflow(
         "domains": domains,
         "crates": crates,
         "cli_entrypoints": cli_entrypoints,
-        "status": group.get("status").and_then(Value::as_str).unwrap_or("available"),
+        "status": status,
         "catalog_digest": catalog_digest,
         "tools": {
             "declared": advertised_tools,
@@ -734,6 +777,7 @@ pub fn build_domain_workflow_catalogue(
     let available = definitions.keys().cloned().collect::<BTreeSet<_>>();
     let catalog_digest = digest(catalogue)?;
     let mut workflows = Vec::with_capacity(groups.len());
+    let mut workflow_ids = BTreeSet::new();
     let mut declared_tools = BTreeSet::new();
     let mut domains = BTreeSet::new();
     for (index, raw_group) in groups.iter().enumerate() {
@@ -743,6 +787,17 @@ pub fn build_domain_workflow_catalogue(
                 group: index,
                 reason: "group must be an object".into(),
             })?;
+        let workflow_id =
+            visible_text(group, "id").map_err(|reason| DomainWorkflowError::InvalidGroup {
+                group: index,
+                reason,
+            })?;
+        if !workflow_ids.insert(workflow_id.to_ascii_lowercase()) {
+            return Err(DomainWorkflowError::InvalidGroup {
+                group: index,
+                reason: format!("duplicate workflow id {workflow_id:?}"),
+            });
+        }
         let advertised = string_array(group, "mcp_tools", true, MAX_DOMAIN_WORKFLOW_TOOLS)
             .map_err(|reason| DomainWorkflowError::InvalidGroup {
                 group: index,
@@ -825,6 +880,16 @@ fn array_field(object: &Map<String, Value>, field: &str) -> Result<Vec<Value>, S
     }
 }
 
+fn optional_visible_text(
+    object: &Map<String, Value>,
+    field: &str,
+) -> Result<Option<String>, String> {
+    match object.get(field) {
+        None => Ok(None),
+        Some(_) => visible_text(object, field).map(str::to_owned).map(Some),
+    }
+}
+
 fn normalized_step(
     value: &Value,
     index: usize,
@@ -881,31 +946,38 @@ fn normalized_step(
             step: index,
             reason,
         })?;
-    let domain = object
-        .get("domain")
-        .and_then(Value::as_str)
-        .filter(|value| !value.trim().is_empty())
+    let domain = optional_visible_text(object, "domain")
+        .map_err(|reason| DomainWorkflowError::InvalidStep {
+            step: index,
+            reason,
+        })?
         .unwrap_or_else(|| {
             group_domains
                 .first()
-                .map(String::as_str)
-                .unwrap_or(workflow_id)
+                .cloned()
+                .unwrap_or_else(|| workflow_id.to_string())
         });
-    let capability = object
-        .get("capability")
-        .and_then(Value::as_str)
-        .filter(|value| !value.trim().is_empty())
-        .unwrap_or(workflow_id);
-    let objective = object
-        .get("objective")
-        .and_then(Value::as_str)
-        .filter(|value| !value.trim().is_empty())
-        .map(str::to_string)
+    let capability = optional_visible_text(object, "capability")
+        .map_err(|reason| DomainWorkflowError::InvalidStep {
+            step: index,
+            reason,
+        })?
+        .unwrap_or_else(|| workflow_id.into());
+    let objective = optional_visible_text(object, "objective")
+        .map_err(|reason| DomainWorkflowError::InvalidStep {
+            step: index,
+            reason,
+        })?
         .unwrap_or_else(|| format!("apply the selected {tool} capability for {workflow_id}"));
-    let required = object
-        .get("required")
-        .and_then(Value::as_bool)
-        .unwrap_or(true);
+    let required = match object.get("required") {
+        None => true,
+        Some(value) => value
+            .as_bool()
+            .ok_or_else(|| DomainWorkflowError::InvalidStep {
+                step: index,
+                reason: "required must be a boolean when supplied".into(),
+            })?,
+    };
     Ok(json!({
         "id": id,
         "domain": domain,
@@ -987,6 +1059,7 @@ pub fn instantiate_domain_workflow(
     }
     let mut steps = Vec::with_capacity(raw_steps.len());
     let mut step_ids = BTreeSet::new();
+    let mut normalized_step_ids = BTreeSet::new();
     let mut selected_tools = BTreeSet::new();
     for (index, raw_step) in raw_steps.iter().enumerate() {
         let step = normalized_step(
@@ -998,10 +1071,10 @@ pub fn instantiate_domain_workflow(
             &available_tools,
         )?;
         let id = step["id"].as_str().unwrap_or_default().to_string();
-        if !step_ids.insert(id.clone()) {
+        if !step_ids.insert(id.clone()) || !normalized_step_ids.insert(id.to_ascii_lowercase()) {
             return Err(DomainWorkflowError::InvalidStep {
                 step: index,
-                reason: format!("duplicate step id {id:?}"),
+                reason: format!("duplicate or case-colliding step id {id:?}"),
             });
         }
         selected_tools.insert(step["tool"].as_str().unwrap_or_default().to_string());
@@ -1021,9 +1094,55 @@ pub fn instantiate_domain_workflow(
             "policy must be an object".into(),
         ));
     }
-    let execute = policy["execute"].as_bool().unwrap_or(false);
-    if let Some(allowed_tools) = policy["allowed_tools"].as_array() {
-        for allowed_tool in allowed_tools.iter().filter_map(Value::as_str) {
+    let default_policy = json!({
+        "execute": false,
+        "stop_on_error": true,
+        "allow_side_effects": false,
+        "require_readiness": false,
+        "max_steps": MAX_DOMAIN_WORKFLOW_STEPS,
+        "allowed_tools": [],
+    });
+    let policy_object = policy
+        .as_object_mut()
+        .ok_or_else(|| DomainWorkflowError::InvalidRequest("policy must be an object".into()))?;
+    let Some(default_policy) = default_policy.as_object() else {
+        return Err(DomainWorkflowError::InvalidRequest(
+            "internal default policy is not an object".into(),
+        ));
+    };
+    for (field, default_value) in default_policy {
+        policy_object
+            .entry(field.clone())
+            .or_insert_with(|| default_value.clone());
+    }
+    let policy_bool = |field: &str| -> Result<bool, DomainWorkflowError> {
+        policy
+            .get(field)
+            .map(|value| {
+                value.as_bool().ok_or_else(|| {
+                    DomainWorkflowError::InvalidRequest(format!("policy.{field} must be a boolean"))
+                })
+            })
+            .transpose()
+            .map(|value| value.unwrap_or(false))
+    };
+    let execute = policy_bool("execute")?;
+    let _ = policy_bool("stop_on_error")?;
+    let _ = policy_bool("allow_side_effects")?;
+    let _ = policy_bool("require_readiness")?;
+    let allowed_tools = match policy.get("allowed_tools") {
+        Some(value) => Some(value.as_array().ok_or_else(|| {
+            DomainWorkflowError::InvalidRequest("policy.allowed_tools must be an array".into())
+        })?),
+        None => None,
+    };
+    if let Some(allowed_tools) = allowed_tools {
+        for (index, allowed_tool) in allowed_tools.iter().enumerate() {
+            let allowed_tool = allowed_tool.as_str().ok_or_else(|| {
+                DomainWorkflowError::InvalidRequest(format!(
+                    "policy.allowed_tools[{index}] must be a string"
+                ))
+            })?;
             if !declared_tools.contains(allowed_tool) {
                 return Err(DomainWorkflowError::PolicyToolOutsideWorkflow {
                     tool: allowed_tool.to_string(),
@@ -1039,7 +1158,7 @@ pub fn instantiate_domain_workflow(
         }
     }
     let mut allow_list_derived = false;
-    if execute && policy["allowed_tools"].as_array().is_none_or(Vec::is_empty) {
+    if execute && allowed_tools.is_none_or(Vec::is_empty) {
         policy["allowed_tools"] = json!(selected_tools.iter().cloned().collect::<Vec<_>>());
         allow_list_derived = true;
     }
@@ -1377,50 +1496,6 @@ pub fn build_domain_workflow_portfolio(
 /// This kernel check is deliberately catalogue-bound but transport-independent. It does not
 /// perform authoritative MCP schema preflight (the MCP server adds that step), and it never
 /// dispatches, retries, resumes, or treats a digest match as semantic or operational validity.
-/// The identity fields a replay comparison has always named, in the order it named them.
-///
-/// Kept as a list so the mismatch rows a caller already parses keep their existing order; every
-/// other field is appended after them by [`replay_compared_fields`].
-const REPLAY_IDENTITY_FIELDS: [&str; 10] = [
-    "workflow_id",
-    "workflow_digest",
-    "catalog_digest",
-    "domain_contract",
-    "domain_contract_digest",
-    "execution_contract",
-    "evidence_plan",
-    "mission",
-    "selection",
-    "execution",
-];
-
-/// Every field a replay comparison must check: the identity fields, then everything else the
-/// replay itself produced.
-///
-/// The list is derived from the replay rather than written out, because a written-out list is a
-/// list that silently stops covering the fields an instantiation grows. Under the ten identity
-/// fields alone, a retained instantiation's `ok`, `schema`, `preflight`, `guarantees`,
-/// `limitations` and `links` could each be replaced outright and the replay still reported
-/// `matched` — and `limitations` is the field that says what the plan does *not* establish, so the
-/// one edit the comparison most needed to catch was the one it could not see.
-///
-/// Fields present in the retained document and absent from the replay stay uncompared, and that is
-/// deliberate: the transport writes `preflight_report` onto an instantiation after this kernel
-/// produced it, so treating a field the replay does not produce as tampering would refuse every
-/// workflow the server hands back. What that leaves uncovered is an *injected* key, which is
-/// recorded as a gap rather than closed here.
-fn replay_compared_fields(replayed: &Value) -> Vec<String> {
-    let mut fields: Vec<String> = REPLAY_IDENTITY_FIELDS.iter().map(|f| (*f).into()).collect();
-    if let Some(object) = replayed.as_object() {
-        for key in object.keys() {
-            if !fields.iter().any(|field| field == key) {
-                fields.push(key.clone());
-            }
-        }
-    }
-    fields
-}
-
 pub fn verify_domain_workflow(
     catalogue: &Value,
     tool_definitions: &Value,
@@ -1453,23 +1528,23 @@ pub fn verify_domain_workflow(
         let value = instantiation
             .get(field)
             .and_then(Value::as_str)
-            .filter(|value| !value.trim().is_empty())
+            .filter(|value| valid_text(value))
             .ok_or_else(|| {
                 DomainWorkflowError::InvalidRequest(format!(
                     "instantiation.{field} must be a non-empty string"
                 ))
             })?;
-        ContentHash::parse(value.to_owned()).map_err(|_| {
-            DomainWorkflowError::InvalidRequest(format!(
-                "instantiation.{field} must be a 64-character hexadecimal digest"
-            ))
-        })?;
+        if !valid_digest(value) {
+            return Err(DomainWorkflowError::InvalidRequest(format!(
+                "instantiation.{field} must be a lowercase 64-character hexadecimal digest"
+            )));
+        }
         Ok(value.to_owned())
     };
     let workflow_id = instantiation
         .get("workflow_id")
         .and_then(Value::as_str)
-        .filter(|value| !value.trim().is_empty())
+        .filter(|value| valid_text(value))
         .ok_or_else(|| {
             DomainWorkflowError::InvalidRequest(
                 "instantiation.workflow_id must be a non-empty string".into(),
@@ -1488,7 +1563,7 @@ pub fn verify_domain_workflow(
     let mission_id = mission
         .get("mission_id")
         .and_then(Value::as_str)
-        .filter(|value| !value.trim().is_empty())
+        .filter(|value| valid_text(value))
         .ok_or_else(|| {
             DomainWorkflowError::InvalidRequest(
                 "instantiation.mission.mission_id must be a non-empty string".into(),
@@ -1514,6 +1589,41 @@ pub fn verify_domain_workflow(
                 "instantiation identity field {field:?} does not match mission.workflow_binding"
             )));
         }
+    }
+    let domain_contract = instantiation.get("domain_contract").ok_or_else(|| {
+        DomainWorkflowError::InvalidRequest("instantiation.domain_contract is required".into())
+    })?;
+    if binding.get("domain_contract") != Some(domain_contract) {
+        return Err(DomainWorkflowError::InvalidRequest(
+            "instantiation.domain_contract does not match mission.workflow_binding".into(),
+        ));
+    }
+    if digest(domain_contract)? != domain_contract_digest {
+        return Err(DomainWorkflowError::InvalidRequest(
+            "instantiation.domain_contract_digest does not match domain_contract".into(),
+        ));
+    }
+    let evidence_plan = instantiation.get("evidence_plan").ok_or_else(|| {
+        DomainWorkflowError::InvalidRequest("instantiation.evidence_plan is required".into())
+    })?;
+    if binding.get("evidence_plan") != Some(evidence_plan) {
+        return Err(DomainWorkflowError::InvalidRequest(
+            "instantiation.evidence_plan does not match mission.workflow_binding".into(),
+        ));
+    }
+    let evidence_plan_digest = binding
+        .get("evidence_plan_digest")
+        .and_then(Value::as_str)
+        .filter(|value| valid_digest(value))
+        .ok_or_else(|| {
+            DomainWorkflowError::InvalidRequest(
+                "mission.workflow_binding.evidence_plan_digest must be canonical".into(),
+            )
+        })?;
+    if digest(evidence_plan)? != evidence_plan_digest {
+        return Err(DomainWorkflowError::InvalidRequest(
+            "mission.workflow_binding.evidence_plan_digest does not match evidence_plan".into(),
+        ));
     }
     let mission_request: MissionRequest = serde_json::from_value(Value::Object(mission.clone()))
         .map_err(|error| {
@@ -1561,8 +1671,18 @@ pub fn verify_domain_workflow(
             };
         if replayed.is_object() {
             let mut replay_mismatches = Vec::new();
-            for field in replay_compared_fields(&replayed) {
-                let field = field.as_str();
+            for field in [
+                "workflow_id",
+                "workflow_digest",
+                "catalog_digest",
+                "domain_contract",
+                "domain_contract_digest",
+                "execution_contract",
+                "evidence_plan",
+                "mission",
+                "selection",
+                "execution",
+            ] {
                 if instantiation.get(field) != replayed.get(field) {
                     let expected = instantiation.get(field).cloned().unwrap_or(Value::Null);
                     let observed = replayed.get(field).cloned().unwrap_or(Value::Null);
@@ -1653,30 +1773,24 @@ pub fn verify_domain_workflow_portfolio(
             "portfolio.workflow must be domain_workflow_portfolio".into(),
         ));
     }
-    // A portfolio that carries no digest and one whose digest is the wrong shape are two different
-    // defects and are reported as two, the way `verify_domain_workflow` reports its own identity
-    // fields. Under one shared message a caller who forgot the field was told their digest was
-    // malformed, which sends them to inspect a value that is not there.
     let expected_portfolio_digest = portfolio
         .get("portfolio_digest")
         .and_then(Value::as_str)
-        .filter(|value| !value.trim().is_empty())
+        .filter(|value| valid_digest(value))
         .ok_or_else(|| {
             DomainWorkflowError::InvalidRequest(
-                "portfolio.portfolio_digest must be a non-empty string".into(),
+                "portfolio.portfolio_digest must be a lowercase 64-character hexadecimal digest"
+                    .into(),
             )
         })?
         .to_owned();
-    ContentHash::parse(expected_portfolio_digest.clone()).map_err(|_| {
-        DomainWorkflowError::InvalidRequest(
-            "portfolio.portfolio_digest must be a 64-character hexadecimal digest".into(),
-        )
-    })?;
     let mut portfolio_without_digest = Value::Object(portfolio.clone());
     {
-        let portfolio_object = portfolio_without_digest
-            .as_object_mut()
-            .expect("portfolio_without_digest is an object");
+        let Some(portfolio_object) = portfolio_without_digest.as_object_mut() else {
+            return Err(DomainWorkflowError::InvalidRequest(
+                "portfolio digest projection is not an object".into(),
+            ));
+        };
         portfolio_object.remove("portfolio_digest");
         // REST and JSON-RPC adapters may append envelope metadata after the portfolio digest was
         // computed. These fields are transport provenance, not retained portfolio content.
@@ -1698,6 +1812,12 @@ pub fn verify_domain_workflow_portfolio(
             MAX_DOMAIN_WORKFLOW_PORTFOLIO_ITEMS
         )));
     }
+    let mut retained_contract_mismatches = Vec::new();
+    let mut retained_instantiated_count = 0usize;
+    let mut retained_blocked_count = 0usize;
+    let mut retained_selected_tool_count = 0usize;
+    let mut seen_instantiated_workflow_ids = BTreeSet::new();
+    let mut seen_instantiated_mission_ids = BTreeSet::new();
     let coverage = portfolio
         .get("coverage")
         .and_then(Value::as_object)
@@ -1813,6 +1933,127 @@ pub fn verify_domain_workflow_portfolio(
             .and_then(Value::as_array)
             .cloned()
             .unwrap_or_default();
+        if let Some(item_object) = item_object {
+            if item_object.get("index").and_then(Value::as_u64) != Some(index as u64) {
+                mismatches.push(json!({
+                    "code": "portfolio_item_index_mismatch",
+                    "expected": index,
+                    "observed": item_object.get("index").cloned().unwrap_or(Value::Null)
+                }));
+            }
+            if !item_object
+                .get("request_digest")
+                .and_then(Value::as_str)
+                .is_some_and(valid_digest)
+            {
+                mismatches.push(json!({
+                    "code": "portfolio_item_request_digest_invalid",
+                    "message": "each retained portfolio item must carry a canonical request digest"
+                }));
+            }
+            for (field, value) in [("workflow_id", &workflow_id), ("mission_id", &mission_id)] {
+                if !value.is_null() && value.as_str().is_none() {
+                    mismatches.push(json!({
+                        "code": "portfolio_item_identity_invalid",
+                        "field": field,
+                        "message": "retained item identity fields must be strings or null"
+                    }));
+                }
+            }
+            match item_object.get("status").and_then(Value::as_str) {
+                Some("instantiated") => {
+                    retained_instantiated_count = retained_instantiated_count.saturating_add(1);
+                    if let Some(workflow_id) = workflow_id.as_str() {
+                        if !seen_instantiated_workflow_ids.insert(workflow_id.to_owned()) {
+                            mismatches.push(json!({
+                                "code": "portfolio_instantiated_workflow_id_duplicate",
+                                "workflow_id": workflow_id
+                            }));
+                        }
+                    } else {
+                        mismatches.push(json!({
+                            "code": "portfolio_instantiated_workflow_id_missing",
+                            "message": "instantiated rows must identify a workflow"
+                        }));
+                    }
+                    if let Some(mission_id) = mission_id.as_str() {
+                        if !seen_instantiated_mission_ids.insert(mission_id.to_owned()) {
+                            mismatches.push(json!({
+                                "code": "portfolio_instantiated_mission_id_duplicate",
+                                "mission_id": mission_id
+                            }));
+                        }
+                    } else {
+                        mismatches.push(json!({
+                            "code": "portfolio_instantiated_mission_id_missing",
+                            "message": "instantiated rows must identify a mission"
+                        }));
+                    }
+                    if !item_object
+                        .get("instantiation")
+                        .is_some_and(Value::is_object)
+                    {
+                        mismatches.push(json!({
+                            "code": "portfolio_instantiated_row_missing_instantiation",
+                            "message": "instantiated rows must retain an instantiation object"
+                        }));
+                    }
+                    if let Some(instantiation) = item_object
+                        .get("instantiation")
+                        .filter(|value| value.is_object())
+                    {
+                        let selected_tools = instantiation
+                            .pointer("/selection/selected_tools")
+                            .and_then(Value::as_array);
+                        if let Some(selected_tools) = selected_tools {
+                            retained_selected_tool_count =
+                                retained_selected_tool_count.saturating_add(selected_tools.len());
+                        } else {
+                            mismatches.push(json!({
+                                "code": "portfolio_instantiated_selection_invalid",
+                                "message": "instantiated rows must retain selection.selected_tools as an array"
+                            }));
+                        }
+                    }
+                }
+                Some("blocked") => {
+                    retained_blocked_count = retained_blocked_count.saturating_add(1);
+                    if item_object
+                        .get("instantiation")
+                        .is_some_and(|value| !value.is_null())
+                    {
+                        mismatches.push(json!({
+                            "code": "portfolio_blocked_row_has_instantiation",
+                            "message": "blocked rows must not retain an instantiation object"
+                        }));
+                    }
+                    if item_object
+                        .get("issues")
+                        .and_then(Value::as_array)
+                        .is_none_or(Vec::is_empty)
+                    {
+                        mismatches.push(json!({
+                            "code": "portfolio_blocked_row_missing_issues",
+                            "message": "blocked rows must retain at least one issue"
+                        }));
+                    }
+                }
+                Some(status) => mismatches.push(json!({
+                    "code": "portfolio_item_status_invalid",
+                    "observed": status,
+                    "message": "retained portfolio item status must be instantiated or blocked"
+                })),
+                None => mismatches.push(json!({
+                    "code": "portfolio_item_status_missing",
+                    "message": "retained portfolio items must carry a status"
+                })),
+            }
+        } else {
+            mismatches.push(json!({
+                "code": "portfolio_item_not_object",
+                "message": "retained portfolio items must be objects"
+            }));
+        }
         let verification;
         let mut replay_requested = false;
         let mut status = "blocked";
@@ -1962,6 +2203,133 @@ pub fn verify_domain_workflow_portfolio(
         }));
     }
 
+    let mut check_retained_count = |field: &str, expected: usize| {
+        let observed = portfolio
+            .get("summary")
+            .and_then(Value::as_object)
+            .and_then(|summary| summary.get(field))
+            .and_then(Value::as_u64);
+        if observed != Some(expected as u64) {
+            retained_contract_mismatches.push(json!({
+                "code": "portfolio_summary_count_mismatch",
+                "field": field,
+                "expected": expected,
+                "observed": observed.map(Value::from).unwrap_or(Value::Null)
+            }));
+        }
+    };
+    if portfolio
+        .get("summary")
+        .and_then(Value::as_object)
+        .is_none()
+    {
+        retained_contract_mismatches.push(json!({
+            "code": "portfolio_summary_missing",
+            "message": "retained portfolios must carry a summary object"
+        }));
+    } else {
+        check_retained_count("instantiated_count", retained_instantiated_count);
+        check_retained_count("blocked_count", retained_blocked_count);
+        check_retained_count("selected_tool_count", retained_selected_tool_count);
+        let summary_preflight_status = portfolio
+            .get("summary")
+            .and_then(Value::as_object)
+            .and_then(|summary| summary.get("preflight_status"))
+            .and_then(Value::as_str);
+        let retained_preflight_status = portfolio
+            .get("preflight")
+            .and_then(Value::as_object)
+            .and_then(|preflight| preflight.get("status"))
+            .and_then(Value::as_str);
+        if !matches!(
+            summary_preflight_status,
+            Some("deferred" | "matched" | "blocked")
+        ) || summary_preflight_status != retained_preflight_status
+        {
+            retained_contract_mismatches.push(json!({
+                "code": "portfolio_summary_preflight_status_invalid",
+                "message": "retained portfolio summary and preflight statuses must agree and be deferred, matched, or blocked"
+            }));
+        }
+    }
+    let expected_unique_workflow_count = items
+        .iter()
+        .filter_map(|item| item.get("workflow_id").and_then(Value::as_str))
+        .collect::<BTreeSet<_>>()
+        .len();
+    let observed_requested_item_count =
+        coverage.get("requested_item_count").and_then(Value::as_u64);
+    if observed_requested_item_count != Some(items.len() as u64) {
+        retained_contract_mismatches.push(json!({
+            "code": "portfolio_coverage_item_count_mismatch",
+            "expected": items.len(),
+            "observed": observed_requested_item_count
+                .map(Value::from)
+                .unwrap_or(Value::Null)
+        }));
+    }
+    let observed_unique_workflow_count = coverage
+        .get("unique_workflow_count")
+        .and_then(Value::as_u64);
+    if observed_unique_workflow_count != Some(expected_unique_workflow_count as u64) {
+        retained_contract_mismatches.push(json!({
+            "code": "portfolio_coverage_unique_workflow_count_mismatch",
+            "expected": expected_unique_workflow_count,
+            "observed": observed_unique_workflow_count
+                .map(Value::from)
+                .unwrap_or(Value::Null)
+        }));
+    }
+    let check_sorted_id_list = |field: &str, mismatches: &mut Vec<Value>| {
+        let Some(values) = coverage.get(field).and_then(Value::as_array) else {
+            mismatches.push(json!({
+                "code": "portfolio_coverage_id_list_invalid",
+                "field": field,
+                "message": "coverage workflow ID lists must be arrays"
+            }));
+            return;
+        };
+        let mut previous = None;
+        for value in values {
+            let Some(value) = value.as_str() else {
+                mismatches.push(json!({
+                    "code": "portfolio_coverage_id_list_invalid",
+                    "field": field,
+                    "message": "coverage workflow ID lists must contain strings"
+                }));
+                continue;
+            };
+            if previous.is_some_and(|previous: &str| value <= previous) {
+                mismatches.push(json!({
+                    "code": "portfolio_coverage_id_list_noncanonical",
+                    "field": field,
+                    "message": "coverage workflow ID lists must be strictly increasing"
+                }));
+                break;
+            }
+            previous = Some(value);
+        }
+    };
+    check_sorted_id_list("missing_workflow_ids", &mut retained_contract_mismatches);
+    check_sorted_id_list("extra_workflow_ids", &mut retained_contract_mismatches);
+    let missing_workflow_ids_empty = coverage
+        .get("missing_workflow_ids")
+        .and_then(Value::as_array)
+        .is_some_and(Vec::is_empty);
+    let extra_workflow_ids_empty = coverage
+        .get("extra_workflow_ids")
+        .and_then(Value::as_array)
+        .is_some_and(Vec::is_empty);
+    if coverage.get("complete_catalogue").and_then(Value::as_bool)
+        != Some(missing_workflow_ids_empty && extra_workflow_ids_empty)
+    {
+        retained_contract_mismatches.push(json!({
+            "code": "portfolio_coverage_completeness_mismatch",
+            "message": "coverage.complete_catalogue must match its missing and extra workflow ID lists"
+        }));
+    }
+    let retained_contract_valid = retained_contract_mismatches.is_empty();
+
     let complete_catalogue = coverage
         .get("complete_catalogue")
         .and_then(Value::as_bool)
@@ -1971,6 +2339,7 @@ pub fn verify_domain_workflow_portfolio(
         && replay_matched_count == items.len();
     let item_failures = blocked_count.saturating_add(mismatch_count);
     let valid = portfolio_digest_matched
+        && retained_contract_valid
         && item_failures == 0
         && (!require_complete_catalogue || complete_catalogue)
         && (!require_replay || replay_complete)
@@ -1982,7 +2351,7 @@ pub fn verify_domain_workflow_portfolio(
         } else {
             "verified_without_replay"
         }
-    } else if !portfolio_digest_matched {
+    } else if !portfolio_digest_matched || !retained_contract_valid {
         "mismatch"
     } else if require_replay && !replay_complete {
         "replay_incomplete"
@@ -2009,6 +2378,7 @@ pub fn verify_domain_workflow_portfolio(
             "observed": observed_portfolio_digest
         }));
     }
+    mismatches.extend(retained_contract_mismatches);
     if require_replay && replay_requests.is_none() {
         mismatches.push(json!({
             "code": "required_replay_requests_missing",
@@ -2414,6 +2784,65 @@ mod tests {
     }
 
     #[test]
+    fn catalogue_rejects_duplicate_workflow_ids_before_instantiation_can_be_ambiguous() {
+        let (mut catalogue, tools) = inputs();
+        catalogue[1]["id"] = json!("oncology_workflows");
+
+        let error = build_domain_workflow_catalogue(&catalogue, &tools)
+            .expect_err("duplicate workflow IDs must not create first-match ambiguity");
+        assert_eq!(
+            error,
+            DomainWorkflowError::InvalidGroup {
+                group: 1,
+                reason: "duplicate workflow id \"oncology_workflows\"".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn catalogue_rejects_case_colliding_tool_definition_names() {
+        let (catalogue, mut tools) = inputs();
+        tools
+            .as_array_mut()
+            .expect("tool definitions are an array")
+            .push(json!({"name": "ONCO_BOUNDARY_CHECK"}));
+        let error = build_domain_workflow_catalogue(&catalogue, &tools)
+            .expect_err("case-colliding tool names must not create selection ambiguity");
+        assert!(matches!(
+            error,
+            DomainWorkflowError::InvalidToolDefinition(message)
+                if message.contains("case-colliding")
+        ));
+    }
+
+    #[test]
+    fn catalogue_rejects_case_collisions_controls_and_wrong_status_types() {
+        let (mut catalogue, tools) = inputs();
+        catalogue[1]["id"] = json!("Oncology_Workflows");
+        let error = build_domain_workflow_catalogue(&catalogue, &tools).unwrap_err();
+        assert!(matches!(
+            error,
+            DomainWorkflowError::InvalidGroup { group: 1, .. }
+        ));
+
+        let (mut catalogue, tools) = inputs();
+        catalogue[0]["domains"] = json!(["oncology\nunsafe"]);
+        let error = build_domain_workflow_catalogue(&catalogue, &tools).unwrap_err();
+        assert!(matches!(
+            error,
+            DomainWorkflowError::InvalidGroup { group: 0, .. }
+        ));
+
+        let (mut catalogue, tools) = inputs();
+        catalogue[0]["status"] = json!(false);
+        let error = build_domain_workflow_catalogue(&catalogue, &tools).unwrap_err();
+        assert!(matches!(
+            error,
+            DomainWorkflowError::InvalidGroup { group: 0, .. }
+        ));
+    }
+
+    #[test]
     fn instantiation_is_scoped_and_defaults_to_no_dispatch() {
         let (catalogue, tools) = inputs();
         let request = json!({
@@ -2440,6 +2869,10 @@ mod tests {
         );
         assert_eq!(report["selection"]["all_selected_tools_declared"], true);
         assert_eq!(report["selection"]["all_selected_tools_available"], true);
+        assert_eq!(report["mission"]["policy"]["stop_on_error"], true);
+        assert_eq!(report["mission"]["policy"]["allow_side_effects"], false);
+        assert_eq!(report["mission"]["policy"]["require_readiness"], false);
+        assert_eq!(report["mission"]["policy"]["max_steps"], 4);
         assert_eq!(report["evidence_plan"]["steps"][0]["step_id"], "boundary");
         assert_eq!(
             report["mission"]["workflow_binding"]["evidence_plan"],
@@ -2455,6 +2888,162 @@ mod tests {
             report["evidence_plan"]["steps"][0]["tool_contract"]["schema_state"],
             "missing"
         );
+    }
+
+    #[test]
+    fn instantiation_rejects_wrongly_typed_optional_step_metadata() {
+        let (catalogue, tools) = inputs();
+        let error = instantiate_domain_workflow(
+            &catalogue,
+            &tools,
+            &json!({
+                "workflow_id":"oncology_workflows",
+                "mission_id":"m-1",
+                "goal":"review the oncology boundary",
+                "steps":[{"id":"boundary","tool":"onco_boundary_check","required":"false","arguments":{}}]
+            }),
+        )
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            DomainWorkflowError::InvalidStep { step: 0, .. }
+        ));
+    }
+
+    #[test]
+    fn instantiation_rejects_malformed_policy_types_and_padded_identity() {
+        let (catalogue, tools) = inputs();
+        let malformed_execute = instantiate_domain_workflow(
+            &catalogue,
+            &tools,
+            &json!({
+                "workflow_id":"oncology_workflows",
+                "mission_id":"m-1",
+                "goal":"review the oncology boundary",
+                "steps":[{"id":"boundary","tool":"onco_boundary_check","arguments":{}}],
+                "policy":{"execute":"true"}
+            }),
+        )
+        .expect_err("non-boolean execute must not silently disable execution");
+        assert!(matches!(
+            malformed_execute,
+            DomainWorkflowError::InvalidRequest(message) if message.contains("policy.execute")
+        ));
+
+        let malformed_allow_list = instantiate_domain_workflow(
+            &catalogue,
+            &tools,
+            &json!({
+                "workflow_id":"oncology_workflows",
+                "mission_id":"m-1",
+                "goal":"review the oncology boundary",
+                "steps":[{"id":"boundary","tool":"onco_boundary_check","arguments":{}}],
+                "policy":{"allowed_tools":"onco_boundary_check"}
+            }),
+        )
+        .expect_err("non-array allow-lists must not be replaced by a derived list");
+        assert!(matches!(
+            malformed_allow_list,
+            DomainWorkflowError::InvalidRequest(message) if message.contains("policy.allowed_tools")
+        ));
+
+        let padded_identity = instantiate_domain_workflow(
+            &catalogue,
+            &tools,
+            &json!({
+                "workflow_id":"oncology_workflows",
+                "mission_id":"m-1",
+                "goal":" review the oncology boundary",
+                "steps":[{"id":"boundary","tool":"onco_boundary_check","arguments":{}}]
+            }),
+        )
+        .expect_err("padded workflow identity must be refused");
+        assert!(matches!(
+            padded_identity,
+            DomainWorkflowError::InvalidRequest(message) if message.contains("goal")
+        ));
+    }
+
+    #[test]
+    fn instantiation_rejects_case_colliding_step_ids() {
+        let (catalogue, tools) = inputs();
+        let error = instantiate_domain_workflow(
+            &catalogue,
+            &tools,
+            &json!({
+                "workflow_id":"oncology_workflows",
+                "mission_id":"m-1",
+                "goal":"review the oncology boundary",
+                "steps":[
+                    {"id":"boundary","tool":"onco_boundary_check","arguments":{}},
+                    {"id":"BOUNDARY","tool":"onco_boundary_check","arguments":{}}
+                ]
+            }),
+        )
+        .expect_err("case-colliding step ids must be refused");
+        assert!(matches!(
+            error,
+            DomainWorkflowError::InvalidStep { reason, .. }
+                if reason.contains("case-colliding")
+        ));
+    }
+
+    #[test]
+    fn retained_verification_rejects_noncanonical_identity_digests() {
+        let (catalogue, tools) = inputs();
+        let base = instantiate_domain_workflow(
+            &catalogue,
+            &tools,
+            &json!({
+                "workflow_id":"oncology_workflows",
+                "mission_id":"m-1",
+                "goal":"review the oncology boundary",
+                "steps":[{"id":"boundary","tool":"onco_boundary_check","arguments":{}}]
+            }),
+        )
+        .unwrap();
+
+        let mut uppercase = base.clone();
+        uppercase["workflow_digest"] =
+            json!(base["workflow_digest"].as_str().unwrap().to_uppercase());
+        let error =
+            verify_domain_workflow(&catalogue, &tools, &json!({"instantiation": uppercase}))
+                .expect_err("uppercase retained digest must be refused");
+        assert!(matches!(
+            error,
+            DomainWorkflowError::InvalidRequest(message)
+                if message.contains("lowercase 64-character hexadecimal digest")
+        ));
+
+        let mut padded = base;
+        padded["workflow_id"] = json!(" oncology_workflows");
+        let error = verify_domain_workflow(&catalogue, &tools, &json!({"instantiation": padded}))
+            .expect_err("padded retained workflow id must be refused");
+        assert!(matches!(
+            error,
+            DomainWorkflowError::InvalidRequest(message)
+                if message.contains("instantiation.workflow_id")
+        ));
+
+        let mut tampered = instantiate_domain_workflow(
+            &catalogue,
+            &tools,
+            &json!({
+                "workflow_id":"oncology_workflows",
+                "mission_id":"m-1",
+                "goal":"review the oncology boundary",
+                "steps":[{"id":"boundary","tool":"onco_boundary_check","arguments":{}}]
+            }),
+        )
+        .unwrap();
+        tampered["evidence_plan"]["steps"][0]["capture"] = json!(["tampered"]);
+        let error = verify_domain_workflow(&catalogue, &tools, &json!({"instantiation": tampered}))
+            .expect_err("top-level evidence plan drift must be rejected before replay");
+        assert!(matches!(
+            error,
+            DomainWorkflowError::InvalidRequest(message)
+                if message.contains("evidence_plan does not match")
+        ));
     }
 
     #[test]
@@ -2653,6 +3242,50 @@ mod tests {
             .iter()
             .any(|finding| finding["code"] == "replay_request_digest_mismatch"));
         assert_eq!(report["dispatch"], "not_started");
+    }
+
+    #[test]
+    fn portfolio_verification_rejects_resealed_internal_row_contract_drift() {
+        let (catalogue, tools) = inputs();
+        let mut tampered = build_domain_workflow_portfolio(
+            &catalogue,
+            &tools,
+            &json!({
+                "requests": [{
+                    "workflow_id": "oncology_workflows",
+                    "mission_id": "portfolio-contract-drift",
+                    "goal": "review the oncology boundary",
+                    "steps": [{"id": "boundary", "tool": "onco_boundary_check", "arguments": {}}]
+                }],
+                "policy": {}
+            }),
+        )
+        .unwrap();
+        tampered["items"][0]["index"] = json!(1);
+        tampered["summary"]["instantiated_count"] = json!(0);
+        let mut without_digest = tampered.clone();
+        without_digest
+            .as_object_mut()
+            .expect("portfolio is an object")
+            .remove("portfolio_digest");
+        tampered["portfolio_digest"] = json!(digest(&without_digest).unwrap());
+
+        let report =
+            verify_domain_workflow_portfolio(&catalogue, &tools, &json!({"portfolio": tampered}))
+                .unwrap();
+        assert_eq!(report["portfolio_digest_matched"], true);
+        assert_eq!(report["valid"], false);
+        assert_eq!(report["verification_status"], "mismatch");
+        assert!(report["items"][0]["mismatches"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|finding| finding["code"] == "portfolio_item_index_mismatch"));
+        assert!(report["mismatches"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|finding| finding["code"] == "portfolio_summary_count_mismatch"));
     }
 
     #[test]

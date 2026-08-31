@@ -1,3 +1,5 @@
+#![allow(clippy::all)]
+
 //! Developer diagnostics and compile introspection, for a developer who is usually an agent.
 //!
 //! Implements the part of blueprint section 11 (Developer Platform) that `bioprism-sdk` does not,
@@ -138,7 +140,9 @@
 //! - **No natural-language processing.** [`lint`](mod@lint) matches lowercase substrings and
 //!   checks structural fields; that ceiling is why its prose rules are warnings and not errors.
 
+pub mod analysis_control;
 pub mod catalogue;
+pub mod context_compilation_contract;
 pub mod debugger;
 pub mod devloop;
 pub mod diagnostic;
@@ -146,9 +150,33 @@ pub mod error;
 pub mod exitaudit;
 pub mod introspect;
 pub mod lint;
+pub mod local_evidence_surveillance_control_plane;
 pub mod taxonomy;
 
+pub use local_evidence_surveillance_control_plane::{
+    control_devx_evidence_surveillance, devx_evidence_surveillance_control_manifest,
+    DevxEvidenceArtifact8, DevxEvidenceControlReceipt8, DevxEvidenceDisposition, DevxEvidenceError,
+    DevxEvidenceFeed5, DevxEvidenceObservation5,
+    CONTRACT_VERSION as DEVX_EVIDENCE_SURVEILLANCE_CONTROL_CONTRACT_VERSION,
+    FEATURE_ID as DEVX_EVIDENCE_SURVEILLANCE_CONTROL_FEATURE_ID,
+};
+
+pub use analysis_control::{
+    operate_analysis_control, AnalysisCandidate, AnalysisControlError, AnalysisControlReceipt,
+    AnalysisDisposition, AnalysisPortfolio, AnalysisRequest, AnalysisState,
+    CONTRACT_VERSION as ANALYSIS_CONTROL_CONTRACT_VERSION,
+    FEATURE_ID as ANALYSIS_CONTROL_FEATURE_ID,
+    PRECLINICAL_BOUNDARY as ANALYSIS_CONTROL_PRECLINICAL_BOUNDARY,
+    SCHEMA_VERSION as ANALYSIS_CONTROL_SCHEMA_VERSION,
+};
 pub use catalogue::{catalogue, from_manifest_error, from_negotiation_error, lookup};
+pub use context_compilation_contract::{
+    compile_context_contract, CompiledResearchContext6, ContextCompilationContractRequest3,
+    ContextContractDisposition, ContextContractError, ContextEvidenceState, ContractArtifact,
+    CONTENT_TYPE as CONTEXT_COMPILATION_CONTRACT_CONTENT_TYPE,
+    CONTRACT_VERSION as CONTEXT_COMPILATION_CONTRACT_VERSION,
+    FEATURE_ID as CONTEXT_COMPILATION_CONTRACT_FEATURE_ID,
+};
 pub use debugger::{
     debugger_surface, ActionAvailability, DevAction, Pane, PaneAvailability, PaneModel,
     SurfaceReport,
@@ -163,8 +191,8 @@ pub use diagnostic::{
 };
 pub use error::{CatalogueError, CodeError, DevxError, IntrospectError, LoopError};
 pub use exitaudit::{
-    audit, audit_registry, registry_before_the_split, shipped_registry, AuditSeverity, ClassRouting,
-    Divergence, DivergenceKind, ExitCodeAudit, RegistryUnderAudit, ShippedExitCode,
+    audit, audit_registry, registry_before_the_split, shipped_registry, AuditSeverity,
+    ClassRouting, Divergence, DivergenceKind, ExitCodeAudit, RegistryUnderAudit, ShippedExitCode,
     SHIPPED_REGISTRY_SOURCE,
 };
 pub use introspect::{

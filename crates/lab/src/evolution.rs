@@ -268,14 +268,14 @@ impl EvolutionCard {
         &self,
         direction: Direction,
     ) -> Result<ImprovementClaim, EvolutionError> {
-        let MeasurementSurface::Clean { before, after } = &self.surface else {
-            let MeasurementSurface::Contaminated(record) = &self.surface else {
-                unreachable!("measurement surface is clean or contaminated");
-            };
-            return Err(EvolutionError::ContaminatedSurface {
-                card: self.id.clone(),
-                reason: record.refusal.to_string(),
-            });
+        let (before, after) = match &self.surface {
+            MeasurementSurface::Clean { before, after } => (before, after),
+            MeasurementSurface::Contaminated(record) => {
+                return Err(EvolutionError::ContaminatedSurface {
+                    card: self.id.clone(),
+                    reason: record.refusal.to_string(),
+                })
+            }
         };
         if self.rollback_handle.as_str().trim().is_empty() {
             return Err(EvolutionError::NoRollbackHandle {
@@ -499,7 +499,9 @@ mod tests {
         .unwrap();
         let claim = card.claim_improvement(Direction::HigherIsBetter).unwrap();
         assert!((claim.delta() - 0.13).abs() < 1e-9);
-        assert!(claim.to_sentence().contains("rotating_private_certification"));
+        assert!(claim
+            .to_sentence()
+            .contains("rotating_private_certification"));
     }
 
     #[test]

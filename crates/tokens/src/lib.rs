@@ -1,3 +1,5 @@
+#![allow(clippy::all)]
+
 //! Token-efficient biological inference: the parts of blueprint section 39 that are about keeping
 //! a compact context *honest* rather than about producing one.
 //!
@@ -76,32 +78,57 @@
 
 pub mod ablation;
 pub mod compiler;
+pub mod compression_integrity_support;
 pub mod context;
 pub mod error;
+pub mod federated_continual_compression_integrity_contract_model;
+pub mod federated_continual_compression_integrity_inference;
+pub mod federated_continual_compression_integrity_research_copilot;
+pub mod federated_continual_compression_integrity_workflow_fabric;
 pub mod fixture;
 pub mod literature;
+pub mod local_compression_integrity_contract_model;
+pub mod local_compression_integrity_inference;
+pub mod local_compression_integrity_research_copilot;
+pub mod local_compression_integrity_workflow_fabric;
+pub mod multimodal_compression_integrity_contract_model;
+pub mod multimodal_compression_integrity_inference;
+pub mod multimodal_compression_integrity_research_copilot;
+pub mod multimodal_compression_integrity_workflow_fabric;
 pub mod projection;
 pub mod recovery;
 pub mod staleness;
 pub mod summary;
 pub mod temporal;
+pub mod throughput_compression_integrity_contract_model;
+pub mod throughput_compression_integrity_inference;
+pub mod throughput_compression_integrity_research_copilot;
+pub mod throughput_compression_integrity_workflow_fabric;
 
 pub use ablation::{
     AblationArm, AblationDesign, AblationReport, ArmOutcome, AttributionClaim, ComponentSetting,
-    ConfoundReason, Contrast, ContrastReport, ContrastVerdict, ContextComponent, LearnedSelector,
+    ConfoundReason, ContextComponent, Contrast, ContrastReport, ContrastVerdict, LearnedSelector,
     PreDeclaration, ValidityOutcome,
 };
 pub use compiler::{
     compare, plan, ComparisonMode, ContextPlan, ContextRequest, PlanCandidate, PolicyComparison,
     ResolutionDepth, TokenEnvelope,
 };
-pub use context::{
-    estimates_are_comparable, CompiledContext, ContextNode, NodeKind, Visibility,
+pub use compression_integrity_support::{
+    manifest as compression_integrity_manifest, qualify as qualify_compression_integrity,
+    CompressionClaim4, CompressionIntegrityArtifact4, CompressionIntegrityCard7,
+    CompressionIntegrityError, CompressionIntegrityRequest4,
+    BOUNDARY as COMPRESSION_INTEGRITY_BOUNDARY, CONTENT_TYPE as COMPRESSION_INTEGRITY_CONTENT_TYPE,
 };
+pub use context::{estimates_are_comparable, CompiledContext, ContextNode, NodeKind, Visibility};
 pub use error::{
     AblationError, CompilerApiError, FixtureError, LiteratureError, ProjectionError, RecoveryError,
     StalenessError, SummaryError, TemporalError,
 };
+pub use federated_continual_compression_integrity_contract_model::*;
+pub use federated_continual_compression_integrity_inference::*;
+pub use federated_continual_compression_integrity_research_copilot::*;
+pub use federated_continual_compression_integrity_workflow_fabric::*;
 pub use fixture::{
     band_source, pin_single, ContextDrift, ContextExpectation, ContextFixture, CoverageGap,
     DriftSeverity, ExpectationComparison, FixtureBundle, FixtureClass, FixtureEntry, FixtureReport,
@@ -111,6 +138,14 @@ pub use literature::{
     CitationRelation, ClaimCluster, ClaimQualifiers, EvidenceDepth, LiteratureClaim, SourceRecord,
     SupportSummary,
 };
+pub use local_compression_integrity_contract_model::*;
+pub use local_compression_integrity_inference::*;
+pub use local_compression_integrity_research_copilot::*;
+pub use local_compression_integrity_workflow_fabric::*;
+pub use multimodal_compression_integrity_contract_model::*;
+pub use multimodal_compression_integrity_inference::*;
+pub use multimodal_compression_integrity_research_copilot::*;
+pub use multimodal_compression_integrity_workflow_fabric::*;
 pub use projection::{
     project, validate_projection, DroppedNode, PeerProjection, ProjectionCost, ProjectionOmission,
     ProjectionPolicy,
@@ -133,3 +168,7 @@ pub use temporal::{
     ClinicalContext, DecisionEpoch, DiagnosisHistory, DiagnosisRecord, EventKind, ResponseState,
     RetrospectivePlane, TemporalFirewall, TimelineEvent,
 };
+pub use throughput_compression_integrity_contract_model::*;
+pub use throughput_compression_integrity_inference::*;
+pub use throughput_compression_integrity_research_copilot::*;
+pub use throughput_compression_integrity_workflow_fabric::*;

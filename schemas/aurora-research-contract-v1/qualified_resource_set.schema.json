@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aurora-neuro.org/schemas/aurora-research-contract-v1/qualified-resource-set.json",
+  "title": "AURORA qualified resource set",
+  "description": "Deterministic, omission-aware qualification of local and permitted federated research resources.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "feature_id", "need_id", "requester", "disposition", "considered_candidates", "qualified_count", "resources", "omissions", "reasons", "artifact", "boundary"],
+  "properties": {
+    "schema_version": { "const": "aurora-research-contract/1.0" },
+    "feature_id": { "const": "AFA-fiber-P05-F20" },
+    "need_id": { "type": "string", "minLength": 1 },
+    "requester": { "type": "string", "minLength": 1 },
+    "disposition": { "enum": ["qualified", "partial", "unknown", "blocked"] },
+    "considered_candidates": { "type": "integer", "minimum": 1 },
+    "qualified_count": { "type": "integer", "minimum": 0 },
+    "resources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["resource_id", "origin", "artifact_digest", "rank", "reasons"],
+        "properties": {
+          "resource_id": { "type": "string", "minLength": 1 },
+          "origin": { "type": "string", "minLength": 1 },
+          "artifact_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "rank": { "type": "integer", "minimum": 1 },
+          "reasons": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } }
+        }
+      }
+    },
+    "omissions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["resource_id", "reason"],
+        "properties": {
+          "resource_id": { "type": "string", "minLength": 1 },
+          "reason": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "reasons": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+    "artifact": { "type": "object", "required": ["content_hash"], "properties": { "content_hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" } } },
+    "boundary": { "const": "preclinical-research-only; no human-subject or clinical-source data; no diagnosis, treatment, triage, enrollment, or clinical decisions" }
+  }
+}

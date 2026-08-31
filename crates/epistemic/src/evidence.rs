@@ -82,6 +82,33 @@ impl EvidenceItem {
         })
     }
 
+    /// Re-checks intrinsic invariants after a value arrived through derived serde deserialisation.
+    pub fn validate(&self) -> Result<(), EpistemicError> {
+        if !self.cost.is_finite() || self.cost < 0.0 {
+            return Err(EpistemicError::InadmissibleCost {
+                item: self.id.clone(),
+                value: self.cost,
+            });
+        }
+        let mut any_positive = false;
+        for (model, value) in self.likelihood.iter().enumerate() {
+            if !value.is_finite() || *value < 0.0 {
+                return Err(EpistemicError::InadmissibleLikelihood {
+                    item: self.id.clone(),
+                    model,
+                    value: *value,
+                });
+            }
+            any_positive |= *value > 0.0;
+        }
+        if !any_positive {
+            return Err(EpistemicError::AnnihilatingEvidence {
+                item: self.id.clone(),
+            });
+        }
+        Ok(())
+    }
+
     /// An item whose likelihood is the same under every model.
     ///
     /// Such an item cannot move any posterior and therefore cannot change any decision. Its true
@@ -121,11 +148,25 @@ impl EvidencePool {
     pub fn new(items: Vec<EvidenceItem>) -> Result<Self, EpistemicError> {
         let ids: Vec<String> = items.iter().map(|i| i.id.clone()).collect();
         crate::unique(&ids, "evidence pool")?;
-        Ok(EvidencePool { items })
+        let pool = EvidencePool { items };
+        pool.validate()?;
+        Ok(pool)
+    }
+
+    /// Re-checks pool identity and item invariants after derived serde deserialisation.
+    pub fn validate(&self) -> Result<(), EpistemicError> {
+        let ids: Vec<String> = self.items.iter().map(|item| item.id.clone()).collect();
+        crate::unique(&ids, "evidence pool")?;
+        for item in &self.items {
+            item.validate()?;
+        }
+        Ok(())
     }
 
     /// Checks every item's likelihood profile has one entry per model of `problem`.
     pub fn check_against(&self, problem: &DecisionProblem) -> Result<(), EpistemicError> {
+        problem.validate()?;
+        self.validate()?;
         for item in &self.items {
             if item.likelihood.len() != problem.model_count() {
                 return Err(EpistemicError::LikelihoodShape {
@@ -170,6 +211,7 @@ impl EvidencePool {
 
     /// Total cost of a subset. This is the *rate* in rate–distortion.
     pub fn rate(&self, subset: &BTreeSet<usize>) -> Result<f64, EpistemicError> {
+        self.validate()?;
         let mut total = 0.0;
         for &index in subset {
             total += self.get(index)?.cost;
@@ -188,9 +230,18 @@ impl EvidencePool {
         prior: &Belief,
         subset: &BTreeSet<usize>,
     ) -> Result<Belief, EpistemicError> {
+        prior.validate()?;
+        self.validate()?;
         let mut mass: Vec<f64> = prior.masses().to_vec();
         for &index in subset {
             let item = self.get(index)?;
+            if item.likelihood.len() != prior.len() {
+                return Err(EpistemicError::LikelihoodShape {
+                    item: item.id.clone(),
+                    got: item.likelihood.len(),
+                    models: prior.len(),
+                });
+            }
             for (model, value) in mass.iter_mut().enumerate() {
                 *value *= item.likelihood(model);
             }

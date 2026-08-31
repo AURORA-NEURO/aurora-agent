@@ -280,7 +280,10 @@ pub fn decide(plane: ClaimPlane, evidence: &PerturbationEvidence) -> Determinati
     if plane == ClaimPlane::Prediction {
         return Determination::supported(
             EvidenceTier::Statistical,
-            format!("a predictive association was recorded for {}", evidence.target),
+            format!(
+                "a predictive association was recorded for {}",
+                evidence.target
+            ),
         );
     }
 
@@ -290,16 +293,14 @@ pub fn decide(plane: ClaimPlane, evidence: &PerturbationEvidence) -> Determinati
         .map(|control| {
             Missing::new(
                 format!("{} control", control.as_str()),
-                format!(
-                    "the {} plane cannot be reached without it",
-                    plane.as_str()
-                ),
+                format!("the {} plane cannot be reached without it", plane.as_str()),
             )
         })
         .collect();
     if !missing_controls.is_empty() {
-        return Determination::Unresolved(
-            Unresolved::new(missing_controls).expect("the vector was checked non-empty"),
+        return Unresolved::new(missing_controls).map_or_else(
+            |_| Determination::not_evaluable("the perturbation control gap was empty"),
+            Determination::Unresolved,
         );
     }
 
@@ -353,8 +354,9 @@ pub fn decide(plane: ClaimPlane, evidence: &PerturbationEvidence) -> Determinati
                 "no rescue was attempted, so a failed rescue cannot be distinguished from an untried one",
             ));
         }
-        return Determination::Unresolved(
-            Unresolved::new(missing).expect("the vector was checked non-empty"),
+        return Unresolved::new(missing).map_or_else(
+            |_| Determination::not_evaluable("the perturbation evidence gap was empty"),
+            Determination::Unresolved,
         );
     }
 
@@ -393,9 +395,9 @@ pub fn decide(plane: ClaimPlane, evidence: &PerturbationEvidence) -> Determinati
             "a rescue or epistasis experiment",
             "reagent agreement establishes the target, not the pathway carrying the effect",
         ),
-        (ClaimPlane::Prediction | ClaimPlane::Phenotype, _) => {
-            unreachable!("both planes returned above")
-        }
+        (ClaimPlane::Prediction | ClaimPlane::Phenotype, _) => Determination::not_evaluable(
+            "the perturbation claim plane was already resolved before rescue evaluation",
+        ),
     }
 }
 

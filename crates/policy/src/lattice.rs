@@ -383,12 +383,7 @@ impl PolicyLattice {
         }
     }
 
-    fn judge(
-        &self,
-        resolution: &LabelResolution,
-        request: &Request,
-        scope: &ScopeKey,
-    ) -> Decision {
+    fn judge(&self, resolution: &LabelResolution, request: &Request, scope: &ScopeKey) -> Decision {
         if resolution.is_unlabelled() {
             return Decision::Refuse(Refusal::UnlabelledEvidence {
                 scope: describe_scope(scope),
@@ -585,9 +580,8 @@ mod tests {
     }
 
     fn investigator() -> Principal {
-        Principal::new("p.investigator", "investigator", "eu").with_clearance(
-            Clearance::up_to(Classification::ControlledGenomicOrImaging),
-        )
+        Principal::new("p.investigator", "investigator", "eu")
+            .with_clearance(Clearance::up_to(Classification::ControlledGenomicOrImaging))
     }
 
     fn eu_lattice() -> PolicyLattice {
@@ -612,7 +606,9 @@ mod tests {
             .with_rule(PolicyRule::new(
                 "rule.eu-genomic",
                 1,
-                ScopeKey::new().exact("residency", "eu").exact("assay", "wgs"),
+                ScopeKey::new()
+                    .exact("residency", "eu")
+                    .exact("assay", "wgs"),
                 PolicyLabel::public()
                     .with_classification(Classification::ControlledGenomicOrImaging)
                     .with_min_cell_size(11),
@@ -648,7 +644,9 @@ mod tests {
     #[test]
     fn a_scope_no_rule_claims_is_unlabelled_and_refuses_every_request() {
         let lattice = eu_lattice();
-        let orphan = ScopeKey::new().exact("residency", "us").exact("cohort", "X");
+        let orphan = ScopeKey::new()
+            .exact("residency", "us")
+            .exact("cohort", "X");
 
         let resolution = lattice.resolve(&orphan);
         assert!(resolution.is_unlabelled());
@@ -683,7 +681,9 @@ mod tests {
     #[test]
     fn a_clearance_below_the_evidence_classification_is_refused_naming_both_levels() {
         let lattice = eu_lattice();
-        let scope = ScopeKey::new().exact("residency", "eu").exact("assay", "wgs");
+        let scope = ScopeKey::new()
+            .exact("residency", "eu")
+            .exact("assay", "wgs");
         let junior = Principal::new("p.junior", "analyst", "eu")
             .with_clearance(Clearance::up_to(Classification::InstitutionalConfidential));
         let request = Request::new(
@@ -733,9 +733,15 @@ mod tests {
     #[test]
     fn controlled_evidence_is_refused_on_the_cache_and_public_channels() {
         let lattice = eu_lattice();
-        let scope = ScopeKey::new().exact("residency", "eu").exact("assay", "wgs");
+        let scope = ScopeKey::new()
+            .exact("residency", "eu")
+            .exact("assay", "wgs");
 
-        for channel in [Channel::Cache, Channel::ModelPrompt, Channel::PublicArtifact] {
+        for channel in [
+            Channel::Cache,
+            Channel::ModelPrompt,
+            Channel::PublicArtifact,
+        ] {
             let decision = lattice.admits(&scope, &research_request(channel));
             assert!(
                 matches!(
@@ -801,7 +807,10 @@ mod tests {
             .expect("registers");
         let scope = ScopeKey::new().exact("cohort", "POOLED");
 
-        match lattice.admits(&scope, &research_request(Channel::LocalCompute)).refusal() {
+        match lattice
+            .admits(&scope, &research_request(Channel::LocalCompute))
+            .refusal()
+        {
             Some(Refusal::NoLegalExecutionPath { .. }) => {}
             other => panic!("expected no-legal-path, got {other:?}"),
         }
@@ -830,11 +839,21 @@ mod tests {
         let mut lattice = PolicyLattice::new();
         let scope = ScopeKey::new().exact("cohort", "A");
         lattice
-            .register(PolicyRule::new("rule.a", 1, scope.clone(), PolicyLabel::public()))
+            .register(PolicyRule::new(
+                "rule.a",
+                1,
+                scope.clone(),
+                PolicyLabel::public(),
+            ))
             .expect("first registration");
 
         lattice
-            .register(PolicyRule::new("rule.a", 1, scope.clone(), PolicyLabel::public()))
+            .register(PolicyRule::new(
+                "rule.a",
+                1,
+                scope.clone(),
+                PolicyLabel::public(),
+            ))
             .expect("identical re-registration is idempotent");
 
         let conflict = lattice.register(PolicyRule::new(
@@ -965,9 +984,11 @@ mod tests {
             .cloned()
             .expect("public evidence may be cached");
 
-        assert!(admission.obligations.contains(&Obligation::KeyCacheToPolicyVersion {
-            version: lattice.version()
-        }));
+        assert!(admission
+            .obligations
+            .contains(&Obligation::KeyCacheToPolicyVersion {
+                version: lattice.version()
+            }));
         assert!(admission.obligations.contains(&Obligation::DeleteBy {
             at: "2026-09-07T00:00:00Z".to_string()
         }));
@@ -986,7 +1007,9 @@ mod tests {
         let scope = ScopeKey::new().exact("cohort", "A");
 
         assert!(matches!(
-            lattice.admits(&scope, &research_request(Channel::Cache)).refusal(),
+            lattice
+                .admits(&scope, &research_request(Channel::Cache))
+                .refusal(),
             Some(Refusal::RetentionForbidsPersistence { .. })
         ));
         assert!(lattice

@@ -1,0 +1,561 @@
+//! Prospective high-throughput knowledge-representation inference engine.
+//! Atlas feature: `AFA-brain-P04-F03`.
+
+use bioprism_foundation::{
+    AutonomyTier, CapabilityManifest, Determinism, Effect, EvidenceReference, EvidenceState,
+    ResearchSurface, TypedPort, TypedResearchArtifact, PRECLINICAL_BOUNDARY,
+    RESEARCH_CONTRACT_SCHEMA_VERSION,
+};
+use bioprism_ids::ContentHash;
+use serde::{Deserialize, Serialize};
+use serde_json::json;
+use std::collections::{BTreeMap, BTreeSet};
+use thiserror::Error;
+
+pub const FEATURE_ID: &str = "AFA-brain-P04-F03";
+pub const CONTRACT_VERSION: &str = "brain-throughput-knowledge-representation-inference-engine/1.0";
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ThroughputKnowledgeJob {
+    pub job_id: String,
+    pub claims_digest: ContentHash,
+    pub world_digest: ContentHash,
+    pub evidence_digest: Option<ContentHash>,
+    pub provenance_digest: Option<ContentHash>,
+    pub replay_identity: ContentHash,
+    pub state: EvidenceState,
+    pub ready: bool,
+    pub retry_count: u16,
+    pub telemetry_digest: Option<ContentHash>,
+    pub cost_units: u32,
+    pub raw_data_local: bool,
+    pub boundary: String,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ThroughputKnowledgeRequest {
+    pub request_id: String,
+    pub batch_id: String,
+    pub jobs: Vec<ThroughputKnowledgeJob>,
+    pub max_concurrency: u16,
+    pub max_retries: u16,
+    pub budget_units: u32,
+    pub replay_identity: ContentHash,
+    pub policy_allow: bool,
+    pub protected_closure: bool,
+    pub raw_data_local: bool,
+    pub boundary: String,
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ThroughputKnowledgeDisposition {
+    Completed,
+    Degraded,
+    Unresolved,
+    Denied,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ThroughputKnowledgeReceipt {
+    pub schema_version: String,
+    pub contract_version: String,
+    pub feature_id: String,
+    pub request_id: String,
+    pub batch_id: String,
+    pub disposition: ThroughputKnowledgeDisposition,
+    pub candidate_order: Vec<String>,
+    pub completed_order: Vec<String>,
+    pub degraded_order: Vec<String>,
+    pub unresolved_order: Vec<String>,
+    pub denied_order: Vec<String>,
+    pub exchange_order: Vec<ContentHash>,
+    pub checkpoint_seq: u64,
+    pub retry_count: u64,
+    pub consumed_budget_units: u32,
+    pub run_digest: ContentHash,
+    pub telemetry_digest: ContentHash,
+    pub replay_identity: ContentHash,
+    pub witness_order: Vec<String>,
+    pub counterexample_order: Vec<String>,
+    pub omissions: Vec<String>,
+    pub uncertainty: Vec<String>,
+    pub negative_evidence: Vec<String>,
+    pub effect_receipts: Vec<String>,
+    pub artifact: TypedResearchArtifact,
+    pub raw_data_local: bool,
+    pub boundary: String,
+}
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum ThroughputKnowledgeError {
+    #[error("invalid throughput knowledge request: {0}")]
+    Invalid(String),
+    #[error("throughput knowledge artifact failed: {0}")]
+    Artifact(String),
+}
+
+impl ThroughputKnowledgeReceipt {
+    pub fn validate(&self) -> Result<(), ThroughputKnowledgeError> {
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION
+            || self.contract_version != CONTRACT_VERSION
+            || self.feature_id != FEATURE_ID
+            || self.boundary != PRECLINICAL_BOUNDARY
+            || !self.raw_data_local
+            || self.request_id.trim().is_empty()
+            || self.batch_id.trim().is_empty()
+            || self.candidate_order.is_empty()
+            || u64::try_from(self.candidate_order.len()) != Ok(self.checkpoint_seq)
+            || self.effect_receipts.is_empty()
+        {
+            return Err(ThroughputKnowledgeError::Invalid(
+                "throughput knowledge identity, checkpoint, locality, or effects are incomplete"
+                    .into(),
+            ));
+        }
+        for values in [
+            &self.candidate_order,
+            &self.completed_order,
+            &self.degraded_order,
+            &self.unresolved_order,
+            &self.denied_order,
+            &self.witness_order,
+            &self.counterexample_order,
+            &self.omissions,
+            &self.uncertainty,
+            &self.negative_evidence,
+            &self.effect_receipts,
+        ] {
+            if values.windows(2).any(|pair| pair[0] >= pair[1]) {
+                return Err(ThroughputKnowledgeError::Invalid(
+                    "throughput knowledge ordering is not canonical".into(),
+                ));
+            }
+        }
+        if self
+            .exchange_order
+            .windows(2)
+            .any(|pair| pair[0] >= pair[1])
+        {
+            return Err(ThroughputKnowledgeError::Invalid(
+                "throughput knowledge exchange ordering is not canonical".into(),
+            ));
+        }
+        let classified = self
+            .completed_order
+            .iter()
+            .chain(self.degraded_order.iter())
+            .chain(self.unresolved_order.iter())
+            .chain(self.denied_order.iter())
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        if classified.len() != self.candidate_order.len()
+            || classified
+                .iter()
+                .any(|job| !self.candidate_order.contains(job))
+        {
+            return Err(ThroughputKnowledgeError::Invalid(
+                "throughput knowledge dispositions do not partition jobs".into(),
+            ));
+        }
+        let expected_disposition = if !self.denied_order.is_empty() {
+            ThroughputKnowledgeDisposition::Denied
+        } else if !self.unresolved_order.is_empty() {
+            ThroughputKnowledgeDisposition::Unresolved
+        } else if !self.degraded_order.is_empty() {
+            ThroughputKnowledgeDisposition::Degraded
+        } else {
+            ThroughputKnowledgeDisposition::Completed
+        };
+        if self.disposition != expected_disposition {
+            return Err(ThroughputKnowledgeError::Invalid(
+                "throughput knowledge disposition does not match job classifications".into(),
+            ));
+        }
+        if self.exchange_order.len() != self.completed_order.len() {
+            return Err(ThroughputKnowledgeError::Invalid(
+                "throughput knowledge exchange does not match completed jobs".into(),
+            ));
+        }
+        for digest in self.exchange_order.iter().chain([
+            &self.run_digest,
+            &self.telemetry_digest,
+            &self.replay_identity,
+        ]) {
+            if digest.as_str().len() != 64 {
+                return Err(ThroughputKnowledgeError::Invalid(
+                    "throughput knowledge digest is invalid".into(),
+                ));
+            }
+        }
+        if self.effect_receipts.iter().any(|effect| {
+            !effect.starts_with("read:local-throughput-knowledge:")
+                && effect != "block:unsafe-release"
+        }) {
+            return Err(ThroughputKnowledgeError::Invalid(
+                "throughput knowledge effect is outside read-only gate".into(),
+            ));
+        }
+        let expected_effect = if self.disposition == ThroughputKnowledgeDisposition::Completed {
+            format!("read:local-throughput-knowledge:{}", self.request_id)
+        } else {
+            "block:unsafe-release".into()
+        };
+        if self.effect_receipts != [expected_effect] {
+            return Err(ThroughputKnowledgeError::Invalid(
+                "throughput knowledge effect does not match disposition".into(),
+            ));
+        }
+        let expected_telemetry_digest = ContentHash::of_value(&json!({
+            "feature_id": FEATURE_ID,
+            "batch_id": self.batch_id,
+            "candidate_order": self.candidate_order,
+            "retry_count": self.retry_count,
+        }))
+        .map_err(|error| ThroughputKnowledgeError::Artifact(error.to_string()))?;
+        if self.telemetry_digest != expected_telemetry_digest {
+            return Err(ThroughputKnowledgeError::Invalid(
+                "throughput telemetry digest is not bound to retry state".into(),
+            ));
+        }
+        let expected_run_digest = ContentHash::of_value(&json!({
+            "feature_id": FEATURE_ID,
+            "request_id": self.request_id,
+            "disposition": self.disposition,
+            "completed_order": self.completed_order,
+            "degraded_order": self.degraded_order,
+            "unresolved_order": self.unresolved_order,
+            "denied_order": self.denied_order,
+            "checkpoint_seq": self.checkpoint_seq,
+            "consumed_budget_units": self.consumed_budget_units,
+            "telemetry_digest": self.telemetry_digest,
+            "replay_identity": self.replay_identity,
+        }))
+        .map_err(|error| ThroughputKnowledgeError::Artifact(error.to_string()))?;
+        if self.run_digest != expected_run_digest {
+            return Err(ThroughputKnowledgeError::Invalid(
+                "throughput run digest is not bound to execution state".into(),
+            ));
+        }
+        let expected_artifact_id = format!(
+            "brain-throughput-knowledge-representation:{}",
+            self.request_id
+        );
+        if self.artifact.artifact_id != expected_artifact_id
+            || self.artifact.content_type
+                != "application/vnd.aurora.throughput-knowledge-world+json"
+            || !self.artifact.semantic_loss.is_empty()
+            || !self.artifact.provenance.is_empty()
+        {
+            return Err(ThroughputKnowledgeError::Invalid(
+                "throughput knowledge artifact identity or provenance is inconsistent".into(),
+            ));
+        }
+        self.artifact
+            .validate_metadata()
+            .map_err(|error| ThroughputKnowledgeError::Artifact(error.to_string()))?;
+        self.artifact
+            .verify_payload(&receipt_payload(self))
+            .map_err(|error| ThroughputKnowledgeError::Artifact(error.to_string()))
+    }
+    pub fn digest(&self) -> Result<ContentHash, ThroughputKnowledgeError> {
+        self.validate()?;
+        ContentHash::of_value(
+            &serde_json::to_value(self)
+                .map_err(|error| ThroughputKnowledgeError::Artifact(error.to_string()))?,
+        )
+        .map_err(|error| ThroughputKnowledgeError::Artifact(error.to_string()))
+    }
+}
+
+fn receipt_payload(receipt: &ThroughputKnowledgeReceipt) -> serde_json::Value {
+    json!({
+        "schema_version": receipt.schema_version,
+        "contract_version": receipt.contract_version,
+        "feature_id": receipt.feature_id,
+        "request_id": receipt.request_id,
+        "batch_id": receipt.batch_id,
+        "disposition": receipt.disposition,
+        "candidate_order": receipt.candidate_order,
+        "completed_order": receipt.completed_order,
+        "degraded_order": receipt.degraded_order,
+        "unresolved_order": receipt.unresolved_order,
+        "denied_order": receipt.denied_order,
+        "exchange_order": receipt.exchange_order,
+        "checkpoint_seq": receipt.checkpoint_seq,
+        "run_digest": receipt.run_digest,
+        "telemetry_digest": receipt.telemetry_digest,
+        "replay_identity": receipt.replay_identity,
+        "boundary": receipt.boundary,
+    })
+}
+
+pub fn throughput_knowledge_representation_inference_engine_manifest() -> CapabilityManifest {
+    CapabilityManifest { schema_version: RESEARCH_CONTRACT_SCHEMA_VERSION.into(), capability_id: FEATURE_ID.into(), version: CONTRACT_VERSION.into(), owner_crate: "brain".into(), consumers: ["platform reliability engineer".into(), "research workflow operator".into()].into(), behavior: "admits bounded high-throughput knowledge-world inference jobs with deterministic ordering, checkpoints, retries, telemetry, and budgets".into(), value: "prevents queue drops or partial execution from being mistaken for complete typed knowledge".into(), inputs: vec![TypedPort { name: "throughput_knowledge_request".into(), schema: "ScopedResearchClaims3@1".into(), required: true }], outputs: vec![TypedPort { name: "throughput_knowledge_receipt".into(), schema: "TypedKnowledgeWorld1@1".into(), required: true }], effects: [Effect::ReadLocalData, Effect::WriteLocalArtifact].into(), permissions: ["read:local-research-artifacts".into()].into(), determinism: Determinism::ByteStable, evidence: vec![EvidenceReference { source_id: "json-schema".into(), state: EvidenceState::Supported, locator: Some("https://json-schema.org/specification".into()) }], authority_requirements: Vec::new(), autonomy_tier: AutonomyTier::A1, surfaces: [ResearchSurface::Ui, ResearchSurface::Api, ResearchSurface::Sdk, ResearchSurface::Cli, ResearchSurface::McpTool, ResearchSurface::Operator].into(), boundary: PRECLINICAL_BOUNDARY.into() }
+}
+
+pub fn infer_throughput_knowledge_representation(
+    request: &ThroughputKnowledgeRequest,
+) -> Result<ThroughputKnowledgeReceipt, ThroughputKnowledgeError> {
+    if request.request_id.trim().is_empty()
+        || request.batch_id.trim().is_empty()
+        || request.jobs.is_empty()
+        || request.max_concurrency == 0
+        || request.budget_units == 0
+        || request.replay_identity.as_str().len() != 64
+        || !request.raw_data_local
+        || request.boundary != PRECLINICAL_BOUNDARY
+    {
+        return Err(ThroughputKnowledgeError::Invalid("throughput knowledge identity, queue, concurrency, budget, replay, locality, or boundary is invalid".into()));
+    }
+    let mut jobs = request.jobs.clone();
+    jobs.sort_by(|a, b| a.job_id.cmp(&b.job_id));
+    let candidate = jobs.iter().map(|j| j.job_id.clone()).collect::<Vec<_>>();
+    if candidate.windows(2).any(|p| p[0] == p[1]) || candidate.iter().any(|v| v.trim().is_empty()) {
+        return Err(ThroughputKnowledgeError::Invalid(
+            "throughput knowledge job identifiers must be unique and non-empty".into(),
+        ));
+    }
+    let map = jobs
+        .iter()
+        .map(|j| (j.job_id.clone(), j))
+        .collect::<BTreeMap<_, _>>();
+    let mut completed = BTreeSet::new();
+    let mut degraded = BTreeSet::new();
+    let mut unresolved = BTreeSet::new();
+    let mut denied = BTreeSet::new();
+    let mut exchange = Vec::new();
+    let mut witnesses = BTreeSet::from([
+        "gate:typed-throughput-knowledge".to_string(),
+        "gate:queue-checkpoint".to_string(),
+        "gate:concurrency-window".to_string(),
+        "gate:bounded-retry".to_string(),
+        "gate:telemetry".to_string(),
+        "gate:evidence-provenance".to_string(),
+        "gate:locality".to_string(),
+    ]);
+    let mut counter = BTreeSet::new();
+    let mut omissions = BTreeSet::new();
+    let mut uncertainty = BTreeSet::new();
+    let mut negative = BTreeSet::new();
+    let global = request.policy_allow && request.protected_closure && request.raw_data_local;
+    let mut consumed = 0u32;
+    let mut retries = 0u64;
+    for (index, id) in candidate.iter().enumerate() {
+        let j = map[id];
+        retries = retries.saturating_add(u64::from(j.retry_count));
+        if !global || !j.raw_data_local || j.boundary != PRECLINICAL_BOUNDARY {
+            denied.insert(id.clone());
+            counter.insert(format!("counterexample:{}:policy-closure-locality", id));
+        } else if index >= usize::from(request.max_concurrency) {
+            unresolved.insert(id.clone());
+            uncertainty.insert(format!("job:{}:concurrency-window", id));
+        } else if j.retry_count > request.max_retries {
+            degraded.insert(id.clone());
+            omissions.insert(format!("job:{}:retry-budget-exhausted", id));
+        } else if consumed.saturating_add(j.cost_units) > request.budget_units {
+            denied.insert(id.clone());
+            omissions.insert(format!("job:{}:resource-budget-exhausted", id));
+        } else if !j.ready {
+            unresolved.insert(id.clone());
+            uncertainty.insert(format!("job:{}:not-ready", id));
+        } else if j.replay_identity != request.replay_identity {
+            unresolved.insert(id.clone());
+            uncertainty.insert(format!("job:{}:replay-mismatch", id));
+        } else if j.telemetry_digest.is_none() {
+            unresolved.insert(id.clone());
+            omissions.insert(format!("job:{}:telemetry-missing", id));
+        } else if j.evidence_digest.is_none() || j.provenance_digest.is_none() {
+            unresolved.insert(id.clone());
+            omissions.insert(format!("job:{}:evidence-or-provenance-missing", id));
+        } else if matches!(j.state, EvidenceState::Unknown | EvidenceState::Speculative) {
+            unresolved.insert(id.clone());
+            uncertainty.insert(format!("job:{}:unknown-not-asserted", id));
+        } else if matches!(j.state, EvidenceState::Contradicted) {
+            denied.insert(id.clone());
+            negative.insert(format!("job:{}:contradicted", id));
+        } else {
+            completed.insert(id.clone());
+            consumed += j.cost_units;
+            exchange.push(ContentHash::of_value(&json!({"job_id":j.job_id,"claims_digest":j.claims_digest,"world_digest":j.world_digest,"evidence_digest":j.evidence_digest,"provenance_digest":j.provenance_digest,"telemetry_digest":j.telemetry_digest})).map_err(|e|ThroughputKnowledgeError::Artifact(e.to_string()))?);
+        }
+    }
+    if !request.policy_allow {
+        counter.insert("counterexample:policy-denied".into());
+        omissions.insert("control:policy-denied".into());
+    }
+    if !request.protected_closure {
+        counter.insert("counterexample:protected-closure-incomplete".into());
+        omissions.insert("control:protected-closure-incomplete".into());
+    }
+    if !unresolved.is_empty() || !degraded.is_empty() {
+        witnesses.insert("gate:partial-knowledge-retained".into());
+    }
+    exchange.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+    let disposition = if !global || !denied.is_empty() {
+        ThroughputKnowledgeDisposition::Denied
+    } else if !unresolved.is_empty() {
+        ThroughputKnowledgeDisposition::Unresolved
+    } else if !degraded.is_empty() {
+        ThroughputKnowledgeDisposition::Degraded
+    } else {
+        ThroughputKnowledgeDisposition::Completed
+    };
+    let telemetry=ContentHash::of_value(&json!({"feature_id":FEATURE_ID,"batch_id":request.batch_id,"candidate_order":candidate,"retry_count":retries})).map_err(|e|ThroughputKnowledgeError::Artifact(e.to_string()))?;
+    let checkpoint_seq = u64::try_from(jobs.len()).map_err(|_| {
+        ThroughputKnowledgeError::Invalid(
+            "throughput knowledge job count exceeds checkpoint sequence width".into(),
+        )
+    })?;
+    let run=ContentHash::of_value(&json!({"feature_id":FEATURE_ID,"request_id":request.request_id,"disposition":disposition,"completed_order":completed,"degraded_order":degraded,"unresolved_order":unresolved,"denied_order":denied,"checkpoint_seq":checkpoint_seq,"consumed_budget_units":consumed,"telemetry_digest":telemetry,"replay_identity":request.replay_identity})).map_err(|e|ThroughputKnowledgeError::Artifact(e.to_string()))?;
+    let payload = json!({"schema_version":RESEARCH_CONTRACT_SCHEMA_VERSION,"contract_version":CONTRACT_VERSION,"feature_id":FEATURE_ID,"request_id":request.request_id,"batch_id":request.batch_id,"disposition":disposition,"candidate_order":candidate,"completed_order":completed,"degraded_order":degraded,"unresolved_order":unresolved,"denied_order":denied,"exchange_order":exchange,"checkpoint_seq":checkpoint_seq,"run_digest":run,"telemetry_digest":telemetry,"replay_identity":request.replay_identity,"boundary":PRECLINICAL_BOUNDARY});
+    let artifact = TypedResearchArtifact::from_payload(
+        format!(
+            "brain-throughput-knowledge-representation:{}",
+            request.request_id
+        ),
+        "application/vnd.aurora.throughput-knowledge-world+json",
+        &payload,
+        Vec::new(),
+        Vec::new(),
+    )
+    .map_err(|e| ThroughputKnowledgeError::Artifact(e.to_string()))?;
+    let receipt = ThroughputKnowledgeReceipt {
+        schema_version: RESEARCH_CONTRACT_SCHEMA_VERSION.into(),
+        contract_version: CONTRACT_VERSION.into(),
+        feature_id: FEATURE_ID.into(),
+        request_id: request.request_id.clone(),
+        batch_id: request.batch_id.clone(),
+        disposition,
+        candidate_order: candidate,
+        completed_order: completed.into_iter().collect(),
+        degraded_order: degraded.into_iter().collect(),
+        unresolved_order: unresolved.into_iter().collect(),
+        denied_order: denied.into_iter().collect(),
+        exchange_order: exchange,
+        checkpoint_seq,
+        retry_count: retries,
+        consumed_budget_units: consumed,
+        run_digest: run,
+        telemetry_digest: telemetry,
+        replay_identity: request.replay_identity.clone(),
+        witness_order: witnesses.into_iter().collect(),
+        counterexample_order: counter.into_iter().collect(),
+        omissions: omissions.into_iter().collect(),
+        uncertainty: uncertainty.into_iter().collect(),
+        negative_evidence: negative.into_iter().collect(),
+        effect_receipts: if matches!(disposition, ThroughputKnowledgeDisposition::Completed) {
+            vec![format!(
+                "read:local-throughput-knowledge:{}",
+                request.request_id
+            )]
+        } else {
+            vec!["block:unsafe-release".into()]
+        },
+        artifact,
+        raw_data_local: true,
+        boundary: PRECLINICAL_BOUNDARY.into(),
+    };
+    receipt.validate()?;
+    Ok(receipt)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn h(v: &str) -> ContentHash {
+        ContentHash::of_bytes(v.as_bytes())
+    }
+    fn req() -> ThroughputKnowledgeRequest {
+        let r = h("throughput-knowledge");
+        let job = |id: &str| ThroughputKnowledgeJob {
+            job_id: id.into(),
+            claims_digest: r.clone(),
+            world_digest: r.clone(),
+            evidence_digest: Some(r.clone()),
+            provenance_digest: Some(r.clone()),
+            replay_identity: r.clone(),
+            state: EvidenceState::Supported,
+            ready: true,
+            retry_count: 0,
+            telemetry_digest: Some(r.clone()),
+            cost_units: 1,
+            raw_data_local: true,
+            boundary: PRECLINICAL_BOUNDARY.into(),
+        };
+        ThroughputKnowledgeRequest {
+            request_id: "request:throughput-knowledge".into(),
+            batch_id: "batch:one".into(),
+            jobs: vec![job("job:a"), job("job:b")],
+            max_concurrency: 2,
+            max_retries: 2,
+            budget_units: 2,
+            replay_identity: r,
+            policy_allow: true,
+            protected_closure: true,
+            raw_data_local: true,
+            boundary: PRECLINICAL_BOUNDARY.into(),
+        }
+    }
+    #[test]
+    fn manifest_is_a1() {
+        assert_eq!(
+            throughput_knowledge_representation_inference_engine_manifest().autonomy_tier,
+            AutonomyTier::A1
+        )
+    }
+    #[test]
+    fn complete_is_completed() {
+        assert_eq!(
+            infer_throughput_knowledge_representation(&req())
+                .unwrap()
+                .disposition,
+            ThroughputKnowledgeDisposition::Completed
+        )
+    }
+    #[test]
+    fn concurrency_is_unresolved() {
+        let mut v = req();
+        v.max_concurrency = 1;
+        assert_eq!(
+            infer_throughput_knowledge_representation(&v)
+                .unwrap()
+                .disposition,
+            ThroughputKnowledgeDisposition::Unresolved
+        )
+    }
+    #[test]
+    fn retry_is_degraded() {
+        let mut v = req();
+        v.jobs[0].retry_count = 3;
+        assert_eq!(
+            infer_throughput_knowledge_representation(&v)
+                .unwrap()
+                .disposition,
+            ThroughputKnowledgeDisposition::Degraded
+        )
+    }
+    #[test]
+    fn budget_is_denied() {
+        let mut v = req();
+        v.budget_units = 1;
+        assert_eq!(
+            infer_throughput_knowledge_representation(&v)
+                .unwrap()
+                .disposition,
+            ThroughputKnowledgeDisposition::Denied
+        )
+    }
+    #[test]
+    fn unknown_is_unresolved() {
+        let mut v = req();
+        v.jobs[0].state = EvidenceState::Unknown;
+        assert_eq!(
+            infer_throughput_knowledge_representation(&v)
+                .unwrap()
+                .disposition,
+            ThroughputKnowledgeDisposition::Unresolved
+        )
+    }
+    #[test]
+    fn digest_is_stable() {
+        let r = infer_throughput_knowledge_representation(&req()).unwrap();
+        assert_eq!(r.digest().unwrap(), r.digest().unwrap())
+    }
+}

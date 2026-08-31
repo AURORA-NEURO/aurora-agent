@@ -729,7 +729,9 @@ mod tests {
     fn a_renamed_configuration_does_not_launder_a_burned_holdout() {
         let mut space = ArchitectureSpace::new();
         space.register(minimal("v1")).unwrap();
-        space.register(minimal("v1-renamed").derived_from("v1")).unwrap();
+        space
+            .register(minimal("v1-renamed").derived_from("v1"))
+            .unwrap();
         let mut ledger = HoldoutLedger::new();
         ledger.register(certifying()).unwrap();
         let holdout = HoldoutId::new("private-a");

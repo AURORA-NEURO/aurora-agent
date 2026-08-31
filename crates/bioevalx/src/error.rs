@@ -9,6 +9,14 @@ use thiserror::Error;
 /// Refusals from [`crate::plane`], the scoring plane (26.17, 07.05).
 #[derive(Debug, Clone, PartialEq, Error)]
 pub enum PlaneError {
+    #[error("system identifier is invalid: {0}")]
+    InvalidSystem(String),
+    #[error("dimension `{dimension}` is invalid: {detail}")]
+    InvalidDimension { dimension: String, detail: String },
+    #[error("cell for dimension `{dimension}` is invalid: {detail}")]
+    InvalidCell { dimension: String, detail: String },
+    #[error("a scoring plane cannot declare more than {0} dimensions")]
+    TooManyDimensions(usize),
     #[error("dimension `{0}` is already present on this plane")]
     DuplicateDimension(String),
     #[error("dimension `{0}` is not on this plane")]
@@ -33,6 +41,8 @@ pub enum PlaneError {
     Empty,
     #[error("score for dimension `{dimension}` is {value}, outside the unit interval")]
     ScoreOutOfRange { dimension: String, value: f64 },
+    #[error("fold weights or products overflowed while folding the scoring plane")]
+    FoldOverflow,
 }
 
 /// Refusals from [`crate::mesh`], evaluator independence (26.01).
@@ -58,6 +68,18 @@ pub enum MeshError {
         class: Vec<String>,
         positions: Vec<String>,
     },
+    #[error("mesh declaration is invalid: {detail}")]
+    InvalidMesh { detail: String },
+    #[error("evaluator `{evaluator}` is invalid: {detail}")]
+    InvalidEvaluator { evaluator: String, detail: String },
+    #[error("verdict from evaluator `{evaluator}` is invalid: {detail}")]
+    InvalidVerdict { evaluator: String, detail: String },
+    #[error("evaluator `{0}` supplied more than one verdict")]
+    DuplicateVerdict(String),
+    #[error("a mesh may contain at most {limit} evaluators")]
+    TooManyEvaluators { limit: usize },
+    #[error("a verdict batch may contain at most {limit} verdicts")]
+    TooManyVerdicts { limit: usize },
 }
 
 /// Refusals from [`crate::grounding`], claim-to-evidence resolution (26.03).
@@ -71,6 +93,28 @@ pub enum GroundingError {
     UnknownEvidence(String),
     #[error("evidence `{0}` is declared twice")]
     DuplicateEvidence(String),
+    #[error("claim `{claim}` is invalid: {detail}")]
+    InvalidClaim { claim: String, detail: String },
+    #[error("evidence `{evidence}` is invalid: {detail}")]
+    InvalidEvidence { evidence: String, detail: String },
+    #[error("edge from claim `{claim}` to evidence `{evidence}` is invalid: {detail}")]
+    InvalidEdge {
+        claim: String,
+        evidence: String,
+        detail: String,
+    },
+    #[error("edge from claim `{claim}` to evidence `{evidence}` is duplicated for kind `{kind}`")]
+    DuplicateEdge {
+        claim: String,
+        evidence: String,
+        kind: String,
+    },
+    #[error("a grounding graph may contain at most {limit} claims")]
+    TooManyClaims { limit: usize },
+    #[error("a grounding graph may contain at most {limit} evidence objects")]
+    TooManyEvidence { limit: usize },
+    #[error("a grounding graph may contain at most {limit} edges")]
+    TooManyEdges { limit: usize },
 }
 
 /// Refusals from [`crate::acquisition`], information-acquisition accounting (26.05).
@@ -85,6 +129,18 @@ pub enum AcquisitionError {
          no default policy to regret against"
     )]
     NoReferencePolicy,
+    #[error("obligation `{id}` is invalid: {detail}")]
+    InvalidObligation { id: String, detail: String },
+    #[error("action `{id}` is invalid: {detail}")]
+    InvalidAction { id: String, detail: String },
+    #[error("obligations must be unique; `{0}` appears twice")]
+    DuplicateObligation(String),
+    #[error("a trace may contain at most {limit} obligations")]
+    TooManyObligations { limit: usize },
+    #[error("a trace may contain at most {limit} actions")]
+    TooManyActions { limit: usize },
+    #[error("reference policy `{name}` is invalid: {detail}")]
+    InvalidReferencePolicy { name: String, detail: String },
 }
 
 /// Refusals from [`crate::burden`], the nonrenewable-resource ledger (26.06).
@@ -119,6 +175,24 @@ pub enum BurdenError {
         left: String,
         right: String,
     },
+    #[error("resource {resource} is invalid: {detail}")]
+    InvalidResource { resource: String, detail: String },
+    #[error("draw {action} is invalid: {detail}")]
+    InvalidDraw { action: String, detail: String },
+    #[error("branch {0} is declared twice")]
+    DuplicateBranch(String),
+    #[error("branch {0} was not declared")]
+    UnknownBranch(String),
+    #[error("branch {branch} is invalid: {detail}")]
+    InvalidBranch { branch: String, detail: String },
+    #[error("branch {0} appears more than once in a joint-feasibility query")]
+    DuplicateBranchReference(String),
+    #[error("a ledger may contain at most {limit} resources")]
+    TooManyResources { limit: usize },
+    #[error("a ledger may contain at most {limit} branches")]
+    TooManyBranches { limit: usize },
+    #[error("a branch may contain at most {limit} draws")]
+    TooManyDraws { limit: usize },
 }
 
 /// Refusals from [`crate::worldline`], the availability audit (26.07).
@@ -153,6 +227,20 @@ pub enum WorldlineError {
         recorded: String,
         accessible: String,
     },
+    #[error("observation {observation} is invalid: {detail}")]
+    InvalidObservation { observation: String, detail: String },
+    #[error("decision {decision} is invalid: {detail}")]
+    InvalidDecision { decision: String, detail: String },
+    #[error("decision {decision} names observation {observation} more than once")]
+    DuplicateContextReference { decision: String, observation: String },
+    #[error("decision {0} is declared twice")]
+    DuplicateDecision(String),
+    #[error("a worldline may contain at most {limit} observations")]
+    TooManyObservations { limit: usize },
+    #[error("a worldline may contain at most {limit} decisions")]
+    TooManyDecisions { limit: usize },
+    #[error("a decision may contain at most {limit} context references")]
+    TooManyContextReferences { limit: usize },
 }
 
 /// Refusals from [`crate::estimand`], causal declaration (26.09).
@@ -160,6 +248,14 @@ pub enum WorldlineError {
 pub enum EstimandError {
     #[error("estimand is missing a declared {0}; 26.09 step 1 requires all five")]
     MissingElement(&'static str),
+    #[error("estimand field `{field}` is invalid: {detail}")]
+    InvalidField { field: String, detail: String },
+    #[error("identification declaration is invalid: {detail}")]
+    InvalidIdentification { detail: String },
+    #[error("corroboration from `{source_id}` is invalid: {detail}")]
+    InvalidCorroboration { source_id: String, detail: String },
+    #[error("corroboration source `{source_id}` appears more than once")]
+    DuplicateCorroboration { source_id: String },
     #[error(
         "a model-conditional finding cannot be promoted to `{target}`: 26.09 says simulator \
          conclusions are \"never upgraded automatically to real-world truth\""
@@ -176,6 +272,16 @@ pub enum ReproError {
     NothingCompared,
     #[error("output `{0}` appears twice in one comparison set")]
     DuplicateOutput(String),
+    #[error("output `{output_id}` is invalid: {detail}")]
+    InvalidOutput { output_id: String, detail: String },
+    #[error("observation for output `{output_id}` is invalid: {detail}")]
+    InvalidObservation { output_id: String, detail: String },
+    #[error("output `{0}` was observed but was not declared")]
+    UnknownOutput(String),
+    #[error("a reproducibility run cannot declare more than {0} outputs")]
+    TooManyOutputs(usize),
+    #[error("a reproducibility run cannot record more than {0} observations")]
+    TooManyObservations(usize),
     #[error(
         "a reproducibility certificate is not a validity claim: `{0}` asked this certificate to \
          support a conclusion about the biology"
@@ -188,8 +294,18 @@ pub enum ReproError {
 /// Refusals from [`crate::metamorphic`], mutation-response scoring (26.12).
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum MetamorphicError {
+    #[error("metamorphic family `{id}` is invalid: {detail}")]
+    InvalidFamily { id: String, detail: String },
+    #[error("metamorphic trial `{id}` is invalid: {detail}")]
+    InvalidTrial { id: String, detail: String },
     #[error("trial `{0}` appears twice in one family")]
     DuplicateTrial(String),
+    #[error("family `{0}` appears twice in one suite")]
+    DuplicateFamily(String),
+    #[error("a metamorphic suite cannot contain more than {0} families")]
+    TooManyFamilies(usize),
+    #[error("a metamorphic family cannot contain more than {0} trials")]
+    TooManyTrials(usize),
     #[error("a metamorphic family needs at least one trial")]
     EmptyFamily,
     #[error(
@@ -206,6 +322,18 @@ pub enum MetamorphicError {
 /// Refusals from [`crate::reveal`], sealed prospective evaluation (26.16).
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum RevealError {
+    #[error("study identifier is invalid: {0}")]
+    InvalidStudy(String),
+    #[error("commitment `{target}` is invalid: {detail}")]
+    InvalidCommitment { target: String, detail: String },
+    #[error("outcome `{target}` is invalid: {detail}")]
+    InvalidOutcome { target: String, detail: String },
+    #[error("a revealed outcome for `{0}` appears more than once")]
+    DuplicateOutcome(String),
+    #[error("a registration cannot contain more than {0} commitments")]
+    TooManyCommitments(usize),
+    #[error("a reveal cannot contain more than {0} outcomes")]
+    TooManyOutcomes(usize),
     #[error("this registration is already sealed; commitments cannot be added after the seal")]
     AlreadySealed,
     #[error("the outcome has already been revealed")]
@@ -226,6 +354,14 @@ pub enum RevealError {
 /// Refusals from [`crate::design`], matched counterfactual designs (26.18).
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum DesignError {
+    #[error("design field `{field}` is invalid: {detail}")]
+    InvalidDesign { field: String, detail: String },
+    #[error("arm `{arm}` is invalid: {detail}")]
+    InvalidArm { arm: String, detail: String },
+    #[error("a factorial design cannot declare more than {0} factors")]
+    TooManyFactors(usize),
+    #[error("a factorial design cannot contain more than {0} arms")]
+    TooManyArms(usize),
     #[error("arm `{0}` is declared twice")]
     DuplicateArm(String),
     #[error("a design needs a baseline arm and at least one other")]
@@ -241,6 +377,10 @@ pub enum DesignError {
 /// Refusals from [`crate::evaluator`], evaluator health (07.02).
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum EvaluatorError {
+    #[error("evaluator `{evaluator}` has an invalid run record: {detail}")]
+    InvalidRun { evaluator: String, detail: String },
+    #[error("an evaluator panel cannot contain more than {0} runs")]
+    TooManyRuns(usize),
     #[error(
         "evaluator `{evaluator}` was {health}, so its outcome is not evidence about the task; \
          reading it as a task failure would blame the system for the harness"
@@ -255,6 +395,14 @@ pub enum EvaluatorError {
 pub enum TrajectoryError {
     #[error("step index {0} is past the end of the trajectory")]
     StepOutOfRange(usize),
+    #[error("step {index} is invalid: {detail}")]
+    InvalidStep { index: usize, detail: String },
+    #[error("trajectory cannot contain more than {0} steps")]
+    TooManySteps(usize),
+    #[error("property is invalid: {0}")]
+    InvalidProperty(String),
+    #[error("trajectory cannot contain more than {0} properties")]
+    TooManyProperties(usize),
     #[error("property `{0}` is declared twice")]
     DuplicateProperty(String),
     #[error(
@@ -267,6 +415,18 @@ pub enum TrajectoryError {
 /// Refusals from [`crate::boundary`], contextual integrity (07.09).
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum BoundaryError {
+    #[error("policy `{id}` is invalid: {detail}")]
+    InvalidPolicy { id: String, detail: String },
+    #[error("flow `{id}` is invalid: {detail}")]
+    InvalidFlow { id: String, detail: String },
+    #[error("flow `{0}` was assessed more than once")]
+    DuplicateFlow(String),
+    #[error("a boundary assessment cannot contain more than {0} policies")]
+    TooManyPolicies(usize),
+    #[error("a boundary assessment cannot contain more than {0} flows")]
+    TooManyFlows(usize),
+    #[error("utility must be finite")]
+    InvalidUtility,
     #[error("policy `{0}` is declared twice")]
     DuplicatePolicy(String),
     #[error(
@@ -282,6 +442,18 @@ pub enum BoundaryError {
 /// Refusals from [`crate::waiver`], release-gate waivers (07.13).
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum WaiverError {
+    #[error("gate `{id}` is invalid: {detail}")]
+    InvalidGate { id: String, detail: String },
+    #[error("waiver for gate `{gate}` is invalid: {detail}")]
+    InvalidWaiver { gate: String, detail: String },
+    #[error("gate `{gate}` is already waived")]
+    DuplicateWaiver { gate: String },
+    #[error("waiver names gate `{waiver}`, but it was applied to `{gate}`")]
+    GateMismatch { waiver: String, gate: String },
+    #[error("a release decision cannot contain more than {0} gates")]
+    TooManyGates(usize),
+    #[error("a release decision cannot contain more than {0} waivers")]
+    TooManyWaivers(usize),
     #[error("a waiver must name an authorising party")]
     NoAuthoriser,
     #[error("a waiver must carry a rationale")]

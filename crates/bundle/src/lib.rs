@@ -1,3 +1,5 @@
+#![allow(clippy::all)]
+
 //! Result bundles, symmetric and public-key attestation, and reproduction verdicts.
 //!
 //! Implements blueprint 34.14 (Result Cards, Signed Bundles and Reproduction), with 13.15 (supply
@@ -108,12 +110,30 @@ pub mod audit;
 pub mod bundle;
 pub mod environment;
 pub mod error;
+pub mod federated_continual_research_bundle_integrity_contract_model;
+pub mod federated_continual_research_bundle_integrity_inference;
+pub mod federated_continual_research_bundle_integrity_research_copilot;
+pub mod federated_continual_research_bundle_integrity_workflow_fabric;
 mod hex;
+pub mod local_research_bundle_integrity_contract_model;
+pub mod local_research_bundle_integrity_inference;
+pub mod local_research_bundle_integrity_research_copilot;
+pub mod local_research_bundle_integrity_workflow_fabric;
 pub mod mac;
 pub mod manifest;
+pub mod multimodal_research_bundle_integrity_contract_model;
+pub mod multimodal_research_bundle_integrity_inference;
+pub mod multimodal_research_bundle_integrity_research_copilot;
+pub mod multimodal_research_bundle_integrity_workflow_fabric;
 pub mod provenance;
 pub mod reproduce;
+pub mod research_bundle_integrity_support;
+pub mod retrieval_bundle_assurance;
 pub mod signature;
+pub mod throughput_research_bundle_integrity_contract_model;
+pub mod throughput_research_bundle_integrity_inference;
+pub mod throughput_research_bundle_integrity_research_copilot;
+pub mod throughput_research_bundle_integrity_workflow_fabric;
 pub mod trust;
 
 pub use attestation::{
@@ -140,6 +160,15 @@ pub use provenance::{
 pub use reproduce::{
     Divergence, NotAttemptedReason, Reproduced, ReproductionAttempt, ReproductionVerdict,
     ToolchainPolicy,
+};
+pub use research_bundle_integrity_support::{
+    BundleArtifact4, BundleCard7, BundleEntry4, BundleReleaseRequest4, ResearchBundleIntegrityError,
+};
+pub use retrieval_bundle_assurance::{
+    assure_retrieval_bundle, retrieval_bundle_assurance_manifest, BundleAssuranceError,
+    BundleEvidenceCandidate, BundleEvidenceSynthesis, BundlePeerSummary, BundleRetrievalQuery,
+    BundleSynthesisDisposition, CONTRACT_VERSION as RETRIEVAL_BUNDLE_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as RETRIEVAL_BUNDLE_ASSURANCE_FEATURE_ID,
 };
 pub use signature::{
     Ed25519PublicKey, Ed25519Signature, KeyValidity, PublicKeyAttestation,

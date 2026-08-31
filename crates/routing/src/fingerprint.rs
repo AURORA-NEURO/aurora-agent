@@ -38,6 +38,7 @@
 //!   (near the targets). This is the attachment knob that decides whether *any* traversal depth
 //!   admits the decisive set while excluding the distractors.
 
+use crate::error::RoutingError;
 use bioprism_fiber::Query;
 use bioprism_world::World;
 use serde::{Deserialize, Serialize};
@@ -170,6 +171,88 @@ impl Fingerprint {
             hub_is_derived,
             target_producer_count,
         }
+    }
+
+    pub fn validate(&self) -> Result<(), RoutingError> {
+        for (field, value) in [
+            ("protected_fact_fraction", self.protected_fact_fraction),
+            ("distractor_density", self.distractor_density),
+            ("tag_informativeness", self.tag_informativeness),
+            ("hub_share", self.hub_share),
+        ] {
+            if !value.is_finite() || !(0.0..=1.0).contains(&value) {
+                return Err(RoutingError::InvalidFingerprint {
+                    detail: format!("{field} must be finite and in [0, 1]"),
+                });
+            }
+        }
+        if !self.mean_factor_arity.is_finite() || self.mean_factor_arity < 0.0 {
+            return Err(RoutingError::InvalidFingerprint {
+                detail: "mean_factor_arity must be finite and non-negative".into(),
+            });
+        }
+        if (self.protected_fact_fraction + self.distractor_density - 1.0).abs() > 1e-12 {
+            return Err(RoutingError::InvalidFingerprint {
+                detail: "protected_fact_fraction and distractor_density must sum to one".into(),
+            });
+        }
+        let histogram_factors = self
+            .arity_histogram
+            .values()
+            .try_fold(0usize, |total, count| total.checked_add(*count));
+        let Some(histogram_factors) = histogram_factors else {
+            return Err(RoutingError::InvalidFingerprint {
+                detail: "arity_histogram counts overflow usize".into(),
+            });
+        };
+        if histogram_factors != self.factors {
+            return Err(RoutingError::InvalidFingerprint {
+                detail: "arity_histogram must account for every factor".into(),
+            });
+        }
+        let expected_max_arity = self
+            .arity_histogram
+            .keys()
+            .next_back()
+            .copied()
+            .unwrap_or(0);
+        if self.max_factor_arity != expected_max_arity {
+            return Err(RoutingError::InvalidFingerprint {
+                detail: "max_factor_arity must match arity_histogram".into(),
+            });
+        }
+        let arity_total = self
+            .arity_histogram
+            .iter()
+            .try_fold(0usize, |total, (arity, count)| {
+                arity.checked_mul(*count)?.checked_add(total)
+            });
+        let Some(arity_total) = arity_total else {
+            return Err(RoutingError::InvalidFingerprint {
+                detail: "arity_histogram arity total overflows usize".into(),
+            });
+        };
+        let expected_mean_arity = if self.factors == 0 {
+            0.0
+        } else {
+            arity_total as f64 / self.factors as f64
+        };
+        if (self.mean_factor_arity - expected_mean_arity).abs() > 1e-12 {
+            return Err(RoutingError::InvalidFingerprint {
+                detail: "mean_factor_arity must match arity_histogram".into(),
+            });
+        }
+        if self.target_producer_count > self.factors {
+            return Err(RoutingError::InvalidFingerprint {
+                detail: "target_producer_count cannot exceed factors".into(),
+            });
+        }
+        if self.max_unary_chain > CHAIN_RELAXATION_ROUNDS {
+            return Err(RoutingError::InvalidFingerprint {
+                detail: "max_unary_chain exceeds the bounded relaxation limit".into(),
+            });
+        }
+        Ok(())
     }
 
     /// The normalised routing axes, each in `[0, 1]`, in the order [`AXIS_WEIGHTS`] scores them.
@@ -494,6 +577,18 @@ mod tests {
         assert!((left.distance(&right) - right.distance(&left)).abs() < 1e-12);
         assert!(left.distance(&right) > 0.0);
         assert!(left.distance(&right) <= 1.0);
+    }
+
+    #[test]
+    fn malformed_fingerprint_summaries_are_rejected() {
+        let (world, query) = world_and_query(&WorldSpec::reference_like(30));
+        let mut fingerprint = Fingerprint::of(&world, &query);
+        fingerprint.mean_factor_arity = f64::NAN;
+        assert!(fingerprint.validate().is_err());
+
+        let mut fingerprint = Fingerprint::of(&world, &query);
+        fingerprint.arity_histogram.clear();
+        assert!(fingerprint.validate().is_err());
     }
 
     /// The stated prior of [`AXIS_WEIGHTS`], checked rather than asserted.

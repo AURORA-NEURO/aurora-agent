@@ -112,25 +112,61 @@
 //! entirely in two sections: `Responsibilities` (16.7% shared) and `Detailed design` (8.3%).
 
 pub mod catalog;
+pub mod context_compilation_assurance;
+pub mod experiment_design_assurance;
 pub mod deps;
 pub mod federation;
+pub mod interpretation_assurance;
 pub mod lifecycle;
 pub mod mirror;
 pub mod name;
+pub mod quality_assurance;
 pub mod registry;
 pub mod resolve;
 pub mod search;
 
 pub use catalog::{Catalog, CatalogError, Dependency, PackRelease};
+pub use context_compilation_assurance::{
+    assure_context_compilation, context_compilation_assurance_manifest, ContextAssuranceError,
+    ContextAssuranceReport, ContextFact, DecisionQuery,
+    CONTRACT_VERSION as CONTEXT_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as CONTEXT_ASSURANCE_FEATURE_ID,
+    INPUT_SCHEMA as CONTEXT_ASSURANCE_INPUT_SCHEMA,
+    OUTPUT_SCHEMA as CONTEXT_ASSURANCE_OUTPUT_SCHEMA,
+};
+pub use experiment_design_assurance::{
+    assure_federated_experiment_design, experiment_design_assurance_manifest,
+    ExecutableExperimentDesign7, ExecutableExperimentDesignArtifact7,
+    ExperimentDesignAssuranceError, ExperimentDesignCandidate4, ExperimentDesignPeer4,
+    ExperimentObjective4,
+    CONTRACT_VERSION as EXPERIMENT_DESIGN_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as EXPERIMENT_DESIGN_ASSURANCE_FEATURE_ID,
+    INPUT_SCHEMA as EXPERIMENT_DESIGN_ASSURANCE_INPUT_SCHEMA,
+    OUTPUT_SCHEMA as EXPERIMENT_DESIGN_ASSURANCE_OUTPUT_SCHEMA,
+};
 pub use deps::{
     resolve_dependencies, Collision, DependencyError, Lock, Locked, Requirement, Source,
 };
 pub use federation::{
     adopt, Adoption, AdoptionPolicy, Attestation, Basis, FederationError, Subject, TrustStanding,
 };
+pub use interpretation_assurance::{
+    assure_multimodal_interpretations, capability_manifest as interpretation_assurance_manifest,
+    InterpretationAssuranceError, InterpretationDisposition, InterpretationState,
+    MultimodalInterpretationAssuranceReceipt, MultimodalInterpretationAssuranceRequest,
+    MultimodalInterpretationCandidate,
+    CONTRACT_VERSION as INTERPRETATION_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as INTERPRETATION_ASSURANCE_FEATURE_ID,
+};
 pub use lifecycle::{Admission, Availability, Intent, LifecycleError, Note, PackLifecycle};
 pub use mirror::{Freshness, FreshnessPolicy, MirrorError, Replication, StalenessBound};
 pub use name::{Bounds, NameError, Namespace, PackName, Version, VersionReq};
+pub use quality_assurance::{
+    assure as assure_quality, capability_manifest as quality_assurance_manifest, MetricState,
+    QualityAssuranceError, QualityDisposition, QualityMetric, QualityVerdict, ResearchObject,
+    CONTRACT_VERSION as QUALITY_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as QUALITY_ASSURANCE_FEATURE_ID,
+};
 pub use registry::{Authority, AuthorityError, Federation, NameAuthority, RegistryId};
 pub use resolve::{resolve, resolve_in, Provenance, Request, Resolution, ResolveError, Resolved};
 pub use search::{search, Excluded, Facet, Match, Query, Results, SearchError, Why};

@@ -8,6 +8,7 @@ repository.workspace = true
 description = "Generated graph, hypergraph, timeline and table projections over compiled decision regions"
 
 [dependencies]
+bioprism-foundation = { workspace = true }
 bioprism-ids = { workspace = true }
 bioprism-scope = { workspace = true }
 bioprism-world = { workspace = true }

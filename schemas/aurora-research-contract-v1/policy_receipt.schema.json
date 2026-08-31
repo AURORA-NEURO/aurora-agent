@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aurora-neuro.org/schemas/aurora-research-contract-v1/policy_receipt.schema.json",
+  "title": "AURORA PolicyReceipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "receipt_id", "decision", "reasons", "evaluated_artifacts", "authority_reference", "boundary"],
+  "properties": {
+    "schema_version": {"const": "aurora-research-contract/1.0"},
+    "receipt_id": {"type": "string", "minLength": 1},
+    "decision": {"enum": ["allow", "deny", "redact", "local_only", "approval_required", "unresolved"]},
+    "reasons": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+    "evaluated_artifacts": {"type": "array", "items": {"type": "string", "pattern": "^[0-9a-f]{64}$"}},
+    "authority_reference": {"type": ["string", "null"]},
+    "boundary": {"const": "preclinical-research-only; no human-subject or clinical-source data; no diagnosis, treatment, triage, enrollment, or clinical decisions"}
+  }
+}

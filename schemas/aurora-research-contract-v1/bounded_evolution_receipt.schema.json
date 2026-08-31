@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aurora-neuro.org/schemas/aurora-research-contract-v1/bounded-evolution-receipt.schema.json",
+  "title": "AURORA Bounded Evolution Receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "contract_version", "feature_id", "request_id", "workflow_id",
+    "objective_id", "disposition", "candidate_order", "admitted_order", "blocked_order",
+    "evidence_order", "replay_order", "budget", "budget_remaining", "max_concurrency",
+    "checks", "omissions", "uncertainty", "negative_evidence", "effect_receipts", "artifact",
+    "raw_data_local", "boundary"
+  ],
+  "properties": {
+    "schema_version": {"const": "aurora-research-contract/1.0"},
+    "contract_version": {"const": "adapter-bounded-evolution/1.0"},
+    "feature_id": {"const": "AFA-adapter-P32-F23"},
+    "request_id": {"type": "string", "minLength": 1},
+    "workflow_id": {"type": "string", "minLength": 1},
+    "objective_id": {"type": "string", "minLength": 1},
+    "disposition": {"enum": ["admitted", "partial", "unknown", "blocked"]},
+    "candidate_order": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+    "admitted_order": {"type": "array", "items": {"type": "string"}},
+    "blocked_order": {"type": "array", "items": {"type": "string"}},
+    "evidence_order": {"type": "array", "items": {"type": "string", "pattern": "^[0-9a-f]{64}$"}},
+    "replay_order": {"type": "array", "items": {"type": "string", "pattern": "^[0-9a-f]{64}$"}},
+    "budget": {"type": "integer", "minimum": 0},
+    "budget_remaining": {"type": "integer", "minimum": 0},
+    "max_concurrency": {"type": "integer", "minimum": 1},
+    "checks": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+    "omissions": {"type": "array", "items": {"type": "string"}},
+    "uncertainty": {"type": "array", "items": {"type": "string"}},
+    "negative_evidence": {"type": "array", "items": {"type": "string"}},
+    "effect_receipts": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+    "artifact": {
+      "type": "object",
+      "required": ["content_hash"],
+      "properties": {"content_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"}},
+      "additionalProperties": true
+    },
+    "raw_data_local": {"const": true},
+    "boundary": {"const": "preclinical_research_only; no human-subject or clinical-source data; no diagnosis, treatment, triage, enrollment, or clinical decisions"}
+  }
+}

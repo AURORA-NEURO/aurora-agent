@@ -8,6 +8,7 @@ repository.workspace = true
 description = "Evaluation engine: the deterministic-first scoring ladder and causal component attribution"
 
 [dependencies]
+bioprism-foundation = { workspace = true }
 bioprism-ids = { workspace = true }
 bioprism-section = { workspace = true }
 serde = { workspace = true }

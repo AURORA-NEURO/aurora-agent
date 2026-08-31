@@ -1,0 +1,6 @@
+"""Backends P32 multimodal workflow_fabric capability-negotiation integrity feature."""
+from .capability_negotiation_integrity_support import BackendCard7,BackendRequest4,CapabilityNegotiationIntegrityError,manifest,negotiate
+FEATURE_ID="AFA-backends-P32-F14";CONTRACT_VERSION="backends-multimodal_capability_negotiation_integrity_workflow_fabric/1.0"
+def multimodal_capability_negotiation_integrity_workflow_fabric_manifest():return manifest(feature_id=FEATURE_ID,contract_version=CONTRACT_VERSION,scale="multimodal",mode="workflow_fabric")
+def negotiate_multimodal_capability_negotiation_integrity_workflow_fabric(request:BackendRequest4)->BackendCard7:return negotiate(request,feature_id=FEATURE_ID,contract_version=CONTRACT_VERSION,scale="multimodal",mode="workflow_fabric")
+__all__=["FEATURE_ID","CONTRACT_VERSION","multimodal_capability_negotiation_integrity_workflow_fabric_manifest","negotiate_multimodal_capability_negotiation_integrity_workflow_fabric"]

@@ -26,6 +26,7 @@ const PREVIOUS_EVENT_STATE_SCHEMA_VERSION: u64 = 4;
 pub const MAX_EVENT_STATE_FILE_BYTES: usize = 64 * 1024 * 1024;
 pub const DEFAULT_DELIVERY_WORKER_BATCH: usize = 100;
 pub const MAX_DELIVERY_ERROR_BYTES: usize = 8 * 1024;
+pub const MAX_EVENT_PAYLOAD_BYTES: usize = 2 * 1024 * 1024;
 static NEXT_EVENT_CHECKPOINT_TEMP_ID: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -550,10 +551,10 @@ impl EventLog {
                 "recovery_policy": "restored subscriptions are paused until explicit secret rebind; signed outbox rows remain inspectable and are re-signed only after rebind",
             });
             let state_digest = checkpoint_digest(&document)?;
-            document
-                .as_object_mut()
-                .expect("event checkpoint document is an object")
-                .insert("state_digest".into(), Value::String(state_digest));
+            let Some(document_object) = document.as_object_mut() else {
+                return Err("event checkpoint document is not an object".into());
+            };
+            document_object.insert("state_digest".into(), Value::String(state_digest));
             let bytes = serde_json::to_vec_pretty(&document)
                 .map_err(|error| format!("event state could not be serialized: {error}"))?;
             if bytes.len() <= MAX_EVENT_STATE_FILE_BYTES {
@@ -621,6 +622,35 @@ impl EventLog {
         validate_token(event_type, MAX_EVENT_TYPE_BYTES, "event_type")?;
         validate_token(subject, 256, "subject")?;
         validate_token(request_id, 256, "request_id")?;
+        validate_event_payload(&payload)?;
+        let next_event_id = self
+            .next_event_id
+            .checked_add(1)
+            .ok_or_else(|| "event id space is exhausted".to_string())?;
+        if self.next_event_id == 0 {
+            return Err("event id state is invalid".into());
+        }
+        let matching_delivery_count = self
+            .subscriptions
+            .values()
+            .filter(|subscription| {
+                subscription.view.active
+                    && subscription.view.secret_bound
+                    && subscription
+                        .view
+                        .events
+                        .iter()
+                        .any(|filter| filter == "*" || filter == event_type)
+            })
+            .count() as u64;
+        if matching_delivery_count > 0 {
+            self.next_delivery_id
+                .checked_add(matching_delivery_count)
+                .ok_or_else(|| "delivery id space is exhausted".to_string())?;
+            self.next_attempt_id
+                .checked_add(matching_delivery_count)
+                .ok_or_else(|| "delivery attempt id space is exhausted".to_string())?;
+        }
         let event = ApiEvent {
             id: self.next_event_id,
             event_type: event_type.to_string(),
@@ -628,7 +658,7 @@ impl EventLog {
             request_id: request_id.to_string(),
             payload,
         };
-        self.next_event_id = self.next_event_id.saturating_add(1);
+        self.next_event_id = next_event_id;
         if self.events.len() == self.capacity {
             self.events.pop_front();
             self.dropped_events = self.dropped_events.saturating_add(1);
@@ -1222,7 +1252,13 @@ impl EventLog {
         attempt: u32,
     ) -> Result<(), String> {
         let delivery_id = self.next_delivery_id;
-        self.next_delivery_id = self.next_delivery_id.saturating_add(1);
+        let next_delivery_id = self
+            .next_delivery_id
+            .checked_add(1)
+            .ok_or_else(|| "delivery id space is exhausted".to_string())?;
+        if delivery_id == 0 {
+            return Err("delivery id state is invalid".into());
+        }
         let mut envelope = WebhookEnvelope {
             delivery_id,
             subscription_id,
@@ -1231,6 +1267,8 @@ impl EventLog {
             signature: String::new(),
         };
         envelope.signature = sign_envelope(&secret, &envelope);
+        self.record_attempt(&envelope, "enqueue", "pending", None, None, None)?;
+        self.next_delivery_id = next_delivery_id;
         if self.deliveries.len() >= self.delivery_capacity {
             if let Some(first) = self.deliveries.keys().next().copied() {
                 self.deliveries.remove(&first);
@@ -1245,7 +1283,6 @@ impl EventLog {
                 last_error_retryable: None,
             },
         );
-        self.record_attempt(&envelope, "enqueue", "pending", None, None, None)?;
         Ok(())
     }
 
@@ -1259,19 +1296,7 @@ impl EventLog {
         error: Option<String>,
     ) -> Result<(), String> {
         let envelope = serde_json::from_value::<WebhookEnvelope>(delivery.envelope.clone())
-            .unwrap_or_else(|_| WebhookEnvelope {
-                delivery_id: delivery.delivery_id,
-                subscription_id: delivery.subscription_id.clone(),
-                attempt: delivery.attempt,
-                event: ApiEvent {
-                    id: delivery.event_id,
-                    event_type: delivery.event_type.clone(),
-                    subject: String::new(),
-                    request_id: String::new(),
-                    payload: Value::Null,
-                },
-                signature: delivery.signature.clone(),
-            });
+            .map_err(|error| format!("delivery envelope is invalid: {error}"))?;
         self.record_attempt(
             &envelope,
             action,
@@ -1314,7 +1339,14 @@ impl EventLog {
             receipt_id,
             receipt_digest,
         };
-        self.next_attempt_id = self.next_attempt_id.saturating_add(1);
+        let next_attempt_id = self
+            .next_attempt_id
+            .checked_add(1)
+            .ok_or_else(|| "delivery attempt id space is exhausted".to_string())?;
+        if self.next_attempt_id == 0 {
+            return Err("delivery attempt id state is invalid".into());
+        }
+        self.next_attempt_id = next_attempt_id;
         if self.attempts.len() >= self.attempt_capacity {
             self.attempts.pop_front();
             self.dropped_attempts = self.dropped_attempts.saturating_add(1);
@@ -1508,11 +1540,25 @@ fn validate_pending_delivery(delivery: &PendingDelivery) -> Result<(), String> {
     )?;
     validate_token(&envelope.event.subject, 256, "delivery event subject")?;
     validate_token(&envelope.event.request_id, 256, "delivery event request id")?;
+    validate_event_payload(&envelope.event.payload)?;
     validate_token(&envelope.signature, 256, "delivery signature")?;
     if let Some(error) = &delivery.last_error {
         if error.len() > MAX_DELIVERY_ERROR_BYTES || error.bytes().any(|byte| byte < 0x20) {
             return Err("delivery last_error is unbounded or contains control bytes".into());
         }
+    }
+    Ok(())
+}
+
+fn validate_event_payload(payload: &Value) -> Result<(), String> {
+    let bytes = serde_json::to_vec(payload)
+        .map_err(|error| format!("event payload could not be serialized: {error}"))?;
+    if bytes.len() > MAX_EVENT_PAYLOAD_BYTES {
+        return Err(format!(
+            "event payload is {} bytes, above the {}-byte safety bound",
+            bytes.len(),
+            MAX_EVENT_PAYLOAD_BYTES
+        ));
     }
     Ok(())
 }
@@ -1772,6 +1818,46 @@ mod tests {
             .register_subscription(None, "https://example.test", None, "short")
             .is_err());
         assert!(log.events(0, 0).is_err());
+    }
+
+    #[test]
+    fn event_payload_and_sequence_exhaustion_fail_closed_before_mutation() {
+        let mut log = EventLog::new(2).unwrap();
+        let oversized = Value::String("x".repeat(MAX_EVENT_PAYLOAD_BYTES));
+        assert!(log
+            .emit("tool.completed", "tool", "request", oversized)
+            .is_err());
+        assert!(log.events(0, 10).unwrap().events.is_empty());
+
+        log.next_event_id = u64::MAX;
+        assert!(log
+            .emit("tool.completed", "tool", "request", json!({"ok": true}))
+            .is_err());
+        assert!(log.events(0, 10).unwrap().events.is_empty());
+    }
+
+    #[test]
+    fn delivery_and_attempt_sequence_exhaustion_fail_closed_before_event_append() {
+        let mut log = EventLog::new(2).unwrap();
+        log.register_subscription(
+            Some("worker"),
+            "https://example.test/hook",
+            Some(&["tool.completed".into()]),
+            "a-secret-key",
+        )
+        .unwrap();
+        log.next_delivery_id = u64::MAX;
+        assert!(log
+            .emit("tool.completed", "tool", "request", json!({"ok": true}))
+            .is_err());
+        assert!(log.events(0, 10).unwrap().events.is_empty());
+
+        log.next_delivery_id = 1;
+        log.next_attempt_id = u64::MAX;
+        assert!(log
+            .emit("tool.completed", "tool", "request-2", json!({"ok": true}))
+            .is_err());
+        assert!(log.events(0, 10).unwrap().events.is_empty());
     }
 
     #[test]

@@ -67,7 +67,9 @@ impl Selection {
             compiled_factor_count: region.factors().len(),
             compiled_fact_count: provenance.compiled_fact_count,
             total_factor_count: provenance.total_factor_count.max(region.factors().len()),
-            total_fact_count: provenance.total_fact_count.max(provenance.compiled_fact_count),
+            total_fact_count: provenance
+                .total_fact_count
+                .max(provenance.compiled_fact_count),
             max_selected_factor_arity: region.max_factor_arity(),
             fallback: self.fallback.clone(),
         }
@@ -147,7 +149,17 @@ impl Portfolio {
     /// backend narrow enough to fit is then the only plan, and it is chosen without a margin
     /// because there is nothing to compare it against. Infeasibility is when *nothing* qualifies.
     pub fn select(&self, region: &QueryRegion) -> Result<Selection, Declined> {
-        let baseline_outcome = self.baseline.estimate(region);
+        self.cost_model
+            .validate()
+            .map_err(|detail| Declined::InvalidConfiguration {
+                backend: "portfolio",
+                detail,
+            })?;
+
+        let baseline_outcome = self.baseline.estimate(region).and_then(|estimate| {
+            validate_costed_estimate(self.baseline.backend(), &estimate, &self.cost_model)
+                .map(|_| estimate)
+        });
         let baseline_cost = baseline_outcome
             .as_ref()
             .ok()
@@ -157,7 +169,10 @@ impl Portfolio {
         let mut best: Option<(usize, f64)> = None;
 
         for (index, backend) in self.backends.iter().enumerate() {
-            let outcome = backend.estimate(region);
+            let outcome = backend.estimate(region).and_then(|estimate| {
+                validate_costed_estimate(backend.backend(), &estimate, &self.cost_model)
+                    .map(|_| estimate)
+            });
             let cost = outcome.as_ref().ok().map(|e| self.cost_model.cost(e));
             if let Some(cost) = cost {
                 if best.is_none_or(|(_, incumbent)| cost < incumbent) {
@@ -187,11 +202,16 @@ impl Portfolio {
                 Some(baseline) => cost * self.cost_model.minimum_speedup <= baseline,
             };
             if worth_switching {
-                let estimate = candidates[index]
-                    .outcome
-                    .as_ref()
-                    .expect("a costed candidate did not decline")
-                    .clone();
+                let Some(estimate) = candidates
+                    .get(index)
+                    .and_then(|candidate| candidate.outcome.as_ref().ok())
+                    .cloned()
+                else {
+                    return Err(Declined::InvalidSchedule {
+                        backend: "portfolio",
+                        detail: "a costed candidate no longer carries an estimate".into(),
+                    });
+                };
                 return Ok(Selection {
                     chosen: estimate.backend,
                     method: estimate.method.clone(),
@@ -228,10 +248,7 @@ impl Portfolio {
 
     /// Selects, then runs. A backend that declines at execution time is replaced by the
     /// conservative plan and the substitution is recorded, per 43.36's "fallback chain".
-    pub fn execute(
-        &self,
-        region: &QueryRegion,
-    ) -> Result<(ComputedRegion, Selection), Declined> {
+    pub fn execute(&self, region: &QueryRegion) -> Result<(ComputedRegion, Selection), Declined> {
         let mut selection = self.select(region)?;
         if let Some(index) = selection.chosen_index {
             match self.backends[index].execute(region) {
@@ -254,6 +271,38 @@ impl Portfolio {
         let computed = self.baseline.execute(region)?;
         Ok((computed, selection))
     }
+}
+
+fn validate_costed_estimate(
+    backend: Backend,
+    estimate: &Estimate,
+    cost_model: &CostModel,
+) -> Result<f64, Declined> {
+    let name = backend.as_str();
+    if estimate.backend != backend {
+        return Err(Declined::InvalidEstimate {
+            backend: name,
+            detail: format!(
+                "estimate identifies backend {} but the provider registered as {}",
+                estimate.backend.as_str(),
+                name
+            ),
+        });
+    }
+    estimate
+        .validate()
+        .map_err(|detail| Declined::InvalidEstimate {
+            backend: name,
+            detail,
+        })?;
+    let cost = cost_model.cost(estimate);
+    if !cost.is_finite() || cost < 0.0 {
+        return Err(Declined::InvalidEstimate {
+            backend: name,
+            detail: format!("cost model produced a non-finite or negative cost: {cost}"),
+        });
+    }
+    Ok(cost)
 }
 
 fn speedup(baseline: f64, cost: f64) -> f64 {
