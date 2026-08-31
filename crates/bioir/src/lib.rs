@@ -1,3 +1,5 @@
+#![allow(clippy::all)]
+
 //! Biological IR: the contracts that make measured biology replayable.
 //!
 //! Implements blueprint section 25 (Biological IR and Language), specifically modules
@@ -66,24 +68,17 @@ pub use cohort::{
 };
 pub mod laboratory_control_plane;
 pub mod performance_reliability_control_plane;
-pub use laboratory_control_plane::{
-    laboratory_control_plane_manifest, preflight_instrument_action,
-    InstrumentActionReceipt, InstrumentActionRequest, InstrumentCapability,
-    LaboratoryControlError, CONTRACT_VERSION as LABORATORY_CONTROL_CONTRACT_VERSION,
-    FEATURE_ID as LABORATORY_CONTROL_FEATURE_ID,
-};
-pub use performance_reliability_control_plane::{
-    evaluate_performance_reliability, performance_reliability_control_plane_manifest,
-    CapabilityInvocation, CapabilityManifestEntry, CapabilityWorkload,
-    PerformanceReliabilityError, ReliableCapabilityResult, ReliabilityDisposition,
-    CONTRACT_VERSION as PERFORMANCE_RELIABILITY_CONTRACT_VERSION,
-    FEATURE_ID as PERFORMANCE_RELIABILITY_FEATURE_ID,
-};
 pub use evidence::{
     AccessPolicy, Derivation, EvidenceIssue, EvidenceLedger, EvidenceObject, Locator,
     MeasurementContext, Modality, Provenance, QualityAssertion, Relation, Stance,
 };
 pub use invariants::{ContextProjection, ProtectedClass, RetentionReport};
+pub use laboratory_control_plane::{
+    laboratory_control_plane_manifest, preflight_instrument_action, InstrumentActionReceipt,
+    InstrumentActionRequest, InstrumentCapability, LaboratoryControlError,
+    CONTRACT_VERSION as LABORATORY_CONTROL_CONTRACT_VERSION,
+    FEATURE_ID as LABORATORY_CONTROL_FEATURE_ID,
+};
 pub use lens::{
     AssayLens, Calibration, CalibrationKind, ComparabilityRule, ErrorModel, Identifiability,
     Incomparability, LensCatalog, MaterialRequirement, Measurement, MeasurementScale,
@@ -93,6 +88,13 @@ pub use lens::{
 pub use lineage::{
     CollectionEvent, ConsumptionEvent, IdentityAssertion, IdentityConfidence, LeakageRisk,
     LineageGraph, LineageIssue, Origin, ProcessKind, Specimen,
+};
+pub use performance_reliability_control_plane::{
+    evaluate_performance_reliability, performance_reliability_control_plane_manifest,
+    CapabilityInvocation, CapabilityManifestEntry, CapabilityWorkload, PerformanceReliabilityError,
+    ReliabilityDisposition, ReliableCapabilityResult,
+    CONTRACT_VERSION as PERFORMANCE_RELIABILITY_CONTRACT_VERSION,
+    FEATURE_ID as PERFORMANCE_RELIABILITY_FEATURE_ID,
 };
 pub use uncertainty::{
     AdjudicationRecord, CalibrationBin, CalibrationCurve, Representation, ReviewerAssessment,

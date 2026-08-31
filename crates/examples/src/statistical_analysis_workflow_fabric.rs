@@ -8,8 +8,8 @@
 
 use bioprism_foundation::{
     AuthorityRequirement, AutonomyTier, CapabilityManifest, Determinism, Effect, EvidenceReference,
-    EvidenceState, ProvenanceLink, ResearchSurface, SemanticLoss, TypedPort,
-    TypedResearchArtifact, PRECLINICAL_BOUNDARY, RESEARCH_CONTRACT_SCHEMA_VERSION,
+    EvidenceState, ProvenanceLink, ResearchSurface, SemanticLoss, TypedPort, TypedResearchArtifact,
+    PRECLINICAL_BOUNDARY, RESEARCH_CONTRACT_SCHEMA_VERSION,
 };
 use bioprism_ids::ContentHash;
 use serde::{Deserialize, Serialize};
@@ -269,22 +269,21 @@ pub fn capability_manifest() -> CapabilityManifest {
     }
 }
 
-pub fn assure(
-    draft: &AnalysisWorkflowDraft,
-) -> Result<AnalysisWorkflowRun, AnalysisWorkflowError> {
+pub fn assure(draft: &AnalysisWorkflowDraft) -> Result<AnalysisWorkflowRun, AnalysisWorkflowError> {
     if draft.request_id.trim().is_empty()
         || draft.federation_id.trim().is_empty()
         || draft.purpose.trim().is_empty()
         || draft.semantic_profile.trim().is_empty()
         || draft.required_candidate_order.is_empty()
         || !canonical(&draft.required_candidate_order)
-        || draft.stage_order != vec![
-            "admit".to_string(),
-            "checkpoint".to_string(),
-            "validate".to_string(),
-            "schedule".to_string(),
-            "retain-receipt".to_string(),
-        ]
+        || draft.stage_order
+            != vec![
+                "admit".to_string(),
+                "checkpoint".to_string(),
+                "validate".to_string(),
+                "schedule".to_string(),
+                "retain-receipt".to_string(),
+            ]
         || !draft.raw_data_local
         || !draft.aggregate_only
         || draft.budget_units == 0
@@ -338,13 +337,17 @@ pub fn assure(
             uncertainty.insert(format!("candidate:{}:{item}", candidate.candidate_id));
         }
         if candidate.negative_result {
-            negative.insert(format!("candidate:{}:negative-result", candidate.candidate_id));
+            negative.insert(format!(
+                "candidate:{}:negative-result",
+                candidate.candidate_id
+            ));
         }
         match candidate.evidence_state {
             EvidenceState::Proven | EvidenceState::Supported
                 if candidate.quality_score_milli >= 700
                     && candidate.omissions.is_empty()
-                    && candidate.uncertainty.is_empty() => {
+                    && candidate.uncertainty.is_empty() =>
+            {
                 selected.insert(candidate.candidate_id.clone());
             }
             EvidenceState::Contradicted => {
@@ -353,7 +356,10 @@ pub fn assure(
             }
             _ => {
                 pending.insert(candidate.candidate_id.clone());
-                uncertainty.insert(format!("candidate:{}:not-qualified", candidate.candidate_id));
+                uncertainty.insert(format!(
+                    "candidate:{}:not-qualified",
+                    candidate.candidate_id
+                ));
             }
         }
     }
@@ -477,17 +483,108 @@ mod tests {
     }
 
     fn candidate(id: &str, state: EvidenceState) -> AnalysisCandidate {
-        AnalysisCandidate { candidate_id: id.into(), estimand: "effect-on-organoid-growth".into(), method_family: "doubly-robust".into(), input_digest: hash(), output_digest: hash(), baseline_digest: Some(hash()), provenance_digest: Some(hash()), replay_identity: hash(), semantic_profile: "analysis:v1".into(), evidence_state: state, quality_score_milli: 900, local_data: true, omissions: Vec::new(), uncertainty: Vec::new(), negative_result: false }
+        AnalysisCandidate {
+            candidate_id: id.into(),
+            estimand: "effect-on-organoid-growth".into(),
+            method_family: "doubly-robust".into(),
+            input_digest: hash(),
+            output_digest: hash(),
+            baseline_digest: Some(hash()),
+            provenance_digest: Some(hash()),
+            replay_identity: hash(),
+            semantic_profile: "analysis:v1".into(),
+            evidence_state: state,
+            quality_score_milli: 900,
+            local_data: true,
+            omissions: Vec::new(),
+            uncertainty: Vec::new(),
+            negative_result: false,
+        }
     }
 
     fn draft() -> AnalysisWorkflowDraft {
-        AnalysisWorkflowDraft { request_id: "request:examples-analysis".into(), federation_id: "federation:analysis".into(), purpose: "preclinical-replication".into(), semantic_profile: "analysis:v1".into(), required_candidate_order: vec!["analysis-a".into(), "analysis-b".into()], candidates: vec![candidate("analysis-a", EvidenceState::Supported), candidate("analysis-b", EvidenceState::Proven)], stage_order: vec!["admit".into(), "checkpoint".into(), "validate".into(), "schedule".into(), "retain-receipt".into()], replay_identity: hash(), policy_allow: true, protected_closure: true, signed_approval: true, federation_approved: true, raw_data_local: true, aggregate_only: true, budget_units: 10, max_budget_units: 10, adversarial_events: Vec::new(), boundary: PRECLINICAL_BOUNDARY.into() }
+        AnalysisWorkflowDraft {
+            request_id: "request:examples-analysis".into(),
+            federation_id: "federation:analysis".into(),
+            purpose: "preclinical-replication".into(),
+            semantic_profile: "analysis:v1".into(),
+            required_candidate_order: vec!["analysis-a".into(), "analysis-b".into()],
+            candidates: vec![
+                candidate("analysis-a", EvidenceState::Supported),
+                candidate("analysis-b", EvidenceState::Proven),
+            ],
+            stage_order: vec![
+                "admit".into(),
+                "checkpoint".into(),
+                "validate".into(),
+                "schedule".into(),
+                "retain-receipt".into(),
+            ],
+            replay_identity: hash(),
+            policy_allow: true,
+            protected_closure: true,
+            signed_approval: true,
+            federation_approved: true,
+            raw_data_local: true,
+            aggregate_only: true,
+            budget_units: 10,
+            max_budget_units: 10,
+            adversarial_events: Vec::new(),
+            boundary: PRECLINICAL_BOUNDARY.into(),
+        }
     }
 
-    #[test] fn qualified_workflow_schedules() { let run = assure(&draft()).unwrap(); assert_eq!(run.disposition, "qualified"); assert_eq!(run.selected_candidate_order, vec!["analysis-a", "analysis-b"]); assert!(run.effect_receipts[0].starts_with("schedule:analysis-workflow:")); }
-    #[test] fn unknown_candidate_is_partial_and_compensated() { let mut value = draft(); value.candidates[0].evidence_state = EvidenceState::Unknown; let run = assure(&value).unwrap(); assert_eq!(run.disposition, "partial"); assert!(run.pending_candidate_order.contains(&"analysis-a".into())); assert!(run.effect_receipts[0].starts_with("compensate:analysis-workflow:")); }
-    #[test] fn missing_candidate_is_partial() { let mut value = draft(); value.candidates.pop(); let run = assure(&value).unwrap(); assert_eq!(run.disposition, "partial"); assert!(run.omission_order.iter().any(|item| item.contains("missing-candidate"))); }
-    #[test] fn contradiction_blocks() { let mut value = draft(); value.candidates[0].evidence_state = EvidenceState::Contradicted; let run = assure(&value).unwrap(); assert_eq!(run.disposition, "partial"); assert!(run.blocked_candidate_order.contains(&"analysis-a".into())); }
-    #[test] fn policy_and_adversarial_events_block() { let mut value = draft(); value.policy_allow = false; value.adversarial_events = vec!["poisoned-model-card".into()]; let run = assure(&value).unwrap(); assert_eq!(run.disposition, "blocked"); assert_eq!(run.effect_receipts, vec!["block:unsafe-release"]); }
-    #[test] fn manifest_is_a2_and_federated() { let manifest = capability_manifest(); assert_eq!(manifest.autonomy_tier, AutonomyTier::A2); assert!(manifest.effects.contains(&Effect::FederationExport)); }
+    #[test]
+    fn qualified_workflow_schedules() {
+        let run = assure(&draft()).unwrap();
+        assert_eq!(run.disposition, "qualified");
+        assert_eq!(
+            run.selected_candidate_order,
+            vec!["analysis-a", "analysis-b"]
+        );
+        assert!(run.effect_receipts[0].starts_with("schedule:analysis-workflow:"));
+    }
+    #[test]
+    fn unknown_candidate_is_partial_and_compensated() {
+        let mut value = draft();
+        value.candidates[0].evidence_state = EvidenceState::Unknown;
+        let run = assure(&value).unwrap();
+        assert_eq!(run.disposition, "partial");
+        assert!(run.pending_candidate_order.contains(&"analysis-a".into()));
+        assert!(run.effect_receipts[0].starts_with("compensate:analysis-workflow:"));
+    }
+    #[test]
+    fn missing_candidate_is_partial() {
+        let mut value = draft();
+        value.candidates.pop();
+        let run = assure(&value).unwrap();
+        assert_eq!(run.disposition, "partial");
+        assert!(run
+            .omission_order
+            .iter()
+            .any(|item| item.contains("missing-candidate")));
+    }
+    #[test]
+    fn contradiction_blocks() {
+        let mut value = draft();
+        value.candidates[0].evidence_state = EvidenceState::Contradicted;
+        let run = assure(&value).unwrap();
+        assert_eq!(run.disposition, "partial");
+        assert!(run.blocked_candidate_order.contains(&"analysis-a".into()));
+    }
+    #[test]
+    fn policy_and_adversarial_events_block() {
+        let mut value = draft();
+        value.policy_allow = false;
+        value.adversarial_events = vec!["poisoned-model-card".into()];
+        let run = assure(&value).unwrap();
+        assert_eq!(run.disposition, "blocked");
+        assert_eq!(run.effect_receipts, vec!["block:unsafe-release"]);
+    }
+    #[test]
+    fn manifest_is_a2_and_federated() {
+        let manifest = capability_manifest();
+        assert_eq!(manifest.autonomy_tier, AutonomyTier::A2);
+        assert!(manifest.effects.contains(&Effect::FederationExport));
+    }
 }

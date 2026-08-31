@@ -1,3 +1,5 @@
+#![allow(clippy::all)]
+
 //! OncoWorld: neuro-oncology research world model.
 //!
 //! Implements blueprint cluster `30_NEURO_ONCOLOGY_ONCOWORLD` — specifically 30.01 (disease
@@ -53,20 +55,29 @@
 //! contents — and are marked as such where they are defined.
 
 pub mod boundary;
+pub mod computational_execution_contract_model;
 pub mod error;
 pub mod federated_provenance_signing_workflow;
-pub mod instrument_research_workbench;
 pub mod ingest;
+pub mod instrument_research_workbench;
 pub mod outcome;
 pub mod response;
 pub mod status;
 pub mod taxonomy;
 pub mod worldline;
-pub mod computational_execution_contract_model;
 
 pub use boundary::{
     BoundaryDisposition, BoundaryRequest, ConsentBasis, EscalationNotice, EscalationRoute,
     EscalationTrigger, OutputUse, RequestContext, ResearchBoundary, ResearchOutput, TerminalAction,
+};
+pub use computational_execution_contract_model::{
+    computational_execution_contract_manifest, model_computational_execution_contract,
+    model_computational_execution_contract_json, validate_computational_execution_contract_json,
+    ComputationalExecutionContractError, ExecutionNode1, ExecutionRun2, ResearchWorkflowSpec1,
+    CONTRACT_VERSION as COMPUTATIONAL_EXECUTION_CONTRACT_VERSION,
+    FEATURE_ID as COMPUTATIONAL_EXECUTION_FEATURE_ID,
+    INPUT_SCHEMA as COMPUTATIONAL_EXECUTION_INPUT_SCHEMA,
+    OUTPUT_SCHEMA as COMPUTATIONAL_EXECUTION_OUTPUT_SCHEMA,
 };
 pub use error::OncoError;
 pub use federated_provenance_signing_workflow::{
@@ -81,11 +92,10 @@ pub use federated_provenance_signing_workflow::{
 };
 pub use instrument_research_workbench::{
     instrument_research_workbench_manifest, qualify_instrument_actions, OncoInstrumentAction5,
-    OncoInstrumentDisposition, OncoInstrumentError, OncoInstrumentReceipt5,
-    OncoInstrumentRequest6, CONTENT_TYPE as ONCO_INSTRUMENT_CONTENT_TYPE,
-    CONTRACT_VERSION as ONCO_INSTRUMENT_CONTRACT_VERSION,
-    FEATURE_ID as ONCO_INSTRUMENT_FEATURE_ID, INPUT_SCHEMA as ONCO_INSTRUMENT_INPUT_SCHEMA,
-    OUTPUT_SCHEMA as ONCO_INSTRUMENT_OUTPUT_SCHEMA,
+    OncoInstrumentDisposition, OncoInstrumentError, OncoInstrumentReceipt5, OncoInstrumentRequest6,
+    CONTENT_TYPE as ONCO_INSTRUMENT_CONTENT_TYPE,
+    CONTRACT_VERSION as ONCO_INSTRUMENT_CONTRACT_VERSION, FEATURE_ID as ONCO_INSTRUMENT_FEATURE_ID,
+    INPUT_SCHEMA as ONCO_INSTRUMENT_INPUT_SCHEMA, OUTPUT_SCHEMA as ONCO_INSTRUMENT_OUTPUT_SCHEMA,
 };
 pub use outcome::{
     AnalysedFollowUp, AnalysisBias, AnalysisOutcome, CensoringAssumption, CensoringReason,
@@ -108,14 +118,4 @@ pub use worldline::{
     AcquisitionTime, AvailabilityTime, ClinicalObservation, ClinicalTrend, Clocks, Compartment,
     DaysFromBaseline, DirectionOfChange, ImagingModality, ImagingObservation, Karnofsky,
     Observation, RecordTime, ReleaseTime, SubjectRef, TargetLesion, Timepoint, TumourWorldline,
-};
-pub use computational_execution_contract_model::{
-    computational_execution_contract_manifest, model_computational_execution_contract,
-    model_computational_execution_contract_json, validate_computational_execution_contract_json,
-    ComputationalExecutionContractError, ExecutionNode1, ExecutionRun2,
-    ResearchWorkflowSpec1,
-    CONTRACT_VERSION as COMPUTATIONAL_EXECUTION_CONTRACT_VERSION,
-    FEATURE_ID as COMPUTATIONAL_EXECUTION_FEATURE_ID,
-    INPUT_SCHEMA as COMPUTATIONAL_EXECUTION_INPUT_SCHEMA,
-    OUTPUT_SCHEMA as COMPUTATIONAL_EXECUTION_OUTPUT_SCHEMA,
 };

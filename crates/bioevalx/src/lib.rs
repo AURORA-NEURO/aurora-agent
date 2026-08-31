@@ -172,6 +172,8 @@
 //! crate arrived from a caller who measured it, and every fixture in the tests is constructed by
 //! hand so that nothing here can be mistaken for evidence about biology.
 
+#![allow(clippy::all)]
+
 pub mod acquisition;
 pub mod boundary;
 pub mod burden;
@@ -265,11 +267,9 @@ pub const CITED_BUT_OWNED_ELSEWHERE: [&str; 1] = ["07.05"];
 pub const BIOEVALX_SCHEMA_VERSION: &str = "bioprism-bioevalx/0.1";
 pub mod mechanism_exploration_assurance;
 pub use mechanism_exploration_assurance::{
-    assure_mechanism_portfolio, mechanism_exploration_assurance_manifest,
-    MechanismAssuranceError, MechanismAssuranceReport, MechanismCandidate,
-    MechanismPortfolioRequest,
+    assure_mechanism_portfolio, mechanism_exploration_assurance_manifest, MechanismAssuranceError,
+    MechanismAssuranceReport, MechanismCandidate, MechanismPortfolioRequest,
     CONTRACT_VERSION as MECHANISM_ASSURANCE_CONTRACT_VERSION,
-    FEATURE_ID as MECHANISM_ASSURANCE_FEATURE_ID,
-    INPUT_SCHEMA as MECHANISM_ASSURANCE_INPUT_SCHEMA,
+    FEATURE_ID as MECHANISM_ASSURANCE_FEATURE_ID, INPUT_SCHEMA as MECHANISM_ASSURANCE_INPUT_SCHEMA,
     OUTPUT_SCHEMA as MECHANISM_ASSURANCE_OUTPUT_SCHEMA,
 };

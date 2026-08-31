@@ -34,28 +34,28 @@
 pub mod admission;
 pub mod authority;
 pub mod error;
+pub mod federated_continual_lease_fencing_integrity_contract_model;
+pub mod federated_continual_lease_fencing_integrity_inference;
+pub mod federated_continual_lease_fencing_integrity_research_copilot;
+pub mod federated_continual_lease_fencing_integrity_workflow_fabric;
+pub mod federated_quality_workbench;
 pub mod job;
 pub mod lease;
-pub mod federated_quality_workbench;
 pub mod lease_fencing_integrity_support;
-pub mod local_lease_fencing_integrity_inference;
-pub mod multimodal_lease_fencing_integrity_inference;
-pub mod throughput_lease_fencing_integrity_inference;
-pub mod federated_continual_lease_fencing_integrity_inference;
 pub mod local_lease_fencing_integrity_contract_model;
-pub mod multimodal_lease_fencing_integrity_contract_model;
-pub mod throughput_lease_fencing_integrity_contract_model;
-pub mod federated_continual_lease_fencing_integrity_contract_model;
+pub mod local_lease_fencing_integrity_inference;
 pub mod local_lease_fencing_integrity_research_copilot;
-pub mod multimodal_lease_fencing_integrity_research_copilot;
-pub mod throughput_lease_fencing_integrity_research_copilot;
-pub mod federated_continual_lease_fencing_integrity_research_copilot;
 pub mod local_lease_fencing_integrity_workflow_fabric;
+pub mod multimodal_lease_fencing_integrity_contract_model;
+pub mod multimodal_lease_fencing_integrity_inference;
+pub mod multimodal_lease_fencing_integrity_research_copilot;
 pub mod multimodal_lease_fencing_integrity_workflow_fabric;
-pub mod throughput_lease_fencing_integrity_workflow_fabric;
-pub mod federated_continual_lease_fencing_integrity_workflow_fabric;
 pub mod snapshot;
 pub mod store;
+pub mod throughput_lease_fencing_integrity_contract_model;
+pub mod throughput_lease_fencing_integrity_inference;
+pub mod throughput_lease_fencing_integrity_research_copilot;
+pub mod throughput_lease_fencing_integrity_workflow_fabric;
 
 pub use admission::QueueAdmissionPolicy;
 pub use authority::{
@@ -65,8 +65,6 @@ pub use authority::{
     MAX_EXECUTION_AUTHORITY_EVENTS,
 };
 pub use error::FactoryError;
-pub use job::{Idempotency, Job, JobState, ResourceClass};
-pub use lease::{Lease, WorkerCapability};
 pub use federated_quality_workbench::{
     assure_factory_federated_quality_workbench, factory_federated_quality_workbench_manifest,
     FactoryQualityPeer4, FactoryQualityVerdict5, FactoryQualityVerdict5Artifact,
@@ -77,6 +75,8 @@ pub use federated_quality_workbench::{
     INPUT_SCHEMA as FEDERATED_QUALITY_WORKBENCH_INPUT_SCHEMA,
     OUTPUT_SCHEMA as FEDERATED_QUALITY_WORKBENCH_OUTPUT_SCHEMA,
 };
+pub use job::{Idempotency, Job, JobState, ResourceClass};
+pub use lease::{Lease, WorkerCapability};
 pub use lease_fencing_integrity_support::{
     LeaseFencingArtifact4, LeaseFencingIntegrityCard7, LeaseFencingIntegrityError,
     LeaseFencingIntegrityRequest4, WorkerLease4,

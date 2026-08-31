@@ -5,6 +5,7 @@ raw data, fits models, or exports institution-local payloads.
 """
 from __future__ import annotations
 import hashlib, json, re
+from dataclasses import dataclass
 from typing import Any, Mapping
 from .research_contracts import PRECLINICAL_BOUNDARY, RESEARCH_CONTRACT_SCHEMA_VERSION, ResearchContractError
 
@@ -15,6 +16,27 @@ OUTPUT_SCHEMA = "InteractiveInterpretation7@1"
 CONTENT_TYPE = "application/vnd.aurora.scale-interactive-interpretation-7+json"
 # The scale assurance surface emits a mapping rather than the runtime wrapper class.  Keep a
 # public structural alias so package-level imports remain usable across both representations.
+
+@dataclass(frozen=True)
+class InteractiveInterpretation7:
+    """Typed wrapper for the scale interpretation receipt.
+
+    The JSON-facing assurance function intentionally returns a plain mapping for parity with
+    the TypeScript SDK.  This wrapper preserves the package-level typed API used by callers that
+    want an object with the same ``to_dict``/``validate`` affordances as other SDK receipts.
+    """
+
+    value: Mapping[str, Any]
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.value)
+
+    def validate(self) -> None:
+        validate_interpretation_visualization(self.value)
+
+    def digest(self) -> str:
+        self.validate()
+        return _hash(self.value)
 
 def _hash(value: Any) -> str:
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
@@ -78,4 +100,4 @@ def assure_interpretation_visualization(request: Mapping[str, Any]) -> dict[str,
 
 def assure_interpretation_visualization_json(value: Mapping[str, Any]) -> dict[str, Any]: return assure_interpretation_visualization(value)
 
-__all__ = ["FEATURE_ID", "CONTRACT_VERSION", "INPUT_SCHEMA", "OUTPUT_SCHEMA", "CONTENT_TYPE", "interpretation_visualization_assurance_manifest", "assure_interpretation_visualization", "assure_interpretation_visualization_json", "validate_interpretation_visualization"]
+__all__ = ["FEATURE_ID", "CONTRACT_VERSION", "INPUT_SCHEMA", "OUTPUT_SCHEMA", "CONTENT_TYPE", "InteractiveInterpretation7", "interpretation_visualization_assurance_manifest", "assure_interpretation_visualization", "assure_interpretation_visualization_json", "validate_interpretation_visualization"]

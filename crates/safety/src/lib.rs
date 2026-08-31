@@ -137,72 +137,75 @@
 
 pub mod attest;
 pub mod boundary;
+pub mod control_integrity_support;
 pub mod disclosure;
 pub mod error;
+pub mod federated_continual_control_integrity_contract_model;
+pub mod federated_continual_control_integrity_inference;
+pub mod federated_continual_control_integrity_research_copilot;
+pub mod federated_continual_control_integrity_workflow_fabric;
 pub mod incident;
 pub mod integrity;
+pub mod local_control_integrity_contract_model;
+pub mod local_control_integrity_inference;
+pub mod local_control_integrity_research_copilot;
+pub mod local_control_integrity_workflow_fabric;
 pub mod mechanism_workflow;
 pub mod model;
+pub mod multimodal_control_integrity_contract_model;
+pub mod multimodal_control_integrity_inference;
+pub mod multimodal_control_integrity_research_copilot;
+pub mod multimodal_control_integrity_workflow_fabric;
+pub mod prospective_laboratory_integration_assurance;
 pub mod provenance;
 pub mod release;
 pub mod supply;
 pub mod threat;
-pub mod prospective_laboratory_integration_assurance;
-pub mod control_integrity_support;
-pub mod local_control_integrity_inference;
-pub mod multimodal_control_integrity_inference;
-pub mod throughput_control_integrity_inference;
-pub mod federated_continual_control_integrity_inference;
-pub mod local_control_integrity_contract_model;
-pub mod multimodal_control_integrity_contract_model;
 pub mod throughput_control_integrity_contract_model;
-pub mod federated_continual_control_integrity_contract_model;
-pub mod local_control_integrity_research_copilot;
-pub mod multimodal_control_integrity_research_copilot;
+pub mod throughput_control_integrity_inference;
 pub mod throughput_control_integrity_research_copilot;
-pub mod federated_continual_control_integrity_research_copilot;
-pub mod local_control_integrity_workflow_fabric;
-pub mod multimodal_control_integrity_workflow_fabric;
 pub mod throughput_control_integrity_workflow_fabric;
-pub mod federated_continual_control_integrity_workflow_fabric;
 
+pub use control_integrity_support::{
+    manifest as control_integrity_manifest, qualify as qualify_control_integrity, SafetyControl4,
+    SafetyIntegrityArtifact4, SafetyIntegrityCard7, SafetyIntegrityError, SafetyIntegrityRequest4,
+    BOUNDARY as CONTROL_INTEGRITY_BOUNDARY, CONTENT_TYPE as CONTROL_INTEGRITY_CONTENT_TYPE,
+};
 pub use error::{ErrorFamily, SafetyError};
+pub use federated_continual_control_integrity_contract_model::*;
+pub use federated_continual_control_integrity_inference::*;
+pub use federated_continual_control_integrity_research_copilot::*;
+pub use federated_continual_control_integrity_workflow_fabric::*;
+pub use local_control_integrity_contract_model::*;
+pub use local_control_integrity_inference::*;
+pub use local_control_integrity_research_copilot::*;
+pub use local_control_integrity_workflow_fabric::*;
 pub use mechanism_workflow::{
     orchestrate_mechanism_workflow, safety_workflow_manifest, MechanismCandidate,
     MechanismWorkflowError, MechanismWorkflowReceipt, MechanismWorkflowRequest, SafetyDisposition,
     WorkflowEvidenceState, CONTRACT_VERSION as MECHANISM_WORKFLOW_CONTRACT_VERSION,
     FEATURE_ID as MECHANISM_WORKFLOW_FEATURE_ID,
 };
-pub use threat::{Mitigation, Threat, ThreatModel, ThreatStatus, Unrepresentable};
+pub use multimodal_control_integrity_contract_model::*;
+pub use multimodal_control_integrity_inference::*;
+pub use multimodal_control_integrity_research_copilot::*;
+pub use multimodal_control_integrity_workflow_fabric::*;
 pub use prospective_laboratory_integration_assurance::{
-    assure_prospective_laboratory_integration,
-    safety_prospective_laboratory_integration_manifest,
+    assure_prospective_laboratory_integration, safety_prospective_laboratory_integration_manifest,
     InstrumentActionAssuranceError, InstrumentActionReceipt7, InstrumentActionRequest3,
-    LaboratoryEvidenceState, InstrumentEndpoint6, LabAction6, LaboratoryPeer6,
+    InstrumentEndpoint6, LabAction6, LaboratoryEvidenceState, LaboratoryPeer6,
     CONTRACT_VERSION as PROSPECTIVE_LABORATORY_INTEGRATION_CONTRACT_VERSION,
     FEATURE_ID as PROSPECTIVE_LABORATORY_INTEGRATION_FEATURE_ID,
 };
-pub use control_integrity_support::{qualify as qualify_control_integrity, manifest as control_integrity_manifest, SafetyControl4, SafetyIntegrityArtifact4, SafetyIntegrityCard7, SafetyIntegrityError, SafetyIntegrityRequest4, BOUNDARY as CONTROL_INTEGRITY_BOUNDARY, CONTENT_TYPE as CONTROL_INTEGRITY_CONTENT_TYPE};
-pub use local_control_integrity_inference::*;
-pub use multimodal_control_integrity_inference::*;
-pub use throughput_control_integrity_inference::*;
-pub use federated_continual_control_integrity_inference::*;
-pub use local_control_integrity_contract_model::*;
-pub use multimodal_control_integrity_contract_model::*;
+pub use threat::{Mitigation, Threat, ThreatModel, ThreatStatus, Unrepresentable};
 pub use throughput_control_integrity_contract_model::*;
-pub use federated_continual_control_integrity_contract_model::*;
-pub use local_control_integrity_research_copilot::*;
-pub use multimodal_control_integrity_research_copilot::*;
+pub use throughput_control_integrity_inference::*;
 pub use throughput_control_integrity_research_copilot::*;
-pub use federated_continual_control_integrity_research_copilot::*;
-pub use local_control_integrity_workflow_fabric::*;
-pub use multimodal_control_integrity_workflow_fabric::*;
 pub use throughput_control_integrity_workflow_fabric::*;
-pub use federated_continual_control_integrity_workflow_fabric::*;
 pub mod evidence_surveillance_copilot;
 pub use evidence_surveillance_copilot::{
-    assure_evidence_surveillance, evidence_surveillance_copilot_manifest,
-    EvidenceObservation, EvidenceSurveillanceError, EvidenceWatchRequest, QualifiedEvidenceSet,
+    assure_evidence_surveillance, evidence_surveillance_copilot_manifest, EvidenceObservation,
+    EvidenceSurveillanceError, EvidenceWatchRequest, QualifiedEvidenceSet,
     CONTRACT_VERSION as EVIDENCE_SURVEILLANCE_COPILOT_CONTRACT_VERSION,
     FEATURE_ID as EVIDENCE_SURVEILLANCE_COPILOT_FEATURE_ID,
     INPUT_SCHEMA as EVIDENCE_SURVEILLANCE_COPILOT_INPUT_SCHEMA,

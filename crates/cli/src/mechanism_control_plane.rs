@@ -5,28 +5,584 @@
 //! receipts. It never executes a model, dispatches a job, exports raw data, or makes a clinical
 //! decision.
 
-use bioprism_foundation::{AuthorityRequirement, AutonomyTier, CapabilityManifest, Determinism, Effect, EvidenceReference, EvidenceState, ProvenanceLink, ResearchSurface, TypedPort, TypedResearchArtifact, PRECLINICAL_BOUNDARY, RESEARCH_CONTRACT_SCHEMA_VERSION};
+use bioprism_foundation::{
+    AuthorityRequirement, AutonomyTier, CapabilityManifest, Determinism, Effect, EvidenceReference,
+    EvidenceState, ProvenanceLink, ResearchSurface, TypedPort, TypedResearchArtifact,
+    PRECLINICAL_BOUNDARY, RESEARCH_CONTRACT_SCHEMA_VERSION,
+};
 use bioprism_ids::ContentHash;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::BTreeSet;
 use thiserror::Error;
 
-pub const FEATURE_ID:&str="AFA-cli-P08-F32";
-pub const CONTRACT_VERSION:&str="cli-federated-continual-mechanism-exploration-control-plane/1.0";
-pub const INPUT_SCHEMA:&str="MechanismQuestion5@1";
-pub const OUTPUT_SCHEMA:&str="MechanismPortfolio7@1";
+pub const FEATURE_ID: &str = "AFA-cli-P08-F32";
+pub const CONTRACT_VERSION: &str =
+    "cli-federated-continual-mechanism-exploration-control-plane/1.0";
+pub const INPUT_SCHEMA: &str = "MechanismQuestion5@1";
+pub const OUTPUT_SCHEMA: &str = "MechanismPortfolio7@1";
 
-#[derive(Debug,Clone,PartialEq,Eq,Serialize,Deserialize)]
-pub struct MechanismCandidate { pub candidate_id:String,pub label:String,pub study_order:Vec<String>,pub modality_order:Vec<String>,pub semantic_profile:String,pub evidence_state:EvidenceState,pub support_milli:u16,pub artifact_digest:ContentHash,pub provenance_digest:Option<ContentHash>,pub replay_identity:ContentHash,pub omissions:Vec<String>,pub uncertainty:Vec<String>,pub negative_result:bool,pub local_data:bool,pub permitted:bool }
-#[derive(Debug,Clone,PartialEq,Eq,Serialize,Deserialize)]
-pub struct MechanismQuestion { pub request_id:String,pub federation_id:String,pub source_institution:String,pub target_institution:String,pub purpose:String,pub semantic_profile:String,pub required_candidate_order:Vec<String>,pub required_study_order:Vec<String>,pub required_modality_order:Vec<String>,pub candidates:Vec<MechanismCandidate>,pub replay_identity:ContentHash,pub policy_allow:bool,pub protected_closure:bool,pub signed_approval:bool,pub federation_approved:bool,pub raw_data_local:bool,pub aggregate_only:bool,pub budget:u64,pub max_budget:u64,pub adversarial_events:Vec<String>,pub boundary:String }
-#[derive(Debug,Clone,PartialEq,Eq,Serialize,Deserialize)]
-pub struct MechanismPortfolio { pub schema_version:String,pub contract_version:String,pub feature_id:String,pub request_id:String,pub federation_id:String,pub source_institution:String,pub target_institution:String,pub purpose:String,pub semantic_profile:String,pub disposition:String,pub candidate_order:Vec<String>,pub ranked_order:Vec<String>,pub selected_order:Vec<String>,pub unresolved_order:Vec<String>,pub blocked_order:Vec<String>,pub missing_candidate_order:Vec<String>,pub missing_study_order:Vec<String>,pub missing_modality_order:Vec<String>,pub omission_order:Vec<String>,pub uncertainty_order:Vec<String>,pub contradiction_order:Vec<String>,pub negative_evidence_order:Vec<String>,pub adversarial_event_order:Vec<String>,pub replay_identity:ContentHash,pub portfolio_digest:ContentHash,pub artifact:TypedResearchArtifact,pub effect_receipts:Vec<String>,pub raw_data_local:bool,pub aggregate_only:bool,pub boundary:String }
-#[derive(Debug,Error,Clone,PartialEq,Eq)] pub enum MechanismControlError { #[error("invalid mechanism control request: {0}")] Invalid(String), #[error("mechanism control artifact failed: {0}")] Artifact(String) }
-fn invalid(v:impl Into<String>)->MechanismControlError{MechanismControlError::Invalid(v.into())} fn canonical(v:&[String])->bool{v.windows(2).all(|p|p[0]<p[1])} fn digest(v:&ContentHash)->bool{v.as_str().len()==64}
-pub fn mechanism_control_plane_manifest()->CapabilityManifest{CapabilityManifest{schema_version:RESEARCH_CONTRACT_SCHEMA_VERSION.into(),capability_id:FEATURE_ID.into(),version:CONTRACT_VERSION.into(),owner_crate:"cli".into(),consumers:["mechanism program lead".into(),"integration engineer".into(),"federation operator".into()].into(),behavior:"coordinates typed federated mechanism candidates with deterministic ranking, closure, replay, policy, and locality gates".into(),value:"prevents unsupported mechanistic portfolios from being scheduled or exchanged while retaining evidence gaps".into(),inputs:vec![TypedPort{name:"mechanism_question".into(),schema:INPUT_SCHEMA.into(),required:true}],outputs:vec![TypedPort{name:"mechanism_portfolio".into(),schema:OUTPUT_SCHEMA.into(),required:true}],effects:[Effect::ReadLocalData,Effect::ExecuteLocalComputation,Effect::FederationExport,Effect::WriteLocalArtifact].into(),permissions:["control:mechanism-portfolio".into()].into(),determinism:Determinism::ByteStable,evidence:vec![EvidenceReference{source_id:"w3c-prov-o".into(),state:EvidenceState::Supported,locator:Some("https://www.w3.org/TR/prov-o/".into())}],authority_requirements:vec![AuthorityRequirement{role:"mechanism federation steward".into(),reason:"portfolio control requires institutional approval".into()}],autonomy_tier:AutonomyTier::A2,surfaces:[ResearchSurface::Ui,ResearchSurface::Cli,ResearchSurface::Api,ResearchSurface::Sdk,ResearchSurface::Protocol,ResearchSurface::Policy,ResearchSurface::Operator].into(),boundary:PRECLINICAL_BOUNDARY.into()}}
-impl MechanismPortfolio{pub fn validate(&self)->Result<(),MechanismControlError>{if self.schema_version!=RESEARCH_CONTRACT_SCHEMA_VERSION||self.contract_version!=CONTRACT_VERSION||self.feature_id!=FEATURE_ID||self.boundary!=PRECLINICAL_BOUNDARY||self.artifact.boundary!=PRECLINICAL_BOUNDARY||!self.raw_data_local||!self.aggregate_only||self.request_id.trim().is_empty()||self.federation_id.trim().is_empty()||self.source_institution==self.target_institution||self.purpose.trim().is_empty()||self.semantic_profile.trim().is_empty()||!matches!(self.disposition.as_str(),"qualified"|"unresolved"|"blocked")||self.candidate_order.is_empty()||self.ranked_order.len()!=self.candidate_order.len()||self.effect_receipts.is_empty(){return Err(invalid("mechanism portfolio identity, locality, ranking, disposition, or effects are incomplete"));}for v in [&self.candidate_order,&self.selected_order,&self.unresolved_order,&self.blocked_order,&self.missing_candidate_order,&self.missing_study_order,&self.missing_modality_order,&self.omission_order,&self.uncertainty_order,&self.contradiction_order,&self.negative_evidence_order,&self.adversarial_event_order,&self.effect_receipts]{if !canonical(v){return Err(invalid("mechanism portfolio ordering is not canonical"));}}let ids=self.candidate_order.iter().collect::<BTreeSet<_>>();let p=self.selected_order.iter().chain(self.unresolved_order.iter()).chain(self.blocked_order.iter()).collect::<Vec<_>>();if p.len()!=ids.len()||p.iter().any(|x|!ids.contains(x))||p.iter().collect::<BTreeSet<_>>().len()!=p.len()||self.ranked_order.iter().collect::<BTreeSet<_>>()!=ids{return Err(invalid("mechanism portfolio states do not partition candidates"));}for d in [&self.replay_identity,&self.portfolio_digest,&self.artifact.content_hash]{if !digest(d){return Err(invalid("mechanism portfolio digest is invalid"));}}self.artifact.validate_metadata().map_err(|e|MechanismControlError::Artifact(e.to_string()))?;if self.artifact.content_type!="application/vnd.aurora.mechanism-portfolio+json"{return Err(invalid("mechanism portfolio artifact type is invalid"));}if self.disposition=="qualified"{if self.effect_receipts.len()!=1||!self.effect_receipts[0].starts_with("control:mechanism-portfolio:"){return Err(invalid("qualified mechanism control effect is invalid"));}}else if self.effect_receipts!=["block:unsafe-release"]{return Err(invalid("non-qualified mechanism control must block release"));}Ok(())}}
-pub fn control_mechanism_portfolio(q:&MechanismQuestion)->Result<MechanismPortfolio,MechanismControlError>{validate(q)?;let mut c=q.candidates.clone();c.sort_by(|a,b|b.support_milli.cmp(&a.support_milli).then(a.candidate_id.cmp(&b.candidate_id)));let ranked=c.iter().map(|x|x.candidate_id.clone()).collect::<Vec<_>>();let mut order=ranked.clone();order.sort();let required=q.required_candidate_order.iter().cloned().collect::<BTreeSet<_>>();let missing=required.iter().filter(|x|!c.iter().any(|v|&v.candidate_id==*x)).cloned().collect::<Vec<_>>();let studies=q.required_study_order.iter().cloned().collect::<BTreeSet<_>>();let modalities=q.required_modality_order.iter().cloned().collect::<BTreeSet<_>>();let mut selected=BTreeSet::new();let mut unresolved=BTreeSet::new();let mut blocked=BTreeSet::new();let mut omissions=BTreeSet::new();let mut uncertainty=BTreeSet::new();let mut contradiction=BTreeSet::new();let mut negative=BTreeSet::new();for x in &c{let id=&x.candidate_id;if x.negative_result{negative.insert(format!("{id}:negative-result"));}omissions.extend(x.omissions.iter().map(|v|format!("{id}:{v}")));uncertainty.extend(x.uncertainty.iter().map(|v|format!("{id}:{v}")));if x.evidence_state==EvidenceState::Contradicted{blocked.insert(id.clone());contradiction.insert(format!("{id}:contradicted-evidence"));continue;}if matches!(x.evidence_state,EvidenceState::Unknown|EvidenceState::Speculative){unresolved.insert(id.clone());uncertainty.insert(format!("{id}:evidence-unresolved"));continue;}let ss=x.study_order.iter().cloned().collect::<BTreeSet<_>>();let mm=x.modality_order.iter().cloned().collect::<BTreeSet<_>>();let ok=x.label.trim()!=""&&x.semantic_profile==q.semantic_profile&&x.replay_identity==q.replay_identity&&x.provenance_digest.is_some()&&studies.is_subset(&ss)&&modalities.is_subset(&mm)&&x.omissions.is_empty()&&x.uncertainty.is_empty()&&x.local_data&&x.permitted&&x.support_milli>=600;if ok&&matches!(x.evidence_state,EvidenceState::Proven|EvidenceState::Supported){selected.insert(id.clone());}else{unresolved.insert(id.clone());if x.provenance_digest.is_none(){omissions.insert(format!("{id}:provenance-missing"));}if !studies.is_subset(&ss){omissions.insert(format!("{id}:required-study-coverage-incomplete"));}if !modalities.is_subset(&mm){omissions.insert(format!("{id}:required-modality-coverage-incomplete"));}if x.support_milli<600{uncertainty.insert(format!("{id}:support-threshold-not-met"));}if !x.local_data||!x.permitted{blocked.insert(id.clone());unresolved.remove(id);omissions.insert(format!("{id}:locality-or-permission-denied"));}}}for id in &missing{omissions.insert(format!("{id}:required-candidate-missing"));}let missing_study=q.required_study_order.iter().filter(|s|!c.iter().any(|x|x.study_order.contains(s))).cloned().collect::<Vec<_>>();let missing_mod=q.required_modality_order.iter().filter(|m|!c.iter().any(|x|x.modality_order.contains(m))).cloned().collect::<Vec<_>>();for s in &missing_study{omissions.insert(format!("required-study-missing:{s}"));}for m in &missing_mod{omissions.insert(format!("required-modality-missing:{m}"));}negative.extend(q.adversarial_events.iter().map(|e|format!("adversarial:{e}")));let global=!q.policy_allow||!q.protected_closure||!q.signed_approval||!q.federation_approved||!q.raw_data_local||!q.aggregate_only||q.budget>q.max_budget||!q.adversarial_events.is_empty();let disposition=if global{"blocked"}else if missing.is_empty()&&missing_study.is_empty()&&missing_mod.is_empty()&&!selected.is_empty()&&unresolved.is_empty()&&blocked.is_empty(){"qualified"}else{"unresolved"};if !q.policy_allow{uncertainty.insert("request:policy-denied".into());}if !q.protected_closure{uncertainty.insert("request:protected-closure-incomplete".into());}if !q.signed_approval||!q.federation_approved{uncertainty.insert("request:institutional-approval-incomplete".into());}if q.budget>q.max_budget{omissions.insert("request:budget-ceiling-exceeded".into());}let selected=selected.into_iter().collect::<Vec<_>>();let unresolved=unresolved.into_iter().collect::<Vec<_>>();let blocked=blocked.into_iter().collect::<Vec<_>>();let omissions=omissions.into_iter().collect::<Vec<_>>();let uncertainty=uncertainty.into_iter().collect::<Vec<_>>();let contradiction=contradiction.into_iter().collect::<Vec<_>>();let negative=negative.into_iter().collect::<Vec<_>>();let effects=if disposition=="qualified"{vec![format!("control:mechanism-portfolio:{}",q.request_id)]}else{vec!["block:unsafe-release".into()]};let payload=json!({"schema_version":RESEARCH_CONTRACT_SCHEMA_VERSION,"contract_version":CONTRACT_VERSION,"feature_id":FEATURE_ID,"request_id":q.request_id,"federation_id":q.federation_id,"source_institution":q.source_institution,"target_institution":q.target_institution,"purpose":q.purpose,"semantic_profile":q.semantic_profile,"disposition":disposition,"candidate_order":order,"ranked_order":ranked,"selected_order":selected,"unresolved_order":unresolved,"blocked_order":blocked,"missing_candidate_order":missing,"missing_study_order":missing_study,"missing_modality_order":missing_mod,"omission_order":omissions,"uncertainty_order":uncertainty,"contradiction_order":contradiction,"negative_evidence_order":negative,"adversarial_event_order":q.adversarial_events,"replay_identity":q.replay_identity,"effect_receipts":effects,"raw_data_local":q.raw_data_local,"aggregate_only":q.aggregate_only,"boundary":PRECLINICAL_BOUNDARY});let portfolio_digest=ContentHash::of_value(&payload).map_err(|e|MechanismControlError::Artifact(e.to_string()))?;let artifact=TypedResearchArtifact::from_payload(format!("cli-mechanism:{}",q.request_id),"application/vnd.aurora.mechanism-portfolio+json",&payload,Vec::new(),vec![ProvenanceLink{source_id:format!("federation:{}",q.federation_id),relation:"derived-from-local-mechanism-manifest".into(),digest:q.replay_identity.clone()}]).map_err(|e|MechanismControlError::Artifact(e.to_string()))?;let p=MechanismPortfolio{schema_version:RESEARCH_CONTRACT_SCHEMA_VERSION.into(),contract_version:CONTRACT_VERSION.into(),feature_id:FEATURE_ID.into(),request_id:q.request_id.clone(),federation_id:q.federation_id.clone(),source_institution:q.source_institution.clone(),target_institution:q.target_institution.clone(),purpose:q.purpose.clone(),semantic_profile:q.semantic_profile.clone(),disposition:disposition.into(),candidate_order:order,ranked_order:ranked,selected_order:selected,unresolved_order:unresolved,blocked_order:blocked,missing_candidate_order:missing,missing_study_order:missing_study,missing_modality_order:missing_mod,omission_order:omissions,uncertainty_order:uncertainty,contradiction_order:contradiction,negative_evidence_order:negative,adversarial_event_order:q.adversarial_events.clone(),replay_identity:q.replay_identity.clone(),portfolio_digest,artifact,effect_receipts:effects,raw_data_local:q.raw_data_local,aggregate_only:q.aggregate_only,boundary:PRECLINICAL_BOUNDARY.into()};p.validate()?;Ok(p)}
-fn validate(q:&MechanismQuestion)->Result<(),MechanismControlError>{if q.request_id.trim().is_empty()||q.federation_id.trim().is_empty()||q.source_institution.trim().is_empty()||q.target_institution.trim().is_empty()||q.source_institution==q.target_institution||q.purpose.trim().is_empty()||q.semantic_profile.trim().is_empty()||q.required_candidate_order.is_empty()||q.required_study_order.is_empty()||q.required_modality_order.is_empty()||q.candidates.is_empty()||!canonical(&q.required_candidate_order)||!canonical(&q.required_study_order)||!canonical(&q.required_modality_order)||!canonical(&q.adversarial_events)||!digest(&q.replay_identity)||q.budget==0||q.max_budget==0||q.boundary!=PRECLINICAL_BOUNDARY||!q.raw_data_local||!q.aggregate_only{return Err(invalid("mechanism question identity, requirements, digest, budget, locality, or boundary is invalid"));}let mut seen=BTreeSet::new();for c in &q.candidates{if c.candidate_id.trim().is_empty()||c.label.trim().is_empty()||!seen.insert(c.candidate_id.clone())||c.study_order.is_empty()||c.modality_order.is_empty()||!canonical(&c.study_order)||!canonical(&c.modality_order)||c.support_milli>1000||!digest(&c.artifact_digest)||c.provenance_digest.as_ref().is_some_and(|v|!digest(v))||!digest(&c.replay_identity)||c.semantic_profile.trim().is_empty()||!canonical(&c.omissions)||!canonical(&c.uncertainty){return Err(invalid(format!("candidate {} is malformed or duplicated",c.candidate_id)));}}Ok(())}
-#[cfg(test)]mod tests{use super::*;fn h(v:&str)->ContentHash{ContentHash::of_bytes(v.as_bytes())}fn c(id:&str,state:EvidenceState,s:u16)->MechanismCandidate{MechanismCandidate{candidate_id:id.into(),label:format!("label-{id}"),study_order:vec!["study-a".into()],modality_order:vec!["imaging".into()],semantic_profile:"preclinical-neural".into(),evidence_state:state,support_milli:s,artifact_digest:h(&format!("artifact-{id}")),provenance_digest:Some(h(&format!("prov-{id}"))),replay_identity:h("replay"),omissions:vec![],uncertainty:vec![],negative_result:false,local_data:true,permitted:true}}fn q(candidates:Vec<MechanismCandidate>)->MechanismQuestion{MechanismQuestion{request_id:"request-1".into(),federation_id:"fed-1".into(),source_institution:"site-a".into(),target_institution:"site-b".into(),purpose:"mechanism-control".into(),semantic_profile:"preclinical-neural".into(),required_candidate_order:vec!["candidate-a".into()],required_study_order:vec!["study-a".into()],required_modality_order:vec!["imaging".into()],candidates,replay_identity:h("replay"),policy_allow:true,protected_closure:true,signed_approval:true,federation_approved:true,raw_data_local:true,aggregate_only:true,budget:4,max_budget:8,adversarial_events:vec![],boundary:PRECLINICAL_BOUNDARY.into()}}#[test]fn manifest(){let m=mechanism_control_plane_manifest();assert_eq!(m.autonomy_tier,AutonomyTier::A2);m.validate().unwrap()}#[test]fn qualified(){let p=control_mechanism_portfolio(&q(vec![c("candidate-a",EvidenceState::Supported,900)])).unwrap();assert_eq!(p.disposition,"qualified")}#[test]fn unknown_and_contradicted(){let mut x=q(vec![c("candidate-a",EvidenceState::Unknown,900),c("candidate-b",EvidenceState::Contradicted,900)]);let p=control_mechanism_portfolio(&x).unwrap();assert!(p.unresolved_order.contains(&"candidate-a".into()));assert!(p.blocked_order.contains(&"candidate-b".into()));x.required_candidate_order=vec!["candidate-a".into()];}#[test]fn adversarial(){let mut x=q(vec![c("candidate-a",EvidenceState::Supported,900)]);x.adversarial_events=vec!["poisoned".into()];assert_eq!(control_mechanism_portfolio(&x).unwrap().disposition,"blocked")}#[test]fn duplicate(){let x=q(vec![c("candidate-a",EvidenceState::Supported,900),c("candidate-a",EvidenceState::Supported,800)]);assert!(matches!(control_mechanism_portfolio(&x),Err(MechanismControlError::Invalid(_))))}#[test]fn deterministic(){let a=control_mechanism_portfolio(&q(vec![c("candidate-b",EvidenceState::Supported,700),c("candidate-a",EvidenceState::Supported,900)])).unwrap();let b=control_mechanism_portfolio(&q(vec![c("candidate-a",EvidenceState::Supported,900),c("candidate-b",EvidenceState::Supported,700)])).unwrap();assert_eq!(a.ranked_order,b.ranked_order);assert_eq!(a.portfolio_digest,b.portfolio_digest)}}
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MechanismCandidate {
+    pub candidate_id: String,
+    pub label: String,
+    pub study_order: Vec<String>,
+    pub modality_order: Vec<String>,
+    pub semantic_profile: String,
+    pub evidence_state: EvidenceState,
+    pub support_milli: u16,
+    pub artifact_digest: ContentHash,
+    pub provenance_digest: Option<ContentHash>,
+    pub replay_identity: ContentHash,
+    pub omissions: Vec<String>,
+    pub uncertainty: Vec<String>,
+    pub negative_result: bool,
+    pub local_data: bool,
+    pub permitted: bool,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MechanismQuestion {
+    pub request_id: String,
+    pub federation_id: String,
+    pub source_institution: String,
+    pub target_institution: String,
+    pub purpose: String,
+    pub semantic_profile: String,
+    pub required_candidate_order: Vec<String>,
+    pub required_study_order: Vec<String>,
+    pub required_modality_order: Vec<String>,
+    pub candidates: Vec<MechanismCandidate>,
+    pub replay_identity: ContentHash,
+    pub policy_allow: bool,
+    pub protected_closure: bool,
+    pub signed_approval: bool,
+    pub federation_approved: bool,
+    pub raw_data_local: bool,
+    pub aggregate_only: bool,
+    pub budget: u64,
+    pub max_budget: u64,
+    pub adversarial_events: Vec<String>,
+    pub boundary: String,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MechanismPortfolio {
+    pub schema_version: String,
+    pub contract_version: String,
+    pub feature_id: String,
+    pub request_id: String,
+    pub federation_id: String,
+    pub source_institution: String,
+    pub target_institution: String,
+    pub purpose: String,
+    pub semantic_profile: String,
+    pub disposition: String,
+    pub candidate_order: Vec<String>,
+    pub ranked_order: Vec<String>,
+    pub selected_order: Vec<String>,
+    pub unresolved_order: Vec<String>,
+    pub blocked_order: Vec<String>,
+    pub missing_candidate_order: Vec<String>,
+    pub missing_study_order: Vec<String>,
+    pub missing_modality_order: Vec<String>,
+    pub omission_order: Vec<String>,
+    pub uncertainty_order: Vec<String>,
+    pub contradiction_order: Vec<String>,
+    pub negative_evidence_order: Vec<String>,
+    pub adversarial_event_order: Vec<String>,
+    pub replay_identity: ContentHash,
+    pub portfolio_digest: ContentHash,
+    pub artifact: TypedResearchArtifact,
+    pub effect_receipts: Vec<String>,
+    pub raw_data_local: bool,
+    pub aggregate_only: bool,
+    pub boundary: String,
+}
+#[derive(Debug, Error, Clone, PartialEq, Eq)]
+pub enum MechanismControlError {
+    #[error("invalid mechanism control request: {0}")]
+    Invalid(String),
+    #[error("mechanism control artifact failed: {0}")]
+    Artifact(String),
+}
+fn invalid(v: impl Into<String>) -> MechanismControlError {
+    MechanismControlError::Invalid(v.into())
+}
+fn canonical(v: &[String]) -> bool {
+    v.windows(2).all(|p| p[0] < p[1])
+}
+fn digest(v: &ContentHash) -> bool {
+    v.as_str().len() == 64
+}
+pub fn mechanism_control_plane_manifest() -> CapabilityManifest {
+    CapabilityManifest{schema_version:RESEARCH_CONTRACT_SCHEMA_VERSION.into(),capability_id:FEATURE_ID.into(),version:CONTRACT_VERSION.into(),owner_crate:"cli".into(),consumers:["mechanism program lead".into(),"integration engineer".into(),"federation operator".into()].into(),behavior:"coordinates typed federated mechanism candidates with deterministic ranking, closure, replay, policy, and locality gates".into(),value:"prevents unsupported mechanistic portfolios from being scheduled or exchanged while retaining evidence gaps".into(),inputs:vec![TypedPort{name:"mechanism_question".into(),schema:INPUT_SCHEMA.into(),required:true}],outputs:vec![TypedPort{name:"mechanism_portfolio".into(),schema:OUTPUT_SCHEMA.into(),required:true}],effects:[Effect::ReadLocalData,Effect::ExecuteLocalComputation,Effect::FederationExport,Effect::WriteLocalArtifact].into(),permissions:["control:mechanism-portfolio".into()].into(),determinism:Determinism::ByteStable,evidence:vec![EvidenceReference{source_id:"w3c-prov-o".into(),state:EvidenceState::Supported,locator:Some("https://www.w3.org/TR/prov-o/".into())}],authority_requirements:vec![AuthorityRequirement{role:"mechanism federation steward".into(),reason:"portfolio control requires institutional approval".into()}],autonomy_tier:AutonomyTier::A2,surfaces:[ResearchSurface::Ui,ResearchSurface::Cli,ResearchSurface::Api,ResearchSurface::Sdk,ResearchSurface::Protocol,ResearchSurface::Policy,ResearchSurface::Operator].into(),boundary:PRECLINICAL_BOUNDARY.into()}
+}
+impl MechanismPortfolio {
+    pub fn validate(&self) -> Result<(), MechanismControlError> {
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION
+            || self.contract_version != CONTRACT_VERSION
+            || self.feature_id != FEATURE_ID
+            || self.boundary != PRECLINICAL_BOUNDARY
+            || self.artifact.boundary != PRECLINICAL_BOUNDARY
+            || !self.raw_data_local
+            || !self.aggregate_only
+            || self.request_id.trim().is_empty()
+            || self.federation_id.trim().is_empty()
+            || self.source_institution == self.target_institution
+            || self.purpose.trim().is_empty()
+            || self.semantic_profile.trim().is_empty()
+            || !matches!(
+                self.disposition.as_str(),
+                "qualified" | "unresolved" | "blocked"
+            )
+            || self.candidate_order.is_empty()
+            || self.ranked_order.len() != self.candidate_order.len()
+            || self.effect_receipts.is_empty()
+        {
+            return Err(invalid("mechanism portfolio identity, locality, ranking, disposition, or effects are incomplete"));
+        }
+        for v in [
+            &self.candidate_order,
+            &self.selected_order,
+            &self.unresolved_order,
+            &self.blocked_order,
+            &self.missing_candidate_order,
+            &self.missing_study_order,
+            &self.missing_modality_order,
+            &self.omission_order,
+            &self.uncertainty_order,
+            &self.contradiction_order,
+            &self.negative_evidence_order,
+            &self.adversarial_event_order,
+            &self.effect_receipts,
+        ] {
+            if !canonical(v) {
+                return Err(invalid("mechanism portfolio ordering is not canonical"));
+            }
+        }
+        let ids = self.candidate_order.iter().collect::<BTreeSet<_>>();
+        let p = self
+            .selected_order
+            .iter()
+            .chain(self.unresolved_order.iter())
+            .chain(self.blocked_order.iter())
+            .collect::<Vec<_>>();
+        if p.len() != ids.len()
+            || p.iter().any(|x| !ids.contains(x))
+            || p.iter().collect::<BTreeSet<_>>().len() != p.len()
+            || self.ranked_order.iter().collect::<BTreeSet<_>>() != ids
+        {
+            return Err(invalid(
+                "mechanism portfolio states do not partition candidates",
+            ));
+        }
+        for d in [
+            &self.replay_identity,
+            &self.portfolio_digest,
+            &self.artifact.content_hash,
+        ] {
+            if !digest(d) {
+                return Err(invalid("mechanism portfolio digest is invalid"));
+            }
+        }
+        self.artifact
+            .validate_metadata()
+            .map_err(|e| MechanismControlError::Artifact(e.to_string()))?;
+        if self.artifact.content_type != "application/vnd.aurora.mechanism-portfolio+json" {
+            return Err(invalid("mechanism portfolio artifact type is invalid"));
+        }
+        if self.disposition == "qualified" {
+            if self.effect_receipts.len() != 1
+                || !self.effect_receipts[0].starts_with("control:mechanism-portfolio:")
+            {
+                return Err(invalid("qualified mechanism control effect is invalid"));
+            }
+        } else if self.effect_receipts != ["block:unsafe-release"] {
+            return Err(invalid(
+                "non-qualified mechanism control must block release",
+            ));
+        }
+        Ok(())
+    }
+}
+pub fn control_mechanism_portfolio(
+    q: &MechanismQuestion,
+) -> Result<MechanismPortfolio, MechanismControlError> {
+    validate(q)?;
+    let mut c = q.candidates.clone();
+    c.sort_by(|a, b| {
+        b.support_milli
+            .cmp(&a.support_milli)
+            .then(a.candidate_id.cmp(&b.candidate_id))
+    });
+    let ranked = c.iter().map(|x| x.candidate_id.clone()).collect::<Vec<_>>();
+    let mut order = ranked.clone();
+    order.sort();
+    let required = q
+        .required_candidate_order
+        .iter()
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    let missing = required
+        .iter()
+        .filter(|x| !c.iter().any(|v| &v.candidate_id == *x))
+        .cloned()
+        .collect::<Vec<_>>();
+    let studies = q
+        .required_study_order
+        .iter()
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    let modalities = q
+        .required_modality_order
+        .iter()
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    let mut selected = BTreeSet::new();
+    let mut unresolved = BTreeSet::new();
+    let mut blocked = BTreeSet::new();
+    let mut omissions = BTreeSet::new();
+    let mut uncertainty = BTreeSet::new();
+    let mut contradiction = BTreeSet::new();
+    let mut negative = BTreeSet::new();
+    for x in &c {
+        let id = &x.candidate_id;
+        if x.negative_result {
+            negative.insert(format!("{id}:negative-result"));
+        }
+        omissions.extend(x.omissions.iter().map(|v| format!("{id}:{v}")));
+        uncertainty.extend(x.uncertainty.iter().map(|v| format!("{id}:{v}")));
+        if x.evidence_state == EvidenceState::Contradicted {
+            blocked.insert(id.clone());
+            contradiction.insert(format!("{id}:contradicted-evidence"));
+            continue;
+        }
+        if matches!(
+            x.evidence_state,
+            EvidenceState::Unknown | EvidenceState::Speculative
+        ) {
+            unresolved.insert(id.clone());
+            uncertainty.insert(format!("{id}:evidence-unresolved"));
+            continue;
+        }
+        let ss = x.study_order.iter().cloned().collect::<BTreeSet<_>>();
+        let mm = x.modality_order.iter().cloned().collect::<BTreeSet<_>>();
+        let ok = x.label.trim() != ""
+            && x.semantic_profile == q.semantic_profile
+            && x.replay_identity == q.replay_identity
+            && x.provenance_digest.is_some()
+            && studies.is_subset(&ss)
+            && modalities.is_subset(&mm)
+            && x.omissions.is_empty()
+            && x.uncertainty.is_empty()
+            && x.local_data
+            && x.permitted
+            && x.support_milli >= 600;
+        if ok
+            && matches!(
+                x.evidence_state,
+                EvidenceState::Proven | EvidenceState::Supported
+            )
+        {
+            selected.insert(id.clone());
+        } else {
+            unresolved.insert(id.clone());
+            if x.provenance_digest.is_none() {
+                omissions.insert(format!("{id}:provenance-missing"));
+            }
+            if !studies.is_subset(&ss) {
+                omissions.insert(format!("{id}:required-study-coverage-incomplete"));
+            }
+            if !modalities.is_subset(&mm) {
+                omissions.insert(format!("{id}:required-modality-coverage-incomplete"));
+            }
+            if x.support_milli < 600 {
+                uncertainty.insert(format!("{id}:support-threshold-not-met"));
+            }
+            if !x.local_data || !x.permitted {
+                blocked.insert(id.clone());
+                unresolved.remove(id);
+                omissions.insert(format!("{id}:locality-or-permission-denied"));
+            }
+        }
+    }
+    for id in &missing {
+        omissions.insert(format!("{id}:required-candidate-missing"));
+    }
+    let missing_study = q
+        .required_study_order
+        .iter()
+        .filter(|s| !c.iter().any(|x| x.study_order.contains(s)))
+        .cloned()
+        .collect::<Vec<_>>();
+    let missing_mod = q
+        .required_modality_order
+        .iter()
+        .filter(|m| !c.iter().any(|x| x.modality_order.contains(m)))
+        .cloned()
+        .collect::<Vec<_>>();
+    for s in &missing_study {
+        omissions.insert(format!("required-study-missing:{s}"));
+    }
+    for m in &missing_mod {
+        omissions.insert(format!("required-modality-missing:{m}"));
+    }
+    negative.extend(
+        q.adversarial_events
+            .iter()
+            .map(|e| format!("adversarial:{e}")),
+    );
+    let global = !q.policy_allow
+        || !q.protected_closure
+        || !q.signed_approval
+        || !q.federation_approved
+        || !q.raw_data_local
+        || !q.aggregate_only
+        || q.budget > q.max_budget
+        || !q.adversarial_events.is_empty();
+    let disposition = if global {
+        "blocked"
+    } else if missing.is_empty()
+        && missing_study.is_empty()
+        && missing_mod.is_empty()
+        && !selected.is_empty()
+        && unresolved.is_empty()
+        && blocked.is_empty()
+    {
+        "qualified"
+    } else {
+        "unresolved"
+    };
+    if !q.policy_allow {
+        uncertainty.insert("request:policy-denied".into());
+    }
+    if !q.protected_closure {
+        uncertainty.insert("request:protected-closure-incomplete".into());
+    }
+    if !q.signed_approval || !q.federation_approved {
+        uncertainty.insert("request:institutional-approval-incomplete".into());
+    }
+    if q.budget > q.max_budget {
+        omissions.insert("request:budget-ceiling-exceeded".into());
+    }
+    let selected = selected.into_iter().collect::<Vec<_>>();
+    let unresolved = unresolved.into_iter().collect::<Vec<_>>();
+    let blocked = blocked.into_iter().collect::<Vec<_>>();
+    let omissions = omissions.into_iter().collect::<Vec<_>>();
+    let uncertainty = uncertainty.into_iter().collect::<Vec<_>>();
+    let contradiction = contradiction.into_iter().collect::<Vec<_>>();
+    let negative = negative.into_iter().collect::<Vec<_>>();
+    let effects = if disposition == "qualified" {
+        vec![format!("control:mechanism-portfolio:{}", q.request_id)]
+    } else {
+        vec!["block:unsafe-release".into()]
+    };
+    let payload = json!({"schema_version":RESEARCH_CONTRACT_SCHEMA_VERSION,"contract_version":CONTRACT_VERSION,"feature_id":FEATURE_ID,"request_id":q.request_id,"federation_id":q.federation_id,"source_institution":q.source_institution,"target_institution":q.target_institution,"purpose":q.purpose,"semantic_profile":q.semantic_profile,"disposition":disposition,"candidate_order":order,"ranked_order":ranked,"selected_order":selected,"unresolved_order":unresolved,"blocked_order":blocked,"missing_candidate_order":missing,"missing_study_order":missing_study,"missing_modality_order":missing_mod,"omission_order":omissions,"uncertainty_order":uncertainty,"contradiction_order":contradiction,"negative_evidence_order":negative,"adversarial_event_order":q.adversarial_events,"replay_identity":q.replay_identity,"effect_receipts":effects,"raw_data_local":q.raw_data_local,"aggregate_only":q.aggregate_only,"boundary":PRECLINICAL_BOUNDARY});
+    let portfolio_digest = ContentHash::of_value(&payload)
+        .map_err(|e| MechanismControlError::Artifact(e.to_string()))?;
+    let artifact = TypedResearchArtifact::from_payload(
+        format!("cli-mechanism:{}", q.request_id),
+        "application/vnd.aurora.mechanism-portfolio+json",
+        &payload,
+        Vec::new(),
+        vec![ProvenanceLink {
+            source_id: format!("federation:{}", q.federation_id),
+            relation: "derived-from-local-mechanism-manifest".into(),
+            digest: q.replay_identity.clone(),
+        }],
+    )
+    .map_err(|e| MechanismControlError::Artifact(e.to_string()))?;
+    let p = MechanismPortfolio {
+        schema_version: RESEARCH_CONTRACT_SCHEMA_VERSION.into(),
+        contract_version: CONTRACT_VERSION.into(),
+        feature_id: FEATURE_ID.into(),
+        request_id: q.request_id.clone(),
+        federation_id: q.federation_id.clone(),
+        source_institution: q.source_institution.clone(),
+        target_institution: q.target_institution.clone(),
+        purpose: q.purpose.clone(),
+        semantic_profile: q.semantic_profile.clone(),
+        disposition: disposition.into(),
+        candidate_order: order,
+        ranked_order: ranked,
+        selected_order: selected,
+        unresolved_order: unresolved,
+        blocked_order: blocked,
+        missing_candidate_order: missing,
+        missing_study_order: missing_study,
+        missing_modality_order: missing_mod,
+        omission_order: omissions,
+        uncertainty_order: uncertainty,
+        contradiction_order: contradiction,
+        negative_evidence_order: negative,
+        adversarial_event_order: q.adversarial_events.clone(),
+        replay_identity: q.replay_identity.clone(),
+        portfolio_digest,
+        artifact,
+        effect_receipts: effects,
+        raw_data_local: q.raw_data_local,
+        aggregate_only: q.aggregate_only,
+        boundary: PRECLINICAL_BOUNDARY.into(),
+    };
+    p.validate()?;
+    Ok(p)
+}
+fn validate(q: &MechanismQuestion) -> Result<(), MechanismControlError> {
+    if q.request_id.trim().is_empty()
+        || q.federation_id.trim().is_empty()
+        || q.source_institution.trim().is_empty()
+        || q.target_institution.trim().is_empty()
+        || q.source_institution == q.target_institution
+        || q.purpose.trim().is_empty()
+        || q.semantic_profile.trim().is_empty()
+        || q.required_candidate_order.is_empty()
+        || q.required_study_order.is_empty()
+        || q.required_modality_order.is_empty()
+        || q.candidates.is_empty()
+        || !canonical(&q.required_candidate_order)
+        || !canonical(&q.required_study_order)
+        || !canonical(&q.required_modality_order)
+        || !canonical(&q.adversarial_events)
+        || !digest(&q.replay_identity)
+        || q.budget == 0
+        || q.max_budget == 0
+        || q.boundary != PRECLINICAL_BOUNDARY
+        || !q.raw_data_local
+        || !q.aggregate_only
+    {
+        return Err(invalid("mechanism question identity, requirements, digest, budget, locality, or boundary is invalid"));
+    }
+    let mut seen = BTreeSet::new();
+    for c in &q.candidates {
+        if c.candidate_id.trim().is_empty()
+            || c.label.trim().is_empty()
+            || !seen.insert(c.candidate_id.clone())
+            || c.study_order.is_empty()
+            || c.modality_order.is_empty()
+            || !canonical(&c.study_order)
+            || !canonical(&c.modality_order)
+            || c.support_milli > 1000
+            || !digest(&c.artifact_digest)
+            || c.provenance_digest.as_ref().is_some_and(|v| !digest(v))
+            || !digest(&c.replay_identity)
+            || c.semantic_profile.trim().is_empty()
+            || !canonical(&c.omissions)
+            || !canonical(&c.uncertainty)
+        {
+            return Err(invalid(format!(
+                "candidate {} is malformed or duplicated",
+                c.candidate_id
+            )));
+        }
+    }
+    Ok(())
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn h(v: &str) -> ContentHash {
+        ContentHash::of_bytes(v.as_bytes())
+    }
+    fn c(id: &str, state: EvidenceState, s: u16) -> MechanismCandidate {
+        MechanismCandidate {
+            candidate_id: id.into(),
+            label: format!("label-{id}"),
+            study_order: vec!["study-a".into()],
+            modality_order: vec!["imaging".into()],
+            semantic_profile: "preclinical-neural".into(),
+            evidence_state: state,
+            support_milli: s,
+            artifact_digest: h(&format!("artifact-{id}")),
+            provenance_digest: Some(h(&format!("prov-{id}"))),
+            replay_identity: h("replay"),
+            omissions: vec![],
+            uncertainty: vec![],
+            negative_result: false,
+            local_data: true,
+            permitted: true,
+        }
+    }
+    fn q(candidates: Vec<MechanismCandidate>) -> MechanismQuestion {
+        MechanismQuestion {
+            request_id: "request-1".into(),
+            federation_id: "fed-1".into(),
+            source_institution: "site-a".into(),
+            target_institution: "site-b".into(),
+            purpose: "mechanism-control".into(),
+            semantic_profile: "preclinical-neural".into(),
+            required_candidate_order: vec!["candidate-a".into()],
+            required_study_order: vec!["study-a".into()],
+            required_modality_order: vec!["imaging".into()],
+            candidates,
+            replay_identity: h("replay"),
+            policy_allow: true,
+            protected_closure: true,
+            signed_approval: true,
+            federation_approved: true,
+            raw_data_local: true,
+            aggregate_only: true,
+            budget: 4,
+            max_budget: 8,
+            adversarial_events: vec![],
+            boundary: PRECLINICAL_BOUNDARY.into(),
+        }
+    }
+    #[test]
+    fn manifest() {
+        let m = mechanism_control_plane_manifest();
+        assert_eq!(m.autonomy_tier, AutonomyTier::A2);
+        m.validate().unwrap()
+    }
+    #[test]
+    fn qualified() {
+        let p =
+            control_mechanism_portfolio(&q(vec![c("candidate-a", EvidenceState::Supported, 900)]))
+                .unwrap();
+        assert_eq!(p.disposition, "qualified")
+    }
+    #[test]
+    fn unknown_and_contradicted() {
+        let mut x = q(vec![
+            c("candidate-a", EvidenceState::Unknown, 900),
+            c("candidate-b", EvidenceState::Contradicted, 900),
+        ]);
+        let p = control_mechanism_portfolio(&x).unwrap();
+        assert!(p.unresolved_order.contains(&"candidate-a".into()));
+        assert!(p.blocked_order.contains(&"candidate-b".into()));
+        x.required_candidate_order = vec!["candidate-a".into()];
+    }
+    #[test]
+    fn adversarial() {
+        let mut x = q(vec![c("candidate-a", EvidenceState::Supported, 900)]);
+        x.adversarial_events = vec!["poisoned".into()];
+        assert_eq!(
+            control_mechanism_portfolio(&x).unwrap().disposition,
+            "blocked"
+        )
+    }
+    #[test]
+    fn duplicate() {
+        let x = q(vec![
+            c("candidate-a", EvidenceState::Supported, 900),
+            c("candidate-a", EvidenceState::Supported, 800),
+        ]);
+        assert!(matches!(
+            control_mechanism_portfolio(&x),
+            Err(MechanismControlError::Invalid(_))
+        ))
+    }
+    #[test]
+    fn deterministic() {
+        let a = control_mechanism_portfolio(&q(vec![
+            c("candidate-b", EvidenceState::Supported, 700),
+            c("candidate-a", EvidenceState::Supported, 900),
+        ]))
+        .unwrap();
+        let b = control_mechanism_portfolio(&q(vec![
+            c("candidate-a", EvidenceState::Supported, 900),
+            c("candidate-b", EvidenceState::Supported, 700),
+        ]))
+        .unwrap();
+        assert_eq!(a.ranked_order, b.ranked_order);
+        assert_eq!(a.portfolio_digest, b.portfolio_digest)
+    }
+}

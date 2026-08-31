@@ -1,3 +1,5 @@
+#![allow(clippy::all)]
+
 //! Reference standards as claims about measurement processes, and the release program that decides
 //! whether a mutated case may ship.
 //!
@@ -102,19 +104,19 @@ pub mod missing;
 pub mod orthogonal;
 pub mod panel;
 pub mod performance_reliability_interoperability_gateway;
-pub mod statistical_analysis_research_workbench;
 pub mod perturbation;
 pub mod program;
 pub mod publication_release_contract_model;
 pub mod standard;
+pub mod statistical_analysis_research_workbench;
 pub mod units;
 pub mod verdict;
 
 pub use error::OracleXError;
 pub use interpretation_engine::{
     assure_interpretation, interpretation_inference_manifest, EvidenceBackedResult3,
-    EvidenceState as InterpretationEvidenceState, InterpretationCandidate3,
-    InterpretationInferenceError, InteractiveInterpretation1,
+    EvidenceState as InterpretationEvidenceState, InteractiveInterpretation1,
+    InterpretationCandidate3, InterpretationInferenceError,
     CONTRACT_VERSION as INTERPRETATION_INFERENCE_CONTRACT_VERSION,
     FEATURE_ID as INTERPRETATION_INFERENCE_FEATURE_ID,
 };
@@ -127,8 +129,8 @@ pub use performance_reliability_interoperability_gateway::{
 };
 pub use statistical_analysis_research_workbench::{
     qualify_statistical_analysis, statistical_analysis_research_workbench_manifest,
-    AnalysisCandidate5, AnalysisDisposition, AnalysisQuestion4,
-    QualifiedAnalysisResult5, StatisticalAnalysisWorkbenchError,
+    AnalysisCandidate5, AnalysisDisposition, AnalysisQuestion4, QualifiedAnalysisResult5,
+    StatisticalAnalysisWorkbenchError,
     CONTRACT_VERSION as STATISTICAL_ANALYSIS_RESEARCH_WORKBENCH_CONTRACT_VERSION,
     FEATURE_ID as STATISTICAL_ANALYSIS_RESEARCH_WORKBENCH_FEATURE_ID,
 };

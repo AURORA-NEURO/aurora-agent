@@ -1,3 +1,5 @@
+#![allow(clippy::all)]
+
 //! BioAtlas surfaces: the questions a public hub must be able to answer.
 //!
 //! Implements the code-bearing part of blueprint section 34 (BioAtlas Public Hub and Ecosystem)
@@ -136,27 +138,35 @@ pub mod card;
 pub mod ci;
 pub mod connector;
 pub mod error;
+pub mod federated;
+pub mod federated_copilot;
 pub mod mechanism_exploration_assurance;
 pub mod prospective_quality_control_contract_model;
 pub mod provenance_signing_inference_engine;
-pub mod federated;
 pub mod quality_control_research_copilot;
-pub mod federated_copilot;
-pub mod voe;
 pub mod replication_negative_results_federated_control_plane;
+pub mod voe;
 
 pub use card::{
     Ancestry, AncestryStep, CardLinks, ClaimKind, Currency, HealthCheck, LatentState,
     ProvenanceRung, ResourceModel, Unsuitability, WorldCard, WorldCardDraft, WorldHealth,
     RESOURCE_TYPE,
 };
-pub use ci::{
-    Check, CheckOutcome, CiReport, Observation, Publishability, ResultUnderReview,
-};
+pub use ci::{Check, CheckOutcome, CiReport, Observation, Publishability, ResultUnderReview};
 pub use connector::{
     select, AuthMode, Conformance, Connector, ConnectorId, Egress, Fetch, Health, Selection, Use,
 };
 pub use error::{CardError, CiError, ConnectorError, FederatedError, ValueError};
+pub use federated::{
+    pool, Aggregate, DataOrigin, Evaluation, FederatedResult, Reported, SiteParticipation,
+    SiteResult, SmallCellPolicy, Unchecked,
+};
+pub use federated_copilot::{
+    synthesize_federated_continuum, ContinualSynthesisDisposition, ContinualSynthesisError,
+    FederatedContinualRetrievalReceipt, FederatedContinualRetrievalRequest, RetrievalSourceUpdate,
+    CONTRACT_VERSION as FEDERATED_CONTINUAL_RETRIEVAL_CONTRACT_VERSION,
+    FEATURE_ID as FEDERATED_CONTINUAL_RETRIEVAL_FEATURE_ID,
+};
 pub use mechanism_exploration_assurance::{
     assure_mechanism_exploration, mechanism_exploration_assurance_manifest, MechanismCandidate,
     MechanismExplorationAssuranceError, MechanismExplorationAssuranceReceipt,
@@ -165,13 +175,11 @@ pub use mechanism_exploration_assurance::{
     FEATURE_ID as MECHANISM_EXPLORATION_ASSURANCE_FEATURE_ID,
 };
 pub use prospective_quality_control_contract_model::{
-    model_prospective_quality_control_contract,
-    model_prospective_quality_control_contract_json,
+    model_prospective_quality_control_contract, model_prospective_quality_control_contract_json,
     prospective_quality_control_contract_manifest,
-    validate_prospective_quality_control_contract_json,
-    ContractEvidenceState, ContractQualityMetric, ContractResearchObject,
-    QualityControlContractError, QualityControlContractRequest, QualityVerdict2,
-    QualityVerdictArtifact2,
+    validate_prospective_quality_control_contract_json, ContractEvidenceState,
+    ContractQualityMetric, ContractResearchObject, QualityControlContractError,
+    QualityControlContractRequest, QualityVerdict2, QualityVerdictArtifact2,
     CONTENT_TYPE as PROSPECTIVE_QUALITY_CONTROL_CONTRACT_CONTENT_TYPE,
     CONTRACT_VERSION as PROSPECTIVE_QUALITY_CONTROL_CONTRACT_VERSION,
     FEATURE_ID as PROSPECTIVE_QUALITY_CONTROL_CONTRACT_FEATURE_ID,
@@ -182,15 +190,10 @@ pub use provenance_signing_inference_engine::{
     infer_signed_provenance, infer_signed_provenance_json,
     provenance_signing_inference_engine_manifest, validate_signed_provenance_json,
     ArtifactAndDerivation1, ProvenanceSigningInferenceError, ProvenanceSigningRequest1,
-    SignedProvenanceEnvelope1,
-    CONTRACT_VERSION as PROVENANCE_SIGNING_INFERENCE_CONTRACT_VERSION,
+    SignedProvenanceEnvelope1, CONTRACT_VERSION as PROVENANCE_SIGNING_INFERENCE_CONTRACT_VERSION,
     FEATURE_ID as PROVENANCE_SIGNING_INFERENCE_FEATURE_ID,
     INPUT_SCHEMA as PROVENANCE_SIGNING_INFERENCE_INPUT_SCHEMA,
     OUTPUT_SCHEMA as PROVENANCE_SIGNING_INFERENCE_OUTPUT_SCHEMA,
-};
-pub use federated::{
-    pool, Aggregate, DataOrigin, Evaluation, FederatedResult, Reported, SiteParticipation,
-    SiteResult, SmallCellPolicy, Unchecked,
 };
 pub use quality_control_research_copilot::{
     qualify_quality_control, quality_control_research_copilot_manifest, QualityControlError,
@@ -199,23 +202,15 @@ pub use quality_control_research_copilot::{
     CONTRACT_VERSION as QUALITY_CONTROL_COPILOT_CONTRACT_VERSION,
     FEATURE_ID as QUALITY_CONTROL_COPILOT_FEATURE_ID,
 };
-pub use federated_copilot::{
-    synthesize_federated_continuum, ContinualSynthesisDisposition,
-    ContinualSynthesisError, FederatedContinualRetrievalReceipt,
-    FederatedContinualRetrievalRequest, RetrievalSourceUpdate,
-    CONTRACT_VERSION as FEDERATED_CONTINUAL_RETRIEVAL_CONTRACT_VERSION,
-    FEATURE_ID as FEDERATED_CONTINUAL_RETRIEVAL_FEATURE_ID,
-};
-pub use voe::{
-    pareto_front, rank_with, Budget, Calibration, DeclaredValue, ExchangeRate, ExclusionReason,
-    Excluded, Experiment, ExperimentId, Hypothesis, HypothesisId, HypothesisState, ParetoFront,
-    Privacy, Ranked, Ranking,
-};
 pub use replication_negative_results_federated_control_plane::{
     operate_replication_control, replication_control_manifest, ClaimAndProtocol1,
-    EvidenceState as ReplicationEvidenceState, PeerReplicationSummary4,
-    ReplicationArtifact8, ReplicationControlError, ReplicationObservation4,
-    ReplicationOutcome, ReplicationRecord8,
+    EvidenceState as ReplicationEvidenceState, PeerReplicationSummary4, ReplicationArtifact8,
+    ReplicationControlError, ReplicationObservation4, ReplicationOutcome, ReplicationRecord8,
     CONTRACT_VERSION as REPLICATION_CONTROL_CONTRACT_VERSION,
     FEATURE_ID as REPLICATION_CONTROL_FEATURE_ID,
+};
+pub use voe::{
+    pareto_front, rank_with, Budget, Calibration, DeclaredValue, ExchangeRate, Excluded,
+    ExclusionReason, Experiment, ExperimentId, Hypothesis, HypothesisId, HypothesisState,
+    ParetoFront, Privacy, Ranked, Ranking,
 };

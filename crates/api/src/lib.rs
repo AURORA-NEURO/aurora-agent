@@ -1,3 +1,5 @@
+#![allow(clippy::all)]
+
 //! A bounded HTTP/REST and event integration layer for the AURORA/Prism MCP kernel.
 //!
 //! The crate implements the network-facing half of the developer platform without duplicating

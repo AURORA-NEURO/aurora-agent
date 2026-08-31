@@ -8,8 +8,8 @@
 
 use bioprism_foundation::{
     AuthorityRequirement, AutonomyTier, CapabilityManifest, Determinism, Effect, EvidenceReference,
-    EvidenceState, ProvenanceLink, ResearchSurface, SemanticLoss, TypedPort,
-    TypedResearchArtifact, PRECLINICAL_BOUNDARY, RESEARCH_CONTRACT_SCHEMA_VERSION,
+    EvidenceState, ProvenanceLink, ResearchSurface, SemanticLoss, TypedPort, TypedResearchArtifact,
+    PRECLINICAL_BOUNDARY, RESEARCH_CONTRACT_SCHEMA_VERSION,
 };
 use bioprism_ids::ContentHash;
 use serde::{Deserialize, Serialize};
@@ -143,7 +143,11 @@ impl CapabilityCompositionReceipt {
                 ));
             }
         }
-        if self.requested_capability_order.iter().collect::<BTreeSet<_>>().len()
+        if self
+            .requested_capability_order
+            .iter()
+            .collect::<BTreeSet<_>>()
+            .len()
             != self.requested_capability_order.len()
         {
             return Err(DependencyCompositionError::Invalid(
@@ -311,7 +315,9 @@ pub fn assure(
             || declaration.provenance_digest.is_none()
             || !declaration.permitted
             || !declaration.raw_data_local
-            || declarations.insert(declaration.capability_id.clone(), declaration).is_some()
+            || declarations
+                .insert(declaration.capability_id.clone(), declaration)
+                .is_some()
         {
             return Err(DependencyCompositionError::Invalid(
                 "capability declarations are duplicated, non-canonical, unbound, unsigned, or non-local".into(),
@@ -351,13 +357,24 @@ pub fn assure(
         };
         state.insert(id.into(), 1);
         for dependency in &declaration.dependency_order {
-            visit(dependency, declarations, selected, missing, incompatible, unresolved, cycles, state);
+            visit(
+                dependency,
+                declarations,
+                selected,
+                missing,
+                incompatible,
+                unresolved,
+                cycles,
+                state,
+            );
         }
         state.insert(id.into(), 2);
         if cycles.contains(id) || declaration.evidence_state == EvidenceState::Contradicted {
             incompatible.insert(id.into());
-        } else if matches!(declaration.evidence_state, EvidenceState::Unknown | EvidenceState::Speculative)
-            || declaration.uncertainty.iter().any(|_| true)
+        } else if matches!(
+            declaration.evidence_state,
+            EvidenceState::Unknown | EvidenceState::Speculative
+        ) || declaration.uncertainty.iter().any(|_| true)
         {
             unresolved.insert(id.into());
         } else if declaration.omissions.is_empty() {
@@ -367,7 +384,16 @@ pub fn assure(
         }
     }
     for id in &request.requested_capability_order {
-        visit(id, &declarations, &mut selected, &mut missing, &mut incompatible, &mut unresolved, &mut cycles, &mut state);
+        visit(
+            id,
+            &declarations,
+            &mut selected,
+            &mut missing,
+            &mut incompatible,
+            &mut unresolved,
+            &mut cycles,
+            &mut state,
+        );
     }
     let selected_snapshot = selected.clone();
     for id in selected_snapshot {
@@ -395,7 +421,10 @@ pub fn assure(
             uncertainty.insert(format!("capability:{}:{item}", declaration.capability_id));
         }
         if declaration.negative_result {
-            negative.insert(format!("capability:{}:negative-result", declaration.capability_id));
+            negative.insert(format!(
+                "capability:{}:negative-result",
+                declaration.capability_id
+            ));
         }
     }
     for id in &missing {
@@ -421,8 +450,15 @@ pub fn assure(
         incompatible.insert(format!("adversarial:{event}"));
         omissions.insert(format!("workflow:adversarial:{event}"));
     }
-    let global_block = !incompatible.is_empty() || !cycles.is_empty() || !request.adversarial_events.is_empty();
-    let disposition = if global_block { "blocked" } else if !missing.is_empty() || !unresolved.is_empty() || !uncertainty.is_empty() { "unresolved" } else { "qualified" };
+    let global_block =
+        !incompatible.is_empty() || !cycles.is_empty() || !request.adversarial_events.is_empty();
+    let disposition = if global_block {
+        "blocked"
+    } else if !missing.is_empty() || !unresolved.is_empty() || !uncertainty.is_empty() {
+        "unresolved"
+    } else {
+        "qualified"
+    };
     let selected_capability_order = selected.into_iter().collect::<Vec<_>>();
     let missing_capability_order = missing.into_iter().collect::<Vec<_>>();
     let incompatible_capability_order = incompatible.into_iter().collect::<Vec<_>>();
@@ -461,7 +497,10 @@ pub fn assure(
     )
     .map_err(|error| DependencyCompositionError::Artifact(error.to_string()))?;
     let effect_receipts = if disposition == "qualified" {
-        vec![format!("compose:capability-contract:{}", request.request_id)]
+        vec![format!(
+            "compose:capability-contract:{}",
+            request.request_id
+        )]
     } else {
         vec!["block:unsafe-release".into()]
     };
@@ -508,28 +547,103 @@ mod tests {
         ContentHash::of_bytes(b"interweave-dependency-contract")
     }
 
-    fn declaration(id: &str, dependencies: Vec<&str>, state: EvidenceState) -> CapabilityDeclaration {
+    fn declaration(
+        id: &str,
+        dependencies: Vec<&str>,
+        state: EvidenceState,
+    ) -> CapabilityDeclaration {
         CapabilityDeclaration {
-            capability_id: id.into(), version: "1.0.0".into(), input_schema: "Input@1".into(), output_schema: "Output@1".into(), semantic_profile: "composition:v1".into(), dependency_order: dependencies.into_iter().map(str::to_string).collect(), effect_order: vec!["read-local".into()], determinism: "byte-stable".into(), evidence_state: state, artifact_digest: hash(), provenance_digest: Some(hash()), permitted: true, raw_data_local: true, omissions: Vec::new(), uncertainty: Vec::new(), negative_result: false,
+            capability_id: id.into(),
+            version: "1.0.0".into(),
+            input_schema: "Input@1".into(),
+            output_schema: "Output@1".into(),
+            semantic_profile: "composition:v1".into(),
+            dependency_order: dependencies.into_iter().map(str::to_string).collect(),
+            effect_order: vec!["read-local".into()],
+            determinism: "byte-stable".into(),
+            evidence_state: state,
+            artifact_digest: hash(),
+            provenance_digest: Some(hash()),
+            permitted: true,
+            raw_data_local: true,
+            omissions: Vec::new(),
+            uncertainty: Vec::new(),
+            negative_result: false,
         }
     }
 
     fn request() -> DependencyCompositionRequest {
         DependencyCompositionRequest {
-            request_id: "request:interweave-composition".into(), federation_id: "federation:composition".into(), purpose: "research-workflow".into(), requested_capability_order: vec!["capability-a".into(), "capability-b".into()], semantic_profile: "composition:v1".into(), protocol_version: "mcp:2025-06-18".into(), declarations: vec![declaration("capability-a", vec![], EvidenceState::Supported), declaration("capability-b", vec!["capability-a"], EvidenceState::Proven)], policy_allow: true, protected_closure: true, signed_approval: true, federation_approved: true, raw_data_local: true, aggregate_only: true, budget_units: 10, max_budget_units: 10, adversarial_events: Vec::new(), boundary: PRECLINICAL_BOUNDARY.into(),
+            request_id: "request:interweave-composition".into(),
+            federation_id: "federation:composition".into(),
+            purpose: "research-workflow".into(),
+            requested_capability_order: vec!["capability-a".into(), "capability-b".into()],
+            semantic_profile: "composition:v1".into(),
+            protocol_version: "mcp:2025-06-18".into(),
+            declarations: vec![
+                declaration("capability-a", vec![], EvidenceState::Supported),
+                declaration("capability-b", vec!["capability-a"], EvidenceState::Proven),
+            ],
+            policy_allow: true,
+            protected_closure: true,
+            signed_approval: true,
+            federation_approved: true,
+            raw_data_local: true,
+            aggregate_only: true,
+            budget_units: 10,
+            max_budget_units: 10,
+            adversarial_events: Vec::new(),
+            boundary: PRECLINICAL_BOUNDARY.into(),
         }
     }
 
     #[test]
-    fn qualified_dependency_closure_emits_composition() { let receipt = assure(&request()).unwrap(); assert_eq!(receipt.disposition, "qualified"); assert_eq!(receipt.selected_capability_order, vec!["capability-a", "capability-b"]); assert!(receipt.effect_receipts[0].starts_with("compose:capability-contract:")); }
+    fn qualified_dependency_closure_emits_composition() {
+        let receipt = assure(&request()).unwrap();
+        assert_eq!(receipt.disposition, "qualified");
+        assert_eq!(
+            receipt.selected_capability_order,
+            vec!["capability-a", "capability-b"]
+        );
+        assert!(receipt.effect_receipts[0].starts_with("compose:capability-contract:"));
+    }
     #[test]
-    fn missing_dependency_is_unresolved() { let mut value = request(); value.declarations[1].dependency_order = vec!["missing".into()]; let receipt = assure(&value).unwrap(); assert_eq!(receipt.disposition, "unresolved"); assert!(receipt.missing_capability_order.contains(&"missing".into())); }
+    fn missing_dependency_is_unresolved() {
+        let mut value = request();
+        value.declarations[1].dependency_order = vec!["missing".into()];
+        let receipt = assure(&value).unwrap();
+        assert_eq!(receipt.disposition, "unresolved");
+        assert!(receipt.missing_capability_order.contains(&"missing".into()));
+    }
     #[test]
-    fn cycle_is_blocked() { let mut value = request(); value.declarations[0].dependency_order = vec!["capability-b".into()]; let receipt = assure(&value).unwrap(); assert_eq!(receipt.disposition, "blocked"); assert!(!receipt.cycle_order.is_empty()); }
+    fn cycle_is_blocked() {
+        let mut value = request();
+        value.declarations[0].dependency_order = vec!["capability-b".into()];
+        let receipt = assure(&value).unwrap();
+        assert_eq!(receipt.disposition, "blocked");
+        assert!(!receipt.cycle_order.is_empty());
+    }
     #[test]
-    fn unknown_evidence_is_unresolved() { let mut value = request(); value.declarations[0].evidence_state = EvidenceState::Unknown; let receipt = assure(&value).unwrap(); assert_eq!(receipt.disposition, "unresolved"); assert!(!receipt.unresolved_capability_order.is_empty()); }
+    fn unknown_evidence_is_unresolved() {
+        let mut value = request();
+        value.declarations[0].evidence_state = EvidenceState::Unknown;
+        let receipt = assure(&value).unwrap();
+        assert_eq!(receipt.disposition, "unresolved");
+        assert!(!receipt.unresolved_capability_order.is_empty());
+    }
     #[test]
-    fn policy_and_adversarial_inputs_block() { let mut value = request(); value.policy_allow = false; value.adversarial_events = vec!["poisoned-manifest".into()]; let receipt = assure(&value).unwrap(); assert_eq!(receipt.disposition, "blocked"); assert_eq!(receipt.effect_receipts, vec!["block:unsafe-release"]); }
+    fn policy_and_adversarial_inputs_block() {
+        let mut value = request();
+        value.policy_allow = false;
+        value.adversarial_events = vec!["poisoned-manifest".into()];
+        let receipt = assure(&value).unwrap();
+        assert_eq!(receipt.disposition, "blocked");
+        assert_eq!(receipt.effect_receipts, vec!["block:unsafe-release"]);
+    }
     #[test]
-    fn manifest_is_a2_and_federated() { let manifest = capability_manifest(); assert_eq!(manifest.autonomy_tier, AutonomyTier::A2); assert!(manifest.effects.contains(&Effect::FederationExport)); }
+    fn manifest_is_a2_and_federated() {
+        let manifest = capability_manifest();
+        assert_eq!(manifest.autonomy_tier, AutonomyTier::A2);
+        assert!(manifest.effects.contains(&Effect::FederationExport));
+    }
 }

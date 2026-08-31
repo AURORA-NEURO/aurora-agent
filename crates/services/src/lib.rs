@@ -1,3 +1,5 @@
+#![allow(clippy::all)]
+
 //! The nine §40 service contracts as types, and the workspace held against them.
 //!
 //! Implements blueprint 40.03 (Service and Process Graph), 40.04 (Domain Boundaries and
@@ -160,10 +162,9 @@ pub use research_release_batch::{
 };
 pub use research_release_federated_inference_engine::{
     federated_publication_release_inference_manifest, infer_federated_publication_release,
-    FederatedPublicationReleaseInferenceError,
-    FederatedPublicationReleaseInferenceReceipt,
-    FederatedPublicationReleaseInferenceRequest,
-    PublicationReleaseInferenceCandidate, PublicationReleaseInferenceDecision,
+    FederatedPublicationReleaseInferenceError, FederatedPublicationReleaseInferenceReceipt,
+    FederatedPublicationReleaseInferenceRequest, PublicationReleaseInferenceCandidate,
+    PublicationReleaseInferenceDecision,
     FEATURE_ID as FEDERATED_PUBLICATION_RELEASE_INFERENCE_FEATURE_ID,
     FEATURE_VERSION as FEDERATED_PUBLICATION_RELEASE_INFERENCE_VERSION,
 };

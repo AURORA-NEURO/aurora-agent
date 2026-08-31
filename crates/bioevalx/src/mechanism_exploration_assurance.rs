@@ -9,9 +9,9 @@
 //! institution; only digests and an auditable receipt are produced.
 
 use bioprism_foundation::research::{
-    AuthorityRequirement, AutonomyTier, CapabilityManifest, Determinism, Effect,
-    EvidenceReference, EvidenceState, ProvenanceLink, ResearchSurface, TypedPort,
-    TypedResearchArtifact, PRECLINICAL_BOUNDARY, RESEARCH_CONTRACT_SCHEMA_VERSION,
+    AuthorityRequirement, AutonomyTier, CapabilityManifest, Determinism, Effect, EvidenceReference,
+    EvidenceState, ProvenanceLink, ResearchSurface, TypedPort, TypedResearchArtifact,
+    PRECLINICAL_BOUNDARY, RESEARCH_CONTRACT_SCHEMA_VERSION,
 };
 use bioprism_ids::ContentHash;
 use serde::{Deserialize, Serialize};
@@ -195,7 +195,10 @@ impl MechanismAssuranceReport {
             || self.federation_id.trim().is_empty()
             || self.purpose.trim().is_empty()
             || self.semantic_profile.trim().is_empty()
-            || !matches!(self.disposition.as_str(), "qualified" | "unresolved" | "blocked")
+            || !matches!(
+                self.disposition.as_str(),
+                "qualified" | "unresolved" | "blocked"
+            )
             || self.candidate_order.is_empty()
             || self.ranked_order.len() != self.candidate_order.len()
             || self.effect_receipts.is_empty()
@@ -248,14 +251,11 @@ impl MechanismAssuranceReport {
                 .iter()
                 .any(|id| candidate_set.contains(id))
         {
-            return Err(invalid("mechanism candidate states do not partition observed and missing candidates"));
+            return Err(invalid(
+                "mechanism candidate states do not partition observed and missing candidates",
+            ));
         }
-        if self
-            .ranked_order
-            .iter()
-            .collect::<BTreeSet<_>>()
-            != candidate_set
-        {
+        if self.ranked_order.iter().collect::<BTreeSet<_>>() != candidate_set {
             return Err(invalid("mechanism ranking is not a candidate permutation"));
         }
         for value in [
@@ -278,7 +278,7 @@ impl MechanismAssuranceReport {
         if self.disposition == "qualified" {
             if self.effect_receipts.len() != 1
                 || !self.effect_receipts[0].starts_with("verify:bioevalx-mechanism-assurance:")
-        {
+            {
                 return Err(invalid("qualified mechanism report effect is invalid"));
             }
         } else if self.effect_receipts != ["block:unsafe-release"] {
@@ -354,14 +354,24 @@ pub fn assure_mechanism_portfolio(
             competing.insert(format!("{}:contradicted-evidence", candidate.candidate_id));
             continue;
         }
-        if matches!(candidate.evidence_state, EvidenceState::Unknown | EvidenceState::Speculative)
-        {
+        if matches!(
+            candidate.evidence_state,
+            EvidenceState::Unknown | EvidenceState::Speculative
+        ) {
             unresolved.insert(candidate.candidate_id.clone());
             uncertainty.insert(format!("{}:evidence-unresolved", candidate.candidate_id));
             continue;
         }
-        let studies = candidate.study_order.iter().cloned().collect::<BTreeSet<_>>();
-        let modalities = candidate.modality_order.iter().cloned().collect::<BTreeSet<_>>();
+        let studies = candidate
+            .study_order
+            .iter()
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        let modalities = candidate
+            .modality_order
+            .iter()
+            .cloned()
+            .collect::<BTreeSet<_>>();
         let complete = candidate.local_data
             && candidate.permitted
             && candidate.provenance_digest.is_some()
@@ -373,40 +383,67 @@ pub fn assure_mechanism_portfolio(
             && candidate.omissions.is_empty()
             && candidate.uncertainty.is_empty()
             && candidate.support_score_milli >= 600;
-        if complete && matches!(candidate.evidence_state, EvidenceState::Proven | EvidenceState::Supported)
+        if complete
+            && matches!(
+                candidate.evidence_state,
+                EvidenceState::Proven | EvidenceState::Supported
+            )
         {
             qualified.insert(candidate.candidate_id.clone());
         } else {
             unresolved.insert(candidate.candidate_id.clone());
             if candidate.provenance_digest.is_none() || candidate.baseline_digest.is_none() {
-                omissions.insert(format!("{}:typed-provenance-or-baseline-missing", candidate.candidate_id));
+                omissions.insert(format!(
+                    "{}:typed-provenance-or-baseline-missing",
+                    candidate.candidate_id
+                ));
             }
             if !required_studies.is_subset(&studies) {
-                omissions.insert(format!("{}:required-study-coverage-incomplete", candidate.candidate_id));
+                omissions.insert(format!(
+                    "{}:required-study-coverage-incomplete",
+                    candidate.candidate_id
+                ));
             }
             if !required_modalities.is_subset(&modalities) {
-                omissions.insert(format!("{}:required-modality-coverage-incomplete", candidate.candidate_id));
+                omissions.insert(format!(
+                    "{}:required-modality-coverage-incomplete",
+                    candidate.candidate_id
+                ));
             }
             if candidate.support_score_milli < 600 {
-                uncertainty.insert(format!("{}:support-threshold-not-met", candidate.candidate_id));
+                uncertainty.insert(format!(
+                    "{}:support-threshold-not-met",
+                    candidate.candidate_id
+                ));
             }
             if !candidate.local_data || !candidate.permitted {
                 blocked.insert(candidate.candidate_id.clone());
                 unresolved.remove(&candidate.candidate_id);
-                omissions.insert(format!("{}:locality-or-permission-denied", candidate.candidate_id));
+                omissions.insert(format!(
+                    "{}:locality-or-permission-denied",
+                    candidate.candidate_id
+                ));
             }
         }
     }
     let missing_study_order = request
         .required_study_order
         .iter()
-        .filter(|study| !candidates.iter().any(|candidate| candidate.study_order.contains(study)))
+        .filter(|study| {
+            !candidates
+                .iter()
+                .any(|candidate| candidate.study_order.contains(study))
+        })
         .cloned()
         .collect::<Vec<_>>();
     let missing_modality_order = request
         .required_modality_order
         .iter()
-        .filter(|modality| !candidates.iter().any(|candidate| candidate.modality_order.contains(modality)))
+        .filter(|modality| {
+            !candidates
+                .iter()
+                .any(|candidate| candidate.modality_order.contains(modality))
+        })
         .cloned()
         .collect::<Vec<_>>();
     for id in &missing_candidate_order {
@@ -470,7 +507,10 @@ pub fn assure_mechanism_portfolio(
         "retain-omission-and-negative-receipt".into(),
     ];
     let effect_receipts = if disposition == "qualified" {
-        vec![format!("verify:bioevalx-mechanism-assurance:{}", request.request_id)]
+        vec![format!(
+            "verify:bioevalx-mechanism-assurance:{}",
+            request.request_id
+        )]
     } else {
         vec!["block:unsafe-release".into()]
     };
@@ -599,7 +639,10 @@ fn validate_request(request: &MechanismPortfolioRequest) -> Result<(), Mechanism
             || !canonical(&candidate.omissions)
             || !canonical(&candidate.uncertainty)
         {
-            return Err(invalid(format!("candidate {} is malformed or duplicated", candidate.candidate_id)));
+            return Err(invalid(format!(
+                "candidate {} is malformed or duplicated",
+                candidate.candidate_id
+            )));
         }
     }
     Ok(())
@@ -682,12 +725,19 @@ mod tests {
 
     #[test]
     fn missing_requirements_remain_unresolved() {
-        let mut req = request(vec![candidate("candidate-a", EvidenceState::Supported, 900)]);
+        let mut req = request(vec![candidate(
+            "candidate-a",
+            EvidenceState::Supported,
+            900,
+        )]);
         req.required_modality_order.push("spatial".into());
         req.required_modality_order.sort();
         let report = assure_mechanism_portfolio(&req).unwrap();
         assert_eq!(report.disposition, "unresolved");
-        assert!(report.omission_order.iter().any(|item| item.contains("required-modality")));
+        assert!(report
+            .omission_order
+            .iter()
+            .any(|item| item.contains("required-modality")));
     }
 
     #[test]
@@ -705,7 +755,11 @@ mod tests {
 
     #[test]
     fn policy_or_adversarial_event_blocks_release() {
-        let mut req = request(vec![candidate("candidate-a", EvidenceState::Supported, 900)]);
+        let mut req = request(vec![candidate(
+            "candidate-a",
+            EvidenceState::Supported,
+            900,
+        )]);
         req.adversarial_events = vec!["poisoned-artifact".into()];
         let report = assure_mechanism_portfolio(&req).unwrap();
         assert_eq!(report.disposition, "blocked");

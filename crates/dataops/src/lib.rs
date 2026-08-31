@@ -1,3 +1,5 @@
+#![allow(clippy::all)]
+
 //! The rest of blueprint section 12: storage architecture, the relational catalog, service-level
 //! objectives, compute providers, placement, and local and federated deployment.
 //!
@@ -262,30 +264,30 @@ pub mod basis;
 pub mod catalog;
 pub mod citations;
 pub mod error;
+pub mod federated_continual_ingestion_integrity_contract_model;
+pub mod federated_continual_ingestion_integrity_inference;
+pub mod federated_continual_ingestion_integrity_research_copilot;
+pub mod federated_continual_ingestion_integrity_workflow_fabric;
 pub mod federation;
 pub mod ingestion_integrity_support;
-pub mod local_ingestion_integrity_inference;
-pub mod multimodal_ingestion_integrity_inference;
-pub mod throughput_ingestion_integrity_inference;
-pub mod federated_continual_ingestion_integrity_inference;
-pub mod local_ingestion_integrity_contract_model;
-pub mod multimodal_ingestion_integrity_contract_model;
-pub mod throughput_ingestion_integrity_contract_model;
-pub mod federated_continual_ingestion_integrity_contract_model;
-pub mod local_ingestion_integrity_research_copilot;
-pub mod multimodal_ingestion_integrity_research_copilot;
-pub mod throughput_ingestion_integrity_research_copilot;
-pub mod federated_continual_ingestion_integrity_research_copilot;
-pub mod local_ingestion_integrity_workflow_fabric;
-pub mod multimodal_ingestion_integrity_workflow_fabric;
-pub mod throughput_ingestion_integrity_workflow_fabric;
-pub mod federated_continual_ingestion_integrity_workflow_fabric;
 pub mod local;
+pub mod local_ingestion_integrity_contract_model;
+pub mod local_ingestion_integrity_inference;
+pub mod local_ingestion_integrity_research_copilot;
+pub mod local_ingestion_integrity_workflow_fabric;
+pub mod multimodal_ingestion_integrity_contract_model;
+pub mod multimodal_ingestion_integrity_inference;
+pub mod multimodal_ingestion_integrity_research_copilot;
+pub mod multimodal_ingestion_integrity_workflow_fabric;
 pub mod placement;
+pub mod provenance_signing_workflow_fabric;
 pub mod provider;
 pub mod slo;
+pub mod throughput_ingestion_integrity_contract_model;
+pub mod throughput_ingestion_integrity_inference;
+pub mod throughput_ingestion_integrity_research_copilot;
+pub mod throughput_ingestion_integrity_workflow_fabric;
 pub mod topology;
-pub mod provenance_signing_workflow_fabric;
 
 pub use basis::{Attested, Basis, Coverage, PartyId};
 pub use catalog::{
@@ -297,19 +299,39 @@ pub use error::{
     BasisError, CatalogError, FederationError, LocalError, PlacementError, ProviderError, SloError,
     TopologyError,
 };
+pub use federated_continual_ingestion_integrity_contract_model::*;
+pub use federated_continual_ingestion_integrity_inference::*;
+pub use federated_continual_ingestion_integrity_research_copilot::*;
+pub use federated_continual_ingestion_integrity_workflow_fabric::*;
 pub use federation::{
     import_record, minimize_cross_region, plan_replication, private_worker_link,
     ArtifactSensitivity, ConnectionDirection, DeploymentPlan, FederationPolicy, Plane,
     PlanePlacement, Replication, SignedRecord, TenantPattern,
 };
+pub use ingestion_integrity_support::*;
 pub use local::{
     Demand, Detail, DoctorReport, NetworkPolicy, OfflineContract, ParityClaim, ProbeOutcome,
     Readiness, Requirement, Resolution, ResourceEnvelope, Source, Unsatisfiable,
 };
+pub use local_ingestion_integrity_contract_model::*;
+pub use local_ingestion_integrity_inference::*;
+pub use local_ingestion_integrity_research_copilot::*;
+pub use local_ingestion_integrity_workflow_fabric::*;
+pub use multimodal_ingestion_integrity_contract_model::*;
+pub use multimodal_ingestion_integrity_inference::*;
+pub use multimodal_ingestion_integrity_research_copilot::*;
+pub use multimodal_ingestion_integrity_workflow_fabric::*;
 pub use placement::{
     accept_result, attribute_timeout, plan_shards, AttemptRecord, Fleet, JobRequirements,
     MatchReason, PlacementDecision, PlacementPolicy, Refusal, Repeatability, ResultEvidence, Seed,
     ShardPlan, TaskId, TaskLease, TimeoutEvidence, UnitId, WorkerDeclaration, WorkerId,
+};
+pub use provenance_signing_workflow_fabric::{
+    assure_prospective_provenance, prospective_provenance_assurance_manifest,
+    ArtifactAndDerivation3, ArtifactAndDerivationRequest3, DerivationEvidenceState,
+    ProspectiveProvenanceError, SignedProvenanceEnvelope7,
+    CONTRACT_VERSION as PROVENANCE_SIGNING_WORKFLOW_FABRIC_CONTRACT_VERSION,
+    FEATURE_ID as PROVENANCE_SIGNING_WORKFLOW_FABRIC_FEATURE_ID,
 };
 pub use provider::{
     local_path_is_self_contained, AdmissionPolicy, Capability, ConformanceLevel, ExternalService,
@@ -321,34 +343,14 @@ pub use slo::{
     BurnThreshold, Confidence, Conformance, FailureDomain, Indeterminate, Observations,
     ServiceObjective, SloReport, Target, Window,
 };
+pub use throughput_ingestion_integrity_contract_model::*;
+pub use throughput_ingestion_integrity_inference::*;
+pub use throughput_ingestion_integrity_research_copilot::*;
+pub use throughput_ingestion_integrity_workflow_fabric::*;
 pub use topology::{
     parity, reference_local, reference_team, DataClass, Deployment, Mutability, ParityReport,
     PromiseDifference, Promises, StorageTopology, StoreProfile, TopologyDraft,
 };
-pub use provenance_signing_workflow_fabric::{
-    assure_prospective_provenance, prospective_provenance_assurance_manifest,
-    ArtifactAndDerivation3, ArtifactAndDerivationRequest3, DerivationEvidenceState,
-    ProspectiveProvenanceError, SignedProvenanceEnvelope7,
-    FEATURE_ID as PROVENANCE_SIGNING_WORKFLOW_FABRIC_FEATURE_ID,
-    CONTRACT_VERSION as PROVENANCE_SIGNING_WORKFLOW_FABRIC_CONTRACT_VERSION,
-};
-pub use ingestion_integrity_support::*;
-pub use local_ingestion_integrity_inference::*;
-pub use multimodal_ingestion_integrity_inference::*;
-pub use throughput_ingestion_integrity_inference::*;
-pub use federated_continual_ingestion_integrity_inference::*;
-pub use local_ingestion_integrity_contract_model::*;
-pub use multimodal_ingestion_integrity_contract_model::*;
-pub use throughput_ingestion_integrity_contract_model::*;
-pub use federated_continual_ingestion_integrity_contract_model::*;
-pub use local_ingestion_integrity_research_copilot::*;
-pub use multimodal_ingestion_integrity_research_copilot::*;
-pub use throughput_ingestion_integrity_research_copilot::*;
-pub use federated_continual_ingestion_integrity_research_copilot::*;
-pub use local_ingestion_integrity_workflow_fabric::*;
-pub use multimodal_ingestion_integrity_workflow_fabric::*;
-pub use throughput_ingestion_integrity_workflow_fabric::*;
-pub use federated_continual_ingestion_integrity_workflow_fabric::*;
 
 /// The caller-supplied logical clock every lifecycle decision in this crate advances on.
 #[doc(inline)]

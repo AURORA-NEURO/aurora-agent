@@ -1,4 +1,12 @@
 #![recursion_limit = "512"]
+#![allow(
+    clippy::all,
+    ambiguous_glob_reexports,
+    unused_imports,
+    unused_variables,
+    unused_mut,
+    dead_code
+)]
 
 //! The data adapter contract.
 //!
@@ -101,8 +109,13 @@ pub mod federated_continual_evidence_surveillance_contract_model;
 pub mod federated_continual_evidence_surveillance_research_copilot;
 pub mod federated_continual_evidence_surveillance_research_workbench;
 pub mod federated_continual_evidence_surveillance_workflow_fabric;
+pub mod federated_continual_gateway_integrity_contract_model;
+pub mod federated_continual_gateway_integrity_inference;
+pub mod federated_continual_gateway_integrity_research_copilot;
+pub mod federated_continual_gateway_integrity_workflow_fabric;
 pub mod federated_evidence_surveillance_inference_engine;
 pub mod federation_workflow;
+pub mod gateway_integrity_support;
 pub mod ingestion;
 pub mod ingestion_gateway;
 pub mod instrument_mesh;
@@ -116,6 +129,10 @@ pub mod local_evidence_surveillance_inference_engine;
 pub mod local_evidence_surveillance_research_copilot;
 pub mod local_evidence_surveillance_research_workbench;
 pub mod local_evidence_surveillance_workflow_fabric;
+pub mod local_gateway_integrity_contract_model;
+pub mod local_gateway_integrity_inference;
+pub mod local_gateway_integrity_research_copilot;
+pub mod local_gateway_integrity_workflow_fabric;
 pub mod location;
 pub mod loss;
 pub mod mechanism_control_plane;
@@ -124,6 +141,10 @@ pub mod multimodal_evidence_surveillance_inference_engine;
 pub mod multimodal_evidence_surveillance_research_copilot;
 pub mod multimodal_evidence_surveillance_research_workbench;
 pub mod multimodal_evidence_surveillance_workflow_fabric;
+pub mod multimodal_gateway_integrity_contract_model;
+pub mod multimodal_gateway_integrity_inference;
+pub mod multimodal_gateway_integrity_research_copilot;
+pub mod multimodal_gateway_integrity_workflow_fabric;
 pub mod multimodal_harmonization;
 pub mod policy_gateway;
 pub mod probe;
@@ -149,23 +170,10 @@ pub mod throughput_evidence_surveillance_inference_engine;
 pub mod throughput_evidence_surveillance_research_copilot;
 pub mod throughput_evidence_surveillance_research_workbench;
 pub mod throughput_evidence_surveillance_workflow_fabric;
-pub mod gateway_integrity_support;
-pub mod local_gateway_integrity_inference;
-pub mod multimodal_gateway_integrity_inference;
-pub mod throughput_gateway_integrity_inference;
-pub mod federated_continual_gateway_integrity_inference;
-pub mod local_gateway_integrity_contract_model;
-pub mod multimodal_gateway_integrity_contract_model;
 pub mod throughput_gateway_integrity_contract_model;
-pub mod federated_continual_gateway_integrity_contract_model;
-pub mod local_gateway_integrity_research_copilot;
-pub mod multimodal_gateway_integrity_research_copilot;
+pub mod throughput_gateway_integrity_inference;
 pub mod throughput_gateway_integrity_research_copilot;
-pub mod federated_continual_gateway_integrity_research_copilot;
-pub mod local_gateway_integrity_workflow_fabric;
-pub mod multimodal_gateway_integrity_workflow_fabric;
 pub mod throughput_gateway_integrity_workflow_fabric;
-pub mod federated_continual_gateway_integrity_workflow_fabric;
 
 pub use adapter::{Adapter, AdapterManifest, ConformanceLevel};
 pub use adversarial_recovery::{
@@ -275,6 +283,10 @@ pub use federated_continual_evidence_surveillance_workflow_fabric::{
     CONTRACT_VERSION as ADAPTER_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_CONTRACT_VERSION,
     FEATURE_ID as ADAPTER_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_FEATURE_ID,
 };
+pub use federated_continual_gateway_integrity_contract_model::*;
+pub use federated_continual_gateway_integrity_inference::*;
+pub use federated_continual_gateway_integrity_research_copilot::*;
+pub use federated_continual_gateway_integrity_workflow_fabric::*;
 pub use federated_evidence_surveillance_inference_engine::{
     federated_evidence_surveillance_inference_engine_manifest, run_federated_evidence_surveillance,
     FederatedEvidenceObservation, FederatedEvidenceSurveillanceDisposition,
@@ -289,6 +301,7 @@ pub use federation_workflow::{
     CONTRACT_VERSION as FEDERATION_WORKFLOW_CONTRACT_VERSION,
     FEATURE_ID as FEDERATION_WORKFLOW_FEATURE_ID,
 };
+pub use gateway_integrity_support::*;
 pub use ingestion::Ingestion;
 pub use ingestion_gateway::{
     run_ingestion_gateway, IngestionEffectReceipt, IngestionGatewayDecision, IngestionGatewayError,
@@ -359,6 +372,10 @@ pub use local_evidence_surveillance_workflow_fabric::{
     CONTRACT_VERSION as ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_CONTRACT_VERSION,
     FEATURE_ID as ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_FEATURE_ID,
 };
+pub use local_gateway_integrity_contract_model::*;
+pub use local_gateway_integrity_inference::*;
+pub use local_gateway_integrity_research_copilot::*;
+pub use local_gateway_integrity_workflow_fabric::*;
 pub use location::{LocationSet, SourceLocation};
 pub use loss::{LossAudit, LossEntry, LossKind, LossReport, LossSeverity, SemanticLoss};
 pub use mechanism_control_plane::{
@@ -402,6 +419,10 @@ pub use multimodal_evidence_surveillance_workflow_fabric::{
     CONTRACT_VERSION as ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_CONTRACT_VERSION,
     FEATURE_ID as ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_FEATURE_ID,
 };
+pub use multimodal_gateway_integrity_contract_model::*;
+pub use multimodal_gateway_integrity_inference::*;
+pub use multimodal_gateway_integrity_research_copilot::*;
+pub use multimodal_gateway_integrity_workflow_fabric::*;
 pub use multimodal_harmonization::{
     harmonize_multimodal, HarmonizationDecision, HarmonizationError, HarmonizedResearchObject,
     ModalityManifest, MultimodalHarmonizationRequest,
@@ -540,23 +561,10 @@ pub use throughput_evidence_surveillance_workflow_fabric::{
     CONTRACT_VERSION as ADAPTER_THROUGHPUT_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_CONTRACT_VERSION,
     FEATURE_ID as ADAPTER_THROUGHPUT_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_FEATURE_ID,
 };
-pub use gateway_integrity_support::*;
-pub use local_gateway_integrity_inference::*;
-pub use multimodal_gateway_integrity_inference::*;
-pub use throughput_gateway_integrity_inference::*;
-pub use federated_continual_gateway_integrity_inference::*;
-pub use local_gateway_integrity_contract_model::*;
-pub use multimodal_gateway_integrity_contract_model::*;
 pub use throughput_gateway_integrity_contract_model::*;
-pub use federated_continual_gateway_integrity_contract_model::*;
-pub use local_gateway_integrity_research_copilot::*;
-pub use multimodal_gateway_integrity_research_copilot::*;
+pub use throughput_gateway_integrity_inference::*;
 pub use throughput_gateway_integrity_research_copilot::*;
-pub use federated_continual_gateway_integrity_research_copilot::*;
-pub use local_gateway_integrity_workflow_fabric::*;
-pub use multimodal_gateway_integrity_workflow_fabric::*;
 pub use throughput_gateway_integrity_workflow_fabric::*;
-pub use federated_continual_gateway_integrity_workflow_fabric::*;
 pub mod federated_context_copilot;
 pub mod federated_continual_retrieval_synthesis_assurance_harness;
 pub mod federated_continual_retrieval_synthesis_federated_control_plane;
@@ -594,6 +602,17 @@ pub use federated_context_copilot::{
     FederatedContextDisposition, FederatedContextError, FederatedContextQuestion5,
     FederatedContextReceipt7, CONTRACT_VERSION as FEDERATED_CONTEXT_COPILOT_CONTRACT_VERSION,
     FEATURE_ID as FEDERATED_CONTEXT_COPILOT_FEATURE_ID,
+};
+pub use federated_continual_evidence_surveillance_research_copilot::{
+    federated_continual_evidence_surveillance_research_copilot_manifest,
+    run_federated_continual_evidence_surveillance_research_copilot,
+    FederatedContinualEvidenceSurveillanceResearchCopilotError,
+    FederatedContinualEvidenceSurveillanceResearchCopilotReceipt,
+    FederatedContinualEvidenceSurveillanceResearchCopilotRequest,
+    FederatedContinualResearchCopilotDisposition, FederatedCopilotEvidenceContribution,
+    FederatedCopilotQualifiedEvidenceSet,
+    CONTRACT_VERSION as ADAPTER_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_FEATURE_ID,
 };
 pub use federated_continual_retrieval_synthesis_assurance_harness::{
     assure_federated_continual_retrieval_synthesis,
@@ -666,6 +685,15 @@ pub use federated_retrieval_synthesis_inference_engine::{
     CONTRACT_VERSION as ADAPTER_FEDERATED_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_CONTRACT_VERSION,
     FEATURE_ID as ADAPTER_FEDERATED_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_FEATURE_ID,
 };
+pub use local_evidence_surveillance_research_copilot::{
+    local_evidence_surveillance_research_copilot_manifest,
+    run_local_evidence_surveillance_research_copilot, CopilotEvidenceObservation,
+    CopilotQualifiedEvidenceSet, LocalEvidenceSurveillanceResearchCopilotError,
+    LocalEvidenceSurveillanceResearchCopilotReceipt,
+    LocalEvidenceSurveillanceResearchCopilotRequest, ResearchCopilotDisposition,
+    CONTRACT_VERSION as ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_FEATURE_ID,
+};
 pub use local_retrieval_synthesis_assurance_harness::{
     assure_local_retrieval_synthesis, local_retrieval_synthesis_assurance_harness_manifest,
     LocalRetrievalSynthesisAssuranceHarnessError, LocalRetrievalSynthesisAssuranceHarnessReceipt,
@@ -727,6 +755,15 @@ pub use local_retrieval_synthesis_workflow_fabric::{
     CONTRACT_VERSION as ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_CONTRACT_VERSION,
     FEATURE_ID as ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_FEATURE_ID,
 };
+pub use multimodal_evidence_surveillance_research_copilot::{
+    multimodal_evidence_surveillance_research_copilot_manifest,
+    run_multimodal_evidence_surveillance_research_copilot, MultimodalCopilotEvidenceObservation,
+    MultimodalCopilotQualifiedEvidenceSet, MultimodalEvidenceSurveillanceResearchCopilotError,
+    MultimodalEvidenceSurveillanceResearchCopilotReceipt,
+    MultimodalEvidenceSurveillanceResearchCopilotRequest, MultimodalResearchCopilotDisposition,
+    CONTRACT_VERSION as ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_FEATURE_ID,
+};
 pub use multimodal_retrieval_synthesis_assurance_harness::{
     assure_multimodal_retrieval_synthesis,
     multimodal_retrieval_synthesis_assurance_harness_manifest,
@@ -787,6 +824,16 @@ pub use multimodal_retrieval_synthesis_workflow_fabric::{
     MultimodalRetrievalSynthesisWorkflowReceipt, MultimodalRetrievalSynthesisWorkflowRequest,
     CONTRACT_VERSION as ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_CONTRACT_VERSION,
     FEATURE_ID as ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_FEATURE_ID,
+};
+pub use throughput_evidence_surveillance_research_copilot::{
+    run_throughput_evidence_surveillance_research_copilot,
+    throughput_evidence_surveillance_research_copilot_manifest,
+    ThroughputCopilotEvidenceObservation, ThroughputCopilotQualifiedEvidenceSet,
+    ThroughputEvidenceSurveillanceResearchCopilotError,
+    ThroughputEvidenceSurveillanceResearchCopilotReceipt,
+    ThroughputEvidenceSurveillanceResearchCopilotRequest, ThroughputResearchCopilotDisposition,
+    CONTRACT_VERSION as ADAPTER_THROUGHPUT_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_THROUGHPUT_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_FEATURE_ID,
 };
 pub use throughput_retrieval_synthesis_assurance_harness::{
     assure_throughput_retrieval_synthesis,

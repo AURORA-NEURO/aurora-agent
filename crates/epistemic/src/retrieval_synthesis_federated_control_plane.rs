@@ -305,7 +305,7 @@ pub fn operate_retrieval_synthesis(
     let mut qualified = BTreeSet::new();
     let mut unresolved = BTreeSet::new();
     let mut blocked = BTreeSet::new();
-    let mut source_order = rows
+    let source_order = rows
         .iter()
         .map(|r| r.source_id.clone())
         .collect::<BTreeSet<_>>();

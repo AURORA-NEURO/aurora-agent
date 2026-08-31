@@ -6,7 +6,7 @@
 //! clinical decisions.
 
 use bioprism_foundation::{
-    AutonomyTier, CapabilityManifest, Determinism, Effect, EvidenceReference, EvidenceState,
+    AutonomyTier, CapabilityManifest, Determinism, EvidenceReference, EvidenceState,
     ResearchSurface, TypedPort, PRECLINICAL_BOUNDARY, RESEARCH_CONTRACT_SCHEMA_VERSION,
 };
 use bioprism_ids::ContentHash;

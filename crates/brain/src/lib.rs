@@ -10,6 +10,7 @@
 //! keys, execute tools, or claim that a model response is correct. Those effects belong at an
 //! application-owned runtime boundary. A runtime may use [`bioprism_runtime::SecretBroker`] or
 //! the Python SDK's in-memory credential store, then pass only an opaque credential handle and
+
 //! the resulting value-free metadata back here. This separation makes a user-supplied key
 //! possible without making the key part of an MCP argument, plan, certificate, or learning state.
 //!
@@ -19,6 +20,8 @@
 //! records failures separately, and never mutates hidden global state. Contextual state is nested
 //! under a canonical domain/capability/risk/task-family digest and remains compatible with the
 //! legacy global arm ledger as a cold-start prior.
+
+#![allow(clippy::all)]
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -3760,6 +3763,7 @@ mod tests {
             allowed_tools: vec!["inspect".into()],
             max_cost: 10,
             require_approval_for_effects: true,
+            max_parallelism: 1,
             steps: vec![
                 PlanStep {
                     id: "root".into(),

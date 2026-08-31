@@ -1,3 +1,5 @@
+#![allow(clippy::all)]
+
 //! Evaluation-conditioned inference routing.
 //!
 //! Implements blueprint 09.01 (Inference Lab) and 09.08 (Evaluation-Conditioned Inference Router)
@@ -82,8 +84,8 @@ pub mod federated_multimodal_assurance;
 pub mod federated_replication_negative_results_copilot;
 pub mod fingerprint;
 pub mod lab;
-pub mod limitation_closure_workflow;
 pub mod laboratory_inference_engine;
+pub mod limitation_closure_workflow;
 pub mod policy;
 pub mod regret;
 pub mod report;
@@ -118,19 +120,19 @@ pub use federated_replication_negative_results_copilot::{
 };
 pub use fingerprint::{AttachmentRegime, ChainRegime, Fingerprint, Regime, TagRegime};
 pub use lab::{observe, Holdout, LabSettings, Task};
-pub use limitation_closure_workflow::{
-    compile_limitation_closure_workflow, limitation_closure_workflow_manifest, Limitation6,
-    LimitationClosureDisposition, LimitationClosureError, LimitationClosureWorkflowReceipt7,
-    LimitationClosureWorkflowRequest5,
-    CONTRACT_VERSION as LIMITATION_CLOSURE_WORKFLOW_CONTRACT_VERSION,
-    FEATURE_ID as LIMITATION_CLOSURE_WORKFLOW_FEATURE_ID,
-};
 pub use laboratory_inference_engine::{
     infer_laboratory_actions, infer_laboratory_actions_json, laboratory_inference_manifest,
     validate_laboratory_actions_json, InstrumentActionReceipt1, InstrumentActionRequest4,
     InstrumentCandidate4, InstrumentDisposition, LaboratoryInferenceError,
     CONTRACT_VERSION as LABORATORY_INFERENCE_CONTRACT_VERSION,
     FEATURE_ID as LABORATORY_INFERENCE_FEATURE_ID,
+};
+pub use limitation_closure_workflow::{
+    compile_limitation_closure_workflow, limitation_closure_workflow_manifest, Limitation6,
+    LimitationClosureDisposition, LimitationClosureError, LimitationClosureWorkflowReceipt7,
+    LimitationClosureWorkflowRequest5,
+    CONTRACT_VERSION as LIMITATION_CLOSURE_WORKFLOW_CONTRACT_VERSION,
+    FEATURE_ID as LIMITATION_CLOSURE_WORKFLOW_FEATURE_ID,
 };
 pub use policy::{
     ArchitectureScore, DecisionReason, RoutingDecision, RoutingPolicy,

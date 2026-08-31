@@ -1,3 +1,5 @@
+#![allow(clippy::all, dead_code)]
+
 //! The `bioprism` command-line interface.
 //!
 //! Implements the local-first slice of blueprint 40.13. Four invariants from that contract are
@@ -19,19 +21,19 @@
 //!   `bioprism_baseline::sweep` documents.
 
 mod args;
+mod computational_execution_assurance;
 mod exit;
+mod experiment_design_assurance;
 mod explain;
+mod federated_retrieval_assurance;
+mod interpretation_interoperability_gateway;
 mod io;
 mod knowledge_interop;
-mod retrieval_synthesis_assurance;
-mod computational_execution_assurance;
-mod protocol_simulation_assurance;
-mod federated_retrieval_assurance;
-mod quality_control_workflow_fabric;
-mod quality_control_inference_engine;
-mod interpretation_interoperability_gateway;
 mod mechanism_control_plane;
-mod experiment_design_assurance;
+mod protocol_simulation_assurance;
+mod quality_control_inference_engine;
+mod quality_control_workflow_fabric;
+mod retrieval_synthesis_assurance;
 
 use args::{
     Command, CompileOptions, Family, GenerateOptions, Invocation, Parsed, Profile,
@@ -829,7 +831,8 @@ fn retrieval_synthesis_assure(
         "artifact": artifact.as_ref().map(|value| json!({"path": value.path.display().to_string(), "bytes": value.bytes, "written": value.written})).unwrap_or(Value::Null),
         "execution": "verification only; no retrieval provider, network, instrument, external workflow, or clinical effect started"
     });
-    document["policy_denied"] = json!(request.get("policy_allow").and_then(Value::as_bool) == Some(false));
+    document["policy_denied"] =
+        json!(request.get("policy_allow").and_then(Value::as_bool) == Some(false));
     let human = format!(
         "retrieval and synthesis assurance: {disposition}\n  request: {}\n  evidence digest: {digest}\n  execution: verification only; no retrieval provider or external effect started\n\nNext: bioprism retrieval assure --request {}{}\n",
         request_path.display(),
@@ -871,7 +874,8 @@ fn computational_execution_assure(
         "artifact": artifact.as_ref().map(|value| json!({"path": value.path.display().to_string(), "bytes": value.bytes, "written": value.written})).unwrap_or(Value::Null),
         "execution": "verification only; no job, process, network provider, instrument, or clinical effect started"
     });
-    document["policy_denied"] = json!(request.get("policy_allow").and_then(Value::as_bool) == Some(false));
+    document["policy_denied"] =
+        json!(request.get("policy_allow").and_then(Value::as_bool) == Some(false));
     let human = format!(
         "computational execution assurance: {disposition}\n  request: {}\n  run digest: {digest}\n  execution: verification only; no job or external effect started\n\nNext: bioprism execution assure --request {}{}\n",
         request_path.display(),

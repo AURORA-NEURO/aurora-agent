@@ -67,41 +67,40 @@ pub mod deprecation;
 pub mod descriptor;
 pub mod diff;
 pub mod error;
-pub mod interpretation_assurance;
+pub mod evolution_integrity_support;
+pub mod federated_continual_evolution_integrity_contract_model;
+pub mod federated_continual_evolution_integrity_inference;
+pub mod federated_continual_evolution_integrity_research_copilot;
+pub mod federated_continual_evolution_integrity_workflow_fabric;
 pub mod federated_continual_interpretation_assurance;
+pub mod interpretation_assurance;
 pub mod known;
+pub mod local_evolution_integrity_contract_model;
+pub mod local_evolution_integrity_inference;
+pub mod local_evolution_integrity_research_copilot;
+pub mod local_evolution_integrity_workflow_fabric;
 pub mod migration;
 pub mod mode;
+pub mod multimodal_evolution_integrity_contract_model;
+pub mod multimodal_evolution_integrity_inference;
+pub mod multimodal_evolution_integrity_research_copilot;
+pub mod multimodal_evolution_integrity_workflow_fabric;
 pub(crate) mod pointer;
 pub mod research_release_contract;
-pub mod version;
-pub mod evolution_integrity_support;
-pub mod local_evolution_integrity_inference;
-pub mod multimodal_evolution_integrity_inference;
-pub mod throughput_evolution_integrity_inference;
-pub mod federated_continual_evolution_integrity_inference;
-pub mod local_evolution_integrity_contract_model;
-pub mod multimodal_evolution_integrity_contract_model;
 pub mod throughput_evolution_integrity_contract_model;
-pub mod federated_continual_evolution_integrity_contract_model;
-pub mod local_evolution_integrity_research_copilot;
-pub mod multimodal_evolution_integrity_research_copilot;
+pub mod throughput_evolution_integrity_inference;
 pub mod throughput_evolution_integrity_research_copilot;
-pub mod federated_continual_evolution_integrity_research_copilot;
-pub mod local_evolution_integrity_workflow_fabric;
-pub mod multimodal_evolution_integrity_workflow_fabric;
 pub mod throughput_evolution_integrity_workflow_fabric;
-pub mod federated_continual_evolution_integrity_workflow_fabric;
+pub mod version;
 
 pub use classify::{
     affects_digest, classify, classify_and_gate, ChangeVerdict, ClaimAudit, Classification,
     CompatibilityClass,
 };
 pub use computational_execution_contract_model::{
-    model_computational_execution_contract, computational_execution_contract_model_manifest,
+    computational_execution_contract_model_manifest, model_computational_execution_contract,
     ExecutionContractRequest5, ExecutionEvidenceState, ExecutionNode5, ExecutionPeer5,
-    GovernanceExecutionArtifact8, GovernanceExecutionContract8,
-    GovernanceExecutionContractError,
+    GovernanceExecutionArtifact8, GovernanceExecutionContract8, GovernanceExecutionContractError,
     CONTRACT_VERSION as COMPUTATIONAL_EXECUTION_CONTRACT_MODEL_CONTRACT_VERSION,
     FEATURE_ID as COMPUTATIONAL_EXECUTION_CONTRACT_MODEL_FEATURE_ID,
     INPUT_SCHEMA as COMPUTATIONAL_EXECUTION_CONTRACT_MODEL_INPUT_SCHEMA,
@@ -118,13 +117,16 @@ pub use error::{
     CompatibilityError, DeprecationError, DescriptorError, DigestBreach, GovernanceError,
     MigrationError, VersionError,
 };
-pub use interpretation_assurance::{
-    assure_interpretations, interpretation_assurance_manifest, InterpretationAssuranceError,
-    InterpretationAssuranceReport, InterpretationAssuranceRequest, InterpretationCandidate,
-    InterpretationDisposition, InterpretationState,
-    CONTRACT_VERSION as INTERPRETATION_ASSURANCE_CONTRACT_VERSION,
-    FEATURE_ID as INTERPRETATION_ASSURANCE_FEATURE_ID,
+pub use evolution_integrity_support::{
+    manifest as evolution_integrity_manifest, qualify as qualify_evolution_integrity,
+    EvolutionChange4, EvolutionIntegrityArtifact4, EvolutionIntegrityCard7,
+    EvolutionIntegrityError, EvolutionIntegrityRequest4, BOUNDARY as EVOLUTION_INTEGRITY_BOUNDARY,
+    CONTENT_TYPE as EVOLUTION_INTEGRITY_CONTENT_TYPE,
 };
+pub use federated_continual_evolution_integrity_contract_model::*;
+pub use federated_continual_evolution_integrity_inference::*;
+pub use federated_continual_evolution_integrity_research_copilot::*;
+pub use federated_continual_evolution_integrity_workflow_fabric::*;
 pub use federated_continual_interpretation_assurance::{
     assure_federated_continual_interpretations,
     federated_continual_interpretation_assurance_manifest,
@@ -132,40 +134,37 @@ pub use federated_continual_interpretation_assurance::{
     FederatedContinualInterpretationAssuranceReport,
     FederatedContinualInterpretationAssuranceRequest,
 };
+pub use interpretation_assurance::{
+    assure_interpretations, interpretation_assurance_manifest, InterpretationAssuranceError,
+    InterpretationAssuranceReport, InterpretationAssuranceRequest, InterpretationCandidate,
+    InterpretationDisposition, InterpretationState,
+    CONTRACT_VERSION as INTERPRETATION_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as INTERPRETATION_ASSURANCE_FEATURE_ID,
+};
+pub use local_evolution_integrity_contract_model::*;
+pub use local_evolution_integrity_inference::*;
+pub use local_evolution_integrity_research_copilot::*;
+pub use local_evolution_integrity_workflow_fabric::*;
 pub use migration::{
     DocumentFailure, LossAudit, LossItem, Migration, MigrationRegistry, MigrationStep,
     TotalityReport, SCHEMA_VERSION_KEY,
 };
 pub use mode::{apply_mode, negotiate, CompatibilityMode, Negotiated, UnknownFieldReport};
+pub use multimodal_evolution_integrity_contract_model::*;
+pub use multimodal_evolution_integrity_inference::*;
+pub use multimodal_evolution_integrity_research_copilot::*;
+pub use multimodal_evolution_integrity_workflow_fabric::*;
 pub use research_release_contract::{
     compile_signed_research_object, research_release_contract_manifest, GovernanceReleaseError,
     SignedResearchObject, ValidatedResearchRun,
     CONTRACT_VERSION as RESEARCH_RELEASE_CONTRACT_VERSION,
     FEATURE_ID as RESEARCH_RELEASE_CONTRACT_FEATURE_ID,
 };
-pub use version::{observed_bump, SchemaId, SchemaVersion, VersionBump};
-pub use evolution_integrity_support::{
-    qualify as qualify_evolution_integrity, manifest as evolution_integrity_manifest,
-    EvolutionChange4, EvolutionIntegrityArtifact4, EvolutionIntegrityCard7,
-    EvolutionIntegrityError, EvolutionIntegrityRequest4,
-    BOUNDARY as EVOLUTION_INTEGRITY_BOUNDARY, CONTENT_TYPE as EVOLUTION_INTEGRITY_CONTENT_TYPE,
-};
-pub use local_evolution_integrity_inference::*;
-pub use multimodal_evolution_integrity_inference::*;
-pub use throughput_evolution_integrity_inference::*;
-pub use federated_continual_evolution_integrity_inference::*;
-pub use local_evolution_integrity_contract_model::*;
-pub use multimodal_evolution_integrity_contract_model::*;
 pub use throughput_evolution_integrity_contract_model::*;
-pub use federated_continual_evolution_integrity_contract_model::*;
-pub use local_evolution_integrity_research_copilot::*;
-pub use multimodal_evolution_integrity_research_copilot::*;
+pub use throughput_evolution_integrity_inference::*;
 pub use throughput_evolution_integrity_research_copilot::*;
-pub use federated_continual_evolution_integrity_research_copilot::*;
-pub use local_evolution_integrity_workflow_fabric::*;
-pub use multimodal_evolution_integrity_workflow_fabric::*;
 pub use throughput_evolution_integrity_workflow_fabric::*;
-pub use federated_continual_evolution_integrity_workflow_fabric::*;
+pub use version::{observed_bump, SchemaId, SchemaVersion, VersionBump};
 pub mod experiment_design_assurance;
 pub use experiment_design_assurance::{
     assure_experiment_design, experiment_design_assurance_manifest, DesignArm,

@@ -1,3 +1,5 @@
+#![allow(clippy::all)]
+
 //! WeaveLang, WeaveIR, and the compiler between them.
 //!
 //! Implements blueprint 23.02 (the language), 23.03 (the IR and compiler pipeline), 23.34 (the

@@ -67,6 +67,7 @@ pub mod boundary;
 pub mod causality;
 pub mod contract;
 pub mod error;
+pub mod federated_continual_evidence_surveillance_contract_model;
 pub mod lattice;
 pub mod ledger;
 pub mod lens;
@@ -79,34 +80,23 @@ pub mod system;
 pub mod unit;
 pub mod worldclass;
 pub mod worldline;
-pub mod federated_continual_evidence_surveillance_contract_model;
 
 pub use error::ResearchContractError;
 pub use research::{
     ApprovalRequirement, AuthorityRequirement, AutonomyGrant, AutonomyTier, CapabilityManifest,
-    Compensation,
-    CompetingExplanation, DecisionImpact, Determinism, Effect, EvaluationCard, EvaluationMetric,
-    EvidenceAvailability, EvidenceReceipt, EvidenceReference, EvidenceSource, EvidenceState,
-    ExecutionCheckpoint, ExecutionEvent, ExecutionRun, ExecutionStatus, FederationEnvelope,
-    LossSeverity, NegativeEvidence, Omission, PolicyDecision, PolicyReceipt, ProvenanceLink,
-    ReleaseVerdict, ResearchSurface, ResearchWorkflowSpec, ResourceBudget, SemanticLoss, TypedPort,
-    TypedResearchArtifact, UncertaintyStatement, WorkflowCheckpoint, WorkflowEdge, WorkflowNode,
-    PRECLINICAL_BOUNDARY, RESEARCH_CONTRACT_SCHEMA_VERSION,
+    Compensation, CompetingExplanation, DecisionImpact, Determinism, Effect, EvaluationCard,
+    EvaluationMetric, EvidenceAvailability, EvidenceReceipt, EvidenceReference, EvidenceSource,
+    EvidenceState, ExecutionCheckpoint, ExecutionEvent, ExecutionRun, ExecutionStatus,
+    FederationEnvelope, LossSeverity, NegativeEvidence, Omission, PolicyDecision, PolicyReceipt,
+    ProvenanceLink, ReleaseVerdict, ResearchSurface, ResearchWorkflowSpec, ResourceBudget,
+    SemanticLoss, TypedPort, TypedResearchArtifact, UncertaintyStatement, WorkflowCheckpoint,
+    WorkflowEdge, WorkflowNode, PRECLINICAL_BOUNDARY, RESEARCH_CONTRACT_SCHEMA_VERSION,
 };
 pub mod mechanism_exploration_assurance_harness;
-pub use mechanism_exploration_assurance_harness::{
-    assure_mechanism_exploration, mechanism_exploration_assurance_manifest,
-    MechanismCandidate, MechanismExplorationAssuranceError,
-    MechanismExplorationAssuranceReceipt, MechanismExplorationAssuranceRequest,
-    CONTRACT_VERSION as FOUNDATION_MECHANISM_EXPLORATION_ASSURANCE_CONTRACT_VERSION,
-    FEATURE_ID as FOUNDATION_MECHANISM_EXPLORATION_ASSURANCE_FEATURE_ID,
-};
 pub use federated_continual_evidence_surveillance_contract_model::{
     federated_continual_evidence_surveillance_contract_model_manifest,
-    model_federated_continual_evidence_surveillance_contract,
-    FederatedContinualContractClaim,
-    FederatedContinualContractCompatibility,
-    FederatedContinualContractDisposition,
+    model_federated_continual_evidence_surveillance_contract, FederatedContinualContractClaim,
+    FederatedContinualContractCompatibility, FederatedContinualContractDisposition,
     FederatedContinualEvidenceSurveillanceContractError,
     FederatedContinualEvidenceSurveillanceContractReceipt,
     FederatedContinualEvidenceSurveillanceContractRequest,
@@ -114,4 +104,11 @@ pub use federated_continual_evidence_surveillance_contract_model::{
     FEATURE_ID as FOUNDATION_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_FEATURE_ID,
     INPUT_SCHEMA as FOUNDATION_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_INPUT_SCHEMA,
     OUTPUT_SCHEMA as FOUNDATION_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_OUTPUT_SCHEMA,
+};
+pub use mechanism_exploration_assurance_harness::{
+    assure_mechanism_exploration, mechanism_exploration_assurance_manifest, MechanismCandidate,
+    MechanismExplorationAssuranceError, MechanismExplorationAssuranceReceipt,
+    MechanismExplorationAssuranceRequest,
+    CONTRACT_VERSION as FOUNDATION_MECHANISM_EXPLORATION_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as FOUNDATION_MECHANISM_EXPLORATION_ASSURANCE_FEATURE_ID,
 };

@@ -1,3 +1,5 @@
+#![allow(clippy::all)]
+
 //! Result bundles, symmetric and public-key attestation, and reproduction verdicts.
 //!
 //! Implements blueprint 34.14 (Result Cards, Signed Bundles and Reproduction), with 13.15 (supply
@@ -104,43 +106,39 @@
 //! the symmetric shared-secret compatibility path.
 
 pub mod attestation;
-pub mod research_bundle_integrity_support;
-pub mod local_research_bundle_integrity_inference;
-pub mod multimodal_research_bundle_integrity_inference;
-pub mod throughput_research_bundle_integrity_inference;
-pub mod federated_continual_research_bundle_integrity_inference;
-pub mod local_research_bundle_integrity_contract_model;
-pub mod multimodal_research_bundle_integrity_contract_model;
-pub mod throughput_research_bundle_integrity_contract_model;
-pub mod federated_continual_research_bundle_integrity_contract_model;
-pub mod local_research_bundle_integrity_research_copilot;
-pub mod multimodal_research_bundle_integrity_research_copilot;
-pub mod throughput_research_bundle_integrity_research_copilot;
-pub mod federated_continual_research_bundle_integrity_research_copilot;
-pub mod local_research_bundle_integrity_workflow_fabric;
-pub mod multimodal_research_bundle_integrity_workflow_fabric;
-pub mod throughput_research_bundle_integrity_workflow_fabric;
-pub mod federated_continual_research_bundle_integrity_workflow_fabric;
 pub mod audit;
 pub mod bundle;
 pub mod environment;
 pub mod error;
+pub mod federated_continual_research_bundle_integrity_contract_model;
+pub mod federated_continual_research_bundle_integrity_inference;
+pub mod federated_continual_research_bundle_integrity_research_copilot;
+pub mod federated_continual_research_bundle_integrity_workflow_fabric;
 mod hex;
+pub mod local_research_bundle_integrity_contract_model;
+pub mod local_research_bundle_integrity_inference;
+pub mod local_research_bundle_integrity_research_copilot;
+pub mod local_research_bundle_integrity_workflow_fabric;
 pub mod mac;
 pub mod manifest;
+pub mod multimodal_research_bundle_integrity_contract_model;
+pub mod multimodal_research_bundle_integrity_inference;
+pub mod multimodal_research_bundle_integrity_research_copilot;
+pub mod multimodal_research_bundle_integrity_workflow_fabric;
 pub mod provenance;
 pub mod reproduce;
-pub mod signature;
-pub mod trust;
+pub mod research_bundle_integrity_support;
 pub mod retrieval_bundle_assurance;
+pub mod signature;
+pub mod throughput_research_bundle_integrity_contract_model;
+pub mod throughput_research_bundle_integrity_inference;
+pub mod throughput_research_bundle_integrity_research_copilot;
+pub mod throughput_research_bundle_integrity_workflow_fabric;
+pub mod trust;
 
 pub use attestation::{
     Attestation, AttestationCheck, AttestationPurpose, ClaimedProducer, KeyHolderAuthenticated,
     ATTESTATION_SCHEMA_VERSION,
-};
-pub use research_bundle_integrity_support::{
-    BundleArtifact4, BundleCard7, BundleEntry4, BundleReleaseRequest4,
-    ResearchBundleIntegrityError,
 };
 pub use audit::{
     AuditAction, AuditCheckpoint, AuditEvent, AuditLog, AuditOutcome, ChainVerification,
@@ -163,6 +161,15 @@ pub use reproduce::{
     Divergence, NotAttemptedReason, Reproduced, ReproductionAttempt, ReproductionVerdict,
     ToolchainPolicy,
 };
+pub use research_bundle_integrity_support::{
+    BundleArtifact4, BundleCard7, BundleEntry4, BundleReleaseRequest4, ResearchBundleIntegrityError,
+};
+pub use retrieval_bundle_assurance::{
+    assure_retrieval_bundle, retrieval_bundle_assurance_manifest, BundleAssuranceError,
+    BundleEvidenceCandidate, BundleEvidenceSynthesis, BundlePeerSummary, BundleRetrievalQuery,
+    BundleSynthesisDisposition, CONTRACT_VERSION as RETRIEVAL_BUNDLE_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as RETRIEVAL_BUNDLE_ASSURANCE_FEATURE_ID,
+};
 pub use signature::{
     Ed25519PublicKey, Ed25519Signature, KeyValidity, PublicKeyAttestation,
     PublicKeyAttestationCheck, SignatureError, SigningKey, VerificationKey,
@@ -172,11 +179,4 @@ pub use trust::{
     KeyDelegation, KeyRegistry, KeyRevocation, KeyRole, KeyRotation, RegisteredKey, TrustError,
     TrustPolicy, TrustReport, TrustVerdict, MAX_DELEGATION_DEPTH, MAX_TRUST_EVENTS, MAX_TRUST_KEYS,
     TRUST_REGISTRY_SCHEMA_VERSION,
-};
-pub use retrieval_bundle_assurance::{
-    assure_retrieval_bundle, retrieval_bundle_assurance_manifest, BundleAssuranceError,
-    BundleEvidenceCandidate, BundleEvidenceSynthesis, BundlePeerSummary, BundleRetrievalQuery,
-    BundleSynthesisDisposition,
-    CONTRACT_VERSION as RETRIEVAL_BUNDLE_ASSURANCE_CONTRACT_VERSION,
-    FEATURE_ID as RETRIEVAL_BUNDLE_ASSURANCE_FEATURE_ID,
 };

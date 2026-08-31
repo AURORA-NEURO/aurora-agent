@@ -169,11 +169,9 @@ impl ThroughputRetrievalSynthesisFederatedControlPlaneReceipt {
                 "throughput federated control effect is outside admission gate",
             ));
         }
-        self.artifact
-            .validate_metadata()
-            .map_err(|error| {
-                ThroughputRetrievalSynthesisFederatedControlPlaneError::Artifact(error.to_string())
-            })
+        self.artifact.validate_metadata().map_err(|error| {
+            ThroughputRetrievalSynthesisFederatedControlPlaneError::Artifact(error.to_string())
+        })
     }
     fn invalid(message: &str) -> ThroughputRetrievalSynthesisFederatedControlPlaneError {
         ThroughputRetrievalSynthesisFederatedControlPlaneError::Invalid(message.into())

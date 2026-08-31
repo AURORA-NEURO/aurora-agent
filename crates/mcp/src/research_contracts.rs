@@ -3,24 +3,24 @@
 //! The MCP transport accepts JSON, but it does not own scientific semantics. These helpers perform
 //! the same schema/boundary/policy checks as the Rust service before a tool result is returned.
 
+use crate::replication_negative_results_assurance::{
+    assure_replication as assure_mcp_replication, replication_assurance_manifest,
+    ClaimAndProtocol3 as McpClaimAndProtocol3, ReplicationRecord7 as McpReplicationRecord7,
+    FEATURE_ID as MCP_REPLICATION_ASSURANCE_FEATURE_ID,
+};
 use bioprism_fabric::{
-    negotiate_experiment_design, ExperimentDesignRequest4, ExecutableExperimentDesign8,
-    EXPERIMENT_DESIGN_GATEWAY_FEATURE_ID, EXPERIMENT_DESIGN_GATEWAY_CONTRACT_VERSION,
+    negotiate_experiment_design, ExecutableExperimentDesign8,
+    ExperimentDesignRequest4 as FabricExperimentDesignRequest4,
+    EXPERIMENT_DESIGN_GATEWAY_CONTRACT_VERSION, EXPERIMENT_DESIGN_GATEWAY_FEATURE_ID,
 };
 use bioprism_fabric::{
     negotiate_experiment_design_contract, ExecutableExperimentDesign2,
-    FabricExperimentDesignContractRequest4,
-    EXPERIMENT_DESIGN_CONTRACT_MODEL_CONTRACT_VERSION,
+    FabricExperimentDesignContractRequest4, EXPERIMENT_DESIGN_CONTRACT_MODEL_CONTRACT_VERSION,
     EXPERIMENT_DESIGN_CONTRACT_MODEL_FEATURE_ID,
 };
 use bioprism_hubapi::{
     assure_federated_experiment_design, ExecutableExperimentDesign7, ExperimentObjective4,
     EXPERIMENT_DESIGN_ASSURANCE_CONTRACT_VERSION, EXPERIMENT_DESIGN_ASSURANCE_FEATURE_ID,
-};
-use crate::replication_negative_results_assurance::{
-    assure_replication as assure_mcp_replication, replication_assurance_manifest,
-    ClaimAndProtocol3 as McpClaimAndProtocol3, ReplicationRecord7 as McpReplicationRecord7,
-    FEATURE_ID as MCP_REPLICATION_ASSURANCE_FEATURE_ID,
 };
 
 use crate::evolution_assurance::{
@@ -55,12 +55,7 @@ use bioprism_adapter::{
     ContextCompilationRequest, CONTEXT_COMPILATION_FEATURE_ID,
 };
 use bioprism_adapter::{
-    qualify_federated_context, FederatedContextError, FederatedContextQuestion5,
-    FederatedContextReceipt7, FEDERATED_CONTEXT_COPILOT_CONTRACT_VERSION,
-    FEDERATED_CONTEXT_COPILOT_FEATURE_ID,
-};
-use bioprism_adapter::{
-    assure_evaluation_run, CapabilityRun, EvaluationAssuranceError, EvaluationAssuranceReceipt,
+    assure_evaluation_run, CapabilityRun, EvaluationAssuranceReceipt,
     EVALUATION_ASSURANCE_FEATURE_ID,
 };
 use bioprism_adapter::{
@@ -101,8 +96,8 @@ use bioprism_adapter::{
     ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_FEATURE_ID,
 };
 use bioprism_adapter::{
-    close_adapter_limitations, AdapterClosureReceipt, LimitationClosureError,
-    LimitationClosureRequest, LIMITATION_CLOSURE_FEATURE_ID,
+    close_adapter_limitations, AdapterClosureReceipt, LimitationClosureRequest,
+    LIMITATION_CLOSURE_FEATURE_ID,
 };
 use bioprism_adapter::{
     compile_adapter_capability_manifest, AdapterCapabilityManifest, AdapterContractInput,
@@ -194,6 +189,11 @@ use bioprism_adapter::{
 use bioprism_adapter::{
     qualify_analysis_portfolio, AnalysisPortfolioReceipt, AnalysisPortfolioRequest,
     ANALYSIS_PORTFOLIO_FEATURE_ID,
+};
+use bioprism_adapter::{
+    qualify_federated_context, FederatedContextError, FederatedContextQuestion5,
+    FederatedContextReceipt7, FEDERATED_CONTEXT_COPILOT_CONTRACT_VERSION,
+    FEDERATED_CONTEXT_COPILOT_FEATURE_ID,
 };
 use bioprism_adapter::{
     recover_adversarial_events, AdversarialRecoveryError, AdversarialRecoveryReceipt,
@@ -415,31 +415,40 @@ use bioprism_adapter::{
     PROTOCOL_SIMULATION_FEATURE_ID,
 };
 use bioprism_atlashub::{
-    operate_replication_control, ClaimAndProtocol1, PeerReplicationSummary4,
-    ReplicationObservation4, ReplicationRecord8, REPLICATION_CONTROL_FEATURE_ID,
+    assure_mechanism_exploration as assure_atlashub_mechanism_exploration,
+    MechanismExplorationAssuranceReceipt as AtlashubMechanismExplorationAssuranceReceipt,
+    MechanismExplorationAssuranceRequest as AtlashubMechanismExplorationAssuranceRequest,
+    MECHANISM_EXPLORATION_ASSURANCE_FEATURE_ID as ATLASHUB_MECHANISM_EXPLORATION_ASSURANCE_FEATURE_ID,
 };
 use bioprism_atlashub::{
-    synthesize_federated_continuum, FederatedContinualRetrievalReceipt,
-    FederatedContinualRetrievalRequest, FEDERATED_CONTINUAL_RETRIEVAL_FEATURE_ID,
+    infer_signed_provenance, ProvenanceSigningRequest1 as AtlashubProvenanceSigningRequest1,
+    SignedProvenanceEnvelope1 as AtlashubSignedProvenanceEnvelope1,
+    PROVENANCE_SIGNING_INFERENCE_CONTRACT_VERSION, PROVENANCE_SIGNING_INFERENCE_FEATURE_ID,
+};
+use bioprism_atlashub::{
+    model_prospective_quality_control_contract, QualityControlContractError,
+    QualityControlContractRequest, QualityVerdict2,
+    PROSPECTIVE_QUALITY_CONTROL_CONTRACT_FEATURE_ID,
+};
+use bioprism_atlashub::{
+    operate_replication_control, ClaimAndProtocol1, PeerReplicationSummary4,
+    ReplicationObservation4, ReplicationRecord8, REPLICATION_CONTROL_FEATURE_ID,
 };
 use bioprism_atlashub::{
     qualify_quality_control, QualityControlError, QualityControlRequest3, QualityVerdict3,
     QUALITY_CONTROL_COPILOT_FEATURE_ID,
 };
 use bioprism_atlashub::{
-    model_prospective_quality_control_contract,
-    QualityControlContractError, QualityControlContractRequest, QualityVerdict2,
-    PROSPECTIVE_QUALITY_CONTROL_CONTRACT_FEATURE_ID,
-};
-use bioprism_atlashub::{
-    assure_mechanism_exploration as assure_atlashub_mechanism_exploration,
-    MechanismExplorationAssuranceReceipt as AtlashubMechanismExplorationAssuranceReceipt,
-    MechanismExplorationAssuranceRequest as AtlashubMechanismExplorationAssuranceRequest,
-    MECHANISM_EXPLORATION_ASSURANCE_FEATURE_ID as ATLASHUB_MECHANISM_EXPLORATION_ASSURANCE_FEATURE_ID,
+    synthesize_federated_continuum, FederatedContinualRetrievalReceipt,
+    FederatedContinualRetrievalRequest, FEDERATED_CONTINUAL_RETRIEVAL_FEATURE_ID,
 };
 use bioprism_atlasx::{
     admit_atlasx_mechanism_contract, AtlasxMechanismPortfolio2, AtlasxMechanismQuestion4,
     MechanismContractModelError, ATLASX_MECHANISM_FEATURE_ID,
+};
+use bioprism_atlasx::{
+    assure_computational_execution, ComputationalExecutionError, ExecutionRun7,
+    ResearchWorkflowSpec3, COMPUTATIONAL_EXECUTION_ASSURANCE_FEATURE_ID,
 };
 use bioprism_atlasx::{
     compile_context, CompiledResearchContext6, ContextCompilationError,
@@ -450,20 +459,24 @@ use bioprism_atlasx::{
     plan_federated_execution, ExecutionRun8, FederatedExecutionError, ResearchWorkflowSpec4,
     FEDERATED_EXECUTION_CONTROL_CONTRACT_VERSION, FEDERATED_EXECUTION_CONTROL_FEATURE_ID,
 };
-use bioprism_atlasx::{
-    assure_computational_execution, ComputationalExecutionError, ExecutionRun7,
-    ResearchWorkflowSpec3, COMPUTATIONAL_EXECUTION_ASSURANCE_FEATURE_ID,
+use bioprism_backends::{
+    run_federated_retrieval_synthesis, FederatedRetrievalSynthesisRequest6,
+    FederatedRetrievalSynthesisRun8, FEDERATED_RETRIEVAL_SYNTHESIS_WORKFLOW_CONTRACT_VERSION,
+    FEDERATED_RETRIEVAL_SYNTHESIS_WORKFLOW_FEATURE_ID,
 };
 use bioprism_bioethics::{
     assure_evidence_surveillance, BioethicsEvidenceReceipt, BioethicsEvidenceRequest,
     EvidenceSurveillanceAssuranceError, EVIDENCE_SURVEILLANCE_ASSURANCE_FEATURE_ID,
 };
-use bioprism_stress::{
-    harmonize_federated_multimodal,
-    HarmonizedResearchObject2 as StressHarmonizedResearchObject2,
-    RawModalityBundle4 as StressRawModalityBundle4,
-    FEDERATED_MULTIMODAL_INGESTION_CONTRACT_VERSION,
-    FEDERATED_MULTIMODAL_INGESTION_FEATURE_ID,
+use bioprism_bioethics::{
+    assure_multimodal_bounded_evolution, BioethicsEvolutionDecision7, BioethicsEvolutionRequest3,
+    MULTIMODAL_BOUNDED_EVOLUTION_CONTRACT_VERSION, MULTIMODAL_BOUNDED_EVOLUTION_FEATURE_ID,
+};
+use bioprism_bioethics::{
+    assure_multimodal_context_compilation,
+    CertifiedDecisionSection7 as BioethicsCertifiedDecisionSection7,
+    DecisionQuery2 as BioethicsDecisionQuery2, MULTIMODAL_CONTEXT_COMPILATION_CONTRACT_VERSION,
+    MULTIMODAL_CONTEXT_COMPILATION_FEATURE_ID,
 };
 use bioprism_bioethics::{
     assure_prospective_computational_execution, ExecutionAssuranceError,
@@ -472,24 +485,25 @@ use bioprism_bioethics::{
     PROSPECTIVE_COMPUTATIONAL_EXECUTION_FEATURE_ID,
 };
 use bioprism_bioethics::{
+    assure_statistical_analysis, AnalysisQuestion3 as BioethicsAnalysisQuestion3,
+    QualifiedAnalysisResult7 as BioethicsQualifiedAnalysisResult7,
+    STATISTICAL_ANALYSIS_ASSURANCE_CONTRACT_VERSION, STATISTICAL_ANALYSIS_ASSURANCE_FEATURE_ID,
+};
+use bioprism_bioethics::{
+    compile_experiment_design_workflow,
+    ExecutableExperimentDesign4 as BioethicsExecutableExperimentDesign4,
+    ExperimentDesignWorkflowRequest1 as BioethicsExperimentDesignWorkflowRequest1,
+    EXPERIMENT_DESIGN_WORKFLOW_CONTRACT_VERSION, EXPERIMENT_DESIGN_WORKFLOW_FEATURE_ID,
+};
+use bioprism_bioethics::{
     evaluate_capacity, BioethicsCapacityReport2, BioethicsScaleFrontierError,
     BioethicsScaleFrontierRequest,
 };
-use bioprism_bioethics::{
-    assure_multimodal_context_compilation, CertifiedDecisionSection7 as BioethicsCertifiedDecisionSection7,
-    DecisionQuery2 as BioethicsDecisionQuery2,
-    MULTIMODAL_CONTEXT_COMPILATION_CONTRACT_VERSION,
-    MULTIMODAL_CONTEXT_COMPILATION_FEATURE_ID,
-};
-use bioprism_bioethics::{
-    assure_statistical_analysis, AnalysisQuestion3 as BioethicsAnalysisQuestion3,
-    QualifiedAnalysisResult7 as BioethicsQualifiedAnalysisResult7,
-    STATISTICAL_ANALYSIS_ASSURANCE_CONTRACT_VERSION,
-    STATISTICAL_ANALYSIS_ASSURANCE_FEATURE_ID,
-};
 use bioprism_bioworlds::{
-    qualify_resources, QualifiedResourceSet6, ResourceDiscoveryError, ResourceNeed5,
-    RESOURCE_DISCOVERY_COPILOT_CONTRACT_VERSION, RESOURCE_DISCOVERY_COPILOT_FEATURE_ID,
+    compile_federated_continual_context_workbench, FederatedContextWorkbenchError,
+    FederatedContextWorkbenchReceipt, FederatedContextWorkbenchRequest,
+    FEDERATED_CONTEXT_RESEARCH_WORKBENCH_CONTRACT_VERSION,
+    FEDERATED_CONTEXT_RESEARCH_WORKBENCH_FEATURE_ID,
 };
 use bioprism_bioworlds::{
     compile_knowledge_workflow, KnowledgeWorkflowError, KnowledgeWorkflowReceipt7,
@@ -498,10 +512,9 @@ use bioprism_bioworlds::{
     KNOWLEDGE_WORKFLOW_FEATURE_ID as BIOWORLDS_KNOWLEDGE_WORKFLOW_FEATURE_ID,
 };
 use bioprism_bioworlds::{
-    compile_federated_continual_context_workbench, FederatedContextWorkbenchError,
-    FederatedContextWorkbenchReceipt, FederatedContextWorkbenchRequest,
-    FEDERATED_CONTEXT_RESEARCH_WORKBENCH_CONTRACT_VERSION,
-    FEDERATED_CONTEXT_RESEARCH_WORKBENCH_FEATURE_ID,
+    qualify_resources, QualifiedResourceSet6 as BioworldsQualifiedResourceSet6,
+    ResourceDiscoveryError, ResourceNeed5, RESOURCE_DISCOVERY_COPILOT_CONTRACT_VERSION,
+    RESOURCE_DISCOVERY_COPILOT_FEATURE_ID,
 };
 use bioprism_conformance::context_compilation_federated_control_plane::{
     operate_context_compilation_federated_control, ContextCompilationFederatedControlReceipt,
@@ -516,33 +529,38 @@ use bioprism_conformance::{
     CONTEXT_COMPILATION_ASSURANCE_FEATURE_ID as CONFORMANCE_CONTEXT_COMPILATION_ASSURANCE_FEATURE_ID,
 };
 use bioprism_conformance::{
-    negotiate_retrieval_synthesis_contract,
-    ConformanceEvidenceSynthesis2,
-    ConformanceScopedRetrievalQuery3,
-    RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_CONTRACT_VERSION,
+    negotiate_retrieval_synthesis_contract, ConformanceEvidenceSynthesis2,
+    ConformanceScopedRetrievalQuery3, RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_CONTRACT_VERSION,
     RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_FEATURE_ID,
 };
-use bioprism_devx::{compile_context_contract, CompiledResearchContext6 as DevxCompiledResearchContext6, ContextCompilationContractRequest3, ContextContractError, CONTEXT_COMPILATION_CONTRACT_FEATURE_ID};
+use bioprism_dataops::{
+    assure_prospective_provenance as assure_dataops_provenance,
+    ArtifactAndDerivationRequest3 as DataopsArtifactAndDerivationRequest3,
+    ProspectiveProvenanceError as DataopsProspectiveProvenanceError,
+    SignedProvenanceEnvelope7 as DataopsSignedProvenanceEnvelope7,
+    PROVENANCE_SIGNING_WORKFLOW_FABRIC_FEATURE_ID as DATAOPS_PROVENANCE_SIGNING_WORKFLOW_FABRIC_FEATURE_ID,
+};
+use bioprism_devplat::{
+    assure_context_compilation, assure_devplat_multimodal_limitation_closure,
+    ContextCompilationAssuranceReceipt, ContextCompilationAssuranceRequest, DevplatClosureError,
+    DevplatClosureReceipt7, DevplatLimitationCase2,
+    CONTEXT_COMPILATION_ASSURANCE_FEATURE_ID as DEVPLAT_CONTEXT_COMPILATION_ASSURANCE_FEATURE_ID,
+    DEVPLAT_MULTIMODAL_LIMITATION_CLOSURE_CONTRACT_VERSION,
+    DEVPLAT_MULTIMODAL_LIMITATION_CLOSURE_FEATURE_ID,
+};
+use bioprism_devx::{
+    compile_context_contract, CompiledResearchContext6 as DevxCompiledResearchContext6,
+    ContextCompilationContractRequest3, ContextContractError,
+    CONTEXT_COMPILATION_CONTRACT_FEATURE_ID,
+};
 use bioprism_devx::{
     control_devx_evidence_surveillance, DevxEvidenceControlReceipt8, DevxEvidenceFeed5,
     DEVX_EVIDENCE_SURVEILLANCE_CONTROL_CONTRACT_VERSION,
     DEVX_EVIDENCE_SURVEILLANCE_CONTROL_FEATURE_ID,
 };
-use bioprism_devplat::{
-    assure_context_compilation, ContextCompilationAssuranceReceipt,
-    ContextCompilationAssuranceRequest, CONTEXT_COMPILATION_ASSURANCE_FEATURE_ID,
-    assure_devplat_multimodal_limitation_closure, DevplatClosureError,
-    DevplatClosureReceipt7, DevplatLimitationCase2,
-    DEVPLAT_MULTIMODAL_LIMITATION_CLOSURE_CONTRACT_VERSION,
-    DEVPLAT_MULTIMODAL_LIMITATION_CLOSURE_FEATURE_ID,
-};
 use bioprism_docgraph::{
     validate_instrument_actions, InstrumentActionContractError, InstrumentActionReceipt2,
     InstrumentActionRequest4,
-};
-use bioprism_epistemic::{
-    operate_retrieval_synthesis, EvidenceSynthesis8, PeerSynthesisSummary4, RetrievalCandidate4,
-    ScopedRetrievalQuery3, RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_FEATURE_ID,
 };
 use bioprism_epistemic::{
     compile_experiment_design_workbench,
@@ -552,6 +570,21 @@ use bioprism_epistemic::{
     EXPERIMENT_DESIGN_RESEARCH_WORKBENCH_CONTRACT_VERSION,
     EXPERIMENT_DESIGN_RESEARCH_WORKBENCH_FEATURE_ID,
 };
+use bioprism_epistemic::{
+    operate_retrieval_synthesis, EvidenceSynthesis8, PeerSynthesisSummary4, RetrievalCandidate4,
+    ScopedRetrievalQuery3, RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_FEATURE_ID,
+};
+use bioprism_evalengine::{
+    assure_evalengine_local_mechanism_exploration, EvalengineMechanismExplorationAssuranceError,
+    EvalengineMechanismPortfolio7, EvalengineMechanismQuestion1,
+    EVALENGINE_LOCAL_MECHANISM_EXPLORATION_CONTRACT_VERSION,
+    EVALENGINE_LOCAL_MECHANISM_EXPLORATION_FEATURE_ID,
+};
+use bioprism_evalengine::{
+    assure_evalengine_protocol, EvalengineProtocolDraft, EvalengineProtocolSimulationCopilotError,
+    EvalengineProtocolSimulationReport, EVALENGINE_PROTOCOL_SIMULATION_COPILOT_CONTRACT_VERSION,
+    EVALENGINE_PROTOCOL_SIMULATION_COPILOT_FEATURE_ID,
+};
 use bioprism_evalengine::{
     compile_evaluation_card, evaluate_federated_evaluation, evaluate_multimodal_replication,
     qualify_analysis, AnalysisQualificationRequest, EvaluationCardReceipt, EvaluationCardRequest,
@@ -560,41 +593,20 @@ use bioprism_evalengine::{
     EVALUATION_OBSERVABILITY_FEATURE_ID, FEDERATED_EVALUATION_FEATURE_ID,
     MULTIMODAL_REPLICATION_FEATURE_ID,
 };
-use bioprism_evalengine::{
-    assure_evalengine_protocol, EvalengineProtocolDraft,
-    EvalengineProtocolSimulationCopilotError, EvalengineProtocolSimulationReport,
-    EVALENGINE_PROTOCOL_SIMULATION_COPILOT_CONTRACT_VERSION,
-    EVALENGINE_PROTOCOL_SIMULATION_COPILOT_FEATURE_ID,
-};
-use bioprism_evalengine::{
-    assure_evalengine_local_mechanism_exploration,
-    EvalengineMechanismExplorationAssuranceError, EvalengineMechanismPortfolio7,
-    EvalengineMechanismQuestion1,
-    EVALENGINE_LOCAL_MECHANISM_EXPLORATION_CONTRACT_VERSION,
-    EVALENGINE_LOCAL_MECHANISM_EXPLORATION_FEATURE_ID,
-};
 use bioprism_factory::{
-    assure_prospective_evidence_surveillance, EvidenceSurveillanceError,
-    EvidenceSurveillanceReceipt9, EvidenceSurveillanceRequest8,
-    PROSPECTIVE_EVIDENCE_CONTRACT_VERSION, PROSPECTIVE_EVIDENCE_FEATURE_ID,
-    assure_factory_federated_quality_workbench, FactoryQualityWorkbenchError,
-    FactoryQualityVerdict5, FactoryQualityWorkbenchRequest,
+    assure_factory_federated_quality_workbench, assure_prospective_evidence_surveillance,
+    EvidenceSurveillanceError, EvidenceSurveillanceReceipt9, EvidenceSurveillanceRequest8,
+    FactoryQualityVerdict5, FactoryQualityWorkbenchError, FactoryQualityWorkbenchRequest,
     FEDERATED_QUALITY_WORKBENCH_CONTRACT_VERSION, FEDERATED_QUALITY_WORKBENCH_FEATURE_ID,
+    PROSPECTIVE_EVIDENCE_CONTRACT_VERSION, PROSPECTIVE_EVIDENCE_FEATURE_ID,
+};
+use bioprism_fiber::{
+    admit_federated_analysis, FederatedAnalysisControlError, FederatedAnalysisControlReceipt,
+    FederatedAnalysisControlRequest,
 };
 use bioprism_fiber::{
     admit_mechanism_gateway, MechanismGatewayReceipt, MechanismGatewayRequest,
     MECHANISM_GATEWAY_FEATURE_ID,
-};
-use bioprism_fiber::{
-    admit_federated_analysis,
-    FederatedAnalysisControlError,
-    FederatedAnalysisControlReceipt,
-    FederatedAnalysisControlRequest,
-};
-use bioprism_routing::{
-    compile_limitation_closure_workflow, LimitationClosureError,
-    LimitationClosureWorkflowReceipt7, LimitationClosureWorkflowRequest5,
-    LIMITATION_CLOSURE_WORKFLOW_CONTRACT_VERSION, LIMITATION_CLOSURE_WORKFLOW_FEATURE_ID,
 };
 use bioprism_fiber::{
     assure_federated_retrieval, discover_resources, FederatedRetrievalAssuranceReceipt,
@@ -613,6 +625,12 @@ use bioprism_foundation::{
     MechanismExplorationAssuranceRequest, PolicyReceipt,
     FOUNDATION_MECHANISM_EXPLORATION_ASSURANCE_FEATURE_ID,
 };
+use bioprism_governance::experiment_design_assurance::{
+    assure_experiment_design as assure_governance_experiment_design,
+    ExperimentDesignAssurance as GovernanceExperimentDesignAssurance,
+    ExperimentObjective as GovernanceExperimentObjective,
+    FEATURE_ID as GOVERNANCE_EXPERIMENT_DESIGN_ASSURANCE_FEATURE_ID,
+};
 use bioprism_governance::federated_continual_interpretation_assurance::{
     assure_federated_continual_interpretations, FederatedContinualInterpretationAssuranceReport,
     FederatedContinualInterpretationAssuranceRequest,
@@ -622,35 +640,22 @@ use bioprism_governance::{
     compile_signed_research_object, SignedResearchObject, ValidatedResearchRun,
     RESEARCH_RELEASE_CONTRACT_FEATURE_ID,
 };
-use bioprism_governance::experiment_design_assurance::{
-    assure_experiment_design as assure_governance_experiment_design,
-    ExperimentDesignAssurance as GovernanceExperimentDesignAssurance,
-    ExperimentObjective as GovernanceExperimentObjective,
-    FEATURE_ID as GOVERNANCE_EXPERIMENT_DESIGN_ASSURANCE_FEATURE_ID,
+use bioprism_hub::{
+    infer_policy_receipt, PolicyInferenceRequest3 as HubPolicyInferenceRequest3,
+    PolicyReceipt1 as HubPolicyReceipt1, POLICY_AUTONOMY_INFERENCE_CONTRACT_VERSION,
+    POLICY_AUTONOMY_INFERENCE_FEATURE_ID,
+};
+use bioprism_ids::{
+    admit_federation_security, FederationEnvelope2, FederationRequest4 as IdsFederationRequest4,
+    FederationSecurityError, IDS_FEDERATION_SECURITY_FEATURE_ID,
 };
 use bioprism_ids::{
     admit_policy_autonomy, AutonomyPolicyReceipt9, AutonomyPolicyRequest7, PolicyAutonomyError,
     IDS_POLICY_AUTONOMY_FEATURE_ID,
 };
-use bioprism_scope::{
-    operate_federated_evidence_control,
-    EvidenceControlRequest6 as ScopeEvidenceControlRequest6,
-    FederatedEvidenceControlReceipt9 as ScopeFederatedEvidenceControlReceipt9,
-    SCOPE_FEDERATED_EVIDENCE_CONTROL_CONTRACT_VERSION,
-    SCOPE_FEDERATED_EVIDENCE_CONTROL_FEATURE_ID,
-};
-use bioprism_scope::{
-    operate_federated_scope_interoperability_gateway,
-    ScopeFederationGatewayRequest7,
-    ScopeFederationGatewayReceipt10,
-    SCOPE_FEDERATED_INTEROPERABILITY_CONTRACT_VERSION,
-    SCOPE_FEDERATED_INTEROPERABILITY_FEATURE_ID,
-};
 use bioprism_ids::{
-    infer_local_evidence_surveillance, EvidenceFeed1 as IdsEvidenceFeed1,
-    QualifiedEvidenceSet1 as IdsQualifiedEvidenceSet1,
-    IDS_LOCAL_EVIDENCE_SURVEILLANCE_CONTRACT_VERSION,
-    IDS_LOCAL_EVIDENCE_SURVEILLANCE_FEATURE_ID,
+    assess_performance_reliability, CapabilityWorkloadRequest4, PerformanceReliabilityError,
+    ReliableCapabilityResult6, IDS_PERFORMANCE_RELIABILITY_FEATURE_ID,
 };
 use bioprism_ids::{
     assure_contract_frontier as assure_ids_contract_frontier,
@@ -659,13 +664,21 @@ use bioprism_ids::{
 };
 use bioprism_ids::{
     assure_evaluation as assure_ids_evaluation, CapabilityRun7 as IdsCapabilityRun7,
-    EvaluationAssuranceError, EvaluationCard9 as IdsEvaluationCard9,
+    EvaluationAssuranceError as IdsEvaluationAssuranceError, EvaluationCard9 as IdsEvaluationCard9,
     IDS_EVALUATION_ASSURANCE_FEATURE_ID,
+};
+use bioprism_ids::{
+    assure_ids_interpretation, IdsEvidenceBackedResult4, IdsInteractiveInterpretation7,
+    IDS_INTERPRETATION_VISUALIZATION_CONTRACT_VERSION, IDS_INTERPRETATION_VISUALIZATION_FEATURE_ID,
 };
 use bioprism_ids::{
     assure_mechanism_exploration as assure_ids_mechanism_exploration, MechanismCandidate4,
     MechanismPortfolio7, MechanismQuestion2, PeerMechanismSummary4,
     IDS_MECHANISM_EXPLORATION_FEATURE_ID,
+};
+use bioprism_ids::{
+    assure_prospective_provenance, ArtifactAndDerivationRequest3, ProspectiveProvenanceError,
+    SignedProvenanceEnvelope7, IDS_PROSPECTIVE_PROVENANCE_FEATURE_ID,
 };
 use bioprism_ids::{
     assure_provenance_signing, ProvenanceBundleRequest7, ProvenanceSigningError,
@@ -678,6 +691,10 @@ use bioprism_ids::{
 use bioprism_ids::{
     assure_retrieval_synthesis, EvidenceSynthesis11, RetrievalSynthesisAssuranceError,
     ScopedRetrievalQuery6, IDS_RETRIEVAL_SYNTHESIS_ASSURANCE_FEATURE_ID,
+};
+use bioprism_ids::{
+    assure_typed_determinism, CanonicalCapabilityOutput7, TypedCapabilityInput4,
+    TypedDeterminismAssuranceError, IDS_TYPED_DETERMINISM_ASSURANCE_FEATURE_ID,
 };
 use bioprism_ids::{
     close_ids_limitations, IdsClosureReceipt9, IdsLimitationClosureRequest7,
@@ -718,6 +735,11 @@ use bioprism_ids::{
     SemanticParityError as IdsSemanticParityError, IDS_SEMANTIC_PARITY_FEATURE_ID,
 };
 use bioprism_ids::{
+    infer_local_evidence_surveillance, EvidenceFeed1 as IdsEvidenceFeed1,
+    QualifiedEvidenceSet1 as IdsQualifiedEvidenceSet1,
+    IDS_LOCAL_EVIDENCE_SURVEILLANCE_CONTRACT_VERSION, IDS_LOCAL_EVIDENCE_SURVEILLANCE_FEATURE_ID,
+};
+use bioprism_ids::{
     integrate_laboratory_workflow, LaboratoryIntegrationReport9, LaboratoryIntegrationRequest6,
     IDS_LABORATORY_INTEGRATION_FEATURE_ID,
 };
@@ -736,43 +758,13 @@ use bioprism_ids::{
     NegotiatedIntegration9 as IdsNegotiatedIntegration9, IDS_INTEROPERABILITY_GATEWAY_FEATURE_ID,
 };
 use bioprism_ids::{
+    negotiate_interoperability_copilot, ExternalCapabilityRequest2,
+    InteroperabilityExtensibilityError, NegotiatedIntegration3,
+    IDS_INTEROPERABILITY_EXTENSIBILITY_FEATURE_ID,
+};
+use bioprism_ids::{
     negotiate_typed_determinism, TypedDeterminismError, TypedDeterminismReceipt8,
     TypedDeterminismRequest7, IDS_TYPED_DETERMINISM_FEATURE_ID,
-};
-use bioprism_ids::{
-    assure_typed_determinism, CanonicalCapabilityOutput7,
-    TypedCapabilityInput4, TypedDeterminismAssuranceError,
-    IDS_TYPED_DETERMINISM_ASSURANCE_FEATURE_ID,
-};
-use bioprism_ids::{
-    assure_prospective_provenance, ArtifactAndDerivationRequest3,
-    ProspectiveProvenanceError, SignedProvenanceEnvelope7,
-    IDS_PROSPECTIVE_PROVENANCE_FEATURE_ID,
-};
-use bioprism_dataops::{
-    assure_prospective_provenance as assure_dataops_provenance,
-    ArtifactAndDerivationRequest3 as DataopsArtifactAndDerivationRequest3,
-    ProspectiveProvenanceError as DataopsProspectiveProvenanceError,
-    SignedProvenanceEnvelope7 as DataopsSignedProvenanceEnvelope7,
-    PROVENANCE_SIGNING_WORKFLOW_FABRIC_FEATURE_ID as DATAOPS_PROVENANCE_SIGNING_WORKFLOW_FABRIC_FEATURE_ID,
-};
-use bioprism_ids::{
-    operate_policy_autonomy, ActionAndAuthorityRequest4, PolicyAutonomyWorkbenchError,
-    PolicyReceipt5, IDS_POLICY_AUTONOMY_WORKBENCH_FEATURE_ID,
-};
-use bioprism_ids::{
-    admit_federation_security, FederationEnvelope2, FederationRequest4 as IdsFederationRequest4,
-    FederationSecurityError, IDS_FEDERATION_SECURITY_FEATURE_ID,
-};
-use bioprism_ids::{
-    assess_performance_reliability, CapabilityWorkloadRequest4,
-    PerformanceReliabilityError, ReliableCapabilityResult6,
-    IDS_PERFORMANCE_RELIABILITY_FEATURE_ID,
-};
-use bioprism_ids::{
-    negotiate_interoperability_copilot,
-    ExternalCapabilityRequest2, InteroperabilityExtensibilityError, NegotiatedIntegration3,
-    IDS_INTEROPERABILITY_EXTENSIBILITY_FEATURE_ID,
 };
 use bioprism_ids::{
     operate_context_compilation, CertifiedDecisionSection1, ContextFact4, ContextPeer4,
@@ -787,7 +779,12 @@ use bioprism_ids::{
     MultimodalIngestionRequest4, IDS_MULTIMODAL_INGESTION_FEATURE_ID,
 };
 use bioprism_ids::{
-    preflight_reliability, CapabilityWorkload7, ReliabilityCopilotError, ReliableCapabilityResult9,
+    operate_policy_autonomy, ActionAndAuthorityRequest4, PolicyAutonomyWorkbenchError,
+    PolicyReceipt5, IDS_POLICY_AUTONOMY_WORKBENCH_FEATURE_ID,
+};
+use bioprism_ids::{
+    preflight_reliability, CapabilityWorkload7,
+    ReliabilityCopilotError as IdsReliabilityCopilotError, ReliableCapabilityResult9,
     IDS_RELIABILITY_COPILOT_FEATURE_ID,
 };
 use bioprism_ids::{
@@ -812,29 +809,28 @@ use bioprism_ids::{
     IDS_PROTOCOL_SIMULATION_FEATURE_ID,
 };
 use bioprism_influence::{
-    run_federated_continual_interpretation, EvidenceBackedResult4, FederatedInterpretationError,
-    InteractiveInterpretation, FEDERATED_CONTINUAL_INTERPRETATION_FEATURE_ID,
-};
-use bioprism_influence::{
     assure_local_evidence_surveillance, InfluenceEvidenceFeedRequest,
     InfluenceEvidenceSurveillanceError, InfluenceQualifiedEvidenceSet,
     INFLUENCE_LOCAL_EVIDENCE_SURVEILLANCE_CONTRACT_VERSION,
     INFLUENCE_LOCAL_EVIDENCE_SURVEILLANCE_FEATURE_ID,
 };
+use bioprism_influence::{
+    run_federated_continual_interpretation,
+    EvidenceBackedResult4 as InfluenceEvidenceBackedResult4, FederatedInterpretationError,
+    InteractiveInterpretation, FEDERATED_CONTINUAL_INTERPRETATION_FEATURE_ID,
+};
+use bioprism_interweave::federated_interpretation_engine::{
+    compile_interpretation as compile_interweave_interpretation,
+    InterpretationInferenceError as InterweaveInterpretationError, InterpretationInferenceReceipt,
+    InterpretationInferenceRequest,
+};
 use bioprism_interweave::interweave_contract_frontier_federated_control_plane::{
     feature_id as INTERWEAVE_FRONTIER_FEATURE_ID, operate_interweave_frontier,
     InterweaveControlPlaneRequest, InterweaveControlReceipt,
 };
-use bioprism_interweave::federated_interpretation_engine::{
-    compile_interpretation as compile_interweave_interpretation,
-    InterpretationInferenceError as InterweaveInterpretationError,
-    InterpretationInferenceReceipt,
-    InterpretationInferenceRequest,
-};
 use bioprism_interweave::{
-    assure_federated_commons, InterweaveFederationEnvelope7,
-    InterweaveFederationError, InterweaveFederationRequest3,
-    FEDERATED_COMMONS_ASSURANCE_FEATURE_ID,
+    assure_federated_commons, InterweaveFederationEnvelope7, InterweaveFederationError,
+    InterweaveFederationRequest3, FEDERATED_COMMONS_ASSURANCE_FEATURE_ID,
 };
 use bioprism_lab::{
     evaluate_design_frontier, evaluate_semantic_parity, instrument_preflight,
@@ -846,23 +842,8 @@ use bioprism_lab::{
     INSTRUMENT_PREFLIGHT_FEATURE_ID, PROTOCOL_MATRIX_FEATURE_ID,
     RETRIEVAL_SYNTHESIS_OPERATIONS_FEATURE_ID, SEMANTIC_PARITY_FEATURE_ID,
 };
-use bioprism_stress::{
-    compile_publication_research_object,
-    SignedResearchObject5 as StressSignedResearchObject5,
-    PublicationWorkbenchRequest5 as StressPublicationWorkbenchRequest5,
-    PUBLICATION_RESEARCH_OBJECT_WORKBENCH_CONTRACT_VERSION,
-    PUBLICATION_RESEARCH_OBJECT_WORKBENCH_FEATURE_ID,
-};
-use bioprism_bioethics::{
-    assure_multimodal_bounded_evolution,
-    BioethicsEvolutionDecision7,
-    BioethicsEvolutionRequest3,
-    MULTIMODAL_BOUNDED_EVOLUTION_CONTRACT_VERSION,
-    MULTIMODAL_BOUNDED_EVOLUTION_FEATURE_ID,
-};
 use bioprism_lab::{
-    negotiate_lab_experiment_design,
-    ExecutableExperimentDesign8 as LabExecutableExperimentDesign8,
+    negotiate_lab_experiment_design, ExecutableExperimentDesign8 as LabExecutableExperimentDesign8,
     ExperimentDesignRequest4 as LabExperimentDesignRequest4,
     LAB_EXPERIMENT_DESIGN_INTEROPERABILITY_CONTRACT_VERSION,
     LAB_EXPERIMENT_DESIGN_INTEROPERABILITY_FEATURE_ID,
@@ -878,8 +859,7 @@ use bioprism_lens::{
 };
 use bioprism_lens::{
     compile_provenance_envelope, ProvenanceSigningError as LensProvenanceSigningError,
-    ProvenanceSigningRequest,
-    SignedProvenanceEnvelope3,
+    ProvenanceSigningRequest, SignedProvenanceEnvelope3,
 };
 use bioprism_megafactory::{
     operate_mechanism_exploration_control, FederatedMechanismControlRequest,
@@ -892,24 +872,29 @@ use bioprism_mutation::knowledge_representation_federated_control_plane::{
     FEATURE_ID as MUTATION_KNOWLEDGE_FEDERATED_CONTROL_FEATURE_ID,
 };
 use bioprism_mutation::{
+    assure_mutation_federated_bounded_evolution, MutationEvolutionReceipt10,
+    MutationEvolutionRequest8, MutationFederatedEvolutionError,
+    MUTATION_FEDERATED_EVOLUTION_CONTRACT_VERSION, MUTATION_FEDERATED_EVOLUTION_FEATURE_ID,
+};
+use bioprism_mutation::{
     compile_mutation_publication_release, MutationPublicationReleaseReceipt9,
     PublicationReleaseError as MutationPublicationReleaseError, PublicationReleaseRequest6,
     MUTATION_PUBLICATION_CONTRACT_VERSION, MUTATION_PUBLICATION_FEATURE_ID,
 };
 use bioprism_mutation::{
-    assure_mutation_federated_bounded_evolution, MutationFederatedEvolutionError,
-    MutationEvolutionReceipt10, MutationEvolutionRequest8,
-    MUTATION_FEDERATED_EVOLUTION_CONTRACT_VERSION, MUTATION_FEDERATED_EVOLUTION_FEATURE_ID,
-};
-use bioprism_mutation::{
-    operate_mutation_federated_resource_discovery,
+    operate_mutation_federated_resource_discovery, MutationPeerResourceSummary4,
     MutationResourceDiscoveryError, MutationResourceEndpoint4, MutationResourceNeed4,
-    MutationPeerResourceSummary4, QualifiedResourceSet8,
-    MUTATION_RESOURCE_DISCOVERY_FEATURE_ID,
+    QualifiedResourceSet8, MUTATION_RESOURCE_DISCOVERY_FEATURE_ID,
 };
 use bioprism_obligation::{
     assess_release_harness, ReleaseHarnessReceipt, ReleaseHarnessRequest,
     RELEASE_HARNESS_FEATURE_ID,
+};
+use bioprism_obligation::{
+    assure_knowledge_representation as assure_obligation_knowledge_representation,
+    AssuranceKnowledgePeer4, AssuranceResearchClaim4, AssuranceScopedResearchClaims4,
+    AssuranceTypedKnowledgeWorld7,
+    KNOWLEDGE_REPRESENTATION_ASSURANCE_FEATURE_ID as OBLIGATION_KNOWLEDGE_REPRESENTATION_ASSURANCE_FEATURE_ID,
 };
 use bioprism_obligation::{
     assure_prospective_release, ProspectiveReleaseAssuranceError,
@@ -917,13 +902,7 @@ use bioprism_obligation::{
     PROSPECTIVE_RELEASE_ASSURANCE_CONTRACT_VERSION, PROSPECTIVE_RELEASE_ASSURANCE_FEATURE_ID,
 };
 use bioprism_obligation::{
-    assure_knowledge_representation as assure_obligation_knowledge_representation,
-    AssuranceKnowledgePeer4, AssuranceResearchClaim4, AssuranceScopedResearchClaims4,
-    AssuranceTypedKnowledgeWorld7, KNOWLEDGE_REPRESENTATION_ASSURANCE_FEATURE_ID,
-};
-use bioprism_obligation::{
-    negotiate_security_federation,
-    FederationCapability6 as ObligationFederationCapability6,
+    negotiate_security_federation, FederationCapability6 as ObligationFederationCapability6,
     FederationEnvelope6 as ObligationFederationEnvelope6,
     FederationRequest4 as ObligationFederationRequest4,
     SECURITY_FEDERATION_INTEROPERABILITY_GATEWAY_CONTRACT_VERSION,
@@ -934,59 +913,43 @@ use bioprism_onco::{
     ProvenanceSigningRequest6, SignedProvenanceWorkflow9, FEDERATED_PROVENANCE_FEATURE_ID,
 };
 use bioprism_onco::{
+    model_computational_execution_contract, ExecutionRun2 as OncoExecutionRun2,
+    ResearchWorkflowSpec1 as OncoResearchWorkflowSpec1, COMPUTATIONAL_EXECUTION_CONTRACT_VERSION,
+    COMPUTATIONAL_EXECUTION_FEATURE_ID,
+};
+use bioprism_onco::{
     qualify_instrument_actions, OncoInstrumentError, OncoInstrumentReceipt5,
     OncoInstrumentRequest6, ONCO_INSTRUMENT_FEATURE_ID,
 };
 use bioprism_oncoworlds::{
-    qualify_oncoworlds_analysis_workbench, OncoworldsAnalysisWorkbenchError,
-    OncoworldsAnalysisWorkbenchReceipt,
-    OncoworldsAnalysisWorkbenchRequest,
-    ONCOWORLDS_ANALYSIS_WORKBENCH_CONTRACT_VERSION,
-    ONCOWORLDS_ANALYSIS_WORKBENCH_FEATURE_ID,
-};
-use bioprism_oncoworlds::{
-    run_oncoworlds_evidence_surveillance_copilot,
-    OncoworldsEvidenceSurveillanceCopilotError,
-    OncoworldsEvidenceSurveillanceCopilotReceipt,
-    OncoworldsEvidenceSurveillanceCopilotRequest,
-    ONCOWORLDS_EVIDENCE_SURVEILLANCE_COPILOT_CONTRACT_VERSION,
-    ONCOWORLDS_EVIDENCE_SURVEILLANCE_COPILOT_FEATURE_ID,
-};
-use bioprism_oncoworlds::{
-    assure_oncoworlds_replication, OncoworldsClaimAndProtocol,
-    OncoworldsReplicationAssuranceError, OncoworldsReplicationRecord,
-    ONCOWORLDS_REPLICATION_ASSURANCE_CONTRACT_VERSION,
+    assure_oncoworlds_replication, OncoworldsClaimAndProtocol, OncoworldsReplicationAssuranceError,
+    OncoworldsReplicationRecord, ONCOWORLDS_REPLICATION_ASSURANCE_CONTRACT_VERSION,
     ONCOWORLDS_REPLICATION_ASSURANCE_FEATURE_ID,
 };
 use bioprism_oncoworlds::{
-    assure_oncoworlds_resources, OncoworldsPeerResourceSummary4,
-    OncoworldsQualifiedResourceSet7, OncoworldsResourceDiscoveryError,
-    OncoworldsResourceEndpoint4, OncoworldsResourceNeed4,
-    ONCOWORLDS_RESOURCE_DISCOVERY_CONTRACT_VERSION,
-    ONCOWORLDS_RESOURCE_DISCOVERY_FEATURE_ID,
+    assure_oncoworlds_resources, OncoworldsPeerResourceSummary4, OncoworldsQualifiedResourceSet7,
+    OncoworldsResourceDiscoveryError, OncoworldsResourceEndpoint4, OncoworldsResourceNeed4,
+    ONCOWORLDS_RESOURCE_DISCOVERY_CONTRACT_VERSION, ONCOWORLDS_RESOURCE_DISCOVERY_FEATURE_ID,
+};
+use bioprism_oncoworlds::{
+    qualify_oncoworlds_analysis_workbench, OncoworldsAnalysisWorkbenchError,
+    OncoworldsAnalysisWorkbenchReceipt, OncoworldsAnalysisWorkbenchRequest,
+    ONCOWORLDS_ANALYSIS_WORKBENCH_CONTRACT_VERSION, ONCOWORLDS_ANALYSIS_WORKBENCH_FEATURE_ID,
+};
+use bioprism_oncoworlds::{
+    run_oncoworlds_evidence_surveillance_copilot, OncoworldsEvidenceSurveillanceCopilotError,
+    OncoworldsEvidenceSurveillanceCopilotReceipt, OncoworldsEvidenceSurveillanceCopilotRequest,
+    ONCOWORLDS_EVIDENCE_SURVEILLANCE_COPILOT_CONTRACT_VERSION,
+    ONCOWORLDS_EVIDENCE_SURVEILLANCE_COPILOT_FEATURE_ID,
 };
 use bioprism_ops::{
     assure_knowledge_representation, KnowledgeRepresentationAssuranceReceipt,
     KnowledgeRepresentationAssuranceRequest, KNOWLEDGE_REPRESENTATION_ASSURANCE_FEATURE_ID,
 };
-use bioprism_oraclex::publication_release_contract_model::{
-    compile_publication_release as compile_oraclex_publication_release,
-    feature_id as PUBLICATION_RELEASE_FEATURE_ID, PublicationReleaseReceipt,
-    PublicationReleaseRequest,
-};
-use bioprism_oraclex::{
-    assure_interpretation as assure_oraclex_interpretation,
-    negotiate_performance_reliability,
-    qualify_statistical_analysis,
-    CapabilityWorkload4 as OraclexCapabilityWorkload4,
-    AnalysisQuestion4 as OraclexAnalysisQuestion4,
-    QualifiedAnalysisResult5 as OraclexQualifiedAnalysisResult5,
-    ReliableCapabilityResult6 as OraclexReliableCapabilityResult6,
-    EvidenceBackedResult3 as OraclexEvidenceBackedResult3,
-    InteractiveInterpretation1 as OraclexInteractiveInterpretation1,
-    INTERPRETATION_INFERENCE_FEATURE_ID as ORACLEX_INTERPRETATION_INFERENCE_FEATURE_ID,
-    PERFORMANCE_RELIABILITY_INTEROPERABILITY_FEATURE_ID as ORACLEX_PERFORMANCE_RELIABILITY_INTEROPERABILITY_FEATURE_ID,
-    STATISTICAL_ANALYSIS_RESEARCH_WORKBENCH_FEATURE_ID as ORACLEX_STATISTICAL_ANALYSIS_RESEARCH_WORKBENCH_FEATURE_ID,
+use bioprism_oracle::{
+    negotiate_integration, ExternalCapabilityRequest1 as OracleExternalCapabilityRequest1,
+    NegotiatedIntegration5 as OracleNegotiatedIntegration5,
+    INTEROPERABILITY_WORKBENCH_CONTRACT_VERSION, INTEROPERABILITY_WORKBENCH_FEATURE_ID,
 };
 use bioprism_oracle::{
     schedule_evidence_surveillance,
@@ -995,25 +958,34 @@ use bioprism_oracle::{
     CONTRACT_VERSION as ORACLE_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_CONTRACT_VERSION,
     FEATURE_ID as ORACLE_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_FEATURE_ID,
 };
-use bioprism_safety::{
-    assure_prospective_laboratory_integration, InstrumentActionReceipt7,
-    InstrumentActionRequest3, InstrumentActionAssuranceError,
-    PROSPECTIVE_LABORATORY_INTEGRATION_CONTRACT_VERSION,
-    PROSPECTIVE_LABORATORY_INTEGRATION_FEATURE_ID,
+use bioprism_oraclex::publication_release_contract_model::{
+    compile_publication_release as compile_oraclex_publication_release,
+    feature_id as PUBLICATION_RELEASE_FEATURE_ID, PublicationReleaseReceipt,
+    PublicationReleaseRequest,
 };
-use bioprism_policy::{
-    admit_autonomy_batch, BatchAdmissionReceipt, BatchAdmissionRequest, AUTONOMY_BATCH_FEATURE_ID,
+use bioprism_oraclex::{
+    assure_interpretation as assure_oraclex_interpretation, negotiate_performance_reliability,
+    qualify_statistical_analysis, AnalysisQuestion4 as OraclexAnalysisQuestion4,
+    CapabilityWorkload4 as OraclexCapabilityWorkload4,
+    EvidenceBackedResult3 as OraclexEvidenceBackedResult3,
+    InteractiveInterpretation1 as OraclexInteractiveInterpretation1,
+    QualifiedAnalysisResult5 as OraclexQualifiedAnalysisResult5,
+    ReliableCapabilityResult6 as OraclexReliableCapabilityResult6,
+    INTERPRETATION_INFERENCE_FEATURE_ID as ORACLEX_INTERPRETATION_INFERENCE_FEATURE_ID,
+    PERFORMANCE_RELIABILITY_INTEROPERABILITY_FEATURE_ID as ORACLEX_PERFORMANCE_RELIABILITY_INTEROPERABILITY_FEATURE_ID,
+    STATISTICAL_ANALYSIS_RESEARCH_WORKBENCH_FEATURE_ID as ORACLEX_STATISTICAL_ANALYSIS_RESEARCH_WORKBENCH_FEATURE_ID,
 };
 use bioprism_packs::{
     assure_packs_quality_control, PacksQualityControlError, PacksQualityObservation2,
-    PacksQualityVerdict7, PacksResearchObject1,
-    PACKS_LOCAL_QUALITY_CONTROL_CONTRACT_VERSION, PACKS_LOCAL_QUALITY_CONTROL_FEATURE_ID,
+    PacksQualityVerdict7, PacksResearchObject1, PACKS_LOCAL_QUALITY_CONTROL_CONTRACT_VERSION,
+    PACKS_LOCAL_QUALITY_CONTROL_FEATURE_ID,
 };
 use bioprism_packs::{
-    simulate_packs_protocol_workbench,
-    PacksProtocolWorkbenchReport9,
-    PACKS_PROTOCOL_WORKBENCH_CONTRACT_VERSION,
-    PACKS_PROTOCOL_WORKBENCH_FEATURE_ID,
+    simulate_packs_protocol_workbench, PacksProtocolWorkbenchReport9,
+    PACKS_PROTOCOL_WORKBENCH_CONTRACT_VERSION, PACKS_PROTOCOL_WORKBENCH_FEATURE_ID,
+};
+use bioprism_policy::{
+    admit_autonomy_batch, BatchAdmissionReceipt, BatchAdmissionRequest, AUTONOMY_BATCH_FEATURE_ID,
 };
 use bioprism_policy::{
     assess_protocol_assurance, ProtocolAssuranceReceipt, ProtocolAssuranceRequest,
@@ -1025,28 +997,31 @@ use bioprism_policy::{
     ANALYSIS_COPILOT_FEATURE_ID as POLICY_ANALYSIS_COPILOT_FEATURE_ID,
 };
 use bioprism_prism::{
-    qualify_analysis_workbench, AnalysisWorkbenchError, AnalysisWorkbenchReceipt7,
-    AnalysisWorkbenchRequest5, ANALYSIS_WORKBENCH_CONTRACT_VERSION as PRISM_ANALYSIS_WORKBENCH_CONTRACT_VERSION,
-    ANALYSIS_WORKBENCH_FEATURE_ID as PRISM_ANALYSIS_WORKBENCH_FEATURE_ID,
-    assure_protocol_simulation, ProtocolDraft as PrismProtocolDraft,
-    ProtocolSimulationReport as PrismProtocolSimulationReport,
-    PROTOCOL_SIMULATION_ASSURANCE_CONTRACT_VERSION,
-    PROTOCOL_SIMULATION_ASSURANCE_FEATURE_ID,
-};
-use bioprism_prism::{
     admit_laboratory_integration_action, InstrumentActionReceipt3 as PrismInstrumentActionReceipt3,
     InstrumentActionRequest4 as PrismInstrumentActionRequest4,
-    LABORATORY_INTEGRATION_COPILOT_CONTRACT_VERSION,
-    LABORATORY_INTEGRATION_COPILOT_FEATURE_ID,
+    LABORATORY_INTEGRATION_COPILOT_CONTRACT_VERSION, LABORATORY_INTEGRATION_COPILOT_FEATURE_ID,
+};
+use bioprism_prism::{
+    assure_protocol_simulation, qualify_analysis_workbench, AnalysisWorkbenchError,
+    AnalysisWorkbenchReceipt7, AnalysisWorkbenchRequest5, ProtocolDraft as PrismProtocolDraft,
+    ProtocolSimulationReport as PrismProtocolSimulationReport,
+    ANALYSIS_WORKBENCH_CONTRACT_VERSION as PRISM_ANALYSIS_WORKBENCH_CONTRACT_VERSION,
+    ANALYSIS_WORKBENCH_FEATURE_ID as PRISM_ANALYSIS_WORKBENCH_FEATURE_ID,
+    PROTOCOL_SIMULATION_ASSURANCE_CONTRACT_VERSION, PROTOCOL_SIMULATION_ASSURANCE_FEATURE_ID,
 };
 use bioprism_routing::{
     assure_federated_multimodal, FederatedMultimodalAssuranceReceipt,
     FederatedMultimodalAssuranceRequest, FEDERATED_MULTIMODAL_ASSURANCE_FEATURE_ID,
 };
 use bioprism_routing::{
+    compile_limitation_closure_workflow, LimitationClosureError as RoutingLimitationClosureError,
+    LimitationClosureWorkflowReceipt7, LimitationClosureWorkflowRequest5,
+    LIMITATION_CLOSURE_WORKFLOW_CONTRACT_VERSION, LIMITATION_CLOSURE_WORKFLOW_FEATURE_ID,
+};
+use bioprism_routing::{
     infer_laboratory_actions, InstrumentActionReceipt1,
-    InstrumentActionRequest4 as RoutingInstrumentActionRequest4,
-    LaboratoryInferenceError, LABORATORY_INFERENCE_FEATURE_ID,
+    InstrumentActionRequest4 as RoutingInstrumentActionRequest4, LaboratoryInferenceError,
+    LABORATORY_INFERENCE_FEATURE_ID,
 };
 use bioprism_routing::{
     route_federated_execution, ExecutionRoutingReceipt9, FederatedExecutionCopilotError,
@@ -1055,88 +1030,57 @@ use bioprism_routing::{
 use bioprism_runtime::{
     assure_interpretation as assure_runtime_interpretation, execute_workflow,
     execute_workflow_batch, EvidenceBackedResult4, InteractiveInterpretation7,
-    WorkflowBatchReceipt, WorkflowBatchRequest, WorkflowExecutionReceipt,
-    WorkflowExecutionRequest,
+    WorkflowBatchReceipt, WorkflowBatchRequest, WorkflowExecutionReceipt, WorkflowExecutionRequest,
     INTERPRETATION_ASSURANCE_FEATURE_ID as RUNTIME_INTERPRETATION_ASSURANCE_FEATURE_ID,
     WORKFLOW_BATCH_FEATURE_ID, WORKFLOW_EXECUTION_FEATURE_ID,
 };
 use bioprism_runtime::{
-    assure_runtime_knowledge_representation,
-    RuntimeKnowledgePeer4, RuntimeResearchClaim4, RuntimeScopedResearchClaims4,
-    RuntimeTypedKnowledgeWorld7, RUNTIME_KNOWLEDGE_REPRESENTATION_FEATURE_ID,
+    assure_runtime_knowledge_representation, RuntimeKnowledgePeer4, RuntimeResearchClaim4,
+    RuntimeScopedResearchClaims4, RuntimeTypedKnowledgeWorld7,
+    RUNTIME_KNOWLEDGE_REPRESENTATION_FEATURE_ID,
 };
-use bioprism_ids::{
-    assure_ids_interpretation, IdsEvidenceBackedResult4, IdsInteractiveInterpretation7,
-    IDS_INTERPRETATION_VISUALIZATION_CONTRACT_VERSION,
-    IDS_INTERPRETATION_VISUALIZATION_FEATURE_ID,
+use bioprism_safety::{
+    assure_prospective_laboratory_integration, InstrumentActionAssuranceError,
+    InstrumentActionReceipt7, InstrumentActionRequest3,
+    PROSPECTIVE_LABORATORY_INTEGRATION_CONTRACT_VERSION,
+    PROSPECTIVE_LABORATORY_INTEGRATION_FEATURE_ID,
 };
 use bioprism_scale::{
-    assure_federation, FederationEnvelope8, FederationRequest4, FederationTrustError,
-    FEDERATION_TRUST_FEATURE_ID,
-    model_quality_control_contract as model_scale_quality_control_contract,
+    assure_federation, model_quality_control_contract as model_scale_quality_control_contract,
+    FederationEnvelope8, FederationRequest4, FederationTrustError,
     QualityControlContractRequest as ScaleQualityControlContractRequest,
-    QualityVerdict2 as ScaleQualityVerdict2,
-    QUALITY_CONTROL_CONTRACT_MODEL_CONTRACT_VERSION,
-    QUALITY_CONTROL_CONTRACT_MODEL_FEATURE_ID,
+    QualityVerdict2 as ScaleQualityVerdict2, FEDERATION_TRUST_FEATURE_ID,
+    QUALITY_CONTROL_CONTRACT_MODEL_CONTRACT_VERSION, QUALITY_CONTROL_CONTRACT_MODEL_FEATURE_ID,
 };
 use bioprism_scale::{
-    assure_interpretation_visualization,
-    EvidenceBackedResult4 as ScaleEvidenceBackedResult4,
+    assure_interpretation_visualization, EvidenceBackedResult4 as ScaleEvidenceBackedResult4,
     InteractiveInterpretation7 as ScaleInteractiveInterpretation7,
-    INTERPRETATION_VISUALIZATION_CONTRACT_VERSION,
-    INTERPRETATION_VISUALIZATION_FEATURE_ID,
+    INTERPRETATION_VISUALIZATION_CONTRACT_VERSION, INTERPRETATION_VISUALIZATION_FEATURE_ID,
 };
 use bioprism_scale::{
-    interoperate_interpretations,
-    EvidenceBackedResult2 as ScaleInterpretationInteropRequest,
+    interoperate_interpretations, EvidenceBackedResult2 as ScaleInterpretationInteropRequest,
     InteractiveInterpretation6 as ScaleInterpretationInteropReceipt,
-    INTERPRETATION_INTEROPERABILITY_CONTRACT_VERSION,
-    INTERPRETATION_INTEROPERABILITY_FEATURE_ID,
+    INTERPRETATION_INTEROPERABILITY_CONTRACT_VERSION, INTERPRETATION_INTEROPERABILITY_FEATURE_ID,
 };
-use bioprism_bioethics::{
-    compile_experiment_design_workflow,
-    ExecutableExperimentDesign4 as BioethicsExecutableExperimentDesign4,
-    ExperimentDesignWorkflowRequest1 as BioethicsExperimentDesignWorkflowRequest1,
-    EXPERIMENT_DESIGN_WORKFLOW_CONTRACT_VERSION,
-    EXPERIMENT_DESIGN_WORKFLOW_FEATURE_ID,
+use bioprism_scope::{
+    operate_federated_evidence_control, EvidenceControlRequest6 as ScopeEvidenceControlRequest6,
+    FederatedEvidenceControlReceipt9 as ScopeFederatedEvidenceControlReceipt9,
+    SCOPE_FEDERATED_EVIDENCE_CONTROL_CONTRACT_VERSION, SCOPE_FEDERATED_EVIDENCE_CONTROL_FEATURE_ID,
 };
-use bioprism_onco::{
-    model_computational_execution_contract,
-    ExecutionRun2 as OncoExecutionRun2,
-    ResearchWorkflowSpec1 as OncoResearchWorkflowSpec1,
-    COMPUTATIONAL_EXECUTION_CONTRACT_VERSION,
-    COMPUTATIONAL_EXECUTION_FEATURE_ID,
-};
-use bioprism_oracle::{
-    negotiate_integration,
-    ExternalCapabilityRequest1 as OracleExternalCapabilityRequest1,
-    NegotiatedIntegration5 as OracleNegotiatedIntegration5,
-    INTEROPERABILITY_WORKBENCH_CONTRACT_VERSION,
-    INTEROPERABILITY_WORKBENCH_FEATURE_ID,
-};
-use bioprism_atlashub::{
-    infer_signed_provenance,
-    ProvenanceSigningRequest1 as AtlashubProvenanceSigningRequest1,
-    SignedProvenanceEnvelope1 as AtlashubSignedProvenanceEnvelope1,
-    PROVENANCE_SIGNING_INFERENCE_CONTRACT_VERSION,
-    PROVENANCE_SIGNING_INFERENCE_FEATURE_ID,
-};
-use bioprism_hub::{
-    infer_policy_receipt,
-    PolicyInferenceRequest3 as HubPolicyInferenceRequest3,
-    PolicyReceipt1 as HubPolicyReceipt1,
-    POLICY_AUTONOMY_INFERENCE_CONTRACT_VERSION,
-    POLICY_AUTONOMY_INFERENCE_FEATURE_ID,
-};
-use bioprism_services::{
-    compile_multimodal_interpretation, InteractiveInterpretation1, InterpretationEngineError,
-    InterpretationRequest2, MULTIMODAL_INTERPRETATION_FEATURE_ID,
+use bioprism_scope::{
+    operate_federated_scope_interoperability_gateway, ScopeFederationGatewayReceipt10,
+    ScopeFederationGatewayRequest7, SCOPE_FEDERATED_INTEROPERABILITY_CONTRACT_VERSION,
+    SCOPE_FEDERATED_INTEROPERABILITY_FEATURE_ID,
 };
 use bioprism_services::{
     compile_context_compilation, CertifiedDecisionSection3 as ServicesCertifiedDecisionSection3,
     ContextCompilationError as ServicesContextCompilationError,
     ContextCompilationRequest as ServicesContextCompilationRequest,
     CONTEXT_COMPILATION_COPILOT_FEATURE_ID,
+};
+use bioprism_services::{
+    compile_multimodal_interpretation, InteractiveInterpretation1, InterpretationEngineError,
+    InterpretationRequest2, MULTIMODAL_INTERPRETATION_FEATURE_ID,
 };
 use bioprism_services::{
     infer_federated_publication_release, FederatedPublicationReleaseInferenceReceipt,
@@ -1148,33 +1092,38 @@ use bioprism_store::{
     admit_federated_knowledge, FederatedKnowledgeGatewayReceipt, FederatedKnowledgeGatewayRequest,
     FEDERATED_KNOWLEDGE_GATEWAY_FEATURE_ID,
 };
+use bioprism_stress::{
+    compile_publication_research_object,
+    PublicationWorkbenchRequest5 as StressPublicationWorkbenchRequest5,
+    SignedResearchObject5 as StressSignedResearchObject5,
+    PUBLICATION_RESEARCH_OBJECT_WORKBENCH_CONTRACT_VERSION,
+    PUBLICATION_RESEARCH_OBJECT_WORKBENCH_FEATURE_ID,
+};
+use bioprism_stress::{
+    harmonize_federated_multimodal, HarmonizedResearchObject2 as StressHarmonizedResearchObject2,
+    RawModalityBundle4 as StressRawModalityBundle4,
+    FEDERATED_MULTIMODAL_INGESTION_CONTRACT_VERSION, FEDERATED_MULTIMODAL_INGESTION_FEATURE_ID,
+};
 use bioprism_weave::{
     operate_resource_control_plane, ResourceControlPlaneReceipt, ResourceControlPlaneRequest,
     RESOURCE_CONTROL_PLANE_FEATURE_ID,
 };
-use bioprism_backends::{
-    run_federated_retrieval_synthesis, FederatedRetrievalSynthesisRequest6,
-    FederatedRetrievalSynthesisRun8,
-    FEDERATED_RETRIEVAL_SYNTHESIS_WORKFLOW_CONTRACT_VERSION,
-    FEDERATED_RETRIEVAL_SYNTHESIS_WORKFLOW_FEATURE_ID,
+use bioprism_weavelang::{
+    assure_weavelang_federated_commons, WeavelangFederationEnvelope8, WeavelangFederationRequest5,
+    WEAVELANG_FEDERATED_COMMONS_ASSURANCE_CONTRACT_VERSION,
+    WEAVELANG_FEDERATED_COMMONS_ASSURANCE_FEATURE_ID,
 };
 use bioprism_weavelang::{
     assure_weavelang_release, WeaveLangReleaseAssuranceReceipt, WeaveLangReleaseAssuranceRequest,
     WEAVELANG_RELEASE_ASSURANCE_FEATURE_ID,
 };
-use bioprism_weavelang::{
-    assure_weavelang_federated_commons, WeavelangFederationEnvelope8,
-    WeavelangFederationRequest5,
-    WEAVELANG_FEDERATED_COMMONS_ASSURANCE_CONTRACT_VERSION,
-    WEAVELANG_FEDERATED_COMMONS_ASSURANCE_FEATURE_ID,
+use bioprism_worldfactory::{
+    authorize_computational_execution, ComputationalExecutionPlan4, ComputationalExecutionRun9,
+    COMPUTATIONAL_EXECUTION_FEDERATED_CONTROL_FEATURE_ID,
 };
 use bioprism_worldfactory::{
     simulate_protocol, ProtocolDraft4, ProtocolSimulationReport8,
     PROTOCOL_SIMULATION_FEDERATED_CONTROL_FEATURE_ID,
-};
-use bioprism_worldfactory::{
-    authorize_computational_execution, ComputationalExecutionPlan4, ComputationalExecutionRun9,
-    COMPUTATIONAL_EXECUTION_FEDERATED_CONTROL_FEATURE_ID,
 };
 use bioprism_worldgen::{
     assure_worldgen_multimodal_execution, MultimodalExecutionAssuranceError, WorldgenExecutionRun7,
@@ -1191,11 +1140,15 @@ use serde_json::Value;
 pub const RESEARCH_COMPILE_TOOL: &str = "aurora_research_compile_evidence";
 pub const WORKFLOW_EXECUTION_TOOL: &str = "runtime_workflow_execute";
 pub const ORACLEX_INTERPRETATION_INFERENCE_TOOL: &str = "oraclex_interpretation_inference";
-pub const ORACLEX_PERFORMANCE_RELIABILITY_INTEROPERABILITY_GATEWAY_TOOL: &str = "oraclex_performance_reliability_interoperability_gateway";
-pub const ORACLEX_STATISTICAL_ANALYSIS_RESEARCH_WORKBENCH_TOOL: &str = "oraclex_statistical_analysis_research_workbench";
+pub const ORACLEX_PERFORMANCE_RELIABILITY_INTEROPERABILITY_GATEWAY_TOOL: &str =
+    "oraclex_performance_reliability_interoperability_gateway";
+pub const ORACLEX_STATISTICAL_ANALYSIS_RESEARCH_WORKBENCH_TOOL: &str =
+    "oraclex_statistical_analysis_research_workbench";
 pub const RUNTIME_INTERPRETATION_ASSURANCE_TOOL: &str = "runtime_interpretation_assurance";
-pub const RUNTIME_KNOWLEDGE_REPRESENTATION_ASSURANCE_TOOL: &str = "runtime_knowledge_representation_assurance";
-pub const FABRIC_EXPERIMENT_DESIGN_INTEROPERABILITY_GATEWAY_TOOL: &str = "fabric_experiment_design_interoperability_gateway";
+pub const RUNTIME_KNOWLEDGE_REPRESENTATION_ASSURANCE_TOOL: &str =
+    "runtime_knowledge_representation_assurance";
+pub const FABRIC_EXPERIMENT_DESIGN_INTEROPERABILITY_GATEWAY_TOOL: &str =
+    "fabric_experiment_design_interoperability_gateway";
 pub const IDS_INTERPRETATION_VISUALIZATION_ASSURANCE_TOOL: &str =
     "ids_federated_interpretation_visualization_assurance";
 pub const EVALENGINE_LOCAL_MECHANISM_EXPLORATION_ASSURANCE_TOOL: &str =
@@ -1239,11 +1192,12 @@ pub const ONCOWORLDS_EVIDENCE_SURVEILLANCE_COPILOT_TOOL: &str =
 pub const SCALE_FEDERATION_TRUST_TOOL: &str = "scale_federation_trust_control_plane";
 pub const FEDERATED_QUALITY_CONTROL_TOOL: &str = "mcp_federated_quality_control";
 pub const ONCO_FEDERATED_PROVENANCE_TOOL: &str = "onco_federated_provenance_signing";
-pub const ONCO_INSTRUMENT_RESEARCH_WORKBENCH_TOOL: &str =
-    "onco_instrument_research_workbench";
+pub const ONCO_INSTRUMENT_RESEARCH_WORKBENCH_TOOL: &str = "onco_instrument_research_workbench";
 pub const MUTATION_PUBLICATION_RELEASE_TOOL: &str = "mutation_federated_publication_release";
-pub const MUTATION_FEDERATED_EVOLUTION_ASSURANCE_TOOL: &str = "mutation_federated_continual_bounded_evolution_assurance";
-pub const MUTATION_RESOURCE_DISCOVERY_CONTROL_PLANE_TOOL: &str = "mutation_federated_resource_discovery_control_plane";
+pub const MUTATION_FEDERATED_EVOLUTION_ASSURANCE_TOOL: &str =
+    "mutation_federated_continual_bounded_evolution_assurance";
+pub const MUTATION_RESOURCE_DISCOVERY_CONTROL_PLANE_TOOL: &str =
+    "mutation_federated_resource_discovery_control_plane";
 pub const FACTORY_PROSPECTIVE_EVIDENCE_TOOL: &str = "factory_prospective_evidence_surveillance";
 pub const FACTORY_FEDERATED_QUALITY_WORKBENCH_TOOL: &str = "factory_federated_quality_workbench";
 pub const FIBER_FEDERATED_RESOURCE_TOOL: &str = "fiber_federated_resource_workbench";
@@ -1253,15 +1207,19 @@ pub const OBLIGATION_PROSPECTIVE_RELEASE_TOOL: &str = "obligation_prospective_re
 pub const ATLASX_FEDERATED_EXECUTION_TOOL: &str = "atlasx_federated_execution_control_plane";
 pub const POLICY_ANALYSIS_COPILOT_TOOL: &str = "policy_federated_analysis_copilot";
 pub const ATLASX_CONTEXT_COMPILATION_TOOL: &str = "atlasx_context_compilation_assurance";
-pub const ATLASX_COMPUTATIONAL_EXECUTION_ASSURANCE_TOOL: &str = "atlasx_computational_execution_assurance";
+pub const ATLASX_COMPUTATIONAL_EXECUTION_ASSURANCE_TOOL: &str =
+    "atlasx_computational_execution_assurance";
 pub const ATLASHUB_QUALITY_CONTROL_COPILOT_TOOL: &str = "atlashub_quality_control_research_copilot";
-pub const ATLASHUB_QUALITY_CONTROL_CONTRACT_MODEL_TOOL: &str = "atlashub_quality_control_contract_model";
+pub const ATLASHUB_QUALITY_CONTROL_CONTRACT_MODEL_TOOL: &str =
+    "atlashub_quality_control_contract_model";
 pub const BIOWORLDS_RESOURCE_DISCOVERY_TOOL: &str = "bioworlds_resource_discovery_copilot";
 pub const BIOWORLDS_KNOWLEDGE_WORKFLOW_TOOL: &str = "bioworlds_knowledge_workflow_fabric";
-pub const BIOWORLDS_FEDERATED_CONTEXT_RESEARCH_WORKBENCH_TOOL: &str = "bioworlds_federated_context_research_workbench";
+pub const BIOWORLDS_FEDERATED_CONTEXT_RESEARCH_WORKBENCH_TOOL: &str =
+    "bioworlds_federated_context_research_workbench";
 pub const ADAPTER_FEDERATED_CONTEXT_COPILOT_TOOL: &str = "adapter_federated_context_copilot";
 pub const ROUTING_LIMITATION_CLOSURE_TOOL: &str = "routing_limitation_closure_workflow";
-pub const INTERWEAVE_FEDERATED_INTERPRETATION_TOOL: &str = "interweave_federated_interpretation_engine";
+pub const INTERWEAVE_FEDERATED_INTERPRETATION_TOOL: &str =
+    "interweave_federated_interpretation_engine";
 pub const INTERWEAVE_FEDERATED_COMMONS_ASSURANCE_TOOL: &str =
     "interweave_federated_commons_assurance";
 pub const ROUTING_LABORATORY_INFERENCE_TOOL: &str = "routing_laboratory_inference_engine";
@@ -1275,7 +1233,8 @@ pub const SERVICES_CONTEXT_COMPILATION_COPILOT_TOOL: &str =
     "services_context_compilation_research_copilot";
 pub const FEDERATED_CONTINUAL_RETRIEVAL_TOOL: &str = "federated_continual_retrieval_copilot";
 pub const CONTEXT_COMPILATION_ASSURANCE_TOOL: &str = "federated_context_compilation_assurance";
-pub const DEVPLAT_MULTIMODAL_LIMITATION_CLOSURE_TOOL: &str = "devplat_multimodal_limitation_closure_assurance";
+pub const DEVPLAT_MULTIMODAL_LIMITATION_CLOSURE_TOOL: &str =
+    "devplat_multimodal_limitation_closure_assurance";
 pub const KNOWLEDGE_REPRESENTATION_ASSURANCE_TOOL: &str =
     "federated_knowledge_representation_assurance";
 pub const RESOURCE_CONTROL_PLANE_TOOL: &str = "federated_resource_control_plane";
@@ -1389,8 +1348,10 @@ pub const INSTRUMENT_MESH_TOOL: &str = "adapter_instrument_mesh";
 pub const EXECUTION_CONTROL_TOOL: &str = "adapter_execution_control";
 pub const ANALYSIS_PORTFOLIO_TOOL: &str = "adapter_analysis_portfolio";
 pub const INTERPRETATION_ASSURANCE_TOOL: &str = "adapter_interpretation_assurance";
-pub const INFLUENCE_LOCAL_EVIDENCE_SURVEILLANCE_TOOL: &str = "influence_local_evidence_surveillance_assurance";
-pub const SAFETY_PROSPECTIVE_LABORATORY_INTEGRATION_TOOL: &str = "safety_prospective_laboratory_integration_assurance";
+pub const INFLUENCE_LOCAL_EVIDENCE_SURVEILLANCE_TOOL: &str =
+    "influence_local_evidence_surveillance_assurance";
+pub const SAFETY_PROSPECTIVE_LABORATORY_INTEGRATION_TOOL: &str =
+    "safety_prospective_laboratory_integration_assurance";
 pub const REPLICATION_ASSURANCE_TOOL: &str = "adapter_replication_assurance";
 pub const RELEASE_ASSURANCE_TOOL: &str = "adapter_release_assurance";
 pub const DETERMINISM_GATEWAY_TOOL: &str = "adapter_determinism_gateway";
@@ -1617,7 +1578,10 @@ pub fn validate_registry_scale_frontier_json(
 pub const REGISTRY_REPLICATION_WORKBENCH_TOOL: &str = "registry_replication_workbench";
 
 pub fn operate_registry_replication_workbench_json(value: &Value) -> Result<Value, String> {
-    let request = value.get("request").cloned().unwrap_or_else(|| value.clone());
+    let request = value
+        .get("request")
+        .cloned()
+        .unwrap_or_else(|| value.clone());
     bioprism_registry::assure_replication_json(&request)
         .map_err(|error| format!("registry replication workbench failed: {error}"))
 }
@@ -1859,36 +1823,56 @@ pub fn validate_runtime_interpretation_assurance_json(
 }
 
 pub fn run_runtime_knowledge_representation_assurance_json(value: &Value) -> Result<Value, String> {
-    let request: RuntimeScopedResearchClaims4 = serde_json::from_value(value.get("request").cloned().ok_or("request is required")?)
-        .map_err(|error| format!("invalid runtime knowledge request: {error}"))?;
-    let claims: Vec<RuntimeResearchClaim4> = serde_json::from_value(value.get("claims").cloned().ok_or("claims are required")?)
-        .map_err(|error| format!("invalid runtime knowledge claims: {error}"))?;
-    let peers: Vec<RuntimeKnowledgePeer4> = serde_json::from_value(value.get("peers").cloned().ok_or("peers are required")?)
-        .map_err(|error| format!("invalid runtime knowledge peers: {error}"))?;
+    let request: RuntimeScopedResearchClaims4 =
+        serde_json::from_value(value.get("request").cloned().ok_or("request is required")?)
+            .map_err(|error| format!("invalid runtime knowledge request: {error}"))?;
+    let claims: Vec<RuntimeResearchClaim4> =
+        serde_json::from_value(value.get("claims").cloned().ok_or("claims are required")?)
+            .map_err(|error| format!("invalid runtime knowledge claims: {error}"))?;
+    let peers: Vec<RuntimeKnowledgePeer4> =
+        serde_json::from_value(value.get("peers").cloned().ok_or("peers are required")?)
+            .map_err(|error| format!("invalid runtime knowledge peers: {error}"))?;
     let receipt = assure_runtime_knowledge_representation(&request, &claims, &peers)
         .map_err(|error| error.to_string())?;
-    serde_json::to_value(receipt).map_err(|error| format!("cannot serialize runtime knowledge receipt: {error}"))
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize runtime knowledge receipt: {error}"))
 }
 
-pub fn validate_runtime_knowledge_representation_assurance_json(value: &Value) -> Result<RuntimeTypedKnowledgeWorld7, String> {
+pub fn validate_runtime_knowledge_representation_assurance_json(
+    value: &Value,
+) -> Result<RuntimeTypedKnowledgeWorld7, String> {
     let receipt: RuntimeTypedKnowledgeWorld7 = serde_json::from_value(value.clone())
         .map_err(|error| format!("invalid runtime knowledge receipt: {error}"))?;
     receipt.validate().map_err(|error| error.to_string())?;
-    if receipt.feature_id != RUNTIME_KNOWLEDGE_REPRESENTATION_FEATURE_ID { return Err("runtime knowledge feature id mismatch".into()); }
+    if receipt.feature_id != RUNTIME_KNOWLEDGE_REPRESENTATION_FEATURE_ID {
+        return Err("runtime knowledge feature id mismatch".into());
+    }
     Ok(receipt)
 }
 
-pub fn run_fabric_experiment_design_interoperability_gateway_json(value: &Value) -> Result<Value, String> {
-    let request: ExperimentDesignRequest4 = serde_json::from_value(value.get("request").cloned().ok_or("request is required")?)
-        .map_err(|error| format!("invalid fabric experiment-design request: {error}"))?;
-    let receipt = negotiate_experiment_design(&request).map_err(|error| format!("fabric experiment-design negotiation failed: {error}"))?;
-    serde_json::to_value(receipt).map_err(|error| format!("cannot serialize fabric experiment-design receipt: {error}"))
+pub fn run_fabric_experiment_design_interoperability_gateway_json(
+    value: &Value,
+) -> Result<Value, String> {
+    let request: FabricExperimentDesignRequest4 =
+        serde_json::from_value(value.get("request").cloned().ok_or("request is required")?)
+            .map_err(|error| format!("invalid fabric experiment-design request: {error}"))?;
+    let receipt = negotiate_experiment_design(&request)
+        .map_err(|error| format!("fabric experiment-design negotiation failed: {error}"))?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize fabric experiment-design receipt: {error}"))
 }
 
-pub fn validate_fabric_experiment_design_interoperability_gateway_json(value: &Value) -> Result<ExecutableExperimentDesign8, String> {
-    let receipt: ExecutableExperimentDesign8 = serde_json::from_value(value.clone()).map_err(|error| format!("invalid fabric experiment-design receipt: {error}"))?;
+pub fn validate_fabric_experiment_design_interoperability_gateway_json(
+    value: &Value,
+) -> Result<ExecutableExperimentDesign8, String> {
+    let receipt: ExecutableExperimentDesign8 = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid fabric experiment-design receipt: {error}"))?;
     receipt.validate().map_err(|error| error.to_string())?;
-    if receipt.feature_id != EXPERIMENT_DESIGN_GATEWAY_FEATURE_ID || receipt.contract_version != EXPERIMENT_DESIGN_GATEWAY_CONTRACT_VERSION { return Err("fabric experiment-design identity mismatch".into()); }
+    if receipt.feature_id != EXPERIMENT_DESIGN_GATEWAY_FEATURE_ID
+        || receipt.contract_version != EXPERIMENT_DESIGN_GATEWAY_CONTRACT_VERSION
+    {
+        return Err("fabric experiment-design identity mismatch".into());
+    }
     Ok(receipt)
 }
 
@@ -1898,13 +1882,9 @@ pub const LAB_EXPERIMENT_DESIGN_INTEROPERABILITY_GATEWAY_TOOL: &str =
 pub fn run_lab_federated_experiment_design_interoperability_gateway_json(
     value: &Value,
 ) -> Result<Value, String> {
-    let request: LabExperimentDesignRequest4 = serde_json::from_value(
-        value
-            .get("request")
-            .cloned()
-            .ok_or("request is required")?,
-    )
-    .map_err(|error| format!("invalid lab experiment-design request: {error}"))?;
+    let request: LabExperimentDesignRequest4 =
+        serde_json::from_value(value.get("request").cloned().ok_or("request is required")?)
+            .map_err(|error| format!("invalid lab experiment-design request: {error}"))?;
     let receipt = negotiate_lab_experiment_design(&request)
         .map_err(|error| format!("lab experiment-design negotiation failed: {error}"))?;
     serde_json::to_value(receipt)
@@ -1931,13 +1911,9 @@ pub const STRESS_PUBLICATION_RESEARCH_OBJECT_WORKBENCH_TOOL: &str =
 pub fn run_stress_publication_research_object_workbench_json(
     value: &Value,
 ) -> Result<Value, String> {
-    let request: StressPublicationWorkbenchRequest5 = serde_json::from_value(
-        value
-            .get("request")
-            .cloned()
-            .ok_or("request is required")?,
-    )
-    .map_err(|error| format!("invalid stress publication request: {error}"))?;
+    let request: StressPublicationWorkbenchRequest5 =
+        serde_json::from_value(value.get("request").cloned().ok_or("request is required")?)
+            .map_err(|error| format!("invalid stress publication request: {error}"))?;
     let receipt = compile_publication_research_object(&request)
         .map_err(|error| format!("stress publication workbench failed: {error}"))?;
     serde_json::to_value(receipt)
@@ -1964,13 +1940,9 @@ pub const STRESS_FEDERATED_MULTIMODAL_INGESTION_CONTRACT_MODEL_TOOL: &str =
 pub fn run_stress_federated_multimodal_ingestion_contract_model_json(
     value: &Value,
 ) -> Result<Value, String> {
-    let request: StressRawModalityBundle4 = serde_json::from_value(
-        value
-            .get("request")
-            .cloned()
-            .ok_or("request is required")?,
-    )
-    .map_err(|error| format!("invalid stress multimodal bundle: {error}"))?;
+    let request: StressRawModalityBundle4 =
+        serde_json::from_value(value.get("request").cloned().ok_or("request is required")?)
+            .map_err(|error| format!("invalid stress multimodal bundle: {error}"))?;
     let receipt = harmonize_federated_multimodal(&request)
         .map_err(|error| format!("stress multimodal harmonization failed: {error}"))?;
     serde_json::to_value(receipt)
@@ -2316,10 +2288,9 @@ pub fn validate_onco_federated_provenance_json(
 }
 
 pub fn operate_onco_instrument_research_workbench_json(value: &Value) -> Result<Value, String> {
-    let request: OncoInstrumentRequest6 = serde_json::from_value(
-        value.get("request").cloned().ok_or("request is required")?,
-    )
-    .map_err(|error| format!("invalid OncoWorld instrument request: {error}"))?;
+    let request: OncoInstrumentRequest6 =
+        serde_json::from_value(value.get("request").cloned().ok_or("request is required")?)
+            .map_err(|error| format!("invalid OncoWorld instrument request: {error}"))?;
     let receipt = qualify_instrument_actions(&request).map_err(|error: OncoInstrumentError| {
         format!("OncoWorld instrument workbench failed: {error}")
     })?;
@@ -2367,46 +2338,75 @@ pub fn validate_mutation_publication_release_json(
     Ok(receipt)
 }
 
-pub const MUTATION_FEDERATED_EVOLUTION_ASSURANCE_TOOL: &str = "mutation_federated_continual_bounded_evolution_assurance";
-
-pub fn operate_mutation_federated_continual_bounded_evolution_assurance_json(value: &Value) -> Result<Value, String> {
-    let request: MutationEvolutionRequest8 = serde_json::from_value(
-        value.get("request").cloned().ok_or("request is required")?,
-    ).map_err(|error| format!("invalid mutation federated bounded-evolution request: {error}"))?;
-    let receipt = assure_mutation_federated_bounded_evolution(&request)
-        .map_err(|error: MutationFederatedEvolutionError| format!("mutation federated bounded-evolution assurance failed: {error}"))?;
-    serde_json::to_value(receipt).map_err(|error| format!("cannot serialize mutation federated bounded-evolution receipt: {error}"))
+pub fn operate_mutation_federated_continual_bounded_evolution_assurance_json(
+    value: &Value,
+) -> Result<Value, String> {
+    let request: MutationEvolutionRequest8 =
+        serde_json::from_value(value.get("request").cloned().ok_or("request is required")?)
+            .map_err(|error| {
+                format!("invalid mutation federated bounded-evolution request: {error}")
+            })?;
+    let receipt = assure_mutation_federated_bounded_evolution(&request).map_err(
+        |error: MutationFederatedEvolutionError| {
+            format!("mutation federated bounded-evolution assurance failed: {error}")
+        },
+    )?;
+    serde_json::to_value(receipt).map_err(|error| {
+        format!("cannot serialize mutation federated bounded-evolution receipt: {error}")
+    })
 }
 
-pub fn validate_mutation_federated_continual_bounded_evolution_assurance_json(value: &Value) -> Result<MutationEvolutionReceipt10, String> {
-    let receipt: MutationEvolutionReceipt10 = serde_json::from_value(value.clone())
-        .map_err(|error| format!("invalid mutation federated bounded-evolution receipt: {error}"))?;
+pub fn validate_mutation_federated_continual_bounded_evolution_assurance_json(
+    value: &Value,
+) -> Result<MutationEvolutionReceipt10, String> {
+    let receipt: MutationEvolutionReceipt10 =
+        serde_json::from_value(value.clone()).map_err(|error| {
+            format!("invalid mutation federated bounded-evolution receipt: {error}")
+        })?;
     receipt.validate().map_err(|error| error.to_string())?;
-    if receipt.feature_id != MUTATION_FEDERATED_EVOLUTION_FEATURE_ID || receipt.contract_version != MUTATION_FEDERATED_EVOLUTION_CONTRACT_VERSION {
+    if receipt.feature_id != MUTATION_FEDERATED_EVOLUTION_FEATURE_ID
+        || receipt.contract_version != MUTATION_FEDERATED_EVOLUTION_CONTRACT_VERSION
+    {
         return Err("mutation federated bounded-evolution identity mismatch".into());
     }
     Ok(receipt)
 }
 
 pub fn operate_mutation_federated_resource_discovery_json(value: &Value) -> Result<Value, String> {
-    let request: MutationResourceNeed4 = serde_json::from_value(
-        value.get("request").cloned().ok_or("request is required")?,
-    ).map_err(|error| format!("invalid mutation resource-discovery request: {error}"))?;
+    let request: MutationResourceNeed4 =
+        serde_json::from_value(value.get("request").cloned().ok_or("request is required")?)
+            .map_err(|error| format!("invalid mutation resource-discovery request: {error}"))?;
     let endpoints: Vec<MutationResourceEndpoint4> = serde_json::from_value(
-        value.get("endpoints").cloned().ok_or("endpoints are required")?,
-    ).map_err(|error| format!("invalid mutation resource endpoints: {error}"))?;
+        value
+            .get("endpoints")
+            .cloned()
+            .ok_or("endpoints are required")?,
+    )
+    .map_err(|error| format!("invalid mutation resource endpoints: {error}"))?;
     let peers: Vec<MutationPeerResourceSummary4> = serde_json::from_value(
-        value.get("peers").cloned().unwrap_or_else(|| serde_json::json!([])),
-    ).map_err(|error| format!("invalid mutation resource peers: {error}"))?;
+        value
+            .get("peers")
+            .cloned()
+            .unwrap_or_else(|| serde_json::json!([])),
+    )
+    .map_err(|error| format!("invalid mutation resource peers: {error}"))?;
     let receipt = operate_mutation_federated_resource_discovery(&request, &endpoints, &peers)
-        .map_err(|error: MutationResourceDiscoveryError| format!("mutation resource-discovery control plane failed: {error}"))?;
-    serde_json::to_value(receipt).map_err(|error| format!("cannot serialize mutation resource-discovery receipt: {error}"))
+        .map_err(|error: MutationResourceDiscoveryError| {
+            format!("mutation resource-discovery control plane failed: {error}")
+        })?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize mutation resource-discovery receipt: {error}"))
 }
 
-pub fn validate_mutation_federated_resource_discovery_json(value: &Value) -> Result<QualifiedResourceSet8, String> {
-    let receipt: QualifiedResourceSet8 = serde_json::from_value(value.clone()).map_err(|error| format!("invalid mutation resource-discovery receipt: {error}"))?;
+pub fn validate_mutation_federated_resource_discovery_json(
+    value: &Value,
+) -> Result<QualifiedResourceSet8, String> {
+    let receipt: QualifiedResourceSet8 = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid mutation resource-discovery receipt: {error}"))?;
     receipt.validate().map_err(|error| error.to_string())?;
-    if receipt.feature_id != MUTATION_RESOURCE_DISCOVERY_FEATURE_ID { return Err("mutation resource-discovery feature id mismatch".into()); }
+    if receipt.feature_id != MUTATION_RESOURCE_DISCOVERY_FEATURE_ID {
+        return Err("mutation resource-discovery feature id mismatch".into());
+    }
     Ok(receipt)
 }
 
@@ -2439,10 +2439,11 @@ pub fn validate_factory_prospective_evidence_json(
 }
 
 pub fn operate_factory_federated_quality_workbench_json(value: &Value) -> Result<Value, String> {
-    let request: FactoryQualityWorkbenchRequest = serde_json::from_value(
-        value.get("request").cloned().ok_or("request is required")?,
-    )
-    .map_err(|error| format!("invalid factory federated quality-workbench request: {error}"))?;
+    let request: FactoryQualityWorkbenchRequest =
+        serde_json::from_value(value.get("request").cloned().ok_or("request is required")?)
+            .map_err(|error| {
+                format!("invalid factory federated quality-workbench request: {error}")
+            })?;
     let receipt = assure_factory_federated_quality_workbench(&request).map_err(
         |error: FactoryQualityWorkbenchError| {
             format!("factory federated quality-workbench assurance failed: {error}")
@@ -2496,15 +2497,13 @@ pub fn validate_fiber_federated_resource_json(
 }
 
 pub fn operate_fiber_federated_analysis_json(value: &Value) -> Result<Value, String> {
-    let request: FederatedAnalysisControlRequest = serde_json::from_value(
-        value.get("request").cloned().ok_or("request is required")?,
-    )
-    .map_err(|error| format!("invalid fiber federated-analysis request: {error}"))?;
-    let receipt = admit_federated_analysis(&request).map_err(
-        |error: FederatedAnalysisControlError| {
+    let request: FederatedAnalysisControlRequest =
+        serde_json::from_value(value.get("request").cloned().ok_or("request is required")?)
+            .map_err(|error| format!("invalid fiber federated-analysis request: {error}"))?;
+    let receipt =
+        admit_federated_analysis(&request).map_err(|error: FederatedAnalysisControlError| {
             format!("fiber federated-analysis control failed: {error}")
-        },
-    )?;
+        })?;
     serde_json::to_value(receipt)
         .map_err(|error| format!("cannot serialize fiber federated-analysis receipt: {error}"))
 }
@@ -2527,15 +2526,13 @@ pub fn validate_fiber_federated_analysis_json(
 }
 
 pub fn operate_docgraph_instrument_action_json(value: &Value) -> Result<Value, String> {
-    let request: InstrumentActionRequest4 = serde_json::from_value(
-        value.get("request").cloned().ok_or("request is required")?,
-    )
-    .map_err(|error| format!("invalid docgraph instrument-action request: {error}"))?;
-    let receipt = validate_instrument_actions(&request).map_err(
-        |error: InstrumentActionContractError| {
+    let request: InstrumentActionRequest4 =
+        serde_json::from_value(value.get("request").cloned().ok_or("request is required")?)
+            .map_err(|error| format!("invalid docgraph instrument-action request: {error}"))?;
+    let receipt =
+        validate_instrument_actions(&request).map_err(|error: InstrumentActionContractError| {
             format!("docgraph instrument-action validation failed: {error}")
-        },
-    )?;
+        })?;
     serde_json::to_value(receipt)
         .map_err(|error| format!("cannot serialize docgraph instrument-action receipt: {error}"))
 }
@@ -2558,15 +2555,13 @@ pub fn validate_docgraph_instrument_action_json(
 }
 
 pub fn operate_lens_provenance_signing_json(value: &Value) -> Result<Value, String> {
-    let request: ProvenanceSigningRequest = serde_json::from_value(
-        value.get("request").cloned().ok_or("request is required")?,
-    )
-    .map_err(|error| format!("invalid lens provenance-signing request: {error}"))?;
-    let receipt = compile_provenance_envelope(&request).map_err(
-        |error: LensProvenanceSigningError| {
+    let request: ProvenanceSigningRequest =
+        serde_json::from_value(value.get("request").cloned().ok_or("request is required")?)
+            .map_err(|error| format!("invalid lens provenance-signing request: {error}"))?;
+    let receipt =
+        compile_provenance_envelope(&request).map_err(|error: LensProvenanceSigningError| {
             format!("lens provenance-signing compilation failed: {error}")
-        },
-    )?;
+        })?;
     serde_json::to_value(receipt)
         .map_err(|error| format!("cannot serialize lens provenance envelope: {error}"))
 }
@@ -2587,15 +2582,12 @@ pub fn validate_lens_provenance_signing_json(
 }
 
 pub fn operate_bioethics_scale_frontier_json(value: &Value) -> Result<Value, String> {
-    let request: BioethicsScaleFrontierRequest = serde_json::from_value(
-        value.get("request").cloned().ok_or("request is required")?,
-    )
-    .map_err(|error| format!("invalid bioethics scale-frontier request: {error}"))?;
-    let receipt = evaluate_capacity(&request).map_err(
-        |error: BioethicsScaleFrontierError| {
-            format!("bioethics scale-frontier evaluation failed: {error}")
-        },
-    )?;
+    let request: BioethicsScaleFrontierRequest =
+        serde_json::from_value(value.get("request").cloned().ok_or("request is required")?)
+            .map_err(|error| format!("invalid bioethics scale-frontier request: {error}"))?;
+    let receipt = evaluate_capacity(&request).map_err(|error: BioethicsScaleFrontierError| {
+        format!("bioethics scale-frontier evaluation failed: {error}")
+    })?;
     serde_json::to_value(receipt)
         .map_err(|error| format!("cannot serialize bioethics capacity report: {error}"))
 }
@@ -2674,21 +2666,17 @@ pub fn validate_services_multimodal_interpretation_json(
     Ok(receipt)
 }
 
-pub fn operate_services_context_compilation_copilot_json(
-    value: &Value,
-) -> Result<Value, String> {
-    let request: ServicesContextCompilationRequest = serde_json::from_value(
-        value.get("request").cloned().ok_or("request is required")?,
-    )
-    .map_err(|error| format!("invalid services context-compilation request: {error}"))?;
+pub fn operate_services_context_compilation_copilot_json(value: &Value) -> Result<Value, String> {
+    let request: ServicesContextCompilationRequest =
+        serde_json::from_value(value.get("request").cloned().ok_or("request is required")?)
+            .map_err(|error| format!("invalid services context-compilation request: {error}"))?;
     let receipt = compile_context_compilation(&request).map_err(
         |error: ServicesContextCompilationError| {
             format!("services context-compilation copilot failed: {error}")
         },
     )?;
-    serde_json::to_value(receipt).map_err(|error| {
-        format!("cannot serialize services context-compilation receipt: {error}")
-    })
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize services context-compilation receipt: {error}"))
 }
 
 pub fn validate_services_context_compilation_copilot_json(
@@ -2737,7 +2725,7 @@ pub fn validate_context_compilation_assurance_json(
     let receipt: ContextCompilationAssuranceReceipt = serde_json::from_value(value.clone())
         .map_err(|error| format!("invalid context compilation assurance receipt: {error}"))?;
     receipt.validate().map_err(|error| error.to_string())?;
-    if receipt.feature_id != CONTEXT_COMPILATION_ASSURANCE_FEATURE_ID {
+    if receipt.feature_id != DEVPLAT_CONTEXT_COMPILATION_ASSURANCE_FEATURE_ID {
         return Err("context compilation assurance feature id mismatch".into());
     }
     Ok(receipt)
@@ -2885,8 +2873,9 @@ pub fn run_local_evidence_surveillance_research_copilot_json(
 pub fn validate_local_evidence_surveillance_research_copilot_json(
     value: &Value,
 ) -> Result<LocalEvidenceSurveillanceResearchCopilotReceipt, String> {
-    let receipt = serde_json::from_value(value.clone())
-        .map_err(|error| format!("invalid research copilot receipt: {error}"))?;
+    let receipt: LocalEvidenceSurveillanceResearchCopilotReceipt =
+        serde_json::from_value(value.clone())
+            .map_err(|error| format!("invalid research copilot receipt: {error}"))?;
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_FEATURE_ID {
         return Err("research copilot feature id mismatch".into());
@@ -2933,16 +2922,16 @@ pub fn validate_ids_local_evidence_surveillance_inference_json(
     Ok(receipt)
 }
 
-pub const SCOPE_FEDERATED_EVIDENCE_CONTROL_TOOL: &str =
-    "scope_federated_evidence_control";
+pub const SCOPE_FEDERATED_EVIDENCE_CONTROL_TOOL: &str = "scope_federated_evidence_control";
 
 pub fn run_scope_federated_evidence_control_json(value: &Value) -> Result<Value, String> {
     let request: ScopeEvidenceControlRequest6 = serde_json::from_value(value.clone())
         .map_err(|error| format!("invalid Scope federated evidence-control request: {error}"))?;
     let receipt = operate_federated_evidence_control(&request)
         .map_err(|error| format!("Scope federated evidence-control failed: {error}"))?;
-    serde_json::to_value(receipt)
-        .map_err(|error| format!("cannot serialize Scope federated evidence-control receipt: {error}"))
+    serde_json::to_value(receipt).map_err(|error| {
+        format!("cannot serialize Scope federated evidence-control receipt: {error}")
+    })
 }
 
 pub fn validate_scope_federated_evidence_control_json(
@@ -2970,8 +2959,9 @@ pub fn run_conformance_retrieval_synthesis_contract_model_json(
         .map_err(|error| format!("invalid conformance retrieval/synthesis request: {error}"))?;
     let receipt = negotiate_retrieval_synthesis_contract(&request)
         .map_err(|error| format!("conformance retrieval/synthesis negotiation failed: {error}"))?;
-    serde_json::to_value(receipt)
-        .map_err(|error| format!("cannot serialize conformance retrieval/synthesis receipt: {error}"))
+    serde_json::to_value(receipt).map_err(|error| {
+        format!("cannot serialize conformance retrieval/synthesis receipt: {error}")
+    })
 }
 
 pub fn validate_conformance_retrieval_synthesis_contract_model_json(
@@ -3003,8 +2993,9 @@ pub fn run_multimodal_evidence_surveillance_research_copilot_json(
 pub fn validate_multimodal_evidence_surveillance_research_copilot_json(
     value: &Value,
 ) -> Result<MultimodalEvidenceSurveillanceResearchCopilotReceipt, String> {
-    let receipt = serde_json::from_value(value.clone())
-        .map_err(|error| format!("invalid multimodal research copilot receipt: {error}"))?;
+    let receipt: MultimodalEvidenceSurveillanceResearchCopilotReceipt =
+        serde_json::from_value(value.clone())
+            .map_err(|error| format!("invalid multimodal research copilot receipt: {error}"))?;
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_FEATURE_ID {
         return Err("multimodal research copilot feature id mismatch".into());
@@ -3744,20 +3735,21 @@ pub fn validate_foundation_mechanism_exploration_assurance_json(
 }
 
 pub fn run_atlashub_mechanism_exploration_assurance_json(value: &Value) -> Result<Value, String> {
-    let request: AtlashubMechanismExplorationAssuranceRequest = serde_json::from_value(value.clone())
-        .map_err(|error| format!("invalid atlashub mechanism assurance request: {error}"))?;
-    let receipt = assure_atlashub_mechanism_exploration(&request)
-        .map_err(|error| error.to_string())?;
-    serde_json::to_value(receipt).map_err(|error| {
-        format!("cannot serialize atlashub mechanism assurance receipt: {error}")
-    })
+    let request: AtlashubMechanismExplorationAssuranceRequest =
+        serde_json::from_value(value.clone())
+            .map_err(|error| format!("invalid atlashub mechanism assurance request: {error}"))?;
+    let receipt =
+        assure_atlashub_mechanism_exploration(&request).map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize atlashub mechanism assurance receipt: {error}"))
 }
 
 pub fn validate_atlashub_mechanism_exploration_assurance_json(
     value: &Value,
 ) -> Result<AtlashubMechanismExplorationAssuranceReceipt, String> {
-    let receipt: AtlashubMechanismExplorationAssuranceReceipt = serde_json::from_value(value.clone())
-        .map_err(|error| format!("invalid atlashub mechanism assurance receipt: {error}"))?;
+    let receipt: AtlashubMechanismExplorationAssuranceReceipt =
+        serde_json::from_value(value.clone())
+            .map_err(|error| format!("invalid atlashub mechanism assurance receipt: {error}"))?;
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != ATLASHUB_MECHANISM_EXPLORATION_ASSURANCE_FEATURE_ID {
         return Err("atlashub mechanism assurance feature id mismatch".into());
@@ -3765,21 +3757,33 @@ pub fn validate_atlashub_mechanism_exploration_assurance_json(
     Ok(receipt)
 }
 
-pub fn run_obligation_knowledge_representation_assurance_json(value: &Value) -> Result<Value, String> {
-    let request: AssuranceScopedResearchClaims4 = serde_json::from_value(value.get("request").cloned().ok_or("request is required")?)
-        .map_err(|error| format!("invalid obligation knowledge request: {error}"))?;
-    let claims: Vec<AssuranceResearchClaim4> = serde_json::from_value(value.get("claims").cloned().ok_or("claims are required")?)
-        .map_err(|error| format!("invalid obligation knowledge claims: {error}"))?;
-    let peers: Vec<AssuranceKnowledgePeer4> = serde_json::from_value(value.get("peers").cloned().ok_or("peers are required")?)
-        .map_err(|error| format!("invalid obligation knowledge peers: {error}"))?;
-    let receipt = assure_obligation_knowledge_representation(&request, &claims, &peers).map_err(|error| error.to_string())?;
-    serde_json::to_value(receipt).map_err(|error| format!("cannot serialize obligation knowledge receipt: {error}"))
+pub fn run_obligation_knowledge_representation_assurance_json(
+    value: &Value,
+) -> Result<Value, String> {
+    let request: AssuranceScopedResearchClaims4 =
+        serde_json::from_value(value.get("request").cloned().ok_or("request is required")?)
+            .map_err(|error| format!("invalid obligation knowledge request: {error}"))?;
+    let claims: Vec<AssuranceResearchClaim4> =
+        serde_json::from_value(value.get("claims").cloned().ok_or("claims are required")?)
+            .map_err(|error| format!("invalid obligation knowledge claims: {error}"))?;
+    let peers: Vec<AssuranceKnowledgePeer4> =
+        serde_json::from_value(value.get("peers").cloned().ok_or("peers are required")?)
+            .map_err(|error| format!("invalid obligation knowledge peers: {error}"))?;
+    let receipt = assure_obligation_knowledge_representation(&request, &claims, &peers)
+        .map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize obligation knowledge receipt: {error}"))
 }
 
-pub fn validate_obligation_knowledge_representation_assurance_json(value: &Value) -> Result<AssuranceTypedKnowledgeWorld7, String> {
-    let receipt: AssuranceTypedKnowledgeWorld7 = serde_json::from_value(value.clone()).map_err(|error| format!("invalid obligation knowledge receipt: {error}"))?;
+pub fn validate_obligation_knowledge_representation_assurance_json(
+    value: &Value,
+) -> Result<AssuranceTypedKnowledgeWorld7, String> {
+    let receipt: AssuranceTypedKnowledgeWorld7 = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid obligation knowledge receipt: {error}"))?;
     receipt.validate().map_err(|error| error.to_string())?;
-    if receipt.feature_id != KNOWLEDGE_REPRESENTATION_ASSURANCE_FEATURE_ID { return Err("obligation knowledge feature id mismatch".into()); }
+    if receipt.feature_id != OBLIGATION_KNOWLEDGE_REPRESENTATION_ASSURANCE_FEATURE_ID {
+        return Err("obligation knowledge feature id mismatch".into());
+    }
     Ok(receipt)
 }
 
@@ -3789,13 +3793,9 @@ pub const OBLIGATION_SECURITY_FEDERATION_INTEROPERABILITY_GATEWAY_TOOL: &str =
 pub fn run_obligation_security_federation_interoperability_gateway_json(
     value: &Value,
 ) -> Result<Value, String> {
-    let request: ObligationFederationRequest4 = serde_json::from_value(
-        value
-            .get("request")
-            .cloned()
-            .ok_or("request is required")?,
-    )
-    .map_err(|error| format!("invalid obligation federation request: {error}"))?;
+    let request: ObligationFederationRequest4 =
+        serde_json::from_value(value.get("request").cloned().ok_or("request is required")?)
+            .map_err(|error| format!("invalid obligation federation request: {error}"))?;
     let capabilities: Vec<ObligationFederationCapability6> = serde_json::from_value(
         value
             .get("capabilities")
@@ -3846,7 +3846,7 @@ pub fn validate_interweave_frontier_control_json(
     let receipt: InterweaveControlReceipt = serde_json::from_value(value.clone())
         .map_err(|error| format!("invalid interweave frontier control receipt: {error}"))?;
     receipt.validate().map_err(|error| error.to_string())?;
-    if receipt.feature_id != INTERWEAVE_FRONTIER_FEATURE_ID {
+    if receipt.feature_id != INTERWEAVE_FRONTIER_FEATURE_ID() {
         return Err("interweave frontier control feature id mismatch".into());
     }
     Ok(receipt)
@@ -3857,7 +3857,7 @@ pub fn validate_oraclex_publication_release_json(
     let receipt: PublicationReleaseReceipt = serde_json::from_value(value.clone())
         .map_err(|error| format!("invalid oraclex publication release receipt: {error}"))?;
     receipt.validate().map_err(|error| error.to_string())?;
-    if receipt.feature_id != PUBLICATION_RELEASE_FEATURE_ID {
+    if receipt.feature_id != PUBLICATION_RELEASE_FEATURE_ID() {
         return Err("oraclex publication release feature id mismatch".into());
     }
     Ok(receipt)
@@ -3871,46 +3871,65 @@ pub fn run_oraclex_interpretation_inference_json(value: &Value) -> Result<Value,
         .map_err(|error| format!("cannot serialize oraclex interpretation receipt: {error}"))
 }
 
-pub fn validate_oraclex_interpretation_inference_json(value: &Value) -> Result<OraclexInteractiveInterpretation1, String> {
+pub fn validate_oraclex_interpretation_inference_json(
+    value: &Value,
+) -> Result<OraclexInteractiveInterpretation1, String> {
     let receipt: OraclexInteractiveInterpretation1 = serde_json::from_value(value.clone())
         .map_err(|error| format!("invalid oraclex interpretation receipt: {error}"))?;
     receipt.validate().map_err(|error| error.to_string())?;
-    if receipt.feature_id != ORACLEX_INTERPRETATION_INFERENCE_FEATURE_ID { return Err("oraclex interpretation feature id mismatch".into()); }
+    if receipt.feature_id != ORACLEX_INTERPRETATION_INFERENCE_FEATURE_ID {
+        return Err("oraclex interpretation feature id mismatch".into());
+    }
     Ok(receipt)
 }
 
-pub fn run_oraclex_performance_reliability_interoperability_gateway_json(value: &Value) -> Result<Value, String> {
+pub fn run_oraclex_performance_reliability_interoperability_gateway_json(
+    value: &Value,
+) -> Result<Value, String> {
     let request: OraclexCapabilityWorkload4 = serde_json::from_value(value.clone())
         .map_err(|error| format!("invalid oraclex performance reliability workload: {error}"))?;
     let receipt = negotiate_performance_reliability(&request).map_err(|error| error.to_string())?;
-    serde_json::to_value(receipt).map_err(|error| format!("cannot serialize oraclex performance reliability result: {error}"))
+    serde_json::to_value(receipt).map_err(|error| {
+        format!("cannot serialize oraclex performance reliability result: {error}")
+    })
 }
 
-pub fn validate_oraclex_performance_reliability_interoperability_gateway_json(value: &Value) -> Result<OraclexReliableCapabilityResult6, String> {
+pub fn validate_oraclex_performance_reliability_interoperability_gateway_json(
+    value: &Value,
+) -> Result<OraclexReliableCapabilityResult6, String> {
     let receipt: OraclexReliableCapabilityResult6 = serde_json::from_value(value.clone())
         .map_err(|error| format!("invalid oraclex performance reliability result: {error}"))?;
     receipt.validate().map_err(|error| error.to_string())?;
-    if receipt.feature_id != ORACLEX_PERFORMANCE_RELIABILITY_INTEROPERABILITY_FEATURE_ID { return Err("oraclex performance reliability feature id mismatch".into()); }
+    if receipt.feature_id != ORACLEX_PERFORMANCE_RELIABILITY_INTEROPERABILITY_FEATURE_ID {
+        return Err("oraclex performance reliability feature id mismatch".into());
+    }
     Ok(receipt)
 }
 
-pub fn run_oraclex_statistical_analysis_research_workbench_json(value: &Value) -> Result<Value, String> {
+pub fn run_oraclex_statistical_analysis_research_workbench_json(
+    value: &Value,
+) -> Result<Value, String> {
     let request: OraclexAnalysisQuestion4 = serde_json::from_value(value.clone())
         .map_err(|error| format!("invalid oraclex statistical analysis request: {error}"))?;
     let receipt = qualify_statistical_analysis(&request).map_err(|error| error.to_string())?;
-    serde_json::to_value(receipt).map_err(|error| format!("cannot serialize oraclex statistical analysis result: {error}"))
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize oraclex statistical analysis result: {error}"))
 }
 
-pub fn validate_oraclex_statistical_analysis_research_workbench_json(value: &Value) -> Result<OraclexQualifiedAnalysisResult5, String> {
+pub fn validate_oraclex_statistical_analysis_research_workbench_json(
+    value: &Value,
+) -> Result<OraclexQualifiedAnalysisResult5, String> {
     let receipt: OraclexQualifiedAnalysisResult5 = serde_json::from_value(value.clone())
         .map_err(|error| format!("invalid oraclex statistical analysis result: {error}"))?;
     receipt.validate().map_err(|error| error.to_string())?;
-    if receipt.feature_id != ORACLEX_STATISTICAL_ANALYSIS_RESEARCH_WORKBENCH_FEATURE_ID { return Err("oraclex statistical analysis feature id mismatch".into()); }
+    if receipt.feature_id != ORACLEX_STATISTICAL_ANALYSIS_RESEARCH_WORKBENCH_FEATURE_ID {
+        return Err("oraclex statistical analysis feature id mismatch".into());
+    }
     Ok(receipt)
 }
 
 pub fn run_federated_continual_interpretation_json(value: &Value) -> Result<Value, String> {
-    let request: EvidenceBackedResult4 = serde_json::from_value(value.clone())
+    let request: InfluenceEvidenceBackedResult4 = serde_json::from_value(value.clone())
         .map_err(|error| format!("invalid federated continual interpretation request: {error}"))?;
     let receipt = run_federated_continual_interpretation(&request)
         .map_err(|error: FederatedInterpretationError| error.to_string())?;
@@ -3931,19 +3950,35 @@ pub fn validate_federated_continual_interpretation_json(
     Ok(receipt)
 }
 
-pub fn operate_influence_local_evidence_surveillance_assurance_json(value: &Value) -> Result<Value, String> {
-    let request: InfluenceEvidenceFeedRequest = serde_json::from_value(value.get("request").cloned().unwrap_or_else(|| value.clone()))
-        .map_err(|error| format!("invalid influence evidence-surveillance request: {error}"))?;
-    let receipt = assure_local_evidence_surveillance(&request)
-        .map_err(|error: InfluenceEvidenceSurveillanceError| format!("influence evidence-surveillance assurance failed: {error}"))?;
-    serde_json::to_value(receipt).map_err(|error| format!("cannot serialize influence evidence-surveillance receipt: {error}"))
+pub fn operate_influence_local_evidence_surveillance_assurance_json(
+    value: &Value,
+) -> Result<Value, String> {
+    let request: InfluenceEvidenceFeedRequest = serde_json::from_value(
+        value
+            .get("request")
+            .cloned()
+            .unwrap_or_else(|| value.clone()),
+    )
+    .map_err(|error| format!("invalid influence evidence-surveillance request: {error}"))?;
+    let receipt = assure_local_evidence_surveillance(&request).map_err(
+        |error: InfluenceEvidenceSurveillanceError| {
+            format!("influence evidence-surveillance assurance failed: {error}")
+        },
+    )?;
+    serde_json::to_value(receipt).map_err(|error| {
+        format!("cannot serialize influence evidence-surveillance receipt: {error}")
+    })
 }
 
-pub fn validate_influence_local_evidence_surveillance_assurance_json(value: &Value) -> Result<InfluenceQualifiedEvidenceSet, String> {
+pub fn validate_influence_local_evidence_surveillance_assurance_json(
+    value: &Value,
+) -> Result<InfluenceQualifiedEvidenceSet, String> {
     let receipt: InfluenceQualifiedEvidenceSet = serde_json::from_value(value.clone())
         .map_err(|error| format!("invalid influence evidence-surveillance receipt: {error}"))?;
     receipt.validate().map_err(|error| error.to_string())?;
-    if receipt.feature_id != INFLUENCE_LOCAL_EVIDENCE_SURVEILLANCE_FEATURE_ID || receipt.contract_version != INFLUENCE_LOCAL_EVIDENCE_SURVEILLANCE_CONTRACT_VERSION {
+    if receipt.feature_id != INFLUENCE_LOCAL_EVIDENCE_SURVEILLANCE_FEATURE_ID
+        || receipt.contract_version != INFLUENCE_LOCAL_EVIDENCE_SURVEILLANCE_CONTRACT_VERSION
+    {
         return Err("influence evidence-surveillance identity mismatch".into());
     }
     Ok(receipt)
@@ -3953,7 +3988,10 @@ pub fn operate_safety_prospective_laboratory_integration_assurance_json(
     value: &Value,
 ) -> Result<Value, String> {
     let request: InstrumentActionRequest3 = serde_json::from_value(
-        value.get("request").cloned().unwrap_or_else(|| value.clone()),
+        value
+            .get("request")
+            .cloned()
+            .unwrap_or_else(|| value.clone()),
     )
     .map_err(|error| format!("invalid safety laboratory-integration request: {error}"))?;
     let receipt = assure_prospective_laboratory_integration(&request).map_err(
@@ -3961,9 +3999,8 @@ pub fn operate_safety_prospective_laboratory_integration_assurance_json(
             format!("safety laboratory-integration assurance failed: {error}")
         },
     )?;
-    serde_json::to_value(receipt).map_err(|error| {
-        format!("cannot serialize safety laboratory-integration receipt: {error}")
-    })
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize safety laboratory-integration receipt: {error}"))
 }
 
 pub fn validate_safety_prospective_laboratory_integration_assurance_json(
@@ -3984,7 +4021,10 @@ pub fn operate_devplat_multimodal_limitation_closure_assurance_json(
     value: &Value,
 ) -> Result<Value, String> {
     let request: DevplatLimitationCase2 = serde_json::from_value(
-        value.get("request").cloned().unwrap_or_else(|| value.clone()),
+        value
+            .get("request")
+            .cloned()
+            .unwrap_or_else(|| value.clone()),
     )
     .map_err(|error| format!("invalid devplat limitation-closure request: {error}"))?;
     let receipt = assure_devplat_multimodal_limitation_closure(&request).map_err(
@@ -3992,9 +4032,8 @@ pub fn operate_devplat_multimodal_limitation_closure_assurance_json(
             format!("devplat limitation-closure assurance failed: {error}")
         },
     )?;
-    serde_json::to_value(receipt).map_err(|error| {
-        format!("cannot serialize devplat limitation-closure receipt: {error}")
-    })
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize devplat limitation-closure receipt: {error}"))
 }
 
 pub fn validate_devplat_multimodal_limitation_closure_assurance_json(
@@ -4165,8 +4204,9 @@ pub fn run_throughput_evidence_surveillance_research_copilot_json(
 pub fn validate_throughput_evidence_surveillance_research_copilot_json(
     value: &Value,
 ) -> Result<ThroughputEvidenceSurveillanceResearchCopilotReceipt, String> {
-    let receipt = serde_json::from_value(value.clone())
-        .map_err(|error| format!("invalid throughput research copilot receipt: {error}"))?;
+    let receipt: ThroughputEvidenceSurveillanceResearchCopilotReceipt =
+        serde_json::from_value(value.clone())
+            .map_err(|error| format!("invalid throughput research copilot receipt: {error}"))?;
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != ADAPTER_THROUGHPUT_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_FEATURE_ID {
         return Err("throughput research copilot feature id mismatch".into());
@@ -4199,9 +4239,10 @@ pub fn run_federated_continual_evidence_surveillance_research_copilot_json(
 pub fn validate_federated_continual_evidence_surveillance_research_copilot_json(
     value: &Value,
 ) -> Result<FederatedContinualEvidenceSurveillanceResearchCopilotReceipt, String> {
-    let receipt = serde_json::from_value(value.clone()).map_err(|error| {
-        format!("invalid federated continual research copilot receipt: {error}")
-    })?;
+    let receipt: FederatedContinualEvidenceSurveillanceResearchCopilotReceipt =
+        serde_json::from_value(value.clone()).map_err(|error| {
+            format!("invalid federated continual research copilot receipt: {error}")
+        })?;
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id
         != ADAPTER_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_FEATURE_ID
@@ -4237,8 +4278,9 @@ pub fn run_local_evidence_surveillance_workflow_fabric_json(
 pub fn validate_local_evidence_surveillance_workflow_fabric_json(
     value: &Value,
 ) -> Result<LocalEvidenceSurveillanceWorkflowReceipt, String> {
-    let receipt = serde_json::from_value(value.clone())
-        .map_err(|error| format!("invalid local evidence workflow receipt: {error}"))?;
+    let receipt: LocalEvidenceSurveillanceWorkflowReceipt =
+        serde_json::from_value(value.clone())
+            .map_err(|error| format!("invalid local evidence workflow receipt: {error}"))?;
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_FEATURE_ID {
         return Err("local evidence workflow feature id mismatch".into());
@@ -4260,8 +4302,9 @@ pub fn run_multimodal_evidence_surveillance_workflow_fabric_json(
 pub fn validate_multimodal_evidence_surveillance_workflow_fabric_json(
     value: &Value,
 ) -> Result<MultimodalEvidenceSurveillanceWorkflowReceipt, String> {
-    let receipt = serde_json::from_value(value.clone())
-        .map_err(|error| format!("invalid multimodal evidence workflow receipt: {error}"))?;
+    let receipt: MultimodalEvidenceSurveillanceWorkflowReceipt =
+        serde_json::from_value(value.clone())
+            .map_err(|error| format!("invalid multimodal evidence workflow receipt: {error}"))?;
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_FEATURE_ID {
         return Err("multimodal evidence workflow feature id mismatch".into());
@@ -4283,8 +4326,9 @@ pub fn run_throughput_evidence_surveillance_workflow_fabric_json(
 pub fn validate_throughput_evidence_surveillance_workflow_fabric_json(
     value: &Value,
 ) -> Result<ThroughputEvidenceSurveillanceWorkflowReceipt, String> {
-    let receipt = serde_json::from_value(value.clone())
-        .map_err(|error| format!("invalid throughput evidence workflow receipt: {error}"))?;
+    let receipt: ThroughputEvidenceSurveillanceWorkflowReceipt =
+        serde_json::from_value(value.clone())
+            .map_err(|error| format!("invalid throughput evidence workflow receipt: {error}"))?;
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != ADAPTER_THROUGHPUT_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_FEATURE_ID {
         return Err("throughput evidence workflow feature id mismatch".into());
@@ -4308,9 +4352,10 @@ pub fn run_federated_continual_evidence_surveillance_workflow_fabric_json(
 pub fn validate_federated_continual_evidence_surveillance_workflow_fabric_json(
     value: &Value,
 ) -> Result<FederatedContinualEvidenceSurveillanceWorkflowReceipt, String> {
-    let receipt = serde_json::from_value(value.clone()).map_err(|error| {
-        format!("invalid federated continual evidence workflow receipt: {error}")
-    })?;
+    let receipt: FederatedContinualEvidenceSurveillanceWorkflowReceipt =
+        serde_json::from_value(value.clone()).map_err(|error| {
+            format!("invalid federated continual evidence workflow receipt: {error}")
+        })?;
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id
         != ADAPTER_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_FEATURE_ID
@@ -4526,18 +4571,21 @@ pub fn validate_experiment_design_json(value: &Value) -> Result<ExperimentDesign
     Ok(receipt)
 }
 
-pub const GOVERNANCE_EXPERIMENT_DESIGN_ASSURANCE_TOOL: &str = "governance_experiment_design_assurance";
+pub const GOVERNANCE_EXPERIMENT_DESIGN_ASSURANCE_TOOL: &str =
+    "governance_experiment_design_assurance";
 
 pub fn run_governance_experiment_design_assurance_json(value: &Value) -> Result<Value, String> {
     let request: GovernanceExperimentObjective = serde_json::from_value(value.clone())
         .map_err(|error| format!("invalid governance experiment design request: {error}"))?;
-    let receipt = assure_governance_experiment_design(&request)
-        .map_err(|error| error.to_string())?;
+    let receipt =
+        assure_governance_experiment_design(&request).map_err(|error| error.to_string())?;
     serde_json::to_value(receipt)
         .map_err(|error| format!("cannot serialize governance experiment design receipt: {error}"))
 }
 
-pub fn validate_governance_experiment_design_assurance_json(value: &Value) -> Result<GovernanceExperimentDesignAssurance, String> {
+pub fn validate_governance_experiment_design_assurance_json(
+    value: &Value,
+) -> Result<GovernanceExperimentDesignAssurance, String> {
     let receipt: GovernanceExperimentDesignAssurance = serde_json::from_value(value.clone())
         .map_err(|error| format!("invalid governance experiment design receipt: {error}"))?;
     receipt.validate().map_err(|error| error.to_string())?;
@@ -4853,9 +4901,7 @@ pub fn validate_evaluation_assurance_json(
 ) -> Result<EvaluationAssuranceReceipt, String> {
     let receipt: EvaluationAssuranceReceipt = serde_json::from_value(value.clone())
         .map_err(|error| format!("invalid evaluation assurance receipt: {error}"))?;
-    receipt
-        .validate()
-        .map_err(|error: EvaluationAssuranceError| error.to_string())?;
+    receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != EVALUATION_ASSURANCE_FEATURE_ID {
         return Err("evaluation assurance feature id mismatch".into());
     }
@@ -4916,9 +4962,7 @@ pub fn close_adapter_limitations_json(value: &Value) -> Result<Value, String> {
 pub fn validate_limitation_closure_json(value: &Value) -> Result<AdapterClosureReceipt, String> {
     let receipt: AdapterClosureReceipt = serde_json::from_value(value.clone())
         .map_err(|error| format!("invalid limitation closure receipt: {error}"))?;
-    receipt
-        .validate()
-        .map_err(|error: LimitationClosureError| error.to_string())?;
+    receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != LIMITATION_CLOSURE_FEATURE_ID {
         return Err("limitation closure feature id mismatch".into());
     }
@@ -5099,23 +5143,34 @@ pub fn validate_context_compilation_federated_control_json(
     Ok(receipt)
 }
 
-pub const CONFORMANCE_CONTEXT_COMPILATION_ASSURANCE_TOOL: &str = "conformance_context_compilation_assurance";
+pub const CONFORMANCE_CONTEXT_COMPILATION_ASSURANCE_TOOL: &str =
+    "conformance_context_compilation_assurance";
 
 pub fn run_conformance_context_compilation_assurance_json(value: &Value) -> Result<Value, String> {
-    let request: ConformanceDecisionQuery2 = serde_json::from_value(value.get("request").cloned().ok_or("request is required")?)
-        .map_err(|error| format!("invalid conformance context assurance request: {error}"))?;
-    let facts: Vec<ConformanceDecisionFact2> = serde_json::from_value(value.get("facts").cloned().ok_or("facts are required")?)
-        .map_err(|error| format!("invalid conformance context facts: {error}"))?;
-    let peers: Vec<ConformanceContextPeer2> = serde_json::from_value(value.get("peers").cloned().ok_or("peers are required")?)
-        .map_err(|error| format!("invalid conformance context peers: {error}"))?;
-    let receipt = assure_conformance_context_compilation(&request, &facts, &peers).map_err(|error| error.to_string())?;
-    serde_json::to_value(receipt).map_err(|error| format!("cannot serialize conformance context assurance receipt: {error}"))
+    let request: ConformanceDecisionQuery2 =
+        serde_json::from_value(value.get("request").cloned().ok_or("request is required")?)
+            .map_err(|error| format!("invalid conformance context assurance request: {error}"))?;
+    let facts: Vec<ConformanceDecisionFact2> =
+        serde_json::from_value(value.get("facts").cloned().ok_or("facts are required")?)
+            .map_err(|error| format!("invalid conformance context facts: {error}"))?;
+    let peers: Vec<ConformanceContextPeer2> =
+        serde_json::from_value(value.get("peers").cloned().ok_or("peers are required")?)
+            .map_err(|error| format!("invalid conformance context peers: {error}"))?;
+    let receipt = assure_conformance_context_compilation(&request, &facts, &peers)
+        .map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize conformance context assurance receipt: {error}"))
 }
 
-pub fn validate_conformance_context_compilation_assurance_json(value: &Value) -> Result<ConformanceCertifiedDecisionSection7, String> {
-    let receipt: ConformanceCertifiedDecisionSection7 = serde_json::from_value(value.clone()).map_err(|error| format!("invalid conformance context assurance receipt: {error}"))?;
+pub fn validate_conformance_context_compilation_assurance_json(
+    value: &Value,
+) -> Result<ConformanceCertifiedDecisionSection7, String> {
+    let receipt: ConformanceCertifiedDecisionSection7 = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid conformance context assurance receipt: {error}"))?;
     receipt.validate().map_err(|error| error.to_string())?;
-    if receipt.feature_id != CONFORMANCE_CONTEXT_COMPILATION_ASSURANCE_FEATURE_ID { return Err("conformance context assurance feature id mismatch".into()); }
+    if receipt.feature_id != CONFORMANCE_CONTEXT_COMPILATION_ASSURANCE_FEATURE_ID {
+        return Err("conformance context assurance feature id mismatch".into());
+    }
     Ok(receipt)
 }
 
@@ -5237,8 +5292,10 @@ pub fn authorize_worldfactory_computational_execution_json(value: &Value) -> Res
 pub fn validate_worldfactory_computational_execution_json(
     value: &Value,
 ) -> Result<ComputationalExecutionRun9, String> {
-    let receipt: ComputationalExecutionRun9 = serde_json::from_value(value.clone())
-        .map_err(|error| format!("invalid worldfactory computational execution receipt: {error}"))?;
+    let receipt: ComputationalExecutionRun9 =
+        serde_json::from_value(value.clone()).map_err(|error| {
+            format!("invalid worldfactory computational execution receipt: {error}")
+        })?;
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != COMPUTATIONAL_EXECUTION_FEDERATED_CONTROL_FEATURE_ID {
         return Err("worldfactory computational execution feature id mismatch".into());
@@ -5286,10 +5343,9 @@ pub fn validate_atlashub_replication_control_json(
 }
 
 pub fn operate_atlashub_quality_control_copilot_json(value: &Value) -> Result<Value, String> {
-    let request: QualityControlRequest3 = serde_json::from_value(
-        value.get("request").cloned().ok_or("request is required")?,
-    )
-    .map_err(|error| format!("invalid atlashub quality-control request: {error}"))?;
+    let request: QualityControlRequest3 =
+        serde_json::from_value(value.get("request").cloned().ok_or("request is required")?)
+            .map_err(|error| format!("invalid atlashub quality-control request: {error}"))?;
     let verdict = qualify_quality_control(&request).map_err(|error: QualityControlError| {
         format!("atlashub quality-control qualification failed: {error}")
     })?;
@@ -5309,18 +5365,22 @@ pub fn validate_atlashub_quality_control_copilot_json(
     Ok(verdict)
 }
 
-pub fn operate_atlashub_quality_control_contract_model_json(value: &Value) -> Result<Value, String> {
-    let request: QualityControlContractRequest = serde_json::from_value(
-        value.get("request").cloned().ok_or("request is required")?,
-    )
-    .map_err(|error| format!("invalid atlashub quality-control contract request: {error}"))?;
+pub fn operate_atlashub_quality_control_contract_model_json(
+    value: &Value,
+) -> Result<Value, String> {
+    let request: QualityControlContractRequest =
+        serde_json::from_value(value.get("request").cloned().ok_or("request is required")?)
+            .map_err(|error| {
+                format!("invalid atlashub quality-control contract request: {error}")
+            })?;
     let verdict = model_prospective_quality_control_contract(&request).map_err(
         |error: QualityControlContractError| {
             format!("atlashub quality-control contract modeling failed: {error}")
         },
     )?;
-    serde_json::to_value(verdict)
-        .map_err(|error| format!("cannot serialize atlashub quality-control contract verdict: {error}"))
+    serde_json::to_value(verdict).map_err(|error| {
+        format!("cannot serialize atlashub quality-control contract verdict: {error}")
+    })
 }
 
 pub fn validate_atlashub_quality_control_contract_model_json(
@@ -5392,8 +5452,9 @@ pub fn operate_epistemic_experiment_design_research_workbench_json(
     .map_err(|error| format!("invalid epistemic experiment candidates: {error}"))?;
     let receipt = compile_experiment_design_workbench(&objective, &candidates)
         .map_err(|error| format!("epistemic experiment workbench failed: {error}"))?;
-    serde_json::to_value(receipt)
-        .map_err(|error| format!("cannot serialize epistemic experiment workbench receipt: {error}"))
+    serde_json::to_value(receipt).map_err(|error| {
+        format!("cannot serialize epistemic experiment workbench receipt: {error}")
+    })
 }
 
 pub fn validate_epistemic_experiment_design_research_workbench_json(
@@ -5804,21 +5865,19 @@ pub fn validate_ids_typed_determinism_json(
     Ok(receipt)
 }
 
-pub const IDS_TYPED_DETERMINISM_ASSURANCE_TOOL: &str =
-    "ids_typed_determinism_assurance";
+pub const IDS_TYPED_DETERMINISM_ASSURANCE_TOOL: &str = "ids_typed_determinism_assurance";
 
 pub fn operate_ids_typed_determinism_assurance_json(value: &Value) -> Result<Value, String> {
-    let request: TypedCapabilityInput4 = serde_json::from_value(
-        value.get("request").cloned().ok_or("request is required")?,
-    )
-    .map_err(|error| format!("invalid ids typed-determinism assurance request: {error}"))?;
-    let output = assure_typed_determinism(&request).map_err(
-        |error: TypedDeterminismAssuranceError| {
+    let request: TypedCapabilityInput4 =
+        serde_json::from_value(value.get("request").cloned().ok_or("request is required")?)
+            .map_err(|error| format!("invalid ids typed-determinism assurance request: {error}"))?;
+    let output =
+        assure_typed_determinism(&request).map_err(|error: TypedDeterminismAssuranceError| {
             format!("ids typed-determinism assurance failed: {error}")
-        },
-    )?;
-    serde_json::to_value(output)
-        .map_err(|error| format!("cannot serialize ids typed-determinism assurance output: {error}"))
+        })?;
+    serde_json::to_value(output).map_err(|error| {
+        format!("cannot serialize ids typed-determinism assurance output: {error}")
+    })
 }
 
 pub fn validate_ids_typed_determinism_assurance_json(
@@ -5834,16 +5893,17 @@ pub fn validate_ids_typed_determinism_assurance_json(
 }
 
 pub const IDS_PROSPECTIVE_PROVENANCE_TOOL: &str = "ids_prospective_provenance_assurance";
-pub const DATAOPS_PROVENANCE_SIGNING_WORKFLOW_FABRIC_TOOL: &str = "dataops_provenance_signing_workflow_fabric";
+pub const DATAOPS_PROVENANCE_SIGNING_WORKFLOW_FABRIC_TOOL: &str =
+    "dataops_provenance_signing_workflow_fabric";
 
 pub fn operate_ids_prospective_provenance_json(value: &Value) -> Result<Value, String> {
-    let request: ArtifactAndDerivationRequest3 = serde_json::from_value(
-        value.get("request").cloned().ok_or("request is required")?,
-    )
-    .map_err(|error| format!("invalid ids prospective provenance request: {error}"))?;
-    let output = assure_prospective_provenance(&request).map_err(
-        |error: ProspectiveProvenanceError| format!("ids prospective provenance failed: {error}"),
-    )?;
+    let request: ArtifactAndDerivationRequest3 =
+        serde_json::from_value(value.get("request").cloned().ok_or("request is required")?)
+            .map_err(|error| format!("invalid ids prospective provenance request: {error}"))?;
+    let output =
+        assure_prospective_provenance(&request).map_err(|error: ProspectiveProvenanceError| {
+            format!("ids prospective provenance failed: {error}")
+        })?;
     serde_json::to_value(output)
         .map_err(|error| format!("cannot serialize ids prospective provenance output: {error}"))
 }
@@ -5861,18 +5921,27 @@ pub fn validate_ids_prospective_provenance_json(
 }
 
 pub fn run_dataops_provenance_signing_workflow_fabric_json(value: &Value) -> Result<Value, String> {
-    let request: DataopsArtifactAndDerivationRequest3 = serde_json::from_value(
-        value.get("request").cloned().ok_or("request is required")?,
-    ).map_err(|error| format!("invalid dataops provenance workflow request: {error}"))?;
-    let output = assure_dataops_provenance(&request).map_err(|error: DataopsProspectiveProvenanceError| format!("dataops provenance workflow failed: {error}"))?;
-    serde_json::to_value(output).map_err(|error| format!("cannot serialize dataops provenance workflow output: {error}"))
+    let request: DataopsArtifactAndDerivationRequest3 =
+        serde_json::from_value(value.get("request").cloned().ok_or("request is required")?)
+            .map_err(|error| format!("invalid dataops provenance workflow request: {error}"))?;
+    let output = assure_dataops_provenance(&request).map_err(
+        |error: DataopsProspectiveProvenanceError| {
+            format!("dataops provenance workflow failed: {error}")
+        },
+    )?;
+    serde_json::to_value(output)
+        .map_err(|error| format!("cannot serialize dataops provenance workflow output: {error}"))
 }
 
-pub fn validate_dataops_provenance_signing_workflow_fabric_json(value: &Value) -> Result<DataopsSignedProvenanceEnvelope7, String> {
+pub fn validate_dataops_provenance_signing_workflow_fabric_json(
+    value: &Value,
+) -> Result<DataopsSignedProvenanceEnvelope7, String> {
     let output: DataopsSignedProvenanceEnvelope7 = serde_json::from_value(value.clone())
         .map_err(|error| format!("invalid dataops provenance workflow output: {error}"))?;
     output.validate().map_err(|error| error.to_string())?;
-    if output.feature_id != DATAOPS_PROVENANCE_SIGNING_WORKFLOW_FABRIC_FEATURE_ID { return Err("dataops provenance workflow feature id mismatch".into()); }
+    if output.feature_id != DATAOPS_PROVENANCE_SIGNING_WORKFLOW_FABRIC_FEATURE_ID {
+        return Err("dataops provenance workflow feature id mismatch".into());
+    }
     Ok(output)
 }
 
@@ -5905,10 +5974,9 @@ pub fn validate_ids_provenance_signing_json(
 pub const IDS_PERFORMANCE_RELIABILITY_TOOL: &str = "ids_performance_reliability_gateway";
 
 pub fn operate_ids_performance_reliability_json(value: &Value) -> Result<Value, String> {
-    let request: CapabilityWorkloadRequest4 = serde_json::from_value(
-        value.get("request").cloned().ok_or("request is required")?,
-    )
-    .map_err(|error| format!("invalid ids performance reliability request: {error}"))?;
+    let request: CapabilityWorkloadRequest4 =
+        serde_json::from_value(value.get("request").cloned().ok_or("request is required")?)
+            .map_err(|error| format!("invalid ids performance reliability request: {error}"))?;
     let result = assess_performance_reliability(&request).map_err(
         |error: PerformanceReliabilityError| format!("ids performance reliability failed: {error}"),
     )?;
@@ -5932,10 +6000,11 @@ pub const IDS_INTEROPERABILITY_EXTENSIBILITY_TOOL: &str =
     "ids_interoperability_extensibility_copilot";
 
 pub fn operate_ids_interoperability_extensibility_json(value: &Value) -> Result<Value, String> {
-    let request: ExternalCapabilityRequest2 = serde_json::from_value(
-        value.get("request").cloned().ok_or("request is required")?,
-    )
-    .map_err(|error| format!("invalid ids interoperability/extensibility request: {error}"))?;
+    let request: ExternalCapabilityRequest2 =
+        serde_json::from_value(value.get("request").cloned().ok_or("request is required")?)
+            .map_err(|error| {
+                format!("invalid ids interoperability/extensibility request: {error}")
+            })?;
     let output = negotiate_interoperability_copilot(&request).map_err(
         |error: InteroperabilityExtensibilityError| {
             format!("ids interoperability/extensibility negotiation failed: {error}")
@@ -5949,9 +6018,8 @@ pub fn operate_ids_interoperability_extensibility_json(value: &Value) -> Result<
 pub fn validate_ids_interoperability_extensibility_json(
     value: &Value,
 ) -> Result<NegotiatedIntegration3, String> {
-    let output: NegotiatedIntegration3 = serde_json::from_value(value.clone()).map_err(
-        |error| format!("invalid ids interoperability/extensibility output: {error}"),
-    )?;
+    let output: NegotiatedIntegration3 = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid ids interoperability/extensibility output: {error}"))?;
     output.validate().map_err(|error| error.to_string())?;
     if output.feature_id != IDS_INTEROPERABILITY_EXTENSIBILITY_FEATURE_ID {
         return Err("ids interoperability/extensibility feature id mismatch".into());
@@ -5962,13 +6030,13 @@ pub fn validate_ids_interoperability_extensibility_json(
 pub const IDS_POLICY_AUTONOMY_WORKBENCH_TOOL: &str = "ids_policy_autonomy_workbench";
 
 pub fn operate_ids_policy_autonomy_workbench_json(value: &Value) -> Result<Value, String> {
-    let request: ActionAndAuthorityRequest4 = serde_json::from_value(
-        value.get("request").cloned().ok_or("request is required")?,
-    )
-    .map_err(|error| format!("invalid ids policy workbench request: {error}"))?;
-    let output = operate_policy_autonomy(&request).map_err(
-        |error: PolicyAutonomyWorkbenchError| format!("ids policy workbench failed: {error}"),
-    )?;
+    let request: ActionAndAuthorityRequest4 =
+        serde_json::from_value(value.get("request").cloned().ok_or("request is required")?)
+            .map_err(|error| format!("invalid ids policy workbench request: {error}"))?;
+    let output =
+        operate_policy_autonomy(&request).map_err(|error: PolicyAutonomyWorkbenchError| {
+            format!("ids policy workbench failed: {error}")
+        })?;
     serde_json::to_value(output)
         .map_err(|error| format!("cannot serialize ids policy workbench receipt: {error}"))
 }
@@ -5988,20 +6056,18 @@ pub fn validate_ids_policy_autonomy_workbench_json(
 pub const IDS_FEDERATION_SECURITY_TOOL: &str = "ids_federation_security_contract";
 
 pub fn operate_ids_federation_security_json(value: &Value) -> Result<Value, String> {
-    let request: IdsFederationRequest4 = serde_json::from_value(
-        value.get("request").cloned().ok_or("request is required")?,
-    )
-    .map_err(|error| format!("invalid ids federation security request: {error}"))?;
-    let envelope = admit_federation_security(&request).map_err(
-        |error: FederationSecurityError| format!("ids federation security failed: {error}"),
-    )?;
+    let request: IdsFederationRequest4 =
+        serde_json::from_value(value.get("request").cloned().ok_or("request is required")?)
+            .map_err(|error| format!("invalid ids federation security request: {error}"))?;
+    let envelope =
+        admit_federation_security(&request).map_err(|error: FederationSecurityError| {
+            format!("ids federation security failed: {error}")
+        })?;
     serde_json::to_value(envelope)
         .map_err(|error| format!("cannot serialize ids federation envelope: {error}"))
 }
 
-pub fn validate_ids_federation_security_json(
-    value: &Value,
-) -> Result<FederationEnvelope2, String> {
+pub fn validate_ids_federation_security_json(value: &Value) -> Result<FederationEnvelope2, String> {
     let envelope: FederationEnvelope2 = serde_json::from_value(value.clone())
         .map_err(|error| format!("invalid ids federation envelope: {error}"))?;
     envelope.validate().map_err(|error| error.to_string())?;
@@ -6066,7 +6132,7 @@ pub fn operate_ids_reliability_json(value: &Value) -> Result<Value, String> {
     let request: CapabilityWorkload7 =
         serde_json::from_value(value.get("request").cloned().ok_or("request is required")?)
             .map_err(|error| format!("invalid ids reliability workload: {error}"))?;
-    let result = preflight_reliability(&request).map_err(|error: ReliabilityCopilotError| {
+    let result = preflight_reliability(&request).map_err(|error: IdsReliabilityCopilotError| {
         format!("ids reliability preflight failed: {error}")
     })?;
     serde_json::to_value(result)
@@ -6339,7 +6405,7 @@ pub fn operate_ids_evaluation_json(value: &Value) -> Result<Value, String> {
     let request: IdsCapabilityRun7 =
         serde_json::from_value(value.get("request").cloned().ok_or("request is required")?)
             .map_err(|error| format!("invalid ids evaluation run: {error}"))?;
-    let card = assure_ids_evaluation(&request).map_err(|error: EvaluationAssuranceError| {
+    let card = assure_ids_evaluation(&request).map_err(|error: IdsEvaluationAssuranceError| {
         format!("ids evaluation assurance failed: {error}")
     })?;
     serde_json::to_value(card)
@@ -6462,11 +6528,12 @@ pub fn validate_atlasx_federated_execution_json(value: &Value) -> Result<Executi
     Ok(receipt)
 }
 
-pub fn operate_atlasx_computational_execution_assurance_json(value: &Value) -> Result<Value, String> {
-    let request: ResearchWorkflowSpec3 = serde_json::from_value(
-        value.get("request").cloned().ok_or("request is required")?,
-    )
-    .map_err(|error| format!("invalid atlasx computational-execution request: {error}"))?;
+pub fn operate_atlasx_computational_execution_assurance_json(
+    value: &Value,
+) -> Result<Value, String> {
+    let request: ResearchWorkflowSpec3 =
+        serde_json::from_value(value.get("request").cloned().ok_or("request is required")?)
+            .map_err(|error| format!("invalid atlasx computational-execution request: {error}"))?;
     let receipt = assure_computational_execution(&request).map_err(
         |error: ComputationalExecutionError| {
             format!("atlasx computational-execution assurance failed: {error}")
@@ -6515,10 +6582,9 @@ pub fn validate_atlasx_context_compilation_json(
 }
 
 pub fn operate_adapter_federated_context_copilot_json(value: &Value) -> Result<Value, String> {
-    let request: FederatedContextQuestion5 = serde_json::from_value(
-        value.get("request").cloned().ok_or("request is required")?,
-    )
-    .map_err(|error| format!("invalid adapter federated-context request: {error}"))?;
+    let request: FederatedContextQuestion5 =
+        serde_json::from_value(value.get("request").cloned().ok_or("request is required")?)
+            .map_err(|error| format!("invalid adapter federated-context request: {error}"))?;
     let receipt = qualify_federated_context(&request).map_err(|error: FederatedContextError| {
         format!("adapter federated-context qualification failed: {error}")
     })?;
@@ -6542,13 +6608,14 @@ pub fn validate_adapter_federated_context_copilot_json(
 }
 
 pub fn operate_routing_limitation_closure_json(value: &Value) -> Result<Value, String> {
-    let request: LimitationClosureWorkflowRequest5 = serde_json::from_value(
-        value.get("request").cloned().ok_or("request is required")?,
-    )
-    .map_err(|error| format!("invalid routing limitation-closure request: {error}"))?;
-    let receipt = compile_limitation_closure_workflow(&request).map_err(|error: LimitationClosureError| {
-        format!("routing limitation-closure compilation failed: {error}")
-    })?;
+    let request: LimitationClosureWorkflowRequest5 =
+        serde_json::from_value(value.get("request").cloned().ok_or("request is required")?)
+            .map_err(|error| format!("invalid routing limitation-closure request: {error}"))?;
+    let receipt = compile_limitation_closure_workflow(&request).map_err(
+        |error: RoutingLimitationClosureError| {
+            format!("routing limitation-closure compilation failed: {error}")
+        },
+    )?;
     serde_json::to_value(receipt)
         .map_err(|error| format!("cannot serialize routing limitation-closure receipt: {error}"))
 }
@@ -6569,10 +6636,9 @@ pub fn validate_routing_limitation_closure_json(
 }
 
 pub fn operate_interweave_federated_interpretation_json(value: &Value) -> Result<Value, String> {
-    let request: InterpretationInferenceRequest = serde_json::from_value(
-        value.get("request").cloned().ok_or("request is required")?,
-    )
-    .map_err(|error| format!("invalid interweave interpretation request: {error}"))?;
+    let request: InterpretationInferenceRequest =
+        serde_json::from_value(value.get("request").cloned().ok_or("request is required")?)
+            .map_err(|error| format!("invalid interweave interpretation request: {error}"))?;
     let receipt = compile_interweave_interpretation(&request).map_err(
         |error: InterweaveInterpretationError| {
             format!("interweave interpretation compilation failed: {error}")
@@ -6599,18 +6665,14 @@ pub fn validate_interweave_federated_interpretation_json(
     Ok(receipt)
 }
 
-pub fn operate_interweave_federated_commons_assurance_json(
-    value: &Value,
-) -> Result<Value, String> {
-    let request: InterweaveFederationRequest3 = serde_json::from_value(
-        value.get("request").cloned().ok_or("request is required")?,
-    )
-    .map_err(|error| format!("invalid interweave federation request: {error}"))?;
-    let receipt = assure_federated_commons(&request).map_err(
-        |error: InterweaveFederationError| {
+pub fn operate_interweave_federated_commons_assurance_json(value: &Value) -> Result<Value, String> {
+    let request: InterweaveFederationRequest3 =
+        serde_json::from_value(value.get("request").cloned().ok_or("request is required")?)
+            .map_err(|error| format!("invalid interweave federation request: {error}"))?;
+    let receipt =
+        assure_federated_commons(&request).map_err(|error: InterweaveFederationError| {
             format!("interweave federated-commons assurance failed: {error}")
-        },
-    )?;
+        })?;
     serde_json::to_value(receipt)
         .map_err(|error| format!("cannot serialize interweave federation envelope: {error}"))
 }
@@ -6640,8 +6702,8 @@ pub fn operate_bioworlds_resource_discovery_json(value: &Value) -> Result<Value,
 
 pub fn validate_bioworlds_resource_discovery_json(
     value: &Value,
-) -> Result<QualifiedResourceSet6, String> {
-    let receipt: QualifiedResourceSet6 = serde_json::from_value(value.clone())
+) -> Result<BioworldsQualifiedResourceSet6, String> {
+    let receipt: BioworldsQualifiedResourceSet6 = serde_json::from_value(value.clone())
         .map_err(|error| format!("invalid bioworlds resource set: {error}"))?;
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != RESOURCE_DISCOVERY_COPILOT_FEATURE_ID {
@@ -6654,13 +6716,13 @@ pub fn validate_bioworlds_resource_discovery_json(
 }
 
 pub fn operate_bioworlds_knowledge_workflow_json(value: &Value) -> Result<Value, String> {
-    let request: KnowledgeWorkflowRequest5 = serde_json::from_value(
-        value.get("request").cloned().ok_or("request is required")?,
-    )
-    .map_err(|error| format!("invalid bioworlds knowledge-workflow request: {error}"))?;
-    let receipt = compile_knowledge_workflow(&request).map_err(|error: KnowledgeWorkflowError| {
-        format!("bioworlds knowledge-workflow compilation failed: {error}")
-    })?;
+    let request: KnowledgeWorkflowRequest5 =
+        serde_json::from_value(value.get("request").cloned().ok_or("request is required")?)
+            .map_err(|error| format!("invalid bioworlds knowledge-workflow request: {error}"))?;
+    let receipt =
+        compile_knowledge_workflow(&request).map_err(|error: KnowledgeWorkflowError| {
+            format!("bioworlds knowledge-workflow compilation failed: {error}")
+        })?;
     serde_json::to_value(receipt)
         .map_err(|error| format!("cannot serialize bioworlds knowledge-workflow receipt: {error}"))
 }
@@ -6683,24 +6745,28 @@ pub fn validate_bioworlds_knowledge_workflow_json(
 pub fn operate_bioworlds_federated_context_research_workbench_json(
     value: &Value,
 ) -> Result<Value, String> {
-    let request: FederatedContextWorkbenchRequest = serde_json::from_value(
-        value.get("request").cloned().ok_or("request is required")?,
-    )
-    .map_err(|error| format!("invalid bioworlds federated context workbench request: {error}"))?;
+    let request: FederatedContextWorkbenchRequest =
+        serde_json::from_value(value.get("request").cloned().ok_or("request is required")?)
+            .map_err(|error| {
+                format!("invalid bioworlds federated context workbench request: {error}")
+            })?;
     let receipt = compile_federated_continual_context_workbench(&request).map_err(
         |error: FederatedContextWorkbenchError| {
             format!("bioworlds federated context workbench compilation failed: {error}")
         },
     )?;
-    serde_json::to_value(receipt)
-        .map_err(|error| format!("cannot serialize bioworlds federated context workbench receipt: {error}"))
+    serde_json::to_value(receipt).map_err(|error| {
+        format!("cannot serialize bioworlds federated context workbench receipt: {error}")
+    })
 }
 
 pub fn validate_bioworlds_federated_context_research_workbench_json(
     value: &Value,
 ) -> Result<FederatedContextWorkbenchReceipt, String> {
-    let receipt: FederatedContextWorkbenchReceipt = serde_json::from_value(value.clone())
-        .map_err(|error| format!("invalid bioworlds federated context workbench receipt: {error}"))?;
+    let receipt: FederatedContextWorkbenchReceipt =
+        serde_json::from_value(value.clone()).map_err(|error| {
+            format!("invalid bioworlds federated context workbench receipt: {error}")
+        })?;
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != FEDERATED_CONTEXT_RESEARCH_WORKBENCH_FEATURE_ID {
         return Err("bioworlds federated context workbench feature id mismatch".into());
@@ -6740,13 +6806,13 @@ pub fn validate_lab_instrument_interoperability_json(
 }
 
 pub fn operate_prism_analysis_workbench_json(value: &Value) -> Result<Value, String> {
-    let request: AnalysisWorkbenchRequest5 = serde_json::from_value(
-        value.get("request").cloned().ok_or("request is required")?,
-    )
-    .map_err(|error| format!("invalid PRISM analysis-workbench request: {error}"))?;
-    let receipt = qualify_analysis_workbench(&request).map_err(|error: AnalysisWorkbenchError| {
-        format!("PRISM analysis-workbench qualification failed: {error}")
-    })?;
+    let request: AnalysisWorkbenchRequest5 =
+        serde_json::from_value(value.get("request").cloned().ok_or("request is required")?)
+            .map_err(|error| format!("invalid PRISM analysis-workbench request: {error}"))?;
+    let receipt =
+        qualify_analysis_workbench(&request).map_err(|error: AnalysisWorkbenchError| {
+            format!("PRISM analysis-workbench qualification failed: {error}")
+        })?;
     serde_json::to_value(receipt)
         .map_err(|error| format!("cannot serialize PRISM analysis-workbench receipt: {error}"))
 }
@@ -6818,12 +6884,16 @@ pub fn validate_routing_execution_copilot_json(
 
 pub fn operate_routing_laboratory_inference_json(value: &Value) -> Result<Value, String> {
     let request: RoutingInstrumentActionRequest4 = serde_json::from_value(
-        value.get("request").cloned().unwrap_or_else(|| value.clone()),
+        value
+            .get("request")
+            .cloned()
+            .unwrap_or_else(|| value.clone()),
     )
     .map_err(|error| format!("invalid routing laboratory inference request: {error}"))?;
-    let receipt = infer_laboratory_actions(&request).map_err(|error: LaboratoryInferenceError| {
-        format!("routing laboratory inference failed: {error}")
-    })?;
+    let receipt =
+        infer_laboratory_actions(&request).map_err(|error: LaboratoryInferenceError| {
+            format!("routing laboratory inference failed: {error}")
+        })?;
     serde_json::to_value(receipt)
         .map_err(|error| format!("cannot serialize routing laboratory inference receipt: {error}"))
 }
@@ -6842,7 +6912,10 @@ pub fn validate_routing_laboratory_inference_json(
 
 pub fn operate_devx_context_compilation_contract_json(value: &Value) -> Result<Value, String> {
     let request: ContextCompilationContractRequest3 = serde_json::from_value(
-        value.get("request").cloned().unwrap_or_else(|| value.clone()),
+        value
+            .get("request")
+            .cloned()
+            .unwrap_or_else(|| value.clone()),
     )
     .map_err(|error| format!("invalid devx context contract request: {error}"))?;
     let receipt = compile_context_contract(&request).map_err(|error: ContextContractError| {
@@ -6868,13 +6941,11 @@ pub fn validate_devx_context_compilation_contract_json(
 pub fn operate_bioethics_prospective_computational_execution_json(
     value: &Value,
 ) -> Result<Value, String> {
-    let request: BioethicsResearchWorkflowSpec = serde_json::from_value(
-        value
-            .get("request")
-            .cloned()
-            .ok_or("request is required")?,
-    )
-    .map_err(|error| format!("invalid bioethics computational-execution request: {error}"))?;
+    let request: BioethicsResearchWorkflowSpec =
+        serde_json::from_value(value.get("request").cloned().ok_or("request is required")?)
+            .map_err(|error| {
+                format!("invalid bioethics computational-execution request: {error}")
+            })?;
     let receipt = assure_prospective_computational_execution(&request).map_err(
         |error: ExecutionAssuranceError| {
             format!("bioethics computational-execution assurance failed: {error}")
@@ -6901,13 +6972,9 @@ pub fn validate_bioethics_prospective_computational_execution_json(
 }
 
 pub fn operate_oncoworlds_analysis_workbench_json(value: &Value) -> Result<Value, String> {
-    let request: OncoworldsAnalysisWorkbenchRequest = serde_json::from_value(
-        value
-            .get("request")
-            .cloned()
-            .ok_or("request is required")?,
-    )
-    .map_err(|error| format!("invalid Oncoworlds analysis-workbench request: {error}"))?;
+    let request: OncoworldsAnalysisWorkbenchRequest =
+        serde_json::from_value(value.get("request").cloned().ok_or("request is required")?)
+            .map_err(|error| format!("invalid Oncoworlds analysis-workbench request: {error}"))?;
     let receipt = qualify_oncoworlds_analysis_workbench(&request).map_err(
         |error: OncoworldsAnalysisWorkbenchError| {
             format!("Oncoworlds analysis-workbench qualification failed: {error}")
@@ -6935,20 +7002,19 @@ pub fn validate_oncoworlds_analysis_workbench_json(
 pub fn operate_oncoworlds_evidence_surveillance_copilot_json(
     value: &Value,
 ) -> Result<Value, String> {
-    let request: OncoworldsEvidenceSurveillanceCopilotRequest = serde_json::from_value(
-        value
-            .get("request")
-            .cloned()
-            .ok_or("request is required")?,
-    )
-    .map_err(|error| format!("invalid OncoWorlds evidence-surveillance request: {error}"))?;
+    let request: OncoworldsEvidenceSurveillanceCopilotRequest =
+        serde_json::from_value(value.get("request").cloned().ok_or("request is required")?)
+            .map_err(|error| {
+                format!("invalid OncoWorlds evidence-surveillance request: {error}")
+            })?;
     let receipt = run_oncoworlds_evidence_surveillance_copilot(&request).map_err(
         |error: OncoworldsEvidenceSurveillanceCopilotError| {
             format!("OncoWorlds evidence-surveillance copilot failed: {error}")
         },
     )?;
-    serde_json::to_value(receipt)
-        .map_err(|error| format!("cannot serialize OncoWorlds evidence-surveillance receipt: {error}"))
+    serde_json::to_value(receipt).map_err(|error| {
+        format!("cannot serialize OncoWorlds evidence-surveillance receipt: {error}")
+    })
 }
 
 pub fn validate_oncoworlds_evidence_surveillance_copilot_json(
@@ -6972,13 +7038,9 @@ pub const ONCOWORLDS_REPLICATION_ASSURANCE_TOOL: &str =
     "oncoworlds_prospective_replication_negative_results_assurance";
 
 pub fn operate_oncoworlds_replication_assurance_json(value: &Value) -> Result<Value, String> {
-    let request: OncoworldsClaimAndProtocol = serde_json::from_value(
-        value
-            .get("request")
-            .cloned()
-            .ok_or("request is required")?,
-    )
-    .map_err(|error| format!("invalid OncoWorlds replication request: {error}"))?;
+    let request: OncoworldsClaimAndProtocol =
+        serde_json::from_value(value.get("request").cloned().ok_or("request is required")?)
+            .map_err(|error| format!("invalid OncoWorlds replication request: {error}"))?;
     let receipt = assure_oncoworlds_replication(&request).map_err(
         |error: OncoworldsReplicationAssuranceError| {
             format!("OncoWorlds replication assurance failed: {error}")
@@ -7006,14 +7068,12 @@ pub fn validate_oncoworlds_replication_assurance_json(
 pub const ONCOWORLDS_RESOURCE_DISCOVERY_ASSURANCE_TOOL: &str =
     "oncoworlds_federated_resource_discovery_assurance";
 
-pub fn operate_oncoworlds_resource_discovery_assurance_json(value: &Value) -> Result<Value, String> {
-    let request: OncoworldsResourceNeed4 = serde_json::from_value(
-        value
-            .get("request")
-            .cloned()
-            .ok_or("request is required")?,
-    )
-    .map_err(|error| format!("invalid OncoWorlds resource request: {error}"))?;
+pub fn operate_oncoworlds_resource_discovery_assurance_json(
+    value: &Value,
+) -> Result<Value, String> {
+    let request: OncoworldsResourceNeed4 =
+        serde_json::from_value(value.get("request").cloned().ok_or("request is required")?)
+            .map_err(|error| format!("invalid OncoWorlds resource request: {error}"))?;
     let endpoints: Vec<OncoworldsResourceEndpoint4> = serde_json::from_value(
         value
             .get("endpoints")
@@ -7021,13 +7081,9 @@ pub fn operate_oncoworlds_resource_discovery_assurance_json(value: &Value) -> Re
             .ok_or("endpoints are required")?,
     )
     .map_err(|error| format!("invalid OncoWorlds resource endpoints: {error}"))?;
-    let peers: Vec<OncoworldsPeerResourceSummary4> = serde_json::from_value(
-        value
-            .get("peers")
-            .cloned()
-            .ok_or("peers are required")?,
-    )
-    .map_err(|error| format!("invalid OncoWorlds resource peers: {error}"))?;
+    let peers: Vec<OncoworldsPeerResourceSummary4> =
+        serde_json::from_value(value.get("peers").cloned().ok_or("peers are required")?)
+            .map_err(|error| format!("invalid OncoWorlds resource peers: {error}"))?;
     let receipt = assure_oncoworlds_resources(&request, &endpoints, &peers).map_err(
         |error: OncoworldsResourceDiscoveryError| {
             format!("OncoWorlds resource discovery assurance failed: {error}")
@@ -7107,13 +7163,9 @@ pub fn validate_evalengine_local_mechanism_exploration_assurance_json(
 }
 
 pub fn operate_packs_local_quality_control_json(value: &Value) -> Result<Value, String> {
-    let request: PacksResearchObject1 = serde_json::from_value(
-        value
-            .get("request")
-            .cloned()
-            .ok_or("request is required")?,
-    )
-    .map_err(|error| format!("invalid Packs quality request: {error}"))?;
+    let request: PacksResearchObject1 =
+        serde_json::from_value(value.get("request").cloned().ok_or("request is required")?)
+            .map_err(|error| format!("invalid Packs quality request: {error}"))?;
     let observations: Vec<PacksQualityObservation2> = serde_json::from_value(
         value
             .get("observations")
@@ -7161,9 +7213,7 @@ pub fn validate_evalengine_protocol_simulation_copilot_json(
 pub const MCP_REPLICATION_NEGATIVE_RESULTS_ASSURANCE_TOOL: &str =
     "mcp_replication_negative_results_assurance";
 
-pub fn run_mcp_replication_negative_results_assurance_json(
-    value: &Value,
-) -> Result<Value, String> {
+pub fn run_mcp_replication_negative_results_assurance_json(value: &Value) -> Result<Value, String> {
     let request: McpClaimAndProtocol3 = serde_json::from_value(value.clone())
         .map_err(|error| format!("invalid MCP replication assurance request: {error}"))?;
     let receipt = assure_mcp_replication(request)
@@ -7240,8 +7290,7 @@ pub fn validate_scale_quality_control_contract_json(
     Ok(receipt)
 }
 
-pub const PACKS_PROTOCOL_SIMULATION_WORKBENCH_TOOL: &str =
-    "packs_protocol_simulation_workbench";
+pub const PACKS_PROTOCOL_SIMULATION_WORKBENCH_TOOL: &str = "packs_protocol_simulation_workbench";
 
 pub fn run_packs_protocol_simulation_workbench_json(value: &Value) -> Result<Value, String> {
     let request: bioprism_ids::ProtocolWorkbenchRequest5 = serde_json::from_value(value.clone())
@@ -7258,10 +7307,14 @@ pub fn validate_packs_protocol_simulation_workbench_json(
     let receipt: PacksProtocolWorkbenchReport9 = serde_json::from_value(value.clone())
         .map_err(|error| format!("invalid Packs protocol workbench receipt: {error}"))?;
     receipt.validate().map_err(|error| error.to_string())?;
-    if receipt.0.get("feature_id").and_then(Value::as_str) != Some(PACKS_PROTOCOL_WORKBENCH_FEATURE_ID) {
+    if receipt.0.get("feature_id").and_then(Value::as_str)
+        != Some(PACKS_PROTOCOL_WORKBENCH_FEATURE_ID)
+    {
         return Err("Packs protocol workbench feature id mismatch".into());
     }
-    if receipt.0.get("contract_version").and_then(Value::as_str) != Some(PACKS_PROTOCOL_WORKBENCH_CONTRACT_VERSION) {
+    if receipt.0.get("contract_version").and_then(Value::as_str)
+        != Some(PACKS_PROTOCOL_WORKBENCH_CONTRACT_VERSION)
+    {
         return Err("Packs protocol workbench contract version mismatch".into());
     }
     Ok(receipt)
@@ -7352,8 +7405,7 @@ pub fn validate_backends_federated_retrieval_synthesis_workflow_json(
     Ok(receipt)
 }
 
-pub const DEVX_EVIDENCE_SURVEILLANCE_CONTROL_TOOL: &str =
-    "devx_evidence_surveillance_control";
+pub const DEVX_EVIDENCE_SURVEILLANCE_CONTROL_TOOL: &str = "devx_evidence_surveillance_control";
 
 pub fn run_devx_evidence_surveillance_control_json(value: &Value) -> Result<Value, String> {
     let request: DevxEvidenceFeed5 = serde_json::from_value(value.clone())
@@ -7441,8 +7493,9 @@ pub fn run_fabric_experiment_design_contract_model_json(value: &Value) -> Result
         .map_err(|error| format!("invalid Fabric experiment-design contract request: {error}"))?;
     let receipt = negotiate_experiment_design_contract(&request)
         .map_err(|error| format!("Fabric experiment-design contract failed: {error}"))?;
-    serde_json::to_value(receipt)
-        .map_err(|error| format!("cannot serialize Fabric experiment-design contract receipt: {error}"))
+    serde_json::to_value(receipt).map_err(|error| {
+        format!("cannot serialize Fabric experiment-design contract receipt: {error}")
+    })
 }
 
 pub fn validate_fabric_experiment_design_contract_model_json(
@@ -7514,8 +7567,7 @@ pub fn validate_bioethics_statistical_analysis_assurance_json(
     Ok(receipt)
 }
 
-pub const PRISM_LABORATORY_INTEGRATION_COPILOT_TOOL: &str =
-    "prism_laboratory_integration_copilot";
+pub const PRISM_LABORATORY_INTEGRATION_COPILOT_TOOL: &str = "prism_laboratory_integration_copilot";
 
 pub fn run_prism_laboratory_integration_copilot_json(value: &Value) -> Result<Value, String> {
     let request: PrismInstrumentActionRequest4 = serde_json::from_value(value.clone())
@@ -7544,7 +7596,9 @@ pub fn validate_prism_laboratory_integration_copilot_json(
 pub const SCALE_INTERPRETATION_VISUALIZATION_ASSURANCE_TOOL: &str =
     "scale_interpretation_visualization_assurance";
 
-pub fn run_scale_interpretation_visualization_assurance_json(value: &Value) -> Result<Value, String> {
+pub fn run_scale_interpretation_visualization_assurance_json(
+    value: &Value,
+) -> Result<Value, String> {
     let request: ScaleEvidenceBackedResult4 = serde_json::from_value(value.clone())
         .map_err(|error| format!("invalid Scale interpretation request: {error}"))?;
     let receipt = assure_interpretation_visualization(&request)
@@ -7571,20 +7625,27 @@ pub fn validate_scale_interpretation_visualization_assurance_json(
 pub const SCALE_INTERPRETATION_INTEROPERABILITY_GATEWAY_TOOL: &str =
     "scale_interpretation_interoperability_gateway";
 
-pub fn run_scale_interpretation_interoperability_gateway_json(value: &Value) -> Result<Value, String> {
+pub fn run_scale_interpretation_interoperability_gateway_json(
+    value: &Value,
+) -> Result<Value, String> {
     let request: ScaleInterpretationInteropRequest = serde_json::from_value(value.clone())
-        .map_err(|error| format!("invalid Scale interpretation interoperability request: {error}"))?;
+        .map_err(|error| {
+            format!("invalid Scale interpretation interoperability request: {error}")
+        })?;
     let receipt = interoperate_interpretations(&request)
         .map_err(|error| format!("Scale interpretation interoperability failed: {error}"))?;
-    serde_json::to_value(receipt)
-        .map_err(|error| format!("cannot serialize Scale interpretation interoperability receipt: {error}"))
+    serde_json::to_value(receipt).map_err(|error| {
+        format!("cannot serialize Scale interpretation interoperability receipt: {error}")
+    })
 }
 
 pub fn validate_scale_interpretation_interoperability_gateway_json(
     value: &Value,
 ) -> Result<ScaleInterpretationInteropReceipt, String> {
     let receipt: ScaleInterpretationInteropReceipt = serde_json::from_value(value.clone())
-        .map_err(|error| format!("invalid Scale interpretation interoperability receipt: {error}"))?;
+        .map_err(|error| {
+            format!("invalid Scale interpretation interoperability receipt: {error}")
+        })?;
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != INTERPRETATION_INTEROPERABILITY_FEATURE_ID {
         return Err("Scale interpretation interoperability feature id mismatch".into());
@@ -7598,9 +7659,13 @@ pub fn validate_scale_interpretation_interoperability_gateway_json(
 pub const BIOETHICS_EXPERIMENT_DESIGN_WORKFLOW_FABRIC_TOOL: &str =
     "bioethics_experiment_design_workflow_fabric";
 
-pub fn run_bioethics_experiment_design_workflow_fabric_json(value: &Value) -> Result<Value, String> {
+pub fn run_bioethics_experiment_design_workflow_fabric_json(
+    value: &Value,
+) -> Result<Value, String> {
     let request: BioethicsExperimentDesignWorkflowRequest1 = serde_json::from_value(value.clone())
-        .map_err(|error| format!("invalid Bioethics experiment design workflow request: {error}"))?;
+        .map_err(|error| {
+            format!("invalid Bioethics experiment design workflow request: {error}")
+        })?;
     let receipt = compile_experiment_design_workflow(&request)
         .map_err(|error| format!("Bioethics experiment design workflow failed: {error}"))?;
     serde_json::to_value(receipt)
@@ -7613,13 +7678,9 @@ pub const BIOETHICS_MULTIMODAL_BOUNDED_EVOLUTION_ASSURANCE_TOOL: &str =
 pub fn run_bioethics_multimodal_bounded_evolution_assurance_json(
     value: &Value,
 ) -> Result<Value, String> {
-    let request: BioethicsEvolutionRequest3 = serde_json::from_value(
-        value
-            .get("request")
-            .cloned()
-            .ok_or("request is required")?,
-    )
-    .map_err(|error| format!("invalid bioethics evolution request: {error}"))?;
+    let request: BioethicsEvolutionRequest3 =
+        serde_json::from_value(value.get("request").cloned().ok_or("request is required")?)
+            .map_err(|error| format!("invalid bioethics evolution request: {error}"))?;
     let receipt = assure_multimodal_bounded_evolution(&request)
         .map_err(|error| format!("bioethics evolution assurance failed: {error}"))?;
     serde_json::to_value(receipt)
@@ -7658,7 +7719,9 @@ pub fn validate_bioethics_experiment_design_workflow_fabric_json(
 pub const ONCO_COMPUTATIONAL_EXECUTION_CONTRACT_MODEL_TOOL: &str =
     "onco_computational_execution_contract_model";
 
-pub fn run_onco_computational_execution_contract_model_json(value: &Value) -> Result<Value, String> {
+pub fn run_onco_computational_execution_contract_model_json(
+    value: &Value,
+) -> Result<Value, String> {
     let request: OncoResearchWorkflowSpec1 = serde_json::from_value(value.clone())
         .map_err(|error| format!("invalid Onco execution contract request: {error}"))?;
     let receipt = model_computational_execution_contract(&request)
@@ -7712,7 +7775,9 @@ pub fn validate_oracle_interoperability_research_workbench_json(
 pub const ATLASHUB_PROVENANCE_SIGNING_INFERENCE_ENGINE_TOOL: &str =
     "atlashub_provenance_signing_inference_engine";
 
-pub fn run_atlashub_provenance_signing_inference_engine_json(value: &Value) -> Result<Value, String> {
+pub fn run_atlashub_provenance_signing_inference_engine_json(
+    value: &Value,
+) -> Result<Value, String> {
     let request: AtlashubProvenanceSigningRequest1 = serde_json::from_value(value.clone())
         .map_err(|error| format!("invalid Atlashub provenance request: {error}"))?;
     let receipt = infer_signed_provenance(&request)
@@ -7736,8 +7801,7 @@ pub fn validate_atlashub_provenance_signing_inference_engine_json(
     Ok(receipt)
 }
 
-pub const HUB_POLICY_AUTONOMY_INFERENCE_ENGINE_TOOL: &str =
-    "hub_policy_autonomy_inference_engine";
+pub const HUB_POLICY_AUTONOMY_INFERENCE_ENGINE_TOOL: &str = "hub_policy_autonomy_inference_engine";
 
 pub fn run_hub_policy_autonomy_inference_engine_json(value: &Value) -> Result<Value, String> {
     let request: HubPolicyInferenceRequest3 = serde_json::from_value(value.clone())

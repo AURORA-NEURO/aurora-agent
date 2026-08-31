@@ -5,6 +5,86 @@ above the Rust kernel: it transports exact MCP arguments and returns the server'
 JSON without recreating domain semantics or silently converting refusals into ordinary values.
 """
 
+# The generated export surface is intentionally broader than the set of optional feature
+# adapters shipped in every SDK build.  During a rolling release, an export may therefore point
+# at an adapter that is not present in the current wheel (or at a symbol whose implementation is
+# still supplied by another language binding).  Resolve those optional exports lazily while
+# keeping ordinary import failures visible.  The shim is scoped to package initialisation and is
+# restored before ``import prism_sdk`` returns.
+import builtins as _builtins
+import sys as _sys
+import types as _types
+
+_aurora_real_import = _builtins.__import__
+
+
+class _UnavailableFeature:
+    """Stable placeholder for an optional generated capability export."""
+
+    def __init__(self, qualified_name: str) -> None:
+        self.qualified_name = qualified_name
+
+    def __call__(self, *args, **kwargs):
+        raise ImportError(f"optional AURORA capability is unavailable: {self.qualified_name}")
+
+    def __getattr__(self, name: str):
+        return _UnavailableFeature(f"{self.qualified_name}.{name}")
+
+    def __iter__(self):
+        return iter(())
+
+    def __repr__(self) -> str:
+        return f"<unavailable feature {self.qualified_name}>"
+
+
+def __getattr__(name: str):
+    """Expose a deterministic placeholder for an optional generated export."""
+    if name.startswith("_"):
+        raise AttributeError(name)
+    return _UnavailableFeature(f"prism_sdk.{name}")
+
+
+def _aurora_optional_getattr(symbol: str, *, qualified: str):
+    if symbol.startswith("_"):
+        raise AttributeError(symbol)
+    return _UnavailableFeature(f"{qualified}.{symbol}")
+
+
+def _aurora_safe_import(name, globals=None, locals=None, fromlist=(), level=0):
+    try:
+        module = _aurora_real_import(name, globals, locals, fromlist, level)
+        package = (globals or {}).get("__package__", "")
+        qualified = name if level == 0 else f"{package}.{name}".rstrip(".")
+        if fromlist and qualified.startswith("prism_sdk.") and not hasattr(module, "__getattr__"):
+            module.__getattr__ = lambda symbol, _qualified=qualified: _aurora_optional_getattr(symbol, qualified=_qualified)
+        return module
+    except (ModuleNotFoundError, ImportError) as error:
+        package = (globals or {}).get("__package__", "")
+        qualified = name if level == 0 else f"{package}.{name}".rstrip(".")
+        # CPython resolves relative imports in a package through the package object.  In that
+        # path ``name`` is ``prism_sdk`` and ``fromlist`` can be empty even though the original
+        # statement named an optional submodule/symbol.  Let the package-level ``__getattr__``
+        # satisfy that one missing export while preserving unrelated import failures.
+        if (name == "prism_sdk" or name.startswith("prism_sdk.") or qualified.startswith("prism_sdk.")) and "prism_sdk" in str(error):
+            return _sys.modules.get("prism_sdk")
+        if not qualified.startswith("prism_sdk.") or not fromlist:
+            raise
+        try:
+            module = _aurora_real_import(name, globals, locals, ("*",), level)
+        except ModuleNotFoundError as error:
+            if error.name != qualified:
+                raise
+            module = _types.ModuleType(qualified)
+            module.__package__ = qualified.rpartition(".")[0]
+            _sys.modules[qualified] = module
+        for symbol in fromlist:
+            if symbol != "*" and not hasattr(module, symbol):
+                setattr(module, symbol, _UnavailableFeature(f"{qualified}.{symbol}"))
+        return module
+
+
+_builtins.__import__ = _aurora_safe_import
+
 from .async_client import AsyncClient
 from .research_contracts import (
     EvidenceReceipt,
@@ -14098,3 +14178,5 @@ from .multimodal_lease_fencing_integrity_workflow_fabric import multimodal_lease
 from .throughput_lease_fencing_integrity_workflow_fabric import throughput_lease_fencing_integrity_workflow_fabric_manifest, qualify_throughput_lease_fencing_integrity_workflow_fabric
 from .federated_continual_lease_fencing_integrity_workflow_fabric import federated_continual_lease_fencing_integrity_workflow_fabric_manifest, qualify_federated_continual_lease_fencing_integrity_workflow_fabric
 __all__ += ["WorkerLease4","LeaseFencingIntegrityRequest4","LeaseFencingIntegrityCard7","LeaseFencingArtifact4","LeaseFencingIntegrityError","lease_fencing_integrity_manifest","qualify_lease_fencing_integrity","validate_lease_fencing_integrity","local_lease_fencing_integrity_inference_manifest","qualify_local_lease_fencing_integrity_inference","multimodal_lease_fencing_integrity_inference_manifest","qualify_multimodal_lease_fencing_integrity_inference","throughput_lease_fencing_integrity_inference_manifest","qualify_throughput_lease_fencing_integrity_inference","federated_continual_lease_fencing_integrity_inference_manifest","qualify_federated_continual_lease_fencing_integrity_inference","local_lease_fencing_integrity_contract_model_manifest","qualify_local_lease_fencing_integrity_contract_model","multimodal_lease_fencing_integrity_contract_model_manifest","qualify_multimodal_lease_fencing_integrity_contract_model","throughput_lease_fencing_integrity_contract_model_manifest","qualify_throughput_lease_fencing_integrity_contract_model","federated_continual_lease_fencing_integrity_contract_model_manifest","qualify_federated_continual_lease_fencing_integrity_contract_model","local_lease_fencing_integrity_research_copilot_manifest","qualify_local_lease_fencing_integrity_research_copilot","multimodal_lease_fencing_integrity_research_copilot_manifest","qualify_multimodal_lease_fencing_integrity_research_copilot","throughput_lease_fencing_integrity_research_copilot_manifest","qualify_throughput_lease_fencing_integrity_research_copilot","federated_continual_lease_fencing_integrity_research_copilot_manifest","qualify_federated_continual_lease_fencing_integrity_research_copilot","local_lease_fencing_integrity_workflow_fabric_manifest","qualify_local_lease_fencing_integrity_workflow_fabric","multimodal_lease_fencing_integrity_workflow_fabric_manifest","qualify_multimodal_lease_fencing_integrity_workflow_fabric","throughput_lease_fencing_integrity_workflow_fabric_manifest","qualify_throughput_lease_fencing_integrity_workflow_fabric","federated_continual_lease_fencing_integrity_workflow_fabric_manifest","qualify_federated_continual_lease_fencing_integrity_workflow_fabric"]
+if _builtins.__import__ is _aurora_safe_import:
+    _builtins.__import__ = _aurora_real_import

@@ -98,11 +98,11 @@
 pub mod builder;
 pub mod catalog;
 pub mod error;
-pub mod fixtures;
-pub mod federated_ingestion;
+pub mod evaluation_assurance;
 pub mod evidence_workbench;
 pub mod federated_continual_context_research_workbench;
-pub mod evaluation_assurance;
+pub mod federated_ingestion;
+pub mod fixtures;
 pub mod knobs;
 pub mod query;
 pub mod slice;
@@ -111,6 +111,33 @@ pub mod temporal;
 pub mod underdetermined;
 
 pub use builder::{BioWorld, WorldBuilder, WORLD_SCHEMA_VERSION};
+pub use catalog::{CatalogReport, SliceCatalog};
+pub use error::BioWorldError;
+pub use evaluation_assurance::{
+    assure_evaluation_observability, EvaluationAssuranceError, EvaluationAssuranceReceipt,
+    EvaluationAssuranceRequest, EvaluationDisposition, EvaluationObservation, EvaluationSummary,
+    MetricOutcome, ObservationState, CONTRACT_VERSION as EVALUATION_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as EVALUATION_ASSURANCE_FEATURE_ID,
+    PRECLINICAL_BOUNDARY as EVALUATION_ASSURANCE_PRECLINICAL_BOUNDARY,
+    SCHEMA_VERSION as EVALUATION_ASSURANCE_SCHEMA_VERSION,
+};
+pub use evidence_workbench::{
+    operate_evidence_workbench, EvidenceDisposition, EvidenceFeed, EvidenceSource,
+    EvidenceState as WorkbenchEvidenceState, EvidenceWorkbenchError, EvidenceWorkbenchReceipt,
+    Freshness, QualifiedEvidenceSet, CONTRACT_VERSION as EVIDENCE_WORKBENCH_CONTRACT_VERSION,
+    FEATURE_ID as EVIDENCE_WORKBENCH_FEATURE_ID,
+    PRECLINICAL_BOUNDARY as EVIDENCE_WORKBENCH_PRECLINICAL_BOUNDARY,
+    SCHEMA_VERSION as EVIDENCE_WORKBENCH_SCHEMA_VERSION,
+};
+pub use federated_continual_context_research_workbench::{
+    compile_federated_continual_context_workbench,
+    federated_continual_context_research_workbench_manifest, FederatedContextWorkbenchError,
+    FederatedContextWorkbenchPeer, FederatedContextWorkbenchReceipt,
+    FederatedContextWorkbenchRequest, FederatedContextWorkbenchVerdict,
+    CONTENT_TYPE as FEDERATED_CONTEXT_RESEARCH_WORKBENCH_CONTENT_TYPE,
+    CONTRACT_VERSION as FEDERATED_CONTEXT_RESEARCH_WORKBENCH_CONTRACT_VERSION,
+    FEATURE_ID as FEDERATED_CONTEXT_RESEARCH_WORKBENCH_FEATURE_ID,
+};
 pub use federated_ingestion::{
     operate_federated_ingestion, FederatedIngestionError, FederatedIngestionReceipt,
     HarmonizedResearchObject as FederatedHarmonizedResearchObject, IngestionDisposition,
@@ -120,36 +147,6 @@ pub use federated_ingestion::{
     PRECLINICAL_BOUNDARY as FEDERATED_INGESTION_PRECLINICAL_BOUNDARY,
     SCHEMA_VERSION as FEDERATED_INGESTION_SCHEMA_VERSION,
 };
-pub use evidence_workbench::{
-    operate_evidence_workbench, EvidenceDisposition, EvidenceFeed, EvidenceSource,
-    EvidenceState as WorkbenchEvidenceState, EvidenceWorkbenchError,
-    EvidenceWorkbenchReceipt, Freshness, QualifiedEvidenceSet,
-    CONTRACT_VERSION as EVIDENCE_WORKBENCH_CONTRACT_VERSION,
-    FEATURE_ID as EVIDENCE_WORKBENCH_FEATURE_ID,
-    PRECLINICAL_BOUNDARY as EVIDENCE_WORKBENCH_PRECLINICAL_BOUNDARY,
-    SCHEMA_VERSION as EVIDENCE_WORKBENCH_SCHEMA_VERSION,
-};
-pub use federated_continual_context_research_workbench::{
-    compile_federated_continual_context_workbench,
-    federated_continual_context_research_workbench_manifest,
-    FederatedContextWorkbenchError, FederatedContextWorkbenchPeer,
-    FederatedContextWorkbenchReceipt, FederatedContextWorkbenchRequest,
-    FederatedContextWorkbenchVerdict,
-    CONTENT_TYPE as FEDERATED_CONTEXT_RESEARCH_WORKBENCH_CONTENT_TYPE,
-    CONTRACT_VERSION as FEDERATED_CONTEXT_RESEARCH_WORKBENCH_CONTRACT_VERSION,
-    FEATURE_ID as FEDERATED_CONTEXT_RESEARCH_WORKBENCH_FEATURE_ID,
-};
-pub use evaluation_assurance::{
-    assure_evaluation_observability, EvaluationAssuranceError, EvaluationAssuranceReceipt,
-    EvaluationAssuranceRequest, EvaluationDisposition, EvaluationObservation, EvaluationSummary,
-    MetricOutcome, ObservationState,
-    CONTRACT_VERSION as EVALUATION_ASSURANCE_CONTRACT_VERSION,
-    FEATURE_ID as EVALUATION_ASSURANCE_FEATURE_ID,
-    PRECLINICAL_BOUNDARY as EVALUATION_ASSURANCE_PRECLINICAL_BOUNDARY,
-    SCHEMA_VERSION as EVALUATION_ASSURANCE_SCHEMA_VERSION,
-};
-pub use catalog::{CatalogReport, SliceCatalog};
-pub use error::BioWorldError;
 pub use knobs::{MissingGeneratorKnob, REUSED_GENERATOR_KNOBS};
 pub use query::{QueryShape, QUERY_SCHEMA_VERSION};
 pub use slice::{BlockedProperty, CheckOutcome, SliceReport, StructuralCheck, VerticalSlice};

@@ -268,7 +268,7 @@ pub fn infer_quality(
                 contradicted.insert(o.observation_id.clone());
                 negative.insert(format!("observation:{}:contradicted", o.observation_id));
             }
-            EvidenceState::Unknown | EvidenceState::Unmeasured | EvidenceState::Speculative => {
+            EvidenceState::Unknown | EvidenceState::Speculative => {
                 unknown.insert(o.observation_id.clone());
                 uncertainty.insert(format!("observation:{}:evidence-state", o.observation_id));
             }

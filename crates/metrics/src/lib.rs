@@ -1,3 +1,5 @@
+#![allow(ambiguous_glob_reexports)]
+
 //! Metric semantics for the BioCapability Atlas: what a capability number may and may not claim.
 //!
 //! Implements the part of blueprint section 33 (BioCapability Atlas and Metrics) that sits *above*
@@ -112,29 +114,29 @@ pub mod aggregate;
 pub mod analytics;
 pub mod comparability;
 pub mod conditions;
+pub mod discovery_rate_integrity_support;
 pub mod error;
+pub mod federated_continual_discovery_rate_integrity_contract_model;
+pub mod federated_continual_discovery_rate_integrity_inference;
+pub mod federated_continual_discovery_rate_integrity_research_copilot;
+pub mod federated_continual_discovery_rate_integrity_workflow_fabric;
 pub mod gate;
 pub mod grid;
 pub mod interval;
-pub mod ranking;
-pub mod weighting;
-pub mod discovery_rate_integrity_support;
-pub mod local_discovery_rate_integrity_inference;
-pub mod multimodal_discovery_rate_integrity_inference;
-pub mod throughput_discovery_rate_integrity_inference;
-pub mod federated_continual_discovery_rate_integrity_inference;
 pub mod local_discovery_rate_integrity_contract_model;
-pub mod multimodal_discovery_rate_integrity_contract_model;
-pub mod throughput_discovery_rate_integrity_contract_model;
-pub mod federated_continual_discovery_rate_integrity_contract_model;
+pub mod local_discovery_rate_integrity_inference;
 pub mod local_discovery_rate_integrity_research_copilot;
-pub mod multimodal_discovery_rate_integrity_research_copilot;
-pub mod throughput_discovery_rate_integrity_research_copilot;
-pub mod federated_continual_discovery_rate_integrity_research_copilot;
 pub mod local_discovery_rate_integrity_workflow_fabric;
+pub mod multimodal_discovery_rate_integrity_contract_model;
+pub mod multimodal_discovery_rate_integrity_inference;
+pub mod multimodal_discovery_rate_integrity_research_copilot;
 pub mod multimodal_discovery_rate_integrity_workflow_fabric;
+pub mod ranking;
+pub mod throughput_discovery_rate_integrity_contract_model;
+pub mod throughput_discovery_rate_integrity_inference;
+pub mod throughput_discovery_rate_integrity_research_copilot;
 pub mod throughput_discovery_rate_integrity_workflow_fabric;
-pub mod federated_continual_discovery_rate_integrity_workflow_fabric;
+pub mod weighting;
 
 pub use aggregate::{
     AggregationRule, BareScore, Coverage, CoveredAggregate, CoveredAggregateFields, UnmeasuredCell,
@@ -155,7 +157,12 @@ pub use conditions::{
     Budget, Condition, Direction, MeasurementConditions, ScoringRule, Stratum, Subject,
     STRATIFICATION_KEY,
 };
+pub use discovery_rate_integrity_support::*;
 pub use error::{MetricsError, ScoreIncomparability, UnrecordedSide};
+pub use federated_continual_discovery_rate_integrity_contract_model::*;
+pub use federated_continual_discovery_rate_integrity_inference::*;
+pub use federated_continual_discovery_rate_integrity_research_copilot::*;
+pub use federated_continual_discovery_rate_integrity_workflow_fabric::*;
 pub use gate::{
     EvaluabilityGap, GateOutcome, GatePredicate, GateReport, GateVerdict, PredicateOutcome,
     ReleaseGate,
@@ -165,29 +172,24 @@ pub use interval::{
     weighted_mean, ClusteringUnit, ConfidenceLevel, Estimate, Interval, IntervalBasis,
     IntervalEstimate, NoIntervalReason, PointEstimate,
 };
+pub use local_discovery_rate_integrity_contract_model::*;
+pub use local_discovery_rate_integrity_inference::*;
+pub use local_discovery_rate_integrity_research_copilot::*;
+pub use local_discovery_rate_integrity_workflow_fabric::*;
+pub use multimodal_discovery_rate_integrity_contract_model::*;
+pub use multimodal_discovery_rate_integrity_inference::*;
+pub use multimodal_discovery_rate_integrity_research_copilot::*;
+pub use multimodal_discovery_rate_integrity_workflow_fabric::*;
 pub use ranking::{
     breakdown, compare, compare_under, CapabilityBreakdown, CapabilityVector,
     CollapsedIncomparability, Dominance, Instability, PairRelation, PartialRanking,
     RankInstability, RankedSystem, SystemId, TotalRanking, Unorderable,
 };
-pub use weighting::{DeclaredWeighting, DeclaredWeightingFields};
-pub use discovery_rate_integrity_support::*;
-pub use local_discovery_rate_integrity_inference::*;
-pub use multimodal_discovery_rate_integrity_inference::*;
-pub use throughput_discovery_rate_integrity_inference::*;
-pub use federated_continual_discovery_rate_integrity_inference::*;
-pub use local_discovery_rate_integrity_contract_model::*;
-pub use multimodal_discovery_rate_integrity_contract_model::*;
 pub use throughput_discovery_rate_integrity_contract_model::*;
-pub use federated_continual_discovery_rate_integrity_contract_model::*;
-pub use local_discovery_rate_integrity_research_copilot::*;
-pub use multimodal_discovery_rate_integrity_research_copilot::*;
+pub use throughput_discovery_rate_integrity_inference::*;
 pub use throughput_discovery_rate_integrity_research_copilot::*;
-pub use federated_continual_discovery_rate_integrity_research_copilot::*;
-pub use local_discovery_rate_integrity_workflow_fabric::*;
-pub use multimodal_discovery_rate_integrity_workflow_fabric::*;
 pub use throughput_discovery_rate_integrity_workflow_fabric::*;
-pub use federated_continual_discovery_rate_integrity_workflow_fabric::*;
+pub use weighting::{DeclaredWeighting, DeclaredWeightingFields};
 
 /// The schema version of the metric objects this crate emits.
 ///
@@ -197,8 +199,7 @@ pub const METRICS_SCHEMA_VERSION: &str = "bioprism-metrics/0.1";
 pub mod experiment_design_control_plane;
 pub use experiment_design_control_plane::{
     evaluate_experiment_design, experiment_design_control_plane_manifest,
-    DesignCandidate as MetricsDesignCandidate,
-    DesignDisposition as MetricsDesignDisposition,
+    DesignCandidate as MetricsDesignCandidate, DesignDisposition as MetricsDesignDisposition,
     ExecutableExperimentDesign as MetricsExecutableExperimentDesign,
     ExperimentDesignError as MetricsExperimentDesignError,
     ExperimentObjective as MetricsExperimentObjective,

@@ -295,10 +295,15 @@ export {
   validateInstrumentPreflightReceipt,
   validateHarmonizedResearchObject,
   validateQualifiedAnalysisResult,
+  PROTOCOL_MATRIX_FEATURE_ID,
   validateProtocolMatrixReceipt,
+  MULTIMODAL_REPLICATION_FEATURE_ID,
   validateMultimodalReplicationReport,
   validateQualityDriftReceipt,
+  QUALITY_DRIFT_FEATURE_ID,
+  DESIGN_FRONTIER_FEATURE_ID,
   validateDesignFrontierReceipt,
+  AUTONOMY_BATCH_FEATURE_ID,
   validateBatchAdmissionReceipt,
   WORKFLOW_BATCH_FEATURE_ID,
   workflowBatchReceiptDigest,
@@ -392,7 +397,6 @@ export {
   KNOWLEDGE_WORKFLOW_CONTRACT_VERSION,
   knowledgeWorkflowReceiptDigest,
   validateKnowledgeWorkflowReceipt,
-  RESOURCE_WORKBENCH_FEATURE_ID,
   RESOURCE_WORKBENCH_CONTRACT_VERSION,
   resourceWorkbenchReceiptDigest,
   validateResourceWorkbenchReceipt,
@@ -408,7 +412,6 @@ export {
   EXPERIMENT_DESIGN_CONTROL_CONTRACT_VERSION,
   experimentDesignReceiptDigest,
   validateExperimentDesignReceipt,
-  PROTOCOL_SIMULATION_FEATURE_ID,
   PROTOCOL_SIMULATION_CONTRACT_VERSION,
   protocolSimulationReceiptDigest,
   validateProtocolSimulationReceipt,
@@ -765,8 +768,6 @@ export {
   FEDERATED_OPERATIONS_CONTROL_PLANE_CONTRACT_VERSION,
   brainFederatedOperationsReceiptDigest,
   validateBrainFederatedOperationsReceipt,
-  RETRIEVAL_SYNTHESIS_FEATURE_ID,
-  RETRIEVAL_SYNTHESIS_CONTRACT_VERSION,
   brainEvidenceSynthesisDigest,
   validateBrainEvidenceSynthesis,
   MULTIMODAL_RETRIEVAL_SYNTHESIS_FEATURE_ID,
@@ -874,8 +875,6 @@ export {
   THROUGHPUT_RETRIEVAL_ASSURANCE_CONTRACT_VERSION,
   brainThroughputRetrievalAssuranceReceiptDigest,
   validateBrainThroughputRetrievalAssuranceReceipt,
-  FEDERATED_RETRIEVAL_ASSURANCE_FEATURE_ID,
-  FEDERATED_RETRIEVAL_ASSURANCE_CONTRACT_VERSION,
   brainFederatedRetrievalAssuranceReceiptDigest,
   validateBrainFederatedRetrievalAssuranceReceipt,
   RETRIEVAL_CONTROL_PLANE_FEATURE_ID,
@@ -1011,8 +1010,6 @@ export {
   FEDERATED_CONTEXT_PROTOCOL_RESPONSE_SCHEMA,
   brainFederatedContextProtocolReceiptDigest,
   validateBrainFederatedContextProtocolReceipt,
-  CONTEXT_COMPILATION_ASSURANCE_FEATURE_ID,
-  CONTEXT_COMPILATION_ASSURANCE_CONTRACT_VERSION,
   brainContextCompilationAssuranceReceiptDigest,
   validateBrainContextCompilationAssuranceReceipt,
   MULTIMODAL_CONTEXT_COMPILATION_ASSURANCE_FEATURE_ID,
@@ -1261,6 +1258,7 @@ export type { SectionInterpretationAssuranceReceipt } from "./research-contracts
 export type { OpsRetrievalAssuranceReceipt } from "./research-contracts.js";
 export type { ConformanceKnowledgeWorldAssuranceReceipt } from "./research-contracts.js";
 export type { BrainEvidenceSurveillanceReceipt } from "./research-contracts.js";
+export {
   AUTONOMOUS_MODEL_CONTINUATION_SCHEMA,
   AUTONOMOUS_MODEL_CONTINUATION_STATE_SCHEMA,
   MAX_AUTONOMOUS_MODEL_CONTINUATION_FAILOVERS,
@@ -5860,8 +5858,6 @@ export {
   idsReliableCapabilityResult6Digest,
   validateIdsReliableCapabilityResult6,
 } from "./research-contracts.js";
-export type { ReliableCapabilityResult6 } from "./research-contracts.js";
-
 export {
   ORACLEX_STATISTICAL_ANALYSIS_RESEARCH_WORKBENCH_FEATURE_ID,
   ORACLEX_STATISTICAL_ANALYSIS_RESEARCH_WORKBENCH_CONTRACT_VERSION,
@@ -7572,10 +7568,7 @@ export {
   DEVX_CONTEXT_COMPILATION_CONTRACT_OUTPUT_SCHEMA,
   DEVX_CONTEXT_COMPILATION_CONTRACT_CONTENT_TYPE,
   devxContextCompilationContractDigest,
-  validateCompiledResearchContext6,
 } from "./research-contracts.js";
-export type { CompiledResearchContext6 } from "./research-contracts.js";
-+
 export {
   WORLDGEN_KNOWLEDGE_REPRESENTATION_CONTENT_TYPE, WORLDGEN_KNOWLEDGE_CONTRACT_CONTENT_TYPE, WORLDGEN_KNOWLEDGE_COPILOT_CONTENT_TYPE, WORLDGEN_KNOWLEDGE_WORKFLOW_CONTENT_TYPE,
   WORLDGEN_LOCAL_KNOWLEDGE_REPRESENTATION_FEATURE_ID, WORLDGEN_MULTIMODAL_KNOWLEDGE_REPRESENTATION_FEATURE_ID, WORLDGEN_THROUGHPUT_KNOWLEDGE_REPRESENTATION_FEATURE_ID, WORLDGEN_FEDERATED_KNOWLEDGE_REPRESENTATION_FEATURE_ID,
@@ -7590,7 +7583,6 @@ export {
   validateWorldgenKnowledgeRepresentationReceipt, validateWorldgenKnowledgeContractReceipt, validateWorldgenKnowledgeCopilotReceipt, validateWorldgenKnowledgeWorkflowReceipt,
 } from "./research-contracts.js";
 export type { WorldgenKnowledgeRepresentationReceipt, WorldgenKnowledgeContractReceipt, WorldgenKnowledgeCopilotReceipt, WorldgenKnowledgeWorkflowReceipt } from "./research-contracts.js";
-+
 export {
   WORLDGEN_RESOURCE_DISCOVERY_CONTENT_TYPE, WORLDGEN_RESOURCE_CONTRACT_CONTENT_TYPE, WORLDGEN_RESOURCE_COPILOT_CONTENT_TYPE, WORLDGEN_RESOURCE_WORKFLOW_CONTENT_TYPE,
   WORLDGEN_LOCAL_RESOURCE_DISCOVERY_FEATURE_ID, WORLDGEN_MULTIMODAL_RESOURCE_DISCOVERY_FEATURE_ID, WORLDGEN_THROUGHPUT_RESOURCE_DISCOVERY_FEATURE_ID, WORLDGEN_FEDERATED_RESOURCE_DISCOVERY_FEATURE_ID,
@@ -7601,9 +7593,6 @@ export {
   validateWorldgenResourceDiscoveryReceipt, validateWorldgenResourceContractReceipt, validateWorldgenResourceCopilotReceipt, validateWorldgenResourceWorkflowReceipt,
 } from "./research-contracts.js";
 export type { WorldgenResourceDiscoveryReceipt, WorldgenResourceContractReceipt, WorldgenResourceCopilotReceipt, WorldgenResourceWorkflowReceipt } from "./research-contracts.js";
-+
-export { WORLDGEN_MULTIMODAL_INGESTION_CONTENT_TYPE, WORLDGEN_LOCAL_MULTIMODAL_INGESTION_FEATURE_ID, WORLDGEN_MULTIMODAL_MULTIMODAL_INGESTION_FEATURE_ID, WORLDGEN_THROUGHPUT_MULTIMODAL_INGESTION_FEATURE_ID, WORLDGEN_FEDERATED_MULTIMODAL_INGESTION_FEATURE_ID, worldgenMultimodalIngestionDigest, validateWorldgenMultimodalIngestionReceipt } from "./research-contracts.js";
-export type { WorldgenMultimodalIngestionReceipt } from "./research-contracts.js";
 export {
   WORLDGEN_QUALITY_CONTROL_CONTENT_TYPE, WORLDGEN_QUALITY_CONTRACT_CONTENT_TYPE, WORLDGEN_QUALITY_COPILOT_CONTENT_TYPE, WORLDGEN_QUALITY_WORKFLOW_CONTENT_TYPE,
   WORLDGEN_LOCAL_QUALITY_CONTROL_FEATURE_ID, WORLDGEN_MULTIMODAL_QUALITY_CONTROL_FEATURE_ID, WORLDGEN_THROUGHPUT_QUALITY_CONTROL_FEATURE_ID, WORLDGEN_FEDERATED_QUALITY_CONTROL_FEATURE_ID,

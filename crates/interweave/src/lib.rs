@@ -187,15 +187,11 @@ pub mod federated_interpretation_engine;
 pub mod interweave_contract_frontier_federated_control_plane;
 pub mod laboratory_integration_workflow_fabric;
 pub mod semantic_parity_copilot;
-pub use federated_interpretation_engine::{
-    capability_manifest as federated_interpretation_capability_manifest,
-    compile_interpretation as compile_federated_interpretation, InterpretationEvidence,
-    InterpretationInferenceError, InterpretationInferenceReceipt, InterpretationInferenceRequest,
-    CONTENT_TYPE as FEDERATED_INTERPRETATION_CONTENT_TYPE,
-    CONTRACT_VERSION as FEDERATED_INTERPRETATION_CONTRACT_VERSION,
-    FEATURE_ID as FEDERATED_INTERPRETATION_FEATURE_ID,
-    INPUT_SCHEMA as FEDERATED_INTERPRETATION_INPUT_SCHEMA,
-    OUTPUT_SCHEMA as FEDERATED_INTERPRETATION_OUTPUT_SCHEMA,
+pub use federated_commons_assurance::{
+    assure_federated_commons, federated_commons_assurance_manifest,
+    InterweaveFederationDisposition, InterweaveFederationEnvelope7, InterweaveFederationError,
+    InterweaveFederationRequest3, CONTRACT_VERSION as FEDERATED_COMMONS_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as FEDERATED_COMMONS_ASSURANCE_FEATURE_ID,
 };
 pub use federated_dependency_contract_model::{
     assure as assure_federated_dependency_composition,
@@ -206,12 +202,15 @@ pub use federated_dependency_contract_model::{
     INPUT_SCHEMA as FEDERATED_DEPENDENCY_COMPOSITION_INPUT_SCHEMA,
     OUTPUT_SCHEMA as FEDERATED_DEPENDENCY_COMPOSITION_OUTPUT_SCHEMA,
 };
-pub use federated_commons_assurance::{
-    assure_federated_commons, federated_commons_assurance_manifest,
-    InterweaveFederationEnvelope7, InterweaveFederationError, InterweaveFederationRequest3,
-    InterweaveFederationDisposition,
-    CONTRACT_VERSION as FEDERATED_COMMONS_ASSURANCE_CONTRACT_VERSION,
-    FEATURE_ID as FEDERATED_COMMONS_ASSURANCE_FEATURE_ID,
+pub use federated_interpretation_engine::{
+    capability_manifest as federated_interpretation_capability_manifest,
+    compile_interpretation as compile_federated_interpretation, InterpretationEvidence,
+    InterpretationInferenceError, InterpretationInferenceReceipt, InterpretationInferenceRequest,
+    CONTENT_TYPE as FEDERATED_INTERPRETATION_CONTENT_TYPE,
+    CONTRACT_VERSION as FEDERATED_INTERPRETATION_CONTRACT_VERSION,
+    FEATURE_ID as FEDERATED_INTERPRETATION_FEATURE_ID,
+    INPUT_SCHEMA as FEDERATED_INTERPRETATION_INPUT_SCHEMA,
+    OUTPUT_SCHEMA as FEDERATED_INTERPRETATION_OUTPUT_SCHEMA,
 };
 pub use laboratory_integration_workflow_fabric::{
     capability_manifest as laboratory_integration_capability_manifest,

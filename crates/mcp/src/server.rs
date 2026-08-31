@@ -175,10 +175,10 @@ use bioprism_devplat::{
     MissionTraceEvent, MissionTraceObserver, OperationalReadinessManifest, ReleasePipelineManifest,
     SandboxManifest, SandboxRuntimeManifest, SecurityPrivacyManifest, SecurityProgramManifest,
     WorkbenchReportRegistry, WorkbenchRequest, WorkbenchVerificationRequest,
-    WorkflowExecutionEvidenceRegistry, ADAPTER_DOMAIN_REPORT_SCHEMA_VERSION,
-    DEVPLAT_MULTIMODAL_LIMITATION_CLOSURE_CONTRACT_VERSION,
-    DEVPLAT_MULTIMODAL_LIMITATION_CLOSURE_FEATURE_ID,
-    ADAPTER_DOMAIN_REPORT_WORKFLOW, CAPABILITY_SCHEMA_VERSION, DOMAIN_ACQUISITION_SCHEMA_VERSION,
+    WorkflowExecutionEvidenceQuery, WorkflowExecutionEvidenceRegistry,
+    ADAPTER_DOMAIN_REPORT_SCHEMA_VERSION, ADAPTER_DOMAIN_REPORT_WORKFLOW,
+    CAPABILITY_SCHEMA_VERSION, DEVPLAT_MULTIMODAL_LIMITATION_CLOSURE_CONTRACT_VERSION,
+    DEVPLAT_MULTIMODAL_LIMITATION_CLOSURE_FEATURE_ID, DOMAIN_ACQUISITION_SCHEMA_VERSION,
     DOMAIN_ACQUISITION_WORKFLOW, DOMAIN_DECISION_READINESS_SCHEMA_VERSION,
     DOMAIN_DECISION_READINESS_WORKFLOW, DOMAIN_EVIDENCE_HARMONIZATION_SCHEMA_VERSION,
     DOMAIN_EVIDENCE_HARMONIZATION_WORKFLOW, DOMAIN_EVIDENCE_INTAKE_COVERAGE_SCHEMA_VERSION,
@@ -253,10 +253,10 @@ use bioprism_fabric::synth::{
 };
 use bioprism_factory::{ExecutionAuthoritySnapshot, Job as FactoryJob, JobStore, WorkerCapability};
 use bioprism_factory::{PROSPECTIVE_EVIDENCE_CONTRACT_VERSION, PROSPECTIVE_EVIDENCE_FEATURE_ID};
-use bioprism_fiber::{FEDERATED_RESOURCE_CONTRACT_VERSION, FEDERATED_RESOURCE_FEATURE_ID};
 use bioprism_fiber::{
     compile, compile_with_oracle, AdaptiveAcquisitionTrace, DecisionOracle, Query,
 };
+use bioprism_fiber::{FEDERATED_RESOURCE_CONTRACT_VERSION, FEDERATED_RESOURCE_FEATURE_ID};
 use bioprism_foundation::contract::{ContractDraft, FalsifiableContract};
 use bioprism_foundation::maturity::ApplicabilityEnvelope;
 use bioprism_foundation::worldclass::{BioWorldDeclaration, CounterfactualClaim, Transition};
@@ -291,6 +291,11 @@ use bioprism_ids::{
 use bioprism_ids::{IDS_EXPERIMENT_DESIGN_CONTRACT_VERSION, IDS_EXPERIMENT_DESIGN_FEATURE_ID};
 use bioprism_ids::{IDS_FEDERATED_COMMONS_CONTRACT_VERSION, IDS_FEDERATED_COMMONS_FEATURE_ID};
 use bioprism_ids::{IDS_FEDERATED_WORKFLOW_CONTRACT_VERSION, IDS_FEDERATED_WORKFLOW_FEATURE_ID};
+use bioprism_ids::{IDS_FEDERATION_SECURITY_CONTRACT_VERSION, IDS_FEDERATION_SECURITY_FEATURE_ID};
+use bioprism_ids::{
+    IDS_INTEROPERABILITY_EXTENSIBILITY_CONTRACT_VERSION,
+    IDS_INTEROPERABILITY_EXTENSIBILITY_FEATURE_ID,
+};
 use bioprism_ids::{
     IDS_INTEROPERABILITY_GATEWAY_CONTRACT_VERSION, IDS_INTEROPERABILITY_GATEWAY_FEATURE_ID,
 };
@@ -307,7 +312,16 @@ use bioprism_ids::{
 use bioprism_ids::{
     IDS_MULTIMODAL_INGESTION_CONTRACT_VERSION, IDS_MULTIMODAL_INGESTION_FEATURE_ID,
 };
+use bioprism_ids::{
+    IDS_PERFORMANCE_RELIABILITY_CONTRACT_VERSION, IDS_PERFORMANCE_RELIABILITY_FEATURE_ID,
+};
 use bioprism_ids::{IDS_POLICY_AUTONOMY_CONTRACT_VERSION, IDS_POLICY_AUTONOMY_FEATURE_ID};
+use bioprism_ids::{
+    IDS_POLICY_AUTONOMY_WORKBENCH_CONTRACT_VERSION, IDS_POLICY_AUTONOMY_WORKBENCH_FEATURE_ID,
+};
+use bioprism_ids::{
+    IDS_PROSPECTIVE_PROVENANCE_CONTRACT_VERSION, IDS_PROSPECTIVE_PROVENANCE_FEATURE_ID,
+};
 use bioprism_ids::{IDS_PROTOCOL_SIMULATION_CONTRACT_VERSION, IDS_PROTOCOL_SIMULATION_FEATURE_ID};
 use bioprism_ids::{IDS_PROVENANCE_SIGNING_CONTRACT_VERSION, IDS_PROVENANCE_SIGNING_FEATURE_ID};
 use bioprism_ids::{IDS_PUBLICATION_RELEASE_CONTRACT_VERSION, IDS_PUBLICATION_RELEASE_FEATURE_ID};
@@ -326,13 +340,10 @@ use bioprism_ids::{IDS_SEMANTIC_PARITY_CONTRACT_VERSION, IDS_SEMANTIC_PARITY_FEA
 use bioprism_ids::{
     IDS_STATISTICAL_CAUSAL_ML_CONTRACT_VERSION, IDS_STATISTICAL_CAUSAL_ML_FEATURE_ID,
 };
+use bioprism_ids::{
+    IDS_TYPED_DETERMINISM_ASSURANCE_CONTRACT_VERSION, IDS_TYPED_DETERMINISM_ASSURANCE_FEATURE_ID,
+};
 use bioprism_ids::{IDS_TYPED_DETERMINISM_CONTRACT_VERSION, IDS_TYPED_DETERMINISM_FEATURE_ID};
-use bioprism_ids::{IDS_TYPED_DETERMINISM_ASSURANCE_CONTRACT_VERSION, IDS_TYPED_DETERMINISM_ASSURANCE_FEATURE_ID};
-use bioprism_ids::{IDS_PROSPECTIVE_PROVENANCE_CONTRACT_VERSION, IDS_PROSPECTIVE_PROVENANCE_FEATURE_ID};
-use bioprism_ids::{IDS_POLICY_AUTONOMY_WORKBENCH_CONTRACT_VERSION, IDS_POLICY_AUTONOMY_WORKBENCH_FEATURE_ID};
-use bioprism_ids::{IDS_FEDERATION_SECURITY_CONTRACT_VERSION, IDS_FEDERATION_SECURITY_FEATURE_ID};
-use bioprism_ids::{IDS_PERFORMANCE_RELIABILITY_CONTRACT_VERSION, IDS_PERFORMANCE_RELIABILITY_FEATURE_ID};
-use bioprism_ids::{IDS_INTEROPERABILITY_EXTENSIBILITY_CONTRACT_VERSION, IDS_INTEROPERABILITY_EXTENSIBILITY_FEATURE_ID};
 use bioprism_influence::{
     InfluenceAnalyzer, Perturbation, INFLUENCE_LOCAL_EVIDENCE_SURVEILLANCE_FEATURE_ID,
 };
@@ -343,10 +354,6 @@ use bioprism_infra::{
     TieringPolicy,
 };
 use bioprism_interweave::interweave_contract_frontier_federated_control_plane::feature_id as INTERWEAVE_FRONTIER_FEATURE_ID;
-use bioprism_interweave::{
-    FEDERATED_COMMONS_ASSURANCE_CONTRACT_VERSION,
-    FEDERATED_COMMONS_ASSURANCE_FEATURE_ID,
-};
 use bioprism_interweave::workflow::{
     catalogue as interweave_catalogue, outstanding_deliverables, WorkflowId as InterweaveWorkflowId,
 };
@@ -354,6 +361,9 @@ use bioprism_interweave::workflow_execution::{
     WorkflowExecutionBinding as InterweaveWorkflowExecutionBinding,
     WorkflowExecutionReceipt as InterweaveWorkflowExecutionReceipt,
     WORKFLOW_EXECUTION_SCHEMA as INTERWEAVE_WORKFLOW_EXECUTION_SCHEMA,
+};
+use bioprism_interweave::{
+    FEDERATED_COMMONS_ASSURANCE_CONTRACT_VERSION, FEDERATED_COMMONS_ASSURANCE_FEATURE_ID,
 };
 use bioprism_lab::{
     evolution::{ChangeProposal, ContaminationRecord, EvolutionCard},
@@ -459,8 +469,8 @@ use bioprism_repair::{
 use bioprism_routing::{
     lab::{run as run_routing_lab, LabSettings, Task},
     EvidenceLedger, Fingerprint, RoutingPolicy, FEDERATED_EXECUTION_COPILOT_CONTRACT_VERSION,
-    FEDERATED_EXECUTION_COPILOT_FEATURE_ID,
-    LABORATORY_INFERENCE_CONTRACT_VERSION, LABORATORY_INFERENCE_FEATURE_ID,
+    FEDERATED_EXECUTION_COPILOT_FEATURE_ID, LABORATORY_INFERENCE_CONTRACT_VERSION,
+    LABORATORY_INFERENCE_FEATURE_ID,
 };
 use bioprism_runtime::{
     compare_suffixes, observable_state, open_suffix, BudgetController, BudgetPlan, EffectPolicy,
@@ -2110,18 +2120,12 @@ impl Server {
             "ids_typed_determinism_interoperability_gateway" => {
                 self.ids_typed_determinism_interoperability_gateway(&arguments)
             }
-            "ids_typed_determinism_assurance" => {
-                self.ids_typed_determinism_assurance(&arguments)
-            }
+            "ids_typed_determinism_assurance" => self.ids_typed_determinism_assurance(&arguments),
             "ids_prospective_provenance_assurance" => {
                 self.ids_prospective_provenance_assurance(&arguments)
             }
-            "ids_policy_autonomy_workbench" => {
-                self.ids_policy_autonomy_workbench(&arguments)
-            }
-            "ids_federation_security_contract" => {
-                self.ids_federation_security_contract(&arguments)
-            }
+            "ids_policy_autonomy_workbench" => self.ids_policy_autonomy_workbench(&arguments),
+            "ids_federation_security_contract" => self.ids_federation_security_contract(&arguments),
             "ids_performance_reliability_gateway" => {
                 self.ids_performance_reliability_gateway(&arguments)
             }
@@ -2219,9 +2223,7 @@ impl Server {
             "docgraph_instrument_action_contract" => {
                 self.docgraph_instrument_action_contract(&arguments)
             }
-            "lens_provenance_signing_copilot" => {
-                self.lens_provenance_signing_copilot(&arguments)
-            }
+            "lens_provenance_signing_copilot" => self.lens_provenance_signing_copilot(&arguments),
             "obligation_prospective_release_assurance" => {
                 self.obligation_prospective_release_assurance(&arguments)
             }
@@ -2302,9 +2304,7 @@ impl Server {
             "ids_local_evidence_surveillance_inference" => {
                 self.ids_local_evidence_surveillance_inference(&arguments)
             }
-            "scope_federated_evidence_control" => {
-                self.scope_federated_evidence_control(&arguments)
-            }
+            "scope_federated_evidence_control" => self.scope_federated_evidence_control(&arguments),
             "scope_federated_commons_interoperability_gateway" => {
                 self.scope_federated_commons_interoperability_gateway(&arguments)
             }
@@ -2480,8 +2480,12 @@ impl Server {
             }
             "oraclex_publication_release" => self.oraclex_publication_release(&arguments),
             "oraclex_interpretation_inference" => self.oraclex_interpretation_inference(&arguments),
-            "oraclex_performance_reliability_interoperability_gateway" => self.oraclex_performance_reliability_interoperability_gateway(&arguments),
-            "oraclex_statistical_analysis_research_workbench" => self.oraclex_statistical_analysis_research_workbench(&arguments),
+            "oraclex_performance_reliability_interoperability_gateway" => {
+                self.oraclex_performance_reliability_interoperability_gateway(&arguments)
+            }
+            "oraclex_statistical_analysis_research_workbench" => {
+                self.oraclex_statistical_analysis_research_workbench(&arguments)
+            }
             "interweave_frontier_control" => self.interweave_frontier_control(&arguments),
             "influence_federated_continual_interpretation" => {
                 self.influence_federated_continual_interpretation(&arguments)
@@ -2581,10 +2585,18 @@ impl Server {
             "autonomy_batch_admit" => self.autonomy_batch_admit(&arguments),
             "workflow_batch_execute" => self.workflow_batch_execute(&arguments),
             "runtime_interpretation_assurance" => self.runtime_interpretation_assurance(&arguments),
-            "runtime_knowledge_representation_assurance" => self.runtime_knowledge_representation_assurance(&arguments),
-            "fabric_experiment_design_interoperability_gateway" => self.fabric_experiment_design_interoperability_gateway(&arguments),
-            "lab_federated_experiment_design_interoperability_gateway" => self.lab_federated_experiment_design_interoperability_gateway(&arguments),
-            "stress_publication_research_object_workbench" => self.stress_publication_research_object_workbench(&arguments),
+            "runtime_knowledge_representation_assurance" => {
+                self.runtime_knowledge_representation_assurance(&arguments)
+            }
+            "fabric_experiment_design_interoperability_gateway" => {
+                self.fabric_experiment_design_interoperability_gateway(&arguments)
+            }
+            "lab_federated_experiment_design_interoperability_gateway" => {
+                self.lab_federated_experiment_design_interoperability_gateway(&arguments)
+            }
+            "stress_publication_research_object_workbench" => {
+                self.stress_publication_research_object_workbench(&arguments)
+            }
             "ids_federated_interpretation_visualization_assurance" => {
                 self.ids_federated_interpretation_visualization_assurance(&arguments)
             }
@@ -3635,7 +3647,8 @@ impl Server {
     }
 
     fn routing_laboratory_inference_engine(&self, arguments: &Value) -> Result<Value, String> {
-        let receipt = crate::research_contracts::operate_routing_laboratory_inference_json(arguments)?;
+        let receipt =
+            crate::research_contracts::operate_routing_laboratory_inference_json(arguments)?;
         Ok(json!({
             "ok": true,
             "schema": "aurora-research-contract/1.0",
@@ -3656,7 +3669,8 @@ impl Server {
     }
 
     fn devx_context_compilation_contract(&self, arguments: &Value) -> Result<Value, String> {
-        let receipt = crate::research_contracts::operate_devx_context_compilation_contract_json(arguments)?;
+        let receipt =
+            crate::research_contracts::operate_devx_context_compilation_contract_json(arguments)?;
         Ok(json!({
             "ok": true,
             "schema": "aurora-research-contract/1.0",
@@ -3680,7 +3694,8 @@ impl Server {
         let request = arguments
             .get("request")
             .ok_or("request is required and must be a DevxEvidenceFeed5")?;
-        let receipt = crate::research_contracts::run_devx_evidence_surveillance_control_json(request)?;
+        let receipt =
+            crate::research_contracts::run_devx_evidence_surveillance_control_json(request)?;
         Ok(json!({
             "ok": true,
             "schema": "aurora-research-contract/1.0",
@@ -17930,18 +17945,18 @@ impl Server {
         self.workflow_execution_evidence_registry
             .lock()
             .map_err(|_| "workflow execution evidence registry lock is poisoned".to_string())?
-            .query(
-                optional_text("workflow_id")?,
-                optional_text("subject_id")?,
-                optional_text("domain")?,
-                optional_text("plan_digest")?,
-                optional_text("binding_digest")?,
-                optional_text("receipt_status")?,
-                optional_text("provenance_mode")?,
-                optional_text("after")?,
+            .query(&WorkflowExecutionEvidenceQuery {
+                workflow_id: optional_text("workflow_id")?,
+                subject_id: optional_text("subject_id")?,
+                domain: optional_text("domain")?,
+                plan_digest: optional_text("plan_digest")?,
+                binding_digest: optional_text("binding_digest")?,
+                receipt_status: optional_text("receipt_status")?,
+                provenance_mode: optional_text("provenance_mode")?,
+                after: optional_text("after")?,
                 max_items,
                 include_records,
-            )
+            })
             .map_err(|error| format!("workflow execution evidence query refused: {error}"))
     }
 
@@ -22489,7 +22504,9 @@ impl Server {
         }
 
         let mut finding = BioevalFinding::new(estimand, kind, basis);
-        finding = finding.identified_by(identification);
+        finding = finding
+            .identified_by(identification)
+            .map_err(|error| format!("identification validation failed: {error}"))?;
         for (index, corroboration) in corroborations.iter().cloned().enumerate() {
             if let Err(error) = finding.promote(corroboration) {
                 return Ok(refusal(
@@ -22724,7 +22741,9 @@ impl Server {
                     format!("runs[{index}].evaluator must contain 1 to {MAX_ID_BYTES} bytes"),
                 ));
             }
-            panel.record(run.clone());
+            if let Err(error) = panel.record(run.clone()) {
+                return Ok(refusal("run_validation", error.to_string()));
+            }
             runs.push(run);
         }
 
@@ -23002,7 +23021,9 @@ impl Server {
                     return Ok(refusal("trial_validation", error.to_string()));
                 }
             }
-            suite.add(normalized.clone());
+            if let Err(error) = suite.add(normalized.clone()) {
+                return Ok(refusal("family_validation", error.to_string()));
+            }
             families.push(normalized);
         }
 
@@ -24780,7 +24801,10 @@ impl Server {
         let sealed_at_value = json!(sealed.sealed_at());
         let rubric_digest = sealed.rubric_digest().to_string();
         let commitment_digest = sealed.commitment_digest().to_string();
-        let revealed = sealed.reveal(outcomes.clone());
+        let revealed = match sealed.reveal(outcomes.clone()) {
+            Ok(revealed) => revealed,
+            Err(error) => return Ok(refusal("reveal", error.to_string())),
+        };
         let reveal_lock = match revealed.reveal(Vec::new()) {
             Ok(()) => json!({ "status": "accepted", "refusal": Value::Null }),
             Err(error) => json!({ "status": "refused", "refusal": error.to_string() }),
@@ -25512,7 +25536,8 @@ impl Server {
             });
         }
 
-        let mut trace = AcquisitionTrace::against(obligations);
+        let mut trace = AcquisitionTrace::against(obligations)
+            .map_err(|error| format!("cannot initialize acquisition trace: {error}"))?;
         for (index, raw) in raw_actions.iter().enumerate() {
             let id = raw
                 .get("id")
@@ -26108,7 +26133,10 @@ impl Server {
         &self,
         arguments: &Value,
     ) -> Result<Value, String> {
-        let receipt = crate::research_contracts::authorize_worldfactory_computational_execution_json(arguments)?;
+        let receipt =
+            crate::research_contracts::authorize_worldfactory_computational_execution_json(
+                arguments,
+            )?;
         Ok(json!({
             "ok": true,
             "schema": "aurora-research-contract/1.0",
@@ -26134,7 +26162,10 @@ impl Server {
         let request = arguments
             .get("request")
             .ok_or("request is required and must be an EvalengineProtocolDraft")?;
-        let receipt = crate::research_contracts::operate_evalengine_protocol_simulation_copilot_json(request)?;
+        let receipt =
+            crate::research_contracts::operate_evalengine_protocol_simulation_copilot_json(
+                request,
+            )?;
         Ok(json!({
             "ok": true,
             "schema": "aurora-research-contract/1.0",
@@ -26179,10 +26210,7 @@ impl Server {
         }))
     }
 
-    fn packs_local_quality_control_assurance(
-        &self,
-        arguments: &Value,
-    ) -> Result<Value, String> {
+    fn packs_local_quality_control_assurance(&self, arguments: &Value) -> Result<Value, String> {
         let request = arguments
             .get("request")
             .ok_or("request is required and must be a Packs ResearchObject1")?;
@@ -26244,7 +26272,10 @@ impl Server {
         let request = arguments
             .get("request")
             .ok_or("request is required and must be a ClaimAndProtocol3")?;
-        let receipt = crate::research_contracts::run_mcp_replication_negative_results_assurance_json(request)?;
+        let receipt =
+            crate::research_contracts::run_mcp_replication_negative_results_assurance_json(
+                request,
+            )?;
         Ok(json!({
             "ok": true,
             "schema": "aurora-research-contract/1.0",
@@ -26263,14 +26294,12 @@ impl Server {
         }))
     }
 
-    fn prism_protocol_simulation_assurance(
-        &self,
-        arguments: &Value,
-    ) -> Result<Value, String> {
+    fn prism_protocol_simulation_assurance(&self, arguments: &Value) -> Result<Value, String> {
         let request = arguments
             .get("request")
             .ok_or("request is required and must be a PRISM ProtocolDraft2")?;
-        let receipt = crate::research_contracts::run_prism_protocol_simulation_assurance_json(request)?;
+        let receipt =
+            crate::research_contracts::run_prism_protocol_simulation_assurance_json(request)?;
         Ok(json!({
             "ok": true,
             "schema": "aurora-research-contract/1.0",
@@ -26289,14 +26318,12 @@ impl Server {
         }))
     }
 
-    fn scale_quality_control_contract_model(
-        &self,
-        arguments: &Value,
-    ) -> Result<Value, String> {
+    fn scale_quality_control_contract_model(&self, arguments: &Value) -> Result<Value, String> {
         let request = arguments
             .get("request")
             .ok_or("request is required and must be a Scale QualityControlContractRequest")?;
-        let receipt = crate::research_contracts::run_scale_quality_control_contract_model_json(request)?;
+        let receipt =
+            crate::research_contracts::run_scale_quality_control_contract_model_json(request)?;
         Ok(json!({
             "ok": true,
             "schema": "aurora-research-contract/1.0",
@@ -26319,7 +26346,8 @@ impl Server {
         let request = arguments
             .get("request")
             .ok_or("request is required and must be a Packs ProtocolWorkbenchRequest5")?;
-        let receipt = crate::research_contracts::run_packs_protocol_simulation_workbench_json(request)?;
+        let receipt =
+            crate::research_contracts::run_packs_protocol_simulation_workbench_json(request)?;
         Ok(json!({
             "ok": true,
             "schema": "aurora-research-contract/1.0",
@@ -26342,10 +26370,13 @@ impl Server {
         &self,
         arguments: &Value,
     ) -> Result<Value, String> {
-        let request = arguments
-            .get("request")
-            .ok_or("request is required and must be an Oracle EvidenceSurveillanceWorkflowRequest")?;
-        let receipt = crate::research_contracts::run_oracle_evidence_surveillance_workflow_fabric_json(request)?;
+        let request = arguments.get("request").ok_or(
+            "request is required and must be an Oracle EvidenceSurveillanceWorkflowRequest",
+        )?;
+        let receipt =
+            crate::research_contracts::run_oracle_evidence_surveillance_workflow_fabric_json(
+                request,
+            )?;
         Ok(json!({
             "ok": true,
             "schema": "aurora-research-contract/1.0",
@@ -26388,8 +26419,14 @@ impl Server {
         }))
     }
 
-    fn epistemic_experiment_design_research_workbench(&self, arguments: &Value) -> Result<Value, String> {
-        let receipt = crate::research_contracts::operate_epistemic_experiment_design_research_workbench_json(arguments)?;
+    fn epistemic_experiment_design_research_workbench(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let receipt =
+            crate::research_contracts::operate_epistemic_experiment_design_research_workbench_json(
+                arguments,
+            )?;
         Ok(json!({
             "ok": true,
             "schema": "aurora-research-contract/1.0",
@@ -26721,7 +26758,8 @@ impl Server {
     }
 
     fn ids_typed_determinism_assurance(&self, arguments: &Value) -> Result<Value, String> {
-        let output = crate::research_contracts::operate_ids_typed_determinism_assurance_json(arguments)?;
+        let output =
+            crate::research_contracts::operate_ids_typed_determinism_assurance_json(arguments)?;
         Ok(json!({
             "ok": true,
             "schema": "aurora-research-contract/1.0",
@@ -26783,7 +26821,8 @@ impl Server {
     }
 
     fn ids_performance_reliability_gateway(&self, arguments: &Value) -> Result<Value, String> {
-        let result = crate::research_contracts::operate_ids_performance_reliability_json(arguments)?;
+        let result =
+            crate::research_contracts::operate_ids_performance_reliability_json(arguments)?;
         Ok(json!({
             "ok": true,
             "schema": "aurora-research-contract/1.0",
@@ -26806,7 +26845,8 @@ impl Server {
         &self,
         arguments: &Value,
     ) -> Result<Value, String> {
-        let output = crate::research_contracts::operate_ids_interoperability_extensibility_json(arguments)?;
+        let output =
+            crate::research_contracts::operate_ids_interoperability_extensibility_json(arguments)?;
         Ok(json!({
             "ok": true,
             "schema": "aurora-research-contract/1.0",
@@ -26826,7 +26866,8 @@ impl Server {
     }
 
     fn ids_policy_autonomy_workbench(&self, arguments: &Value) -> Result<Value, String> {
-        let receipt = crate::research_contracts::operate_ids_policy_autonomy_workbench_json(arguments)?;
+        let receipt =
+            crate::research_contracts::operate_ids_policy_autonomy_workbench_json(arguments)?;
         Ok(json!({
             "ok": true,
             "schema": "aurora-research-contract/1.0",
@@ -27217,8 +27258,14 @@ impl Server {
         }))
     }
 
-    fn obligation_knowledge_representation_assurance(&self, arguments: &Value) -> Result<Value, String> {
-        let receipt = crate::research_contracts::run_obligation_knowledge_representation_assurance_json(arguments)?;
+    fn obligation_knowledge_representation_assurance(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let receipt =
+            crate::research_contracts::run_obligation_knowledge_representation_assurance_json(
+                arguments,
+            )?;
         Ok(json!({
             "ok": true,
             "schema": "aurora-research-contract/1.0",
@@ -27237,7 +27284,10 @@ impl Server {
         }))
     }
 
-    fn obligation_security_federation_interoperability_gateway(&self, arguments: &Value) -> Result<Value, String> {
+    fn obligation_security_federation_interoperability_gateway(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
         let receipt = crate::research_contracts::run_obligation_security_federation_interoperability_gateway_json(arguments)?;
         Ok(json!({
             "ok": true,
@@ -27283,7 +27333,10 @@ impl Server {
         let request = arguments
             .get("request")
             .ok_or("request is required and must be a ResearchWorkflowSpec3")?;
-        let receipt = crate::research_contracts::operate_atlasx_computational_execution_assurance_json(request)?;
+        let receipt =
+            crate::research_contracts::operate_atlasx_computational_execution_assurance_json(
+                request,
+            )?;
         Ok(json!({
             "ok": true,
             "schema": "aurora-research-contract/1.0",
@@ -27371,11 +27424,15 @@ impl Server {
         }))
     }
 
-    fn atlashub_quality_control_research_copilot(&self, arguments: &Value) -> Result<Value, String> {
+    fn atlashub_quality_control_research_copilot(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
         let request = arguments
             .get("request")
             .ok_or("request is required and must be a QualityControlRequest3")?;
-        let verdict = crate::research_contracts::operate_atlashub_quality_control_copilot_json(request)?;
+        let verdict =
+            crate::research_contracts::operate_atlashub_quality_control_copilot_json(request)?;
         Ok(json!({
             "ok": true,
             "schema": "aurora-research-contract/1.0",
@@ -27398,7 +27455,10 @@ impl Server {
         let request = arguments
             .get("request")
             .ok_or("request is required and must be a QualityControlContractRequest")?;
-        let verdict = crate::research_contracts::operate_atlashub_quality_control_contract_model_json(request)?;
+        let verdict =
+            crate::research_contracts::operate_atlashub_quality_control_contract_model_json(
+                request,
+            )?;
         Ok(json!({
             "ok": true,
             "schema": "aurora-research-contract/1.0",
@@ -27490,11 +27550,15 @@ impl Server {
         }))
     }
 
-    fn interweave_federated_interpretation_engine(&self, arguments: &Value) -> Result<Value, String> {
+    fn interweave_federated_interpretation_engine(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
         let request = arguments
             .get("request")
             .ok_or("request is required and must be an InterpretationInferenceRequest")?;
-        let receipt = crate::research_contracts::operate_interweave_federated_interpretation_json(request)?;
+        let receipt =
+            crate::research_contracts::operate_interweave_federated_interpretation_json(request)?;
         Ok(json!({
             "ok": true,
             "schema": "aurora-research-contract/1.0",
@@ -27514,7 +27578,10 @@ impl Server {
     }
 
     fn interweave_federated_commons_assurance(&self, arguments: &Value) -> Result<Value, String> {
-        let receipt = crate::research_contracts::operate_interweave_federated_commons_assurance_json(arguments)?;
+        let receipt =
+            crate::research_contracts::operate_interweave_federated_commons_assurance_json(
+                arguments,
+            )?;
         Ok(json!({
             "ok": true,
             "schema": "aurora-research-contract/1.0",
@@ -27538,7 +27605,8 @@ impl Server {
         let request = arguments
             .get("request")
             .ok_or("request is required and must be a FederatedContextQuestion5")?;
-        let receipt = crate::research_contracts::operate_adapter_federated_context_copilot_json(request)?;
+        let receipt =
+            crate::research_contracts::operate_adapter_federated_context_copilot_json(request)?;
         Ok(json!({
             "ok": true,
             "schema": "aurora-research-contract/1.0",
@@ -27561,7 +27629,8 @@ impl Server {
         let request = arguments
             .get("request")
             .ok_or("request is required and must be a KnowledgeWorkflowRequest5")?;
-        let receipt = crate::research_contracts::operate_bioworlds_knowledge_workflow_json(request)?;
+        let receipt =
+            crate::research_contracts::operate_bioworlds_knowledge_workflow_json(request)?;
         Ok(json!({
             "ok": true,
             "schema": "aurora-research-contract/1.0",
@@ -27580,11 +27649,17 @@ impl Server {
         }))
     }
 
-    fn bioworlds_federated_context_research_workbench(&self, arguments: &Value) -> Result<Value, String> {
+    fn bioworlds_federated_context_research_workbench(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
         let request = arguments
             .get("request")
             .ok_or("request is required and must be a FederatedContextWorkbenchRequest")?;
-        let receipt = crate::research_contracts::operate_bioworlds_federated_context_research_workbench_json(request)?;
+        let receipt =
+            crate::research_contracts::operate_bioworlds_federated_context_research_workbench_json(
+                request,
+            )?;
         Ok(json!({
             "ok": true,
             "schema": "aurora-research-contract/1.0",
@@ -27766,7 +27841,10 @@ impl Server {
         let request = arguments
             .get("request")
             .ok_or("request is required and must be a FederatedRetrievalSynthesisRequest6")?;
-        let receipt = crate::research_contracts::run_backends_federated_retrieval_synthesis_workflow_json(request)?;
+        let receipt =
+            crate::research_contracts::run_backends_federated_retrieval_synthesis_workflow_json(
+                request,
+            )?;
         Ok(json!({
             "ok": true,
             "schema": "aurora-research-contract/1.0",
@@ -27836,7 +27914,10 @@ impl Server {
         let request = arguments
             .get("request")
             .ok_or("request is required and must be a ResearchWorkflowSpec4")?;
-        let receipt = crate::research_contracts::operate_bioethics_prospective_computational_execution_json(request)?;
+        let receipt =
+            crate::research_contracts::operate_bioethics_prospective_computational_execution_json(
+                request,
+            )?;
         Ok(json!({
             "ok": true,
             "schema": "aurora-research-contract/1.0",
@@ -27939,7 +28020,8 @@ impl Server {
     }
 
     fn onco_instrument_research_workbench(&self, arguments: &Value) -> Result<Value, String> {
-        let receipt = crate::research_contracts::operate_onco_instrument_research_workbench_json(arguments)?;
+        let receipt =
+            crate::research_contracts::operate_onco_instrument_research_workbench_json(arguments)?;
         Ok(json!({
             "ok": true,
             "schema": "aurora-research-contract/1.0",
@@ -27980,14 +28062,27 @@ impl Server {
         }))
     }
 
-    fn mutation_federated_continual_bounded_evolution_assurance(&self, arguments: &Value) -> Result<Value, String> {
+    fn mutation_federated_continual_bounded_evolution_assurance(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
         let receipt = crate::research_contracts::operate_mutation_federated_continual_bounded_evolution_assurance_json(arguments)?;
-        Ok(json!({"ok":true,"schema":"aurora-research-contract/1.0","feature_id":bioprism_mutation::MUTATION_FEDERATED_EVOLUTION_FEATURE_ID,"contract_version":bioprism_mutation::MUTATION_FEDERATED_EVOLUTION_CONTRACT_VERSION,"receipt":receipt,"guarantees":["A1 mutation assurance verifies federated continual MutationEvolutionCandidate proposals against compatibility, benchmark, safety, evidence, replay, signature, policy, protected-closure, aggregate-only locality, and fail-closed gates","incompatible, benchmark-failed, unsafe, unsigned, contradicted, unknown, unmeasured, omitted, and negative proposals remain explicit","the route never mutates implementations, grants authority, exports raw preclinical data, or makes clinical decisions"],"limitations":["the harness evaluates caller-supplied mutation attestations and does not apply mutations, execute instruments, or publish releases","qualified output is a reversible verification preview, not scientific truth or release authorization"]}))
+        Ok(
+            json!({"ok":true,"schema":"aurora-research-contract/1.0","feature_id":bioprism_mutation::MUTATION_FEDERATED_EVOLUTION_FEATURE_ID,"contract_version":bioprism_mutation::MUTATION_FEDERATED_EVOLUTION_CONTRACT_VERSION,"receipt":receipt,"guarantees":["A1 mutation assurance verifies federated continual MutationEvolutionCandidate proposals against compatibility, benchmark, safety, evidence, replay, signature, policy, protected-closure, aggregate-only locality, and fail-closed gates","incompatible, benchmark-failed, unsafe, unsigned, contradicted, unknown, unmeasured, omitted, and negative proposals remain explicit","the route never mutates implementations, grants authority, exports raw preclinical data, or makes clinical decisions"],"limitations":["the harness evaluates caller-supplied mutation attestations and does not apply mutations, execute instruments, or publish releases","qualified output is a reversible verification preview, not scientific truth or release authorization"]}),
+        )
     }
 
-    fn mutation_federated_resource_discovery_control_plane(&self, arguments: &Value) -> Result<Value, String> {
-        let receipt = crate::research_contracts::operate_mutation_federated_resource_discovery_json(arguments)?;
-        Ok(json!({"ok":true,"schema":"aurora-research-contract/1.0","feature_id":bioprism_mutation::MUTATION_RESOURCE_DISCOVERY_FEATURE_ID,"contract_version":bioprism_mutation::MUTATION_RESOURCE_DISCOVERY_CONTRACT_VERSION,"receipt":receipt,"guarantees":["typed ResourceNeed4, endpoint, and peer attestations are deterministically partitioned into a QualifiedResourceSet8","capability fitness, protocol migration, evidence, provenance, replay, policy, locality, quorum, omission, uncertainty, negative, and adversarial governance states remain explicit","qualified effects are limited to local capability management and aggregate-only permitted-summary exchange; raw data never leaves the institution"],"limitations":["the control plane evaluates caller-supplied manifests and never contacts endpoints, executes instruments, or moves raw preclinical data","a qualified resource set is a bounded selection artifact, not evidence of scientific validity or a clinical decision"]}))
+    fn mutation_federated_resource_discovery_control_plane(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let receipt =
+            crate::research_contracts::operate_mutation_federated_resource_discovery_json(
+                arguments,
+            )?;
+        Ok(
+            json!({"ok":true,"schema":"aurora-research-contract/1.0","feature_id":bioprism_mutation::MUTATION_RESOURCE_DISCOVERY_FEATURE_ID,"contract_version":bioprism_mutation::MUTATION_RESOURCE_DISCOVERY_CONTRACT_VERSION,"receipt":receipt,"guarantees":["typed ResourceNeed4, endpoint, and peer attestations are deterministically partitioned into a QualifiedResourceSet8","capability fitness, protocol migration, evidence, provenance, replay, policy, locality, quorum, omission, uncertainty, negative, and adversarial governance states remain explicit","qualified effects are limited to local capability management and aggregate-only permitted-summary exchange; raw data never leaves the institution"],"limitations":["the control plane evaluates caller-supplied manifests and never contacts endpoints, executes instruments, or moves raw preclinical data","a qualified resource set is a bounded selection artifact, not evidence of scientific validity or a clinical decision"]}),
+        )
     }
 
     fn factory_prospective_evidence_surveillance(
@@ -28019,7 +28114,8 @@ impl Server {
         let request = arguments
             .get("request")
             .ok_or("request is required and must be a ResearchObject4")?;
-        let receipt = crate::research_contracts::operate_factory_federated_quality_workbench_json(request)?;
+        let receipt =
+            crate::research_contracts::operate_factory_federated_quality_workbench_json(request)?;
         Ok(json!({
             "ok": true,
             "schema": "aurora-research-contract/1.0",
@@ -28080,7 +28176,8 @@ impl Server {
     }
 
     fn docgraph_instrument_action_contract(&self, arguments: &Value) -> Result<Value, String> {
-        let receipt = crate::research_contracts::operate_docgraph_instrument_action_json(arguments)?;
+        let receipt =
+            crate::research_contracts::operate_docgraph_instrument_action_json(arguments)?;
         Ok(json!({
             "ok": true,
             "schema": "aurora-research-contract/1.0",
@@ -28145,7 +28242,9 @@ impl Server {
         &self,
         arguments: &Value,
     ) -> Result<Value, String> {
-        let receipt = crate::research_contracts::operate_services_context_compilation_copilot_json(arguments)?;
+        let receipt = crate::research_contracts::operate_services_context_compilation_copilot_json(
+            arguments,
+        )?;
         Ok(json!({
             "ok": true,
             "schema": "aurora-research-contract/1.0",
@@ -28282,14 +28381,12 @@ impl Server {
         }))
     }
 
-    fn weavelang_federated_commons_assurance(
-        &self,
-        arguments: &Value,
-    ) -> Result<Value, String> {
+    fn weavelang_federated_commons_assurance(&self, arguments: &Value) -> Result<Value, String> {
         let request = arguments
             .get("request")
             .ok_or("request is required and must be a WeavelangFederationRequest5")?;
-        let receipt = crate::research_contracts::run_weavelang_federated_commons_assurance_json(request)?;
+        let receipt =
+            crate::research_contracts::run_weavelang_federated_commons_assurance_json(request)?;
         Ok(json!({
             "ok": true,
             "schema": "aurora-research-contract/1.0",
@@ -28412,7 +28509,8 @@ impl Server {
         let request = arguments
             .get("request")
             .ok_or("request is required and must be an IDS EvidenceFeed1")?;
-        let receipt = crate::research_contracts::run_ids_local_evidence_surveillance_inference_json(request)?;
+        let receipt =
+            crate::research_contracts::run_ids_local_evidence_surveillance_inference_json(request)?;
         Ok(json!({
             "ok": true,
             "schema": "aurora-research-contract/1.0",
@@ -28435,7 +28533,8 @@ impl Server {
         let request = arguments
             .get("request")
             .ok_or("request is required and must be a Scope EvidenceControlRequest6")?;
-        let receipt = crate::research_contracts::run_scope_federated_evidence_control_json(request)?;
+        let receipt =
+            crate::research_contracts::run_scope_federated_evidence_control_json(request)?;
         Ok(json!({
             "ok": true,
             "schema": "aurora-research-contract/1.0",
@@ -28461,7 +28560,8 @@ impl Server {
         let request = arguments
             .get("request")
             .ok_or("request is required and must be a ScopeFederationGatewayRequest7")?;
-        let receipt = crate::research_contracts::run_scope_federated_interoperability_gateway_json(request)?;
+        let receipt =
+            crate::research_contracts::run_scope_federated_interoperability_gateway_json(request)?;
         Ok(json!({
             "ok": true,
             "schema": "aurora-research-contract/1.0",
@@ -28487,7 +28587,8 @@ impl Server {
         let request = arguments
             .get("request")
             .ok_or("request is required and must be an ExperimentObjective4")?;
-        let receipt = crate::research_contracts::run_hubapi_experiment_design_assurance_json(request)?;
+        let receipt =
+            crate::research_contracts::run_hubapi_experiment_design_assurance_json(request)?;
         Ok(json!({
             "ok": true,
             "schema": "aurora-research-contract/1.0",
@@ -28506,14 +28607,12 @@ impl Server {
         }))
     }
 
-    fn fabric_experiment_design_contract_model(
-        &self,
-        arguments: &Value,
-    ) -> Result<Value, String> {
+    fn fabric_experiment_design_contract_model(&self, arguments: &Value) -> Result<Value, String> {
         let request = arguments
             .get("request")
             .ok_or("request is required and must be a FabricExperimentDesignContractRequest4")?;
-        let receipt = crate::research_contracts::run_fabric_experiment_design_contract_model_json(request)?;
+        let receipt =
+            crate::research_contracts::run_fabric_experiment_design_contract_model_json(request)?;
         Ok(json!({
             "ok": true,
             "schema": "aurora-research-contract/1.0",
@@ -28539,7 +28638,8 @@ impl Server {
         let request = arguments
             .get("request")
             .ok_or("request is required and must be a Bioethics DecisionQuery2")?;
-        let receipt = crate::research_contracts::run_bioethics_multimodal_context_compilation_json(request)?;
+        let receipt =
+            crate::research_contracts::run_bioethics_multimodal_context_compilation_json(request)?;
         Ok(json!({
             "ok": true,
             "schema": "aurora-research-contract/1.0",
@@ -28558,14 +28658,12 @@ impl Server {
         }))
     }
 
-    fn bioethics_statistical_analysis_assurance(
-        &self,
-        arguments: &Value,
-    ) -> Result<Value, String> {
+    fn bioethics_statistical_analysis_assurance(&self, arguments: &Value) -> Result<Value, String> {
         let request = arguments
             .get("request")
             .ok_or("request is required and must be a Bioethics AnalysisQuestion3")?;
-        let receipt = crate::research_contracts::run_bioethics_statistical_analysis_assurance_json(request)?;
+        let receipt =
+            crate::research_contracts::run_bioethics_statistical_analysis_assurance_json(request)?;
         Ok(json!({
             "ok": true,
             "schema": "aurora-research-contract/1.0",
@@ -28584,14 +28682,12 @@ impl Server {
         }))
     }
 
-    fn prism_laboratory_integration_copilot(
-        &self,
-        arguments: &Value,
-    ) -> Result<Value, String> {
+    fn prism_laboratory_integration_copilot(&self, arguments: &Value) -> Result<Value, String> {
         let request = arguments
             .get("request")
             .ok_or("request is required and must be an InstrumentActionRequest4")?;
-        let receipt = crate::research_contracts::run_prism_laboratory_integration_copilot_json(request)?;
+        let receipt =
+            crate::research_contracts::run_prism_laboratory_integration_copilot_json(request)?;
         Ok(json!({
             "ok": true,
             "schema": "aurora-research-contract/1.0",
@@ -28617,7 +28713,10 @@ impl Server {
         let request = arguments
             .get("request")
             .ok_or("request is required and must be an EvidenceBackedResult4")?;
-        let receipt = crate::research_contracts::run_scale_interpretation_visualization_assurance_json(request)?;
+        let receipt =
+            crate::research_contracts::run_scale_interpretation_visualization_assurance_json(
+                request,
+            )?;
         Ok(json!({
             "ok": true,
             "schema": "aurora-research-contract/1.0",
@@ -28643,7 +28742,10 @@ impl Server {
         let request = arguments
             .get("request")
             .ok_or("request is required and must be an EvidenceBackedResult2")?;
-        let receipt = crate::research_contracts::run_scale_interpretation_interoperability_gateway_json(request)?;
+        let receipt =
+            crate::research_contracts::run_scale_interpretation_interoperability_gateway_json(
+                request,
+            )?;
         Ok(json!({
             "ok": true,
             "schema": "aurora-research-contract/1.0",
@@ -28669,7 +28771,10 @@ impl Server {
         let request = arguments
             .get("request")
             .ok_or("request is required and must be an ExperimentDesignWorkflowRequest1")?;
-        let receipt = crate::research_contracts::run_bioethics_experiment_design_workflow_fabric_json(request)?;
+        let receipt =
+            crate::research_contracts::run_bioethics_experiment_design_workflow_fabric_json(
+                request,
+            )?;
         Ok(json!({
             "ok": true,
             "schema": "aurora-research-contract/1.0",
@@ -28692,7 +28797,10 @@ impl Server {
         &self,
         arguments: &Value,
     ) -> Result<Value, String> {
-        let receipt = crate::research_contracts::run_bioethics_multimodal_bounded_evolution_assurance_json(arguments)?;
+        let receipt =
+            crate::research_contracts::run_bioethics_multimodal_bounded_evolution_assurance_json(
+                arguments,
+            )?;
         Ok(json!({
             "ok": true,
             "schema": "aurora-research-contract/1.0",
@@ -28741,7 +28849,10 @@ impl Server {
         let request = arguments
             .get("request")
             .ok_or("request is required and must be a ResearchWorkflowSpec1")?;
-        let receipt = crate::research_contracts::run_onco_computational_execution_contract_model_json(request)?;
+        let receipt =
+            crate::research_contracts::run_onco_computational_execution_contract_model_json(
+                request,
+            )?;
         Ok(json!({
             "ok": true,
             "schema": "aurora-research-contract/1.0",
@@ -28767,7 +28878,10 @@ impl Server {
         let request = arguments
             .get("request")
             .ok_or("request is required and must be an ExternalCapabilityRequest1")?;
-        let receipt = crate::research_contracts::run_oracle_interoperability_research_workbench_json(request)?;
+        let receipt =
+            crate::research_contracts::run_oracle_interoperability_research_workbench_json(
+                request,
+            )?;
         Ok(json!({
             "ok": true,
             "schema": "aurora-research-contract/1.0",
@@ -28793,7 +28907,10 @@ impl Server {
         let request = arguments
             .get("request")
             .ok_or("request is required and must be a ProvenanceSigningRequest1")?;
-        let receipt = crate::research_contracts::run_atlashub_provenance_signing_inference_engine_json(request)?;
+        let receipt =
+            crate::research_contracts::run_atlashub_provenance_signing_inference_engine_json(
+                request,
+            )?;
         Ok(json!({
             "ok": true,
             "schema": "aurora-research-contract/1.0",
@@ -28812,14 +28929,12 @@ impl Server {
         }))
     }
 
-    fn hub_policy_autonomy_inference_engine(
-        &self,
-        arguments: &Value,
-    ) -> Result<Value, String> {
+    fn hub_policy_autonomy_inference_engine(&self, arguments: &Value) -> Result<Value, String> {
         let request = arguments
             .get("request")
             .ok_or("request is required and must be a PolicyInferenceRequest3")?;
-        let receipt = crate::research_contracts::run_hub_policy_autonomy_inference_engine_json(request)?;
+        let receipt =
+            crate::research_contracts::run_hub_policy_autonomy_inference_engine_json(request)?;
         Ok(json!({
             "ok": true,
             "schema": "aurora-research-contract/1.0",
@@ -28845,7 +28960,10 @@ impl Server {
         let request = arguments
             .get("request")
             .ok_or("request is required and must be a ScopedRetrievalQuery3")?;
-        let receipt = crate::research_contracts::run_conformance_retrieval_synthesis_contract_model_json(request)?;
+        let receipt =
+            crate::research_contracts::run_conformance_retrieval_synthesis_contract_model_json(
+                request,
+            )?;
         Ok(json!({
             "ok": true,
             "schema": "aurora-research-contract/1.0",
@@ -29548,16 +29666,12 @@ impl Server {
         )
     }
 
-    fn atlashub_mechanism_exploration_assurance(
-        &self,
-        arguments: &Value,
-    ) -> Result<Value, String> {
-        let request = arguments
-            .get("request")
-            .ok_or("request is required and must be an Atlashub MechanismExplorationAssuranceRequest")?;
-        let receipt = crate::research_contracts::run_atlashub_mechanism_exploration_assurance_json(
-            request,
+    fn atlashub_mechanism_exploration_assurance(&self, arguments: &Value) -> Result<Value, String> {
+        let request = arguments.get("request").ok_or(
+            "request is required and must be an Atlashub MechanismExplorationAssuranceRequest",
         )?;
+        let receipt =
+            crate::research_contracts::run_atlashub_mechanism_exploration_assurance_json(request)?;
         Ok(json!({
             "ok": true,
             "schema": "aurora-research-contract/1.0",
@@ -29579,8 +29693,13 @@ impl Server {
         &self,
         arguments: &Value,
     ) -> Result<Value, String> {
-        let receipt = crate::research_contracts::run_dataops_provenance_signing_workflow_fabric_json(arguments)?;
-        Ok(json!({"ok":true,"schema":"aurora-research-contract/1.0","feature_id":bioprism_dataops::PROVENANCE_SIGNING_WORKFLOW_FABRIC_FEATURE_ID,"receipt":receipt,"guarantees":["A1 workflow fabric verifies high-throughput artifact derivation lineage, detached signature attestations, root and replay identity, capacity, policy, protected closure, approval, aggregate-only locality, and adversarial gates","missing parents, cycles, invalid signatures, root drift, unknown or negative evidence, omissions, and unresolved closure remain explicit","non-qualified workflows fail closed with block:unsafe-release; raw preclinical data never leaves its institution"],"limitations":["the fabric validates caller-supplied attestations and does not sign, upload, execute, or move artifacts","the capability is not a clinical decision system"]}))
+        let receipt =
+            crate::research_contracts::run_dataops_provenance_signing_workflow_fabric_json(
+                arguments,
+            )?;
+        Ok(
+            json!({"ok":true,"schema":"aurora-research-contract/1.0","feature_id":bioprism_dataops::PROVENANCE_SIGNING_WORKFLOW_FABRIC_FEATURE_ID,"receipt":receipt,"guarantees":["A1 workflow fabric verifies high-throughput artifact derivation lineage, detached signature attestations, root and replay identity, capacity, policy, protected closure, approval, aggregate-only locality, and adversarial gates","missing parents, cycles, invalid signatures, root drift, unknown or negative evidence, omissions, and unresolved closure remain explicit","non-qualified workflows fail closed with block:unsafe-release; raw preclinical data never leaves its institution"],"limitations":["the fabric validates caller-supplied attestations and does not sign, upload, execute, or move artifacts","the capability is not a clinical decision system"]}),
+        )
     }
 
     fn oraclex_publication_release(&self, arguments: &Value) -> Result<Value, String> {
@@ -29594,21 +29713,43 @@ impl Server {
     }
 
     fn oraclex_interpretation_inference(&self, arguments: &Value) -> Result<Value, String> {
-        let request = arguments.get("request").ok_or("request is required and must be an EvidenceBackedResult3")?;
-        let receipt = crate::research_contracts::run_oraclex_interpretation_inference_json(request)?;
-        Ok(json!({"ok":true,"schema":"aurora-research-contract/1.0","feature_id":bioprism_oraclex::INTERPRETATION_INFERENCE_FEATURE_ID,"receipt":receipt,"guarantees":["candidate ordering and qualified/unresolved/blocked/incomparable partitions are deterministic","study and modality closure, comparability, replay, provenance, policy, federation, locality, budget, omission, uncertainty, negative, and adversarial gates remain explicit","the InteractiveInterpretation1 artifact is content-addressed and release-blocked by default"],"limitations":["the engine ranks caller-supplied declarations and does not render, infer biology, access raw data, or make clinical decisions","qualified panels remain subject to independent scientific and governance review"]}))
+        let request = arguments
+            .get("request")
+            .ok_or("request is required and must be an EvidenceBackedResult3")?;
+        let receipt =
+            crate::research_contracts::run_oraclex_interpretation_inference_json(request)?;
+        Ok(
+            json!({"ok":true,"schema":"aurora-research-contract/1.0","feature_id":bioprism_oraclex::INTERPRETATION_INFERENCE_FEATURE_ID,"receipt":receipt,"guarantees":["candidate ordering and qualified/unresolved/blocked/incomparable partitions are deterministic","study and modality closure, comparability, replay, provenance, policy, federation, locality, budget, omission, uncertainty, negative, and adversarial gates remain explicit","the InteractiveInterpretation1 artifact is content-addressed and release-blocked by default"],"limitations":["the engine ranks caller-supplied declarations and does not render, infer biology, access raw data, or make clinical decisions","qualified panels remain subject to independent scientific and governance review"]}),
+        )
     }
 
-    fn oraclex_performance_reliability_interoperability_gateway(&self, arguments: &Value) -> Result<Value, String> {
-        let request = arguments.get("request").ok_or("request is required and must be a CapabilityWorkload4")?;
+    fn oraclex_performance_reliability_interoperability_gateway(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request = arguments
+            .get("request")
+            .ok_or("request is required and must be a CapabilityWorkload4")?;
         let receipt = crate::research_contracts::run_oraclex_performance_reliability_interoperability_gateway_json(request)?;
-        Ok(json!({"ok":true,"schema":"aurora-research-contract/1.0","feature_id":bioprism_oraclex::PERFORMANCE_RELIABILITY_INTEROPERABILITY_FEATURE_ID,"receipt":receipt,"guarantees":["A2 federated reliability exchange is deterministic, aggregate-only, and replay-bound","retry, timeout, duplicate-event, migration, omission, uncertainty, adversarial, and negative evidence remain explicit","unsigned, unpermitted, non-local, incomplete, or over-budget invocations fail closed","the capability is not a clinical decision system and excludes human-subject and clinical-source data"],"limitations":["the gateway evaluates caller-supplied telemetry and does not execute workloads, sign artifacts, or move raw data","qualified exchange remains subject to institutional governance and independent reliability review"]}))
+        Ok(
+            json!({"ok":true,"schema":"aurora-research-contract/1.0","feature_id":bioprism_oraclex::PERFORMANCE_RELIABILITY_INTEROPERABILITY_FEATURE_ID,"receipt":receipt,"guarantees":["A2 federated reliability exchange is deterministic, aggregate-only, and replay-bound","retry, timeout, duplicate-event, migration, omission, uncertainty, adversarial, and negative evidence remain explicit","unsigned, unpermitted, non-local, incomplete, or over-budget invocations fail closed","the capability is not a clinical decision system and excludes human-subject and clinical-source data"],"limitations":["the gateway evaluates caller-supplied telemetry and does not execute workloads, sign artifacts, or move raw data","qualified exchange remains subject to institutional governance and independent reliability review"]}),
+        )
     }
 
-    fn oraclex_statistical_analysis_research_workbench(&self, arguments: &Value) -> Result<Value, String> {
-        let request = arguments.get("request").ok_or("request is required and must be an AnalysisQuestion4")?;
-        let receipt = crate::research_contracts::run_oraclex_statistical_analysis_research_workbench_json(request)?;
-        Ok(json!({"ok":true,"schema":"aurora-research-contract/1.0","feature_id":bioprism_oraclex::STATISTICAL_ANALYSIS_RESEARCH_WORKBENCH_FEATURE_ID,"receipt":receipt,"guarantees":["A1 analysis qualification is deterministic, replay-bound, and local","identification, comparability, quality, evidence, provenance, omission, uncertainty, contradiction, negative, and adversarial states remain explicit","the workbench never executes models, exports raw arrays, or makes clinical decisions"],"limitations":["the workbench validates caller-supplied attestations and does not fit models or publish results","qualified analysis remains subject to independent statistical and institutional review"]}))
+    fn oraclex_statistical_analysis_research_workbench(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request = arguments
+            .get("request")
+            .ok_or("request is required and must be an AnalysisQuestion4")?;
+        let receipt =
+            crate::research_contracts::run_oraclex_statistical_analysis_research_workbench_json(
+                request,
+            )?;
+        Ok(
+            json!({"ok":true,"schema":"aurora-research-contract/1.0","feature_id":bioprism_oraclex::STATISTICAL_ANALYSIS_RESEARCH_WORKBENCH_FEATURE_ID,"receipt":receipt,"guarantees":["A1 analysis qualification is deterministic, replay-bound, and local","identification, comparability, quality, evidence, provenance, omission, uncertainty, contradiction, negative, and adversarial states remain explicit","the workbench never executes models, exports raw arrays, or makes clinical decisions"],"limitations":["the workbench validates caller-supplied attestations and does not fit models or publish results","qualified analysis remains subject to independent statistical and institutional review"]}),
+        )
     }
 
     fn interweave_frontier_control(&self, arguments: &Value) -> Result<Value, String> {
@@ -29694,8 +29835,10 @@ impl Server {
             .get("request")
             .ok_or("request is required and must be an InstrumentActionRequest3")?;
         let receipt = crate::research_contracts::operate_safety_prospective_laboratory_integration_assurance_json(request)?;
-        let typed: InstrumentActionReceipt7 = serde_json::from_value(receipt.clone())
-            .map_err(|error| format!("safety laboratory-integration receipt serialization failed: {error}"))?;
+        let typed: InstrumentActionReceipt7 =
+            serde_json::from_value(receipt.clone()).map_err(|error| {
+                format!("safety laboratory-integration receipt serialization failed: {error}")
+            })?;
         Ok(json!({
             "ok": true,
             "schema": "aurora-research-contract/1.0",
@@ -29931,7 +30074,8 @@ impl Server {
         let request = arguments
             .get("request")
             .ok_or("request is required and must be an ExperimentObjective")?;
-        let receipt = crate::research_contracts::run_governance_experiment_design_assurance_json(request)?;
+        let receipt =
+            crate::research_contracts::run_governance_experiment_design_assurance_json(request)?;
         Ok(json!({
             "ok": true,
             "schema": "aurora-research-contract/1.0",
@@ -30802,7 +30946,8 @@ impl Server {
         let request = arguments
             .get("request")
             .ok_or("request is required and must be a serialized ClaimAndProtocol1")?;
-        let receipt = crate::research_contracts::operate_registry_replication_workbench_json(request)?;
+        let receipt =
+            crate::research_contracts::operate_registry_replication_workbench_json(request)?;
         Ok(json!({
             "ok": true,
             "schema": "aurora-research-contract/1.0",
@@ -31298,19 +31443,39 @@ impl Server {
     }
 
     fn runtime_interpretation_assurance(&self, arguments: &Value) -> Result<Value, String> {
-        let request = arguments.get("request").ok_or("request is required and must be a serialized EvidenceBackedResult4")?;
+        let request = arguments
+            .get("request")
+            .ok_or("request is required and must be a serialized EvidenceBackedResult4")?;
         let receipt = crate::research_contracts::runtime_interpretation_assurance_json(request)?;
-        Ok(json!({"ok":true,"schema":"aurora-research-contract/1.0","feature_id":bioprism_runtime::INTERPRETATION_ASSURANCE_FEATURE_ID,"receipt":receipt,"guarantees":["candidate partition and ordering are deterministic","comparability, replay, provenance, omissions, uncertainty, negative evidence, policy, locality, protected closure, signed approval, federation, and adversarial gates remain explicit","release effect is always block:unsafe-release"],"limitations":["typed declarations are evaluated without rendering, raw-data access, biological inference, or clinical decisions","aggregate-only output requires independent scientific review"]}))
+        Ok(
+            json!({"ok":true,"schema":"aurora-research-contract/1.0","feature_id":bioprism_runtime::INTERPRETATION_ASSURANCE_FEATURE_ID,"receipt":receipt,"guarantees":["candidate partition and ordering are deterministic","comparability, replay, provenance, omissions, uncertainty, negative evidence, policy, locality, protected closure, signed approval, federation, and adversarial gates remain explicit","release effect is always block:unsafe-release"],"limitations":["typed declarations are evaluated without rendering, raw-data access, biological inference, or clinical decisions","aggregate-only output requires independent scientific review"]}),
+        )
     }
 
-    fn runtime_knowledge_representation_assurance(&self, arguments: &Value) -> Result<Value, String> {
-        let receipt = crate::research_contracts::run_runtime_knowledge_representation_assurance_json(arguments)?;
-        Ok(json!({"ok":true,"schema":"aurora-research-contract/1.0","feature_id":bioprism_runtime::RUNTIME_KNOWLEDGE_REPRESENTATION_FEATURE_ID,"contract_version":bioprism_runtime::RUNTIME_KNOWLEDGE_REPRESENTATION_CONTRACT_VERSION,"receipt":receipt,"guarantees":["federated continual typed claims and aggregate-only peer summaries are deterministically partitioned","missing, unknown, unmeasured, contradicted, omitted, negative, replay, provenance, policy, protected-closure, locality, budget, and adversarial states remain visible","the route always emits block:unsafe-release and never exports raw data, executes tools, or makes clinical decisions"],"limitations":["the harness verifies caller-supplied claim and peer attestations without fetching sources or opening federation connections","a blocked receipt is a safety and conformance artifact, not a scientific conclusion"]}))
+    fn runtime_knowledge_representation_assurance(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let receipt =
+            crate::research_contracts::run_runtime_knowledge_representation_assurance_json(
+                arguments,
+            )?;
+        Ok(
+            json!({"ok":true,"schema":"aurora-research-contract/1.0","feature_id":bioprism_runtime::RUNTIME_KNOWLEDGE_REPRESENTATION_FEATURE_ID,"contract_version":bioprism_runtime::RUNTIME_KNOWLEDGE_REPRESENTATION_CONTRACT_VERSION,"receipt":receipt,"guarantees":["federated continual typed claims and aggregate-only peer summaries are deterministically partitioned","missing, unknown, unmeasured, contradicted, omitted, negative, replay, provenance, policy, protected-closure, locality, budget, and adversarial states remain visible","the route always emits block:unsafe-release and never exports raw data, executes tools, or makes clinical decisions"],"limitations":["the harness verifies caller-supplied claim and peer attestations without fetching sources or opening federation connections","a blocked receipt is a safety and conformance artifact, not a scientific conclusion"]}),
+        )
     }
 
-    fn fabric_experiment_design_interoperability_gateway(&self, arguments: &Value) -> Result<Value, String> {
-        let receipt = crate::research_contracts::run_fabric_experiment_design_interoperability_gateway_json(arguments)?;
-        Ok(json!({"ok":true,"schema":"aurora-research-contract/1.0","feature_id":bioprism_fabric::EXPERIMENT_DESIGN_GATEWAY_FEATURE_ID,"contract_version":bioprism_fabric::EXPERIMENT_DESIGN_GATEWAY_CONTRACT_VERSION,"receipt":receipt,"guarantees":["versioned experiment-objective and capability manifests are negotiated deterministically with explicit migration-loss receipts","missing modalities/controls, semantic or instrument-profile conflicts, unknown or contradicted evidence, policy, locality, replay, provenance, and approval gaps remain visible","qualified effects are limited to contract negotiation; no protocol, instrument, or raw-data effect is dispatched"],"limitations":["the gateway evaluates caller-supplied capability manifests and never contacts instruments or workflow services","an executable-design artifact is a bounded interoperability contract, not scientific validity or a clinical decision"]}))
+    fn fabric_experiment_design_interoperability_gateway(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let receipt =
+            crate::research_contracts::run_fabric_experiment_design_interoperability_gateway_json(
+                arguments,
+            )?;
+        Ok(
+            json!({"ok":true,"schema":"aurora-research-contract/1.0","feature_id":bioprism_fabric::EXPERIMENT_DESIGN_GATEWAY_FEATURE_ID,"contract_version":bioprism_fabric::EXPERIMENT_DESIGN_GATEWAY_CONTRACT_VERSION,"receipt":receipt,"guarantees":["versioned experiment-objective and capability manifests are negotiated deterministically with explicit migration-loss receipts","missing modalities/controls, semantic or instrument-profile conflicts, unknown or contradicted evidence, policy, locality, replay, provenance, and approval gaps remain visible","qualified effects are limited to contract negotiation; no protocol, instrument, or raw-data effect is dispatched"],"limitations":["the gateway evaluates caller-supplied capability manifests and never contacts instruments or workflow services","an executable-design artifact is a bounded interoperability contract, not scientific validity or a clinical decision"]}),
+        )
     }
 
     fn lab_federated_experiment_design_interoperability_gateway(
@@ -31340,7 +31505,10 @@ impl Server {
         &self,
         arguments: &Value,
     ) -> Result<Value, String> {
-        let receipt = crate::research_contracts::run_stress_publication_research_object_workbench_json(arguments)?;
+        let receipt =
+            crate::research_contracts::run_stress_publication_research_object_workbench_json(
+                arguments,
+            )?;
         Ok(json!({
             "ok": true,
             "schema": "aurora-research-contract/1.0",
@@ -31366,7 +31534,10 @@ impl Server {
         let request = arguments
             .get("request")
             .ok_or("request is required and must be a serialized ids EvidenceBackedResult4")?;
-        let receipt = crate::research_contracts::operate_ids_interpretation_visualization_assurance_json(request)?;
+        let receipt =
+            crate::research_contracts::operate_ids_interpretation_visualization_assurance_json(
+                request,
+            )?;
         Ok(json!({
             "ok": true,
             "schema": "aurora-research-contract/1.0",
@@ -33286,7 +33457,8 @@ impl Server {
         let request = arguments
             .get("request")
             .ok_or("request is required and must be an OncoworldsAnalysisWorkbenchRequest")?;
-        let receipt = crate::research_contracts::operate_oncoworlds_analysis_workbench_json(request)?;
+        let receipt =
+            crate::research_contracts::operate_oncoworlds_analysis_workbench_json(request)?;
         Ok(json!({
             "ok": true,
             "schema": "aurora-research-contract/1.0",
@@ -33309,10 +33481,13 @@ impl Server {
         &self,
         arguments: &Value,
     ) -> Result<Value, String> {
-        let request = arguments
-            .get("request")
-            .ok_or("request is required and must be an OncoworldsEvidenceSurveillanceCopilotRequest")?;
-        let receipt = crate::research_contracts::operate_oncoworlds_evidence_surveillance_copilot_json(request)?;
+        let request = arguments.get("request").ok_or(
+            "request is required and must be an OncoworldsEvidenceSurveillanceCopilotRequest",
+        )?;
+        let receipt =
+            crate::research_contracts::operate_oncoworlds_evidence_surveillance_copilot_json(
+                request,
+            )?;
         Ok(json!({
             "ok": true,
             "schema": "aurora-research-contract/1.0",
@@ -33338,7 +33513,8 @@ impl Server {
         let request = arguments
             .get("request")
             .ok_or("request is required and must be an OncoworldsClaimAndProtocol")?;
-        let receipt = crate::research_contracts::operate_oncoworlds_replication_assurance_json(request)?;
+        let receipt =
+            crate::research_contracts::operate_oncoworlds_replication_assurance_json(request)?;
         Ok(json!({
             "ok": true,
             "schema": "aurora-research-contract/1.0",
@@ -33364,13 +33540,14 @@ impl Server {
         let request = arguments
             .get("request")
             .ok_or("request is required and must be an OncoworldsResourceNeed4")?;
-        let receipt = crate::research_contracts::operate_oncoworlds_resource_discovery_assurance_json(
-            &json!({
-                "request": request,
-                "endpoints": arguments.get("endpoints").ok_or("endpoints are required")?,
-                "peers": arguments.get("peers").ok_or("peers are required")?
-            }),
-        )?;
+        let receipt =
+            crate::research_contracts::operate_oncoworlds_resource_discovery_assurance_json(
+                &json!({
+                    "request": request,
+                    "endpoints": arguments.get("endpoints").ok_or("endpoints are required")?,
+                    "peers": arguments.get("peers").ok_or("peers are required")?
+                }),
+            )?;
         Ok(json!({
             "ok": true,
             "schema": "aurora-research-contract/1.0",
@@ -34826,7 +35003,10 @@ impl Server {
         &self,
         arguments: &Value,
     ) -> Result<Value, String> {
-        let receipt = crate::research_contracts::run_conformance_context_compilation_assurance_json(arguments)?;
+        let receipt =
+            crate::research_contracts::run_conformance_context_compilation_assurance_json(
+                arguments,
+            )?;
         Ok(json!({
             "ok": true,
             "schema": "aurora-research-contract/1.0",

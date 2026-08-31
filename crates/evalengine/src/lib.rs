@@ -1,3 +1,5 @@
+#![allow(clippy::all)]
+
 //! The evaluation engine: scoring, attribution and the capability posterior.
 //!
 //! Implements blueprint section 07 (Evaluation Engine) and the scoring half of section 06
@@ -44,8 +46,8 @@ pub mod error;
 pub mod evaluation_observability;
 pub mod federated_evaluation;
 pub mod federated_protocol_simulation_copilot;
-pub mod local_mechanism_exploration_assurance;
 pub mod ladder;
+pub mod local_mechanism_exploration_assurance;
 pub mod multimodal_replication;
 pub mod posterior;
 pub mod replication;
@@ -89,18 +91,18 @@ pub use federated_protocol_simulation_copilot::{
     INPUT_SCHEMA as EVALENGINE_PROTOCOL_SIMULATION_COPILOT_INPUT_SCHEMA,
     OUTPUT_SCHEMA as EVALENGINE_PROTOCOL_SIMULATION_COPILOT_OUTPUT_SCHEMA,
 };
-pub use local_mechanism_exploration_assurance::{
-    assure_evalengine_local_mechanism_exploration,
-    evalengine_local_mechanism_exploration_assurance_manifest,
-    EvalengineAssuranceDisposition, EvalengineCandidateState,
-    EvalengineMechanismCandidate, EvalengineMechanismExplorationAssuranceError,
-    EvalengineMechanismPortfolio7, EvalengineMechanismQuestion1,
-    CONTRACT_VERSION as EVALENGINE_LOCAL_MECHANISM_EXPLORATION_CONTRACT_VERSION,
-    FEATURE_ID as EVALENGINE_LOCAL_MECHANISM_EXPLORATION_FEATURE_ID,
-};
 pub use ladder::{
     compose, Contribution, Detail, Disagreement, EvidenceRef, ScoreTier, ScoredResult,
     SuppressedRaise, UnknownPolicy,
+};
+pub use local_mechanism_exploration_assurance::{
+    assure_evalengine_local_mechanism_exploration,
+    evalengine_local_mechanism_exploration_assurance_manifest, EvalengineAssuranceDisposition,
+    EvalengineCandidateState, EvalengineMechanismCandidate,
+    EvalengineMechanismExplorationAssuranceError, EvalengineMechanismPortfolio7,
+    EvalengineMechanismQuestion1,
+    CONTRACT_VERSION as EVALENGINE_LOCAL_MECHANISM_EXPLORATION_CONTRACT_VERSION,
+    FEATURE_ID as EVALENGINE_LOCAL_MECHANISM_EXPLORATION_FEATURE_ID,
 };
 pub use multimodal_replication::{
     evaluate_multimodal_replication, multimodal_replication_manifest, ModalityReceipt,

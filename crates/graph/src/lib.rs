@@ -1,3 +1,5 @@
+#![allow(ambiguous_glob_reexports)]
+
 //! Generated projections of compiled decision regions.
 //!
 //! Implements blueprint section 41 (graph-first knowledge and navigation) and section 42
@@ -73,38 +75,42 @@
 
 pub mod error;
 pub mod factors;
+pub mod federated_continual_projection_integrity_contract_model;
+pub mod federated_continual_projection_integrity_inference;
+pub mod federated_continual_projection_integrity_research_copilot;
+pub mod federated_continual_projection_integrity_workflow_fabric;
 pub mod fidelity;
 pub mod graph;
 pub mod hypergraph;
 pub mod identity;
 pub mod lint;
+pub mod local_projection_integrity_contract_model;
+pub mod local_projection_integrity_inference;
+pub mod local_projection_integrity_research_copilot;
+pub mod local_projection_integrity_workflow_fabric;
 pub mod markers;
+pub mod multimodal_projection_integrity_contract_model;
+pub mod multimodal_projection_integrity_inference;
+pub mod multimodal_projection_integrity_research_copilot;
+pub mod multimodal_projection_integrity_workflow_fabric;
+pub mod projection_integrity_support;
 pub mod provenance;
 pub mod roundtrip;
 pub mod table;
+pub mod throughput_projection_integrity_contract_model;
+pub mod throughput_projection_integrity_inference;
+pub mod throughput_projection_integrity_research_copilot;
+pub mod throughput_projection_integrity_workflow_fabric;
 pub mod timeline;
 pub mod view;
 pub mod vocabulary;
-pub mod projection_integrity_support;
-pub mod local_projection_integrity_inference;
-pub mod multimodal_projection_integrity_inference;
-pub mod throughput_projection_integrity_inference;
-pub mod federated_continual_projection_integrity_inference;
-pub mod local_projection_integrity_contract_model;
-pub mod multimodal_projection_integrity_contract_model;
-pub mod throughput_projection_integrity_contract_model;
-pub mod federated_continual_projection_integrity_contract_model;
-pub mod local_projection_integrity_research_copilot;
-pub mod multimodal_projection_integrity_research_copilot;
-pub mod throughput_projection_integrity_research_copilot;
-pub mod federated_continual_projection_integrity_research_copilot;
-pub mod local_projection_integrity_workflow_fabric;
-pub mod multimodal_projection_integrity_workflow_fabric;
-pub mod throughput_projection_integrity_workflow_fabric;
-pub mod federated_continual_projection_integrity_workflow_fabric;
 
 pub use error::ProjectionError;
 pub use factors::{selected_factors, SelectedFactor};
+pub use federated_continual_projection_integrity_contract_model::*;
+pub use federated_continual_projection_integrity_inference::*;
+pub use federated_continual_projection_integrity_research_copilot::*;
+pub use federated_continual_projection_integrity_workflow_fabric::*;
 pub use fidelity::{DropReason, DroppedFeature, FidelityLedger, FidelityReport};
 pub use graph::{
     EdgeGloss, GraphBody, GraphEdge, GraphNode, GraphProjection, MultiwayNote, NotEmitted,
@@ -113,35 +119,31 @@ pub use hypergraph::{
     HyperVertex, Hyperedge, HypergraphBody, HypergraphProjection, Pin, PinRole, RENDERING_NOTE,
 };
 pub use lint::{lint_graph, GraphLint};
+pub use local_projection_integrity_contract_model::*;
+pub use local_projection_integrity_inference::*;
+pub use local_projection_integrity_research_copilot::*;
+pub use local_projection_integrity_workflow_fabric::*;
 pub use markers::{ConflictMarker, ObligationMarker};
+pub use multimodal_projection_integrity_contract_model::*;
+pub use multimodal_projection_integrity_inference::*;
+pub use multimodal_projection_integrity_research_copilot::*;
+pub use multimodal_projection_integrity_workflow_fabric::*;
+pub use projection_integrity_support::*;
 pub use provenance::{BoundSection, ProjectionSource, ProvenanceCheck};
 pub use roundtrip::{
     evidence_survives, obstructions_survive, project_all, HandleCoverage, ProjectionBundle,
 };
 pub use table::{TableBody, TableProjection, TableRow, COLUMNS};
+pub use throughput_projection_integrity_contract_model::*;
+pub use throughput_projection_integrity_inference::*;
+pub use throughput_projection_integrity_research_copilot::*;
+pub use throughput_projection_integrity_workflow_fabric::*;
 pub use timeline::{
     Availability, ClockAnomaly, OrderJustification, TimelineAxis, TimelineBody, TimelineEntry,
     TimelineProjection,
 };
 pub use view::{ProjectRegion, ProjectedBody, Projection, ProjectionKind, View};
 pub use vocabulary::{EdgeType, NodeKind, NodeStatus};
-pub use projection_integrity_support::*;
-pub use local_projection_integrity_inference::*;
-pub use multimodal_projection_integrity_inference::*;
-pub use throughput_projection_integrity_inference::*;
-pub use federated_continual_projection_integrity_inference::*;
-pub use local_projection_integrity_contract_model::*;
-pub use multimodal_projection_integrity_contract_model::*;
-pub use throughput_projection_integrity_contract_model::*;
-pub use federated_continual_projection_integrity_contract_model::*;
-pub use local_projection_integrity_research_copilot::*;
-pub use multimodal_projection_integrity_research_copilot::*;
-pub use throughput_projection_integrity_research_copilot::*;
-pub use federated_continual_projection_integrity_research_copilot::*;
-pub use local_projection_integrity_workflow_fabric::*;
-pub use multimodal_projection_integrity_workflow_fabric::*;
-pub use throughput_projection_integrity_workflow_fabric::*;
-pub use federated_continual_projection_integrity_workflow_fabric::*;
 pub mod computational_execution_gateway;
 pub use computational_execution_gateway::{
     admit as admit_computational_execution,

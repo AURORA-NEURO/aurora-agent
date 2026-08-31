@@ -1,3 +1,5 @@
+#![allow(clippy::all)]
+
 //! What is left of the developer platform and the reference examples, honestly sorted.
 //!
 //! Twenty blueprint modules were still uncited when this crate started: fourteen in the developer
@@ -231,8 +233,6 @@ pub mod domain_evidence_provider_handoff;
 pub mod domain_evidence_source;
 pub mod domain_evidence_source_execution;
 pub mod domain_report;
-pub mod multimodal_limitation_closure_assurance;
-pub mod quality_control_federated_control_plane;
 pub mod engineering;
 pub mod engineering_plan;
 pub mod error;
@@ -242,7 +242,9 @@ pub mod evidence_registry;
 pub mod execution_provenance;
 pub mod exploit;
 pub mod mission;
+pub mod multimodal_limitation_closure_assurance;
 pub mod operational_readiness;
+pub mod quality_control_federated_control_plane;
 pub mod release_pipeline;
 pub mod report;
 pub mod repro;
@@ -515,6 +517,13 @@ pub use mission::{
     MAX_CLAIM_REQUESTS, MAX_WORKFLOW_BINDING_BYTES, MISSION_SCHEMA_VERSION,
     MISSION_TRACE_SCHEMA_VERSION,
 };
+pub use multimodal_limitation_closure_assurance::{
+    assure_devplat_multimodal_limitation_closure, devplat_multimodal_limitation_closure_manifest,
+    DevplatClosureError, DevplatClosureReceipt7, DevplatLimitationCase2, Limitation6,
+    LimitationClosureDisposition,
+    CONTRACT_VERSION as DEVPLAT_MULTIMODAL_LIMITATION_CLOSURE_CONTRACT_VERSION,
+    FEATURE_ID as DEVPLAT_MULTIMODAL_LIMITATION_CLOSURE_FEATURE_ID,
+};
 pub use operational_readiness::{
     DependencyCriticality, IncidentSeverity, IncidentState, IndicatorStatus, OperationalContract,
     OperationalContractKind, OperationalControls, OperationalCriticality, OperationalDependency,
@@ -524,6 +533,21 @@ pub use operational_readiness::{
     OperationalReadinessIssue, OperationalReadinessManifest, OperationalReadinessPolicies,
     OperationalRunbook, OperationalRunbookAudit, OperationalService, RunbookReviewStatus,
     OPERATIONAL_READINESS_AUDIT_SCHEMA, OPERATIONAL_READINESS_MANIFEST_SCHEMA,
+};
+pub use quality_control_federated_control_plane::{
+    assure_devplat_quality_control_federated_control_plane,
+    devplat_quality_control_federated_control_plane_manifest,
+    QualityAssuranceError as DevplatQualityControlPlaneError,
+    QualityControlRequest5 as DevplatQualityBatchRequest5,
+    QualityVerdict7 as DevplatQualityControlPlaneReceipt7,
+    QualityVerdictDisposition as DevplatQualityDisposition,
+    ResearchObject4 as DevplatQualityObservation4,
+    CONTENT_TYPE as DEVPLAT_QUALITY_CONTROL_PLANE_CONTENT_TYPE,
+    CONTRACT_VERSION as DEVPLAT_QUALITY_CONTROL_PLANE_CONTRACT_VERSION,
+    FEATURE_ID as DEVPLAT_QUALITY_CONTROL_PLANE_FEATURE_ID,
+    INPUT_SCHEMA as DEVPLAT_QUALITY_CONTROL_PLANE_INPUT_SCHEMA,
+    MAX_BATCH_OBJECTS as DEVPLAT_QUALITY_CONTROL_PLANE_MAX_BATCH_OBJECTS,
+    OUTPUT_SCHEMA as DEVPLAT_QUALITY_CONTROL_PLANE_OUTPUT_SCHEMA,
 };
 pub use release_pipeline::{
     EnvironmentClass, PipelineArtifact, PipelineArtifactKind, PipelineAttestation,
@@ -631,27 +655,4 @@ pub use workflow_reconciliation_registry::{
     DOMAIN_WORKFLOW_RECONCILIATION_REGISTRY_SCHEMA_VERSION,
     DOMAIN_WORKFLOW_RECONCILIATION_SUMMARY_SCHEMA_VERSION, MAX_DOMAIN_WORKFLOW_RECONCILIATIONS,
     MAX_DOMAIN_WORKFLOW_RECONCILIATION_BYTES, MAX_DOMAIN_WORKFLOW_RECONCILIATION_QUERY_ITEMS,
-};
-pub use multimodal_limitation_closure_assurance::{
-    assure_devplat_multimodal_limitation_closure,
-    devplat_multimodal_limitation_closure_manifest,
-    DevplatClosureError, DevplatClosureReceipt7, DevplatLimitationCase2,
-    Limitation6, LimitationClosureDisposition,
-    CONTRACT_VERSION as DEVPLAT_MULTIMODAL_LIMITATION_CLOSURE_CONTRACT_VERSION,
-    FEATURE_ID as DEVPLAT_MULTIMODAL_LIMITATION_CLOSURE_FEATURE_ID,
-};
-pub use quality_control_federated_control_plane::{
-    assure_devplat_quality_control_federated_control_plane,
-    devplat_quality_control_federated_control_plane_manifest,
-    QualityAssuranceError as DevplatQualityControlPlaneError,
-    QualityControlRequest5 as DevplatQualityBatchRequest5,
-    QualityVerdict7 as DevplatQualityControlPlaneReceipt7,
-    QualityVerdictDisposition as DevplatQualityDisposition,
-    ResearchObject4 as DevplatQualityObservation4,
-    CONTENT_TYPE as DEVPLAT_QUALITY_CONTROL_PLANE_CONTENT_TYPE,
-    CONTRACT_VERSION as DEVPLAT_QUALITY_CONTROL_PLANE_CONTRACT_VERSION,
-    FEATURE_ID as DEVPLAT_QUALITY_CONTROL_PLANE_FEATURE_ID,
-    INPUT_SCHEMA as DEVPLAT_QUALITY_CONTROL_PLANE_INPUT_SCHEMA,
-    MAX_BATCH_OBJECTS as DEVPLAT_QUALITY_CONTROL_PLANE_MAX_BATCH_OBJECTS,
-    OUTPUT_SCHEMA as DEVPLAT_QUALITY_CONTROL_PLANE_OUTPUT_SCHEMA,
 };

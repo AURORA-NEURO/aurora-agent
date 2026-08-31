@@ -9,8 +9,8 @@
 
 use bioprism_foundation::{
     AuthorityRequirement, AutonomyTier, CapabilityManifest, Determinism, Effect, EvidenceReference,
-    EvidenceState, ProvenanceLink, ResearchSurface, SemanticLoss, TypedPort,
-    TypedResearchArtifact, PRECLINICAL_BOUNDARY, RESEARCH_CONTRACT_SCHEMA_VERSION,
+    EvidenceState, ProvenanceLink, ResearchSurface, SemanticLoss, TypedPort, TypedResearchArtifact,
+    PRECLINICAL_BOUNDARY, RESEARCH_CONTRACT_SCHEMA_VERSION,
 };
 use bioprism_ids::ContentHash;
 use serde::{Deserialize, Serialize};
@@ -149,12 +149,25 @@ impl ExecutionInteroperabilityEnvelope {
                 ));
             }
         }
-        let required = self.required_capability_order.iter().collect::<BTreeSet<_>>();
-        let offered = self.offered_capability_order.iter().collect::<BTreeSet<_>>();
-        let missing = self.missing_capability_order.iter().collect::<BTreeSet<_>>();
+        let required = self
+            .required_capability_order
+            .iter()
+            .collect::<BTreeSet<_>>();
+        let offered = self
+            .offered_capability_order
+            .iter()
+            .collect::<BTreeSet<_>>();
+        let missing = self
+            .missing_capability_order
+            .iter()
+            .collect::<BTreeSet<_>>();
         if required.len() != self.required_capability_order.len()
             || offered.len() != self.offered_capability_order.len()
-            || missing != required.difference(&offered).cloned().collect::<BTreeSet<_>>()
+            || missing
+                != required
+                    .difference(&offered)
+                    .cloned()
+                    .collect::<BTreeSet<_>>()
         {
             return Err(ExecutionInteroperabilityError::Invalid(
                 "capability closure is not a disjoint required/offered/missing partition".into(),
@@ -306,10 +319,7 @@ pub fn assure(
             "artifact identity, schema, semantic/replay binding, provenance, locality, permission, or effect scope is invalid".into(),
         ));
     }
-    let missing = required
-        .difference(&offered)
-        .cloned()
-        .collect::<Vec<_>>();
+    let missing = required.difference(&offered).cloned().collect::<Vec<_>>();
     let mut violations = BTreeSet::new();
     let mut omissions = request
         .artifact
@@ -520,7 +530,9 @@ mod tests {
         value.offered_capability_order.pop();
         let report = assure(&value).unwrap();
         assert_eq!(report.disposition, "unresolved");
-        assert!(report.missing_capability_order.contains(&"replay-verify".into()));
+        assert!(report
+            .missing_capability_order
+            .contains(&"replay-verify".into()));
     }
 
     #[test]
@@ -529,7 +541,10 @@ mod tests {
         value.artifact.evidence_state = EvidenceState::Unknown;
         let report = assure(&value).unwrap();
         assert_eq!(report.disposition, "unresolved");
-        assert!(report.uncertainty.iter().any(|item| item.contains("evidence-state")));
+        assert!(report
+            .uncertainty
+            .iter()
+            .any(|item| item.contains("evidence-state")));
     }
 
     #[test]
@@ -540,7 +555,10 @@ mod tests {
         let report = assure(&value).unwrap();
         assert_eq!(report.disposition, "blocked");
         assert_eq!(report.effect_receipts, vec!["block:unsafe-release"]);
-        assert!(report.negative_evidence.iter().any(|item| item.contains("contradicted")));
+        assert!(report
+            .negative_evidence
+            .iter()
+            .any(|item| item.contains("contradicted")));
     }
 
     #[test]
@@ -549,7 +567,10 @@ mod tests {
         value.adversarial_events = vec!["poisoned-artifact".into()];
         let report = assure(&value).unwrap();
         assert_eq!(report.disposition, "blocked");
-        assert!(report.omissions.iter().any(|item| item.contains("adversarial")));
+        assert!(report
+            .omissions
+            .iter()
+            .any(|item| item.contains("adversarial")));
     }
 
     #[test]

@@ -1,3 +1,5 @@
+#![allow(ambiguous_glob_reexports)]
+
 //! Data infrastructure: the part of blueprint section 12 that `bioprism-ledger` and
 //! `bioprism-store` do not already own.
 //!
@@ -174,29 +176,29 @@ pub mod backup;
 pub mod cache;
 pub mod epoch;
 pub mod error;
+pub mod federated_continual_reliability_integrity_contract_model;
+pub mod federated_continual_reliability_integrity_inference;
+pub mod federated_continual_reliability_integrity_research_copilot;
+pub mod federated_continual_reliability_integrity_workflow_fabric;
 pub mod index;
 pub mod invalidation;
 pub mod lifecycle;
+pub mod local_reliability_integrity_contract_model;
+pub mod local_reliability_integrity_inference;
+pub mod local_reliability_integrity_research_copilot;
+pub mod local_reliability_integrity_workflow_fabric;
+pub mod multimodal_reliability_integrity_contract_model;
+pub mod multimodal_reliability_integrity_inference;
+pub mod multimodal_reliability_integrity_research_copilot;
+pub mod multimodal_reliability_integrity_workflow_fabric;
 pub mod quality;
 pub mod quota;
-pub mod tiering;
 pub mod reliability_integrity_support;
-pub mod local_reliability_integrity_inference;
-pub mod multimodal_reliability_integrity_inference;
-pub mod throughput_reliability_integrity_inference;
-pub mod federated_continual_reliability_integrity_inference;
-pub mod local_reliability_integrity_contract_model;
-pub mod multimodal_reliability_integrity_contract_model;
 pub mod throughput_reliability_integrity_contract_model;
-pub mod federated_continual_reliability_integrity_contract_model;
-pub mod local_reliability_integrity_research_copilot;
-pub mod multimodal_reliability_integrity_research_copilot;
+pub mod throughput_reliability_integrity_inference;
 pub mod throughput_reliability_integrity_research_copilot;
-pub mod federated_continual_reliability_integrity_research_copilot;
-pub mod local_reliability_integrity_workflow_fabric;
-pub mod multimodal_reliability_integrity_workflow_fabric;
 pub mod throughput_reliability_integrity_workflow_fabric;
-pub mod federated_continual_reliability_integrity_workflow_fabric;
+pub mod tiering;
 
 pub use backup::{BackedUpItem, BackupClass, BackupSet, RestoreReport, RestoreVerdict};
 pub use cache::{
@@ -208,6 +210,10 @@ pub use error::{
     BackupError, CacheError, IndexError, InvalidationError, LifecycleError, QualityError,
     QuotaError,
 };
+pub use federated_continual_reliability_integrity_contract_model::*;
+pub use federated_continual_reliability_integrity_inference::*;
+pub use federated_continual_reliability_integrity_research_copilot::*;
+pub use federated_continual_reliability_integrity_workflow_fabric::*;
 pub use index::{CandidateId, Freshness, IndexAnswer, Projection};
 pub use invalidation::{
     Completeness, DependencyDeclaration, DependencyGraph, InvalidationPlan, ResourceId,
@@ -217,29 +223,25 @@ pub use lifecycle::{
     Classification, DeletionBasis, Durability, GcPolicy, GcReport, Lifecycle, LocalLayout,
     ObjectId, ObjectRecord, Residency, StorageArea, Tombstone,
 };
+pub use local_reliability_integrity_contract_model::*;
+pub use local_reliability_integrity_inference::*;
+pub use local_reliability_integrity_research_copilot::*;
+pub use local_reliability_integrity_workflow_fabric::*;
+pub use multimodal_reliability_integrity_contract_model::*;
+pub use multimodal_reliability_integrity_inference::*;
+pub use multimodal_reliability_integrity_research_copilot::*;
+pub use multimodal_reliability_integrity_workflow_fabric::*;
 pub use quality::{
     Check, CheckOutcome, Dataset, Gate, GateReport, GateVerdict, NotRunnable, ReferenceSets,
     Witness,
 };
 pub use quota::{Purpose, StorageClass, StorageQuota};
-pub use tiering::{AccessRecord, Tier, TierReason, TierTransition, TieringPlan, TieringPolicy};
 pub use reliability_integrity_support::*;
-pub use local_reliability_integrity_inference::*;
-pub use multimodal_reliability_integrity_inference::*;
-pub use throughput_reliability_integrity_inference::*;
-pub use federated_continual_reliability_integrity_inference::*;
-pub use local_reliability_integrity_contract_model::*;
-pub use multimodal_reliability_integrity_contract_model::*;
 pub use throughput_reliability_integrity_contract_model::*;
-pub use federated_continual_reliability_integrity_contract_model::*;
-pub use local_reliability_integrity_research_copilot::*;
-pub use multimodal_reliability_integrity_research_copilot::*;
+pub use throughput_reliability_integrity_inference::*;
 pub use throughput_reliability_integrity_research_copilot::*;
-pub use federated_continual_reliability_integrity_research_copilot::*;
-pub use local_reliability_integrity_workflow_fabric::*;
-pub use multimodal_reliability_integrity_workflow_fabric::*;
 pub use throughput_reliability_integrity_workflow_fabric::*;
-pub use federated_continual_reliability_integrity_workflow_fabric::*;
+pub use tiering::{AccessRecord, Tier, TierReason, TierTransition, TieringPlan, TieringPolicy};
 
 #[doc(inline)]
 pub use bioprism_ledger::RetentionWindow;

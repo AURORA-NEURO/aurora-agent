@@ -372,7 +372,11 @@ impl CliError {
             ProjectError::Adapter(adapter) => {
                 let code = match &adapter {
                     AdapterError::Io { .. } => ExitCode::Io,
-                    AdapterError::UnsupportedSource { .. }
+                    AdapterError::InvalidSource(_)
+                    | AdapterError::InvalidLoss(_)
+                    | AdapterError::TraversalLimit { .. }
+                    | AdapterError::Conformance(_)
+                    | AdapterError::UnsupportedSource { .. }
                     | AdapterError::UnsupportedFormat { .. }
                     | AdapterError::Csv(_)
                     | AdapterError::AmbiguousIdentity { .. }

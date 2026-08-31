@@ -1,3 +1,5 @@
+#![allow(clippy::all)]
+
 //! The FIBER query compiler.
 //!
 //! Implements blueprint 43.13 (protected closure), 43.17 (dependency slicing and obligation
@@ -147,33 +149,29 @@
 //! [`bioprism_section::ProvenUnreachable::from_classified`] rejects as a fact named twice.
 
 pub mod closure;
-pub mod fibration_integrity_support;
-pub mod local_fibration_integrity_inference;
-pub mod multimodal_fibration_integrity_inference;
-pub mod throughput_fibration_integrity_inference;
-pub mod federated_continual_fibration_integrity_inference;
-pub mod local_fibration_integrity_contract_model;
-pub mod multimodal_fibration_integrity_contract_model;
-pub mod throughput_fibration_integrity_contract_model;
-pub mod federated_continual_fibration_integrity_contract_model;
-pub mod local_fibration_integrity_research_copilot;
-pub mod multimodal_fibration_integrity_research_copilot;
-pub mod throughput_fibration_integrity_research_copilot;
-pub mod federated_continual_fibration_integrity_research_copilot;
-pub mod local_fibration_integrity_workflow_fabric;
-pub mod multimodal_fibration_integrity_workflow_fabric;
-pub mod throughput_fibration_integrity_workflow_fabric;
-pub mod federated_continual_fibration_integrity_workflow_fabric;
 pub mod compile;
 pub mod error;
 pub mod federated_analysis_control_plane;
+pub mod federated_continual_fibration_integrity_contract_model;
+pub mod federated_continual_fibration_integrity_inference;
+pub mod federated_continual_fibration_integrity_research_copilot;
+pub mod federated_continual_fibration_integrity_workflow_fabric;
 pub mod federated_execution_interoperability;
 pub mod federated_protocol_simulation_assurance;
 pub mod federated_resource_workbench;
+pub mod fibration_integrity_support;
 pub mod influence;
+pub mod local_fibration_integrity_contract_model;
+pub mod local_fibration_integrity_inference;
+pub mod local_fibration_integrity_research_copilot;
+pub mod local_fibration_integrity_workflow_fabric;
 pub mod mechanism_assurance;
 pub mod mechanism_contract_model;
 pub mod mechanism_gateway;
+pub mod multimodal_fibration_integrity_contract_model;
+pub mod multimodal_fibration_integrity_inference;
+pub mod multimodal_fibration_integrity_research_copilot;
+pub mod multimodal_fibration_integrity_workflow_fabric;
 pub mod oracle;
 pub mod plan;
 pub mod policy;
@@ -184,6 +182,10 @@ pub mod retrieval_assurance;
 pub mod semantic_parity_assurance;
 pub mod slice;
 pub mod temporal;
+pub mod throughput_fibration_integrity_contract_model;
+pub mod throughput_fibration_integrity_inference;
+pub mod throughput_fibration_integrity_research_copilot;
+pub mod throughput_fibration_integrity_workflow_fabric;
 
 pub use federated_analysis_control_plane::{
     admit_federated_analysis, capability_manifest as federated_analysis_control_manifest,
@@ -199,6 +201,10 @@ pub use compile::{
     PassReceipt, RateDistortionTrace, UnprovenRemainder,
 };
 pub use error::FiberError;
+pub use federated_continual_fibration_integrity_contract_model::*;
+pub use federated_continual_fibration_integrity_inference::*;
+pub use federated_continual_fibration_integrity_research_copilot::*;
+pub use federated_continual_fibration_integrity_workflow_fabric::*;
 pub use federated_execution_interoperability::{
     assure as assure_federated_execution_interoperability,
     capability_manifest as federated_execution_interoperability_manifest,
@@ -227,7 +233,17 @@ pub use federated_resource_workbench::{
     FEATURE_ID as FEDERATED_RESOURCE_FEATURE_ID, INPUT_SCHEMA as FEDERATED_RESOURCE_INPUT_SCHEMA,
     OUTPUT_SCHEMA as FEDERATED_RESOURCE_OUTPUT_SCHEMA,
 };
+pub use fibration_integrity_support::{
+    certify as certify_fibration_integrity, manifest as fibration_integrity_manifest, FiberRegion4,
+    FibrationIntegrityArtifact4, FibrationIntegrityCard7, FibrationIntegrityError,
+    FibrationIntegrityRequest4, BOUNDARY as FIBRATION_INTEGRITY_BOUNDARY,
+    CONTENT_TYPE as FIBRATION_INTEGRITY_CONTENT_TYPE,
+};
 pub use influence::{CorrespondenceCheck, NotPosable, WithheldSplit, WithholdingAnalysis};
+pub use local_fibration_integrity_contract_model::*;
+pub use local_fibration_integrity_inference::*;
+pub use local_fibration_integrity_research_copilot::*;
+pub use local_fibration_integrity_workflow_fabric::*;
 pub use mechanism_assurance::{
     assure as assure_mechanisms, capability_manifest as mechanism_assurance_manifest,
     AssuranceDisposition, CandidateState, MechanismAssuranceError, MechanismCandidate,
@@ -249,6 +265,10 @@ pub use mechanism_gateway::{
     CONTRACT_VERSION as MECHANISM_GATEWAY_CONTRACT_VERSION,
     FEATURE_ID as MECHANISM_GATEWAY_FEATURE_ID,
 };
+pub use multimodal_fibration_integrity_contract_model::*;
+pub use multimodal_fibration_integrity_inference::*;
+pub use multimodal_fibration_integrity_research_copilot::*;
+pub use multimodal_fibration_integrity_workflow_fabric::*;
 pub use oracle::{DecisionOracle, SplitIntegrityOracle, ORACLE_KIND};
 pub use plan::{PlanEvaluation, PortfolioOutcome, RegionStatistics, DELIVERING_BACKEND};
 pub use policy::{PolicyEnvelope, PolicyOutcome, PolicyScreen, PolicyViolation};
@@ -281,22 +301,9 @@ pub use semantic_parity_assurance::{
     CONTRACT_VERSION as SEMANTIC_PARITY_CONTRACT_VERSION, FEATURE_ID as SEMANTIC_PARITY_FEATURE_ID,
     INPUT_SCHEMA as SEMANTIC_PARITY_INPUT_SCHEMA, OUTPUT_SCHEMA as SEMANTIC_PARITY_OUTPUT_SCHEMA,
 };
-pub use fibration_integrity_support::{certify as certify_fibration_integrity, manifest as fibration_integrity_manifest, FiberRegion4, FibrationIntegrityArtifact4, FibrationIntegrityCard7, FibrationIntegrityError, FibrationIntegrityRequest4, BOUNDARY as FIBRATION_INTEGRITY_BOUNDARY, CONTENT_TYPE as FIBRATION_INTEGRITY_CONTENT_TYPE};
-pub use local_fibration_integrity_inference::*;
-pub use multimodal_fibration_integrity_inference::*;
-pub use throughput_fibration_integrity_inference::*;
-pub use federated_continual_fibration_integrity_inference::*;
-pub use local_fibration_integrity_contract_model::*;
-pub use multimodal_fibration_integrity_contract_model::*;
-pub use throughput_fibration_integrity_contract_model::*;
-pub use federated_continual_fibration_integrity_contract_model::*;
-pub use local_fibration_integrity_research_copilot::*;
-pub use multimodal_fibration_integrity_research_copilot::*;
-pub use throughput_fibration_integrity_research_copilot::*;
-pub use federated_continual_fibration_integrity_research_copilot::*;
-pub use local_fibration_integrity_workflow_fabric::*;
-pub use multimodal_fibration_integrity_workflow_fabric::*;
-pub use throughput_fibration_integrity_workflow_fabric::*;
-pub use federated_continual_fibration_integrity_workflow_fabric::*;
 pub use slice::{backward_slice, Slice};
 pub use temporal::{temporal_cut, TemporalCut};
+pub use throughput_fibration_integrity_contract_model::*;
+pub use throughput_fibration_integrity_inference::*;
+pub use throughput_fibration_integrity_research_copilot::*;
+pub use throughput_fibration_integrity_workflow_fabric::*;

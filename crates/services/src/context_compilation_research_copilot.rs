@@ -6,9 +6,9 @@
 //! omission-aware admission boundary that an agent and a downstream workflow can replay.
 
 use bioprism_foundation::{
-    AuthorityRequirement, AutonomyTier, CapabilityManifest, Determinism, Effect,
-    EvidenceReference, EvidenceState, ProvenanceLink, ResearchSurface, SemanticLoss, TypedPort,
-    TypedResearchArtifact, PRECLINICAL_BOUNDARY, RESEARCH_CONTRACT_SCHEMA_VERSION,
+    AuthorityRequirement, AutonomyTier, CapabilityManifest, Determinism, Effect, EvidenceReference,
+    EvidenceState, ProvenanceLink, ResearchSurface, SemanticLoss, TypedPort, TypedResearchArtifact,
+    PRECLINICAL_BOUNDARY, RESEARCH_CONTRACT_SCHEMA_VERSION,
 };
 use bioprism_ids::ContentHash;
 use serde::{Deserialize, Serialize};
@@ -17,7 +17,8 @@ use std::collections::BTreeSet;
 use thiserror::Error;
 
 pub const FEATURE_ID: &str = "AFA-services-P03-F12";
-pub const CONTRACT_VERSION: &str = "services-federated-continual-context-compilation-research-copilot/1.0";
+pub const CONTRACT_VERSION: &str =
+    "services-federated-continual-context-compilation-research-copilot/1.0";
 pub const INPUT_SCHEMA: &str = "DecisionQuery4@1";
 pub const OUTPUT_SCHEMA: &str = "CertifiedDecisionSection3@1";
 pub const CONTENT_TYPE: &str = "application/vnd.aurora.certified-decision-section-3+json";
@@ -136,7 +137,9 @@ impl CertifiedDecisionSection3 {
             || self.query_order.is_empty()
             || self.effect_receipts.is_empty()
         {
-            return Err(invalid("decision-section identity, required axes, locality, or effects are incomplete"));
+            return Err(invalid(
+                "decision-section identity, required axes, locality, or effects are incomplete",
+            ));
         }
         for values in [
             &self.required_query_order,
@@ -168,23 +171,47 @@ impl CertifiedDecisionSection3 {
         if all.len() != self.query_order.len()
             || parts.len() + self.missing_query_order.len() != all.len()
             || !parts.is_disjoint(&self.missing_query_order.iter().cloned().collect())
-            || parts.union(&self.missing_query_order.iter().cloned().collect()).cloned().collect::<BTreeSet<_>>() != all
+            || parts
+                .union(&self.missing_query_order.iter().cloned().collect())
+                .cloned()
+                .collect::<BTreeSet<_>>()
+                != all
         {
             return Err(invalid("query states do not form a complete partition"));
         }
-        let required_queries = self.required_query_order.iter().cloned().collect::<BTreeSet<_>>();
-        let missing_queries = self.missing_query_order.iter().cloned().collect::<BTreeSet<_>>();
+        let required_queries = self
+            .required_query_order
+            .iter()
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        let missing_queries = self
+            .missing_query_order
+            .iter()
+            .cloned()
+            .collect::<BTreeSet<_>>();
         if !missing_queries.is_subset(&required_queries) {
             return Err(invalid("missing query state is outside required queries"));
         }
-        let required_studies = self.required_study_order.iter().cloned().collect::<BTreeSet<_>>();
-        if !self.missing_study_order.iter().all(|id| required_studies.contains(id)) {
+        let required_studies = self
+            .required_study_order
+            .iter()
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        if !self
+            .missing_study_order
+            .iter()
+            .all(|id| required_studies.contains(id))
+        {
             return Err(invalid("missing study state is outside required studies"));
         }
-        if !valid_digest(&self.compilation_digest) || self.artifact.content_hash != self.compilation_digest {
+        if !valid_digest(&self.compilation_digest)
+            || self.artifact.content_hash != self.compilation_digest
+        {
             return Err(invalid("compilation digest is invalid or inconsistent"));
         }
-        self.artifact.validate_metadata().map_err(|error| ContextCompilationError::Artifact(error.to_string()))?;
+        self.artifact
+            .validate_metadata()
+            .map_err(|error| ContextCompilationError::Artifact(error.to_string()))?;
         if self.artifact.content_type != CONTENT_TYPE {
             return Err(invalid("decision-section artifact content type is invalid"));
         }
@@ -208,8 +235,11 @@ impl CertifiedDecisionSection3 {
 
     pub fn digest(&self) -> Result<ContentHash, ContextCompilationError> {
         self.validate()?;
-        ContentHash::of_value(&serde_json::to_value(self).map_err(|error| ContextCompilationError::Artifact(error.to_string()))?)
-            .map_err(|error| ContextCompilationError::Artifact(error.to_string()))
+        ContentHash::of_value(
+            &serde_json::to_value(self)
+                .map_err(|error| ContextCompilationError::Artifact(error.to_string()))?,
+        )
+        .map_err(|error| ContextCompilationError::Artifact(error.to_string()))
     }
 }
 
@@ -244,7 +274,10 @@ pub fn compile_context_compilation(
     validate_request(request)?;
     let mut queries = request.queries.clone();
     queries.sort_by(|left, right| left.query_id.cmp(&right.query_id));
-    let query_order = queries.iter().map(|query| query.query_id.clone()).collect::<Vec<_>>();
+    let query_order = queries
+        .iter()
+        .map(|query| query.query_id.clone())
+        .collect::<Vec<_>>();
     let mut selected = BTreeSet::new();
     let mut unresolved = BTreeSet::new();
     let mut blocked = BTreeSet::new();
@@ -258,43 +291,116 @@ pub fn compile_context_compilation(
             omissions.insert(format!("{}:permission-or-locality", query.query_id));
         } else if query.replay_identity != request.replay_identity
             || !query.influence_complete
-            || !matches!(query.evidence_state, EvidenceState::Proven | EvidenceState::Supported)
+            || !matches!(
+                query.evidence_state,
+                EvidenceState::Proven | EvidenceState::Supported
+            )
         {
             unresolved.insert(query.query_id.clone());
-            if query.replay_identity != request.replay_identity { uncertainty.insert(format!("{}:replay-mismatch", query.query_id)); }
-            if !query.influence_complete { uncertainty.insert(format!("{}:influence-unmeasured", query.query_id)); }
-            if !matches!(query.evidence_state, EvidenceState::Proven | EvidenceState::Supported) { uncertainty.insert(format!("{}:evidence-state", query.query_id)); }
+            if query.replay_identity != request.replay_identity {
+                uncertainty.insert(format!("{}:replay-mismatch", query.query_id));
+            }
+            if !query.influence_complete {
+                uncertainty.insert(format!("{}:influence-unmeasured", query.query_id));
+            }
+            if !matches!(
+                query.evidence_state,
+                EvidenceState::Proven | EvidenceState::Supported
+            ) {
+                uncertainty.insert(format!("{}:evidence-state", query.query_id));
+            }
         } else {
             selected.insert(query.query_id.clone());
             selected_studies.insert(query.study_id.clone());
         }
-        omissions.extend(query.omission_order.iter().map(|item| format!("{}:{item}", query.query_id)));
-        uncertainty.extend(query.uncertainty_order.iter().map(|item| format!("{}:{item}", query.query_id)));
-        if query.negative_result { negative.insert(format!("{}:negative-result", query.query_id)); }
+        omissions.extend(
+            query
+                .omission_order
+                .iter()
+                .map(|item| format!("{}:{item}", query.query_id)),
+        );
+        uncertainty.extend(
+            query
+                .uncertainty_order
+                .iter()
+                .map(|item| format!("{}:{item}", query.query_id)),
+        );
+        if query.negative_result {
+            negative.insert(format!("{}:negative-result", query.query_id));
+        }
     }
-    let required_queries = request.required_query_order.iter().cloned().collect::<BTreeSet<_>>();
-    let missing_queries = required_queries.difference(&query_order.iter().cloned().collect()).cloned().collect::<BTreeSet<_>>();
-    let required_studies = request.required_study_order.iter().cloned().collect::<BTreeSet<_>>();
-    let missing_studies = required_studies.difference(&selected_studies).cloned().collect::<BTreeSet<_>>();
-    omissions.extend(missing_queries.iter().map(|id| format!("query:{id}:missing")));
-    omissions.extend(missing_studies.iter().map(|id| format!("study:{id}:missing")));
-    uncertainty.extend(request.adversarial_events.iter().map(|event| format!("adversarial:{event}")));
-    let global_block = !request.policy_allow || !request.protected_closure || !request.signed_approval || !request.agent_authorized || !request.raw_data_local || !request.aggregate_only || !request.adversarial_events.is_empty();
+    let required_queries = request
+        .required_query_order
+        .iter()
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    let missing_queries = required_queries
+        .difference(&query_order.iter().cloned().collect())
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    let required_studies = request
+        .required_study_order
+        .iter()
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    let missing_studies = required_studies
+        .difference(&selected_studies)
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    omissions.extend(
+        missing_queries
+            .iter()
+            .map(|id| format!("query:{id}:missing")),
+    );
+    omissions.extend(
+        missing_studies
+            .iter()
+            .map(|id| format!("study:{id}:missing")),
+    );
+    uncertainty.extend(
+        request
+            .adversarial_events
+            .iter()
+            .map(|event| format!("adversarial:{event}")),
+    );
+    let global_block = !request.policy_allow
+        || !request.protected_closure
+        || !request.signed_approval
+        || !request.agent_authorized
+        || !request.raw_data_local
+        || !request.aggregate_only
+        || !request.adversarial_events.is_empty();
     if global_block {
         blocked.extend(query_order.iter().cloned());
         selected.clear();
         unresolved.clear();
         omissions.insert("request:release-gate-blocked".into());
     }
-    let disposition = if global_block { CompilationDisposition::Blocked } else if selected.is_empty() || !missing_queries.is_empty() || !missing_studies.is_empty() { CompilationDisposition::Unresolved } else { CompilationDisposition::Qualified };
-    if disposition != CompilationDisposition::Qualified { omissions.insert("request:decision-section-not-release-ready".into()); }
+    let disposition = if global_block {
+        CompilationDisposition::Blocked
+    } else if selected.is_empty() || !missing_queries.is_empty() || !missing_studies.is_empty() {
+        CompilationDisposition::Unresolved
+    } else {
+        CompilationDisposition::Qualified
+    };
+    if disposition != CompilationDisposition::Qualified {
+        omissions.insert("request:decision-section-not-release-ready".into());
+    }
     let selected_order = selected.into_iter().collect::<Vec<_>>();
     let unresolved_order = unresolved.into_iter().collect::<Vec<_>>();
     let blocked_order = blocked.into_iter().collect::<Vec<_>>();
     let missing_query_order = missing_queries.into_iter().collect::<Vec<_>>();
     let missing_study_order = missing_studies.into_iter().collect::<Vec<_>>();
-    let decision_section_order = if disposition == CompilationDisposition::Qualified { selected_order.clone() } else { Vec::new() };
-    let effect_receipts = if disposition == CompilationDisposition::Qualified { vec![format!("invoke:declared-tool:{}", request.request_id)] } else { vec!["block:unsafe-release".into()] };
+    let decision_section_order = if disposition == CompilationDisposition::Qualified {
+        selected_order.clone()
+    } else {
+        Vec::new()
+    };
+    let effect_receipts = if disposition == CompilationDisposition::Qualified {
+        vec![format!("invoke:declared-tool:{}", request.request_id)]
+    } else {
+        vec!["block:unsafe-release".into()]
+    };
     let payload = json!({
         "schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION, "contract_version": CONTRACT_VERSION, "feature_id": FEATURE_ID,
         "request_id": request.request_id, "researcher": request.researcher, "semantic_profile": request.semantic_profile,
@@ -304,34 +410,143 @@ pub fn compile_context_compilation(
         "omission_order": omissions, "uncertainty_order": uncertainty, "negative_evidence_order": negative, "effect_receipts": effect_receipts,
         "raw_data_local": request.raw_data_local, "aggregate_only": request.aggregate_only, "boundary": PRECLINICAL_BOUNDARY,
     });
-    let compilation_digest = ContentHash::of_value(&payload).map_err(|error| ContextCompilationError::Artifact(error.to_string()))?;
-    let artifact = TypedResearchArtifact::from_payload(format!("certified-decision-section:{}", request.request_id), CONTENT_TYPE, &payload, vec![SemanticLoss { field: "omission_order".into(), reason: "omissions remain explicit rather than being silently filled".into(), severity: bioprism_foundation::LossSeverity::Bounded }], vec![ProvenanceLink { source_id: request.request_id.clone(), relation: "compiled-from-decision-query".into(), digest: compilation_digest.clone() }]).map_err(|error| ContextCompilationError::Artifact(error.to_string()))?;
+    let compilation_digest = ContentHash::of_value(&payload)
+        .map_err(|error| ContextCompilationError::Artifact(error.to_string()))?;
+    let artifact = TypedResearchArtifact::from_payload(
+        format!("certified-decision-section:{}", request.request_id),
+        CONTENT_TYPE,
+        &payload,
+        vec![SemanticLoss {
+            field: "omission_order".into(),
+            reason: "omissions remain explicit rather than being silently filled".into(),
+            severity: bioprism_foundation::LossSeverity::Bounded,
+        }],
+        vec![ProvenanceLink {
+            source_id: request.request_id.clone(),
+            relation: "compiled-from-decision-query".into(),
+            digest: compilation_digest.clone(),
+        }],
+    )
+    .map_err(|error| ContextCompilationError::Artifact(error.to_string()))?;
     let receipt = CertifiedDecisionSection3 {
-        schema_version: RESEARCH_CONTRACT_SCHEMA_VERSION.into(), contract_version: CONTRACT_VERSION.into(), feature_id: FEATURE_ID.into(),
-        request_id: request.request_id.clone(), researcher: request.researcher.clone(), semantic_profile: request.semantic_profile.clone(), disposition,
-        required_query_order: request.required_query_order.clone(), required_study_order: request.required_study_order.clone(), query_order,
-        selected_query_order: payload["selected_query_order"].as_array().unwrap().iter().map(|v| v.as_str().unwrap().into()).collect(),
-        unresolved_query_order: payload["unresolved_query_order"].as_array().unwrap().iter().map(|v| v.as_str().unwrap().into()).collect(),
-        blocked_query_order: payload["blocked_query_order"].as_array().unwrap().iter().map(|v| v.as_str().unwrap().into()).collect(),
-        missing_query_order: payload["missing_query_order"].as_array().unwrap().iter().map(|v| v.as_str().unwrap().into()).collect(),
-        missing_study_order: payload["missing_study_order"].as_array().unwrap().iter().map(|v| v.as_str().unwrap().into()).collect(),
-        decision_section_order: payload["decision_section_order"].as_array().unwrap().iter().map(|v| v.as_str().unwrap().into()).collect(),
-        omission_order: payload["omission_order"].as_array().unwrap().iter().map(|v| v.as_str().unwrap().into()).collect(),
-        uncertainty_order: payload["uncertainty_order"].as_array().unwrap().iter().map(|v| v.as_str().unwrap().into()).collect(),
-        negative_evidence_order: payload["negative_evidence_order"].as_array().unwrap().iter().map(|v| v.as_str().unwrap().into()).collect(),
-        compilation_digest, artifact,
-        effect_receipts: payload["effect_receipts"].as_array().unwrap().iter().map(|v| v.as_str().unwrap().into()).collect(),
-        raw_data_local: request.raw_data_local, aggregate_only: request.aggregate_only, boundary: PRECLINICAL_BOUNDARY.into(),
+        schema_version: RESEARCH_CONTRACT_SCHEMA_VERSION.into(),
+        contract_version: CONTRACT_VERSION.into(),
+        feature_id: FEATURE_ID.into(),
+        request_id: request.request_id.clone(),
+        researcher: request.researcher.clone(),
+        semantic_profile: request.semantic_profile.clone(),
+        disposition,
+        required_query_order: request.required_query_order.clone(),
+        required_study_order: request.required_study_order.clone(),
+        query_order,
+        selected_query_order: payload["selected_query_order"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap().into())
+            .collect(),
+        unresolved_query_order: payload["unresolved_query_order"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap().into())
+            .collect(),
+        blocked_query_order: payload["blocked_query_order"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap().into())
+            .collect(),
+        missing_query_order: payload["missing_query_order"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap().into())
+            .collect(),
+        missing_study_order: payload["missing_study_order"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap().into())
+            .collect(),
+        decision_section_order: payload["decision_section_order"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap().into())
+            .collect(),
+        omission_order: payload["omission_order"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap().into())
+            .collect(),
+        uncertainty_order: payload["uncertainty_order"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap().into())
+            .collect(),
+        negative_evidence_order: payload["negative_evidence_order"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap().into())
+            .collect(),
+        compilation_digest,
+        artifact,
+        effect_receipts: payload["effect_receipts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap().into())
+            .collect(),
+        raw_data_local: request.raw_data_local,
+        aggregate_only: request.aggregate_only,
+        boundary: PRECLINICAL_BOUNDARY.into(),
     };
     receipt.validate()?;
     Ok(receipt)
 }
 
 fn validate_request(request: &ContextCompilationRequest) -> Result<(), ContextCompilationError> {
-    if request.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION || request.request_id.trim().is_empty() || request.researcher.trim().is_empty() || request.semantic_profile.trim().is_empty() || request.required_query_order.is_empty() || request.required_study_order.is_empty() || !canonical(&request.required_query_order) || !canonical(&request.required_study_order) || request.queries.is_empty() || !canonical(&request.adversarial_events) || !valid_digest(&request.replay_identity) || !request.raw_data_local || !request.aggregate_only || request.boundary != PRECLINICAL_BOUNDARY { return Err(invalid("decision-query identity, axes, replay, locality, or boundary is invalid")); }
+    if request.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION
+        || request.request_id.trim().is_empty()
+        || request.researcher.trim().is_empty()
+        || request.semantic_profile.trim().is_empty()
+        || request.required_query_order.is_empty()
+        || request.required_study_order.is_empty()
+        || !canonical(&request.required_query_order)
+        || !canonical(&request.required_study_order)
+        || request.queries.is_empty()
+        || !canonical(&request.adversarial_events)
+        || !valid_digest(&request.replay_identity)
+        || !request.raw_data_local
+        || !request.aggregate_only
+        || request.boundary != PRECLINICAL_BOUNDARY
+    {
+        return Err(invalid(
+            "decision-query identity, axes, replay, locality, or boundary is invalid",
+        ));
+    }
     let mut ids = BTreeSet::new();
     for query in &request.queries {
-        if query.query_id.trim().is_empty() || query.study_id.trim().is_empty() || query.intent.trim().is_empty() || !ids.insert(query.query_id.clone()) || !valid_digest(&query.context_digest) || !valid_digest(&query.evidence_digest) || !valid_digest(&query.provenance_digest) || !valid_digest(&query.replay_identity) || !canonical(&query.omission_order) || !canonical(&query.uncertainty_order) { return Err(invalid(format!("decision query {} is malformed or duplicated", query.query_id))); }
+        if query.query_id.trim().is_empty()
+            || query.study_id.trim().is_empty()
+            || query.intent.trim().is_empty()
+            || !ids.insert(query.query_id.clone())
+            || !valid_digest(&query.context_digest)
+            || !valid_digest(&query.evidence_digest)
+            || !valid_digest(&query.provenance_digest)
+            || !valid_digest(&query.replay_identity)
+            || !canonical(&query.omission_order)
+            || !canonical(&query.uncertainty_order)
+        {
+            return Err(invalid(format!(
+                "decision query {} is malformed or duplicated",
+                query.query_id
+            )));
+        }
     }
     Ok(())
 }
@@ -339,16 +554,102 @@ fn validate_request(request: &ContextCompilationRequest) -> Result<(), ContextCo
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn hash(value: &str) -> ContentHash { ContentHash::of_bytes(value.as_bytes()) }
-    fn request() -> ContextCompilationRequest {
-        let query = |id: &str, study: &str| DecisionQuery4 { query_id: id.into(), study_id: study.into(), intent: format!("intent:{id}"), context_digest: hash(id), evidence_digest: hash("evidence"), provenance_digest: hash("provenance"), replay_identity: hash("replay"), evidence_state: EvidenceState::Supported, influence_complete: true, policy_allow: true, permitted: true, local_only: true, aggregate_only: true, omission_order: Vec::new(), uncertainty_order: Vec::new(), negative_result: false };
-        ContextCompilationRequest { schema_version: RESEARCH_CONTRACT_SCHEMA_VERSION.into(), request_id: "context-request".into(), researcher: "workflow-operator".into(), semantic_profile: "decision-context:v1".into(), required_query_order: vec!["query:a".into(), "query:b".into()], required_study_order: vec!["study:a".into(), "study:b".into()], queries: vec![query("query:a", "study:a"), query("query:b", "study:b")], replay_identity: hash("replay"), policy_allow: true, protected_closure: true, signed_approval: true, agent_authorized: true, raw_data_local: true, aggregate_only: true, adversarial_events: Vec::new(), boundary: PRECLINICAL_BOUNDARY.into() }
+    fn hash(value: &str) -> ContentHash {
+        ContentHash::of_bytes(value.as_bytes())
     }
-    #[test] fn manifest_is_a2() { assert_eq!(context_compilation_research_copilot_manifest().autonomy_tier, AutonomyTier::A2); }
-    #[test] fn qualified_context_is_deterministic() { let receipt = compile_context_compilation(&request()).unwrap(); assert_eq!(receipt.disposition, CompilationDisposition::Qualified); assert_eq!(receipt.decision_section_order.len(), 2); assert_eq!(receipt.digest().unwrap(), receipt.digest().unwrap()); }
-    #[test] fn missing_query_is_unresolved() { let mut req = request(); req.queries.pop(); let receipt = compile_context_compilation(&req).unwrap(); assert_eq!(receipt.disposition, CompilationDisposition::Unresolved); assert!(receipt.missing_query_order.contains(&"query:b".into())); }
-    #[test] fn denied_query_is_blocked() { let mut req = request(); req.queries[0].permitted = false; let receipt = compile_context_compilation(&req).unwrap(); assert!(receipt.blocked_query_order.contains(&"query:a".into())); assert_eq!(receipt.disposition, CompilationDisposition::Unresolved); }
-    #[test] fn adversarial_request_blocks_all() { let mut req = request(); req.adversarial_events = vec!["prompt-injection".into()]; let receipt = compile_context_compilation(&req).unwrap(); assert_eq!(receipt.disposition, CompilationDisposition::Blocked); assert!(receipt.selected_query_order.is_empty()); }
-    #[test] fn negative_result_is_preserved() { let mut req = request(); req.queries[0].negative_result = true; let receipt = compile_context_compilation(&req).unwrap(); assert!(receipt.negative_evidence_order.contains(&"query:a:negative-result".into())); }
-    #[test] fn replay_mismatch_is_unresolved() { let mut req = request(); req.queries[0].replay_identity = hash("other"); let receipt = compile_context_compilation(&req).unwrap(); assert!(receipt.unresolved_query_order.contains(&"query:a".into())); assert!(receipt.uncertainty_order.contains(&"query:a:replay-mismatch".into())); }
+    fn request() -> ContextCompilationRequest {
+        let query = |id: &str, study: &str| DecisionQuery4 {
+            query_id: id.into(),
+            study_id: study.into(),
+            intent: format!("intent:{id}"),
+            context_digest: hash(id),
+            evidence_digest: hash("evidence"),
+            provenance_digest: hash("provenance"),
+            replay_identity: hash("replay"),
+            evidence_state: EvidenceState::Supported,
+            influence_complete: true,
+            policy_allow: true,
+            permitted: true,
+            local_only: true,
+            aggregate_only: true,
+            omission_order: Vec::new(),
+            uncertainty_order: Vec::new(),
+            negative_result: false,
+        };
+        ContextCompilationRequest {
+            schema_version: RESEARCH_CONTRACT_SCHEMA_VERSION.into(),
+            request_id: "context-request".into(),
+            researcher: "workflow-operator".into(),
+            semantic_profile: "decision-context:v1".into(),
+            required_query_order: vec!["query:a".into(), "query:b".into()],
+            required_study_order: vec!["study:a".into(), "study:b".into()],
+            queries: vec![query("query:a", "study:a"), query("query:b", "study:b")],
+            replay_identity: hash("replay"),
+            policy_allow: true,
+            protected_closure: true,
+            signed_approval: true,
+            agent_authorized: true,
+            raw_data_local: true,
+            aggregate_only: true,
+            adversarial_events: Vec::new(),
+            boundary: PRECLINICAL_BOUNDARY.into(),
+        }
+    }
+    #[test]
+    fn manifest_is_a2() {
+        assert_eq!(
+            context_compilation_research_copilot_manifest().autonomy_tier,
+            AutonomyTier::A2
+        );
+    }
+    #[test]
+    fn qualified_context_is_deterministic() {
+        let receipt = compile_context_compilation(&request()).unwrap();
+        assert_eq!(receipt.disposition, CompilationDisposition::Qualified);
+        assert_eq!(receipt.decision_section_order.len(), 2);
+        assert_eq!(receipt.digest().unwrap(), receipt.digest().unwrap());
+    }
+    #[test]
+    fn missing_query_is_unresolved() {
+        let mut req = request();
+        req.queries.pop();
+        let receipt = compile_context_compilation(&req).unwrap();
+        assert_eq!(receipt.disposition, CompilationDisposition::Unresolved);
+        assert!(receipt.missing_query_order.contains(&"query:b".into()));
+    }
+    #[test]
+    fn denied_query_is_blocked() {
+        let mut req = request();
+        req.queries[0].permitted = false;
+        let receipt = compile_context_compilation(&req).unwrap();
+        assert!(receipt.blocked_query_order.contains(&"query:a".into()));
+        assert_eq!(receipt.disposition, CompilationDisposition::Unresolved);
+    }
+    #[test]
+    fn adversarial_request_blocks_all() {
+        let mut req = request();
+        req.adversarial_events = vec!["prompt-injection".into()];
+        let receipt = compile_context_compilation(&req).unwrap();
+        assert_eq!(receipt.disposition, CompilationDisposition::Blocked);
+        assert!(receipt.selected_query_order.is_empty());
+    }
+    #[test]
+    fn negative_result_is_preserved() {
+        let mut req = request();
+        req.queries[0].negative_result = true;
+        let receipt = compile_context_compilation(&req).unwrap();
+        assert!(receipt
+            .negative_evidence_order
+            .contains(&"query:a:negative-result".into()));
+    }
+    #[test]
+    fn replay_mismatch_is_unresolved() {
+        let mut req = request();
+        req.queries[0].replay_identity = hash("other");
+        let receipt = compile_context_compilation(&req).unwrap();
+        assert!(receipt.unresolved_query_order.contains(&"query:a".into()));
+        assert!(receipt
+            .uncertainty_order
+            .contains(&"query:a:replay-mismatch".into()));
+    }
 }

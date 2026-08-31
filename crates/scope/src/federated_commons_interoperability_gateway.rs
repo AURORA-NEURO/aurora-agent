@@ -295,7 +295,7 @@ pub fn operate_federated_scope_interoperability_gateway(
             "request identity, manifests, bounds, replay, locality, or boundary is invalid".into(),
         ));
     }
-    let mut candidate_order = request
+    let candidate_order = request
         .artifacts
         .iter()
         .map(|a| a.artifact_id.clone())

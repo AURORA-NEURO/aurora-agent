@@ -5,10 +5,9 @@
 //! influence estimate into a scientific conclusion.
 
 use bioprism_foundation::{
-    AuthorityRequirement, AutonomyTier, CapabilityManifest, Determinism, Effect,
-    EvidenceReference, EvidenceState, LossSeverity, ProvenanceLink, ResearchSurface,
-    SemanticLoss, TypedPort, TypedResearchArtifact, PRECLINICAL_BOUNDARY,
-    RESEARCH_CONTRACT_SCHEMA_VERSION,
+    AuthorityRequirement, AutonomyTier, CapabilityManifest, Determinism, Effect, EvidenceReference,
+    EvidenceState, LossSeverity, ProvenanceLink, ResearchSurface, SemanticLoss, TypedPort,
+    TypedResearchArtifact, PRECLINICAL_BOUNDARY, RESEARCH_CONTRACT_SCHEMA_VERSION,
 };
 use bioprism_ids::ContentHash;
 use serde::{Deserialize, Serialize};
@@ -236,7 +235,9 @@ pub fn capability_manifest() -> CapabilityManifest {
     }
 }
 
-pub fn operate(request: &FederatedMechanismControlRequest) -> Result<FederatedMechanismReceipt, FederatedMechanismError> {
+pub fn operate(
+    request: &FederatedMechanismControlRequest,
+) -> Result<FederatedMechanismReceipt, FederatedMechanismError> {
     if request.request_id.trim().is_empty()
         || request.federation_id.trim().is_empty()
         || request.purpose.trim().is_empty()
@@ -249,17 +250,36 @@ pub fn operate(request: &FederatedMechanismControlRequest) -> Result<FederatedMe
         || !request.raw_data_local
         || request.boundary != PRECLINICAL_BOUNDARY
     {
-        return Err(FederatedMechanismError::Invalid("identity, quorum, capacity, checkpoint, candidates, locality, or boundary is invalid".into()));
+        return Err(FederatedMechanismError::Invalid(
+            "identity, quorum, capacity, checkpoint, candidates, locality, or boundary is invalid"
+                .into(),
+        ));
     }
     let mut candidates = request.candidates.clone();
     candidates.sort_by(|left, right| left.mechanism_id.cmp(&right.mechanism_id));
-    let mechanism_order = candidates.iter().map(|candidate| candidate.mechanism_id.clone()).collect::<Vec<_>>();
-    if mechanism_order.iter().any(|id| id.trim().is_empty()) || mechanism_order.windows(2).any(|window| window[0] == window[1]) {
-        return Err(FederatedMechanismError::Invalid("mechanism identifiers must be unique and non-empty".into()));
+    let mechanism_order = candidates
+        .iter()
+        .map(|candidate| candidate.mechanism_id.clone())
+        .collect::<Vec<_>>();
+    if mechanism_order.iter().any(|id| id.trim().is_empty())
+        || mechanism_order
+            .windows(2)
+            .any(|window| window[0] == window[1])
+    {
+        return Err(FederatedMechanismError::Invalid(
+            "mechanism identifiers must be unique and non-empty".into(),
+        ));
     }
-    let origins = candidates.iter().map(|candidate| candidate.origin.clone()).collect::<BTreeSet<_>>();
-    if origins.iter().any(|origin| origin.trim().is_empty()) || origins.len() < request.required_origin_quorum as usize {
-        return Err(FederatedMechanismError::Invalid("declared origin quorum is not available".into()));
+    let origins = candidates
+        .iter()
+        .map(|candidate| candidate.origin.clone())
+        .collect::<BTreeSet<_>>();
+    if origins.iter().any(|origin| origin.trim().is_empty())
+        || origins.len() < request.required_origin_quorum as usize
+    {
+        return Err(FederatedMechanismError::Invalid(
+            "declared origin quorum is not available".into(),
+        ));
     }
     let mut global_failed = BTreeSet::new();
     for (gate, failed) in [
@@ -267,9 +287,14 @@ pub fn operate(request: &FederatedMechanismControlRequest) -> Result<FederatedMe
         ("protected-closure", !request.protected_closure),
         ("signed-approval", !request.signed_approval),
         ("network-permission", !request.network_permitted),
-        ("origin-quorum", origins.len() < request.required_origin_quorum as usize),
+        (
+            "origin-quorum",
+            origins.len() < request.required_origin_quorum as usize,
+        ),
     ] {
-        if failed { global_failed.insert(gate.to_string()); }
+        if failed {
+            global_failed.insert(gate.to_string());
+        }
     }
     let mut admitted = Vec::new();
     let mut conditional = Vec::new();
@@ -284,35 +309,168 @@ pub fn operate(request: &FederatedMechanismControlRequest) -> Result<FederatedMe
     for candidate in &candidates {
         let mut failed = global_failed.clone();
         let mut pending = BTreeSet::new();
-        if candidate.semantic_profile != request.semantic_profile { failed.insert("semantic-profile".into()); }
-        if candidate.replay_identity != request.replay_identity { failed.insert("replay-identity".into()); }
-        if !candidate.policy_allow { failed.insert("candidate-policy".into()); }
-        if !candidate.protected_closure { failed.insert("candidate-protected-closure".into()); }
-        if !candidate.signed_approval { failed.insert("candidate-signed-approval".into()); }
-        if !candidate.oracle_verified { failed.insert("oracle-verification".into()); }
-        if !candidate.raw_data_local { failed.insert("candidate-locality".into()); }
-        let score = candidate.support_score_milli + (candidate.oracle_verified as i64 * 20_000) + (candidate.freshness_seq.min(20) as i64 * 100) - (candidate.omission_count.min(20) as i64 * 200);
+        if candidate.semantic_profile != request.semantic_profile {
+            failed.insert("semantic-profile".into());
+        }
+        if candidate.replay_identity != request.replay_identity {
+            failed.insert("replay-identity".into());
+        }
+        if !candidate.policy_allow {
+            failed.insert("candidate-policy".into());
+        }
+        if !candidate.protected_closure {
+            failed.insert("candidate-protected-closure".into());
+        }
+        if !candidate.signed_approval {
+            failed.insert("candidate-signed-approval".into());
+        }
+        if !candidate.oracle_verified {
+            failed.insert("oracle-verification".into());
+        }
+        if !candidate.raw_data_local {
+            failed.insert("candidate-locality".into());
+        }
+        let score = candidate.support_score_milli
+            + (candidate.oracle_verified as i64 * 20_000)
+            + (candidate.freshness_seq.min(20) as i64 * 100)
+            - (candidate.omission_count.min(20) as i64 * 200);
         scores.insert(candidate.mechanism_id.clone(), score);
         match candidate.evidence_state {
-            EvidenceState::Contradicted => { failed.insert("contradicted-evidence".into()); negative.insert(format!("{}:contradicted", candidate.mechanism_id)); }
-            EvidenceState::Unknown | EvidenceState::Speculative => { pending.insert("evidence-state".into()); uncertainty.insert(format!("{}:evidence-state", candidate.mechanism_id)); }
+            EvidenceState::Contradicted => {
+                failed.insert("contradicted-evidence".into());
+                negative.insert(format!("{}:contradicted", candidate.mechanism_id));
+            }
+            EvidenceState::Unknown | EvidenceState::Speculative => {
+                pending.insert("evidence-state".into());
+                uncertainty.insert(format!("{}:evidence-state", candidate.mechanism_id));
+            }
             EvidenceState::Proven | EvidenceState::Supported => {}
         }
-        if candidate.omission_count > 0 { pending.insert("omission-closure".into()); omissions.insert(format!("{}:omissions={}", candidate.mechanism_id, candidate.omission_count)); }
-        negative.insert(format!("{}:{}", candidate.mechanism_id, if candidate.negative_result { "negative-result" } else { "negative-result-not-observed" }));
-        let disposition = if !failed.is_empty() { blocked.push(candidate.mechanism_id.clone()); "blocked" } else if !pending.is_empty() { conditional.push(candidate.mechanism_id.clone()); "conditional" } else { admitted.push(candidate.mechanism_id.clone()); "admitted" };
-        if disposition == "blocked" { semantic_loss.push(SemanticLoss { field: format!("mechanism:{}", candidate.mechanism_id), reason: "mechanism attestation failed one or more federation gates".into(), severity: LossSeverity::DecisionRelevant }); }
-        decisions.push(MechanismDecision { mechanism_id: candidate.mechanism_id.clone(), origin: candidate.origin.clone(), support_score_milli: candidate.support_score_milli, disposition: disposition.into(), failed_gates: failed.into_iter().collect(), conditional_gates: pending.into_iter().collect(), negative_result: candidate.negative_result });
+        if candidate.omission_count > 0 {
+            pending.insert("omission-closure".into());
+            omissions.insert(format!(
+                "{}:omissions={}",
+                candidate.mechanism_id, candidate.omission_count
+            ));
+        }
+        negative.insert(format!(
+            "{}:{}",
+            candidate.mechanism_id,
+            if candidate.negative_result {
+                "negative-result"
+            } else {
+                "negative-result-not-observed"
+            }
+        ));
+        let disposition = if !failed.is_empty() {
+            blocked.push(candidate.mechanism_id.clone());
+            "blocked"
+        } else if !pending.is_empty() {
+            conditional.push(candidate.mechanism_id.clone());
+            "conditional"
+        } else {
+            admitted.push(candidate.mechanism_id.clone());
+            "admitted"
+        };
+        if disposition == "blocked" {
+            semantic_loss.push(SemanticLoss {
+                field: format!("mechanism:{}", candidate.mechanism_id),
+                reason: "mechanism attestation failed one or more federation gates".into(),
+                severity: LossSeverity::DecisionRelevant,
+            });
+        }
+        decisions.push(MechanismDecision {
+            mechanism_id: candidate.mechanism_id.clone(),
+            origin: candidate.origin.clone(),
+            support_score_milli: candidate.support_score_milli,
+            disposition: disposition.into(),
+            failed_gates: failed.into_iter().collect(),
+            conditional_gates: pending.into_iter().collect(),
+            negative_result: candidate.negative_result,
+        });
     }
-    let rank_order = { let mut ranked = mechanism_order.clone(); ranked.sort_by(|left, right| scores[right].cmp(&scores[left]).then_with(|| left.cmp(right))); ranked };
-    let admitted_origins = candidates.iter().filter(|candidate| admitted.contains(&candidate.mechanism_id)).map(|candidate| candidate.origin.clone()).collect::<BTreeSet<_>>();
-    let admission = if !global_failed.is_empty() || !blocked.is_empty() { FederatedMechanismAdmission::Blocked } else if !conditional.is_empty() { FederatedMechanismAdmission::ApprovalRequired } else if admitted.is_empty() { FederatedMechanismAdmission::Unknown } else { FederatedMechanismAdmission::Admitted };
+    let rank_order = {
+        let mut ranked = mechanism_order.clone();
+        ranked.sort_by(|left, right| {
+            scores[right]
+                .cmp(&scores[left])
+                .then_with(|| left.cmp(right))
+        });
+        ranked
+    };
+    let admitted_origins = candidates
+        .iter()
+        .filter(|candidate| admitted.contains(&candidate.mechanism_id))
+        .map(|candidate| candidate.origin.clone())
+        .collect::<BTreeSet<_>>();
+    let admission = if !global_failed.is_empty() || !blocked.is_empty() {
+        FederatedMechanismAdmission::Blocked
+    } else if !conditional.is_empty() {
+        FederatedMechanismAdmission::ApprovalRequired
+    } else if admitted.is_empty() {
+        FederatedMechanismAdmission::Unknown
+    } else {
+        FederatedMechanismAdmission::Admitted
+    };
     let checkpoint_digest = ContentHash::of_value(&json!({"federation_id": request.federation_id, "checkpoint_seq": request.checkpoint_seq, "mechanism_order": mechanism_order, "origin_order": origins})).map_err(|error| FederatedMechanismError::Artifact(error.to_string()))?;
     let control_digest = ContentHash::of_value(&json!({"admission": admission, "rank_order": rank_order, "decisions": decisions, "semantic_loss": semantic_loss})).map_err(|error| FederatedMechanismError::Artifact(error.to_string()))?;
     let payload = json!({"schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION, "contract_version": FEATURE_VERSION, "feature_id": FEATURE_ID, "request_id": request.request_id, "federation_id": request.federation_id, "purpose": request.purpose, "semantic_profile": request.semantic_profile, "admission": admission, "mechanism_order": mechanism_order, "rank_order": rank_order, "decisions": decisions, "checkpoint_digest": checkpoint_digest, "control_digest": control_digest, "replay_identity": request.replay_identity, "boundary": PRECLINICAL_BOUNDARY});
-    let artifact = TypedResearchArtifact::from_payload(format!("federated-mechanism-control:{}", request.request_id), "application/vnd.aurora.federated-mechanism-portfolio+json", &payload, semantic_loss.clone(), vec![ProvenanceLink { source_id: request.federation_id.clone(), relation: "federated-mechanism-control".into(), digest: control_digest.clone() }]).map_err(|error| FederatedMechanismError::Artifact(error.to_string()))?;
-    let effect_receipts = match admission { FederatedMechanismAdmission::Admitted => vec![format!("operate:mechanism:{}", request.federation_id)], FederatedMechanismAdmission::ApprovalRequired => vec!["approval-required:mechanism".into(), "block:unsafe-release".into()], _ => vec!["block:unsafe-release".into()] };
-    let receipt = FederatedMechanismReceipt { schema_version: RESEARCH_CONTRACT_SCHEMA_VERSION.into(), contract_version: FEATURE_VERSION.into(), feature_id: FEATURE_ID.into(), request_id: request.request_id.clone(), federation_id: request.federation_id.clone(), purpose: request.purpose.clone(), semantic_profile: request.semantic_profile.clone(), admission, origin_order: origins.into_iter().collect(), admitted_origin_order: admitted_origins.into_iter().collect(), mechanism_order: candidates.iter().map(|candidate| candidate.mechanism_id.clone()).collect(), rank_order, admitted_order: admitted, conditional_order: conditional, blocked_order: blocked, unknown_order: unknown, decisions, checkpoint_seq: request.checkpoint_seq, checkpoint_digest, control_digest, replay_identity: request.replay_identity.clone(), semantic_loss, omissions: omissions.into_iter().collect(), uncertainty: uncertainty.into_iter().collect(), negative_evidence: negative.into_iter().collect(), effect_receipts, artifact, raw_data_local: request.raw_data_local, boundary: PRECLINICAL_BOUNDARY.into() };
+    let artifact = TypedResearchArtifact::from_payload(
+        format!("federated-mechanism-control:{}", request.request_id),
+        "application/vnd.aurora.federated-mechanism-portfolio+json",
+        &payload,
+        semantic_loss.clone(),
+        vec![ProvenanceLink {
+            source_id: request.federation_id.clone(),
+            relation: "federated-mechanism-control".into(),
+            digest: control_digest.clone(),
+        }],
+    )
+    .map_err(|error| FederatedMechanismError::Artifact(error.to_string()))?;
+    let effect_receipts = match admission {
+        FederatedMechanismAdmission::Admitted => {
+            vec![format!("operate:mechanism:{}", request.federation_id)]
+        }
+        FederatedMechanismAdmission::ApprovalRequired => vec![
+            "approval-required:mechanism".into(),
+            "block:unsafe-release".into(),
+        ],
+        _ => vec!["block:unsafe-release".into()],
+    };
+    let receipt = FederatedMechanismReceipt {
+        schema_version: RESEARCH_CONTRACT_SCHEMA_VERSION.into(),
+        contract_version: FEATURE_VERSION.into(),
+        feature_id: FEATURE_ID.into(),
+        request_id: request.request_id.clone(),
+        federation_id: request.federation_id.clone(),
+        purpose: request.purpose.clone(),
+        semantic_profile: request.semantic_profile.clone(),
+        admission,
+        origin_order: origins.into_iter().collect(),
+        admitted_origin_order: admitted_origins.into_iter().collect(),
+        mechanism_order: candidates
+            .iter()
+            .map(|candidate| candidate.mechanism_id.clone())
+            .collect(),
+        rank_order,
+        admitted_order: admitted,
+        conditional_order: conditional,
+        blocked_order: blocked,
+        unknown_order: unknown,
+        decisions,
+        checkpoint_seq: request.checkpoint_seq,
+        checkpoint_digest,
+        control_digest,
+        replay_identity: request.replay_identity.clone(),
+        semantic_loss,
+        omissions: omissions.into_iter().collect(),
+        uncertainty: uncertainty.into_iter().collect(),
+        negative_evidence: negative.into_iter().collect(),
+        effect_receipts,
+        artifact,
+        raw_data_local: request.raw_data_local,
+        boundary: PRECLINICAL_BOUNDARY.into(),
+    };
     receipt.validate()?;
     Ok(receipt)
 }
@@ -320,12 +478,98 @@ pub fn operate(request: &FederatedMechanismControlRequest) -> Result<FederatedMe
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn hash() -> ContentHash { ContentHash::of_bytes(b"federated-mechanism") }
-    fn candidate(id: &str, origin: &str, state: EvidenceState) -> MechanismCandidate { MechanismCandidate { mechanism_id: id.into(), origin: origin.into(), scope: "preclinical".into(), semantic_profile: "mechanism-v1".into(), support_score_milli: 5000, evidence_digest: hash(), provenance_digest: hash(), replay_identity: hash(), evidence_state: state, freshness_seq: 2, omission_count: 0, policy_allow: true, protected_closure: true, signed_approval: true, oracle_verified: true, raw_data_local: true, negative_result: false } }
-    fn request() -> FederatedMechanismControlRequest { FederatedMechanismControlRequest { request_id: "request:mechanism".into(), federation_id: "federation:mechanism".into(), purpose: "mechanism-exploration".into(), semantic_profile: "mechanism-v1".into(), required_origin_quorum: 2, capacity: 4, active_runs: 1, checkpoint_seq: 1, candidates: vec![candidate("m1", "site-a", EvidenceState::Supported), candidate("m2", "site-b", EvidenceState::Supported)], policy_allow: true, protected_closure: true, signed_approval: true, network_permitted: true, raw_data_local: true, replay_identity: hash(), boundary: PRECLINICAL_BOUNDARY.into() } }
-    #[test] fn manifest_is_a2_and_operator_facing() { assert_eq!(capability_manifest().autonomy_tier, AutonomyTier::A2); assert!(capability_manifest().surfaces.contains(&ResearchSurface::Operator)); }
-    #[test] fn deterministic_rank_and_quorum() { let receipt = operate(&request()).unwrap(); assert_eq!(receipt.admission, FederatedMechanismAdmission::Admitted); assert_eq!(receipt.rank_order, vec!["m1", "m2"]); assert_eq!(receipt.digest().unwrap(), receipt.digest().unwrap()); }
-    #[test] fn unknown_is_approval_required() { let mut value = request(); value.candidates[0].evidence_state = EvidenceState::Unknown; let receipt = operate(&value).unwrap(); assert_eq!(receipt.admission, FederatedMechanismAdmission::ApprovalRequired); }
-    #[test] fn contradiction_and_policy_block() { let mut value = request(); value.candidates[0].evidence_state = EvidenceState::Contradicted; value.policy_allow = false; let receipt = operate(&value).unwrap(); assert_eq!(receipt.admission, FederatedMechanismAdmission::Blocked); assert!(receipt.negative_evidence.iter().any(|item| item.contains("contradicted"))); }
-    #[test] fn locality_and_approval_are_fail_closed() { let mut value = request(); value.candidates[0].raw_data_local = false; value.signed_approval = false; let receipt = operate(&value).unwrap(); assert_eq!(receipt.admission, FederatedMechanismAdmission::Blocked); assert!(receipt.effect_receipts.contains(&"block:unsafe-release".into())); }
+    fn hash() -> ContentHash {
+        ContentHash::of_bytes(b"federated-mechanism")
+    }
+    fn candidate(id: &str, origin: &str, state: EvidenceState) -> MechanismCandidate {
+        MechanismCandidate {
+            mechanism_id: id.into(),
+            origin: origin.into(),
+            scope: "preclinical".into(),
+            semantic_profile: "mechanism-v1".into(),
+            support_score_milli: 5000,
+            evidence_digest: hash(),
+            provenance_digest: hash(),
+            replay_identity: hash(),
+            evidence_state: state,
+            freshness_seq: 2,
+            omission_count: 0,
+            policy_allow: true,
+            protected_closure: true,
+            signed_approval: true,
+            oracle_verified: true,
+            raw_data_local: true,
+            negative_result: false,
+        }
+    }
+    fn request() -> FederatedMechanismControlRequest {
+        FederatedMechanismControlRequest {
+            request_id: "request:mechanism".into(),
+            federation_id: "federation:mechanism".into(),
+            purpose: "mechanism-exploration".into(),
+            semantic_profile: "mechanism-v1".into(),
+            required_origin_quorum: 2,
+            capacity: 4,
+            active_runs: 1,
+            checkpoint_seq: 1,
+            candidates: vec![
+                candidate("m1", "site-a", EvidenceState::Supported),
+                candidate("m2", "site-b", EvidenceState::Supported),
+            ],
+            policy_allow: true,
+            protected_closure: true,
+            signed_approval: true,
+            network_permitted: true,
+            raw_data_local: true,
+            replay_identity: hash(),
+            boundary: PRECLINICAL_BOUNDARY.into(),
+        }
+    }
+    #[test]
+    fn manifest_is_a2_and_operator_facing() {
+        assert_eq!(capability_manifest().autonomy_tier, AutonomyTier::A2);
+        assert!(capability_manifest()
+            .surfaces
+            .contains(&ResearchSurface::Operator));
+    }
+    #[test]
+    fn deterministic_rank_and_quorum() {
+        let receipt = operate(&request()).unwrap();
+        assert_eq!(receipt.admission, FederatedMechanismAdmission::Admitted);
+        assert_eq!(receipt.rank_order, vec!["m1", "m2"]);
+        assert_eq!(receipt.digest().unwrap(), receipt.digest().unwrap());
+    }
+    #[test]
+    fn unknown_is_approval_required() {
+        let mut value = request();
+        value.candidates[0].evidence_state = EvidenceState::Unknown;
+        let receipt = operate(&value).unwrap();
+        assert_eq!(
+            receipt.admission,
+            FederatedMechanismAdmission::ApprovalRequired
+        );
+    }
+    #[test]
+    fn contradiction_and_policy_block() {
+        let mut value = request();
+        value.candidates[0].evidence_state = EvidenceState::Contradicted;
+        value.policy_allow = false;
+        let receipt = operate(&value).unwrap();
+        assert_eq!(receipt.admission, FederatedMechanismAdmission::Blocked);
+        assert!(receipt
+            .negative_evidence
+            .iter()
+            .any(|item| item.contains("contradicted")));
+    }
+    #[test]
+    fn locality_and_approval_are_fail_closed() {
+        let mut value = request();
+        value.candidates[0].raw_data_local = false;
+        value.signed_approval = false;
+        let receipt = operate(&value).unwrap();
+        assert_eq!(receipt.admission, FederatedMechanismAdmission::Blocked);
+        assert!(receipt
+            .effect_receipts
+            .contains(&"block:unsafe-release".into()));
+    }
 }
