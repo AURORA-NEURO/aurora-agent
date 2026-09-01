@@ -319,6 +319,7 @@ pub fn implemented_feature_ids() -> Vec<&'static str> {
         crate::glioma::programs::p03_multimodal_ingestion_qc::spatial_niche::FEATURE_ID,
         crate::glioma::programs::p04_decision_context::context_compiler::FEATURE_ID,
         crate::glioma::programs::p05_mechanism_exploration::discrimination::FEATURE_ID,
+        crate::glioma::programs::p05_mechanism_exploration::graph_propagation::FEATURE_ID,
         crate::glioma::programs::p06_experiment_design::adaptive_allocation::FEATURE_ID,
         crate::glioma::programs::p06_experiment_design::dose_response::FEATURE_ID,
         crate::glioma::programs::p06_experiment_design::synergy::FEATURE_ID,

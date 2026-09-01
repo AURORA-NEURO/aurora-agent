@@ -69,6 +69,7 @@ fn main() {
                      glioma_multimodal_consensus, glioma_replication_meta_analyze,\n\
                      glioma_multimodal_harmonize, glioma_multimodal_latent_factors, glioma_spatial_niches, glioma_causal_sensitivity,\n\
                      glioma_mechanism_discriminate,\n\
+                     glioma_mechanism_graph_propagate,\n\
                      glioma_stratified_causal_adjustment,\n\
                      glioma_adaptive_allocation,\n\
                      glioma_evidence_surveillance,\n\

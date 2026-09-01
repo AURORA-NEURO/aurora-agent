@@ -60,10 +60,13 @@ pub use programs::p04_decision_context::{
     DecisionContextDisposition, DecisionContextError, DecisionContextRequest,
 };
 pub use programs::p05_mechanism_exploration::{
-    discriminate_mechanisms, MechanismDiscrimination, MechanismDiscriminationDisposition,
-    MechanismDiscriminationError, MechanismDiscriminationRanking, MechanismDiscriminationRequest,
-    MechanismDiscriminatorAction, MechanismFeatureObservation, MechanismHypothesis,
-    MechanismInformationGain, MechanismPrediction,
+    discriminate_mechanisms, propagate_glioma_mechanism_graph, MechanismDiscrimination,
+    MechanismDiscriminationDisposition, MechanismDiscriminationError,
+    MechanismDiscriminationRanking, MechanismDiscriminationRequest, MechanismDiscriminatorAction,
+    MechanismFeatureObservation, MechanismGraphDisposition, MechanismGraphEdge,
+    MechanismGraphError, MechanismGraphNode, MechanismGraphPropagation, MechanismGraphRelation,
+    MechanismGraphRequest, MechanismHypothesis, MechanismInformationGain, MechanismNodeScore,
+    MechanismPrediction,
 };
 pub use programs::p06_experiment_design::{
     allocate_glioma_assays, analyze_glioma_combination_synergy, analyze_glioma_dose_response,

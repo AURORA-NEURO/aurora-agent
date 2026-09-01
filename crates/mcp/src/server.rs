@@ -477,21 +477,23 @@ use bioprism_research::{
     design_preclinical_experiment, discriminate_mechanisms, dry_run_glioma_research,
     explore_mechanisms, generate_feature_catalog, glioma_program_catalog,
     harmonize_glioma_multimodal_batches, harmonize_multimodal_inputs, plan_glioma_workflow,
-    qualify_evidence, select_glioma_actions, simulate_glioma_protocol, surveil_glioma_evidence,
-    validate_feature_catalog, AdaptiveAllocationRequest, AdaptiveArmObservation, AnalysisDataset,
-    AnalysisRequest, CalibrationRequest, CalibrationRun, CausalContrastRequest,
-    CombinationObservation, CombinationSynergyRequest, ConcordanceRequest, ConsensusRequest,
-    DecisionContextRequest, DoseResponseObservation, DoseResponseRequest, EvidenceRecord,
-    EvidenceRequest, EvidenceSurveillanceRequest, ExperimentArm, ExperimentRequest,
-    FederatedBenchmarkRequest, FederatedBenchmarkSite, GliomaActionCandidate, GliomaResearchIntent,
-    GliomaWorkflowRequest, HarmonizationRequest, HarmonizationVector, KnowledgeRequest,
-    LatentFactorRequest, LatentFactorVector, MechanismCandidate, MechanismDiscriminationRequest,
-    MechanismDiscriminatorAction, MechanismFeatureObservation, MechanismHypothesis,
-    MechanismRequest, MetaAnalysisRequest, ModalityVector, MultimodalObservation,
-    MultimodalRequest, ProtocolSimulationRequest, ReplicationRequest, ReplicationStudy,
-    ResearchObjectRequest, RobustnessRequest, SensitivityObservation, SensitivityRequest,
-    SpatialCell, SpatialNicheRequest, StratifiedCausalRequest, StratifiedObservation,
-    TrajectoryObservation, TrajectoryRequest, TypedKnowledge,
+    propagate_glioma_mechanism_graph, qualify_evidence, select_glioma_actions,
+    simulate_glioma_protocol, surveil_glioma_evidence, validate_feature_catalog,
+    AdaptiveAllocationRequest, AdaptiveArmObservation, AnalysisDataset, AnalysisRequest,
+    CalibrationRequest, CalibrationRun, CausalContrastRequest, CombinationObservation,
+    CombinationSynergyRequest, ConcordanceRequest, ConsensusRequest, DecisionContextRequest,
+    DoseResponseObservation, DoseResponseRequest, EvidenceRecord, EvidenceRequest,
+    EvidenceSurveillanceRequest, ExperimentArm, ExperimentRequest, FederatedBenchmarkRequest,
+    FederatedBenchmarkSite, GliomaActionCandidate, GliomaResearchIntent, GliomaWorkflowRequest,
+    HarmonizationRequest, HarmonizationVector, KnowledgeRequest, LatentFactorRequest,
+    LatentFactorVector, MechanismCandidate, MechanismDiscriminationRequest,
+    MechanismDiscriminatorAction, MechanismFeatureObservation, MechanismGraphEdge,
+    MechanismGraphNode, MechanismGraphRequest, MechanismHypothesis, MechanismRequest,
+    MetaAnalysisRequest, ModalityVector, MultimodalObservation, MultimodalRequest,
+    ProtocolSimulationRequest, ReplicationRequest, ReplicationStudy, ResearchObjectRequest,
+    RobustnessRequest, SensitivityObservation, SensitivityRequest, SpatialCell,
+    SpatialNicheRequest, StratifiedCausalRequest, StratifiedObservation, TrajectoryObservation,
+    TrajectoryRequest, TypedKnowledge,
 };
 use bioprism_routing::{
     lab::{run as run_routing_lab, LabSettings, Task},
@@ -1952,6 +1954,7 @@ impl Server {
             "glioma_multimodal_qc" => self.glioma_multimodal_qc(&arguments),
             "glioma_mechanism_explore" => self.glioma_mechanism_explore(&arguments),
             "glioma_mechanism_discriminate" => self.glioma_mechanism_discriminate(&arguments),
+            "glioma_mechanism_graph_propagate" => self.glioma_mechanism_graph_propagate(&arguments),
             "glioma_instrument_calibration" => self.glioma_instrument_calibration(&arguments),
             "glioma_experiment_design" => self.glioma_experiment_design(&arguments),
             "glioma_analysis_run" => self.glioma_analysis_run(&arguments),
@@ -3798,6 +3801,46 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma mechanism discrimination: {error}"))
+    }
+
+    /// Propagate signed mechanistic support over a local preclinical glioma evidence graph. This
+    /// is a bounded fixed-point calculation only; it never executes an assay or makes a clinical
+    /// decision.
+    fn glioma_mechanism_graph_propagate(&self, arguments: &Value) -> Result<Value, String> {
+        let request: MechanismGraphRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_mechanism_graph_propagate requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma mechanism graph request: {error}"))?;
+        let nodes: Vec<MechanismGraphNode> = serde_json::from_value(
+            arguments
+                .get("nodes")
+                .cloned()
+                .ok_or_else(|| "glioma_mechanism_graph_propagate requires nodes".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma mechanism graph nodes: {error}"))?;
+        let edges: Vec<MechanismGraphEdge> = serde_json::from_value(
+            arguments
+                .get("edges")
+                .cloned()
+                .ok_or_else(|| "glioma_mechanism_graph_propagate requires edges".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma mechanism graph edges: {error}"))?;
+        let output = propagate_glioma_mechanism_graph(&request, &nodes, &edges)
+            .map_err(|error| format!("glioma mechanism graph propagation refused: {error}"))?;
+        serde_json::to_value(json!({
+            "propagation": output,
+            "dispatch": "not_started",
+            "guarantees": [
+                "activating and inhibiting edges propagate signed support with bounded fixed-point arithmetic",
+                "low-confidence edges, disconnected nodes, contradiction, and non-convergence remain visible",
+                "ranking is deterministic and top-k bounded without turning scores into claims of truth",
+                "the route produces local preclinical mechanism priorities only and never makes a clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma mechanism graph propagation: {error}"))
     }
 
     /// Detect instrument-control drift before a preclinical run is admitted. The calibration
@@ -44033,6 +44076,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_multimodal_qc",
                 "glioma_mechanism_explore",
                 "glioma_mechanism_discriminate",
+                "glioma_mechanism_graph_propagate",
                 "glioma_instrument_calibration",
                 "glioma_experiment_design",
                 "glioma_analysis_run",
@@ -51179,6 +51223,19 @@ pub fn tool_definitions() -> Vec<Value> {
                 "actions": {"type": "array", "items": {"type": "object"}, "description": "MechanismDiscriminatorAction1@1 candidate assays with per-mechanism predictions, cost, feasibility, and uncertainty."}
             },
             "required": ["request", "hypotheses", "observations", "actions"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_mechanism_graph_propagate",
+        "description": "Propagate signed mechanistic support over a local preclinical glioma evidence graph. Activating and inhibiting edges use bounded damped fixed-point diffusion; low-confidence edges, disconnected nodes, contradiction, and non-convergence remain explicit. It never executes an assay, moves raw data, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "MechanismGraphRequest1@1 with model binding, iteration/convergence bounds, damping, confidence floor, and top-k bound."},
+                "nodes": {"type": "array", "items": {"type": "object"}, "description": "MechanismGraphNode1@1 records with modality and direct support/contradiction scores."},
+                "edges": {"type": "array", "items": {"type": "object"}, "description": "MechanismGraphEdge1@1 signed activation/inhibition edges with confidence and evidence ids."}
+            },
+            "required": ["request", "nodes", "edges"]
         }
     }));
     definitions.push(json!({

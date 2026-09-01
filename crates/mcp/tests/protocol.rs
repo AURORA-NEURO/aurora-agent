@@ -314,7 +314,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 57;
-const TOOL_DEFINITION_COUNT: usize = 552;
+const TOOL_DEFINITION_COUNT: usize = 553;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -1064,6 +1064,43 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
     assert_eq!(
         mechanism_discrimination["discrimination"]["selected_action_order"][0],
         json!("perturb-f1")
+    );
+
+    let mechanism_graph = call(
+        &mut server,
+        "glioma_mechanism_graph_propagate",
+        json!({
+            "request": {
+                "objective": "propagate invasion mechanism support",
+                "model_system": "organoid",
+                "max_iterations": 100,
+                "convergence_tolerance_milli": 1,
+                "damping_milli": 600,
+                "min_edge_confidence_milli": 500,
+                "top_k": 3
+            },
+            "nodes": [
+                {"node_id":"egfr","label":"EGFR activation","modality":"genomics","prior_milli":100,"support_milli":800,"contradiction_milli":0},
+                {"node_id":"stat3","label":"STAT3 state","modality":"transcriptomics","prior_milli":0,"support_milli":400,"contradiction_milli":0},
+                {"node_id":"invasion","label":"invasion phenotype","modality":"functional_perturbation","prior_milli":0,"support_milli":0,"contradiction_milli":0}
+            ],
+            "edges": [
+                {"edge_id":"e-egfr-stat3","source_node_id":"egfr","target_node_id":"stat3","relation":"activates","confidence_milli":900,"evidence_order":["paper-1"]},
+                {"edge_id":"e-stat3-invasion","source_node_id":"stat3","target_node_id":"invasion","relation":"activates","confidence_milli":900,"evidence_order":["paper-2"]}
+            ]
+        }),
+    );
+    assert_eq!(mechanism_graph["dispatch"], json!("not_started"));
+    assert_eq!(
+        mechanism_graph["propagation"]["disposition"],
+        json!("qualified")
+    );
+    assert_eq!(
+        mechanism_graph["propagation"]["ranking_order"]
+            .as_array()
+            .unwrap()
+            .len(),
+        3
     );
 
     let instrument_calibration = call(
