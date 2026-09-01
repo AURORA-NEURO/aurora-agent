@@ -475,7 +475,7 @@ use bioprism_research::{
     build_research_object_manifest, compile_decision_context, compile_typed_knowledge,
     design_preclinical_experiment, discriminate_mechanisms, dry_run_glioma_research,
     explore_mechanisms, generate_feature_catalog, glioma_program_catalog,
-    analyze_glioma_latent_factors, harmonize_glioma_multimodal_batches,
+    analyze_causal_sensitivity, analyze_glioma_latent_factors, harmonize_glioma_multimodal_batches,
     harmonize_multimodal_inputs, plan_glioma_workflow,
     qualify_evidence, select_glioma_actions, simulate_glioma_protocol, surveil_glioma_evidence,
     validate_feature_catalog, AdaptiveAllocationRequest, AdaptiveArmObservation, AnalysisDataset,
@@ -485,7 +485,7 @@ use bioprism_research::{
     EvidenceRequest, EvidenceSurveillanceRequest, ExperimentArm, ExperimentRequest,
     FederatedBenchmarkRequest, FederatedBenchmarkSite, GliomaActionCandidate, GliomaResearchIntent,
     GliomaWorkflowRequest, HarmonizationRequest, HarmonizationVector, KnowledgeRequest,
-    LatentFactorRequest, LatentFactorVector,
+    LatentFactorRequest, LatentFactorVector, SensitivityObservation, SensitivityRequest,
     MechanismCandidate, MechanismDiscriminationRequest, MechanismDiscriminatorAction,
     MechanismFeatureObservation, MechanismHypothesis, MechanismRequest, MetaAnalysisRequest,
     ModalityVector, MultimodalObservation, MultimodalRequest, ProtocolSimulationRequest,
@@ -1943,6 +1943,7 @@ impl Server {
             "glioma_multimodal_latent_factors" => {
                 self.glioma_multimodal_latent_factors(&arguments)
             }
+            "glioma_causal_sensitivity" => self.glioma_causal_sensitivity(&arguments),
             "glioma_research_select_actions" => self.glioma_research_select_actions(&arguments),
             "glioma_program_catalog" => self.glioma_program_catalog(&arguments),
             "glioma_evidence_qualify" => self.glioma_evidence_qualify(&arguments),
@@ -3475,6 +3476,37 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma latent-factor analysis: {error}"))
+    }
+
+    /// Quantify the declared hidden-confounding budget at which a local preclinical effect tips.
+    fn glioma_causal_sensitivity(&self, arguments: &Value) -> Result<Value, String> {
+        let request: SensitivityRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_causal_sensitivity requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma causal-sensitivity request: {error}"))?;
+        let observations: Vec<SensitivityObservation> = serde_json::from_value(
+            arguments
+                .get("observations")
+                .cloned()
+                .ok_or_else(|| "glioma_causal_sensitivity requires observations".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma causal-sensitivity observations: {error}"))?;
+        let output = analyze_causal_sensitivity(&request, &observations)
+            .map_err(|error| format!("glioma causal-sensitivity analysis refused: {error}"))?;
+        serde_json::to_value(json!({
+            "analysis": output,
+            "dispatch": "not_started",
+            "guarantees": [
+                "declared confounder strength is swept with deterministic worst-case effect intervals",
+                "the exact threshold tipping point and maximum robust strength remain visible",
+                "leave-one-unit-out instability is reported rather than hidden",
+                "the route produces local preclinical interpretation only and never makes a clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma causal-sensitivity analysis: {error}"))
     }
 
     /// Choose a bounded next batch of local glioma actions. This only ranks typed candidates; it
@@ -43958,6 +43990,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_multimodal_consensus",
                 "glioma_multimodal_harmonize",
                 "glioma_multimodal_latent_factors",
+                "glioma_causal_sensitivity",
                 "glioma_research_select_actions",
                 "glioma_program_catalog",
                 "glioma_evidence_qualify",
@@ -50972,6 +51005,18 @@ pub fn tool_definitions() -> Vec<Value> {
                 "vectors": {"type": "array", "items": {"type": "object"}, "description": "Local LatentFactorVector1@1 values with de-identified sample lineages, modalities, feature values, and artifact references."}
             },
             "required": ["request", "vectors"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_causal_sensitivity",
+        "description": "Stress a local preclinical glioma arm contrast against a declared normalized hidden-confounder budget. Sweeps worst-case bias intervals, computes leave-one-unit-out instability, and reports the threshold tipping point and maximum robust strength; it never claims a confounder exists or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "SensitivityRequest1@1 with arm/model binding, expected direction, unit floor, effect threshold, and confounder-strength grid."},
+                "observations": {"type": "array", "items": {"type": "object"}, "description": "Local SensitivityObservation1@1 unit outcomes with normalized confounder scores in [-1000,1000] and artifact references."}
+            },
+            "required": ["request", "observations"]
         }
     }));
     definitions.push(json!({

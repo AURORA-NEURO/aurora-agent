@@ -60,6 +60,8 @@ crates/research/src/glioma/
                                              P10 exact pre/post difference-in-differences analysis
   p10_interpretation_replication/causal_adjustment.rs
                                              P10 stratified overlap-adjusted effect and leave-one-stratum influence
+  p10_interpretation_replication/sensitivity.rs
+                                             P10 hidden-confounding sensitivity sweep and causal tipping-point bounds
   p10_interpretation_replication/meta_analysis.rs
                                              P10 inverse-uncertainty replication meta-analysis and influence bounds
     p12_federated_benchmarking/consensus.rs
@@ -177,3 +179,6 @@ ceilings, and a hard next-batch budget.
 P10 also includes stratified causal adjustment (`analyze_stratified_causal_adjustment`) that
 collapses repeated measurements to units, requires positivity within confounder strata, computes
 pooled weighted contrasts, and exposes leave-one-stratum influence and missing coverage.
+P10 also includes causal sensitivity bounds (`analyze_causal_sensitivity`) that sweep a declared
+normalized hidden-confounder budget, expose worst-case threshold/sign intervals and exact tipping
+strength, and report leave-one-unit-out instability before a mechanism claim can be released.

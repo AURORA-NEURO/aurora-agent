@@ -314,7 +314,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 57;
-const TOOL_DEFINITION_COUNT: usize = 550;
+const TOOL_DEFINITION_COUNT: usize = 551;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -857,6 +857,40 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
     assert_eq!(
         latent_factors["analysis"]["components"][0]["component_index"],
         json!(0)
+    );
+
+    let sensitivity = call(
+        &mut server,
+        "glioma_causal_sensitivity",
+        json!({
+            "request": {
+                "objective": "stress the invasion mechanism effect",
+                "control_arm": "control",
+                "treatment_arm": "treated",
+                "model_system": "organoid",
+                "expected_direction": "positive",
+                "min_units_per_arm": 2,
+                "effect_threshold_milli": 100,
+                "max_confounder_strength_milli": 400,
+                "strength_step_milli": 100,
+                "max_leave_one_out_shift_milli": 100
+            },
+            "observations": [
+                {"observation_id":"ms-c1","unit_id":"ms-c1","arm_id":"control","model_system":"organoid","outcome_milli":100,"confounder_score_milli":-500,"artifact":{"artifact_id":"ms-a1","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-sensitivity+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"observation_id":"ms-c2","unit_id":"ms-c2","arm_id":"control","model_system":"organoid","outcome_milli":110,"confounder_score_milli":-400,"artifact":{"artifact_id":"ms-a2","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-sensitivity+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"observation_id":"ms-t1","unit_id":"ms-t1","arm_id":"treated","model_system":"organoid","outcome_milli":300,"confounder_score_milli":400,"artifact":{"artifact_id":"ms-a3","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-sensitivity+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"observation_id":"ms-t2","unit_id":"ms-t2","arm_id":"treated","model_system":"organoid","outcome_milli":310,"confounder_score_milli":500,"artifact":{"artifact_id":"ms-a4","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-sensitivity+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}}
+            ]
+        }),
+    );
+    assert_eq!(sensitivity["dispatch"], json!("not_started"));
+    assert_eq!(
+        sensitivity["analysis"]["tipping_strength_milli"],
+        json!(200)
+    );
+    assert_eq!(
+        sensitivity["analysis"]["disposition"],
+        json!("partial")
     );
 
     let consensus = call(

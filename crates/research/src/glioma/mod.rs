@@ -47,9 +47,9 @@ pub use programs::p03_multimodal_ingestion_qc::{
     ConcordanceError, ConcordanceRequest, ConsensusAssignment, ConsensusCluster,
     ConsensusDisposition, ConsensusError, ConsensusRequest, FeatureValue, HarmonizationDisposition,
     HarmonizationError, HarmonizationRequest, HarmonizationVector, HarmonizedFeature,
-    HarmonizedVector, ModalityConcordance, ModalityVector, MultimodalConcordance,
-    LatentFactorAnalysis, LatentFactorComponent, LatentFactorDisposition, LatentFactorError,
-    LatentFactorRequest, LatentFactorVector, LatentLoading, LatentScore, MultimodalConsensus,
+    HarmonizedVector, LatentFactorAnalysis, LatentFactorComponent, LatentFactorDisposition,
+    LatentFactorError, LatentFactorRequest, LatentFactorVector, LatentLoading, LatentScore,
+    ModalityConcordance, ModalityVector, MultimodalConcordance, MultimodalConsensus,
     MultimodalHarmonization, PairConcordanceDisposition,
 };
 pub use programs::p04_decision_context::{
@@ -86,14 +86,17 @@ pub use programs::p09_reproducible_computation::{
     RobustnessError, RobustnessRequest, RobustnessSuite,
 };
 pub use programs::p10_interpretation_replication::{
-    analyze_glioma_causal_contrast, analyze_glioma_trajectories, analyze_replication_meta_analysis,
-    analyze_stratified_causal_adjustment, CausalContrastAnalysis, CausalContrastDisposition,
-    CausalContrastError, CausalContrastRequest, CausalStratumSummary, MetaAnalysisDisposition,
-    MetaAnalysisError, MetaAnalysisRequest, MetaStudyContribution, ReplicationMetaAnalysis,
-    StratifiedCausalActionKind, StratifiedCausalAdjustment, StratifiedCausalDisposition,
-    StratifiedCausalError, StratifiedCausalRequest, StratifiedObservation, TrajectoryAnalysis,
-    TrajectoryArmSummary, TrajectoryDisposition, TrajectoryError, TrajectoryObservation,
-    TrajectoryRequest, UnitContrast, UnitTrajectory, UnitTrajectoryDisposition,
+    analyze_causal_sensitivity, analyze_glioma_causal_contrast, analyze_glioma_trajectories,
+    analyze_replication_meta_analysis, analyze_stratified_causal_adjustment,
+    CausalContrastAnalysis, CausalContrastDisposition, CausalContrastError, CausalContrastRequest,
+    CausalSensitivityAnalysis, CausalStratumSummary, MetaAnalysisDisposition, MetaAnalysisError,
+    MetaAnalysisRequest, MetaStudyContribution, ReplicationMetaAnalysis, SensitivityDirection,
+    SensitivityDisposition, SensitivityError, SensitivityObservation, SensitivityPoint,
+    SensitivityRequest, StratifiedCausalActionKind, StratifiedCausalAdjustment,
+    StratifiedCausalDisposition, StratifiedCausalError, StratifiedCausalRequest,
+    StratifiedObservation, TrajectoryAnalysis, TrajectoryArmSummary, TrajectoryDisposition,
+    TrajectoryError, TrajectoryObservation, TrajectoryRequest, UnitContrast, UnitTrajectory,
+    UnitTrajectoryDisposition,
 };
 pub use programs::p12_federated_benchmarking::{
     analyze_federated_benchmark, FederatedBenchmarkConsensus, FederatedBenchmarkContribution,
