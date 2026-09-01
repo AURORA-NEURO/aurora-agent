@@ -476,11 +476,12 @@ use bioprism_research::{
     build_research_object_manifest, compile_decision_context, compile_typed_knowledge,
     design_preclinical_experiment, discriminate_mechanisms, dry_run_glioma_research,
     explore_mechanisms, generate_feature_catalog, glioma_program_catalog,
-    harmonize_glioma_multimodal_batches, harmonize_multimodal_inputs, plan_glioma_workflow,
-    propagate_glioma_mechanism_graph, qualify_evidence, select_glioma_actions,
-    simulate_glioma_protocol, surveil_glioma_evidence, validate_feature_catalog,
-    AdaptiveAllocationRequest, AdaptiveArmObservation, AnalysisDataset, AnalysisRequest,
-    CalibrationRequest, CalibrationRun, CausalContrastRequest, CombinationObservation,
+    harmonize_glioma_multimodal_batches, harmonize_multimodal_inputs,
+    plan_glioma_closed_loop_campaign, plan_glioma_workflow, propagate_glioma_mechanism_graph,
+    qualify_evidence, select_glioma_actions, simulate_glioma_protocol, surveil_glioma_evidence,
+    validate_feature_catalog, AdaptiveAllocationRequest, AdaptiveArmObservation, AnalysisDataset,
+    AnalysisRequest, CalibrationRequest, CalibrationRun, CampaignAction, CampaignMechanism,
+    CampaignObservation, CausalContrastRequest, ClosedLoopCampaignRequest, CombinationObservation,
     CombinationSynergyRequest, ConcordanceRequest, ConsensusRequest, DecisionContextRequest,
     DoseResponseObservation, DoseResponseRequest, EvidenceRecord, EvidenceRequest,
     EvidenceSurveillanceRequest, ExperimentArm, ExperimentRequest, FederatedBenchmarkRequest,
@@ -1938,6 +1939,7 @@ impl Server {
             }
             "glioma_dose_response" => self.glioma_dose_response(&arguments),
             "glioma_adaptive_allocation" => self.glioma_adaptive_allocation(&arguments),
+            "glioma_closed_loop_campaign" => self.glioma_closed_loop_campaign(&arguments),
             "glioma_combination_synergy" => self.glioma_combination_synergy(&arguments),
             "glioma_multimodal_concordance" => self.glioma_multimodal_concordance(&arguments),
             "glioma_multimodal_consensus" => self.glioma_multimodal_consensus(&arguments),
@@ -3316,6 +3318,55 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma adaptive allocation: {error}"))
+    }
+
+    /// Rank and batch mechanism-discriminating preclinical assays for a closed-loop campaign.
+    /// The controller recomputes a deterministic posterior from local observations, then emits
+    /// an information/cost/risk-aware next batch. It never dispatches hardware or asserts a
+    /// biological result.
+    fn glioma_closed_loop_campaign(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ClosedLoopCampaignRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_closed_loop_campaign requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma closed-loop campaign request: {error}"))?;
+        let mechanisms: Vec<CampaignMechanism> = serde_json::from_value(
+            arguments
+                .get("mechanisms")
+                .cloned()
+                .ok_or_else(|| "glioma_closed_loop_campaign requires mechanisms".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma campaign mechanisms: {error}"))?;
+        let actions: Vec<CampaignAction> = serde_json::from_value(
+            arguments
+                .get("actions")
+                .cloned()
+                .ok_or_else(|| "glioma_closed_loop_campaign requires actions".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma campaign actions: {error}"))?;
+        let observations: Vec<CampaignObservation> = serde_json::from_value(
+            arguments
+                .get("observations")
+                .cloned()
+                .unwrap_or_else(|| json!([])),
+        )
+        .map_err(|error| format!("invalid glioma campaign observations: {error}"))?;
+        let output =
+            plan_glioma_closed_loop_campaign(&request, &mechanisms, &actions, &observations)
+                .map_err(|error| format!("glioma closed-loop campaign refused: {error}"))?;
+        serde_json::to_value(json!({
+            "campaign": output,
+            "dispatch": "not_started",
+            "guarantees": [
+                "posterior reweighting uses bounded deterministic residual arithmetic",
+                "assay batches maximize mechanism separation while respecting cost, feasibility, risk, and replicate ceilings",
+                "negative observations, no-information states, budget exhaustion, and posterior convergence remain explicit",
+                "the route returns a caller-owned local execution plan and never dispatches an instrument or makes a clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma closed-loop campaign: {error}"))
     }
 
     /// Analyze a two-agent preclinical glioma response surface with fixed-point Bliss synergy.
@@ -44060,6 +44111,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_stratified_causal_adjustment",
                 "glioma_dose_response",
                 "glioma_adaptive_allocation",
+                "glioma_closed_loop_campaign",
                 "glioma_combination_synergy",
                 "glioma_multimodal_concordance",
                 "glioma_multimodal_consensus",
@@ -51008,6 +51060,20 @@ pub fn tool_definitions() -> Vec<Value> {
                 "arms": {"type": "array", "items": {"type": "object"}, "description": "Local AdaptiveArmObservation1@1 values containing de-identified binary assay counts and artifact references."}
             },
             "required": ["request", "arms"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_closed_loop_campaign",
+        "description": "Plan a mechanism-aware closed-loop preclinical glioma assay campaign. Reweights competing mechanisms from local observations, scores each typed assay by expected mechanism information, expected effect, feasibility, cost, risk, and replicate ceiling, and returns deterministic next batches with explicit convergence, budget, no-information, and unresolved stops. The caller-owned local executor must run the returned batch and append observations before replanning; this route never dispatches instruments or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ClosedLoopCampaignRequest1@1 with model binding, batch/round bounds, budget, information gate, scoring weights, and posterior convergence threshold."},
+                "mechanisms": {"type": "array", "items": {"type": "object"}, "description": "Competing CampaignMechanism1@1 entries with positive priors summing to 1000."},
+                "actions": {"type": "array", "items": {"type": "object"}, "description": "Typed CampaignAction1@1 entries with predictions for every mechanism, measurement uncertainty, expected effect, feasibility, cost, risk, and replicate ceiling."},
+                "observations": {"type": "array", "items": {"type": "object"}, "description": "Optional local CampaignObservation1@1 entries. Raw payloads remain in local stores and each observation is content-addressed."}
+            },
+            "required": ["request", "mechanisms", "actions"]
         }
     }));
     definitions.push(json!({

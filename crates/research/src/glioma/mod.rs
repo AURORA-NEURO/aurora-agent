@@ -70,9 +70,12 @@ pub use programs::p05_mechanism_exploration::{
 };
 pub use programs::p06_experiment_design::{
     allocate_glioma_assays, analyze_glioma_combination_synergy, analyze_glioma_dose_response,
-    AdaptiveAllocation, AdaptiveAllocationActionKind, AdaptiveAllocationDisposition,
-    AdaptiveAllocationError, AdaptiveAllocationRequest, AdaptiveArmObservation,
-    AdaptiveArmPosterior, CombinationCell, CombinationCellDisposition, CombinationObservation,
+    plan_glioma_closed_loop_campaign, AdaptiveAllocation, AdaptiveAllocationActionKind,
+    AdaptiveAllocationDisposition, AdaptiveAllocationError, AdaptiveAllocationRequest,
+    AdaptiveArmObservation, AdaptiveArmPosterior, CampaignAction, CampaignActionScore,
+    CampaignMechanism, CampaignMechanismPosterior, CampaignObservation, CampaignRound,
+    CampaignStopReason, ClosedLoopCampaign, ClosedLoopCampaignDisposition, ClosedLoopCampaignError,
+    ClosedLoopCampaignRequest, CombinationCell, CombinationCellDisposition, CombinationObservation,
     CombinationSynergyAnalysis, CombinationSynergyDisposition, CombinationSynergyError,
     CombinationSynergyRequest, DoseDirection, DosePair, DoseResponseAnalysis,
     DoseResponseDisposition, DoseResponseError, DoseResponseObservation, DoseResponsePoint,

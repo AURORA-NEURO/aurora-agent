@@ -72,6 +72,7 @@ fn main() {
                      glioma_mechanism_graph_propagate,\n\
                      glioma_stratified_causal_adjustment,\n\
                      glioma_adaptive_allocation,\n\
+                     glioma_closed_loop_campaign,\n\
                      glioma_evidence_surveillance,\n\
                      glioma_instrument_calibration,\n\
                      glioma_federated_benchmark_consensus,\n\

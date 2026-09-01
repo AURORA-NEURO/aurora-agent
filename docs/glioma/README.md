@@ -70,6 +70,7 @@ crates/research/src/glioma/
                                              P12 aggregate-only multi-site benchmark consensus with robust pooling and influence bounds
     p06_experiment_design/dose_response.rs   P06 monotone dose-response curve analysis
     p06_experiment_design/synergy.rs         P06 Bliss combination-response analysis
+    p06_experiment_design/campaign.rs       P06 mechanism-aware closed-loop assay campaign controller
     p03_multimodal_ingestion_qc/concordance.rs
                                              P03 feature-level modality concordance analysis
   p03_multimodal_ingestion_qc/consensus.rs
@@ -95,7 +96,7 @@ crates/research/src/glioma/
 | P03 Multimodal ingestion and QC | data steward | multimodal ingestion/QC | comparable cells, robust batch harmonization, feature-level concordance, consensus clusters, spatial niches, and explicit defects |
 | P04 Question-to-decision context | principal investigator | intent normalization, context compilation | bounded decision context and unresolved omissions |
 | P05 Mechanism exploration | mechanism scientist | molecular landscape, mechanism exploration | residual-fit competing mechanisms, posterior-weighted next-assay information gain, signed mechanism-network propagation, and discriminating actions |
-| P06 Power-aware experiment design | experimentalist | experiment design | falsifiable allocation, power, blocking, dose-response, adaptive replicate allocation, combination-synergy fitting, and null-result plan |
+| P06 Power-aware experiment design | experimentalist | experiment design | falsifiable allocation, power, blocking, dose-response, adaptive replicate allocation, mechanism-aware closed-loop campaign rounds, combination-synergy fitting, and null-result plan |
 | P07 Protocol simulation | lab operations lead | protocol simulation, adaptive workflow planning | critical-path resource scheduling, utilization, deterministic next batches, and repair/abstain routing before physical effects |
 | P08 Instrument and robotics preflight | instrument operator | instrument preflight | robust control calibration, drift detection, and signed interlocked action planning |
 | P09 Reproducible computation | computational scientist | computational execution | checkpointed/replayable computation plus omission-stress robustness suite |
@@ -189,6 +190,12 @@ antagonism, and explicit unresolved cells for missing controls or replicates.
 P06 also includes sequential assay allocation (`allocate_glioma_assays`) using Beta posteriors,
 conservative Cantelli target-effect bounds, uncertainty exploration, replicate floors, risk
 ceilings, and a hard next-batch budget.
+P06 also includes a mechanism-aware closed-loop campaign controller
+(`plan_glioma_closed_loop_campaign`) that reweights competing mechanisms from local observations,
+scores typed assays by expected mechanism information and effect, and emits bounded sequential
+rounds under feasibility, cost, risk, and replicate ceilings. The caller executes each local batch
+and replans from its observations; posterior convergence, no-information, negative-result, and
+budget stops remain explicit.
 P10 also includes stratified causal adjustment (`analyze_stratified_causal_adjustment`) that
 collapses repeated measurements to units, requires positivity within confounder strata, computes
 pooled weighted contrasts, and exposes leave-one-stratum influence and missing coverage.

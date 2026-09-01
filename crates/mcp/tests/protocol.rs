@@ -314,7 +314,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 57;
-const TOOL_DEFINITION_COUNT: usize = 553;
+const TOOL_DEFINITION_COUNT: usize = 554;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -717,6 +717,43 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
     assert_eq!(
         adaptive_allocation["allocation"]["selected_order"],
         json!(["egfr"])
+    );
+
+    let closed_loop_campaign = call(
+        &mut server,
+        "glioma_closed_loop_campaign",
+        json!({
+            "request": {
+                "objective": "discriminate invasion mechanisms in glioma organoids",
+                "model_system": "organoid",
+                "max_rounds": 2,
+                "max_actions_per_round": 1,
+                "budget_units": 8,
+                "min_information_gain_milli": 100,
+                "information_weight_milli": 700,
+                "effect_weight_milli": 100,
+                "feasibility_weight_milli": 200,
+                "risk_penalty_milli": 200,
+                "stop_concentration_milli": 900
+            },
+            "mechanisms": [
+                {"mechanism_id":"integrin","prior_milli":500},
+                {"mechanism_id":"hypoxia","prior_milli":500}
+            ],
+            "actions": [
+                {"action_id":"assay-invasion","feature_id":"invasion-score","label":"organoid invasion assay","predicted_milli_by_mechanism":{"integrin":800,"hypoxia":100},"measurement_uncertainty_milli":50,"feasibility_milli":900,"expected_effect_milli":600,"cost_units":4,"risk_milli":100,"max_replicates":1},
+                {"action_id":"assay-oxygen","feature_id":"oxygen-response","label":"oxygen response assay","predicted_milli_by_mechanism":{"integrin":400,"hypoxia":700},"measurement_uncertainty_milli":50,"feasibility_milli":800,"expected_effect_milli":300,"cost_units":4,"risk_milli":100,"max_replicates":1}
+            ]
+        }),
+    );
+    assert_eq!(closed_loop_campaign["dispatch"], json!("not_started"));
+    assert_eq!(
+        closed_loop_campaign["campaign"]["disposition"],
+        json!("qualified")
+    );
+    assert_eq!(
+        closed_loop_campaign["campaign"]["selected_action_order"],
+        json!(["assay-invasion", "assay-oxygen"])
     );
 
     let synergy = call(

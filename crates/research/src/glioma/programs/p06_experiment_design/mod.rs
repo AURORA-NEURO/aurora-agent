@@ -3,6 +3,7 @@
 use crate::glioma::catalog::{glioma_program_catalog, GliomaProgramDescriptor, GliomaProgramId};
 
 pub mod adaptive_allocation;
+pub mod campaign;
 pub mod dose_response;
 pub mod synergy;
 
@@ -10,6 +11,12 @@ pub use adaptive_allocation::{
     allocate_glioma_assays, AdaptiveAllocation, AdaptiveAllocationActionKind,
     AdaptiveAllocationDisposition, AdaptiveAllocationError, AdaptiveAllocationRequest,
     AdaptiveArmObservation, AdaptiveArmPosterior,
+};
+pub use campaign::{
+    plan_glioma_closed_loop_campaign, CampaignAction, CampaignActionScore, CampaignMechanism,
+    CampaignMechanismPosterior, CampaignObservation, CampaignRound, CampaignStopReason,
+    ClosedLoopCampaign, ClosedLoopCampaignDisposition, ClosedLoopCampaignError,
+    ClosedLoopCampaignRequest,
 };
 pub use dose_response::{
     analyze_glioma_dose_response, DoseDirection, DoseResponseAnalysis, DoseResponseDisposition,
