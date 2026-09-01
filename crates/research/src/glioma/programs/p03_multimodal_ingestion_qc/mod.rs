@@ -6,6 +6,7 @@ pub mod concordance;
 pub mod consensus;
 pub mod harmonization;
 pub mod latent_factors;
+pub mod spatial_niche;
 
 pub use concordance::{
     analyze_multimodal_concordance, ConcordanceDisposition, ConcordanceError, ConcordanceRequest,
@@ -25,6 +26,10 @@ pub use latent_factors::{
     analyze_glioma_latent_factors, LatentFactorAnalysis, LatentFactorComponent,
     LatentFactorDisposition, LatentFactorError, LatentFactorRequest, LatentFactorVector,
     LatentLoading, LatentScore,
+};
+pub use spatial_niche::{
+    analyze_glioma_spatial_niches, SpatialCell, SpatialNiche, SpatialNicheAnalysis,
+    SpatialNicheDisposition, SpatialNicheError, SpatialNicheInteraction, SpatialNicheRequest,
 };
 
 pub const PROGRAM_ID: GliomaProgramId = GliomaProgramId::MultimodalIngestionQc;
