@@ -70,7 +70,7 @@ crates/research/src/glioma/
                                              P12 aggregate-only multi-site benchmark consensus with robust pooling and influence bounds
     p06_experiment_design/dose_response.rs   P06 monotone dose-response curve analysis
     p06_experiment_design/synergy.rs         P06 Bliss combination-response analysis
-    p06_experiment_design/campaign.rs       P06 mechanism-aware closed-loop assay campaign controller
+    p06_experiment_design/campaign.rs       P06 mechanism-aware closed-loop assay campaign controller and executor seam
     p03_multimodal_ingestion_qc/concordance.rs
                                              P03 feature-level modality concordance analysis
   p03_multimodal_ingestion_qc/consensus.rs
@@ -191,11 +191,13 @@ P06 also includes sequential assay allocation (`allocate_glioma_assays`) using B
 conservative Cantelli target-effect bounds, uncertainty exploration, replicate floors, risk
 ceilings, and a hard next-batch budget.
 P06 also includes a mechanism-aware closed-loop campaign controller
-(`plan_glioma_closed_loop_campaign`) that reweights competing mechanisms from local observations,
-scores typed assays by expected mechanism information and effect, and emits bounded sequential
-rounds under feasibility, cost, risk, and replicate ceilings. The caller executes each local batch
-and replans from its observations; posterior convergence, no-information, negative-result, and
-budget stops remain explicit.
+(`plan_glioma_closed_loop_campaign`) and round-by-round executor
+(`execute_glioma_closed_loop_campaign`). They reweight competing mechanisms from local
+observations, score typed assays by expected mechanism information and effect, and emit bounded
+sequential rounds under feasibility, cost, risk, and replicate ceilings. The caller-owned executor
+runs each local batch and the engine replans from the observations it actually returns; malformed
+or missing observations stop the loop, while posterior convergence, no-information,
+negative-result, and budget stops remain explicit.
 P10 also includes stratified causal adjustment (`analyze_stratified_causal_adjustment`) that
 collapses repeated measurements to units, requires positivity within confounder strata, computes
 pooled weighted contrasts, and exposes leave-one-stratum influence and missing coverage.

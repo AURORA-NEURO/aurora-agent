@@ -13,10 +13,12 @@ pub use adaptive_allocation::{
     AdaptiveArmObservation, AdaptiveArmPosterior,
 };
 pub use campaign::{
-    plan_glioma_closed_loop_campaign, CampaignAction, CampaignActionScore, CampaignMechanism,
+    execute_glioma_closed_loop_campaign, plan_glioma_closed_loop_campaign, CampaignAction,
+    CampaignActionScore, CampaignExecutionFailure, CampaignExecutionRound, CampaignMechanism,
     CampaignMechanismPosterior, CampaignObservation, CampaignRound, CampaignStopReason,
     ClosedLoopCampaign, ClosedLoopCampaignDisposition, ClosedLoopCampaignError,
-    ClosedLoopCampaignRequest,
+    ClosedLoopCampaignExecution, ClosedLoopCampaignRequest, GliomaCampaignExecutor,
+    EXECUTION_OUTPUT_SCHEMA,
 };
 pub use dose_response::{
     analyze_glioma_dose_response, DoseDirection, DoseResponseAnalysis, DoseResponseDisposition,

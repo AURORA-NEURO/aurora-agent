@@ -70,16 +70,18 @@ pub use programs::p05_mechanism_exploration::{
 };
 pub use programs::p06_experiment_design::{
     allocate_glioma_assays, analyze_glioma_combination_synergy, analyze_glioma_dose_response,
-    plan_glioma_closed_loop_campaign, AdaptiveAllocation, AdaptiveAllocationActionKind,
-    AdaptiveAllocationDisposition, AdaptiveAllocationError, AdaptiveAllocationRequest,
-    AdaptiveArmObservation, AdaptiveArmPosterior, CampaignAction, CampaignActionScore,
-    CampaignMechanism, CampaignMechanismPosterior, CampaignObservation, CampaignRound,
-    CampaignStopReason, ClosedLoopCampaign, ClosedLoopCampaignDisposition, ClosedLoopCampaignError,
-    ClosedLoopCampaignRequest, CombinationCell, CombinationCellDisposition, CombinationObservation,
-    CombinationSynergyAnalysis, CombinationSynergyDisposition, CombinationSynergyError,
-    CombinationSynergyRequest, DoseDirection, DosePair, DoseResponseAnalysis,
-    DoseResponseDisposition, DoseResponseError, DoseResponseObservation, DoseResponsePoint,
-    DoseResponseRequest,
+    execute_glioma_closed_loop_campaign, plan_glioma_closed_loop_campaign, AdaptiveAllocation,
+    AdaptiveAllocationActionKind, AdaptiveAllocationDisposition, AdaptiveAllocationError,
+    AdaptiveAllocationRequest, AdaptiveArmObservation, AdaptiveArmPosterior, CampaignAction,
+    CampaignActionScore, CampaignExecutionFailure, CampaignExecutionRound, CampaignMechanism,
+    CampaignMechanismPosterior, CampaignObservation, CampaignRound, CampaignStopReason,
+    ClosedLoopCampaign, ClosedLoopCampaignDisposition, ClosedLoopCampaignError,
+    ClosedLoopCampaignExecution, ClosedLoopCampaignRequest, CombinationCell,
+    CombinationCellDisposition, CombinationObservation, CombinationSynergyAnalysis,
+    CombinationSynergyDisposition, CombinationSynergyError, CombinationSynergyRequest,
+    DoseDirection, DosePair, DoseResponseAnalysis, DoseResponseDisposition, DoseResponseError,
+    DoseResponseObservation, DoseResponsePoint, DoseResponseRequest, GliomaCampaignExecutor,
+    EXECUTION_OUTPUT_SCHEMA,
 };
 pub use programs::p07_protocol_simulation::{
     protocol_request_from_experiment_design, simulate_glioma_protocol, ProtocolDisposition,

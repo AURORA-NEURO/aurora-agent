@@ -14,6 +14,7 @@ use thiserror::Error;
 
 pub const FEATURE_ID: &str = "GAF-GLIOMA-P06-F11";
 pub const OUTPUT_SCHEMA: &str = "GliomaClosedLoopCampaign1@1";
+pub const EXECUTION_OUTPUT_SCHEMA: &str = "GliomaClosedLoopCampaignExecution1@1";
 pub const MAX_MECHANISMS: usize = 256;
 pub const MAX_ACTIONS: usize = 4_096;
 pub const MAX_OBSERVATIONS: usize = 16_384;
@@ -140,6 +141,39 @@ pub struct ClosedLoopCampaign {
     pub digest: ContentHash,
 }
 
+/// The only effectful seam for a closed-loop campaign. Implementations belong to an institution-
+/// local assay service or simulator; this crate never opens a socket or touches an instrument.
+pub trait GliomaCampaignExecutor {
+    fn execute_action(
+        &mut self,
+        action: &CampaignAction,
+        round: u16,
+    ) -> Result<Vec<CampaignObservation>, CampaignExecutionFailure>;
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CampaignExecutionFailure {
+    pub reason: String,
+    pub retryable: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CampaignExecutionRound {
+    pub round: u16,
+    pub selected_action_order: Vec<String>,
+    pub observation_count: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClosedLoopCampaignExecution {
+    pub feature_id: String,
+    pub output_schema: String,
+    pub rounds: Vec<CampaignExecutionRound>,
+    pub observations: Vec<CampaignObservation>,
+    pub final_campaign: ClosedLoopCampaign,
+    pub execution_digest: ContentHash,
+}
+
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum ClosedLoopCampaignError {
     #[error("closed-loop campaign request is invalid: {0}")]
@@ -150,6 +184,8 @@ pub enum ClosedLoopCampaignError {
     InvalidOutput(String),
     #[error("closed-loop campaign digest failed: {0}")]
     Digest(String),
+    #[error("closed-loop campaign executor failed: {0}")]
+    Executor(String),
 }
 
 fn digest_input(output: &ClosedLoopCampaign) -> serde_json::Value {
@@ -171,6 +207,47 @@ fn digest_input(output: &ClosedLoopCampaign) -> serde_json::Value {
         "stop_reason": output.stop_reason,
         "disposition": output.disposition,
     })
+}
+
+fn execution_digest_input(output: &ClosedLoopCampaignExecution) -> serde_json::Value {
+    serde_json::json!({
+        "feature_id": output.feature_id,
+        "output_schema": output.output_schema,
+        "rounds": output.rounds,
+        "observations": output.observations,
+        "final_campaign": output.final_campaign,
+    })
+}
+
+impl ClosedLoopCampaignExecution {
+    pub fn validate(&self) -> Result<(), ClosedLoopCampaignError> {
+        if self.feature_id != FEATURE_ID
+            || self.output_schema != EXECUTION_OUTPUT_SCHEMA
+            || self
+                .rounds
+                .windows(2)
+                .any(|pair| pair[0].round >= pair[1].round)
+            || self.rounds.iter().any(|round| {
+                round.round == 0
+                    || round.selected_action_order.is_empty()
+                    || round.observation_count == 0
+            })
+            || self.execution_digest.as_str().len() != 64
+        {
+            return Err(ClosedLoopCampaignError::InvalidOutput(
+                "execution identity, ordered rounds, observations, or digest is invalid".into(),
+            ));
+        }
+        self.final_campaign.validate()?;
+        let expected = ContentHash::of_value(&execution_digest_input(self))
+            .map_err(|error| ClosedLoopCampaignError::Digest(error.to_string()))?;
+        if expected != self.execution_digest {
+            return Err(ClosedLoopCampaignError::InvalidOutput(
+                "execution digest is not bound to the campaign and observations".into(),
+            ));
+        }
+        Ok(())
+    }
 }
 
 impl ClosedLoopCampaign {
@@ -741,6 +818,98 @@ pub fn plan_glioma_closed_loop_campaign(
     Ok(output)
 }
 
+/// Execute a bounded campaign through a caller-owned local assay executor. Each round is planned
+/// from the observations actually returned by the previous round, so a provider cannot silently
+/// continue on a stale posterior. Any malformed observation or executor failure stops the loop.
+pub fn execute_glioma_closed_loop_campaign<E: GliomaCampaignExecutor>(
+    request: &ClosedLoopCampaignRequest,
+    mechanisms: &[CampaignMechanism],
+    actions: &[CampaignAction],
+    initial_observations: &[CampaignObservation],
+    executor: &mut E,
+) -> Result<ClosedLoopCampaignExecution, ClosedLoopCampaignError> {
+    validate_inputs(request, mechanisms, actions, initial_observations)?;
+    let action_map = actions
+        .iter()
+        .map(|action| (action.action_id.clone(), action))
+        .collect::<BTreeMap<_, _>>();
+    let mut observations = initial_observations.to_vec();
+    let mut remaining_budget = request.budget_units;
+    let mut rounds = Vec::new();
+    for round in 1..=request.max_rounds {
+        let mut one_round = request.clone();
+        one_round.max_rounds = 1;
+        one_round.budget_units = remaining_budget;
+        let plan =
+            plan_glioma_closed_loop_campaign(&one_round, mechanisms, actions, &observations)?;
+        let Some(planned_round) = plan.rounds.first() else {
+            break;
+        };
+        let mut added = 0_usize;
+        for action_id in &planned_round.selected_action_order {
+            let action = action_map.get(action_id).ok_or_else(|| {
+                ClosedLoopCampaignError::InvalidOutput(format!(
+                    "planned action {action_id} is absent from the executor action map"
+                ))
+            })?;
+            let batch = executor
+                .execute_action(action, round)
+                .map_err(|failure| ClosedLoopCampaignError::Executor(failure.reason))?;
+            for observation in batch {
+                if observation.action_id != action.action_id
+                    || observations.iter().any(|prior| {
+                        prior.action_id == observation.action_id
+                            && prior.replicate_index == observation.replicate_index
+                    })
+                {
+                    return Err(ClosedLoopCampaignError::InvalidOutput(
+                        "executor returned an unknown or duplicate action observation".into(),
+                    ));
+                }
+                observation
+                    .artifact
+                    .validate()
+                    .map_err(|error| ClosedLoopCampaignError::InvalidOutput(error.to_string()))?;
+                observations.push(observation);
+                added = added.saturating_add(1);
+            }
+            remaining_budget = remaining_budget.saturating_sub(u64::from(action.cost_units));
+        }
+        rounds.push(CampaignExecutionRound {
+            round,
+            selected_action_order: planned_round.selected_action_order.clone(),
+            observation_count: added,
+        });
+        if added == 0 {
+            return Err(ClosedLoopCampaignError::InvalidOutput(
+                "executor returned no observation for a selected action".into(),
+            ));
+        }
+        if matches!(
+            plan.stop_reason,
+            CampaignStopReason::PosteriorConverged
+                | CampaignStopReason::BudgetExhausted
+                | CampaignStopReason::NoInformativeActions
+        ) {
+            break;
+        }
+    }
+    let final_campaign =
+        plan_glioma_closed_loop_campaign(request, mechanisms, actions, &observations)?;
+    let mut output = ClosedLoopCampaignExecution {
+        feature_id: FEATURE_ID.into(),
+        output_schema: EXECUTION_OUTPUT_SCHEMA.into(),
+        rounds,
+        observations,
+        final_campaign,
+        execution_digest: ContentHash::of_bytes(b"unsealed-glioma-closed-loop-execution"),
+    };
+    output.execution_digest = ContentHash::of_value(&execution_digest_input(&output))
+        .map_err(|error| ClosedLoopCampaignError::Digest(error.to_string()))?;
+    output.validate()?;
+    Ok(output)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -821,6 +990,30 @@ mod tests {
         ]
     }
 
+    struct SimulatedExecutor;
+
+    impl GliomaCampaignExecutor for SimulatedExecutor {
+        fn execute_action(
+            &mut self,
+            action: &CampaignAction,
+            round: u16,
+        ) -> Result<Vec<CampaignObservation>, CampaignExecutionFailure> {
+            let observed_milli = action
+                .predicted_milli_by_mechanism
+                .values()
+                .copied()
+                .max()
+                .unwrap_or_default();
+            Ok(vec![CampaignObservation {
+                action_id: action.action_id.clone(),
+                observed_milli,
+                uncertainty_milli: 20,
+                replicate_index: u32::from(round),
+                artifact: artifact(&format!("{}-{round}", action.action_id)),
+            }])
+        }
+    }
+
     #[test]
     fn controller_selects_informative_batch_and_is_digest_bound() {
         let mut ample = request();
@@ -893,5 +1086,30 @@ mod tests {
         )
         .unwrap();
         assert_eq!(first, second);
+    }
+
+    #[test]
+    fn executor_replans_from_real_returned_observations() {
+        let mut executor = SimulatedExecutor;
+        let output = execute_glioma_closed_loop_campaign(
+            &request(),
+            &mechanisms(),
+            &actions(),
+            &[],
+            &mut executor,
+        )
+        .unwrap();
+        assert_eq!(output.rounds.len(), 2);
+        assert_eq!(output.observations.len(), 2);
+        assert_eq!(
+            output.rounds[0].selected_action_order,
+            vec!["assay-invasion"]
+        );
+        assert_eq!(output.rounds[1].selected_action_order, vec!["assay-oxygen"]);
+        assert_eq!(
+            output.final_campaign.stop_reason,
+            CampaignStopReason::NoInformativeActions
+        );
+        output.validate().unwrap();
     }
 }
