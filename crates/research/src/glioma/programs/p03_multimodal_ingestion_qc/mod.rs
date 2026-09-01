@@ -6,6 +6,7 @@ pub mod concordance;
 pub mod consensus;
 pub mod harmonization;
 pub mod latent_factors;
+pub mod spatial_communication;
 pub mod spatial_niche;
 
 pub use concordance::{
@@ -26,6 +27,11 @@ pub use latent_factors::{
     analyze_glioma_latent_factors, LatentFactorAnalysis, LatentFactorComponent,
     LatentFactorDisposition, LatentFactorError, LatentFactorRequest, LatentFactorVector,
     LatentLoading, LatentScore,
+};
+pub use spatial_communication::{
+    analyze_glioma_spatial_communication, LigandReceptorPair, SpatialCommunicationAnalysis,
+    SpatialCommunicationCell, SpatialCommunicationDisposition, SpatialCommunicationError,
+    SpatialCommunicationPair, SpatialCommunicationPairDisposition, SpatialCommunicationRequest,
 };
 pub use spatial_niche::{
     analyze_glioma_spatial_niches, SpatialCell, SpatialNiche, SpatialNicheAnalysis,

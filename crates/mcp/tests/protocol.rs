@@ -314,7 +314,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 57;
-const TOOL_DEFINITION_COUNT: usize = 554;
+const TOOL_DEFINITION_COUNT: usize = 555;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -924,6 +924,39 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
         json!("qualified")
     );
     assert!(!spatial_niches["analysis"]["interactions"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+
+    let spatial_communication = call(
+        &mut server,
+        "glioma_spatial_communication",
+        json!({
+            "request": {
+                "study_id": "mcp-communication-study",
+                "model_system": "organoid",
+                "radius_milli": 1_500,
+                "min_neighbors": 1,
+                "min_lineage_cells": 1,
+                "min_signal_milli": 100,
+                "min_enrichment_milli": 900,
+                "max_pairs": 10
+            },
+            "cells": [
+                {"cell_id":"sc-t1","sample_id":"sc-s1","lineage":"tumour","x_milli":0,"y_milli":0,"ligand_scores_milli":{"L1":900},"receptor_scores_milli":{},"artifact":{"artifact_id":"sc-artifact-1","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-spatial-communication+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"cell_id":"sc-t2","sample_id":"sc-s1","lineage":"tumour","x_milli":500,"y_milli":0,"ligand_scores_milli":{"L1":800},"receptor_scores_milli":{},"artifact":{"artifact_id":"sc-artifact-2","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-spatial-communication+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"cell_id":"sc-m1","sample_id":"sc-s1","lineage":"myeloid","x_milli":1000,"y_milli":0,"ligand_scores_milli":{},"receptor_scores_milli":{"R1":900},"artifact":{"artifact_id":"sc-artifact-3","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-spatial-communication+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"cell_id":"sc-m2","sample_id":"sc-s1","lineage":"myeloid","x_milli":1000,"y_milli":500,"ligand_scores_milli":{},"receptor_scores_milli":{"R1":800},"artifact":{"artifact_id":"sc-artifact-4","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-spatial-communication+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}}
+            ],
+            "pairs": [{"pair_id":"L1-R1","ligand_feature":"L1","receptor_feature":"R1"}]
+        }),
+    );
+    assert_eq!(spatial_communication["dispatch"], json!("not_started"));
+    assert_eq!(
+        spatial_communication["analysis"]["disposition"],
+        json!("partial")
+    );
+    assert!(!spatial_communication["analysis"]["enriched_order"]
         .as_array()
         .unwrap()
         .is_empty());

@@ -469,7 +469,8 @@ use bioprism_repair::{
 use bioprism_research::{
     allocate_glioma_assays, analyze_causal_sensitivity, analyze_federated_benchmark,
     analyze_glioma_causal_contrast, analyze_glioma_combination_synergy,
-    analyze_glioma_dose_response, analyze_glioma_latent_factors, analyze_glioma_spatial_niches,
+    analyze_glioma_dose_response, analyze_glioma_latent_factors,
+    analyze_glioma_spatial_communication, analyze_glioma_spatial_niches,
     analyze_glioma_trajectories, analyze_instrument_calibration, analyze_multimodal_concordance,
     analyze_multimodal_consensus, analyze_preclinical_outcomes, analyze_replication_meta_analysis,
     analyze_stratified_causal_adjustment, assess_glioma_robustness, assess_replication,
@@ -487,14 +488,15 @@ use bioprism_research::{
     EvidenceSurveillanceRequest, ExperimentArm, ExperimentRequest, FederatedBenchmarkRequest,
     FederatedBenchmarkSite, GliomaActionCandidate, GliomaResearchIntent, GliomaWorkflowRequest,
     HarmonizationRequest, HarmonizationVector, KnowledgeRequest, LatentFactorRequest,
-    LatentFactorVector, MechanismCandidate, MechanismDiscriminationRequest,
+    LatentFactorVector, LigandReceptorPair, MechanismCandidate, MechanismDiscriminationRequest,
     MechanismDiscriminatorAction, MechanismFeatureObservation, MechanismGraphEdge,
     MechanismGraphNode, MechanismGraphRequest, MechanismHypothesis, MechanismRequest,
     MetaAnalysisRequest, ModalityVector, MultimodalObservation, MultimodalRequest,
     ProtocolSimulationRequest, ReplicationRequest, ReplicationStudy, ResearchObjectRequest,
     RobustnessRequest, SensitivityObservation, SensitivityRequest, SpatialCell,
-    SpatialNicheRequest, StratifiedCausalRequest, StratifiedObservation, TrajectoryObservation,
-    TrajectoryRequest, TypedKnowledge,
+    SpatialCommunicationCell, SpatialCommunicationRequest, SpatialNicheRequest,
+    StratifiedCausalRequest, StratifiedObservation, TrajectoryObservation, TrajectoryRequest,
+    TypedKnowledge,
 };
 use bioprism_routing::{
     lab::{run as run_routing_lab, LabSettings, Task},
@@ -1946,6 +1948,7 @@ impl Server {
             "glioma_multimodal_harmonize" => self.glioma_multimodal_harmonize(&arguments),
             "glioma_multimodal_latent_factors" => self.glioma_multimodal_latent_factors(&arguments),
             "glioma_spatial_niches" => self.glioma_spatial_niches(&arguments),
+            "glioma_spatial_communication" => self.glioma_spatial_communication(&arguments),
             "glioma_causal_sensitivity" => self.glioma_causal_sensitivity(&arguments),
             "glioma_research_select_actions" => self.glioma_research_select_actions(&arguments),
             "glioma_program_catalog" => self.glioma_program_catalog(&arguments),
@@ -3562,6 +3565,46 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma spatial-niche analysis: {error}"))
+    }
+
+    /// Infer local ligand-receptor communication enrichments in preclinical glioma spatial data.
+    /// The analyzer compares observed sender/receiver signal with a lineage-marginal null; it
+    /// never claims causal signalling or dispatches an assay.
+    fn glioma_spatial_communication(&self, arguments: &Value) -> Result<Value, String> {
+        let request: SpatialCommunicationRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_spatial_communication requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma spatial-communication request: {error}"))?;
+        let cells: Vec<SpatialCommunicationCell> = serde_json::from_value(
+            arguments
+                .get("cells")
+                .cloned()
+                .ok_or_else(|| "glioma_spatial_communication requires cells".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma spatial-communication cells: {error}"))?;
+        let pairs: Vec<LigandReceptorPair> = serde_json::from_value(
+            arguments
+                .get("pairs")
+                .cloned()
+                .ok_or_else(|| "glioma_spatial_communication requires pairs".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma ligand-receptor pairs: {error}"))?;
+        let output = analyze_glioma_spatial_communication(&request, &cells, &pairs)
+            .map_err(|error| format!("glioma spatial-communication analysis refused: {error}"))?;
+        serde_json::to_value(json!({
+            "analysis": output,
+            "dispatch": "not_started",
+            "guarantees": [
+                "sender-receiver neighborhoods are deterministic from the declared spatial radius",
+                "observed communication is compared with a lineage-marginal random-mixing null",
+                "missing ligand/receptor coverage, sparse neighborhoods, zero-null signal, and non-enrichment remain explicit",
+                "the route produces local preclinical association analysis only and never makes a clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma spatial-communication analysis: {error}"))
     }
 
     /// Quantify the declared hidden-confounding budget at which a local preclinical effect tips.
@@ -44118,6 +44161,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_multimodal_harmonize",
                 "glioma_multimodal_latent_factors",
                 "glioma_spatial_niches",
+                "glioma_spatial_communication",
                 "glioma_causal_sensitivity",
                 "glioma_research_select_actions",
                 "glioma_program_catalog",
@@ -51160,6 +51204,19 @@ pub fn tool_definitions() -> Vec<Value> {
                 "cells": {"type": "array", "items": {"type": "object"}, "description": "Local SpatialCell1@1 records with de-identified coordinates, lineage/state values, and local artifact references."}
             },
             "required": ["request", "cells"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_spatial_communication",
+        "description": "Infer local ligand-receptor communication enrichments in preclinical glioma spatial data. Builds deterministic sender/receiver neighborhoods, compares observed signal against a lineage-marginal random-mixing null, and retains missing feature coverage, sparse neighborhoods, zero expected signal, non-enrichment, and uncertainty as explicit outcomes. This is an association analysis only: it never claims causal signalling, moves raw data, dispatches an assay, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "SpatialCommunicationRequest1@1 with study/model binding, spatial radius, lineage/neighborhood floors, signal/enrichment gates, and output bound."},
+                "cells": {"type": "array", "items": {"type": "object"}, "description": "Local SpatialCommunicationCell1@1 records with de-identified coordinates, lineage, ligand/receptor scores, and local artifact references."},
+                "pairs": {"type": "array", "items": {"type": "object"}, "description": "Declared LigandReceptorPair1@1 entries binding ligand and receptor feature identifiers."}
+            },
+            "required": ["request", "cells", "pairs"]
         }
     }));
     definitions.push(json!({
