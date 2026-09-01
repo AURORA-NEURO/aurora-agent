@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
-pub const FEATURE_ID: &str = "GAF-GLIOMA-P10-F09";
+pub const FEATURE_ID: &str = "GAF-GLIOMA-P10-F13";
 pub const OUTPUT_SCHEMA: &str = "GliomaTrajectoryAnalysis1@1";
 pub const MAX_OBSERVATIONS: usize = 16_384;
 pub const MAX_UNITS: usize = 4_096;

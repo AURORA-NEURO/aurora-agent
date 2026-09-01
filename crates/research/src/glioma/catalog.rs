@@ -294,6 +294,46 @@ pub fn validate_feature_catalog(features: &[GliomaFeatureSpec]) -> Result<(), Ca
     Ok(())
 }
 
+/// Stable identifiers for executable glioma capabilities implemented in the research crate.
+///
+/// The generated 384-entry portfolio is intentionally broader than the currently implemented
+/// slice.  Keeping this manifest next to the catalog lets release checks prove that concrete
+/// algorithms do not accidentally claim the same product slot (a particularly easy mistake when
+/// several analyses live in one program folder).
+pub fn implemented_feature_ids() -> Vec<&'static str> {
+    vec![
+        crate::glioma::analysis::FEATURE_ID,
+        crate::glioma::evidence::FEATURE_ID,
+        crate::glioma::experiment::FEATURE_ID,
+        crate::glioma::mechanism::FEATURE_ID,
+        crate::glioma::multimodal::FEATURE_ID,
+        crate::glioma::workflow::FEATURE_ID,
+        crate::glioma::release::FEATURE_ID,
+        crate::glioma::replication::FEATURE_ID,
+        crate::glioma::programs::p01_evidence_surveillance::surveillance::FEATURE_ID,
+        crate::glioma::programs::p02_evidence_knowledge::knowledge_graph::FEATURE_ID,
+        crate::glioma::programs::p03_multimodal_ingestion_qc::concordance::FEATURE_ID,
+        crate::glioma::programs::p03_multimodal_ingestion_qc::consensus::FEATURE_ID,
+        crate::glioma::programs::p03_multimodal_ingestion_qc::harmonization::FEATURE_ID,
+        crate::glioma::programs::p03_multimodal_ingestion_qc::latent_factors::FEATURE_ID,
+        crate::glioma::programs::p03_multimodal_ingestion_qc::spatial_niche::FEATURE_ID,
+        crate::glioma::programs::p04_decision_context::context_compiler::FEATURE_ID,
+        crate::glioma::programs::p05_mechanism_exploration::discrimination::FEATURE_ID,
+        crate::glioma::programs::p06_experiment_design::adaptive_allocation::FEATURE_ID,
+        crate::glioma::programs::p06_experiment_design::dose_response::FEATURE_ID,
+        crate::glioma::programs::p06_experiment_design::synergy::FEATURE_ID,
+        crate::glioma::programs::p07_protocol_simulation::simulator::FEATURE_ID,
+        crate::glioma::programs::p08_instrument_robotics::calibration::FEATURE_ID,
+        crate::glioma::programs::p09_reproducible_computation::robustness::FEATURE_ID,
+        crate::glioma::programs::p10_interpretation_replication::causal_adjustment::FEATURE_ID,
+        crate::glioma::programs::p10_interpretation_replication::causal_contrast::FEATURE_ID,
+        crate::glioma::programs::p10_interpretation_replication::meta_analysis::FEATURE_ID,
+        crate::glioma::programs::p10_interpretation_replication::sensitivity::FEATURE_ID,
+        crate::glioma::programs::p10_interpretation_replication::trajectory::FEATURE_ID,
+        crate::glioma::programs::p12_federated_benchmarking::consensus::FEATURE_ID,
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -325,5 +365,17 @@ mod tests {
         assert!(first
             .iter()
             .all(|feature| !feature.feature_id.contains('.')));
+    }
+
+    #[test]
+    fn implemented_feature_ids_are_unique_and_portfolio_backed() {
+        let ids = implemented_feature_ids();
+        let unique = ids.iter().copied().collect::<BTreeSet<_>>();
+        assert_eq!(ids.len(), unique.len());
+        let portfolio = generate_feature_catalog()
+            .into_iter()
+            .map(|feature| feature.feature_id)
+            .collect::<BTreeSet<_>>();
+        assert!(ids.iter().all(|id| portfolio.contains(*id)));
     }
 }

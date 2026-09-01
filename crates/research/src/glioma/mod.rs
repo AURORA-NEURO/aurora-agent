@@ -21,8 +21,9 @@ pub use analysis::{
     analyze_preclinical_outcomes, AnalysisDataset, AnalysisRequest, AnalysisResult,
 };
 pub use catalog::{
-    generate_feature_catalog, glioma_program_catalog, validate_feature_catalog, CatalogError,
-    GliomaFeatureSpec, GliomaOperatingScale, GliomaProgramDescriptor, GliomaProgramId,
+    generate_feature_catalog, glioma_program_catalog, implemented_feature_ids,
+    validate_feature_catalog, CatalogError, GliomaFeatureSpec, GliomaOperatingScale,
+    GliomaProgramDescriptor, GliomaProgramId,
 };
 pub use evidence::{qualify_evidence, EvidenceQualification, EvidenceRecord, EvidenceRequest};
 pub use experiment::{
@@ -42,15 +43,17 @@ pub use programs::p02_evidence_knowledge::{
     KnowledgeError, KnowledgeRequest, TypedKnowledge,
 };
 pub use programs::p03_multimodal_ingestion_qc::{
-    analyze_glioma_latent_factors, analyze_multimodal_concordance, analyze_multimodal_consensus,
-    harmonize_glioma_multimodal_batches, BatchHarmonizationDiagnostic, ConcordanceDisposition,
-    ConcordanceError, ConcordanceRequest, ConsensusAssignment, ConsensusCluster,
-    ConsensusDisposition, ConsensusError, ConsensusRequest, FeatureValue, HarmonizationDisposition,
-    HarmonizationError, HarmonizationRequest, HarmonizationVector, HarmonizedFeature,
-    HarmonizedVector, LatentFactorAnalysis, LatentFactorComponent, LatentFactorDisposition,
-    LatentFactorError, LatentFactorRequest, LatentFactorVector, LatentLoading, LatentScore,
-    ModalityConcordance, ModalityVector, MultimodalConcordance, MultimodalConsensus,
-    MultimodalHarmonization, PairConcordanceDisposition,
+    analyze_glioma_latent_factors, analyze_glioma_spatial_niches, analyze_multimodal_concordance,
+    analyze_multimodal_consensus, harmonize_glioma_multimodal_batches,
+    BatchHarmonizationDiagnostic, ConcordanceDisposition, ConcordanceError, ConcordanceRequest,
+    ConsensusAssignment, ConsensusCluster, ConsensusDisposition, ConsensusError, ConsensusRequest,
+    FeatureValue, HarmonizationDisposition, HarmonizationError, HarmonizationRequest,
+    HarmonizationVector, HarmonizedFeature, HarmonizedVector, LatentFactorAnalysis,
+    LatentFactorComponent, LatentFactorDisposition, LatentFactorError, LatentFactorRequest,
+    LatentFactorVector, LatentLoading, LatentScore, ModalityConcordance, ModalityVector,
+    MultimodalConcordance, MultimodalConsensus, MultimodalHarmonization,
+    PairConcordanceDisposition, SpatialCell, SpatialNiche, SpatialNicheAnalysis,
+    SpatialNicheDisposition, SpatialNicheError, SpatialNicheInteraction, SpatialNicheRequest,
 };
 pub use programs::p04_decision_context::{
     compile_decision_context, DecisionAction, DecisionActionKind, DecisionContext,

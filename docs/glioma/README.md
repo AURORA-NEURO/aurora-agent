@@ -76,6 +76,8 @@ crates/research/src/glioma/
                                              P03 robust per-modality batch harmonization with explicit correction gates
   p03_multimodal_ingestion_qc/latent_factors.rs
                                              P03 robust complete-case multimodal latent-state factorization with convergence and reconstruction gates
+  p03_multimodal_ingestion_qc/spatial_niche.rs
+                                             P03 spatial neighbourhood graph, same-lineage niche components, and cross-lineage enrichment
 ```
 
 `docs/glioma/organization.json` is the machine-readable version of this map. The runtime
@@ -88,7 +90,7 @@ crates/research/src/glioma/
 | --- | --- | --- | --- |
 | P01 Evidence surveillance | evidence curator | evidence surveillance | snapshot deltas, prioritized review/revalidation actions, and stale/unknown/contradictory coverage |
 | P02 Evidence-to-typed-knowledge | knowledge engineer | evidence compilation | scoped claims and competing explanations bound to source artifacts |
-| P03 Multimodal ingestion and QC | data steward | multimodal ingestion/QC | comparable cells, robust batch harmonization, feature-level concordance, consensus clusters, and explicit defects |
+| P03 Multimodal ingestion and QC | data steward | multimodal ingestion/QC | comparable cells, robust batch harmonization, feature-level concordance, consensus clusters, spatial niches, and explicit defects |
 | P04 Question-to-decision context | principal investigator | intent normalization, context compilation | bounded decision context and unresolved omissions |
 | P05 Mechanism exploration | mechanism scientist | molecular landscape, mechanism exploration | residual-fit competing mechanisms, posterior-weighted next-assay information gain, and discriminating actions |
 | P06 Power-aware experiment design | experimentalist | experiment design | falsifiable allocation, power, blocking, dose-response, adaptive replicate allocation, combination-synergy fitting, and null-result plan |
@@ -156,6 +158,11 @@ P03 now also includes deterministic latent-state factorization (`analyze_glioma_
 that robustly median/MAD-scales complete-case modality columns, extracts bounded fixed-point power
 components, and gates on explained variance, reconstruction error, convergence, and explicit
 missing modality/feature coverage without imputation.
+P03 now also includes spatial niche graph analysis (`analyze_glioma_spatial_niches`) that builds
+same-lineage connected components from bounded spatial neighborhoods, summarizes local state and
+boundary structure, and tests cross-lineage edges against a random-mixing expected-edge null model.
+Sparse neighborhoods, isolated cells, undersized components, and absent interactions remain
+explicit partial or unresolved outcomes; no spatial payload is moved or imputed.
 P02 now includes typed-knowledge compilation (`compile_typed_knowledge`) that coalesces scoped
 claims, ranks support against contradiction, preserves negative/unknown evidence, and exposes
 missing modality/model coverage for the next workflow action.

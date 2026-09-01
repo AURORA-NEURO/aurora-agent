@@ -314,7 +314,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 57;
-const TOOL_DEFINITION_COUNT: usize = 551;
+const TOOL_DEFINITION_COUNT: usize = 552;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -858,6 +858,38 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
         latent_factors["analysis"]["components"][0]["component_index"],
         json!(0)
     );
+
+    let spatial_niches = call(
+        &mut server,
+        "glioma_spatial_niches",
+        json!({
+            "request": {
+                "study_id": "mcp-spatial-study",
+                "model_system": "organoid",
+                "radius_milli": 1_500,
+                "min_neighbors": 1,
+                "min_cells_per_niche": 2,
+                "min_interaction_enrichment_milli": 0
+            },
+            "cells": [
+                {"cell_id":"sn-a1","sample_id":"sn-s1","lineage":"tumour","x_milli":0,"y_milli":0,"state_milli":900,"artifact":{"artifact_id":"sn-artifact-1","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-spatial+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"cell_id":"sn-a2","sample_id":"sn-s1","lineage":"tumour","x_milli":1000,"y_milli":0,"state_milli":800,"artifact":{"artifact_id":"sn-artifact-2","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-spatial+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"cell_id":"sn-a3","sample_id":"sn-s1","lineage":"tumour","x_milli":0,"y_milli":1000,"state_milli":850,"artifact":{"artifact_id":"sn-artifact-3","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-spatial+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"cell_id":"sn-b1","sample_id":"sn-s1","lineage":"myeloid","x_milli":2000,"y_milli":0,"state_milli":200,"artifact":{"artifact_id":"sn-artifact-4","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-spatial+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"cell_id":"sn-b2","sample_id":"sn-s1","lineage":"myeloid","x_milli":3000,"y_milli":0,"state_milli":250,"artifact":{"artifact_id":"sn-artifact-5","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-spatial+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"cell_id":"sn-b3","sample_id":"sn-s1","lineage":"myeloid","x_milli":2000,"y_milli":1000,"state_milli":150,"artifact":{"artifact_id":"sn-artifact-6","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-spatial+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}}
+            ]
+        }),
+    );
+    assert_eq!(spatial_niches["dispatch"], json!("not_started"));
+    assert_eq!(
+        spatial_niches["analysis"]["disposition"],
+        json!("qualified")
+    );
+    assert!(!spatial_niches["analysis"]["interactions"]
+        .as_array()
+        .unwrap()
+        .is_empty());
 
     let sensitivity = call(
         &mut server,

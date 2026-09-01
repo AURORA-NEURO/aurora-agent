@@ -469,9 +469,9 @@ use bioprism_repair::{
 use bioprism_research::{
     allocate_glioma_assays, analyze_causal_sensitivity, analyze_federated_benchmark,
     analyze_glioma_causal_contrast, analyze_glioma_combination_synergy,
-    analyze_glioma_dose_response, analyze_glioma_latent_factors, analyze_glioma_trajectories,
-    analyze_instrument_calibration, analyze_multimodal_concordance, analyze_multimodal_consensus,
-    analyze_preclinical_outcomes, analyze_replication_meta_analysis,
+    analyze_glioma_dose_response, analyze_glioma_latent_factors, analyze_glioma_spatial_niches,
+    analyze_glioma_trajectories, analyze_instrument_calibration, analyze_multimodal_concordance,
+    analyze_multimodal_consensus, analyze_preclinical_outcomes, analyze_replication_meta_analysis,
     analyze_stratified_causal_adjustment, assess_glioma_robustness, assess_replication,
     build_research_object_manifest, compile_decision_context, compile_typed_knowledge,
     design_preclinical_experiment, discriminate_mechanisms, dry_run_glioma_research,
@@ -490,8 +490,8 @@ use bioprism_research::{
     MechanismRequest, MetaAnalysisRequest, ModalityVector, MultimodalObservation,
     MultimodalRequest, ProtocolSimulationRequest, ReplicationRequest, ReplicationStudy,
     ResearchObjectRequest, RobustnessRequest, SensitivityObservation, SensitivityRequest,
-    StratifiedCausalRequest, StratifiedObservation, TrajectoryObservation, TrajectoryRequest,
-    TypedKnowledge,
+    SpatialCell, SpatialNicheRequest, StratifiedCausalRequest, StratifiedObservation,
+    TrajectoryObservation, TrajectoryRequest, TypedKnowledge,
 };
 use bioprism_routing::{
     lab::{run as run_routing_lab, LabSettings, Task},
@@ -1941,6 +1941,7 @@ impl Server {
             "glioma_multimodal_consensus" => self.glioma_multimodal_consensus(&arguments),
             "glioma_multimodal_harmonize" => self.glioma_multimodal_harmonize(&arguments),
             "glioma_multimodal_latent_factors" => self.glioma_multimodal_latent_factors(&arguments),
+            "glioma_spatial_niches" => self.glioma_spatial_niches(&arguments),
             "glioma_causal_sensitivity" => self.glioma_causal_sensitivity(&arguments),
             "glioma_research_select_actions" => self.glioma_research_select_actions(&arguments),
             "glioma_program_catalog" => self.glioma_program_catalog(&arguments),
@@ -3474,6 +3475,39 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma latent-factor analysis: {error}"))
+    }
+
+    /// Build spatially connected same-lineage niches and retain cross-lineage interaction
+    /// enrichment for local preclinical glioma observations. This is analysis only: it does not
+    /// move raw spatial data, dispatch an assay, or make a clinical decision.
+    fn glioma_spatial_niches(&self, arguments: &Value) -> Result<Value, String> {
+        let request: SpatialNicheRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_spatial_niches requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma spatial-niche request: {error}"))?;
+        let cells: Vec<SpatialCell> = serde_json::from_value(
+            arguments
+                .get("cells")
+                .cloned()
+                .ok_or_else(|| "glioma_spatial_niches requires cells".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma spatial-niche cells: {error}"))?;
+        let output = analyze_glioma_spatial_niches(&request, &cells)
+            .map_err(|error| format!("glioma spatial-niche analysis refused: {error}"))?;
+        serde_json::to_value(json!({
+            "analysis": output,
+            "dispatch": "not_started",
+            "guarantees": [
+                "same-lineage spatial components are deterministic candidate niches",
+                "cross-lineage edges are compared with a random-mixing expected-edge null model",
+                "isolated cells, undersized niches, sparse graphs, and absent interactions remain explicit",
+                "the route produces local preclinical spatial analysis only and never makes a clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma spatial-niche analysis: {error}"))
     }
 
     /// Quantify the declared hidden-confounding budget at which a local preclinical effect tips.
@@ -43988,6 +44022,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_multimodal_consensus",
                 "glioma_multimodal_harmonize",
                 "glioma_multimodal_latent_factors",
+                "glioma_spatial_niches",
                 "glioma_causal_sensitivity",
                 "glioma_research_select_actions",
                 "glioma_program_catalog",
@@ -51003,6 +51038,18 @@ pub fn tool_definitions() -> Vec<Value> {
                 "vectors": {"type": "array", "items": {"type": "object"}, "description": "Local LatentFactorVector1@1 values with de-identified sample lineages, modalities, feature values, and artifact references."}
             },
             "required": ["request", "vectors"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_spatial_niches",
+        "description": "Build deterministic spatial neighbourhood graphs for local preclinical glioma observations. Same-lineage connected components become candidate niches; cross-lineage edges are tested against a random-mixing expected-edge null model, while sparse support, isolated cells, and undersized components remain explicit. It never imputes spatial data, moves raw data, dispatches an assay, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "SpatialNicheRequest1@1 with study/model binding, radius, neighbour and niche floors, and interaction enrichment floor."},
+                "cells": {"type": "array", "items": {"type": "object"}, "description": "Local SpatialCell1@1 records with de-identified coordinates, lineage/state values, and local artifact references."}
+            },
+            "required": ["request", "cells"]
         }
     }));
     definitions.push(json!({

@@ -1601,7 +1601,7 @@ pub fn glioma_research_engine_manifest() -> CapabilityManifest {
             "adaptive glioma scheduler".into(),
         ]
         .into(),
-        behavior: "compile an adaptive, checkpoint-oriented glioma campaign, continuously diff local evidence snapshots into prioritized review actions, compile typed claims and evidence-gap actions, choose the next dependency-safe batch, execute an admitted full preclinical program through caller-owned local stage executors, detect instrument-control drift before assay admission, compare and batch-harmonize declared multimodal vectors before consensus, extract robust complete-case latent states with convergence and reconstruction gates, compare and cluster multimodal vectors, discriminate competing mechanisms against local features and rank information-gain assays, fit longitudinal, causal-contrast, stratified-overlap-adjusted, dose-response, combination-synergy, replication-meta-analysis, and hidden-confounding sensitivity effects, allocate the next bounded assay replicate batch from conservative Beta-posterior effect probabilities, compare aggregate federated benchmark outcomes with robust site consensus, and stress-test endpoint effects under deterministic omission batteries; every unresolved, contradictory, underpowered, heterogeneous, budget, locality, and approval state routes to an explicit hold or abstain branch".into(),
+        behavior: "compile an adaptive, checkpoint-oriented glioma campaign, continuously diff local evidence snapshots into prioritized review actions, compile typed claims and evidence-gap actions, choose the next dependency-safe batch, execute an admitted full preclinical program through caller-owned local stage executors, detect instrument-control drift before assay admission, compare and batch-harmonize declared multimodal vectors before consensus, extract robust complete-case latent states with convergence and reconstruction gates, build same-lineage spatial niches and cross-lineage interaction enrichment, compare and cluster multimodal vectors, discriminate competing mechanisms against local features and rank information-gain assays, fit longitudinal, causal-contrast, stratified-overlap-adjusted, dose-response, combination-synergy, replication-meta-analysis, and hidden-confounding sensitivity effects, allocate the next bounded assay replicate batch from conservative Beta-posterior effect probabilities, compare aggregate federated benchmark outcomes with robust site consensus, and stress-test endpoint effects under deterministic omission batteries; every unresolved, contradictory, underpowered, heterogeneous, budget, locality, and approval state routes to an explicit hold or abstain branch".into(),
         value: "turns a glioma research objective into a usable end-to-end evidence, multimodal, mechanism, experiment, computation, replication, and release workflow while keeping autonomous progress auditable and outside clinical decision support".into(),
         inputs: vec![TypedPort {
             name: "glioma_research_intent".into(),
@@ -1682,6 +1682,11 @@ pub fn glioma_research_engine_manifest() -> CapabilityManifest {
             TypedPort {
                 name: "glioma_multimodal_latent_factors".into(),
                 schema: "GliomaLatentFactorization1@1".into(),
+                required: false,
+            },
+            TypedPort {
+                name: "glioma_spatial_niches".into(),
+                schema: "GliomaSpatialNiche1@1".into(),
                 required: false,
             },
             TypedPort {

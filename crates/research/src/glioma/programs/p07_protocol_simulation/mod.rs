@@ -10,7 +10,7 @@ pub use crate::glioma::workflow::{
     GliomaWorkflowExecution, GliomaWorkflowMode, GliomaWorkflowNode, GliomaWorkflowPlan,
     GliomaWorkflowRequest, WorkflowNodeDecision,
 };
-mod simulator;
+pub mod simulator;
 
 pub use simulator::{
     protocol_request_from_experiment_design, simulate_glioma_protocol, ProtocolDisposition,
