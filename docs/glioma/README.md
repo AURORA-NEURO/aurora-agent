@@ -72,6 +72,8 @@ crates/research/src/glioma/
                                              P03 deterministic multimodal sample consensus clustering
   p03_multimodal_ingestion_qc/harmonization.rs
                                              P03 robust per-modality batch harmonization with explicit correction gates
+  p03_multimodal_ingestion_qc/latent_factors.rs
+                                             P03 robust complete-case multimodal latent-state factorization with convergence and reconstruction gates
 ```
 
 `docs/glioma/organization.json` is the machine-readable version of this map. The runtime
@@ -148,6 +150,10 @@ modalities, disconnected sample pairs, distance failures, and unresolved samples
 P03 also includes robust batch harmonization (`harmonize_glioma_multimodal_batches`) that
 median-centers each modality against a declared reference batch, emits corrected vectors and
 residual-spread diagnostics, and refuses to impute missing features or hide oversized corrections.
+P03 now also includes deterministic latent-state factorization (`analyze_glioma_latent_factors`)
+that robustly median/MAD-scales complete-case modality columns, extracts bounded fixed-point power
+components, and gates on explained variance, reconstruction error, convergence, and explicit
+missing modality/feature coverage without imputation.
 P02 now includes typed-knowledge compilation (`compile_typed_knowledge`) that coalesces scoped
 claims, ranks support against contradiction, preserves negative/unknown evidence, and exposes
 missing modality/model coverage for the next workflow action.

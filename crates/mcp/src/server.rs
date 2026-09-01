@@ -475,7 +475,8 @@ use bioprism_research::{
     build_research_object_manifest, compile_decision_context, compile_typed_knowledge,
     design_preclinical_experiment, discriminate_mechanisms, dry_run_glioma_research,
     explore_mechanisms, generate_feature_catalog, glioma_program_catalog,
-    harmonize_glioma_multimodal_batches, harmonize_multimodal_inputs, plan_glioma_workflow,
+    analyze_glioma_latent_factors, harmonize_glioma_multimodal_batches,
+    harmonize_multimodal_inputs, plan_glioma_workflow,
     qualify_evidence, select_glioma_actions, simulate_glioma_protocol, surveil_glioma_evidence,
     validate_feature_catalog, AdaptiveAllocationRequest, AdaptiveArmObservation, AnalysisDataset,
     AnalysisRequest, CalibrationRequest, CalibrationRun, CausalContrastRequest,
@@ -484,6 +485,7 @@ use bioprism_research::{
     EvidenceRequest, EvidenceSurveillanceRequest, ExperimentArm, ExperimentRequest,
     FederatedBenchmarkRequest, FederatedBenchmarkSite, GliomaActionCandidate, GliomaResearchIntent,
     GliomaWorkflowRequest, HarmonizationRequest, HarmonizationVector, KnowledgeRequest,
+    LatentFactorRequest, LatentFactorVector,
     MechanismCandidate, MechanismDiscriminationRequest, MechanismDiscriminatorAction,
     MechanismFeatureObservation, MechanismHypothesis, MechanismRequest, MetaAnalysisRequest,
     ModalityVector, MultimodalObservation, MultimodalRequest, ProtocolSimulationRequest,
@@ -1938,6 +1940,9 @@ impl Server {
             "glioma_multimodal_concordance" => self.glioma_multimodal_concordance(&arguments),
             "glioma_multimodal_consensus" => self.glioma_multimodal_consensus(&arguments),
             "glioma_multimodal_harmonize" => self.glioma_multimodal_harmonize(&arguments),
+            "glioma_multimodal_latent_factors" => {
+                self.glioma_multimodal_latent_factors(&arguments)
+            }
             "glioma_research_select_actions" => self.glioma_research_select_actions(&arguments),
             "glioma_program_catalog" => self.glioma_program_catalog(&arguments),
             "glioma_evidence_qualify" => self.glioma_evidence_qualify(&arguments),
@@ -3437,6 +3442,39 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma multimodal harmonization: {error}"))
+    }
+
+    /// Extract deterministic latent states from complete-case multimodal glioma vectors. This is
+    /// a local analysis only: it does not impute missing values, export raw artifacts, or dispatch
+    /// an assay.
+    fn glioma_multimodal_latent_factors(&self, arguments: &Value) -> Result<Value, String> {
+        let request: LatentFactorRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_multimodal_latent_factors requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma latent-factor request: {error}"))?;
+        let vectors: Vec<LatentFactorVector> = serde_json::from_value(
+            arguments
+                .get("vectors")
+                .cloned()
+                .ok_or_else(|| "glioma_multimodal_latent_factors requires vectors".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma latent-factor vectors: {error}"))?;
+        let output = analyze_glioma_latent_factors(&request, &vectors)
+            .map_err(|error| format!("glioma latent-factor analysis refused: {error}"))?;
+        serde_json::to_value(json!({
+            "analysis": output,
+            "dispatch": "not_started",
+            "guarantees": [
+                "complete-case rows and robust median/MAD scaling are deterministic",
+                "latent components use bounded fixed-point power iteration with explicit convergence",
+                "explained variance, reconstruction error, omitted features, and modality gaps remain visible",
+                "the route produces local preclinical analysis only and never makes a clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma latent-factor analysis: {error}"))
     }
 
     /// Choose a bounded next batch of local glioma actions. This only ranks typed candidates; it
@@ -43919,6 +43957,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_multimodal_concordance",
                 "glioma_multimodal_consensus",
                 "glioma_multimodal_harmonize",
+                "glioma_multimodal_latent_factors",
                 "glioma_research_select_actions",
                 "glioma_program_catalog",
                 "glioma_evidence_qualify",
@@ -50919,6 +50958,18 @@ pub fn tool_definitions() -> Vec<Value> {
             "properties": {
                 "request": {"type": "object", "description": "HarmonizationRequest1@1 with modality/model coverage, reference batch, vector/feature floors, and correction bounds."},
                 "vectors": {"type": "array", "items": {"type": "object"}, "description": "Local HarmonizationVector1@1 values with de-identified sample lineages, batches, feature values, and artifact references."}
+            },
+            "required": ["request", "vectors"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_multimodal_latent_factors",
+        "description": "Extract deterministic latent states from complete-case local preclinical glioma modality vectors using robust median/MAD scaling and bounded fixed-point power iteration. Reports component loadings and sample scores, explained variance, reconstruction error, convergence, omitted features, and modality gaps; it never imputes missing values, moves raw data, dispatches an instrument, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "LatentFactorRequest1@1 with modality/model bindings, complete-sample and feature floors, component/iteration bounds, and release gates."},
+                "vectors": {"type": "array", "items": {"type": "object"}, "description": "Local LatentFactorVector1@1 values with de-identified sample lineages, modalities, feature values, and artifact references."}
             },
             "required": ["request", "vectors"]
         }

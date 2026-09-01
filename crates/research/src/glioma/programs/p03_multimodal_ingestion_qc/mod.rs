@@ -5,6 +5,7 @@ use crate::glioma::catalog::{glioma_program_catalog, GliomaProgramDescriptor, Gl
 pub mod concordance;
 pub mod consensus;
 pub mod harmonization;
+pub mod latent_factors;
 
 pub use concordance::{
     analyze_multimodal_concordance, ConcordanceDisposition, ConcordanceError, ConcordanceRequest,
@@ -19,6 +20,11 @@ pub use harmonization::{
     harmonize_glioma_multimodal_batches, BatchHarmonizationDiagnostic, HarmonizationDisposition,
     HarmonizationError, HarmonizationRequest, HarmonizationVector, HarmonizedFeature,
     HarmonizedVector, MultimodalHarmonization,
+};
+pub use latent_factors::{
+    analyze_glioma_latent_factors, LatentFactorAnalysis, LatentFactorComponent,
+    LatentFactorDisposition, LatentFactorError, LatentFactorRequest, LatentFactorVector,
+    LatentLoading, LatentScore,
 };
 
 pub const PROGRAM_ID: GliomaProgramId = GliomaProgramId::MultimodalIngestionQc;

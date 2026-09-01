@@ -314,7 +314,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 57;
-const TOOL_DEFINITION_COUNT: usize = 549;
+const TOOL_DEFINITION_COUNT: usize = 550;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -820,6 +820,43 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
     assert_eq!(
         harmonization["harmonization"]["max_correction_milli"],
         json!(50)
+    );
+
+    let latent_factors = call(
+        &mut server,
+        "glioma_multimodal_latent_factors",
+        json!({
+            "request": {
+                "study_id": "mcp-latent-study",
+                "model_system": "organoid",
+                "required_modalities": ["genomics", "imaging"],
+                "min_complete_samples": 3,
+                "min_shared_features": 2,
+                "components": 1,
+                "max_iterations": 100,
+                "convergence_tolerance_milli": 1,
+                "min_explained_variance_milli": 500,
+                "max_reconstruction_error_milli": 500,
+                "require_all_modalities": true
+            },
+            "vectors": [
+                {"observation_id":"ml-g1","study_id":"mcp-latent-study","sample_lineage":"ml-s1","modality":"genomics","model_system":"organoid","artifact":{"artifact_id":"ml-artifact-1","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-vector+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"features":[{"feature_id":"x","value_milli":100},{"feature_id":"y","value_milli":10}]},
+                {"observation_id":"ml-i1","study_id":"mcp-latent-study","sample_lineage":"ml-s1","modality":"imaging","model_system":"organoid","artifact":{"artifact_id":"ml-artifact-2","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-vector+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"features":[{"feature_id":"x","value_milli":50},{"feature_id":"y","value_milli":5}]},
+                {"observation_id":"ml-g2","study_id":"mcp-latent-study","sample_lineage":"ml-s2","modality":"genomics","model_system":"organoid","artifact":{"artifact_id":"ml-artifact-3","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-vector+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"features":[{"feature_id":"x","value_milli":200},{"feature_id":"y","value_milli":20}]},
+                {"observation_id":"ml-i2","study_id":"mcp-latent-study","sample_lineage":"ml-s2","modality":"imaging","model_system":"organoid","artifact":{"artifact_id":"ml-artifact-4","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-vector+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"features":[{"feature_id":"x","value_milli":100},{"feature_id":"y","value_milli":10}]},
+                {"observation_id":"ml-g3","study_id":"mcp-latent-study","sample_lineage":"ml-s3","modality":"genomics","model_system":"organoid","artifact":{"artifact_id":"ml-artifact-5","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-vector+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"features":[{"feature_id":"x","value_milli":300},{"feature_id":"y","value_milli":30}]},
+                {"observation_id":"ml-i3","study_id":"mcp-latent-study","sample_lineage":"ml-s3","modality":"imaging","model_system":"organoid","artifact":{"artifact_id":"ml-artifact-6","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-vector+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"features":[{"feature_id":"x","value_milli":150},{"feature_id":"y","value_milli":15}]}
+            ]
+        }),
+    );
+    assert_eq!(latent_factors["dispatch"], json!("not_started"));
+    assert_eq!(
+        latent_factors["analysis"]["disposition"],
+        json!("qualified")
+    );
+    assert_eq!(
+        latent_factors["analysis"]["components"][0]["component_index"],
+        json!(0)
     );
 
     let consensus = call(
