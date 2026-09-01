@@ -888,10 +888,7 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
         sensitivity["analysis"]["tipping_strength_milli"],
         json!(200)
     );
-    assert_eq!(
-        sensitivity["analysis"]["disposition"],
-        json!("partial")
-    );
+    assert_eq!(sensitivity["analysis"]["disposition"], json!("partial"));
 
     let consensus = call(
         &mut server,

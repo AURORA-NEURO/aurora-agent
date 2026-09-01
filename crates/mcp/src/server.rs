@@ -467,16 +467,16 @@ use bioprism_repair::{
     DeclaredItem as RepairDeclaredItem, PlanOptions as RepairPlanOptions, RepairPlan,
 };
 use bioprism_research::{
-    allocate_glioma_assays, analyze_federated_benchmark, analyze_glioma_causal_contrast,
-    analyze_glioma_combination_synergy, analyze_glioma_dose_response, analyze_glioma_trajectories,
+    allocate_glioma_assays, analyze_causal_sensitivity, analyze_federated_benchmark,
+    analyze_glioma_causal_contrast, analyze_glioma_combination_synergy,
+    analyze_glioma_dose_response, analyze_glioma_latent_factors, analyze_glioma_trajectories,
     analyze_instrument_calibration, analyze_multimodal_concordance, analyze_multimodal_consensus,
     analyze_preclinical_outcomes, analyze_replication_meta_analysis,
     analyze_stratified_causal_adjustment, assess_glioma_robustness, assess_replication,
     build_research_object_manifest, compile_decision_context, compile_typed_knowledge,
     design_preclinical_experiment, discriminate_mechanisms, dry_run_glioma_research,
     explore_mechanisms, generate_feature_catalog, glioma_program_catalog,
-    analyze_causal_sensitivity, analyze_glioma_latent_factors, harmonize_glioma_multimodal_batches,
-    harmonize_multimodal_inputs, plan_glioma_workflow,
+    harmonize_glioma_multimodal_batches, harmonize_multimodal_inputs, plan_glioma_workflow,
     qualify_evidence, select_glioma_actions, simulate_glioma_protocol, surveil_glioma_evidence,
     validate_feature_catalog, AdaptiveAllocationRequest, AdaptiveArmObservation, AnalysisDataset,
     AnalysisRequest, CalibrationRequest, CalibrationRun, CausalContrastRequest,
@@ -485,11 +485,11 @@ use bioprism_research::{
     EvidenceRequest, EvidenceSurveillanceRequest, ExperimentArm, ExperimentRequest,
     FederatedBenchmarkRequest, FederatedBenchmarkSite, GliomaActionCandidate, GliomaResearchIntent,
     GliomaWorkflowRequest, HarmonizationRequest, HarmonizationVector, KnowledgeRequest,
-    LatentFactorRequest, LatentFactorVector, SensitivityObservation, SensitivityRequest,
-    MechanismCandidate, MechanismDiscriminationRequest, MechanismDiscriminatorAction,
-    MechanismFeatureObservation, MechanismHypothesis, MechanismRequest, MetaAnalysisRequest,
-    ModalityVector, MultimodalObservation, MultimodalRequest, ProtocolSimulationRequest,
-    ReplicationRequest, ReplicationStudy, ResearchObjectRequest, RobustnessRequest,
+    LatentFactorRequest, LatentFactorVector, MechanismCandidate, MechanismDiscriminationRequest,
+    MechanismDiscriminatorAction, MechanismFeatureObservation, MechanismHypothesis,
+    MechanismRequest, MetaAnalysisRequest, ModalityVector, MultimodalObservation,
+    MultimodalRequest, ProtocolSimulationRequest, ReplicationRequest, ReplicationStudy,
+    ResearchObjectRequest, RobustnessRequest, SensitivityObservation, SensitivityRequest,
     StratifiedCausalRequest, StratifiedObservation, TrajectoryObservation, TrajectoryRequest,
     TypedKnowledge,
 };
@@ -1940,9 +1940,7 @@ impl Server {
             "glioma_multimodal_concordance" => self.glioma_multimodal_concordance(&arguments),
             "glioma_multimodal_consensus" => self.glioma_multimodal_consensus(&arguments),
             "glioma_multimodal_harmonize" => self.glioma_multimodal_harmonize(&arguments),
-            "glioma_multimodal_latent_factors" => {
-                self.glioma_multimodal_latent_factors(&arguments)
-            }
+            "glioma_multimodal_latent_factors" => self.glioma_multimodal_latent_factors(&arguments),
             "glioma_causal_sensitivity" => self.glioma_causal_sensitivity(&arguments),
             "glioma_research_select_actions" => self.glioma_research_select_actions(&arguments),
             "glioma_program_catalog" => self.glioma_program_catalog(&arguments),
