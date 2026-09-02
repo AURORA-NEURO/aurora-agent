@@ -2,9 +2,15 @@
 
 use crate::glioma::catalog::{glioma_program_catalog, GliomaProgramDescriptor, GliomaProgramId};
 
+pub mod counterfactual;
 pub mod discrimination;
 pub mod graph_propagation;
 
+pub use counterfactual::{
+    simulate_glioma_counterfactual, CounterfactualContrast, CounterfactualDirection,
+    CounterfactualDisposition, CounterfactualError, CounterfactualIntervention,
+    CounterfactualRequest, MechanismCounterfactual,
+};
 pub use discrimination::{
     discriminate_mechanisms, MechanismDiscrimination, MechanismDiscriminationDisposition,
     MechanismDiscriminationError, MechanismDiscriminationRanking, MechanismDiscriminationRequest,

@@ -26,6 +26,8 @@ crates/research/src/glioma/
                                              P05 residual-likelihood mechanism discrimination and next-assay information gain
   programs/p05_mechanism_exploration/graph_propagation.rs
                                              P05 signed activation/inhibition mechanism-network propagation with convergence gates
+  programs/p05_mechanism_exploration/counterfactual.rs
+                                             P05 signed mechanism perturbation and downstream contrast
   programs/p01_evidence_surveillance/surveillance.rs
                                              P01 snapshot delta surveillance and prioritized evidence review actions
   programs/p08_instrument_robotics/calibration.rs
@@ -234,6 +236,10 @@ typed multimodal DAGs in stable topological order, reuses only replay-keyed loca
 enforces cost budgets, retries transient worker failures, and preserves negative, partial, failed,
 and skipped tasks. The dry-run worker emits synthetic artifacts; production containers, GPUs, and
 schedulers remain behind a caller-owned executor.
+P05 now also includes counterfactual mechanism simulation (`simulate_glioma_counterfactual`). It
+compares baseline and signed node perturbation fixed points over activating/inhibiting networks,
+rank-orders downstream changes, and exposes low-confidence edges and non-convergence as unresolved.
+The result is an assay-prioritization simulation, not a causal estimate or clinical recommendation.
 P10 also includes stratified causal adjustment (`analyze_stratified_causal_adjustment`) that
 collapses repeated measurements to units, requires positivity within confounder strata, computes
 pooled weighted contrasts, and exposes leave-one-stratum influence and missing coverage.

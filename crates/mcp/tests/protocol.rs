@@ -314,7 +314,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 57;
-const TOOL_DEFINITION_COUNT: usize = 559;
+const TOOL_DEFINITION_COUNT: usize = 560;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -1244,6 +1244,49 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
             .unwrap()
             .len(),
         3
+    );
+
+    let mechanism_counterfactual = call(
+        &mut server,
+        "glioma_mechanism_counterfactual",
+        json!({
+            "request": {
+                "objective": "simulate EGFR inhibition on invasion mechanism",
+                "model_system": "organoid",
+                "max_iterations": 100,
+                "convergence_tolerance_milli": 1,
+                "damping_milli": 600,
+                "min_edge_confidence_milli": 500,
+                "min_effect_milli": 10,
+                "top_k": 3
+            },
+            "nodes": [
+                {"node_id":"egfr","label":"EGFR activation","modality":"genomics","prior_milli":100,"support_milli":800,"contradiction_milli":0},
+                {"node_id":"invasion","label":"invasion phenotype","modality":"functional_perturbation","prior_milli":0,"support_milli":0,"contradiction_milli":0}
+            ],
+            "edges": [
+                {"edge_id":"e-egfr-invasion","source_node_id":"egfr","target_node_id":"invasion","relation":"activates","confidence_milli":900,"evidence_order":["paper-egfr"]}
+            ],
+            "interventions": [
+                {"intervention_id":"inhibit-egfr","node_id":"egfr","delta_milli":-600,"rationale":"test whether EGFR support propagates to invasion","evidence_order":["paper-egfr"]}
+            ]
+        }),
+    );
+    assert_eq!(mechanism_counterfactual["dispatch"], json!("not_started"));
+    assert_eq!(
+        mechanism_counterfactual["counterfactual"]["disposition"],
+        json!("qualified")
+    );
+    assert_eq!(
+        mechanism_counterfactual["counterfactual"]["intervention_order"],
+        json!(["inhibit-egfr"])
+    );
+    assert_eq!(
+        mechanism_counterfactual["counterfactual"]["contrasts"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
     );
 
     let instrument_calibration = call(

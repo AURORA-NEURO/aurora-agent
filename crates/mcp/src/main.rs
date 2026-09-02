@@ -70,6 +70,7 @@ fn main() {
                      glioma_multimodal_harmonize, glioma_multimodal_latent_factors, glioma_spatial_niches, glioma_spatial_communication, glioma_state_transition_analyze, glioma_protocol_execute, glioma_causal_sensitivity,\n\
                      glioma_mechanism_discriminate,\n\
                      glioma_mechanism_graph_propagate,\n\
+                     glioma_mechanism_counterfactual,\n\
                      glioma_stratified_causal_adjustment,\n\
                      glioma_adaptive_allocation,\n\
                      glioma_closed_loop_campaign,\n\
