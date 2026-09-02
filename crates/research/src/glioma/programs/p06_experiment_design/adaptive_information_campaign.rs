@@ -797,9 +797,18 @@ pub fn execute_glioma_adaptive_information_campaign<E: GliomaInformationDesignEx
     let action_map = action_map(actions);
     let mut observations = initial_observations.to_vec();
     let mut rounds = Vec::new();
+    // Execution deliberately replans one assay at a time. A caller may request a larger planning
+    // batch, but posterior adaptation is more important than parallel dispatch once outcomes are
+    // available.
+    let mut step_request = request.clone();
+    step_request.max_actions_per_round = 1;
     for round in 1..=request.max_rounds {
-        let plan =
-            plan_glioma_adaptive_information_campaign(request, mechanisms, actions, &observations)?;
+        let plan = plan_glioma_adaptive_information_campaign(
+            &step_request,
+            mechanisms,
+            actions,
+            &observations,
+        )?;
         if plan.next_action_order.is_empty() {
             break;
         }
@@ -807,7 +816,7 @@ pub fn execute_glioma_adaptive_information_campaign<E: GliomaInformationDesignEx
         let mut selected = Vec::new();
         let mut observation_order = Vec::new();
         let mut spent = 0_u64;
-        for action_id in &plan.next_action_order {
+        for action_id in plan.next_action_order.iter().take(1) {
             let action = action_map.get(action_id).ok_or_else(|| {
                 AdaptiveInformationCampaignError::InvalidOutput(format!(
                     "planned action {action_id} is absent from the action map"
