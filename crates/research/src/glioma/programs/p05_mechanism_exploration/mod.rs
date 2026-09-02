@@ -6,6 +6,7 @@ pub mod counterfactual;
 pub mod discrimination;
 pub mod ensemble_counterfactual;
 pub mod graph_propagation;
+pub mod robust_portfolio;
 
 pub use counterfactual::{
     simulate_glioma_counterfactual, CounterfactualContrast, CounterfactualDirection,
@@ -27,6 +28,11 @@ pub use graph_propagation::{
     propagate_glioma_mechanism_graph, MechanismGraphDisposition, MechanismGraphEdge,
     MechanismGraphError, MechanismGraphNode, MechanismGraphPropagation, MechanismGraphRelation,
     MechanismGraphRequest, MechanismNodeScore,
+};
+pub use robust_portfolio::{
+    plan_glioma_robust_intervention_portfolio, PortfolioDirection, RobustInterventionCandidate,
+    RobustInterventionPortfolio, RobustInterventionRequest, RobustInterventionScore,
+    RobustPortfolioDisposition, RobustPortfolioError,
 };
 
 pub const PROGRAM_ID: GliomaProgramId = GliomaProgramId::MechanismExploration;
