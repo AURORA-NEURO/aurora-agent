@@ -3,6 +3,7 @@
 use crate::glioma::catalog::{glioma_program_catalog, GliomaProgramDescriptor, GliomaProgramId};
 
 pub mod adaptive_allocation;
+pub mod adaptive_information_campaign;
 pub mod campaign;
 pub mod dose_response;
 pub mod information_design;
@@ -12,6 +13,14 @@ pub use adaptive_allocation::{
     allocate_glioma_assays, AdaptiveAllocation, AdaptiveAllocationActionKind,
     AdaptiveAllocationDisposition, AdaptiveAllocationError, AdaptiveAllocationRequest,
     AdaptiveArmObservation, AdaptiveArmPosterior,
+};
+pub use adaptive_information_campaign::{
+    execute_glioma_adaptive_information_campaign, plan_glioma_adaptive_information_campaign,
+    AdaptiveInformationCampaignDisposition, AdaptiveInformationCampaignError,
+    AdaptiveInformationCampaignExecution, AdaptiveInformationCampaignPlan,
+    AdaptiveInformationCampaignRequest, AdaptiveInformationCampaignRound,
+    AdaptiveInformationExecutionFailure, AdaptiveInformationObservation,
+    AdaptiveMechanismPosterior, GliomaInformationDesignExecutor,
 };
 pub use campaign::{
     execute_glioma_closed_loop_campaign, plan_glioma_closed_loop_campaign, CampaignAction,

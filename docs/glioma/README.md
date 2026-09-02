@@ -36,6 +36,7 @@ crates/research/src/glioma/
                                              P08 robust control calibration and Theil-Sen instrument drift detection
   programs/p06_experiment_design/adaptive_allocation.rs
   programs/p06_experiment_design/information_design.rs
+  programs/p06_experiment_design/adaptive_information_campaign.rs
                                              P06 conservative Beta-posterior sequential assay allocation and budgeted exploration
   multimodal.rs                            P03 harmonization and QC
   mechanism.rs                             P05 competing mechanism portfolio
@@ -83,6 +84,7 @@ crates/research/src/glioma/
     p06_experiment_design/synergy.rs         P06 Bliss combination-response analysis
     p06_experiment_design/campaign.rs       P06 mechanism-aware closed-loop assay campaign controller and executor seam
     p06_experiment_design/information_design.rs P06 integer Bayesian assay selection by expected mechanism-information reduction
+    p06_experiment_design/adaptive_information_campaign.rs P06 closed-loop posterior updating and re-planning through a caller-owned assay executor
     p03_multimodal_ingestion_qc/concordance.rs
                                              P03 feature-level modality concordance analysis
   p03_multimodal_ingestion_qc/consensus.rs

@@ -73,6 +73,7 @@ fn main() {
                      glioma_mechanism_counterfactual,\n\
                      glioma_mechanism_ensemble_counterfactual,\n\
                      glioma_information_design,\n\
+                     glioma_adaptive_information_campaign,\n\
                      glioma_stratified_causal_adjustment,\n\
                      glioma_adaptive_allocation,\n\
                      glioma_closed_loop_campaign,\n\

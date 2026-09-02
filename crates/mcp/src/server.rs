@@ -479,14 +479,16 @@ use bioprism_research::{
     discriminate_mechanisms, dry_run_glioma_research, execute_glioma_computation,
     execute_glioma_protocol, explore_mechanisms, generate_feature_catalog, glioma_program_catalog,
     harmonize_glioma_multimodal_batches, harmonize_multimodal_inputs,
-    plan_glioma_closed_loop_campaign, plan_glioma_information_design, plan_glioma_workflow,
-    preflight_glioma_instrument, propagate_glioma_mechanism_graph, qualify_evidence,
-    select_glioma_actions, simulate_glioma_counterfactual, simulate_glioma_counterfactual_ensemble,
+    plan_glioma_adaptive_information_campaign, plan_glioma_closed_loop_campaign,
+    plan_glioma_information_design, plan_glioma_workflow, preflight_glioma_instrument,
+    propagate_glioma_mechanism_graph, qualify_evidence, select_glioma_actions,
+    simulate_glioma_counterfactual, simulate_glioma_counterfactual_ensemble,
     simulate_glioma_protocol, surveil_glioma_evidence, validate_feature_catalog,
-    AdaptiveAllocationRequest, AdaptiveArmObservation, AnalysisDataset, AnalysisRequest,
-    CalibrationRequest, CalibrationRun, CampaignAction, CampaignMechanism, CampaignObservation,
-    CausalContrastRequest, ClosedLoopCampaignRequest, CombinationObservation,
-    CombinationSynergyRequest, ComputationExecutionRequest, ConcordanceRequest, ConsensusRequest,
+    AdaptiveAllocationRequest, AdaptiveArmObservation, AdaptiveInformationCampaignRequest,
+    AdaptiveInformationObservation, AnalysisDataset, AnalysisRequest, CalibrationRequest,
+    CalibrationRun, CampaignAction, CampaignMechanism, CampaignObservation, CausalContrastRequest,
+    ClosedLoopCampaignRequest, CombinationObservation, CombinationSynergyRequest,
+    ComputationExecutionRequest, ConcordanceRequest, ConsensusRequest,
     CounterfactualEnsembleRequest, CounterfactualIntervention, CounterfactualModel,
     CounterfactualRequest, DecisionContextRequest, DesignAction, DesignMechanism,
     DoseResponseObservation, DoseResponseRequest, DryRunGliomaComputationExecutor,
@@ -1975,6 +1977,9 @@ impl Server {
                 self.glioma_mechanism_ensemble_counterfactual(&arguments)
             }
             "glioma_information_design" => self.glioma_information_design(&arguments),
+            "glioma_adaptive_information_campaign" => {
+                self.glioma_adaptive_information_campaign(&arguments)
+            }
             "glioma_instrument_calibration" => self.glioma_instrument_calibration(&arguments),
             "glioma_instrument_preflight" => self.glioma_instrument_preflight(&arguments),
             "glioma_experiment_design" => self.glioma_experiment_design(&arguments),
@@ -4157,6 +4162,52 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma information design: {error}"))
+    }
+
+    /// Replan a local adaptive glioma assay campaign from categorical outcomes already returned
+    /// by an institution-local executor. This is a planning endpoint; physical execution remains
+    /// behind the typed Rust executor seam and is never performed by MCP.
+    fn glioma_adaptive_information_campaign(&self, arguments: &Value) -> Result<Value, String> {
+        let request: AdaptiveInformationCampaignRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_adaptive_information_campaign requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma adaptive campaign request: {error}"))?;
+        let mechanisms: Vec<DesignMechanism> =
+            serde_json::from_value(arguments.get("mechanisms").cloned().ok_or_else(|| {
+                "glioma_adaptive_information_campaign requires mechanisms".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma adaptive campaign mechanisms: {error}"))?;
+        let actions: Vec<DesignAction> =
+            serde_json::from_value(arguments.get("actions").cloned().ok_or_else(|| {
+                "glioma_adaptive_information_campaign requires actions".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma adaptive campaign actions: {error}"))?;
+        let observations: Vec<AdaptiveInformationObservation> = arguments
+            .get("observations")
+            .cloned()
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(|error| format!("invalid glioma adaptive campaign observations: {error}"))?
+            .unwrap_or_default();
+        let output = plan_glioma_adaptive_information_campaign(
+            &request,
+            &mechanisms,
+            &actions,
+            &observations,
+        )
+        .map_err(|error| format!("glioma adaptive information campaign refused: {error}"))?;
+        serde_json::to_value(json!({
+            "campaign": output,
+            "dispatch": "not_started",
+            "guarantees": [
+                "each returned categorical outcome is applied with integer Bayes normalization and explicit zero-likelihood refusal",
+                "every replan respects declared replicate, risk, feasibility, cost, and budget ceilings",
+                "posterior concentration, exhausted assays, unresolved information, and negative evidence remain visible",
+                "MCP only compiles the next local preclinical batch; an institution-owned executor must authorize and run any assay"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma adaptive information campaign: {error}"))
     }
 
     /// Detect instrument-control drift before a preclinical run is admitted. The calibration
@@ -44426,6 +44477,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_mechanism_counterfactual",
                 "glioma_mechanism_ensemble_counterfactual",
                 "glioma_information_design",
+                "glioma_adaptive_information_campaign",
                 "glioma_instrument_calibration",
                 "glioma_instrument_preflight",
                 "glioma_experiment_design",
@@ -51685,6 +51737,20 @@ pub fn tool_definitions() -> Vec<Value> {
                 "request": {"type": "object", "description": "InformationDesignRequest1@1 with objective, model system, budget, selection, information, feasibility, risk, cost, and risk-ceiling bounds."},
                 "mechanisms": {"type": "array", "items": {"type": "object"}, "description": "DesignMechanism1@1 prior masses summing to 1000."},
                 "actions": {"type": "array", "items": {"type": "object"}, "description": "DesignAction1@1 candidate assays with per-mechanism discrete outcome probabilities, feasibility, risk, cost, and replicate bounds."}
+            },
+            "required": ["request", "mechanisms", "actions"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_adaptive_information_campaign",
+        "description": "Replan a bounded adaptive preclinical glioma assay campaign from categorical outcomes already returned by an institution-local executor. Applies integer Bayes posterior updates, replicate/risk/feasibility/cost/budget gates, and explicit convergence or abstention states; MCP compiles the next local batch but never executes biology or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "AdaptiveInformationCampaignRequest1@1 with rounds, batch, budget, information, risk, and concentration bounds."},
+                "mechanisms": {"type": "array", "items": {"type": "object"}, "description": "DesignMechanism1@1 competing mechanism priors."},
+                "actions": {"type": "array", "items": {"type": "object"}, "description": "DesignAction1@1 categorical assay actions with per-mechanism outcome probabilities."},
+                "observations": {"type": "array", "items": {"type": "object"}, "description": "Optional AdaptiveInformationObservation1@1 local artifact-backed outcomes for resumable replanning."}
             },
             "required": ["request", "mechanisms", "actions"]
         }

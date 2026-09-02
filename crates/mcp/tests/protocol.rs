@@ -314,7 +314,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 57;
-const TOOL_DEFINITION_COUNT: usize = 562;
+const TOOL_DEFINITION_COUNT: usize = 563;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -1380,6 +1380,53 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
             .unwrap()
             .len(),
         2
+    );
+
+    let adaptive_information_campaign = call(
+        &mut server,
+        "glioma_adaptive_information_campaign",
+        json!({
+            "request": {
+                "objective": "adaptively separate EGFR and matrix invasion mechanisms",
+                "model_system": "organoid",
+                "max_rounds": 3,
+                "max_actions_per_round": 1,
+                "budget_units": 6,
+                "min_information_gain_milli": 10,
+                "information_weight_milli": 800,
+                "feasibility_weight_milli": 200,
+                "risk_penalty_milli": 100,
+                "cost_penalty_milli": 0,
+                "risk_ceiling_milli": 700,
+                "stop_concentration_milli": 900
+            },
+            "mechanisms": [
+                {"mechanism_id":"egfr","prior_milli":500},
+                {"mechanism_id":"matrix","prior_milli":500}
+            ],
+            "actions": [
+                {"action_id":"uninformative","feature_id":"feature-uninformative","label":"uninformative assay","outcomes":[
+                    {"outcome_id":"low","label":"low invasion","probability_milli_by_mechanism":{"egfr":500,"matrix":500}},
+                    {"outcome_id":"high","label":"high invasion","probability_milli_by_mechanism":{"egfr":500,"matrix":500}}
+                ],"feasibility_milli":900,"risk_milli":100,"cost_units":2,"max_replicates":1},
+                {"action_id":"separating","feature_id":"feature-separating","label":"separating assay","outcomes":[
+                    {"outcome_id":"low","label":"low invasion","probability_milli_by_mechanism":{"egfr":900,"matrix":100}},
+                    {"outcome_id":"high","label":"high invasion","probability_milli_by_mechanism":{"egfr":100,"matrix":900}}
+                ],"feasibility_milli":900,"risk_milli":100,"cost_units":2,"max_replicates":1}
+            ]
+        }),
+    );
+    assert_eq!(
+        adaptive_information_campaign["dispatch"],
+        json!("not_started")
+    );
+    assert_eq!(
+        adaptive_information_campaign["campaign"]["disposition"],
+        json!("qualified")
+    );
+    assert_eq!(
+        adaptive_information_campaign["campaign"]["next_action_order"],
+        json!(["separating"])
     );
 
     let instrument_calibration = call(
