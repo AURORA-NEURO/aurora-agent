@@ -938,7 +938,9 @@ mod tests {
             effect_weight_milli: 100,
             feasibility_weight_milli: 200,
             risk_penalty_milli: 200,
-            stop_concentration_milli: 900,
+            // Keep the executor test in the replanning regime: a single exact simulated
+            // observation must not short-circuit the second action before it can be re-evaluated.
+            stop_concentration_milli: 1_000,
         }
     }
 
@@ -998,12 +1000,14 @@ mod tests {
             action: &CampaignAction,
             round: u16,
         ) -> Result<Vec<CampaignObservation>, CampaignExecutionFailure> {
-            let observed_milli = action
+            // Return the midpoint of competing predictions so the executor exercises a real
+            // second-round replan rather than making the first mechanism certain immediately.
+            let predictions = action
                 .predicted_milli_by_mechanism
                 .values()
                 .copied()
-                .max()
-                .unwrap_or_default();
+                .collect::<Vec<_>>();
+            let observed_milli = predictions.iter().sum::<i64>() / predictions.len() as i64;
             Ok(vec![CampaignObservation {
                 action_id: action.action_id.clone(),
                 observed_milli,

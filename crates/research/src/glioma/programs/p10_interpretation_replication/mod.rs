@@ -6,6 +6,7 @@ pub mod causal_adjustment;
 pub mod causal_contrast;
 pub mod meta_analysis;
 pub mod sensitivity;
+pub mod state_transition;
 pub mod trajectory;
 
 pub use causal_adjustment::{
@@ -26,6 +27,12 @@ pub use sensitivity::{
     analyze_causal_sensitivity, CausalSensitivityAnalysis, SensitivityDirection,
     SensitivityDisposition, SensitivityError, SensitivityObservation, SensitivityPoint,
     SensitivityRequest,
+};
+pub use state_transition::{
+    analyze_glioma_state_transitions, StateTransitionAnalysis, StateTransitionCell,
+    StateTransitionContrast, StateTransitionDisposition, StateTransitionError,
+    StateTransitionObservation, StateTransitionRequest, TransitionCellDisposition,
+    TransitionContrastDisposition, TransitionDirection,
 };
 
 pub use trajectory::{

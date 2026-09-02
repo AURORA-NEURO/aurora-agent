@@ -314,7 +314,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 57;
-const TOOL_DEFINITION_COUNT: usize = 555;
+const TOOL_DEFINITION_COUNT: usize = 556;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -584,6 +584,44 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
         trajectory["analysis"]["slope_effect_milli_per_tick"],
         json!(9)
     );
+
+    let state_transition = call(
+        &mut server,
+        "glioma_state_transition_analyze",
+        json!({
+            "request": {
+                "objective": "compare longitudinal glioma state transitions",
+                "control_arm": "control",
+                "treatment_arm": "treated",
+                "model_system": "organoid",
+                "state_order": ["low", "high"],
+                "min_units_per_arm": 2,
+                "min_transitions_per_arm": 2,
+                "max_timepoint_gap": 2,
+                "min_contrast_milli": 100
+            },
+            "observations": [
+                {"observation_id":"st-c0-0","unit_id":"st-control-0","arm_id":"control","model_system":"organoid","batch_id":"st-b0","timepoint":0,"state_id":"low","state_score_milli":100,"artifact":{"artifact_id":"st-artifact-c0-0","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-state-transition+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"observation_id":"st-c0-1","unit_id":"st-control-0","arm_id":"control","model_system":"organoid","batch_id":"st-b1","timepoint":1,"state_id":"low","state_score_milli":100,"artifact":{"artifact_id":"st-artifact-c0-1","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-state-transition+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"observation_id":"st-c1-0","unit_id":"st-control-1","arm_id":"control","model_system":"organoid","batch_id":"st-b2","timepoint":0,"state_id":"low","state_score_milli":100,"artifact":{"artifact_id":"st-artifact-c1-0","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-state-transition+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"observation_id":"st-c1-1","unit_id":"st-control-1","arm_id":"control","model_system":"organoid","batch_id":"st-b3","timepoint":1,"state_id":"low","state_score_milli":100,"artifact":{"artifact_id":"st-artifact-c1-1","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-state-transition+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"observation_id":"st-t0-0","unit_id":"st-treated-0","arm_id":"treated","model_system":"organoid","batch_id":"st-b4","timepoint":0,"state_id":"low","state_score_milli":100,"artifact":{"artifact_id":"st-artifact-t0-0","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-state-transition+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"observation_id":"st-t0-1","unit_id":"st-treated-0","arm_id":"treated","model_system":"organoid","batch_id":"st-b5","timepoint":1,"state_id":"high","state_score_milli":900,"artifact":{"artifact_id":"st-artifact-t0-1","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-state-transition+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"observation_id":"st-t1-0","unit_id":"st-treated-1","arm_id":"treated","model_system":"organoid","batch_id":"st-b6","timepoint":0,"state_id":"low","state_score_milli":100,"artifact":{"artifact_id":"st-artifact-t1-0","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-state-transition+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"observation_id":"st-t1-1","unit_id":"st-treated-1","arm_id":"treated","model_system":"organoid","batch_id":"st-b7","timepoint":1,"state_id":"high","state_score_milli":900,"artifact":{"artifact_id":"st-artifact-t1-1","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-state-transition+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}}
+            ]
+        }),
+    );
+    assert_eq!(state_transition["dispatch"], json!("not_started"));
+    assert_eq!(
+        state_transition["analysis"]["disposition"],
+        json!("qualified")
+    );
+    assert!(state_transition["analysis"]["enriched_order"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|entry| entry == "low:high"));
 
     let causal = call(
         &mut server,

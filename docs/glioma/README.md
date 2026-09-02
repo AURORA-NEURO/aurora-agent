@@ -58,6 +58,8 @@ crates/research/src/glioma/
                                              P09 leave-one-batch/row-out robustness battery
     p10_interpretation_replication/trajectory.rs
                                              P10 longitudinal per-unit trajectory analysis
+    p10_interpretation_replication/state_transition.rs
+                                             P10 discrete-state transition matrices and treatment contrasts
   p10_interpretation_replication/causal_contrast.rs
                                              P10 exact pre/post difference-in-differences analysis
   p10_interpretation_replication/causal_adjustment.rs
@@ -188,6 +190,12 @@ and non-convergence remain visible instead of becoming false mechanistic certain
 P10 now includes an exact bounded causal contrast (`analyze_glioma_causal_contrast`) using
 pre/post unit changes, treatment-label permutations, and leave-one-unit bounds; null, non-significant,
 or underpowered effects remain explicit rather than being promoted into mechanism claims.
+P10 now also includes discrete-state longitudinal transition analysis
+(`analyze_glioma_state_transitions`) for investigator-declared glioma phenotypic states. It builds
+deterministic per-arm transition matrices from consecutive within-unit observations, contrasts
+treatment with control, and preserves irregular sampling, absent transitions, null effects, negative
+evidence, and support-floor failures as explicit outcomes; state order is descriptive and never a
+clinical severity scale.
 P10 also includes fixed-point replication meta-analysis (`analyze_replication_meta_analysis`) with
 fixed and random-effects inverse-uncertainty pooling, estimated between-study variance,
 Cochran/I² heterogeneity, leave-one-study-out influence, and explicit negative or unresolved

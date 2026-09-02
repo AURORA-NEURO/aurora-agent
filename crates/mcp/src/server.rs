@@ -471,13 +471,13 @@ use bioprism_research::{
     analyze_glioma_causal_contrast, analyze_glioma_combination_synergy,
     analyze_glioma_dose_response, analyze_glioma_latent_factors,
     analyze_glioma_spatial_communication, analyze_glioma_spatial_niches,
-    analyze_glioma_trajectories, analyze_instrument_calibration, analyze_multimodal_concordance,
-    analyze_multimodal_consensus, analyze_preclinical_outcomes, analyze_replication_meta_analysis,
-    analyze_stratified_causal_adjustment, assess_glioma_robustness, assess_replication,
-    build_research_object_manifest, compile_decision_context, compile_typed_knowledge,
-    design_preclinical_experiment, discriminate_mechanisms, dry_run_glioma_research,
-    explore_mechanisms, generate_feature_catalog, glioma_program_catalog,
-    harmonize_glioma_multimodal_batches, harmonize_multimodal_inputs,
+    analyze_glioma_state_transitions, analyze_glioma_trajectories, analyze_instrument_calibration,
+    analyze_multimodal_concordance, analyze_multimodal_consensus, analyze_preclinical_outcomes,
+    analyze_replication_meta_analysis, analyze_stratified_causal_adjustment,
+    assess_glioma_robustness, assess_replication, build_research_object_manifest,
+    compile_decision_context, compile_typed_knowledge, design_preclinical_experiment,
+    discriminate_mechanisms, dry_run_glioma_research, explore_mechanisms, generate_feature_catalog,
+    glioma_program_catalog, harmonize_glioma_multimodal_batches, harmonize_multimodal_inputs,
     plan_glioma_closed_loop_campaign, plan_glioma_workflow, propagate_glioma_mechanism_graph,
     qualify_evidence, select_glioma_actions, simulate_glioma_protocol, surveil_glioma_evidence,
     validate_feature_catalog, AdaptiveAllocationRequest, AdaptiveArmObservation, AnalysisDataset,
@@ -495,8 +495,8 @@ use bioprism_research::{
     ProtocolSimulationRequest, ReplicationRequest, ReplicationStudy, ResearchObjectRequest,
     RobustnessRequest, SensitivityObservation, SensitivityRequest, SpatialCell,
     SpatialCommunicationCell, SpatialCommunicationRequest, SpatialNicheRequest,
-    StratifiedCausalRequest, StratifiedObservation, TrajectoryObservation, TrajectoryRequest,
-    TypedKnowledge,
+    StateTransitionObservation, StateTransitionRequest, StratifiedCausalRequest,
+    StratifiedObservation, TrajectoryObservation, TrajectoryRequest, TypedKnowledge,
 };
 use bioprism_routing::{
     lab::{run as run_routing_lab, LabSettings, Task},
@@ -1935,6 +1935,7 @@ impl Server {
             "glioma_protocol_simulate" => self.glioma_protocol_simulate(&arguments),
             "glioma_robustness_suite" => self.glioma_robustness_suite(&arguments),
             "glioma_trajectory_analyze" => self.glioma_trajectory_analyze(&arguments),
+            "glioma_state_transition_analyze" => self.glioma_state_transition_analyze(&arguments),
             "glioma_causal_contrast" => self.glioma_causal_contrast(&arguments),
             "glioma_stratified_causal_adjustment" => {
                 self.glioma_stratified_causal_adjustment(&arguments)
@@ -3196,6 +3197,37 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma trajectory analysis: {error}"))
+    }
+
+    /// Estimate longitudinal discrete-state transition matrices for local preclinical glioma
+    /// observations. This is descriptive research analysis only: it never executes an assay,
+    /// moves raw data, or produces a clinical decision.
+    fn glioma_state_transition_analyze(&self, arguments: &Value) -> Result<Value, String> {
+        let request: StateTransitionRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_state_transition_analyze requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma state-transition request: {error}"))?;
+        let observations: Vec<StateTransitionObservation> =
+            serde_json::from_value(arguments.get("observations").cloned().ok_or_else(|| {
+                "glioma_state_transition_analyze requires observations".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma state-transition observations: {error}"))?;
+        let output = analyze_glioma_state_transitions(&request, &observations)
+            .map_err(|error| format!("glioma state-transition analysis refused: {error}"))?;
+        serde_json::to_value(json!({
+            "analysis": output,
+            "dispatch": "not_started",
+            "guarantees": [
+                "transition probabilities use deterministic consecutive within-unit observations",
+                "irregular windows, absent transitions, sparse arms, null contrasts, and negative evidence remain explicit",
+                "state ordering is investigator-declared and is never interpreted as a clinical severity scale",
+                "the output is preclinical research analysis, not clinical decision support"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma state-transition analysis: {error}"))
     }
 
     /// Estimate a pre/post treatment contrast for a preclinical glioma study. This is analysis
@@ -44142,7 +44174,7 @@ pub fn workspace_capabilities() -> Value {
         },
         {
             "id": "glioma_autonomous_research_engine",
-            "domains": ["preclinical glioma research", "evidence surveillance", "multimodal QC", "molecular mechanism exploration", "experiment design", "protocol simulation", "instrument preflight", "reproducible computation", "longitudinal trajectory analysis", "omission-stress robustness", "replication and negative results", "adaptive next-action selection"],
+            "domains": ["preclinical glioma research", "evidence surveillance", "multimodal QC", "molecular mechanism exploration", "experiment design", "protocol simulation", "instrument preflight", "reproducible computation", "longitudinal trajectory analysis", "state-transition interpretation", "omission-stress robustness", "replication and negative results", "adaptive next-action selection"],
             "crates": ["bioprism-research", "bioprism-onco", "bioprism-foundation", "bioprism-mcp"],
             "mcp_tools": [
                 "glioma_research_dry_run",
@@ -44150,6 +44182,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_protocol_simulate",
                 "glioma_robustness_suite",
                 "glioma_trajectory_analyze",
+                "glioma_state_transition_analyze",
                 "glioma_causal_contrast",
                 "glioma_stratified_causal_adjustment",
                 "glioma_dose_response",
@@ -51047,6 +51080,18 @@ pub fn tool_definitions() -> Vec<Value> {
                     "items": {"type": "object"},
                     "description": "Local TrajectoryObservation1@1 values from de-identified preclinical units."
                 }
+            },
+            "required": ["request", "observations"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_state_transition_analyze",
+        "description": "Estimate deterministic longitudinal state-transition matrices and treatment-vs-control contrasts for local preclinical glioma units. Uses caller-declared ordered research states, consecutive within-unit windows, explicit support floors, and irregular-gap accounting; absent, null, reduced, negative, and unresolved evidence remain visible. It never treats state order as clinical severity, executes an assay, moves raw data, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "StateTransitionRequest1@1 with model/arm bindings, ordered research states, unit/transition floors, time-gap bound, and contrast threshold."},
+                "observations": {"type": "array", "items": {"type": "object"}, "description": "Local StateTransitionObservation1@1 records from de-identified preclinical units with state labels, scores, timepoints, and local artifact references."}
             },
             "required": ["request", "observations"]
         }
