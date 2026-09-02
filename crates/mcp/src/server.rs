@@ -479,26 +479,26 @@ use bioprism_research::{
     discriminate_mechanisms, dry_run_glioma_research, execute_glioma_protocol, explore_mechanisms,
     generate_feature_catalog, glioma_program_catalog, harmonize_glioma_multimodal_batches,
     harmonize_multimodal_inputs, plan_glioma_closed_loop_campaign, plan_glioma_workflow,
-    propagate_glioma_mechanism_graph, qualify_evidence, select_glioma_actions,
-    simulate_glioma_protocol, surveil_glioma_evidence, validate_feature_catalog,
-    AdaptiveAllocationRequest, AdaptiveArmObservation, AnalysisDataset, AnalysisRequest,
-    CalibrationRequest, CalibrationRun, CampaignAction, CampaignMechanism, CampaignObservation,
-    CausalContrastRequest, ClosedLoopCampaignRequest, CombinationObservation,
+    preflight_glioma_instrument, propagate_glioma_mechanism_graph, qualify_evidence,
+    select_glioma_actions, simulate_glioma_protocol, surveil_glioma_evidence,
+    validate_feature_catalog, AdaptiveAllocationRequest, AdaptiveArmObservation, AnalysisDataset,
+    AnalysisRequest, CalibrationRequest, CalibrationRun, CampaignAction, CampaignMechanism,
+    CampaignObservation, CausalContrastRequest, ClosedLoopCampaignRequest, CombinationObservation,
     CombinationSynergyRequest, ConcordanceRequest, ConsensusRequest, DecisionContextRequest,
     DoseResponseObservation, DoseResponseRequest, DryRunGliomaProtocolExecutor, EvidenceRecord,
     EvidenceRequest, EvidenceSurveillanceRequest, ExperimentArm, ExperimentRequest,
     FederatedBenchmarkRequest, FederatedBenchmarkSite, GliomaActionCandidate, GliomaResearchIntent,
-    GliomaWorkflowRequest, HarmonizationRequest, HarmonizationVector, KnowledgeRequest,
-    LatentFactorRequest, LatentFactorVector, LigandReceptorPair, MechanismCandidate,
-    MechanismDiscriminationRequest, MechanismDiscriminatorAction, MechanismFeatureObservation,
-    MechanismGraphEdge, MechanismGraphNode, MechanismGraphRequest, MechanismHypothesis,
-    MechanismRequest, MetaAnalysisRequest, ModalityVector, MultimodalObservation,
-    MultimodalRequest, ProtocolExecutionRequest, ProtocolSimulationRequest, ReplicationRequest,
-    ReplicationStudy, ResearchObjectRequest, RobustnessRequest, SensitivityObservation,
-    SensitivityRequest, SpatialCell, SpatialCommunicationCell, SpatialCommunicationRequest,
-    SpatialNicheRequest, StateTransitionObservation, StateTransitionRequest,
-    StratifiedCausalRequest, StratifiedObservation, TrajectoryObservation, TrajectoryRequest,
-    TypedKnowledge,
+    GliomaWorkflowRequest, HarmonizationRequest, HarmonizationVector, InstrumentPreflightRequest,
+    KnowledgeRequest, LatentFactorRequest, LatentFactorVector, LigandReceptorPair,
+    MechanismCandidate, MechanismDiscriminationRequest, MechanismDiscriminatorAction,
+    MechanismFeatureObservation, MechanismGraphEdge, MechanismGraphNode, MechanismGraphRequest,
+    MechanismHypothesis, MechanismRequest, MetaAnalysisRequest, ModalityVector,
+    MultimodalObservation, MultimodalRequest, ProtocolExecutionRequest, ProtocolSimulationRequest,
+    ReplicationRequest, ReplicationStudy, ResearchObjectRequest, RobustnessRequest,
+    SensitivityObservation, SensitivityRequest, SpatialCell, SpatialCommunicationCell,
+    SpatialCommunicationRequest, SpatialNicheRequest, StateTransitionObservation,
+    StateTransitionRequest, StratifiedCausalRequest, StratifiedObservation, TrajectoryObservation,
+    TrajectoryRequest, TypedKnowledge,
 };
 use bioprism_routing::{
     lab::{run as run_routing_lab, LabSettings, Task},
@@ -1965,6 +1965,7 @@ impl Server {
             "glioma_mechanism_discriminate" => self.glioma_mechanism_discriminate(&arguments),
             "glioma_mechanism_graph_propagate" => self.glioma_mechanism_graph_propagate(&arguments),
             "glioma_instrument_calibration" => self.glioma_instrument_calibration(&arguments),
+            "glioma_instrument_preflight" => self.glioma_instrument_preflight(&arguments),
             "glioma_experiment_design" => self.glioma_experiment_design(&arguments),
             "glioma_analysis_run" => self.glioma_analysis_run(&arguments),
             "glioma_replication_assess" => self.glioma_replication_assess(&arguments),
@@ -4029,6 +4030,31 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma instrument calibration: {error}"))
+    }
+
+    /// Compile an interlocked, authorization-bound instrument plan. The route never dispatches
+    /// hardware; an institution-local gateway must verify the approval digest again before use.
+    fn glioma_instrument_preflight(&self, arguments: &Value) -> Result<Value, String> {
+        let request: InstrumentPreflightRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_instrument_preflight requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma instrument preflight request: {error}"))?;
+        let plan = preflight_glioma_instrument(&request)
+            .map_err(|error| format!("glioma instrument preflight refused: {error}"))?;
+        serde_json::to_value(json!({
+            "preflight": plan,
+            "dispatch": "not_started",
+            "guarantees": [
+                "qualified calibration, emergency stop, guard, deck, temperature, waste, and authorization gates are explicit",
+                "actions are serialized, typed, parameter-bounded, risk-budgeted, and digest-bound",
+                "blocked and unmeasured actions remain visible with compensation order and reasons",
+                "the route never contacts an instrument or consumes biological material"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma instrument preflight: {error}"))
     }
 
     fn glioma_experiment_design(&self, arguments: &Value) -> Result<Value, String> {
@@ -44238,6 +44264,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_mechanism_discriminate",
                 "glioma_mechanism_graph_propagate",
                 "glioma_instrument_calibration",
+                "glioma_instrument_preflight",
                 "glioma_experiment_design",
                 "glioma_analysis_run",
                 "glioma_replication_assess",
@@ -51458,6 +51485,17 @@ pub fn tool_definitions() -> Vec<Value> {
                 "runs": {"type": "array", "items": {"type": "object"}, "description": "CalibrationRun1@1 local de-identified control measurements with sequence indices and artifact references."}
             },
             "required": ["request", "runs"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_instrument_preflight",
+        "description": "Compile a deterministic preclinical glioma instrument/robotics preflight plan from qualified calibration, live interlock telemetry, typed action parameters, operator authorization, and risk/duration budgets. Orders serialized actions, preserves blocked and unmeasured work with reasons and compensation order, and never dispatches hardware or consumes biological material.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "InstrumentPreflightRequest1@1 containing InstrumentAction1@1 values, InstrumentCalibration1@1, interlocks, authorization, and bounded budgets."}
+            },
+            "required": ["request"]
         }
     }));
     definitions.push(json!({

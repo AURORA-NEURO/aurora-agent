@@ -314,7 +314,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 57;
-const TOOL_DEFINITION_COUNT: usize = 557;
+const TOOL_DEFINITION_COUNT: usize = 558;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -1279,6 +1279,38 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
             .unwrap()
             .len(),
         2
+    );
+
+    let instrument_preflight = call(
+        &mut server,
+        "glioma_instrument_preflight",
+        json!({
+            "request": {
+                "objective": "preflight organoid imaging and wash",
+                "instrument_id": "imager-1",
+                "model_system": "organoid",
+                "actions": [
+                    {"action_id":"acquire","instrument_id":"imager-1","operation":"acquire_image","model_system":"organoid","requested_start_tick":1,"duration_ticks":2,"risk_milli":100,"requires_operator":false,"output_schema":"Image1@1","parameters":[]},
+                    {"action_id":"wash","instrument_id":"imager-1","operation":"wash","model_system":"organoid","requested_start_tick":3,"duration_ticks":2,"risk_milli":100,"requires_operator":true,"output_schema":"Wash1@1","parameters":[{"name":"volume_microliter","value_milli":10000,"unit":"microliter_milli","minimum_milli":1,"maximum_milli":100000}]}
+                ],
+                "calibration": instrument_calibration["calibration"].clone(),
+                "interlocks": {"observed_tick":1,"emergency_stop_clear":true,"guard_closed":true,"deck_clear":true,"consumables_available":true,"waste_capacity_milli":100000,"temperature_milli":37000,"minimum_temperature_milli":36000,"maximum_temperature_milli":38000,"calibration_valid_until_tick":100,"calibration_sequence_index":3},
+                "authorization": {"authorization_id":"approval-1","operator_id":"operator-1","instrument_scope":"imager-1","approval_digest":artifact_hash,"issued_tick":0,"expires_tick":100,"revoked":false},
+                "current_tick":1,
+                "maximum_total_risk_milli":500,
+                "maximum_duration_ticks":20,
+                "minimum_waste_capacity_milli":100
+            }
+        }),
+    );
+    assert_eq!(instrument_preflight["dispatch"], json!("not_started"));
+    assert_eq!(
+        instrument_preflight["preflight"]["disposition"],
+        json!("admitted")
+    );
+    assert_eq!(
+        instrument_preflight["preflight"]["admitted_order"],
+        json!(["acquire", "wash"])
     );
 
     let evidence_surveillance = call(

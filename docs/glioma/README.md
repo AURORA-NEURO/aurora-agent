@@ -55,6 +55,7 @@ crates/research/src/glioma/
   workflow.rs                               P07 adaptive campaign planner and guarded execution
     p07_protocol_simulation/simulator.rs    P07 deterministic resource-constrained scheduling
     p07_protocol_simulation/execution.rs   P07 guarded local protocol execution with retries
+    p08_instrument_robotics/preflight.rs   P08 typed instrument/robotics interlock planning
     p09_reproducible_computation/robustness.rs
                                              P09 leave-one-batch/row-out robustness battery
     p10_interpretation_replication/trajectory.rs
@@ -221,6 +222,11 @@ typed output artifacts, bounded retries, partial results, failed tasks, and skip
 recorded explicitly. The executor seam can target a local simulator, compute worker, robotics
 gateway, or institution-approved instrument service without the research crate opening a socket or
 making a clinical decision.
+P08 now also includes deterministic instrument preflight (`preflight_glioma_instrument`). It combines
+qualified calibration, live interlock telemetry, typed operation parameters, operator authorization,
+serialized scheduling, and risk/duration budgets into a dispatch-permitted or fail-closed plan. The
+MCP route only emits the plan; a local gateway must re-verify authorization before any hardware
+effect, and missing telemetry remains unresolved rather than imputed.
 P10 also includes stratified causal adjustment (`analyze_stratified_causal_adjustment`) that
 collapses repeated measurements to units, requires positivity within confounder strata, computes
 pooled weighted contrasts, and exposes leave-one-stratum influence and missing coverage.

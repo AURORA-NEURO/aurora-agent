@@ -96,8 +96,12 @@ pub use programs::p07_protocol_simulation::{
     PROTOCOL_EXECUTION_OUTPUT_SCHEMA,
 };
 pub use programs::p08_instrument_robotics::{
-    analyze_instrument_calibration, CalibrationDisposition, CalibrationError, CalibrationPoint,
-    CalibrationRequest, CalibrationRun, InstrumentCalibration,
+    analyze_instrument_calibration, preflight_glioma_instrument, CalibrationDisposition,
+    CalibrationError, CalibrationPoint, CalibrationRequest, CalibrationRun, InstrumentAction,
+    InstrumentActionDecision, InstrumentActionDisposition, InstrumentAuthorization,
+    InstrumentCalibration, InstrumentInterlockSnapshot, InstrumentOperation, InstrumentParameter,
+    InstrumentPreflightDisposition, InstrumentPreflightError, InstrumentPreflightPlan,
+    InstrumentPreflightRequest,
 };
 pub use programs::p09_reproducible_computation::{
     assess_glioma_robustness, RobustnessCase, RobustnessCaseKind, RobustnessDisposition,

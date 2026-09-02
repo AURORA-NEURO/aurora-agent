@@ -75,6 +75,7 @@ fn main() {
                      glioma_closed_loop_campaign,\n\
                      glioma_evidence_surveillance,\n\
                      glioma_instrument_calibration,\n\
+                     glioma_instrument_preflight,\n\
                      glioma_federated_benchmark_consensus,\n\
                      Resources: fiber-world, fiber-query, context-certificate schemas and the\n\
                      workspace capability catalog"
