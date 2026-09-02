@@ -36,6 +36,7 @@
     "computation_execution": "crates/research/src/glioma/programs/p09_reproducible_computation/execution.rs",
     "mechanism_counterfactual": "crates/research/src/glioma/programs/p05_mechanism_exploration/counterfactual.rs",
     "mechanism_ensemble_counterfactual": "crates/research/src/glioma/programs/p05_mechanism_exploration/ensemble_counterfactual.rs",
+    "information_design": "crates/research/src/glioma/programs/p06_experiment_design/information_design.rs",
     "documentation": "docs/glioma",
     "mcp": "crates/mcp/src/server.rs"
   },
@@ -45,7 +46,7 @@
     {"id": "P03", "slug": "multimodal-ingestion-qc", "folder": "p03_multimodal_ingestion_qc", "stage_kinds": ["multimodal_ingestion_qc"], "surfaces": ["harmonize_glioma_multimodal_batches", "analyze_multimodal_concordance", "analyze_multimodal_consensus", "analyze_glioma_latent_factors", "analyze_glioma_spatial_niches", "analyze_glioma_spatial_communication"]},
     {"id": "P04", "slug": "decision-context", "folder": "p04_decision_context", "stage_kinds": ["intent_normalization", "evidence_compilation"], "surfaces": ["compile_decision_context"]},
     {"id": "P05", "slug": "mechanism-exploration", "folder": "p05_mechanism_exploration", "stage_kinds": ["molecular_landscape", "mechanism_exploration"], "surfaces": ["discriminate_mechanisms", "propagate_glioma_mechanism_graph", "simulate_glioma_counterfactual", "simulate_glioma_counterfactual_ensemble"]},
-    {"id": "P06", "slug": "experiment-design", "folder": "p06_experiment_design", "stage_kinds": ["experiment_design"], "surfaces": ["allocate_glioma_assays", "plan_glioma_closed_loop_campaign", "execute_glioma_closed_loop_campaign", "analyze_glioma_dose_response", "analyze_glioma_combination_synergy"]},
+    {"id": "P06", "slug": "experiment-design", "folder": "p06_experiment_design", "stage_kinds": ["experiment_design"], "surfaces": ["allocate_glioma_assays", "plan_glioma_closed_loop_campaign", "execute_glioma_closed_loop_campaign", "analyze_glioma_dose_response", "analyze_glioma_combination_synergy", "plan_glioma_information_design"]},
     {"id": "P07", "slug": "protocol-simulation", "folder": "p07_protocol_simulation", "stage_kinds": ["protocol_simulation"], "surfaces": ["plan_glioma_workflow", "execute_glioma_workflow", "simulate_glioma_protocol", "execute_glioma_protocol", "protocol_request_from_experiment_design"]},
     {"id": "P08", "slug": "instrument-robotics", "folder": "p08_instrument_robotics", "stage_kinds": ["instrument_preflight"], "surfaces": ["analyze_instrument_calibration", "preflight_glioma_instrument"]},
     {"id": "P09", "slug": "reproducible-computation", "folder": "p09_reproducible_computation", "stage_kinds": ["computational_execution"], "surfaces": ["assess_glioma_robustness", "execute_glioma_computation"]},

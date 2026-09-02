@@ -314,7 +314,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 57;
-const TOOL_DEFINITION_COUNT: usize = 561;
+const TOOL_DEFINITION_COUNT: usize = 562;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -1327,6 +1327,55 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
     );
     assert_eq!(
         mechanism_ensemble_counterfactual["ensemble"]["targets"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+
+    let information_design = call(
+        &mut server,
+        "glioma_information_design",
+        json!({
+            "request": {
+                "objective": "select an assay that separates EGFR and matrix invasion mechanisms",
+                "model_system": "organoid",
+                "budget_units": 4,
+                "max_selected_actions": 1,
+                "min_information_gain_milli": 10,
+                "information_weight_milli": 800,
+                "feasibility_weight_milli": 200,
+                "risk_penalty_milli": 100,
+                "cost_penalty_milli": 0,
+                "risk_ceiling_milli": 700
+            },
+            "mechanisms": [
+                {"mechanism_id":"egfr","prior_milli":500},
+                {"mechanism_id":"matrix","prior_milli":500}
+            ],
+            "actions": [
+                {"action_id":"uninformative","feature_id":"feature-uninformative","label":"uninformative assay","outcomes":[
+                    {"outcome_id":"low","label":"low invasion","probability_milli_by_mechanism":{"egfr":500,"matrix":500}},
+                    {"outcome_id":"high","label":"high invasion","probability_milli_by_mechanism":{"egfr":500,"matrix":500}}
+                ],"feasibility_milli":900,"risk_milli":100,"cost_units":2,"max_replicates":1},
+                {"action_id":"separating","feature_id":"feature-separating","label":"separating assay","outcomes":[
+                    {"outcome_id":"low","label":"low invasion","probability_milli_by_mechanism":{"egfr":900,"matrix":100}},
+                    {"outcome_id":"high","label":"high invasion","probability_milli_by_mechanism":{"egfr":100,"matrix":900}}
+                ],"feasibility_milli":900,"risk_milli":100,"cost_units":2,"max_replicates":1}
+            ]
+        }),
+    );
+    assert_eq!(information_design["dispatch"], json!("not_started"));
+    assert_eq!(
+        information_design["design"]["disposition"],
+        json!("qualified")
+    );
+    assert_eq!(
+        information_design["design"]["selected_order"],
+        json!(["separating"])
+    );
+    assert_eq!(
+        information_design["design"]["scores"]
             .as_array()
             .unwrap()
             .len(),

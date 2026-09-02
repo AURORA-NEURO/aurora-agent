@@ -5,6 +5,7 @@ use crate::glioma::catalog::{glioma_program_catalog, GliomaProgramDescriptor, Gl
 pub mod adaptive_allocation;
 pub mod campaign;
 pub mod dose_response;
+pub mod information_design;
 pub mod synergy;
 
 pub use adaptive_allocation::{
@@ -23,6 +24,11 @@ pub use campaign::{
 pub use dose_response::{
     analyze_glioma_dose_response, DoseDirection, DoseResponseAnalysis, DoseResponseDisposition,
     DoseResponseError, DoseResponseObservation, DoseResponsePoint, DoseResponseRequest,
+};
+pub use information_design::{
+    plan_glioma_information_design, DesignAction, DesignMechanism, DesignOutcome,
+    InformationDesignActionScore, InformationDesignDisposition, InformationDesignError,
+    InformationDesignPlan, InformationDesignRequest,
 };
 pub use synergy::{
     analyze_glioma_combination_synergy, CombinationCell, CombinationCellDisposition,

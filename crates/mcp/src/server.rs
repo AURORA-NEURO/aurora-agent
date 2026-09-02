@@ -479,20 +479,21 @@ use bioprism_research::{
     discriminate_mechanisms, dry_run_glioma_research, execute_glioma_computation,
     execute_glioma_protocol, explore_mechanisms, generate_feature_catalog, glioma_program_catalog,
     harmonize_glioma_multimodal_batches, harmonize_multimodal_inputs,
-    plan_glioma_closed_loop_campaign, plan_glioma_workflow, preflight_glioma_instrument,
-    propagate_glioma_mechanism_graph, qualify_evidence, select_glioma_actions,
-    simulate_glioma_counterfactual, simulate_glioma_counterfactual_ensemble,
+    plan_glioma_closed_loop_campaign, plan_glioma_information_design, plan_glioma_workflow,
+    preflight_glioma_instrument, propagate_glioma_mechanism_graph, qualify_evidence,
+    select_glioma_actions, simulate_glioma_counterfactual, simulate_glioma_counterfactual_ensemble,
     simulate_glioma_protocol, surveil_glioma_evidence, validate_feature_catalog,
     AdaptiveAllocationRequest, AdaptiveArmObservation, AnalysisDataset, AnalysisRequest,
     CalibrationRequest, CalibrationRun, CampaignAction, CampaignMechanism, CampaignObservation,
     CausalContrastRequest, ClosedLoopCampaignRequest, CombinationObservation,
     CombinationSynergyRequest, ComputationExecutionRequest, ConcordanceRequest, ConsensusRequest,
     CounterfactualEnsembleRequest, CounterfactualIntervention, CounterfactualModel,
-    CounterfactualRequest, DecisionContextRequest, DoseResponseObservation, DoseResponseRequest,
-    DryRunGliomaComputationExecutor, DryRunGliomaProtocolExecutor, EvidenceRecord, EvidenceRequest,
-    EvidenceSurveillanceRequest, ExperimentArm, ExperimentRequest, FederatedBenchmarkRequest,
-    FederatedBenchmarkSite, GliomaActionCandidate, GliomaResearchIntent, GliomaWorkflowRequest,
-    HarmonizationRequest, HarmonizationVector, InstrumentPreflightRequest, KnowledgeRequest,
+    CounterfactualRequest, DecisionContextRequest, DesignAction, DesignMechanism,
+    DoseResponseObservation, DoseResponseRequest, DryRunGliomaComputationExecutor,
+    DryRunGliomaProtocolExecutor, EvidenceRecord, EvidenceRequest, EvidenceSurveillanceRequest,
+    ExperimentArm, ExperimentRequest, FederatedBenchmarkRequest, FederatedBenchmarkSite,
+    GliomaActionCandidate, GliomaResearchIntent, GliomaWorkflowRequest, HarmonizationRequest,
+    HarmonizationVector, InformationDesignRequest, InstrumentPreflightRequest, KnowledgeRequest,
     LatentFactorRequest, LatentFactorVector, LigandReceptorPair, MechanismCandidate,
     MechanismDiscriminationRequest, MechanismDiscriminatorAction, MechanismFeatureObservation,
     MechanismGraphEdge, MechanismGraphNode, MechanismGraphRequest, MechanismHypothesis,
@@ -1973,6 +1974,7 @@ impl Server {
             "glioma_mechanism_ensemble_counterfactual" => {
                 self.glioma_mechanism_ensemble_counterfactual(&arguments)
             }
+            "glioma_information_design" => self.glioma_information_design(&arguments),
             "glioma_instrument_calibration" => self.glioma_instrument_calibration(&arguments),
             "glioma_instrument_preflight" => self.glioma_instrument_preflight(&arguments),
             "glioma_experiment_design" => self.glioma_experiment_design(&arguments),
@@ -4115,6 +4117,46 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma mechanism ensemble counterfactual: {error}"))
+    }
+
+    /// Select a bounded local glioma assay batch by expected reduction in mechanism uncertainty.
+    /// The route is an information-design planner only: it does not execute biology, dispatch
+    /// instruments, or turn a model declaration into a clinical conclusion.
+    fn glioma_information_design(&self, arguments: &Value) -> Result<Value, String> {
+        let request: InformationDesignRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_information_design requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma information-design request: {error}"))?;
+        let mechanisms: Vec<DesignMechanism> = serde_json::from_value(
+            arguments
+                .get("mechanisms")
+                .cloned()
+                .ok_or_else(|| "glioma_information_design requires mechanisms".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma information-design mechanisms: {error}"))?;
+        let actions: Vec<DesignAction> = serde_json::from_value(
+            arguments
+                .get("actions")
+                .cloned()
+                .ok_or_else(|| "glioma_information_design requires actions".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma information-design actions: {error}"))?;
+        let output = plan_glioma_information_design(&request, &mechanisms, &actions)
+            .map_err(|error| format!("glioma information design refused: {error}"))?;
+        serde_json::to_value(json!({
+            "design": output,
+            "dispatch": "not_started",
+            "guarantees": [
+                "information gain is integer-only expected Gini reduction over caller-declared outcome distributions",
+                "selection is bounded by feasibility, risk, cost, budget, and replicate limits",
+                "the plan keeps unresolved and risk-blocked assays explicit for researcher review",
+                "the route prioritizes local preclinical assays but never executes biology or makes a clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma information design: {error}"))
     }
 
     /// Detect instrument-control drift before a preclinical run is admitted. The calibration
@@ -44383,6 +44425,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_mechanism_graph_propagate",
                 "glioma_mechanism_counterfactual",
                 "glioma_mechanism_ensemble_counterfactual",
+                "glioma_information_design",
                 "glioma_instrument_calibration",
                 "glioma_instrument_preflight",
                 "glioma_experiment_design",
@@ -51631,6 +51674,19 @@ pub fn tool_definitions() -> Vec<Value> {
                 "interventions": {"type": "array", "items": {"type": "object"}, "description": "CounterfactualIntervention1@1 signed node deltas shared across models."}
             },
             "required": ["request", "models", "interventions"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_information_design",
+        "description": "Select a bounded local preclinical glioma assay batch by expected reduction in mechanism uncertainty. Uses integer-only posterior Gini reduction over caller-declared outcome distributions, then applies feasibility, risk, cost, budget, and replicate gates while preserving deferred and unresolved assays; it never executes biology or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "InformationDesignRequest1@1 with objective, model system, budget, selection, information, feasibility, risk, cost, and risk-ceiling bounds."},
+                "mechanisms": {"type": "array", "items": {"type": "object"}, "description": "DesignMechanism1@1 prior masses summing to 1000."},
+                "actions": {"type": "array", "items": {"type": "object"}, "description": "DesignAction1@1 candidate assays with per-mechanism discrete outcome probabilities, feasibility, risk, cost, and replicate bounds."}
+            },
+            "required": ["request", "mechanisms", "actions"]
         }
     }));
     definitions.push(json!({
