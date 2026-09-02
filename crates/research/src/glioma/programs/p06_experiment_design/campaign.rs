@@ -20,6 +20,9 @@ pub const MAX_ACTIONS: usize = 4_096;
 pub const MAX_OBSERVATIONS: usize = 16_384;
 pub const MAX_ROUNDS: u16 = 128;
 pub const SCORE_SCALE: u64 = 1_000_000;
+/// Pseudo-likelihood regularizer that prevents one exact observation from collapsing the
+/// mechanism posterior to a false certainty before an independent assay can be run.
+pub const POSTERIOR_REGULARIZATION_MILLI: u64 = 10_000;
 
 /// Bounds for a campaign controller.  All weights are integer milli-units so the same decision
 /// is replayable in Rust, Python, TypeScript, and a remote worker without floating point drift.
@@ -463,7 +466,7 @@ fn posterior_for(
         .zip(losses.iter())
         .map(|(mechanism, (loss, _))| {
             u128::from(mechanism.prior_milli).saturating_mul(u128::from(SCORE_SCALE))
-                / u128::from(loss.saturating_add(1))
+                / u128::from(loss.saturating_add(POSTERIOR_REGULARIZATION_MILLI))
         })
         .collect::<Vec<_>>();
     let total = weights.iter().copied().sum::<u128>().max(1);
@@ -938,9 +941,7 @@ mod tests {
             effect_weight_milli: 100,
             feasibility_weight_milli: 200,
             risk_penalty_milli: 200,
-            // Keep the executor test in the replanning regime: a single exact simulated
-            // observation must not short-circuit the second action before it can be re-evaluated.
-            stop_concentration_milli: 1_000,
+            stop_concentration_milli: 900,
         }
     }
 
@@ -1000,14 +1001,12 @@ mod tests {
             action: &CampaignAction,
             round: u16,
         ) -> Result<Vec<CampaignObservation>, CampaignExecutionFailure> {
-            // Return the midpoint of competing predictions so the executor exercises a real
-            // second-round replan rather than making the first mechanism certain immediately.
-            let predictions = action
+            let observed_milli = action
                 .predicted_milli_by_mechanism
                 .values()
                 .copied()
-                .collect::<Vec<_>>();
-            let observed_milli = predictions.iter().sum::<i64>() / predictions.len() as i64;
+                .max()
+                .unwrap_or_default();
             Ok(vec![CampaignObservation {
                 action_id: action.action_id.clone(),
                 observed_milli,
@@ -1053,6 +1052,30 @@ mod tests {
             output.negative_evidence,
             vec!["negative-observation:assay-invasion:replicate-1"]
         );
+    }
+
+    #[test]
+    fn one_exact_observation_does_not_create_false_posterior_certainty() {
+        let observations = vec![CampaignObservation {
+            action_id: "assay-invasion".into(),
+            observed_milli: 800,
+            uncertainty_milli: 20,
+            replicate_index: 1,
+            artifact: artifact("exact-observation"),
+        }];
+        let output =
+            plan_glioma_closed_loop_campaign(&request(), &mechanisms(), &actions(), &observations)
+                .unwrap();
+        assert!(
+            output
+                .posterior_order
+                .iter()
+                .map(|posterior| posterior.posterior_milli)
+                .max()
+                .unwrap()
+                < request().stop_concentration_milli
+        );
+        assert_ne!(output.stop_reason, CampaignStopReason::PosteriorConverged);
     }
 
     #[test]
