@@ -104,8 +104,12 @@ pub use programs::p08_instrument_robotics::{
     InstrumentPreflightRequest,
 };
 pub use programs::p09_reproducible_computation::{
-    assess_glioma_robustness, RobustnessCase, RobustnessCaseKind, RobustnessDisposition,
-    RobustnessError, RobustnessRequest, RobustnessSuite,
+    assess_glioma_robustness, execute_glioma_computation, ComputationCacheEntry,
+    ComputationExecution, ComputationExecutionDisposition, ComputationExecutionError,
+    ComputationExecutionFailure, ComputationExecutionRequest, ComputationExecutionStopReason,
+    ComputationOperation, ComputationTask, ComputationTaskDisposition, ComputationTaskResult,
+    DryRunGliomaComputationExecutor, GliomaComputationExecutor, RobustnessCase, RobustnessCaseKind,
+    RobustnessDisposition, RobustnessError, RobustnessRequest, RobustnessSuite,
 };
 pub use programs::p10_interpretation_replication::{
     analyze_causal_sensitivity, analyze_glioma_causal_contrast, analyze_glioma_state_transitions,

@@ -476,29 +476,31 @@ use bioprism_research::{
     analyze_replication_meta_analysis, analyze_stratified_causal_adjustment,
     assess_glioma_robustness, assess_replication, build_research_object_manifest,
     compile_decision_context, compile_typed_knowledge, design_preclinical_experiment,
-    discriminate_mechanisms, dry_run_glioma_research, execute_glioma_protocol, explore_mechanisms,
-    generate_feature_catalog, glioma_program_catalog, harmonize_glioma_multimodal_batches,
-    harmonize_multimodal_inputs, plan_glioma_closed_loop_campaign, plan_glioma_workflow,
-    preflight_glioma_instrument, propagate_glioma_mechanism_graph, qualify_evidence,
-    select_glioma_actions, simulate_glioma_protocol, surveil_glioma_evidence,
-    validate_feature_catalog, AdaptiveAllocationRequest, AdaptiveArmObservation, AnalysisDataset,
-    AnalysisRequest, CalibrationRequest, CalibrationRun, CampaignAction, CampaignMechanism,
-    CampaignObservation, CausalContrastRequest, ClosedLoopCampaignRequest, CombinationObservation,
-    CombinationSynergyRequest, ConcordanceRequest, ConsensusRequest, DecisionContextRequest,
-    DoseResponseObservation, DoseResponseRequest, DryRunGliomaProtocolExecutor, EvidenceRecord,
-    EvidenceRequest, EvidenceSurveillanceRequest, ExperimentArm, ExperimentRequest,
-    FederatedBenchmarkRequest, FederatedBenchmarkSite, GliomaActionCandidate, GliomaResearchIntent,
-    GliomaWorkflowRequest, HarmonizationRequest, HarmonizationVector, InstrumentPreflightRequest,
-    KnowledgeRequest, LatentFactorRequest, LatentFactorVector, LigandReceptorPair,
-    MechanismCandidate, MechanismDiscriminationRequest, MechanismDiscriminatorAction,
-    MechanismFeatureObservation, MechanismGraphEdge, MechanismGraphNode, MechanismGraphRequest,
-    MechanismHypothesis, MechanismRequest, MetaAnalysisRequest, ModalityVector,
-    MultimodalObservation, MultimodalRequest, ProtocolExecutionRequest, ProtocolSimulationRequest,
-    ReplicationRequest, ReplicationStudy, ResearchObjectRequest, RobustnessRequest,
-    SensitivityObservation, SensitivityRequest, SpatialCell, SpatialCommunicationCell,
-    SpatialCommunicationRequest, SpatialNicheRequest, StateTransitionObservation,
-    StateTransitionRequest, StratifiedCausalRequest, StratifiedObservation, TrajectoryObservation,
-    TrajectoryRequest, TypedKnowledge,
+    discriminate_mechanisms, dry_run_glioma_research, execute_glioma_computation,
+    execute_glioma_protocol, explore_mechanisms, generate_feature_catalog, glioma_program_catalog,
+    harmonize_glioma_multimodal_batches, harmonize_multimodal_inputs,
+    plan_glioma_closed_loop_campaign, plan_glioma_workflow, preflight_glioma_instrument,
+    propagate_glioma_mechanism_graph, qualify_evidence, select_glioma_actions,
+    simulate_glioma_protocol, surveil_glioma_evidence, validate_feature_catalog,
+    AdaptiveAllocationRequest, AdaptiveArmObservation, AnalysisDataset, AnalysisRequest,
+    CalibrationRequest, CalibrationRun, CampaignAction, CampaignMechanism, CampaignObservation,
+    CausalContrastRequest, ClosedLoopCampaignRequest, CombinationObservation,
+    CombinationSynergyRequest, ComputationExecutionRequest, ConcordanceRequest, ConsensusRequest,
+    DecisionContextRequest, DoseResponseObservation, DoseResponseRequest,
+    DryRunGliomaComputationExecutor, DryRunGliomaProtocolExecutor, EvidenceRecord, EvidenceRequest,
+    EvidenceSurveillanceRequest, ExperimentArm, ExperimentRequest, FederatedBenchmarkRequest,
+    FederatedBenchmarkSite, GliomaActionCandidate, GliomaResearchIntent, GliomaWorkflowRequest,
+    HarmonizationRequest, HarmonizationVector, InstrumentPreflightRequest, KnowledgeRequest,
+    LatentFactorRequest, LatentFactorVector, LigandReceptorPair, MechanismCandidate,
+    MechanismDiscriminationRequest, MechanismDiscriminatorAction, MechanismFeatureObservation,
+    MechanismGraphEdge, MechanismGraphNode, MechanismGraphRequest, MechanismHypothesis,
+    MechanismRequest, MetaAnalysisRequest, ModalityVector, MultimodalObservation,
+    MultimodalRequest, ProtocolExecutionRequest, ProtocolSimulationRequest, ReplicationRequest,
+    ReplicationStudy, ResearchObjectRequest, RobustnessRequest, SensitivityObservation,
+    SensitivityRequest, SpatialCell, SpatialCommunicationCell, SpatialCommunicationRequest,
+    SpatialNicheRequest, StateTransitionObservation, StateTransitionRequest,
+    StratifiedCausalRequest, StratifiedObservation, TrajectoryObservation, TrajectoryRequest,
+    TypedKnowledge,
 };
 use bioprism_routing::{
     lab::{run as run_routing_lab, LabSettings, Task},
@@ -1936,6 +1938,7 @@ impl Server {
             "glioma_workflow_plan" => self.glioma_workflow_plan(&arguments),
             "glioma_protocol_simulate" => self.glioma_protocol_simulate(&arguments),
             "glioma_protocol_execute" => self.glioma_protocol_execute(&arguments),
+            "glioma_computation_execute" => self.glioma_computation_execute(&arguments),
             "glioma_robustness_suite" => self.glioma_robustness_suite(&arguments),
             "glioma_trajectory_analyze" => self.glioma_trajectory_analyze(&arguments),
             "glioma_state_transition_analyze" => self.glioma_state_transition_analyze(&arguments),
@@ -3161,6 +3164,33 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma protocol execution: {error}"))
+    }
+
+    /// Execute a typed multimodal computation DAG through the deterministic synthetic worker.
+    /// Production containers, GPUs, and schedulers remain caller-owned through the Rust SDK seam.
+    fn glioma_computation_execute(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ComputationExecutionRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_computation_execute requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma computation execution request: {error}"))?;
+        let mut executor = DryRunGliomaComputationExecutor;
+        let execution = execute_glioma_computation(&request, &mut executor)
+            .map_err(|error| format!("glioma computation execution refused: {error}"))?;
+        serde_json::to_value(json!({
+            "execution": execution,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "stable topological order, replay-keyed cache, bounded budget, and retries are explicit",
+                "typed local artifacts and dependency-blocked work remain visible",
+                "the MCP route uses a synthetic worker and performs no external computation or data movement",
+                "production containers, GPUs, and schedulers require a caller-owned GliomaComputationExecutor"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma computation execution: {error}"))
     }
 
     /// Stress-test a local two-arm glioma analysis under deterministic batch and row omissions.
@@ -44237,6 +44267,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_workflow_plan",
                 "glioma_protocol_simulate",
                 "glioma_protocol_execute",
+                "glioma_computation_execute",
                 "glioma_robustness_suite",
                 "glioma_trajectory_analyze",
                 "glioma_state_transition_analyze",
@@ -51112,6 +51143,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "ProtocolExecutionRequest1@1 containing a ProtocolSimulationRequest1@1, bounded retries, and artifact requirement."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_computation_execute",
+        "description": "Execute a typed local multimodal glioma computation DAG through a deterministic synthetic worker for sandbox validation. The route chooses stable topological order, enforces replay-keyed cache and budgets, retries bounded transient failures, preserves negative/partial/failed/skipped tasks, and never runs external code or moves raw data; production workers require the Rust GliomaComputationExecutor seam.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ComputationExecutionRequest1@1 containing ComputationTask1@1 DAG nodes, replay identity, cache, and resource bounds."}
             },
             "required": ["request"]
         }

@@ -58,6 +58,8 @@ crates/research/src/glioma/
     p08_instrument_robotics/preflight.rs   P08 typed instrument/robotics interlock planning
     p09_reproducible_computation/robustness.rs
                                              P09 leave-one-batch/row-out robustness battery
+    p09_reproducible_computation/execution.rs
+                                             P09 replayable multimodal computation DAG execution
     p10_interpretation_replication/trajectory.rs
                                              P10 longitudinal per-unit trajectory analysis
     p10_interpretation_replication/state_transition.rs
@@ -227,6 +229,11 @@ qualified calibration, live interlock telemetry, typed operation parameters, ope
 serialized scheduling, and risk/duration budgets into a dispatch-permitted or fail-closed plan. The
 MCP route only emits the plan; a local gateway must re-verify authorization before any hardware
 effect, and missing telemetry remains unresolved rather than imputed.
+P09 now also includes replayable computation execution (`execute_glioma_computation`). It schedules
+typed multimodal DAGs in stable topological order, reuses only replay-keyed local cache artifacts,
+enforces cost budgets, retries transient worker failures, and preserves negative, partial, failed,
+and skipped tasks. The dry-run worker emits synthetic artifacts; production containers, GPUs, and
+schedulers remain behind a caller-owned executor.
 P10 also includes stratified causal adjustment (`analyze_stratified_causal_adjustment`) that
 collapses repeated measurements to units, requires positivity within confounder strata, computes
 pooled weighted contrasts, and exposes leave-one-stratum influence and missing coverage.

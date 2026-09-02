@@ -314,7 +314,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 57;
-const TOOL_DEFINITION_COUNT: usize = 558;
+const TOOL_DEFINITION_COUNT: usize = 559;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -1311,6 +1311,36 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
     assert_eq!(
         instrument_preflight["preflight"]["admitted_order"],
         json!(["acquire", "wash"])
+    );
+
+    let computation_execution = call(
+        &mut server,
+        "glioma_computation_execute",
+        json!({
+            "request": {
+                "objective": "replay a glioma organoid multimodal computation",
+                "model_system": "organoid",
+                "tasks": [
+                    {"task_id":"fit","operation":"model_fit","model_system":"organoid","depends_on":["normalize"],"input_artifact_ids":["input:fit"],"output_schema":"Fit1@1","estimated_cost_units":2,"estimated_duration_ticks":1,"deterministic":true},
+                    {"task_id":"normalize","operation":"normalize","model_system":"organoid","depends_on":[],"input_artifact_ids":["input:normalize"],"output_schema":"Normalize1@1","estimated_cost_units":2,"estimated_duration_ticks":1,"deterministic":true}
+                ],
+                "replay_identity": artifact_hash,
+                "max_budget_units": 10,
+                "max_retries": 1,
+                "allow_cache": true,
+                "require_local_artifacts": true,
+                "cache": []
+            }
+        }),
+    );
+    assert_eq!(computation_execution["dispatch"], json!("not_started"));
+    assert_eq!(
+        computation_execution["execution"]["disposition"],
+        json!("completed")
+    );
+    assert_eq!(
+        computation_execution["execution"]["task_order"],
+        json!(["normalize", "fit"])
     );
 
     let evidence_surveillance = call(

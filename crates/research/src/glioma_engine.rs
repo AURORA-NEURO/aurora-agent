@@ -1600,6 +1600,7 @@ pub fn glioma_research_engine_manifest() -> CapabilityManifest {
             "instrument gateway".into(),
             "adaptive glioma scheduler".into(),
             "local protocol execution worker".into(),
+            "local multimodal computation worker".into(),
             "closed-loop glioma assay executor".into(),
             "glioma campaign experimentalist".into(),
         ]
@@ -1640,6 +1641,11 @@ pub fn glioma_research_engine_manifest() -> CapabilityManifest {
             TypedPort {
                 name: "glioma_robustness_suite".into(),
                 schema: "GliomaRobustnessSuite1@1".into(),
+                required: false,
+            },
+            TypedPort {
+                name: "glioma_computation_execution".into(),
+                schema: "GliomaComputationExecution1@1".into(),
                 required: false,
             },
             TypedPort {
