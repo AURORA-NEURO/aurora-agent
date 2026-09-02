@@ -69,6 +69,7 @@ fn main() {
                      glioma_decision_action_plan,\n\
                      glioma_multimodal_consensus, glioma_replication_meta_analyze,\n\
                      glioma_autonomous_campaign_execute,\n\
+                     glioma_research_autopilot_execute,\n\
                      glioma_causal_mediation,\n\
                      glioma_multimodal_harmonize, glioma_multimodal_latent_factors, glioma_spatial_niches, glioma_spatial_communication, glioma_spatial_state_propagation, glioma_state_transition_analyze, glioma_protocol_execute, glioma_action_portfolio_execute, glioma_causal_sensitivity,\n\
                      glioma_mechanism_discriminate,\n\

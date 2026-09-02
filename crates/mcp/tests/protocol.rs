@@ -314,7 +314,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 57;
-const TOOL_DEFINITION_COUNT: usize = 571;
+const TOOL_DEFINITION_COUNT: usize = 572;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -1853,6 +1853,39 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
             .len(),
         1
     );
+
+    let autopilot = call(
+        &mut server,
+        "glioma_research_autopilot_execute",
+        json!({
+            "request": {
+                "objective": "rank invasion mechanisms",
+                "context": decision_context["context"].clone(),
+                "completed_action_order": [],
+                "selection": {
+                    "budget_units": 10,
+                    "max_actions": 1,
+                    "approval_granted": true,
+                    "allow_instrument_execution": false,
+                    "allow_federation": false,
+                    "weights": {
+                        "information_gain": 25,
+                        "frontier_novelty": 20,
+                        "workflow_leverage": 15,
+                        "cross_stage_unlock": 15,
+                        "reproducibility_safety": 10,
+                        "federation_value": 10,
+                        "feasibility": 5
+                    }
+                },
+                "max_retries": 1,
+                "require_artifacts": true
+            }
+        }),
+    );
+    assert_eq!(autopilot["dispatch"], json!("not_started"));
+    assert_eq!(autopilot["simulation_only"], json!(true));
+    assert_eq!(autopilot["run"]["disposition"], json!("completed"));
 }
 
 #[test]

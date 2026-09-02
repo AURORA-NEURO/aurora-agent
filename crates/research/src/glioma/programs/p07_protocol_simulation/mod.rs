@@ -13,6 +13,7 @@ pub use crate::glioma::workflow::{
 pub mod action_execution;
 pub mod autonomous_campaign;
 pub mod execution;
+pub mod research_autopilot;
 pub mod simulator;
 
 pub use action_execution::{
@@ -35,6 +36,11 @@ pub use execution::{
     ProtocolExecution, ProtocolExecutionDisposition, ProtocolExecutionError,
     ProtocolExecutionFailure, ProtocolExecutionRequest, ProtocolExecutionStopReason,
     ProtocolTaskDisposition, ProtocolTaskResult, OUTPUT_SCHEMA as PROTOCOL_EXECUTION_OUTPUT_SCHEMA,
+};
+
+pub use research_autopilot::{
+    execute_glioma_research_autopilot, GliomaResearchAutopilotDisposition,
+    GliomaResearchAutopilotError, GliomaResearchAutopilotRequest, GliomaResearchAutopilotRun,
 };
 
 pub use simulator::{

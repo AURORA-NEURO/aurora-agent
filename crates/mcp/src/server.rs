@@ -478,38 +478,38 @@ use bioprism_research::{
     build_research_object_manifest, compile_decision_context, compile_mechanism_action_plan,
     compile_typed_knowledge, design_preclinical_experiment, discriminate_mechanisms,
     dry_run_glioma_research, execute_glioma_action_portfolio, execute_glioma_autonomous_campaign,
-    execute_glioma_computation, execute_glioma_protocol, explore_mechanisms,
-    generate_feature_catalog, glioma_program_catalog, harmonize_glioma_multimodal_batches,
-    harmonize_multimodal_inputs, plan_decision_actions, plan_glioma_adaptive_information_campaign,
-    plan_glioma_closed_loop_campaign, plan_glioma_information_design,
-    plan_glioma_multi_fidelity_optimization, plan_glioma_robust_intervention_portfolio,
-    plan_glioma_workflow, preflight_glioma_instrument, propagate_glioma_mechanism_graph,
-    qualify_evidence, select_glioma_actions, simulate_glioma_counterfactual,
-    simulate_glioma_counterfactual_ensemble, simulate_glioma_protocol, surveil_glioma_evidence,
-    validate_feature_catalog, ActionPortfolioExecutionRequest, AdaptiveAllocationRequest,
-    AdaptiveArmObservation, AdaptiveInformationCampaignRequest, AdaptiveInformationObservation,
-    AnalysisDataset, AnalysisRequest, CalibrationRequest, CalibrationRun, CampaignAction,
-    CampaignMechanism, CampaignObservation, CausalContrastRequest, ClosedLoopCampaignRequest,
-    CombinationObservation, CombinationSynergyRequest, ComputationExecutionRequest,
-    ConcordanceRequest, ConsensusRequest, CounterfactualEnsembleRequest,
-    CounterfactualIntervention, CounterfactualModel, CounterfactualRequest,
-    DecisionActionPlanRequest, DecisionContext, DecisionContextRequest, DesignAction,
-    DesignMechanism, DoseResponseObservation, DoseResponseRequest, DryRunGliomaActionExecutor,
-    DryRunGliomaComputationExecutor, DryRunGliomaProtocolExecutor, EvidenceRecord, EvidenceRequest,
-    EvidenceSurveillanceRequest, ExperimentArm, ExperimentRequest, FederatedBenchmarkRequest,
-    FederatedBenchmarkSite, FidelityCandidate, FidelityObservation, GliomaActionCandidate,
-    GliomaAutonomousCampaignRequest, GliomaResearchIntent, GliomaWorkflowRequest,
-    HarmonizationRequest, HarmonizationVector, InformationDesignRequest,
-    InstrumentPreflightRequest, KnowledgeRequest, LatentFactorRequest, LatentFactorVector,
-    LigandReceptorPair, MechanismActionPlannerConfig, MechanismCandidate, MechanismDiscrimination,
-    MechanismDiscriminationRequest, MechanismDiscriminatorAction, MechanismFeatureObservation,
-    MechanismGraphEdge, MechanismGraphNode, MechanismGraphRequest, MechanismHypothesis,
-    MechanismRequest, MediationObservation, MediationRequest, MetaAnalysisRequest, ModalityVector,
-    MultiFidelityOptimizationRequest, MultimodalObservation, MultimodalRequest,
-    ProtocolExecutionRequest, ProtocolSimulationRequest, ReplicationRequest, ReplicationStudy,
-    ResearchObjectRequest, RobustInterventionCandidate, RobustInterventionRequest,
-    RobustnessRequest, SensitivityObservation, SensitivityRequest, SpatialCell,
-    SpatialCommunicationCell, SpatialCommunicationRequest, SpatialNicheRequest,
+    execute_glioma_computation, execute_glioma_protocol, execute_glioma_research_autopilot,
+    explore_mechanisms, generate_feature_catalog, glioma_program_catalog,
+    harmonize_glioma_multimodal_batches, harmonize_multimodal_inputs, plan_decision_actions,
+    plan_glioma_adaptive_information_campaign, plan_glioma_closed_loop_campaign,
+    plan_glioma_information_design, plan_glioma_multi_fidelity_optimization,
+    plan_glioma_robust_intervention_portfolio, plan_glioma_workflow, preflight_glioma_instrument,
+    propagate_glioma_mechanism_graph, qualify_evidence, select_glioma_actions,
+    simulate_glioma_counterfactual, simulate_glioma_counterfactual_ensemble,
+    simulate_glioma_protocol, surveil_glioma_evidence, validate_feature_catalog,
+    ActionPortfolioExecutionRequest, AdaptiveAllocationRequest, AdaptiveArmObservation,
+    AdaptiveInformationCampaignRequest, AdaptiveInformationObservation, AnalysisDataset,
+    AnalysisRequest, CalibrationRequest, CalibrationRun, CampaignAction, CampaignMechanism,
+    CampaignObservation, CausalContrastRequest, ClosedLoopCampaignRequest, CombinationObservation,
+    CombinationSynergyRequest, ComputationExecutionRequest, ConcordanceRequest, ConsensusRequest,
+    CounterfactualEnsembleRequest, CounterfactualIntervention, CounterfactualModel,
+    CounterfactualRequest, DecisionActionPlanRequest, DecisionContext, DecisionContextRequest,
+    DesignAction, DesignMechanism, DoseResponseObservation, DoseResponseRequest,
+    DryRunGliomaActionExecutor, DryRunGliomaComputationExecutor, DryRunGliomaProtocolExecutor,
+    EvidenceRecord, EvidenceRequest, EvidenceSurveillanceRequest, ExperimentArm, ExperimentRequest,
+    FederatedBenchmarkRequest, FederatedBenchmarkSite, FidelityCandidate, FidelityObservation,
+    GliomaActionCandidate, GliomaAutonomousCampaignRequest, GliomaResearchAutopilotRequest,
+    GliomaResearchIntent, GliomaWorkflowRequest, HarmonizationRequest, HarmonizationVector,
+    InformationDesignRequest, InstrumentPreflightRequest, KnowledgeRequest, LatentFactorRequest,
+    LatentFactorVector, LigandReceptorPair, MechanismActionPlannerConfig, MechanismCandidate,
+    MechanismDiscrimination, MechanismDiscriminationRequest, MechanismDiscriminatorAction,
+    MechanismFeatureObservation, MechanismGraphEdge, MechanismGraphNode, MechanismGraphRequest,
+    MechanismHypothesis, MechanismRequest, MediationObservation, MediationRequest,
+    MetaAnalysisRequest, ModalityVector, MultiFidelityOptimizationRequest, MultimodalObservation,
+    MultimodalRequest, ProtocolExecutionRequest, ProtocolSimulationRequest, ReplicationRequest,
+    ReplicationStudy, ResearchObjectRequest, RobustInterventionCandidate,
+    RobustInterventionRequest, RobustnessRequest, SensitivityObservation, SensitivityRequest,
+    SpatialCell, SpatialCommunicationCell, SpatialCommunicationRequest, SpatialNicheRequest,
     SpatialPropagationRequest, StateTransitionObservation, StateTransitionRequest,
     StaticGliomaActionPlanner, StratifiedCausalRequest, StratifiedObservation,
     TrajectoryObservation, TrajectoryRequest, TypedKnowledge,
@@ -1954,6 +1954,9 @@ impl Server {
             "glioma_autonomous_campaign_execute" => {
                 self.glioma_autonomous_campaign_execute(&arguments)
             }
+            "glioma_research_autopilot_execute" => {
+                self.glioma_research_autopilot_execute(&arguments)
+            }
             "glioma_computation_execute" => self.glioma_computation_execute(&arguments),
             "glioma_robustness_suite" => self.glioma_robustness_suite(&arguments),
             "glioma_trajectory_analyze" => self.glioma_trajectory_analyze(&arguments),
@@ -3251,6 +3254,33 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma autonomous campaign: {error}"))
+    }
+
+    /// Close one evidence-to-action-to-execution cycle with the deterministic sandbox worker.
+    /// Institution-local callers can replace the worker through the Rust SDK seam.
+    fn glioma_research_autopilot_execute(&self, arguments: &Value) -> Result<Value, String> {
+        let request: GliomaResearchAutopilotRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_research_autopilot_execute requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma research autopilot request: {error}"))?;
+        let mut executor = DryRunGliomaActionExecutor;
+        let run = execute_glioma_research_autopilot(&request, &mut executor)
+            .map_err(|error| format!("glioma research autopilot refused: {error}"))?;
+        serde_json::to_value(json!({
+            "run": run,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "P04 compiled context is selected and executed through the same dependency-safe P07 portfolio path",
+                "completed actions, budget, policy, artifacts, negative results, and failures remain explicit",
+                "a no-runnable-action hold has no synthetic execution result",
+                "the MCP route uses a synthetic local worker; production assay or analysis effects require a caller-owned GliomaActionExecutor"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma research autopilot: {error}"))
     }
 
     /// Execute a typed multimodal computation DAG through the deterministic synthetic worker.
@@ -44726,6 +44756,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_protocol_execute",
                 "glioma_action_portfolio_execute",
                 "glioma_autonomous_campaign_execute",
+                "glioma_research_autopilot_execute",
                 "glioma_computation_execute",
                 "glioma_robustness_suite",
                 "glioma_trajectory_analyze",
@@ -51634,6 +51665,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "GliomaAutonomousCampaignRequest1@1 with a preclinical intent, typed initial candidates, selection policy, round/retry bounds, and local-artifact requirement."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_research_autopilot_execute",
+        "description": "Run one autonomous preclinical glioma research cycle from a compiled decision context: select the next dependency-safe action portfolio and execute it through the local worker seam. Returns an explicit hold when no action is runnable, preserves negative or failed outcomes, and uses a synthetic worker in MCP without biological, instrument, federation, or clinical effects.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "GliomaResearchAutopilotRequest1@1 with DecisionContext1@1, matching objective, completed action ids, selection policy, retry bound, and artifact requirement."}
             },
             "required": ["request"]
         }
