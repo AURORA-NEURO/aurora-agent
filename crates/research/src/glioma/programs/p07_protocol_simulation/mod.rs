@@ -11,6 +11,7 @@ pub use crate::glioma::workflow::{
     GliomaWorkflowRequest, WorkflowNodeDecision,
 };
 pub mod action_execution;
+pub mod autonomous_campaign;
 pub mod execution;
 pub mod simulator;
 
@@ -19,6 +20,14 @@ pub use action_execution::{
     ActionExecutionResult, ActionPortfolioExecution, ActionPortfolioExecutionDisposition,
     ActionPortfolioExecutionError, ActionPortfolioExecutionRequest, ActionPortfolioStopReason,
     DryRunGliomaActionExecutor, GliomaActionExecutor,
+};
+
+pub use autonomous_campaign::{
+    execute_glioma_autonomous_campaign, GliomaActionPlanner, GliomaAutonomousCampaign,
+    GliomaAutonomousCampaignDisposition, GliomaAutonomousCampaignError,
+    GliomaAutonomousCampaignRequest, GliomaAutonomousCampaignRound,
+    GliomaAutonomousCampaignStopReason, GliomaAutonomousPlannerContext, GliomaPlannerFailure,
+    StaticGliomaActionPlanner,
 };
 
 pub use execution::{

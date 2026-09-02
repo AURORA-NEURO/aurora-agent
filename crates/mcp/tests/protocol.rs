@@ -314,7 +314,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 57;
-const TOOL_DEFINITION_COUNT: usize = 566;
+const TOOL_DEFINITION_COUNT: usize = 567;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -1780,6 +1780,87 @@ fn glioma_action_portfolio_execution_is_reachable_through_mcp() {
         execution["execution"]["completed_order"],
         json!(["local-genomics"])
     );
+}
+
+#[test]
+fn glioma_autonomous_campaign_execution_is_reachable_through_mcp() {
+    let mut server = server();
+    let artifact_hash = "0".repeat(64);
+    let replay_identity = "1".repeat(64);
+    let campaign = call(
+        &mut server,
+        "glioma_autonomous_campaign_execute",
+        json!({
+            "request": {
+                "intent": {
+                    "research_id": "mcp-autonomous-campaign",
+                    "study_id": "study-001",
+                    "objective": "test preclinical glioma invasion mechanism",
+                    "output_uses": ["method_development"],
+                    "model_systems": ["organoid"],
+                    "modalities": ["genomics", "computational"],
+                    "input_artifacts": [{
+                        "artifact_id": "local:matrix",
+                        "content_hash": artifact_hash,
+                        "content_type": "application/octet-stream",
+                        "local_only": true,
+                        "contains_human_data": false,
+                        "contains_direct_identifiers": false
+                    }],
+                    "requested_autonomy": "a1",
+                    "approval_reference": null,
+                    "budget_units": 4,
+                    "max_retries": 1,
+                    "allow_instrument_execution": false,
+                    "allow_federation": false,
+                    "raw_data_local": true,
+                    "aggregate_only": true,
+                    "replay_identity": replay_identity,
+                    "boundary": "preclinical-research-only; no human-subject or clinical-source data; no diagnosis, treatment, triage, enrollment, or clinical decisions"
+                },
+                "initial_candidates": [{
+                    "action_id": "mcp-seed",
+                    "stage_kind": "experiment_design",
+                    "modality": "genomics",
+                    "model_system": "organoid",
+                    "depends_on": [],
+                    "cost_units": 2,
+                    "information_gain_milli": 800,
+                    "frontier_novelty_milli": 700,
+                    "workflow_leverage_milli": 700,
+                    "cross_stage_unlock_milli": 700,
+                    "reproducibility_safety_milli": 900,
+                    "federation_value_milli": 400,
+                    "feasibility_milli": 900,
+                    "autonomy_tier": "a1",
+                    "effects": ["read_local_data", "execute_local_computation", "write_local_artifact"]
+                }],
+                "selection": {
+                    "budget_units": 4,
+                    "max_actions": 1,
+                    "approval_granted": false,
+                    "allow_instrument_execution": false,
+                    "allow_federation": false,
+                    "weights": {
+                        "information_gain": 25,
+                        "frontier_novelty": 20,
+                        "workflow_leverage": 15,
+                        "cross_stage_unlock": 15,
+                        "reproducibility_safety": 10,
+                        "federation_value": 10,
+                        "feasibility": 5
+                    }
+                },
+                "max_rounds": 2,
+                "max_retries": 1,
+                "require_artifacts": true
+            }
+        }),
+    );
+    assert_eq!(campaign["dispatch"], json!("not_started"));
+    assert_eq!(campaign["simulation_only"], json!(true));
+    assert_eq!(campaign["campaign"]["disposition"], json!("completed"));
+    assert_eq!(campaign["campaign"]["completed_order"], json!(["mcp-seed"]));
 }
 
 #[test]

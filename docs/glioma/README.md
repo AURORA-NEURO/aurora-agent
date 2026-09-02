@@ -63,6 +63,10 @@ crates/research/src/glioma/
   workflow.rs                               P07 adaptive campaign planner and guarded execution
     p07_protocol_simulation/simulator.rs    P07 deterministic resource-constrained scheduling
     p07_protocol_simulation/execution.rs   P07 guarded local protocol execution with retries
+    p07_protocol_simulation/action_execution.rs
+                                             P07 dependency-safe action-portfolio execution
+    p07_protocol_simulation/autonomous_campaign.rs
+                                             P07 observation-driven campaign replanning over local actions
     p08_instrument_robotics/preflight.rs   P08 typed instrument/robotics interlock planning
     p09_reproducible_computation/robustness.rs
                                              P09 leave-one-batch/row-out robustness battery
@@ -262,6 +266,13 @@ beam-selected autonomous batch. It runs assays, analyses, simulations, or approv
 actions in dependency order through a caller-owned executor, retries only declared transient
 failures, requires local typed artifacts when configured, and stops with explicit failed, partial,
 negative, or skipped outcomes instead of pretending the portfolio completed.
+P07 now also includes an observation-driven autonomous campaign controller
+(`execute_glioma_autonomous_campaign`). It keeps a bounded typed action registry, asks a local
+planner for new assays or analyses after each returned round, spends a hard research budget, and
+replans only from observed executor results. Failed or partial effects stop the campaign; negative
+results remain first-class evidence and can satisfy downstream dependencies. The MCP route uses
+the deterministic dry-run planner/worker, while institution-local planners and execution gateways
+can implement the two explicit Rust seams for real preclinical workflows.
 P08 now also includes deterministic instrument preflight (`preflight_glioma_instrument`). It combines
 qualified calibration, live interlock telemetry, typed operation parameters, operator authorization,
 serialized scheduling, and risk/duration budgets into a dispatch-permitted or fail-closed plan. The

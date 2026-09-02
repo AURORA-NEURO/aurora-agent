@@ -497,6 +497,14 @@ pub fn execute_glioma_action_portfolio<E: GliomaActionExecutor>(
             negative_evidence.insert(format!("{}:{}", result.action_id, result.note));
         }
     }
+    // Status partitions are canonical sets, while `results` retains executable topological order.
+    // Sorting the partitions prevents a high-value action chosen before a lexical prerequisite
+    // from making an otherwise valid execution impossible to validate.
+    completed_order.sort();
+    negative_order.sort();
+    partial_order.sort();
+    failed_order.sort();
+    skipped_order.sort();
     if !selection.deferred_order.is_empty() {
         uncertainty.insert("selection-deferred-actions-remain".into());
     }

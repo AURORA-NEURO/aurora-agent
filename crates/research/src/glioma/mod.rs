@@ -107,17 +107,21 @@ pub use programs::p06_experiment_design::{
     EXECUTION_OUTPUT_SCHEMA,
 };
 pub use programs::p07_protocol_simulation::{
-    execute_glioma_action_portfolio, execute_glioma_protocol,
+    execute_glioma_action_portfolio, execute_glioma_autonomous_campaign, execute_glioma_protocol,
     protocol_request_from_experiment_design, simulate_glioma_protocol, ActionExecutionDisposition,
     ActionExecutionFailure, ActionExecutionResult, ActionPortfolioExecution,
     ActionPortfolioExecutionDisposition, ActionPortfolioExecutionError,
     ActionPortfolioExecutionRequest, ActionPortfolioStopReason, DryRunGliomaActionExecutor,
-    DryRunGliomaProtocolExecutor, GliomaActionExecutor, GliomaProtocolExecutor,
-    ProtocolDisposition, ProtocolExecution, ProtocolExecutionDisposition, ProtocolExecutionError,
-    ProtocolExecutionFailure, ProtocolExecutionRequest, ProtocolExecutionStopReason,
-    ProtocolResource, ProtocolResourceKind, ProtocolSimulation, ProtocolSimulationError,
-    ProtocolSimulationRequest, ProtocolTask, ProtocolTaskDisposition, ProtocolTaskResult,
-    ResourceUtilization, ScheduleEntry, PROTOCOL_EXECUTION_OUTPUT_SCHEMA,
+    DryRunGliomaProtocolExecutor, GliomaActionExecutor, GliomaActionPlanner,
+    GliomaAutonomousCampaign, GliomaAutonomousCampaignDisposition, GliomaAutonomousCampaignError,
+    GliomaAutonomousCampaignRequest, GliomaAutonomousCampaignRound,
+    GliomaAutonomousCampaignStopReason, GliomaAutonomousPlannerContext, GliomaPlannerFailure,
+    GliomaProtocolExecutor, ProtocolDisposition, ProtocolExecution, ProtocolExecutionDisposition,
+    ProtocolExecutionError, ProtocolExecutionFailure, ProtocolExecutionRequest,
+    ProtocolExecutionStopReason, ProtocolResource, ProtocolResourceKind, ProtocolSimulation,
+    ProtocolSimulationError, ProtocolSimulationRequest, ProtocolTask, ProtocolTaskDisposition,
+    ProtocolTaskResult, ResourceUtilization, ScheduleEntry, StaticGliomaActionPlanner,
+    PROTOCOL_EXECUTION_OUTPUT_SCHEMA,
 };
 pub use programs::p08_instrument_robotics::{
     analyze_instrument_calibration, preflight_glioma_instrument, CalibrationDisposition,
