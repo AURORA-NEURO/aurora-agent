@@ -314,7 +314,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 57;
-const TOOL_DEFINITION_COUNT: usize = 567;
+const TOOL_DEFINITION_COUNT: usize = 568;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -1244,6 +1244,25 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
     assert_eq!(
         mechanism_discrimination["discrimination"]["selected_action_order"][0],
         json!("perturb-f1")
+    );
+
+    let mechanism_action_plan = call(
+        &mut server,
+        "glioma_mechanism_action_plan",
+        json!({
+            "discrimination": mechanism_discrimination["discrimination"].clone(),
+            "config": {
+                "model_system": "organoid",
+                "modality": "transcriptomics",
+                "max_actions": 4
+            }
+        }),
+    );
+    assert_eq!(mechanism_action_plan["dispatch"], json!("not_started"));
+    assert_eq!(mechanism_action_plan["simulation_only"], json!(true));
+    assert_eq!(
+        mechanism_action_plan["plan"]["action_order"][0],
+        json!("mechanism-assay:perturb-f1")
     );
 
     let mechanism_graph = call(

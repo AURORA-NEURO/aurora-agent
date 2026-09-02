@@ -2,12 +2,17 @@
 
 use crate::glioma::catalog::{glioma_program_catalog, GliomaProgramDescriptor, GliomaProgramId};
 
+pub mod action_planner;
 pub mod counterfactual;
 pub mod discrimination;
 pub mod ensemble_counterfactual;
 pub mod graph_propagation;
 pub mod robust_portfolio;
 
+pub use action_planner::{
+    compile_mechanism_action_plan, GliomaMechanismActionPlanner, MechanismActionPlan,
+    MechanismActionPlannerConfig, MechanismActionPlannerError,
+};
 pub use counterfactual::{
     simulate_glioma_counterfactual, CounterfactualContrast, CounterfactualDirection,
     CounterfactualDisposition, CounterfactualError, CounterfactualIntervention,

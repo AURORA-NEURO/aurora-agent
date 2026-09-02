@@ -32,6 +32,8 @@ crates/research/src/glioma/
                                              P05 model-averaged counterfactual targets and agreement envelope
   programs/p05_mechanism_exploration/robust_portfolio.rs
                                              P05 lower-tail robust intervention portfolio optimizer across model ensembles
+  programs/p05_mechanism_exploration/action_planner.rs
+                                             P05 compiler from discriminator information gain to executable assay actions
   programs/p01_evidence_surveillance/surveillance.rs
                                              P01 snapshot delta surveillance and prioritized evidence review actions
   programs/p08_instrument_robotics/calibration.rs
@@ -223,6 +225,11 @@ declared model ensemble, computes prior-weighted expected and lower-tail effects
 non-redundant candidates under worst-case effect, model agreement, feasibility, risk, and budget
 gates. The output is a ranked assay portfolio with explicit exclusions and no biological dispatch
 seam.
+P05 now also includes mechanism-action compilation (`compile_mechanism_action_plan`). It converts
+ residual-likelihood information-gain assays into typed A1 local candidates ranked by information
+ per cost, feasibility, measurement uncertainty, and mechanism-unlock value. The resulting plan
+ feeds the autonomous campaign controller; it never turns a mechanism score into an observation
+ or a clinical recommendation.
 P10 now includes an exact bounded causal contrast (`analyze_glioma_causal_contrast`) using
 pre/post unit changes, treatment-label permutations, and leave-one-unit bounds; null, non-significant,
 or underpowered effects remain explicit rather than being promoted into mechanism claims.

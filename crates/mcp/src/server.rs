@@ -475,9 +475,9 @@ use bioprism_research::{
     analyze_glioma_trajectories, analyze_instrument_calibration, analyze_multimodal_concordance,
     analyze_multimodal_consensus, analyze_preclinical_outcomes, analyze_replication_meta_analysis,
     analyze_stratified_causal_adjustment, assess_glioma_robustness, assess_replication,
-    build_research_object_manifest, compile_decision_context, compile_typed_knowledge,
-    design_preclinical_experiment, discriminate_mechanisms, dry_run_glioma_research,
-    execute_glioma_action_portfolio, execute_glioma_autonomous_campaign,
+    build_research_object_manifest, compile_decision_context, compile_mechanism_action_plan,
+    compile_typed_knowledge, design_preclinical_experiment, discriminate_mechanisms,
+    dry_run_glioma_research, execute_glioma_action_portfolio, execute_glioma_autonomous_campaign,
     execute_glioma_computation, execute_glioma_protocol, explore_mechanisms,
     generate_feature_catalog, glioma_program_catalog, harmonize_glioma_multimodal_batches,
     harmonize_multimodal_inputs, plan_glioma_adaptive_information_campaign,
@@ -499,14 +499,14 @@ use bioprism_research::{
     FederatedBenchmarkSite, GliomaActionCandidate, GliomaAutonomousCampaignRequest,
     GliomaResearchIntent, GliomaWorkflowRequest, HarmonizationRequest, HarmonizationVector,
     InformationDesignRequest, InstrumentPreflightRequest, KnowledgeRequest, LatentFactorRequest,
-    LatentFactorVector, LigandReceptorPair, MechanismCandidate, MechanismDiscriminationRequest,
-    MechanismDiscriminatorAction, MechanismFeatureObservation, MechanismGraphEdge,
-    MechanismGraphNode, MechanismGraphRequest, MechanismHypothesis, MechanismRequest,
-    MetaAnalysisRequest, ModalityVector, MultimodalObservation, MultimodalRequest,
-    ProtocolExecutionRequest, ProtocolSimulationRequest, ReplicationRequest, ReplicationStudy,
-    ResearchObjectRequest, RobustInterventionCandidate, RobustInterventionRequest,
-    RobustnessRequest, SensitivityObservation, SensitivityRequest, SpatialCell,
-    SpatialCommunicationCell, SpatialCommunicationRequest, SpatialNicheRequest,
+    LatentFactorVector, LigandReceptorPair, MechanismActionPlannerConfig, MechanismCandidate,
+    MechanismDiscrimination, MechanismDiscriminationRequest, MechanismDiscriminatorAction,
+    MechanismFeatureObservation, MechanismGraphEdge, MechanismGraphNode, MechanismGraphRequest,
+    MechanismHypothesis, MechanismRequest, MetaAnalysisRequest, ModalityVector,
+    MultimodalObservation, MultimodalRequest, ProtocolExecutionRequest, ProtocolSimulationRequest,
+    ReplicationRequest, ReplicationStudy, ResearchObjectRequest, RobustInterventionCandidate,
+    RobustInterventionRequest, RobustnessRequest, SensitivityObservation, SensitivityRequest,
+    SpatialCell, SpatialCommunicationCell, SpatialCommunicationRequest, SpatialNicheRequest,
     SpatialPropagationRequest, StateTransitionObservation, StateTransitionRequest,
     StaticGliomaActionPlanner, StratifiedCausalRequest, StratifiedObservation,
     TrajectoryObservation, TrajectoryRequest, TypedKnowledge,
@@ -1980,6 +1980,7 @@ impl Server {
             "glioma_multimodal_qc" => self.glioma_multimodal_qc(&arguments),
             "glioma_mechanism_explore" => self.glioma_mechanism_explore(&arguments),
             "glioma_mechanism_discriminate" => self.glioma_mechanism_discriminate(&arguments),
+            "glioma_mechanism_action_plan" => self.glioma_mechanism_action_plan(&arguments),
             "glioma_mechanism_graph_propagate" => self.glioma_mechanism_graph_propagate(&arguments),
             "glioma_mechanism_counterfactual" => self.glioma_mechanism_counterfactual(&arguments),
             "glioma_mechanism_ensemble_counterfactual" => {
@@ -4101,6 +4102,37 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma mechanism discrimination: {error}"))
+    }
+
+    /// Compile discriminator information gain into executable local action candidates for the
+    /// autonomous campaign controller. This route plans only; it never dispatches an assay.
+    fn glioma_mechanism_action_plan(&self, arguments: &Value) -> Result<Value, String> {
+        let discrimination: MechanismDiscrimination =
+            serde_json::from_value(arguments.get("discrimination").cloned().ok_or_else(|| {
+                "glioma_mechanism_action_plan requires discrimination".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma mechanism discrimination: {error}"))?;
+        let config: MechanismActionPlannerConfig = serde_json::from_value(
+            arguments
+                .get("config")
+                .cloned()
+                .ok_or_else(|| "glioma_mechanism_action_plan requires config".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma mechanism action planner config: {error}"))?;
+        let plan = compile_mechanism_action_plan(&discrimination, &config)
+            .map_err(|error| format!("glioma mechanism action planning refused: {error}"))?;
+        serde_json::to_value(json!({
+            "plan": plan,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "residual-likelihood information gain is compiled into typed A1 local candidates",
+                "ranking accounts for information per cost, feasibility, measurement uncertainty, and mechanism-unlock value",
+                "source uncertainty and negative evidence remain attached to the plan",
+                "the route does not invent observations, execute assays, or make a clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma mechanism action plan: {error}"))
     }
 
     /// Propagate signed mechanistic support over a local preclinical glioma evidence graph. This
@@ -44610,6 +44642,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_multimodal_qc",
                 "glioma_mechanism_explore",
                 "glioma_mechanism_discriminate",
+                "glioma_mechanism_action_plan",
                 "glioma_mechanism_graph_propagate",
                 "glioma_mechanism_counterfactual",
                 "glioma_mechanism_ensemble_counterfactual",
@@ -51858,6 +51891,18 @@ pub fn tool_definitions() -> Vec<Value> {
                 "actions": {"type": "array", "items": {"type": "object"}, "description": "MechanismDiscriminatorAction1@1 candidate assays with per-mechanism predictions, cost, feasibility, and uncertainty."}
             },
             "required": ["request", "hypotheses", "observations", "actions"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_mechanism_action_plan",
+        "description": "Compile a validated preclinical glioma mechanism-discrimination result into typed A1 local assay candidates for the autonomous campaign controller. Ranks information gain per cost while penalizing measurement uncertainty and preserving mechanism-unlock value, negative evidence, and limitations; this route plans only and never executes an assay or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "discrimination": {"type": "object", "description": "MechanismDiscrimination1@1 output from glioma_mechanism_discriminate."},
+                "config": {"type": "object", "description": "MechanismActionPlannerConfig1@1 with model_system, modality, and max_actions."}
+            },
+            "required": ["discrimination", "config"]
         }
     }));
     definitions.push(json!({
