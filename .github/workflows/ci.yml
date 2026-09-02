@@ -27,6 +27,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: fetch locked Rust dependencies
         run: cargo fetch --locked --config net.offline=false
+      - name: validate glioma folder organization
+        run: python tools/validate_glioma_organization.py
       # The repository predates this workflow and contains unrelated stable-rustfmt drift.
       # Keep the gate actionable by checking every Rust file changed by this revision while
       # the existing baseline is migrated deliberately rather than hiding the result.
