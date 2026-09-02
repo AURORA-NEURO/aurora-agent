@@ -39,6 +39,7 @@
     "robust_intervention_portfolio": "crates/research/src/glioma/programs/p05_mechanism_exploration/robust_portfolio.rs",
     "information_design": "crates/research/src/glioma/programs/p06_experiment_design/information_design.rs",
     "adaptive_information_campaign": "crates/research/src/glioma/programs/p06_experiment_design/adaptive_information_campaign.rs",
+    "organization_validator": "tools/validate_glioma_organization.py",
     "documentation": "docs/glioma",
     "mcp": "crates/mcp/src/server.rs"
   },

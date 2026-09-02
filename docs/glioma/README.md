@@ -105,6 +105,12 @@ crates/research/src/glioma/
 `generate_feature_catalog()` function and that file must agree on program ids, folders, and the
 8-archetype × 4-scale expansion.
 
+Run `python tools/validate_glioma_organization.py --json` before adding a capability. The validator
+checks that every P01–P12 source folder has its `mod.rs` ownership boundary, that the organization
+cardinality remains 12 × 32 = 384, and that the implementation manifest contains stable feature
+ids assigned to the correct program. Its report is the folder-by-folder handoff between the
+portfolio plan and executable code; it does not promote a planned slot to implemented status.
+
 ## Program order
 
 | Program | Product owner | Engine stages | Observable product result |
