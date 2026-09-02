@@ -257,6 +257,11 @@ typed output artifacts, bounded retries, partial results, failed tasks, and skip
 recorded explicitly. The executor seam can target a local simulator, compute worker, robotics
 gateway, or institution-approved instrument service without the research crate opening a socket or
 making a clinical decision.
+P07 now also includes action-portfolio execution (`execute_glioma_action_portfolio`) for the
+beam-selected autonomous batch. It runs assays, analyses, simulations, or approved gateway
+actions in dependency order through a caller-owned executor, retries only declared transient
+failures, requires local typed artifacts when configured, and stops with explicit failed, partial,
+negative, or skipped outcomes instead of pretending the portfolio completed.
 P08 now also includes deterministic instrument preflight (`preflight_glioma_instrument`). It combines
 qualified calibration, live interlock telemetry, typed operation parameters, operator authorization,
 serialized scheduling, and risk/duration budgets into a dispatch-permitted or fail-closed plan. The

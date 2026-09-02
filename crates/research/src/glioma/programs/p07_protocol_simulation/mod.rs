@@ -10,8 +10,16 @@ pub use crate::glioma::workflow::{
     GliomaWorkflowExecution, GliomaWorkflowMode, GliomaWorkflowNode, GliomaWorkflowPlan,
     GliomaWorkflowRequest, WorkflowNodeDecision,
 };
+pub mod action_execution;
 pub mod execution;
 pub mod simulator;
+
+pub use action_execution::{
+    execute_glioma_action_portfolio, ActionExecutionDisposition, ActionExecutionFailure,
+    ActionExecutionResult, ActionPortfolioExecution, ActionPortfolioExecutionDisposition,
+    ActionPortfolioExecutionError, ActionPortfolioExecutionRequest, ActionPortfolioStopReason,
+    DryRunGliomaActionExecutor, GliomaActionExecutor,
+};
 
 pub use execution::{
     execute_glioma_protocol, DryRunGliomaProtocolExecutor, GliomaProtocolExecutor,

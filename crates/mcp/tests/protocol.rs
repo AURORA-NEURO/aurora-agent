@@ -314,7 +314,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 57;
-const TOOL_DEFINITION_COUNT: usize = 565;
+const TOOL_DEFINITION_COUNT: usize = 566;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -1723,6 +1723,62 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
     assert_eq!(
         decision_context["context"]["actions"][0]["candidate"]["stage_kind"],
         json!("mechanism_exploration")
+    );
+}
+
+#[test]
+fn glioma_action_portfolio_execution_is_reachable_through_mcp() {
+    let mut server = server();
+    let execution = call(
+        &mut server,
+        "glioma_action_portfolio_execute",
+        json!({
+            "request": {
+                "candidates": [{
+                    "action_id": "local-genomics",
+                    "stage_kind": "experiment_design",
+                    "modality": "genomics",
+                    "model_system": "organoid",
+                    "depends_on": [],
+                    "cost_units": 2,
+                    "information_gain_milli": 800,
+                    "frontier_novelty_milli": 700,
+                    "workflow_leverage_milli": 700,
+                    "cross_stage_unlock_milli": 700,
+                    "reproducibility_safety_milli": 900,
+                    "federation_value_milli": 400,
+                    "feasibility_milli": 900,
+                    "autonomy_tier": "a1",
+                    "effects": ["read_local_data", "execute_local_computation", "write_local_artifact"]
+                }],
+                "completed_actions": [],
+                "selection": {
+                    "budget_units": 5,
+                    "max_actions": 1,
+                    "approval_granted": false,
+                    "allow_instrument_execution": false,
+                    "allow_federation": false,
+                    "weights": {
+                        "information_gain": 25,
+                        "frontier_novelty": 20,
+                        "workflow_leverage": 15,
+                        "cross_stage_unlock": 15,
+                        "reproducibility_safety": 10,
+                        "federation_value": 10,
+                        "feasibility": 5
+                    }
+                },
+                "max_retries": 1,
+                "require_artifacts": true
+            }
+        }),
+    );
+    assert_eq!(execution["dispatch"], json!("not_started"));
+    assert_eq!(execution["simulation_only"], json!(true));
+    assert_eq!(execution["execution"]["disposition"], json!("completed"));
+    assert_eq!(
+        execution["execution"]["completed_order"],
+        json!(["local-genomics"])
     );
 }
 
