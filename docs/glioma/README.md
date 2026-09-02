@@ -28,6 +28,8 @@ crates/research/src/glioma/
                                              P05 signed activation/inhibition mechanism-network propagation with convergence gates
   programs/p05_mechanism_exploration/counterfactual.rs
                                              P05 signed mechanism perturbation and downstream contrast
+  programs/p05_mechanism_exploration/ensemble_counterfactual.rs
+                                             P05 model-averaged counterfactual targets and agreement envelope
   programs/p01_evidence_surveillance/surveillance.rs
                                              P01 snapshot delta surveillance and prioritized evidence review actions
   programs/p08_instrument_robotics/calibration.rs
@@ -240,6 +242,10 @@ P05 now also includes counterfactual mechanism simulation (`simulate_glioma_coun
 compares baseline and signed node perturbation fixed points over activating/inhibiting networks,
 rank-orders downstream changes, and exposes low-confidence edges and non-convergence as unresolved.
 The result is an assay-prioritization simulation, not a causal estimate or clinical recommendation.
+The ensemble extension (`simulate_glioma_counterfactual_ensemble`) runs the same intervention
+across independently declared mechanism graphs, weights effects by explicit model priors, and
+withholds target direction below a model-agreement floor. Each underlying simulation remains
+inspectable so disagreement is actionable rather than averaged away.
 P10 also includes stratified causal adjustment (`analyze_stratified_causal_adjustment`) that
 collapses repeated measurements to units, requires positivity within confounder strata, computes
 pooled weighted contrasts, and exposes leave-one-stratum influence and missing coverage.

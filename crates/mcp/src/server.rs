@@ -481,26 +481,28 @@ use bioprism_research::{
     harmonize_glioma_multimodal_batches, harmonize_multimodal_inputs,
     plan_glioma_closed_loop_campaign, plan_glioma_workflow, preflight_glioma_instrument,
     propagate_glioma_mechanism_graph, qualify_evidence, select_glioma_actions,
-    simulate_glioma_counterfactual, simulate_glioma_protocol, surveil_glioma_evidence,
-    validate_feature_catalog, AdaptiveAllocationRequest, AdaptiveArmObservation, AnalysisDataset,
-    AnalysisRequest, CalibrationRequest, CalibrationRun, CampaignAction, CampaignMechanism,
-    CampaignObservation, CausalContrastRequest, ClosedLoopCampaignRequest, CombinationObservation,
+    simulate_glioma_counterfactual, simulate_glioma_counterfactual_ensemble,
+    simulate_glioma_protocol, surveil_glioma_evidence, validate_feature_catalog,
+    AdaptiveAllocationRequest, AdaptiveArmObservation, AnalysisDataset, AnalysisRequest,
+    CalibrationRequest, CalibrationRun, CampaignAction, CampaignMechanism, CampaignObservation,
+    CausalContrastRequest, ClosedLoopCampaignRequest, CombinationObservation,
     CombinationSynergyRequest, ComputationExecutionRequest, ConcordanceRequest, ConsensusRequest,
-    CounterfactualIntervention, CounterfactualRequest, DecisionContextRequest,
-    DoseResponseObservation, DoseResponseRequest, DryRunGliomaComputationExecutor,
-    DryRunGliomaProtocolExecutor, EvidenceRecord, EvidenceRequest, EvidenceSurveillanceRequest,
-    ExperimentArm, ExperimentRequest, FederatedBenchmarkRequest, FederatedBenchmarkSite,
-    GliomaActionCandidate, GliomaResearchIntent, GliomaWorkflowRequest, HarmonizationRequest,
-    HarmonizationVector, InstrumentPreflightRequest, KnowledgeRequest, LatentFactorRequest,
-    LatentFactorVector, LigandReceptorPair, MechanismCandidate, MechanismDiscriminationRequest,
-    MechanismDiscriminatorAction, MechanismFeatureObservation, MechanismGraphEdge,
-    MechanismGraphNode, MechanismGraphRequest, MechanismHypothesis, MechanismRequest,
-    MetaAnalysisRequest, ModalityVector, MultimodalObservation, MultimodalRequest,
-    ProtocolExecutionRequest, ProtocolSimulationRequest, ReplicationRequest, ReplicationStudy,
-    ResearchObjectRequest, RobustnessRequest, SensitivityObservation, SensitivityRequest,
-    SpatialCell, SpatialCommunicationCell, SpatialCommunicationRequest, SpatialNicheRequest,
-    StateTransitionObservation, StateTransitionRequest, StratifiedCausalRequest,
-    StratifiedObservation, TrajectoryObservation, TrajectoryRequest, TypedKnowledge,
+    CounterfactualEnsembleRequest, CounterfactualIntervention, CounterfactualModel,
+    CounterfactualRequest, DecisionContextRequest, DoseResponseObservation, DoseResponseRequest,
+    DryRunGliomaComputationExecutor, DryRunGliomaProtocolExecutor, EvidenceRecord, EvidenceRequest,
+    EvidenceSurveillanceRequest, ExperimentArm, ExperimentRequest, FederatedBenchmarkRequest,
+    FederatedBenchmarkSite, GliomaActionCandidate, GliomaResearchIntent, GliomaWorkflowRequest,
+    HarmonizationRequest, HarmonizationVector, InstrumentPreflightRequest, KnowledgeRequest,
+    LatentFactorRequest, LatentFactorVector, LigandReceptorPair, MechanismCandidate,
+    MechanismDiscriminationRequest, MechanismDiscriminatorAction, MechanismFeatureObservation,
+    MechanismGraphEdge, MechanismGraphNode, MechanismGraphRequest, MechanismHypothesis,
+    MechanismRequest, MetaAnalysisRequest, ModalityVector, MultimodalObservation,
+    MultimodalRequest, ProtocolExecutionRequest, ProtocolSimulationRequest, ReplicationRequest,
+    ReplicationStudy, ResearchObjectRequest, RobustnessRequest, SensitivityObservation,
+    SensitivityRequest, SpatialCell, SpatialCommunicationCell, SpatialCommunicationRequest,
+    SpatialNicheRequest, StateTransitionObservation, StateTransitionRequest,
+    StratifiedCausalRequest, StratifiedObservation, TrajectoryObservation, TrajectoryRequest,
+    TypedKnowledge,
 };
 use bioprism_routing::{
     lab::{run as run_routing_lab, LabSettings, Task},
@@ -1968,6 +1970,9 @@ impl Server {
             "glioma_mechanism_discriminate" => self.glioma_mechanism_discriminate(&arguments),
             "glioma_mechanism_graph_propagate" => self.glioma_mechanism_graph_propagate(&arguments),
             "glioma_mechanism_counterfactual" => self.glioma_mechanism_counterfactual(&arguments),
+            "glioma_mechanism_ensemble_counterfactual" => {
+                self.glioma_mechanism_ensemble_counterfactual(&arguments)
+            }
             "glioma_instrument_calibration" => self.glioma_instrument_calibration(&arguments),
             "glioma_instrument_preflight" => self.glioma_instrument_preflight(&arguments),
             "glioma_experiment_design" => self.glioma_experiment_design(&arguments),
@@ -4075,6 +4080,41 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma mechanism counterfactual: {error}"))
+    }
+
+    /// Run the same signed mechanism perturbation across multiple local models and expose only
+    /// targets that survive an explicit model-agreement gate. This route never executes biology.
+    fn glioma_mechanism_ensemble_counterfactual(&self, arguments: &Value) -> Result<Value, String> {
+        let request: CounterfactualEnsembleRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_mechanism_ensemble_counterfactual requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma mechanism ensemble request: {error}"))?;
+        let models: Vec<CounterfactualModel> =
+            serde_json::from_value(arguments.get("models").cloned().ok_or_else(|| {
+                "glioma_mechanism_ensemble_counterfactual requires models".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma mechanism ensemble models: {error}"))?;
+        let interventions: Vec<CounterfactualIntervention> =
+            serde_json::from_value(arguments.get("interventions").cloned().ok_or_else(|| {
+                "glioma_mechanism_ensemble_counterfactual requires interventions".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma mechanism ensemble interventions: {error}"))?;
+        let output = simulate_glioma_counterfactual_ensemble(&request, &models, &interventions)
+            .map_err(|error| {
+                format!("glioma mechanism ensemble counterfactual refused: {error}")
+            })?;
+        serde_json::to_value(json!({
+            "ensemble": output,
+            "dispatch": "not_started",
+            "guarantees": [
+                "effects are model-prior weighted and each model simulation remains inspectable",
+                "target direction is unresolved below the declared model-agreement floor",
+                "model averaging is an assay-prioritization artifact and not a causal or clinical conclusion",
+                "the route never executes a perturbation or moves raw preclinical data"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma mechanism ensemble counterfactual: {error}"))
     }
 
     /// Detect instrument-control drift before a preclinical run is admitted. The calibration
@@ -44342,6 +44382,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_mechanism_discriminate",
                 "glioma_mechanism_graph_propagate",
                 "glioma_mechanism_counterfactual",
+                "glioma_mechanism_ensemble_counterfactual",
                 "glioma_instrument_calibration",
                 "glioma_instrument_preflight",
                 "glioma_experiment_design",
@@ -51577,6 +51618,19 @@ pub fn tool_definitions() -> Vec<Value> {
                 "interventions": {"type": "array", "items": {"type": "object"}, "description": "CounterfactualIntervention1@1 signed node deltas."}
             },
             "required": ["request", "nodes", "edges", "interventions"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_mechanism_ensemble_counterfactual",
+        "description": "Run the same signed node perturbations across a bounded ensemble of preclinical glioma mechanism graphs. Model-prior weighted effects, min/max disagreement envelopes, and direction-agreement gates expose robust assay targets while preserving each model simulation; this route never claims causality, executes biology, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "CounterfactualEnsembleRequest1@1 with convergence, model-agreement, effect, and top-k bounds."},
+                "models": {"type": "array", "items": {"type": "object"}, "description": "CounterfactualModel1@1 local mechanism graphs with positive prior mass."},
+                "interventions": {"type": "array", "items": {"type": "object"}, "description": "CounterfactualIntervention1@1 signed node deltas shared across models."}
+            },
+            "required": ["request", "models", "interventions"]
         }
     }));
     definitions.push(json!({

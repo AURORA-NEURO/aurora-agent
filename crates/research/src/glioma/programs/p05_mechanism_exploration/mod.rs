@@ -4,6 +4,7 @@ use crate::glioma::catalog::{glioma_program_catalog, GliomaProgramDescriptor, Gl
 
 pub mod counterfactual;
 pub mod discrimination;
+pub mod ensemble_counterfactual;
 pub mod graph_propagation;
 
 pub use counterfactual::{
@@ -16,6 +17,11 @@ pub use discrimination::{
     MechanismDiscriminationError, MechanismDiscriminationRanking, MechanismDiscriminationRequest,
     MechanismDiscriminatorAction, MechanismFeatureObservation, MechanismHypothesis,
     MechanismInformationGain, MechanismPrediction,
+};
+pub use ensemble_counterfactual::{
+    simulate_glioma_counterfactual_ensemble, CounterfactualEnsembleRequest, CounterfactualModel,
+    EnsembleCounterfactualError, EnsembleDirection, EnsembleDisposition, EnsembleModelResult,
+    EnsembleTargetSummary, MechanismCounterfactualEnsemble,
 };
 pub use graph_propagation::{
     propagate_glioma_mechanism_graph, MechanismGraphDisposition, MechanismGraphEdge,

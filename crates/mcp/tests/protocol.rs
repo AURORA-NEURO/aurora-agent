@@ -314,7 +314,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 57;
-const TOOL_DEFINITION_COUNT: usize = 560;
+const TOOL_DEFINITION_COUNT: usize = 561;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -1283,6 +1283,50 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
     );
     assert_eq!(
         mechanism_counterfactual["counterfactual"]["contrasts"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+
+    let mechanism_ensemble_counterfactual = call(
+        &mut server,
+        "glioma_mechanism_ensemble_counterfactual",
+        json!({
+            "request": {
+                "objective": "rank robust EGFR inhibition targets",
+                "model_system": "organoid",
+                "max_iterations": 100,
+                "convergence_tolerance_milli": 1,
+                "damping_milli": 600,
+                "min_edge_confidence_milli": 500,
+                "min_effect_milli": 10,
+                "min_model_agreement_milli": 750,
+                "top_k": 2
+            },
+            "models": [
+                {"model_id":"model-a","prior_milli":600,"nodes":[{"node_id":"egfr","label":"EGFR activation","modality":"genomics","prior_milli":100,"support_milli":800,"contradiction_milli":0},{"node_id":"invasion","label":"invasion phenotype","modality":"functional_perturbation","prior_milli":0,"support_milli":0,"contradiction_milli":0}],"edges":[{"edge_id":"model-a-edge","source_node_id":"egfr","target_node_id":"invasion","relation":"activates","confidence_milli":900,"evidence_order":["paper-a"]}]},
+                {"model_id":"model-b","prior_milli":400,"nodes":[{"node_id":"egfr","label":"EGFR activation","modality":"genomics","prior_milli":100,"support_milli":700,"contradiction_milli":0},{"node_id":"invasion","label":"invasion phenotype","modality":"functional_perturbation","prior_milli":0,"support_milli":0,"contradiction_milli":0}],"edges":[{"edge_id":"model-b-edge","source_node_id":"egfr","target_node_id":"invasion","relation":"activates","confidence_milli":900,"evidence_order":["paper-b"]}]}
+            ],
+            "interventions": [
+                {"intervention_id":"inhibit-egfr","node_id":"egfr","delta_milli":-600,"rationale":"test whether EGFR support propagates to invasion","evidence_order":["paper-egfr"]}
+            ]
+        }),
+    );
+    assert_eq!(
+        mechanism_ensemble_counterfactual["dispatch"],
+        json!("not_started")
+    );
+    assert_eq!(
+        mechanism_ensemble_counterfactual["ensemble"]["disposition"],
+        json!("qualified")
+    );
+    assert_eq!(
+        mechanism_ensemble_counterfactual["ensemble"]["model_order"],
+        json!(["model-a", "model-b"])
+    );
+    assert_eq!(
+        mechanism_ensemble_counterfactual["ensemble"]["targets"]
             .as_array()
             .unwrap()
             .len(),
