@@ -314,7 +314,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 57;
-const TOOL_DEFINITION_COUNT: usize = 568;
+const TOOL_DEFINITION_COUNT: usize = 569;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -690,6 +690,34 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
         causal["analysis"]["difference_in_differences_milli"],
         json!(19)
     );
+
+    let mediation = call(
+        &mut server,
+        "glioma_causal_mediation",
+        json!({
+            "request": {
+                "objective": "test invasion mediator decomposition",
+                "control_arm": "control",
+                "treatment_arm": "treated",
+                "model_system": "organoid",
+                "min_units_per_arm": 2,
+                "effect_threshold_milli": 20,
+                "min_signal_to_noise_milli": 100,
+                "max_leave_one_out_shift_milli": 200
+            },
+            "observations": [
+                {"observation_id":"cm-c0","unit_id":"cm-control-0","arm_id":"control","mediator_milli":100,"outcome_milli":120,"uncertainty_milli":5,"artifact":{"artifact_id":"cm-artifact-c0","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-mediation+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"observation_id":"cm-c1","unit_id":"cm-control-1","arm_id":"control","mediator_milli":110,"outcome_milli":130,"uncertainty_milli":5,"artifact":{"artifact_id":"cm-artifact-c1","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-mediation+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"observation_id":"cm-t0","unit_id":"cm-treated-0","arm_id":"treated","mediator_milli":200,"outcome_milli":250,"uncertainty_milli":5,"artifact":{"artifact_id":"cm-artifact-t0","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-mediation+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"observation_id":"cm-t1","unit_id":"cm-treated-1","arm_id":"treated","mediator_milli":210,"outcome_milli":260,"uncertainty_milli":5,"artifact":{"artifact_id":"cm-artifact-t1","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-mediation+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}}
+            ]
+        }),
+    );
+    assert_eq!(mediation["dispatch"], json!("not_started"));
+    assert_eq!(mediation["analysis"]["disposition"], json!("qualified"));
+    assert!(mediation["analysis"]["indirect_effect_milli"]
+        .as_i64()
+        .is_some_and(|effect| effect > 0));
 
     let stratified_causal = call(
         &mut server,

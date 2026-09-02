@@ -80,6 +80,8 @@ crates/research/src/glioma/
                                              P10 discrete-state transition matrices and treatment contrasts
   p10_interpretation_replication/causal_contrast.rs
                                              P10 exact pre/post difference-in-differences analysis
+  p10_interpretation_replication/mediation.rs
+                                             P10 mediator/direct/indirect effect decomposition with influence bounds
   p10_interpretation_replication/causal_adjustment.rs
                                              P10 stratified overlap-adjusted effect and leave-one-stratum influence
   p10_interpretation_replication/sensitivity.rs
@@ -304,3 +306,8 @@ pooled weighted contrasts, and exposes leave-one-stratum influence and missing c
 P10 also includes causal sensitivity bounds (`analyze_causal_sensitivity`) that sweep a declared
 normalized hidden-confounder budget, expose worst-case threshold/sign intervals and exact tipping
 strength, and report leave-one-unit-out instability before a mechanism claim can be released.
+P10 also includes causal mediation analysis (`analyze_glioma_mediation`) for preclinical
+interventions. It estimates mediator, total, direct, and indirect effects with integer covariance,
+propagates measurement uncertainty into signal-to-noise, and runs leave-one-unit-out influence
+bounds. Underpowered arms, zero mediator variance, null effects, and fragile decompositions remain
+explicit rather than being promoted into mechanistic or clinical conclusions.

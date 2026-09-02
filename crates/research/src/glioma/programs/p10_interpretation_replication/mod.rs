@@ -4,6 +4,7 @@ use crate::glioma::catalog::{glioma_program_catalog, GliomaProgramDescriptor, Gl
 
 pub mod causal_adjustment;
 pub mod causal_contrast;
+pub mod mediation;
 pub mod meta_analysis;
 pub mod sensitivity;
 pub mod state_transition;
@@ -17,6 +18,10 @@ pub use causal_adjustment::{
 pub use causal_contrast::{
     analyze_glioma_causal_contrast, CausalContrastAnalysis, CausalContrastDisposition,
     CausalContrastError, CausalContrastRequest, UnitContrast,
+};
+pub use mediation::{
+    analyze_glioma_mediation, MediationAnalysis, MediationDisposition, MediationError,
+    MediationObservation, MediationRequest,
 };
 
 pub use meta_analysis::{

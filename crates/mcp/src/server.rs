@@ -469,7 +469,7 @@ use bioprism_repair::{
 use bioprism_research::{
     allocate_glioma_assays, analyze_causal_sensitivity, analyze_federated_benchmark,
     analyze_glioma_causal_contrast, analyze_glioma_combination_synergy,
-    analyze_glioma_dose_response, analyze_glioma_latent_factors,
+    analyze_glioma_dose_response, analyze_glioma_latent_factors, analyze_glioma_mediation,
     analyze_glioma_spatial_communication, analyze_glioma_spatial_niches,
     analyze_glioma_spatial_state_propagation, analyze_glioma_state_transitions,
     analyze_glioma_trajectories, analyze_instrument_calibration, analyze_multimodal_concordance,
@@ -502,11 +502,12 @@ use bioprism_research::{
     LatentFactorVector, LigandReceptorPair, MechanismActionPlannerConfig, MechanismCandidate,
     MechanismDiscrimination, MechanismDiscriminationRequest, MechanismDiscriminatorAction,
     MechanismFeatureObservation, MechanismGraphEdge, MechanismGraphNode, MechanismGraphRequest,
-    MechanismHypothesis, MechanismRequest, MetaAnalysisRequest, ModalityVector,
-    MultimodalObservation, MultimodalRequest, ProtocolExecutionRequest, ProtocolSimulationRequest,
-    ReplicationRequest, ReplicationStudy, ResearchObjectRequest, RobustInterventionCandidate,
-    RobustInterventionRequest, RobustnessRequest, SensitivityObservation, SensitivityRequest,
-    SpatialCell, SpatialCommunicationCell, SpatialCommunicationRequest, SpatialNicheRequest,
+    MechanismHypothesis, MechanismRequest, MediationObservation, MediationRequest,
+    MetaAnalysisRequest, ModalityVector, MultimodalObservation, MultimodalRequest,
+    ProtocolExecutionRequest, ProtocolSimulationRequest, ReplicationRequest, ReplicationStudy,
+    ResearchObjectRequest, RobustInterventionCandidate, RobustInterventionRequest,
+    RobustnessRequest, SensitivityObservation, SensitivityRequest, SpatialCell,
+    SpatialCommunicationCell, SpatialCommunicationRequest, SpatialNicheRequest,
     SpatialPropagationRequest, StateTransitionObservation, StateTransitionRequest,
     StaticGliomaActionPlanner, StratifiedCausalRequest, StratifiedObservation,
     TrajectoryObservation, TrajectoryRequest, TypedKnowledge,
@@ -1956,6 +1957,7 @@ impl Server {
             "glioma_trajectory_analyze" => self.glioma_trajectory_analyze(&arguments),
             "glioma_state_transition_analyze" => self.glioma_state_transition_analyze(&arguments),
             "glioma_causal_contrast" => self.glioma_causal_contrast(&arguments),
+            "glioma_causal_mediation" => self.glioma_causal_mediation(&arguments),
             "glioma_stratified_causal_adjustment" => {
                 self.glioma_stratified_causal_adjustment(&arguments)
             }
@@ -3402,6 +3404,38 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma causal contrast: {error}"))
+    }
+
+    /// Decompose a preclinical treatment contrast into mediator, direct, and indirect effects.
+    /// This is an interpretation computation only; it never recommends an intervention.
+    fn glioma_causal_mediation(&self, arguments: &Value) -> Result<Value, String> {
+        let request: MediationRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_causal_mediation requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma causal mediation request: {error}"))?;
+        let observations: Vec<MediationObservation> = serde_json::from_value(
+            arguments
+                .get("observations")
+                .cloned()
+                .ok_or_else(|| "glioma_causal_mediation requires observations".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma causal mediation observations: {error}"))?;
+        let analysis = analyze_glioma_mediation(&request, &observations)
+            .map_err(|error| format!("glioma causal mediation refused: {error}"))?;
+        serde_json::to_value(json!({
+            "analysis": analysis,
+            "dispatch": "not_started",
+            "guarantees": [
+                "mediator, total, direct, and indirect effects use deterministic integer covariance",
+                "measurement uncertainty and leave-one-unit-out influence are explicit",
+                "underpowered, null, zero-variance, and fragile decompositions are not promoted",
+                "the route performs no biological or clinical decision effect"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma causal mediation: {error}"))
     }
 
     /// Estimate a stratified, overlap-checked preclinical glioma contrast. This is interpretation
@@ -44620,6 +44654,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_trajectory_analyze",
                 "glioma_state_transition_analyze",
                 "glioma_causal_contrast",
+                "glioma_causal_mediation",
                 "glioma_stratified_causal_adjustment",
                 "glioma_dose_response",
                 "glioma_adaptive_allocation",
@@ -51592,6 +51627,18 @@ pub fn tool_definitions() -> Vec<Value> {
             "properties": {
                 "request": {"type": "object", "description": "CausalContrastRequest1@1 with intervention boundary, arm/model bindings, unit floor, effect threshold, and alpha."},
                 "observations": {"type": "array", "items": {"type": "object"}, "description": "Local TrajectoryObservation1@1 values with pre and post timepoints."}
+            },
+            "required": ["request", "observations"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_causal_mediation",
+        "description": "Decompose a local preclinical glioma treatment contrast into mediator, total, direct, and indirect effects with deterministic integer covariance, measurement uncertainty, and leave-one-unit-out influence bounds. Underpowered, zero-variance, null, or fragile decompositions remain explicit; this is interpretation only and never clinical decision support.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "MediationRequest1@1 with arm/model bindings, unit floor, effect threshold, signal-to-noise floor, and influence bound."},
+                "observations": {"type": "array", "items": {"type": "object"}, "description": "Local MediationObservation1@1 records with one independent de-identified unit per mediator/outcome pair and artifact references."}
             },
             "required": ["request", "observations"]
         }

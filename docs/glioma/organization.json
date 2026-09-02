@@ -32,6 +32,7 @@
     "spatial_communication": "crates/research/src/glioma/programs/p03_multimodal_ingestion_qc/spatial_communication.rs",
     "spatial_state_propagation": "crates/research/src/glioma/programs/p03_multimodal_ingestion_qc/spatial_propagation.rs",
     "state_transition": "crates/research/src/glioma/programs/p10_interpretation_replication/state_transition.rs",
+    "causal_mediation": "crates/research/src/glioma/programs/p10_interpretation_replication/mediation.rs",
     "protocol_execution": "crates/research/src/glioma/programs/p07_protocol_simulation/execution.rs",
     "instrument_preflight": "crates/research/src/glioma/programs/p08_instrument_robotics/preflight.rs",
     "computation_execution": "crates/research/src/glioma/programs/p09_reproducible_computation/execution.rs",
@@ -57,7 +58,7 @@
     {"id": "P07", "slug": "protocol-simulation", "folder": "p07_protocol_simulation", "stage_kinds": ["protocol_simulation"], "surfaces": ["plan_glioma_workflow", "execute_glioma_workflow", "simulate_glioma_protocol", "execute_glioma_protocol", "execute_glioma_action_portfolio", "execute_glioma_autonomous_campaign", "protocol_request_from_experiment_design"]},
     {"id": "P08", "slug": "instrument-robotics", "folder": "p08_instrument_robotics", "stage_kinds": ["instrument_preflight"], "surfaces": ["analyze_instrument_calibration", "preflight_glioma_instrument"]},
     {"id": "P09", "slug": "reproducible-computation", "folder": "p09_reproducible_computation", "stage_kinds": ["computational_execution"], "surfaces": ["assess_glioma_robustness", "execute_glioma_computation"]},
-    {"id": "P10", "slug": "interpretation-replication", "folder": "p10_interpretation_replication", "stage_kinds": ["statistical_interpretation", "replication_robustness"], "surfaces": ["analyze_glioma_trajectories", "analyze_glioma_state_transitions", "analyze_glioma_causal_contrast", "analyze_stratified_causal_adjustment", "analyze_replication_meta_analysis", "analyze_causal_sensitivity"]},
+    {"id": "P10", "slug": "interpretation-replication", "folder": "p10_interpretation_replication", "stage_kinds": ["statistical_interpretation", "replication_robustness"], "surfaces": ["analyze_glioma_trajectories", "analyze_glioma_state_transitions", "analyze_glioma_causal_contrast", "analyze_glioma_mediation", "analyze_stratified_causal_adjustment", "analyze_replication_meta_analysis", "analyze_causal_sensitivity"]},
     {"id": "P11", "slug": "research-object-release", "folder": "p11_research_object_release", "stage_kinds": ["research_object_release"]},
     {"id": "P12", "slug": "federated-benchmarking", "folder": "p12_federated_benchmarking", "stage_kinds": ["federation_benchmarking"], "surfaces": ["analyze_federated_benchmark"]}
   ],
