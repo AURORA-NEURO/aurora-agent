@@ -75,20 +75,19 @@ def validate(root: Path) -> dict:
     if not catalog_path.is_file():
         fail(f"catalog source is missing: {catalog_path}")
     contract_root = root / "crates" / "research" / "src" / "glioma"
-    implemented_ids = sorted(
-        {
-            match.group(1)
-            for path in contract_root.rglob("*.rs")
-            for match in re.finditer(
-                r"pub\s+const\s+FEATURE_ID:\s*&str\s*=\s*\"(GAF-GLIOMA-P\d{2}-F\d{2})\"",
-                path.read_text(encoding="utf-8"),
-            )
-        }
-    )
-    if not implemented_ids:
-        fail("catalog.rs does not expose an implementation manifest")
-    if len(implemented_ids) != len(set(implemented_ids)):
+    implementation_matches = [
+        match.group(1)
+        for path in contract_root.rglob("*.rs")
+        for match in re.finditer(
+            r"pub\s+const\s+FEATURE_ID:\s*&str\s*=\s*\"(GAF-GLIOMA-P\d{2}-F\d{2})\"",
+            path.read_text(encoding="utf-8"),
+        )
+    ]
+    if len(implementation_matches) != len(set(implementation_matches)):
         fail("implementation ids are duplicated")
+    implemented_ids = sorted(set(implementation_matches))
+    if not implemented_ids:
+        fail("glioma source tree does not expose any stable implementation feature ids")
 
     folder_report = []
     for program_id, folder_name in PROGRAMS.items():
