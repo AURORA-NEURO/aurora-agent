@@ -215,10 +215,10 @@ bounded damped fixed-point diffusion. Low-confidence edges, disconnected nodes, 
 and non-convergence remain visible instead of becoming false mechanistic certainty.
 P05 now also includes robust intervention portfolio planning
 (`plan_glioma_robust_intervention_portfolio`) that evaluates each signed perturbation across a
-declared model ensemble, computes prior-weighted expected and lower-tail effects, and greedily
-selects non-redundant candidates under worst-case effect, model agreement, feasibility, risk, and
-budget gates. The output is a ranked assay portfolio with explicit exclusions and no biological
-dispatch seam.
+declared model ensemble, computes prior-weighted expected and lower-tail effects, and selects
+non-redundant candidates under worst-case effect, model agreement, feasibility, risk, and budget
+gates. The output is a ranked assay portfolio with explicit exclusions and no biological dispatch
+seam.
 P10 now includes an exact bounded causal contrast (`analyze_glioma_causal_contrast`) using
 pre/post unit changes, treatment-label permutations, and leave-one-unit bounds; null, non-significant,
 or underpowered effects remain explicit rather than being promoted into mechanism claims.
@@ -238,6 +238,11 @@ antagonism, and explicit unresolved cells for missing controls or replicates.
 P06 also includes sequential assay allocation (`allocate_glioma_assays`) using Beta posteriors,
 conservative Cantelli target-effect bounds, uncertainty exploration, replicate floors, risk
 ceilings, and a hard next-batch budget.
+The engine-level action selector (`select_glioma_actions`) now uses a bounded deterministic beam
+search over executable action portfolios. It preserves multiple partial plans, discounts repeated
+modality/model pairs, and can select a prerequisite-plus-downstream bundle that has greater total
+research value than a locally attractive isolated action; dependency, approval, instrument, and
+federation gates remain fail-closed.
 P06 also includes a mechanism-aware closed-loop campaign controller
 (`plan_glioma_closed_loop_campaign`) and round-by-round executor
 (`execute_glioma_closed_loop_campaign`). They reweight competing mechanisms from local

@@ -37,6 +37,11 @@ pub const OUTPUT_SCHEMA: &str = "GliomaExecutionReceipt1@1";
 pub const ACTION_SELECTION_OUTPUT_SCHEMA: &str = "GliomaActionSelection1@1";
 pub const MAX_ARTIFACTS: usize = 4096;
 pub const MAX_STAGES: usize = 32;
+/// Bound the combinatorial search in the autonomous action selector. A fixed beam keeps
+/// selection predictable for high-throughput campaigns while still considering portfolios that
+/// a one-step greedy policy would miss (for example, a cheap prerequisite plus a high-value
+/// downstream assay).
+const ACTION_SELECTION_BEAM_WIDTH: usize = 128;
 
 /// Data and assay families understood by the glioma workflow planner.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -1395,11 +1400,13 @@ fn action_block_reason(
 
 /// Select the next bounded batch of local glioma actions.
 ///
-/// The selector is an integer, greedy approximation to information-directed experimental design:
-/// a weighted value score is divided by cost, then discounted by the number of already-selected
-/// actions sharing the same modality/model pair. Dependencies must be complete before a child is
-/// eligible, so the returned order is executable as-is. Scores, blocked actions, and deferred
-/// actions are all returned; the caller never has to infer why an assay was omitted.
+/// The selector uses a deterministic bounded beam search over executable portfolios. Each
+/// expansion scores the candidate's weighted value per cost and applies a diminishing-return
+/// penalty to repeated modality/model pairs. Unlike a one-step greedy policy, the beam keeps
+/// alternative partial portfolios alive, allowing a prerequisite plus its downstream assay to
+/// beat an attractive but isolated action. Dependencies must be complete before a child is
+/// eligible, so every returned selection order is executable as-is. Scores, blocked actions, and
+/// deferred actions are all returned; the caller never has to infer why an assay was omitted.
 pub fn select_glioma_actions(
     candidates: &[GliomaActionCandidate],
     completed_actions: &BTreeSet<String>,
@@ -1462,56 +1469,117 @@ pub fn select_glioma_actions(
             )
         })
         .collect::<BTreeMap<_, _>>();
-    let mut selected = Vec::new();
-    let mut selected_set = completed_actions.clone();
-    let mut remaining_budget = config.budget_units;
+    #[derive(Clone)]
+    struct PortfolioState {
+        selected: Vec<String>,
+        selected_set: BTreeSet<String>,
+        remaining_budget: u32,
+        utility: u128,
+    }
+
+    fn state_is_better(left: &PortfolioState, right: &PortfolioState) -> bool {
+        left.utility > right.utility
+            || (left.utility == right.utility
+                && (left.selected.len() > right.selected.len()
+                    || (left.selected.len() == right.selected.len()
+                        && left.selected < right.selected)))
+    }
+
+    let initial_state = PortfolioState {
+        selected: Vec::new(),
+        selected_set: completed_actions.clone(),
+        remaining_budget: config.budget_units,
+        utility: 0,
+    };
+    let mut frontier = vec![initial_state.clone()];
+    let mut best_state = initial_state;
+
+    for _depth in 0..config.max_actions as usize {
+        let mut expanded = Vec::<PortfolioState>::new();
+        for state in &frontier {
+            for candidate in candidates {
+                if blocked.contains_key(&candidate.action_id)
+                    || state.selected_set.contains(&candidate.action_id)
+                    || candidate.cost_units > state.remaining_budget
+                    || candidate
+                        .depends_on
+                        .iter()
+                        .any(|dependency| !state.selected_set.contains(dependency))
+                {
+                    continue;
+                }
+                let siblings = state
+                    .selected
+                    .iter()
+                    .filter(|id| {
+                        candidate_map.get(*id).is_some_and(|other| {
+                            other.modality == candidate.modality
+                                && other.model_system == candidate.model_system
+                        })
+                    })
+                    .count() as u64;
+                let diversity_milli = 1000_u64 / (1 + siblings);
+                let score = base_scores[&candidate.action_id]
+                    .saturating_mul(diversity_milli)
+                    .saturating_mul(1_000_000)
+                    / (candidate.cost_units as u64 * 1000);
+                let mut selected = state.selected.clone();
+                selected.push(candidate.action_id.clone());
+                let mut selected_set = state.selected_set.clone();
+                selected_set.insert(candidate.action_id.clone());
+                expanded.push(PortfolioState {
+                    selected,
+                    selected_set,
+                    remaining_budget: state.remaining_budget - candidate.cost_units,
+                    utility: state.utility.saturating_add(u128::from(score)),
+                });
+            }
+        }
+        if expanded.is_empty() {
+            break;
+        }
+        expanded.sort_by(|left, right| {
+            right
+                .utility
+                .cmp(&left.utility)
+                .then_with(|| right.selected.len().cmp(&left.selected.len()))
+                .then_with(|| left.selected.cmp(&right.selected))
+        });
+        expanded.truncate(ACTION_SELECTION_BEAM_WIDTH);
+        if let Some(candidate) = expanded
+            .iter()
+            .find(|state| state_is_better(state, &best_state))
+        {
+            best_state = candidate.clone();
+        }
+        frontier = expanded;
+    }
+
+    let selected = best_state.selected;
+    let selected_set = best_state.selected_set;
+    let remaining_budget = best_state.remaining_budget;
     let mut decisions = BTreeMap::<String, GliomaActionDecision>::new();
     let mut diversity_counts = BTreeMap::<(GliomaModality, GliomaModelSystem), u32>::new();
-
-    while selected.len() < config.max_actions as usize {
-        let mut ranked = Vec::<(u64, String)>::new();
-        for candidate in candidates {
-            if blocked.contains_key(&candidate.action_id)
-                || selected_set.contains(&candidate.action_id)
-            {
-                continue;
-            }
-            if candidate.cost_units > remaining_budget
-                || candidate
-                    .depends_on
-                    .iter()
-                    .any(|dependency| !selected_set.contains(dependency))
-            {
-                continue;
-            }
-            let siblings = diversity_counts
-                .get(&(candidate.modality, candidate.model_system))
-                .copied()
-                .unwrap_or(0);
-            let diversity_milli = 1000u64 / (1 + siblings as u64);
-            let score = base_scores[&candidate.action_id]
-                .saturating_mul(diversity_milli)
-                .saturating_mul(1_000_000)
-                / (candidate.cost_units as u64 * 1000);
-            ranked.push((score, candidate.action_id.clone()));
-        }
-        ranked.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| left.1.cmp(&right.1)));
-        let Some((score, action_id)) = ranked.into_iter().next() else {
-            break;
-        };
-        let candidate = candidate_map[&action_id];
-        remaining_budget -= candidate.cost_units;
-        selected.push(action_id.clone());
-        selected_set.insert(action_id.clone());
+    for action_id in &selected {
+        let candidate = candidate_map[action_id];
+        let siblings = diversity_counts
+            .get(&(candidate.modality, candidate.model_system))
+            .copied()
+            .unwrap_or(0);
+        let diversity_milli = 1000_u64 / (1 + siblings as u64);
+        let score = base_scores[action_id]
+            .saturating_mul(diversity_milli)
+            .saturating_mul(1_000_000)
+            / (candidate.cost_units as u64 * 1000);
         *diversity_counts
             .entry((candidate.modality, candidate.model_system))
             .or_default() += 1;
         decisions.insert(
-            action_id.clone(),
+            action_id.to_string(),
             GliomaActionDecision {
-                action_id,
+                action_id: action_id.to_string(),
                 score_milli_per_cost: score,
-                base_score_milli: base_scores[&candidate.action_id],
+                base_score_milli: base_scores[action_id],
                 selected: true,
                 reason: None,
             },
@@ -1611,7 +1679,7 @@ pub fn glioma_research_engine_manifest() -> CapabilityManifest {
             "adaptive campaign executor".into(),
         ]
         .into(),
-            behavior: "compile an adaptive, checkpoint-oriented glioma campaign, continuously diff local evidence snapshots into prioritized review actions, compile typed claims and evidence-gap actions, choose the next dependency-safe batch, execute an admitted full preclinical program through caller-owned local stage executors, drive closed-loop assay rounds through a caller-owned executor that replans from returned observations, execute feasible resource-scheduled protocols through a caller-owned local worker with dependency checks, typed artifacts, bounded retries, and fail-closed partial results, detect instrument-control drift before assay admission, compile a serialized instrument/robotics preflight from calibration, interlocks, typed operation parameters, operator authorization, and risk/duration budgets, compare and batch-harmonize declared multimodal vectors before consensus, extract robust complete-case latent states with convergence and reconstruction gates, build same-lineage spatial niches and ligand-receptor communication enrichments against a lineage-marginal null, propagate spatial state over same-sample cell neighborhoods with lineage-aware coupling, convergence bounds, and hotspot ranking, compare and cluster multimodal vectors, discriminate competing mechanisms against local features and rank information-gain assays, propagate signed activating/inhibiting mechanism networks with convergence gates, simulate signed node perturbations against baseline fixed points to rank downstream assay targets while preserving low-confidence and non-convergent states, evaluate each candidate intervention across a declared model ensemble with prior-weighted lower-tail robustness and a risk/cost/feasibility-aware portfolio gate, score candidate assays with integer-only expected Gini information reduction and greedily compile a bounded local batch, update mechanism posteriors from each returned categorical outcome and replan adaptive assay campaigns through a caller-owned executor, plan closed-loop assay rounds from posterior information gain, expected effect, feasibility, cost, risk, and replicate ceilings, fit longitudinal trajectory, discrete-state transition, causal-contrast, stratified-overlap-adjusted, dose-response, combination-synergy, replication-meta-analysis, and hidden-confounding sensitivity effects, allocate the next bounded assay replicate batch from conservative Beta-posterior effect probabilities, compare aggregate federated benchmark outcomes with robust site consensus, and stress-test endpoint effects under deterministic omission batteries; every unresolved, contradictory, underpowered, heterogeneous, budget, locality, and approval state routes to an explicit hold or abstain branch".into(),
+        behavior: "compile an adaptive, checkpoint-oriented glioma campaign, continuously diff local evidence snapshots into prioritized review actions, compile typed claims and evidence-gap actions, select the next dependency-safe batch with a bounded beam-search portfolio optimizer over value, cost, diversity, and prerequisite closure, execute an admitted full preclinical program through caller-owned local stage executors, drive closed-loop assay rounds through a caller-owned executor that replans from returned observations, execute feasible resource-scheduled protocols through a caller-owned local worker with dependency checks, typed artifacts, bounded retries, and fail-closed partial results, detect instrument-control drift before assay admission, compile a serialized instrument/robotics preflight from calibration, interlocks, typed operation parameters, operator authorization, and risk/duration budgets, compare and batch-harmonize declared multimodal vectors before consensus, extract robust complete-case latent states with convergence and reconstruction gates, build same-lineage spatial niches and ligand-receptor communication enrichments against a lineage-marginal null, propagate spatial state over same-sample cell neighborhoods with lineage-aware coupling, convergence bounds, and hotspot ranking, compare and cluster multimodal vectors, discriminate competing mechanisms against local features and rank information-gain assays, propagate signed activating/inhibiting mechanism networks with convergence gates, simulate signed node perturbations against baseline fixed points to rank downstream assay targets while preserving low-confidence and non-convergent states, evaluate each candidate intervention across a declared model ensemble with prior-weighted lower-tail robustness and a risk/cost/feasibility-aware portfolio gate, score candidate assays with integer-only expected Gini information reduction and compile a bounded local batch, update mechanism posteriors from each returned categorical outcome and replan adaptive assay campaigns through a caller-owned executor, plan closed-loop assay rounds from posterior information gain, expected effect, feasibility, cost, risk, and replicate ceilings, fit longitudinal trajectory, discrete-state transition, causal-contrast, stratified-overlap-adjusted, dose-response, combination-synergy, replication-meta-analysis, and hidden-confounding sensitivity effects, allocate the next bounded assay replicate batch from conservative Beta-posterior effect probabilities, compare aggregate federated benchmark outcomes with robust site consensus, and stress-test endpoint effects under deterministic omission batteries; every unresolved, contradictory, underpowered, heterogeneous, budget, locality, and approval state routes to an explicit hold or abstain branch".into(),
         value: "turns a glioma research objective into a usable end-to-end evidence, multimodal, mechanism, experiment, computation, replication, and release workflow while keeping autonomous progress auditable and outside clinical decision support".into(),
         inputs: vec![TypedPort {
             name: "glioma_research_intent".into(),
@@ -2147,6 +2215,58 @@ mod tests {
             selection.decisions[0].reason.as_deref(),
             Some("approval-required")
         );
+        selection.validate().unwrap();
+    }
+
+    #[test]
+    fn portfolio_search_can_prefer_dependency_bundle_over_greedy_single_action() {
+        let mut prerequisite = action(
+            "cheap-prerequisite",
+            GliomaStageKind::ExperimentDesign,
+            GliomaModality::Genomics,
+            GliomaModelSystem::Organoid,
+            5,
+            700,
+        );
+        prerequisite.frontier_novelty_milli = 0;
+        prerequisite.workflow_leverage_milli = 0;
+        prerequisite.cross_stage_unlock_milli = 0;
+        prerequisite.reproducibility_safety_milli = 0;
+        prerequisite.federation_value_milli = 0;
+        prerequisite.feasibility_milli = 0;
+        let mut downstream = prerequisite.clone();
+        downstream.action_id = "cheap-downstream".into();
+        downstream.stage_kind = GliomaStageKind::MechanismExploration;
+        downstream.depends_on = vec!["cheap-prerequisite".into()];
+        let mut isolated = prerequisite.clone();
+        isolated.action_id = "isolated-expensive".into();
+        isolated.cost_units = 6;
+        isolated.information_gain_milli = 1_000;
+        isolated.modality = GliomaModality::Imaging;
+        let selection = select_glioma_actions(
+            &[isolated, downstream, prerequisite],
+            &BTreeSet::new(),
+            &GliomaSelectionConfig {
+                budget_units: 10,
+                max_actions: 2,
+                weights: GliomaSelectionWeights {
+                    information_gain: 100,
+                    frontier_novelty: 0,
+                    workflow_leverage: 0,
+                    cross_stage_unlock: 0,
+                    reproducibility_safety: 0,
+                    federation_value: 0,
+                    feasibility: 0,
+                },
+                ..GliomaSelectionConfig::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            selection.selected_order,
+            vec!["cheap-prerequisite", "cheap-downstream"]
+        );
+        assert_eq!(selection.remaining_budget_units, 0);
         selection.validate().unwrap();
     }
 }
