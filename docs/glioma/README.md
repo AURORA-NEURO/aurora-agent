@@ -22,6 +22,8 @@ crates/research/src/glioma/
                                              P02 scoped claim graph and support/contradiction synthesis
   programs/p04_decision_context/context_compiler.rs
                                              P04 evidence-gap to typed next-action compilation
+  programs/p04_decision_context/action_bridge.rs
+                                             P04 compiler-to-executable action portfolio bridge
   programs/p05_mechanism_exploration/discrimination.rs
                                              P05 residual-likelihood mechanism discrimination and next-assay information gain
   programs/p05_mechanism_exploration/graph_propagation.rs
@@ -129,7 +131,7 @@ portfolio plan and executable code; it does not promote a planned slot to implem
 | P01 Evidence surveillance | evidence curator | evidence surveillance | snapshot deltas, prioritized review/revalidation actions, and stale/unknown/contradictory coverage |
 | P02 Evidence-to-typed-knowledge | knowledge engineer | evidence compilation | scoped claims and competing explanations bound to source artifacts |
 | P03 Multimodal ingestion and QC | data steward | multimodal ingestion/QC | comparable cells, robust batch harmonization, feature-level concordance, consensus clusters, spatial niches, ligand-receptor communication, spatial-state diffusion, and explicit defects |
-| P04 Question-to-decision context | principal investigator | intent normalization, context compilation | bounded decision context and unresolved omissions |
+| P04 Question-to-decision context | principal investigator | intent normalization, context compilation | bounded decision context, selected executable action batches, and unresolved omissions |
 | P05 Mechanism exploration | mechanism scientist | molecular landscape, mechanism exploration | residual-fit competing mechanisms, posterior-weighted next-assay information gain, signed mechanism-network propagation, model-averaged counterfactuals, robust lower-tail intervention portfolios, and discriminating actions |
 | P06 Power-aware experiment design | experimentalist | experiment design | falsifiable allocation, power, blocking, dose-response, adaptive replicate allocation, mechanism-aware closed-loop campaign rounds, combination-synergy fitting, and null-result plan |
 | P07 Protocol simulation | lab operations lead | protocol simulation, adaptive workflow planning | critical-path resource scheduling, utilization, deterministic next batches, and repair/abstain routing before physical effects |
@@ -169,7 +171,9 @@ It is a product capability route, not a hypothesis or a to-do item. Stable ids u
 6. Promote a program only when its independent baseline, reproducibility, and preclinical safety
    gates are measured.
 
-The first tranche is implemented in P01, P02, P03, P05, P06, P08, P10, P11, and P12. P07 now also has an
+The first tranche is implemented in P01, P02, P03, P05, P06, P08, P10, P11, and P12. P04 now also
+bridges compiled evidence gaps into the dependency-aware action selector, so a researcher can hand
+the returned `selected_order` directly to the local portfolio executor. P07 now also has an
 adaptive campaign planner (`plan_glioma_workflow`) and a guarded full-program executor that
 chooses deterministic next batches, closes over dependencies, and routes unresolved evidence,
 QC defects, contradictory mechanisms, underpowered designs, budget exhaustion, and approval gaps

@@ -314,7 +314,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 57;
-const TOOL_DEFINITION_COUNT: usize = 570;
+const TOOL_DEFINITION_COUNT: usize = 571;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -1812,6 +1812,46 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
     assert_eq!(
         decision_context["context"]["actions"][0]["candidate"]["stage_kind"],
         json!("mechanism_exploration")
+    );
+
+    let decision_action_plan = call(
+        &mut server,
+        "glioma_decision_action_plan",
+        json!({
+            "request": {
+                "objective": "rank invasion mechanisms",
+                "completed_action_order": [],
+                "selection": {
+                    "budget_units": 10,
+                    "max_actions": 1,
+                    "approval_granted": true,
+                    "allow_instrument_execution": false,
+                    "allow_federation": false,
+                    "weights": {
+                        "information_gain": 25,
+                        "frontier_novelty": 20,
+                        "workflow_leverage": 15,
+                        "cross_stage_unlock": 15,
+                        "reproducibility_safety": 10,
+                        "federation_value": 10,
+                        "feasibility": 5
+                    }
+                }
+            },
+            "context": decision_context["context"].clone()
+        }),
+    );
+    assert_eq!(decision_action_plan["dispatch"], json!("not_started"));
+    assert_eq!(
+        decision_action_plan["plan"]["disposition"],
+        json!("qualified")
+    );
+    assert_eq!(
+        decision_action_plan["plan"]["selected_order"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
     );
 }
 

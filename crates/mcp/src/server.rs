@@ -480,7 +480,7 @@ use bioprism_research::{
     dry_run_glioma_research, execute_glioma_action_portfolio, execute_glioma_autonomous_campaign,
     execute_glioma_computation, execute_glioma_protocol, explore_mechanisms,
     generate_feature_catalog, glioma_program_catalog, harmonize_glioma_multimodal_batches,
-    harmonize_multimodal_inputs, plan_glioma_adaptive_information_campaign,
+    harmonize_multimodal_inputs, plan_decision_actions, plan_glioma_adaptive_information_campaign,
     plan_glioma_closed_loop_campaign, plan_glioma_information_design,
     plan_glioma_multi_fidelity_optimization, plan_glioma_robust_intervention_portfolio,
     plan_glioma_workflow, preflight_glioma_instrument, propagate_glioma_mechanism_graph,
@@ -492,13 +492,14 @@ use bioprism_research::{
     CampaignMechanism, CampaignObservation, CausalContrastRequest, ClosedLoopCampaignRequest,
     CombinationObservation, CombinationSynergyRequest, ComputationExecutionRequest,
     ConcordanceRequest, ConsensusRequest, CounterfactualEnsembleRequest,
-    CounterfactualIntervention, CounterfactualModel, CounterfactualRequest, DecisionContextRequest,
-    DesignAction, DesignMechanism, DoseResponseObservation, DoseResponseRequest,
-    DryRunGliomaActionExecutor, DryRunGliomaComputationExecutor, DryRunGliomaProtocolExecutor,
-    EvidenceRecord, EvidenceRequest, EvidenceSurveillanceRequest, ExperimentArm, ExperimentRequest,
-    FederatedBenchmarkRequest, FederatedBenchmarkSite, FidelityCandidate, FidelityObservation,
-    GliomaActionCandidate, GliomaAutonomousCampaignRequest, GliomaResearchIntent,
-    GliomaWorkflowRequest, HarmonizationRequest, HarmonizationVector, InformationDesignRequest,
+    CounterfactualIntervention, CounterfactualModel, CounterfactualRequest,
+    DecisionActionPlanRequest, DecisionContext, DecisionContextRequest, DesignAction,
+    DesignMechanism, DoseResponseObservation, DoseResponseRequest, DryRunGliomaActionExecutor,
+    DryRunGliomaComputationExecutor, DryRunGliomaProtocolExecutor, EvidenceRecord, EvidenceRequest,
+    EvidenceSurveillanceRequest, ExperimentArm, ExperimentRequest, FederatedBenchmarkRequest,
+    FederatedBenchmarkSite, FidelityCandidate, FidelityObservation, GliomaActionCandidate,
+    GliomaAutonomousCampaignRequest, GliomaResearchIntent, GliomaWorkflowRequest,
+    HarmonizationRequest, HarmonizationVector, InformationDesignRequest,
     InstrumentPreflightRequest, KnowledgeRequest, LatentFactorRequest, LatentFactorVector,
     LigandReceptorPair, MechanismActionPlannerConfig, MechanismCandidate, MechanismDiscrimination,
     MechanismDiscriminationRequest, MechanismDiscriminatorAction, MechanismFeatureObservation,
@@ -1980,6 +1981,7 @@ impl Server {
             "glioma_evidence_surveillance" => self.glioma_evidence_surveillance(&arguments),
             "glioma_knowledge_compile" => self.glioma_knowledge_compile(&arguments),
             "glioma_decision_context" => self.glioma_decision_context(&arguments),
+            "glioma_decision_action_plan" => self.glioma_decision_action_plan(&arguments),
             "glioma_multimodal_qc" => self.glioma_multimodal_qc(&arguments),
             "glioma_mechanism_explore" => self.glioma_mechanism_explore(&arguments),
             "glioma_mechanism_discriminate" => self.glioma_mechanism_discriminate(&arguments),
@@ -4051,6 +4053,39 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma decision context: {error}"))
+    }
+
+    /// Select the next executable portfolio from a compiled glioma decision context. This keeps
+    /// evidence compilation and action selection composable while preserving a planning-only MCP
+    /// boundary; the returned ids can be submitted to a caller-owned local executor.
+    fn glioma_decision_action_plan(&self, arguments: &Value) -> Result<Value, String> {
+        let request: DecisionActionPlanRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_decision_action_plan requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma decision-action request: {error}"))?;
+        let context: DecisionContext = serde_json::from_value(
+            arguments
+                .get("context")
+                .cloned()
+                .ok_or_else(|| "glioma_decision_action_plan requires context".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma decision context: {error}"))?;
+        let plan = plan_decision_actions(&request, &context)
+            .map_err(|error| format!("glioma decision-action planning refused: {error}"))?;
+        serde_json::to_value(json!({
+            "plan": plan,
+            "dispatch": "not_started",
+            "guarantees": [
+                "compiled evidence gaps are selected with the dependency-aware glioma portfolio policy",
+                "completed actions are never selected again and budget or policy holds remain explicit",
+                "the selected_order can be handed to glioma_action_portfolio_execute or a caller-owned worker",
+                "this route performs no assay, instrument, federation, or clinical action"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma decision-action plan: {error}"))
     }
 
     fn glioma_multimodal_qc(&self, arguments: &Value) -> Result<Value, String> {
@@ -44716,6 +44751,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_evidence_surveillance",
                 "glioma_knowledge_compile",
                 "glioma_decision_context",
+                "glioma_decision_action_plan",
                 "glioma_multimodal_qc",
                 "glioma_mechanism_explore",
                 "glioma_mechanism_discriminate",
@@ -51943,6 +51979,18 @@ pub fn tool_definitions() -> Vec<Value> {
                 "knowledge": {"type": "object", "description": "TypedKnowledge1@1 from glioma_knowledge_compile."}
             },
             "required": ["request", "knowledge"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_decision_action_plan",
+        "description": "Select the next executable preclinical glioma action portfolio from a compiled decision context. Reuses dependency-aware selection, prevents re-running completed actions, preserves evidence omissions and negative findings, and exposes budget or policy holds; the route plans only and never performs an assay, instrument, federation, or clinical action.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "DecisionActionPlanRequest1@1 with matching objective, completed action ids, and GliomaSelectionConfig1@1."},
+                "context": {"type": "object", "description": "DecisionContext1@1 from glioma_decision_context."}
+            },
+            "required": ["request", "context"]
         }
     }));
     definitions.push(json!({

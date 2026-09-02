@@ -1,7 +1,12 @@
 //! Question-to-decision context program ownership.
 
+pub mod action_bridge;
 pub mod context_compiler;
 
+pub use action_bridge::{
+    plan_decision_actions, DecisionActionPlan, DecisionActionPlanDisposition,
+    DecisionActionPlanError, DecisionActionPlanRequest,
+};
 pub use context_compiler::{
     compile_decision_context, DecisionAction, DecisionActionKind, DecisionContext,
     DecisionContextDisposition, DecisionContextError, DecisionContextRequest,
