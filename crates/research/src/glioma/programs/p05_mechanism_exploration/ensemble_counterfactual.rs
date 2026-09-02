@@ -256,6 +256,7 @@ fn validate_request(
         || request.min_edge_confidence_milli > 1_000
         || request.min_model_agreement_milli > 1_000
         || request.top_k == 0
+        || request.top_k > super::counterfactual::MAX_NODES
         || models.is_empty()
         || models.len() > MAX_MODELS
         || interventions.is_empty()
