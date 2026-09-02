@@ -51660,7 +51660,7 @@ pub fn tool_definitions() -> Vec<Value> {
     }));
     definitions.push(json!({
         "name": "glioma_research_select_actions",
-        "description": "Select the next bounded batch of typed preclinical glioma assays, analyses, simulations, or instrument actions. Uses deterministic information-gain, novelty, workflow-unlock, reproducibility/safety, federation-value, feasibility, cost, dependency, and modality/model-diversity scoring. Returns selected, deferred, and blocked actions with reasons; performs no execution or data movement.",
+        "description": "Select the next bounded portfolio of typed preclinical glioma assays, analyses, simulations, or instrument actions. Uses a deterministic beam search over information-gain, novelty, workflow-unlock, reproducibility/safety, federation-value, feasibility, cost, dependency closure, and modality/model diversity, so prerequisite-plus-downstream bundles can beat isolated greedy picks. Returns selected, deferred, and blocked actions with reasons; performs no execution or data movement.",
         "inputSchema": {
             "type": "object",
             "properties": {
