@@ -102,7 +102,17 @@ pub struct AdaptiveInformationCampaignExecution {
     pub rounds: Vec<AdaptiveInformationCampaignRound>,
     pub observations: Vec<AdaptiveInformationObservation>,
     pub final_plan: AdaptiveInformationCampaignPlan,
+    pub termination_reason: AdaptiveInformationCampaignTermination,
     pub execution_digest: ContentHash,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AdaptiveInformationCampaignTermination {
+    PosteriorConverged,
+    BudgetBlocked,
+    NoInformativeActions,
+    MaxRounds,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -181,6 +191,7 @@ fn digest_execution(execution: &AdaptiveInformationCampaignExecution) -> serde_j
         "rounds": execution.rounds,
         "observations": execution.observations,
         "final_plan": execution.final_plan,
+        "termination_reason": execution.termination_reason,
     })
 }
 
@@ -405,12 +416,17 @@ impl AdaptiveInformationCampaignPlan {
             || !canonical(&self.exhausted_order)
             || !canonical(&self.deferred_order)
             || !canonical(&self.observed_order)
-            || !canonical(&self.observed_outcome_order)
             || self
                 .observed_artifact_digest_order
                 .iter()
                 .any(|digest| digest.as_str().len() != 64)
             || self.observed_outcome_order.len() != self.observed_artifact_digest_order.len()
+            || self
+                .observed_outcome_order
+                .iter()
+                .collect::<BTreeSet<_>>()
+                .len()
+                != self.observed_outcome_order.len()
             || self.budget_remaining_units > self.budget_units
             || self.posterior_order.len() != self.mechanism_order.len()
             || self.posterior_order.iter().any(|entry| {
@@ -856,12 +872,23 @@ pub fn execute_glioma_adaptive_information_campaign<E: GliomaInformationDesignEx
     }
     let final_plan =
         plan_glioma_adaptive_information_campaign(request, mechanisms, actions, &observations)?;
+    let termination_reason =
+        if final_plan.disposition == AdaptiveInformationCampaignDisposition::Converged {
+            AdaptiveInformationCampaignTermination::PosteriorConverged
+        } else if final_plan.disposition == AdaptiveInformationCampaignDisposition::BudgetBlocked {
+            AdaptiveInformationCampaignTermination::BudgetBlocked
+        } else if final_plan.next_action_order.is_empty() {
+            AdaptiveInformationCampaignTermination::NoInformativeActions
+        } else {
+            AdaptiveInformationCampaignTermination::MaxRounds
+        };
     let mut output = AdaptiveInformationCampaignExecution {
         feature_id: FEATURE_ID.into(),
         output_schema: EXECUTION_OUTPUT_SCHEMA.into(),
         rounds,
         observations,
         final_plan,
+        termination_reason,
         execution_digest: ContentHash::of_bytes(b"unsealed-glioma-adaptive-information-execution"),
     };
     output.execution_digest = ContentHash::of_value(&digest_execution(&output))

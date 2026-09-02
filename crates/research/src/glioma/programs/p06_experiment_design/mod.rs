@@ -19,8 +19,8 @@ pub use adaptive_information_campaign::{
     AdaptiveInformationCampaignDisposition, AdaptiveInformationCampaignError,
     AdaptiveInformationCampaignExecution, AdaptiveInformationCampaignPlan,
     AdaptiveInformationCampaignRequest, AdaptiveInformationCampaignRound,
-    AdaptiveInformationExecutionFailure, AdaptiveInformationObservation,
-    AdaptiveMechanismPosterior, GliomaInformationDesignExecutor,
+    AdaptiveInformationCampaignTermination, AdaptiveInformationExecutionFailure,
+    AdaptiveInformationObservation, AdaptiveMechanismPosterior, GliomaInformationDesignExecutor,
 };
 pub use campaign::{
     execute_glioma_closed_loop_campaign, plan_glioma_closed_loop_campaign, CampaignAction,
