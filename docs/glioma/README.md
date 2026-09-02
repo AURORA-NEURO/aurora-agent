@@ -99,6 +99,8 @@ crates/research/src/glioma/
                                              P03 spatial neighbourhood graph, same-lineage niche components, and cross-lineage enrichment
   p03_multimodal_ingestion_qc/spatial_communication.rs
                                              P03 spatial ligand-receptor communication enrichment against lineage-marginal null
+  p03_multimodal_ingestion_qc/spatial_propagation.rs
+                                             P03 lineage-aware integer spatial-state diffusion and hotspot prioritisation
 ```
 
 `docs/glioma/organization.json` is the machine-readable version of this map. The runtime
@@ -117,7 +119,7 @@ portfolio plan and executable code; it does not promote a planned slot to implem
 | --- | --- | --- | --- |
 | P01 Evidence surveillance | evidence curator | evidence surveillance | snapshot deltas, prioritized review/revalidation actions, and stale/unknown/contradictory coverage |
 | P02 Evidence-to-typed-knowledge | knowledge engineer | evidence compilation | scoped claims and competing explanations bound to source artifacts |
-| P03 Multimodal ingestion and QC | data steward | multimodal ingestion/QC | comparable cells, robust batch harmonization, feature-level concordance, consensus clusters, spatial niches, ligand-receptor communication, and explicit defects |
+| P03 Multimodal ingestion and QC | data steward | multimodal ingestion/QC | comparable cells, robust batch harmonization, feature-level concordance, consensus clusters, spatial niches, ligand-receptor communication, spatial-state diffusion, and explicit defects |
 | P04 Question-to-decision context | principal investigator | intent normalization, context compilation | bounded decision context and unresolved omissions |
 | P05 Mechanism exploration | mechanism scientist | molecular landscape, mechanism exploration | residual-fit competing mechanisms, posterior-weighted next-assay information gain, signed mechanism-network propagation, model-averaged counterfactuals, robust lower-tail intervention portfolios, and discriminating actions |
 | P06 Power-aware experiment design | experimentalist | experiment design | falsifiable allocation, power, blocking, dose-response, adaptive replicate allocation, mechanism-aware closed-loop campaign rounds, combination-synergy fitting, and null-result plan |
@@ -196,6 +198,10 @@ aggregates declared ligand and receptor scores, and compares observed signal aga
 lineage-marginal random-mixing null. Missing feature coverage, sparse support, zero expected
 signal, and non-enrichment remain explicit; this is a local association screen rather than a
 causal signalling or clinical inference.
+P03 now also includes spatial-state propagation (`analyze_glioma_spatial_state_propagation`) that
+builds same-sample neighborhood edges and runs a bounded integer diffusion with self-retention,
+lineage-aware coupling, convergence checks, and hotspot ranking. It never diffuses across samples,
+imputes isolated cells, or presents a spatial simulation as biological proof.
 P02 now includes typed-knowledge compilation (`compile_typed_knowledge`) that coalesces scoped
 claims, ranks support against contradiction, preserves negative/unknown evidence, and exposes
 missing modality/model coverage for the next workflow action.

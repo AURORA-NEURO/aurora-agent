@@ -8,6 +8,7 @@ pub mod harmonization;
 pub mod latent_factors;
 pub mod spatial_communication;
 pub mod spatial_niche;
+pub mod spatial_propagation;
 
 pub use concordance::{
     analyze_multimodal_concordance, ConcordanceDisposition, ConcordanceError, ConcordanceRequest,
@@ -36,6 +37,11 @@ pub use spatial_communication::{
 pub use spatial_niche::{
     analyze_glioma_spatial_niches, SpatialCell, SpatialNiche, SpatialNicheAnalysis,
     SpatialNicheDisposition, SpatialNicheError, SpatialNicheInteraction, SpatialNicheRequest,
+};
+pub use spatial_propagation::{
+    analyze_glioma_spatial_state_propagation, SpatialPropagationAnalysis,
+    SpatialPropagationDisposition, SpatialPropagationEdge, SpatialPropagationError,
+    SpatialPropagationRequest, SpatialPropagationTrajectory,
 };
 
 pub const PROGRAM_ID: GliomaProgramId = GliomaProgramId::MultimodalIngestionQc;

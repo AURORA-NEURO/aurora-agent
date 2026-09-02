@@ -44,7 +44,8 @@ pub use programs::p02_evidence_knowledge::{
 };
 pub use programs::p03_multimodal_ingestion_qc::{
     analyze_glioma_latent_factors, analyze_glioma_spatial_communication,
-    analyze_glioma_spatial_niches, analyze_multimodal_concordance, analyze_multimodal_consensus,
+    analyze_glioma_spatial_niches, analyze_glioma_spatial_state_propagation,
+    analyze_multimodal_concordance, analyze_multimodal_consensus,
     harmonize_glioma_multimodal_batches, BatchHarmonizationDiagnostic, ConcordanceDisposition,
     ConcordanceError, ConcordanceRequest, ConsensusAssignment, ConsensusCluster,
     ConsensusDisposition, ConsensusError, ConsensusRequest, FeatureValue, HarmonizationDisposition,
@@ -56,7 +57,9 @@ pub use programs::p03_multimodal_ingestion_qc::{
     SpatialCommunicationAnalysis, SpatialCommunicationCell, SpatialCommunicationDisposition,
     SpatialCommunicationError, SpatialCommunicationPair, SpatialCommunicationPairDisposition,
     SpatialCommunicationRequest, SpatialNiche, SpatialNicheAnalysis, SpatialNicheDisposition,
-    SpatialNicheError, SpatialNicheInteraction, SpatialNicheRequest,
+    SpatialNicheError, SpatialNicheInteraction, SpatialNicheRequest, SpatialPropagationAnalysis,
+    SpatialPropagationDisposition, SpatialPropagationEdge, SpatialPropagationError,
+    SpatialPropagationRequest, SpatialPropagationTrajectory,
 };
 pub use programs::p04_decision_context::{
     compile_decision_context, DecisionAction, DecisionActionKind, DecisionContext,

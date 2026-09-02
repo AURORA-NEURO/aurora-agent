@@ -314,7 +314,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 57;
-const TOOL_DEFINITION_COUNT: usize = 564;
+const TOOL_DEFINITION_COUNT: usize = 565;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -1033,6 +1033,43 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
         .as_array()
         .unwrap()
         .is_empty());
+
+    let spatial_state_propagation = call(
+        &mut server,
+        "glioma_spatial_state_propagation",
+        json!({
+            "request": {
+                "study_id": "mcp-propagation-study",
+                "model_system": "organoid",
+                "radius_milli": 1500,
+                "max_steps": 20,
+                "self_retention_milli": 700,
+                "neighbor_weight_milli": 300,
+                "cross_lineage_weight_milli": 500,
+                "convergence_tolerance_milli": 1,
+                "hotspot_threshold_milli": 50
+            },
+            "cells": [
+                {"cell_id":"sp-a","sample_id":"sp-s1","lineage":"tumour","x_milli":0,"y_milli":0,"state_milli":900,"artifact":{"artifact_id":"sp-artifact-1","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-spatial+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"cell_id":"sp-b","sample_id":"sp-s1","lineage":"tumour","x_milli":1000,"y_milli":0,"state_milli":0,"artifact":{"artifact_id":"sp-artifact-2","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-spatial+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}}
+            ]
+        }),
+    );
+    assert_eq!(spatial_state_propagation["dispatch"], json!("not_started"));
+    assert_eq!(
+        spatial_state_propagation["analysis"]["disposition"],
+        json!("qualified")
+    );
+    assert!(spatial_state_propagation["analysis"]["converged"]
+        .as_bool()
+        .unwrap());
+    assert_eq!(
+        spatial_state_propagation["analysis"]["edge_order"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
 
     let sensitivity = call(
         &mut server,

@@ -471,24 +471,25 @@ use bioprism_research::{
     analyze_glioma_causal_contrast, analyze_glioma_combination_synergy,
     analyze_glioma_dose_response, analyze_glioma_latent_factors,
     analyze_glioma_spatial_communication, analyze_glioma_spatial_niches,
-    analyze_glioma_state_transitions, analyze_glioma_trajectories, analyze_instrument_calibration,
-    analyze_multimodal_concordance, analyze_multimodal_consensus, analyze_preclinical_outcomes,
-    analyze_replication_meta_analysis, analyze_stratified_causal_adjustment,
-    assess_glioma_robustness, assess_replication, build_research_object_manifest,
-    compile_decision_context, compile_typed_knowledge, design_preclinical_experiment,
-    discriminate_mechanisms, dry_run_glioma_research, execute_glioma_computation,
-    execute_glioma_protocol, explore_mechanisms, generate_feature_catalog, glioma_program_catalog,
-    harmonize_glioma_multimodal_batches, harmonize_multimodal_inputs,
-    plan_glioma_adaptive_information_campaign, plan_glioma_closed_loop_campaign,
-    plan_glioma_information_design, plan_glioma_robust_intervention_portfolio,
-    plan_glioma_workflow, preflight_glioma_instrument, propagate_glioma_mechanism_graph,
-    qualify_evidence, select_glioma_actions, simulate_glioma_counterfactual,
-    simulate_glioma_counterfactual_ensemble, simulate_glioma_protocol, surveil_glioma_evidence,
-    validate_feature_catalog, AdaptiveAllocationRequest, AdaptiveArmObservation,
-    AdaptiveInformationCampaignRequest, AdaptiveInformationObservation, AnalysisDataset,
-    AnalysisRequest, CalibrationRequest, CalibrationRun, CampaignAction, CampaignMechanism,
-    CampaignObservation, CausalContrastRequest, ClosedLoopCampaignRequest, CombinationObservation,
-    CombinationSynergyRequest, ComputationExecutionRequest, ConcordanceRequest, ConsensusRequest,
+    analyze_glioma_spatial_state_propagation, analyze_glioma_state_transitions,
+    analyze_glioma_trajectories, analyze_instrument_calibration, analyze_multimodal_concordance,
+    analyze_multimodal_consensus, analyze_preclinical_outcomes, analyze_replication_meta_analysis,
+    analyze_stratified_causal_adjustment, assess_glioma_robustness, assess_replication,
+    build_research_object_manifest, compile_decision_context, compile_typed_knowledge,
+    design_preclinical_experiment, discriminate_mechanisms, dry_run_glioma_research,
+    execute_glioma_computation, execute_glioma_protocol, explore_mechanisms,
+    generate_feature_catalog, glioma_program_catalog, harmonize_glioma_multimodal_batches,
+    harmonize_multimodal_inputs, plan_glioma_adaptive_information_campaign,
+    plan_glioma_closed_loop_campaign, plan_glioma_information_design,
+    plan_glioma_robust_intervention_portfolio, plan_glioma_workflow, preflight_glioma_instrument,
+    propagate_glioma_mechanism_graph, qualify_evidence, select_glioma_actions,
+    simulate_glioma_counterfactual, simulate_glioma_counterfactual_ensemble,
+    simulate_glioma_protocol, surveil_glioma_evidence, validate_feature_catalog,
+    AdaptiveAllocationRequest, AdaptiveArmObservation, AdaptiveInformationCampaignRequest,
+    AdaptiveInformationObservation, AnalysisDataset, AnalysisRequest, CalibrationRequest,
+    CalibrationRun, CampaignAction, CampaignMechanism, CampaignObservation, CausalContrastRequest,
+    ClosedLoopCampaignRequest, CombinationObservation, CombinationSynergyRequest,
+    ComputationExecutionRequest, ConcordanceRequest, ConsensusRequest,
     CounterfactualEnsembleRequest, CounterfactualIntervention, CounterfactualModel,
     CounterfactualRequest, DecisionContextRequest, DesignAction, DesignMechanism,
     DoseResponseObservation, DoseResponseRequest, DryRunGliomaComputationExecutor,
@@ -504,8 +505,9 @@ use bioprism_research::{
     ReplicationStudy, ResearchObjectRequest, RobustInterventionCandidate,
     RobustInterventionRequest, RobustnessRequest, SensitivityObservation, SensitivityRequest,
     SpatialCell, SpatialCommunicationCell, SpatialCommunicationRequest, SpatialNicheRequest,
-    StateTransitionObservation, StateTransitionRequest, StratifiedCausalRequest,
-    StratifiedObservation, TrajectoryObservation, TrajectoryRequest, TypedKnowledge,
+    SpatialPropagationRequest, StateTransitionObservation, StateTransitionRequest,
+    StratifiedCausalRequest, StratifiedObservation, TrajectoryObservation, TrajectoryRequest,
+    TypedKnowledge,
 };
 use bioprism_routing::{
     lab::{run as run_routing_lab, LabSettings, Task},
@@ -1961,6 +1963,7 @@ impl Server {
             "glioma_multimodal_latent_factors" => self.glioma_multimodal_latent_factors(&arguments),
             "glioma_spatial_niches" => self.glioma_spatial_niches(&arguments),
             "glioma_spatial_communication" => self.glioma_spatial_communication(&arguments),
+            "glioma_spatial_state_propagation" => self.glioma_spatial_state_propagation(&arguments),
             "glioma_causal_sensitivity" => self.glioma_causal_sensitivity(&arguments),
             "glioma_research_select_actions" => self.glioma_research_select_actions(&arguments),
             "glioma_program_catalog" => self.glioma_program_catalog(&arguments),
@@ -3714,6 +3717,39 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma spatial-communication analysis: {error}"))
+    }
+
+    /// Propagate a declared state signal over local same-sample spatial neighborhoods. The
+    /// integer diffusion is a bounded simulation for sampling and mechanism prioritisation; it
+    /// never treats geometry as biological proof or dispatches an assay.
+    fn glioma_spatial_state_propagation(&self, arguments: &Value) -> Result<Value, String> {
+        let request: SpatialPropagationRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_spatial_state_propagation requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma spatial-propagation request: {error}"))?;
+        let cells: Vec<SpatialCell> = serde_json::from_value(
+            arguments
+                .get("cells")
+                .cloned()
+                .ok_or_else(|| "glioma_spatial_state_propagation requires cells".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma spatial-propagation cells: {error}"))?;
+        let output = analyze_glioma_spatial_state_propagation(&request, &cells)
+            .map_err(|error| format!("glioma spatial-state propagation refused: {error}"))?;
+        serde_json::to_value(json!({
+            "analysis": output,
+            "dispatch": "not_started",
+            "guarantees": [
+                "same-sample neighborhood edges and integer diffusion are deterministic and replayable",
+                "self-retention, neighbor coupling, cross-lineage attenuation, radius, and step bounds are explicit",
+                "isolated cells, non-convergence, and no-neighborhood null results remain visible",
+                "the route is a local preclinical spatial simulation and never executes biology or makes a clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma spatial-state propagation: {error}"))
     }
 
     /// Quantify the declared hidden-confounding budget at which a local preclinical effect tips.
@@ -44500,6 +44536,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_multimodal_latent_factors",
                 "glioma_spatial_niches",
                 "glioma_spatial_communication",
+                "glioma_spatial_state_propagation",
                 "glioma_causal_sensitivity",
                 "glioma_research_select_actions",
                 "glioma_program_catalog",
@@ -51595,6 +51632,18 @@ pub fn tool_definitions() -> Vec<Value> {
                 "pairs": {"type": "array", "items": {"type": "object"}, "description": "Declared LigandReceptorPair1@1 entries binding ligand and receptor feature identifiers."}
             },
             "required": ["request", "cells", "pairs"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_spatial_state_propagation",
+        "description": "Run a bounded integer diffusion simulation over same-sample preclinical glioma spatial cells. The model preserves lineage-aware coupling, self-retention, neighborhood radius, convergence, isolated cells, and hotspot ranking so researchers can prioritize spatial follow-up without treating geometry as biological proof; it never moves raw data, dispatches biology, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "SpatialPropagationRequest1@1 with study/model binding, radius, step, retention, lineage-coupling, convergence, and hotspot bounds."},
+                "cells": {"type": "array", "items": {"type": "object"}, "description": "Local SpatialCell1@1 records with de-identified coordinates, lineage/state values, and artifact references."}
+            },
+            "required": ["request", "cells"]
         }
     }));
     definitions.push(json!({

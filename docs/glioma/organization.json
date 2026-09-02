@@ -30,6 +30,7 @@
     "decision_context": "crates/research/src/glioma/programs/p04_decision_context/context_compiler.rs",
     "closed_loop_campaign": "crates/research/src/glioma/programs/p06_experiment_design/campaign.rs",
     "spatial_communication": "crates/research/src/glioma/programs/p03_multimodal_ingestion_qc/spatial_communication.rs",
+    "spatial_state_propagation": "crates/research/src/glioma/programs/p03_multimodal_ingestion_qc/spatial_propagation.rs",
     "state_transition": "crates/research/src/glioma/programs/p10_interpretation_replication/state_transition.rs",
     "protocol_execution": "crates/research/src/glioma/programs/p07_protocol_simulation/execution.rs",
     "instrument_preflight": "crates/research/src/glioma/programs/p08_instrument_robotics/preflight.rs",
@@ -46,7 +47,7 @@
   "programs": [
     {"id": "P01", "slug": "evidence-surveillance", "folder": "p01_evidence_surveillance", "stage_kinds": ["evidence_surveillance"], "surfaces": ["surveil_glioma_evidence"]},
     {"id": "P02", "slug": "evidence-knowledge", "folder": "p02_evidence_knowledge", "stage_kinds": ["evidence_compilation"], "surfaces": ["compile_typed_knowledge"]},
-    {"id": "P03", "slug": "multimodal-ingestion-qc", "folder": "p03_multimodal_ingestion_qc", "stage_kinds": ["multimodal_ingestion_qc"], "surfaces": ["harmonize_glioma_multimodal_batches", "analyze_multimodal_concordance", "analyze_multimodal_consensus", "analyze_glioma_latent_factors", "analyze_glioma_spatial_niches", "analyze_glioma_spatial_communication"]},
+    {"id": "P03", "slug": "multimodal-ingestion-qc", "folder": "p03_multimodal_ingestion_qc", "stage_kinds": ["multimodal_ingestion_qc"], "surfaces": ["harmonize_glioma_multimodal_batches", "analyze_multimodal_concordance", "analyze_multimodal_consensus", "analyze_glioma_latent_factors", "analyze_glioma_spatial_niches", "analyze_glioma_spatial_communication", "analyze_glioma_spatial_state_propagation"]},
     {"id": "P04", "slug": "decision-context", "folder": "p04_decision_context", "stage_kinds": ["intent_normalization", "evidence_compilation"], "surfaces": ["compile_decision_context"]},
     {"id": "P05", "slug": "mechanism-exploration", "folder": "p05_mechanism_exploration", "stage_kinds": ["molecular_landscape", "mechanism_exploration"], "surfaces": ["discriminate_mechanisms", "propagate_glioma_mechanism_graph", "simulate_glioma_counterfactual", "simulate_glioma_counterfactual_ensemble", "plan_glioma_robust_intervention_portfolio"]},
     {"id": "P06", "slug": "experiment-design", "folder": "p06_experiment_design", "stage_kinds": ["experiment_design"], "surfaces": ["allocate_glioma_assays", "plan_glioma_closed_loop_campaign", "execute_glioma_closed_loop_campaign", "analyze_glioma_dose_response", "analyze_glioma_combination_synergy", "plan_glioma_information_design", "plan_glioma_adaptive_information_campaign"]},
