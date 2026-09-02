@@ -95,6 +95,7 @@ crates/research/src/glioma/
     p06_experiment_design/campaign.rs       P06 mechanism-aware closed-loop assay campaign controller and executor seam
     p06_experiment_design/information_design.rs P06 integer Bayesian assay selection by expected mechanism-information reduction
     p06_experiment_design/adaptive_information_campaign.rs P06 closed-loop posterior updating and re-planning through a caller-owned assay executor
+    p06_experiment_design/multi_fidelity.rs P06 cost-aware multi-fidelity surrogate optimization across screening, mechanistic, and validation models
     p03_multimodal_ingestion_qc/concordance.rs
                                              P03 feature-level modality concordance analysis
   p03_multimodal_ingestion_qc/consensus.rs
@@ -311,3 +312,9 @@ interventions. It estimates mediator, total, direct, and indirect effects with i
 propagates measurement uncertainty into signal-to-noise, and runs leave-one-unit-out influence
 bounds. Underpowered arms, zero mediator variance, null effects, and fragile decompositions remain
 explicit rather than being promoted into mechanistic or clinical conclusions.
+
+P06 also includes multi-fidelity optimization (`plan_glioma_multi_fidelity_optimization`). It
+calibrates paired designs across screening, mechanistic, and validation scales, combines transferred
+and local neighborhood estimates with uncertainty, and selects a bounded next batch with a
+cost/risk-aware beam search. A high-fidelity candidate without qualified lower-fidelity support is
+blocked or deferred instead of being treated as an unexplained positive result.

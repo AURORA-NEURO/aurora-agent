@@ -7,6 +7,7 @@ pub mod adaptive_information_campaign;
 pub mod campaign;
 pub mod dose_response;
 pub mod information_design;
+pub mod multi_fidelity;
 pub mod synergy;
 
 pub use adaptive_allocation::{
@@ -38,6 +39,12 @@ pub use information_design::{
     plan_glioma_information_design, DesignAction, DesignMechanism, DesignOutcome,
     InformationDesignActionScore, InformationDesignDisposition, InformationDesignError,
     InformationDesignPlan, InformationDesignRequest,
+};
+pub use multi_fidelity::{
+    plan_glioma_multi_fidelity_optimization, EstimateSource, FidelityCalibration,
+    FidelityCandidate, FidelityEstimate, FidelityLevel, FidelityObservation,
+    MultiFidelityDisposition, MultiFidelityOptimizationError, MultiFidelityOptimizationPlan,
+    MultiFidelityOptimizationRequest, OptimizationDirection,
 };
 pub use synergy::{
     analyze_glioma_combination_synergy, CombinationCell, CombinationCellDisposition,

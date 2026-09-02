@@ -482,28 +482,29 @@ use bioprism_research::{
     generate_feature_catalog, glioma_program_catalog, harmonize_glioma_multimodal_batches,
     harmonize_multimodal_inputs, plan_glioma_adaptive_information_campaign,
     plan_glioma_closed_loop_campaign, plan_glioma_information_design,
-    plan_glioma_robust_intervention_portfolio, plan_glioma_workflow, preflight_glioma_instrument,
-    propagate_glioma_mechanism_graph, qualify_evidence, select_glioma_actions,
-    simulate_glioma_counterfactual, simulate_glioma_counterfactual_ensemble,
-    simulate_glioma_protocol, surveil_glioma_evidence, validate_feature_catalog,
-    ActionPortfolioExecutionRequest, AdaptiveAllocationRequest, AdaptiveArmObservation,
-    AdaptiveInformationCampaignRequest, AdaptiveInformationObservation, AnalysisDataset,
-    AnalysisRequest, CalibrationRequest, CalibrationRun, CampaignAction, CampaignMechanism,
-    CampaignObservation, CausalContrastRequest, ClosedLoopCampaignRequest, CombinationObservation,
-    CombinationSynergyRequest, ComputationExecutionRequest, ConcordanceRequest, ConsensusRequest,
-    CounterfactualEnsembleRequest, CounterfactualIntervention, CounterfactualModel,
-    CounterfactualRequest, DecisionContextRequest, DesignAction, DesignMechanism,
-    DoseResponseObservation, DoseResponseRequest, DryRunGliomaActionExecutor,
-    DryRunGliomaComputationExecutor, DryRunGliomaProtocolExecutor, EvidenceRecord, EvidenceRequest,
-    EvidenceSurveillanceRequest, ExperimentArm, ExperimentRequest, FederatedBenchmarkRequest,
-    FederatedBenchmarkSite, GliomaActionCandidate, GliomaAutonomousCampaignRequest,
-    GliomaResearchIntent, GliomaWorkflowRequest, HarmonizationRequest, HarmonizationVector,
-    InformationDesignRequest, InstrumentPreflightRequest, KnowledgeRequest, LatentFactorRequest,
-    LatentFactorVector, LigandReceptorPair, MechanismActionPlannerConfig, MechanismCandidate,
-    MechanismDiscrimination, MechanismDiscriminationRequest, MechanismDiscriminatorAction,
-    MechanismFeatureObservation, MechanismGraphEdge, MechanismGraphNode, MechanismGraphRequest,
-    MechanismHypothesis, MechanismRequest, MediationObservation, MediationRequest,
-    MetaAnalysisRequest, ModalityVector, MultimodalObservation, MultimodalRequest,
+    plan_glioma_multi_fidelity_optimization, plan_glioma_robust_intervention_portfolio,
+    plan_glioma_workflow, preflight_glioma_instrument, propagate_glioma_mechanism_graph,
+    qualify_evidence, select_glioma_actions, simulate_glioma_counterfactual,
+    simulate_glioma_counterfactual_ensemble, simulate_glioma_protocol, surveil_glioma_evidence,
+    validate_feature_catalog, ActionPortfolioExecutionRequest, AdaptiveAllocationRequest,
+    AdaptiveArmObservation, AdaptiveInformationCampaignRequest, AdaptiveInformationObservation,
+    AnalysisDataset, AnalysisRequest, CalibrationRequest, CalibrationRun, CampaignAction,
+    CampaignMechanism, CampaignObservation, CausalContrastRequest, ClosedLoopCampaignRequest,
+    CombinationObservation, CombinationSynergyRequest, ComputationExecutionRequest,
+    ConcordanceRequest, ConsensusRequest, CounterfactualEnsembleRequest,
+    CounterfactualIntervention, CounterfactualModel, CounterfactualRequest, DecisionContextRequest,
+    DesignAction, DesignMechanism, DoseResponseObservation, DoseResponseRequest,
+    DryRunGliomaActionExecutor, DryRunGliomaComputationExecutor, DryRunGliomaProtocolExecutor,
+    EvidenceRecord, EvidenceRequest, EvidenceSurveillanceRequest, ExperimentArm, ExperimentRequest,
+    FederatedBenchmarkRequest, FederatedBenchmarkSite, FidelityCandidate, FidelityObservation,
+    GliomaActionCandidate, GliomaAutonomousCampaignRequest, GliomaResearchIntent,
+    GliomaWorkflowRequest, HarmonizationRequest, HarmonizationVector, InformationDesignRequest,
+    InstrumentPreflightRequest, KnowledgeRequest, LatentFactorRequest, LatentFactorVector,
+    LigandReceptorPair, MechanismActionPlannerConfig, MechanismCandidate, MechanismDiscrimination,
+    MechanismDiscriminationRequest, MechanismDiscriminatorAction, MechanismFeatureObservation,
+    MechanismGraphEdge, MechanismGraphNode, MechanismGraphRequest, MechanismHypothesis,
+    MechanismRequest, MediationObservation, MediationRequest, MetaAnalysisRequest, ModalityVector,
+    MultiFidelityOptimizationRequest, MultimodalObservation, MultimodalRequest,
     ProtocolExecutionRequest, ProtocolSimulationRequest, ReplicationRequest, ReplicationStudy,
     ResearchObjectRequest, RobustInterventionCandidate, RobustInterventionRequest,
     RobustnessRequest, SensitivityObservation, SensitivityRequest, SpatialCell,
@@ -1995,6 +1996,7 @@ impl Server {
             "glioma_adaptive_information_campaign" => {
                 self.glioma_adaptive_information_campaign(&arguments)
             }
+            "glioma_multi_fidelity_optimize" => self.glioma_multi_fidelity_optimize(&arguments),
             "glioma_instrument_calibration" => self.glioma_instrument_calibration(&arguments),
             "glioma_instrument_preflight" => self.glioma_instrument_preflight(&arguments),
             "glioma_experiment_design" => self.glioma_experiment_design(&arguments),
@@ -4408,6 +4410,46 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma adaptive information campaign: {error}"))
+    }
+
+    /// Choose a bounded next batch across screening, mechanistic, and validation model systems.
+    /// This is a local planner: it never dispatches an assay or converts a surrogate estimate
+    /// into a clinical recommendation.
+    fn glioma_multi_fidelity_optimize(&self, arguments: &Value) -> Result<Value, String> {
+        let request: MultiFidelityOptimizationRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_multi_fidelity_optimize requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma multi-fidelity request: {error}"))?;
+        let candidates: Vec<FidelityCandidate> = serde_json::from_value(
+            arguments
+                .get("candidates")
+                .cloned()
+                .ok_or_else(|| "glioma_multi_fidelity_optimize requires candidates".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma multi-fidelity candidates: {error}"))?;
+        let observations: Vec<FidelityObservation> = arguments
+            .get("observations")
+            .cloned()
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(|error| format!("invalid glioma multi-fidelity observations: {error}"))?
+            .unwrap_or_default();
+        let plan = plan_glioma_multi_fidelity_optimization(&request, &candidates, &observations)
+            .map_err(|error| format!("glioma multi-fidelity optimization refused: {error}"))?;
+        serde_json::to_value(json!({
+            "optimization": plan,
+            "dispatch": "not_started",
+            "guarantees": [
+                "paired cross-fidelity calibration is estimated from shared designs and carries residual uncertainty",
+                "unobserved candidates use transferred or neighborhood support instead of fabricated certainty",
+                "selection is bounded by cost, risk, replicate, fidelity-support, and portfolio-diversity gates",
+                "the route only plans local preclinical work and never executes biology or makes a clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma multi-fidelity optimization: {error}"))
     }
 
     /// Detect instrument-control drift before a preclinical run is admitted. The calibration
@@ -44684,6 +44726,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_robust_intervention_portfolio",
                 "glioma_information_design",
                 "glioma_adaptive_information_campaign",
+                "glioma_multi_fidelity_optimize",
                 "glioma_instrument_calibration",
                 "glioma_instrument_preflight",
                 "glioma_experiment_design",
@@ -52030,6 +52073,19 @@ pub fn tool_definitions() -> Vec<Value> {
                 "observations": {"type": "array", "items": {"type": "object"}, "description": "Optional AdaptiveInformationObservation1@1 local artifact-backed outcomes for resumable replanning."}
             },
             "required": ["request", "mechanisms", "actions"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_multi_fidelity_optimize",
+        "description": "Choose a bounded next batch for preclinical glioma experiments across screening, mechanistic, and validation fidelities. Calibrates paired designs, combines transferred and local-neighborhood estimates with uncertainty, and applies cost, risk, replicate, support, and diversity gates; it never executes biology or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "MultiFidelityOptimizationRequest1@1 with direction, budget, acquisition weights, risk ceiling, transfer-reliability floor, and selection bounds."},
+                "candidates": {"type": "array", "items": {"type": "object"}, "description": "FidelityCandidate1@1 conditions with design/fidelity/model bindings, cost/risk, and lower-fidelity parent declarations."},
+                "observations": {"type": "array", "items": {"type": "object"}, "description": "Optional local FidelityObservation1@1 replicate outcomes with uncertainty and de-identified artifact references."}
+            },
+            "required": ["request", "candidates"]
         }
     }));
     definitions.push(json!({

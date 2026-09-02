@@ -314,7 +314,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 57;
-const TOOL_DEFINITION_COUNT: usize = 569;
+const TOOL_DEFINITION_COUNT: usize = 570;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -718,6 +718,48 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
     assert!(mediation["analysis"]["indirect_effect_milli"]
         .as_i64()
         .is_some_and(|effect| effect > 0));
+
+    let multi_fidelity = call(
+        &mut server,
+        "glioma_multi_fidelity_optimize",
+        json!({
+            "request": {
+                "objective": "choose the next invasion assay across fidelity levels",
+                "direction": "maximize",
+                "budget_units": 8,
+                "max_selections": 1,
+                "min_replicates_per_candidate": 1,
+                "exploration_weight_milli": 250,
+                "exploitation_weight_milli": 500,
+                "transfer_weight_milli": 250,
+                "risk_penalty_milli": 100,
+                "cost_penalty_milli": 10,
+                "max_risk_milli": 800,
+                "min_transfer_reliability_milli": 200,
+                "baseline_milli": null
+            },
+            "candidates": [
+                {"candidate_id":"mf-screen-a","design_id":"mf-design-a","fidelity":"screening","model_system":"cell_line","dose_milli":100,"combination_milli":0,"cost_units":1,"risk_milli":100,"parent_candidate_id":null,"max_replicates":4},
+                {"candidate_id":"mf-screen-b","design_id":"mf-design-b","fidelity":"screening","model_system":"cell_line","dose_milli":200,"combination_milli":0,"cost_units":1,"risk_milli":100,"parent_candidate_id":null,"max_replicates":4},
+                {"candidate_id":"mf-valid-a","design_id":"mf-design-a","fidelity":"validation","model_system":"mouse_model","dose_milli":100,"combination_milli":0,"cost_units":4,"risk_milli":200,"parent_candidate_id":"mf-screen-a","max_replicates":4},
+                {"candidate_id":"mf-valid-b","design_id":"mf-design-b","fidelity":"validation","model_system":"mouse_model","dose_milli":200,"combination_milli":0,"cost_units":4,"risk_milli":200,"parent_candidate_id":"mf-screen-b","max_replicates":4}
+            ],
+            "observations": [
+                {"observation_id":"mf-obs-screen-a","candidate_id":"mf-screen-a","replicate_index":0,"outcome_milli":400,"uncertainty_milli":10,"artifact":{"artifact_id":"mf-artifact-screen-a","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-fidelity+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"observation_id":"mf-obs-screen-b","candidate_id":"mf-screen-b","replicate_index":0,"outcome_milli":300,"uncertainty_milli":10,"artifact":{"artifact_id":"mf-artifact-screen-b","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-fidelity+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"observation_id":"mf-obs-valid-b","candidate_id":"mf-valid-b","replicate_index":0,"outcome_milli":500,"uncertainty_milli":10,"artifact":{"artifact_id":"mf-artifact-valid-b","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-fidelity+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}}
+            ]
+        }),
+    );
+    assert_eq!(multi_fidelity["dispatch"], json!("not_started"));
+    assert_eq!(
+        multi_fidelity["optimization"]["selected_order"],
+        json!(["mf-valid-a"])
+    );
+    assert_eq!(
+        multi_fidelity["optimization"]["estimates"][2]["source"],
+        json!("transferred")
+    );
 
     let stratified_causal = call(
         &mut server,
