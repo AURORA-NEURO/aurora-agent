@@ -31,6 +31,7 @@
     "closed_loop_campaign": "crates/research/src/glioma/programs/p06_experiment_design/campaign.rs",
     "spatial_communication": "crates/research/src/glioma/programs/p03_multimodal_ingestion_qc/spatial_communication.rs",
     "state_transition": "crates/research/src/glioma/programs/p10_interpretation_replication/state_transition.rs",
+    "protocol_execution": "crates/research/src/glioma/programs/p07_protocol_simulation/execution.rs",
     "documentation": "docs/glioma",
     "mcp": "crates/mcp/src/server.rs"
   },
@@ -41,7 +42,7 @@
     {"id": "P04", "slug": "decision-context", "folder": "p04_decision_context", "stage_kinds": ["intent_normalization", "evidence_compilation"], "surfaces": ["compile_decision_context"]},
     {"id": "P05", "slug": "mechanism-exploration", "folder": "p05_mechanism_exploration", "stage_kinds": ["molecular_landscape", "mechanism_exploration"], "surfaces": ["discriminate_mechanisms", "propagate_glioma_mechanism_graph"]},
     {"id": "P06", "slug": "experiment-design", "folder": "p06_experiment_design", "stage_kinds": ["experiment_design"], "surfaces": ["allocate_glioma_assays", "plan_glioma_closed_loop_campaign", "execute_glioma_closed_loop_campaign", "analyze_glioma_dose_response", "analyze_glioma_combination_synergy"]},
-    {"id": "P07", "slug": "protocol-simulation", "folder": "p07_protocol_simulation", "stage_kinds": ["protocol_simulation"], "surfaces": ["plan_glioma_workflow", "execute_glioma_workflow", "simulate_glioma_protocol", "protocol_request_from_experiment_design"]},
+    {"id": "P07", "slug": "protocol-simulation", "folder": "p07_protocol_simulation", "stage_kinds": ["protocol_simulation"], "surfaces": ["plan_glioma_workflow", "execute_glioma_workflow", "simulate_glioma_protocol", "execute_glioma_protocol", "protocol_request_from_experiment_design"]},
     {"id": "P08", "slug": "instrument-robotics", "folder": "p08_instrument_robotics", "stage_kinds": ["instrument_preflight"], "surfaces": ["analyze_instrument_calibration"]},
     {"id": "P09", "slug": "reproducible-computation", "folder": "p09_reproducible_computation", "stage_kinds": ["computational_execution"], "surfaces": ["assess_glioma_robustness"]},
     {"id": "P10", "slug": "interpretation-replication", "folder": "p10_interpretation_replication", "stage_kinds": ["statistical_interpretation", "replication_robustness"], "surfaces": ["analyze_glioma_trajectories", "analyze_glioma_state_transitions", "analyze_glioma_causal_contrast", "analyze_stratified_causal_adjustment", "analyze_replication_meta_analysis", "analyze_causal_sensitivity"]},

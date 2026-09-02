@@ -476,27 +476,29 @@ use bioprism_research::{
     analyze_replication_meta_analysis, analyze_stratified_causal_adjustment,
     assess_glioma_robustness, assess_replication, build_research_object_manifest,
     compile_decision_context, compile_typed_knowledge, design_preclinical_experiment,
-    discriminate_mechanisms, dry_run_glioma_research, explore_mechanisms, generate_feature_catalog,
-    glioma_program_catalog, harmonize_glioma_multimodal_batches, harmonize_multimodal_inputs,
-    plan_glioma_closed_loop_campaign, plan_glioma_workflow, propagate_glioma_mechanism_graph,
-    qualify_evidence, select_glioma_actions, simulate_glioma_protocol, surveil_glioma_evidence,
-    validate_feature_catalog, AdaptiveAllocationRequest, AdaptiveArmObservation, AnalysisDataset,
-    AnalysisRequest, CalibrationRequest, CalibrationRun, CampaignAction, CampaignMechanism,
-    CampaignObservation, CausalContrastRequest, ClosedLoopCampaignRequest, CombinationObservation,
+    discriminate_mechanisms, dry_run_glioma_research, execute_glioma_protocol, explore_mechanisms,
+    generate_feature_catalog, glioma_program_catalog, harmonize_glioma_multimodal_batches,
+    harmonize_multimodal_inputs, plan_glioma_closed_loop_campaign, plan_glioma_workflow,
+    propagate_glioma_mechanism_graph, qualify_evidence, select_glioma_actions,
+    simulate_glioma_protocol, surveil_glioma_evidence, validate_feature_catalog,
+    AdaptiveAllocationRequest, AdaptiveArmObservation, AnalysisDataset, AnalysisRequest,
+    CalibrationRequest, CalibrationRun, CampaignAction, CampaignMechanism, CampaignObservation,
+    CausalContrastRequest, ClosedLoopCampaignRequest, CombinationObservation,
     CombinationSynergyRequest, ConcordanceRequest, ConsensusRequest, DecisionContextRequest,
-    DoseResponseObservation, DoseResponseRequest, EvidenceRecord, EvidenceRequest,
-    EvidenceSurveillanceRequest, ExperimentArm, ExperimentRequest, FederatedBenchmarkRequest,
-    FederatedBenchmarkSite, GliomaActionCandidate, GliomaResearchIntent, GliomaWorkflowRequest,
-    HarmonizationRequest, HarmonizationVector, KnowledgeRequest, LatentFactorRequest,
-    LatentFactorVector, LigandReceptorPair, MechanismCandidate, MechanismDiscriminationRequest,
-    MechanismDiscriminatorAction, MechanismFeatureObservation, MechanismGraphEdge,
-    MechanismGraphNode, MechanismGraphRequest, MechanismHypothesis, MechanismRequest,
-    MetaAnalysisRequest, ModalityVector, MultimodalObservation, MultimodalRequest,
-    ProtocolSimulationRequest, ReplicationRequest, ReplicationStudy, ResearchObjectRequest,
-    RobustnessRequest, SensitivityObservation, SensitivityRequest, SpatialCell,
-    SpatialCommunicationCell, SpatialCommunicationRequest, SpatialNicheRequest,
-    StateTransitionObservation, StateTransitionRequest, StratifiedCausalRequest,
-    StratifiedObservation, TrajectoryObservation, TrajectoryRequest, TypedKnowledge,
+    DoseResponseObservation, DoseResponseRequest, DryRunGliomaProtocolExecutor, EvidenceRecord,
+    EvidenceRequest, EvidenceSurveillanceRequest, ExperimentArm, ExperimentRequest,
+    FederatedBenchmarkRequest, FederatedBenchmarkSite, GliomaActionCandidate, GliomaResearchIntent,
+    GliomaWorkflowRequest, HarmonizationRequest, HarmonizationVector, KnowledgeRequest,
+    LatentFactorRequest, LatentFactorVector, LigandReceptorPair, MechanismCandidate,
+    MechanismDiscriminationRequest, MechanismDiscriminatorAction, MechanismFeatureObservation,
+    MechanismGraphEdge, MechanismGraphNode, MechanismGraphRequest, MechanismHypothesis,
+    MechanismRequest, MetaAnalysisRequest, ModalityVector, MultimodalObservation,
+    MultimodalRequest, ProtocolExecutionRequest, ProtocolSimulationRequest, ReplicationRequest,
+    ReplicationStudy, ResearchObjectRequest, RobustnessRequest, SensitivityObservation,
+    SensitivityRequest, SpatialCell, SpatialCommunicationCell, SpatialCommunicationRequest,
+    SpatialNicheRequest, StateTransitionObservation, StateTransitionRequest,
+    StratifiedCausalRequest, StratifiedObservation, TrajectoryObservation, TrajectoryRequest,
+    TypedKnowledge,
 };
 use bioprism_routing::{
     lab::{run as run_routing_lab, LabSettings, Task},
@@ -1933,6 +1935,7 @@ impl Server {
             "glioma_research_dry_run" => self.glioma_research_dry_run(&arguments),
             "glioma_workflow_plan" => self.glioma_workflow_plan(&arguments),
             "glioma_protocol_simulate" => self.glioma_protocol_simulate(&arguments),
+            "glioma_protocol_execute" => self.glioma_protocol_execute(&arguments),
             "glioma_robustness_suite" => self.glioma_robustness_suite(&arguments),
             "glioma_trajectory_analyze" => self.glioma_trajectory_analyze(&arguments),
             "glioma_state_transition_analyze" => self.glioma_state_transition_analyze(&arguments),
@@ -3130,6 +3133,33 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma protocol simulation: {error}"))
+    }
+
+    /// Execute a feasible protocol through the deterministic synthetic executor. Production
+    /// instrument or worker effects remain behind the Rust `GliomaProtocolExecutor` seam.
+    fn glioma_protocol_execute(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ProtocolExecutionRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_protocol_execute requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma protocol execution request: {error}"))?;
+        let mut executor = DryRunGliomaProtocolExecutor;
+        let execution = execute_glioma_protocol(&request, &mut executor)
+            .map_err(|error| format!("glioma protocol execution refused: {error}"))?;
+        serde_json::to_value(json!({
+            "execution": execution,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "execution requires a feasible deterministic protocol simulation",
+                "dependency order, typed output schemas, retries, partial results, and skipped work remain explicit",
+                "the MCP route uses synthetic local artifacts and performs no biological or instrument effect",
+                "production effects require a caller-owned local GliomaProtocolExecutor"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma protocol execution: {error}"))
     }
 
     /// Stress-test a local two-arm glioma analysis under deterministic batch and row omissions.
@@ -44180,6 +44210,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_research_dry_run",
                 "glioma_workflow_plan",
                 "glioma_protocol_simulate",
+                "glioma_protocol_execute",
                 "glioma_robustness_suite",
                 "glioma_trajectory_analyze",
                 "glioma_state_transition_analyze",
@@ -51043,6 +51074,17 @@ pub fn tool_definitions() -> Vec<Value> {
                     "type": "object",
                     "description": "Serialized ProtocolSimulationRequest1@1 containing typed tasks, local resource capacities, a bounded horizon/risk budget, and preclinical model binding."
                 }
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_protocol_execute",
+        "description": "Execute a feasible local preclinical glioma protocol through a deterministic synthetic executor for sandbox validation. The route enforces simulation feasibility, dependency order, typed output artifacts, bounded retries, and fail-closed partial results, but performs no biological or instrument effect; production effects require a caller-owned GliomaProtocolExecutor in the Rust SDK.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ProtocolExecutionRequest1@1 containing a ProtocolSimulationRequest1@1, bounded retries, and artifact requirement."}
             },
             "required": ["request"]
         }

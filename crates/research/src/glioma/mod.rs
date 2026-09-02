@@ -87,9 +87,13 @@ pub use programs::p06_experiment_design::{
     EXECUTION_OUTPUT_SCHEMA,
 };
 pub use programs::p07_protocol_simulation::{
-    protocol_request_from_experiment_design, simulate_glioma_protocol, ProtocolDisposition,
-    ProtocolResource, ProtocolResourceKind, ProtocolSimulation, ProtocolSimulationError,
-    ProtocolSimulationRequest, ProtocolTask, ResourceUtilization, ScheduleEntry,
+    execute_glioma_protocol, protocol_request_from_experiment_design, simulate_glioma_protocol,
+    DryRunGliomaProtocolExecutor, GliomaProtocolExecutor, ProtocolDisposition, ProtocolExecution,
+    ProtocolExecutionDisposition, ProtocolExecutionError, ProtocolExecutionFailure,
+    ProtocolExecutionRequest, ProtocolExecutionStopReason, ProtocolResource, ProtocolResourceKind,
+    ProtocolSimulation, ProtocolSimulationError, ProtocolSimulationRequest, ProtocolTask,
+    ProtocolTaskDisposition, ProtocolTaskResult, ResourceUtilization, ScheduleEntry,
+    PROTOCOL_EXECUTION_OUTPUT_SCHEMA,
 };
 pub use programs::p08_instrument_robotics::{
     analyze_instrument_calibration, CalibrationDisposition, CalibrationError, CalibrationPoint,

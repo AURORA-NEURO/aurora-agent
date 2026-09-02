@@ -10,7 +10,15 @@ pub use crate::glioma::workflow::{
     GliomaWorkflowExecution, GliomaWorkflowMode, GliomaWorkflowNode, GliomaWorkflowPlan,
     GliomaWorkflowRequest, WorkflowNodeDecision,
 };
+pub mod execution;
 pub mod simulator;
+
+pub use execution::{
+    execute_glioma_protocol, DryRunGliomaProtocolExecutor, GliomaProtocolExecutor,
+    ProtocolExecution, ProtocolExecutionDisposition, ProtocolExecutionError,
+    ProtocolExecutionFailure, ProtocolExecutionRequest, ProtocolExecutionStopReason,
+    ProtocolTaskDisposition, ProtocolTaskResult, OUTPUT_SCHEMA as PROTOCOL_EXECUTION_OUTPUT_SCHEMA,
+};
 
 pub use simulator::{
     protocol_request_from_experiment_design, simulate_glioma_protocol, ProtocolDisposition,
