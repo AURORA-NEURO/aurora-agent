@@ -63,7 +63,8 @@ pub use programs::p04_decision_context::{
     DecisionContextDisposition, DecisionContextError, DecisionContextRequest,
 };
 pub use programs::p05_mechanism_exploration::{
-    discriminate_mechanisms, propagate_glioma_mechanism_graph, simulate_glioma_counterfactual,
+    discriminate_mechanisms, plan_glioma_robust_intervention_portfolio,
+    propagate_glioma_mechanism_graph, simulate_glioma_counterfactual,
     simulate_glioma_counterfactual_ensemble, CounterfactualContrast, CounterfactualDirection,
     CounterfactualDisposition, CounterfactualEnsembleRequest, CounterfactualError,
     CounterfactualIntervention, CounterfactualModel, CounterfactualRequest,
@@ -74,7 +75,9 @@ pub use programs::p05_mechanism_exploration::{
     MechanismFeatureObservation, MechanismGraphDisposition, MechanismGraphEdge,
     MechanismGraphError, MechanismGraphNode, MechanismGraphPropagation, MechanismGraphRelation,
     MechanismGraphRequest, MechanismHypothesis, MechanismInformationGain, MechanismNodeScore,
-    MechanismPrediction,
+    MechanismPrediction, PortfolioDirection, RobustInterventionCandidate,
+    RobustInterventionPortfolio, RobustInterventionRequest, RobustInterventionScore,
+    RobustPortfolioDisposition, RobustPortfolioError,
 };
 pub use programs::p06_experiment_design::{
     allocate_glioma_assays, analyze_glioma_combination_synergy, analyze_glioma_dose_response,

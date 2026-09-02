@@ -480,15 +480,15 @@ use bioprism_research::{
     execute_glioma_protocol, explore_mechanisms, generate_feature_catalog, glioma_program_catalog,
     harmonize_glioma_multimodal_batches, harmonize_multimodal_inputs,
     plan_glioma_adaptive_information_campaign, plan_glioma_closed_loop_campaign,
-    plan_glioma_information_design, plan_glioma_workflow, preflight_glioma_instrument,
-    propagate_glioma_mechanism_graph, qualify_evidence, select_glioma_actions,
-    simulate_glioma_counterfactual, simulate_glioma_counterfactual_ensemble,
-    simulate_glioma_protocol, surveil_glioma_evidence, validate_feature_catalog,
-    AdaptiveAllocationRequest, AdaptiveArmObservation, AdaptiveInformationCampaignRequest,
-    AdaptiveInformationObservation, AnalysisDataset, AnalysisRequest, CalibrationRequest,
-    CalibrationRun, CampaignAction, CampaignMechanism, CampaignObservation, CausalContrastRequest,
-    ClosedLoopCampaignRequest, CombinationObservation, CombinationSynergyRequest,
-    ComputationExecutionRequest, ConcordanceRequest, ConsensusRequest,
+    plan_glioma_information_design, plan_glioma_robust_intervention_portfolio,
+    plan_glioma_workflow, preflight_glioma_instrument, propagate_glioma_mechanism_graph,
+    qualify_evidence, select_glioma_actions, simulate_glioma_counterfactual,
+    simulate_glioma_counterfactual_ensemble, simulate_glioma_protocol, surveil_glioma_evidence,
+    validate_feature_catalog, AdaptiveAllocationRequest, AdaptiveArmObservation,
+    AdaptiveInformationCampaignRequest, AdaptiveInformationObservation, AnalysisDataset,
+    AnalysisRequest, CalibrationRequest, CalibrationRun, CampaignAction, CampaignMechanism,
+    CampaignObservation, CausalContrastRequest, ClosedLoopCampaignRequest, CombinationObservation,
+    CombinationSynergyRequest, ComputationExecutionRequest, ConcordanceRequest, ConsensusRequest,
     CounterfactualEnsembleRequest, CounterfactualIntervention, CounterfactualModel,
     CounterfactualRequest, DecisionContextRequest, DesignAction, DesignMechanism,
     DoseResponseObservation, DoseResponseRequest, DryRunGliomaComputationExecutor,
@@ -501,11 +501,11 @@ use bioprism_research::{
     MechanismGraphEdge, MechanismGraphNode, MechanismGraphRequest, MechanismHypothesis,
     MechanismRequest, MetaAnalysisRequest, ModalityVector, MultimodalObservation,
     MultimodalRequest, ProtocolExecutionRequest, ProtocolSimulationRequest, ReplicationRequest,
-    ReplicationStudy, ResearchObjectRequest, RobustnessRequest, SensitivityObservation,
-    SensitivityRequest, SpatialCell, SpatialCommunicationCell, SpatialCommunicationRequest,
-    SpatialNicheRequest, StateTransitionObservation, StateTransitionRequest,
-    StratifiedCausalRequest, StratifiedObservation, TrajectoryObservation, TrajectoryRequest,
-    TypedKnowledge,
+    ReplicationStudy, ResearchObjectRequest, RobustInterventionCandidate,
+    RobustInterventionRequest, RobustnessRequest, SensitivityObservation, SensitivityRequest,
+    SpatialCell, SpatialCommunicationCell, SpatialCommunicationRequest, SpatialNicheRequest,
+    StateTransitionObservation, StateTransitionRequest, StratifiedCausalRequest,
+    StratifiedObservation, TrajectoryObservation, TrajectoryRequest, TypedKnowledge,
 };
 use bioprism_routing::{
     lab::{run as run_routing_lab, LabSettings, Task},
@@ -1975,6 +1975,9 @@ impl Server {
             "glioma_mechanism_counterfactual" => self.glioma_mechanism_counterfactual(&arguments),
             "glioma_mechanism_ensemble_counterfactual" => {
                 self.glioma_mechanism_ensemble_counterfactual(&arguments)
+            }
+            "glioma_robust_intervention_portfolio" => {
+                self.glioma_robust_intervention_portfolio(&arguments)
             }
             "glioma_information_design" => self.glioma_information_design(&arguments),
             "glioma_adaptive_information_campaign" => {
@@ -4122,6 +4125,40 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma mechanism ensemble counterfactual: {error}"))
+    }
+
+    /// Compile a robust, risk-aware intervention portfolio across local mechanistic models. The
+    /// route performs no biological dispatch; an institution-local executor must separately
+    /// authorize and run any selected assay.
+    fn glioma_robust_intervention_portfolio(&self, arguments: &Value) -> Result<Value, String> {
+        let request: RobustInterventionRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_robust_intervention_portfolio requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma robust portfolio request: {error}"))?;
+        let models: Vec<CounterfactualModel> =
+            serde_json::from_value(arguments.get("models").cloned().ok_or_else(|| {
+                "glioma_robust_intervention_portfolio requires models".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma robust portfolio models: {error}"))?;
+        let candidates: Vec<RobustInterventionCandidate> =
+            serde_json::from_value(arguments.get("candidates").cloned().ok_or_else(|| {
+                "glioma_robust_intervention_portfolio requires candidates".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma robust portfolio candidates: {error}"))?;
+        let output = plan_glioma_robust_intervention_portfolio(&request, &models, &candidates)
+            .map_err(|error| format!("glioma robust intervention portfolio refused: {error}"))?;
+        serde_json::to_value(json!({
+            "portfolio": output,
+            "dispatch": "not_started",
+            "guarantees": [
+                "each candidate is simulated independently across the declared local model ensemble",
+                "selection uses prior-weighted expected, lower-tail, worst-case, feasibility, risk, cost, and redundancy gates",
+                "model disagreement, risk blocks, budget deferrals, and unresolved effects remain explicit",
+                "the route only compiles a preclinical assay portfolio and never executes biology or makes a clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma robust intervention portfolio: {error}"))
     }
 
     /// Select a bounded local glioma assay batch by expected reduction in mechanism uncertainty.
@@ -44476,6 +44513,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_mechanism_graph_propagate",
                 "glioma_mechanism_counterfactual",
                 "glioma_mechanism_ensemble_counterfactual",
+                "glioma_robust_intervention_portfolio",
                 "glioma_information_design",
                 "glioma_adaptive_information_campaign",
                 "glioma_instrument_calibration",
@@ -51726,6 +51764,19 @@ pub fn tool_definitions() -> Vec<Value> {
                 "interventions": {"type": "array", "items": {"type": "object"}, "description": "CounterfactualIntervention1@1 signed node deltas shared across models."}
             },
             "required": ["request", "models", "interventions"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_robust_intervention_portfolio",
+        "description": "Evaluate and greedily select a robust preclinical glioma intervention portfolio across a declared mechanistic model ensemble. Uses prior-weighted expected effects, lower-tail CVaR-style effects, worst-case gates, feasibility, risk ceilings, costs, and redundancy groups to avoid brittle single-model actions; it never dispatches biology or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "RobustInterventionRequest1@1 with model binding, direction, budget, lower-tail/effect weights, agreement/effect gates, risk ceiling, and selection bounds."},
+                "models": {"type": "array", "items": {"type": "object"}, "description": "CounterfactualModel1@1 local mechanism graphs with positive prior mass and a shared node state space."},
+                "candidates": {"type": "array", "items": {"type": "object"}, "description": "RobustInterventionCandidate1@1 signed perturbations with target node, redundancy group, feasibility, cost, and risk declarations."}
+            },
+            "required": ["request", "models", "candidates"]
         }
     }));
     definitions.push(json!({
