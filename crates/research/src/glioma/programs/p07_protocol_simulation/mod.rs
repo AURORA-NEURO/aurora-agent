@@ -11,6 +11,7 @@ pub use crate::glioma::workflow::{
     GliomaWorkflowRequest, WorkflowNodeDecision,
 };
 pub mod action_execution;
+pub mod active_learning_campaign;
 pub mod autonomous_campaign;
 pub mod evidence_campaign;
 pub mod execution;
@@ -22,6 +23,13 @@ pub use action_execution::{
     ActionExecutionResult, ActionPortfolioExecution, ActionPortfolioExecutionDisposition,
     ActionPortfolioExecutionError, ActionPortfolioExecutionRequest, ActionPortfolioStopReason,
     DryRunGliomaActionExecutor, GliomaActionExecutor,
+};
+
+pub use active_learning_campaign::{
+    execute_glioma_active_learning_campaign, ActiveLearningCampaign,
+    ActiveLearningCampaignDisposition, ActiveLearningCampaignError, ActiveLearningCampaignExecutor,
+    ActiveLearningCampaignRequest, ActiveLearningCampaignRound, ActiveLearningCampaignStopReason,
+    ActiveLearningExecutionFailure, DryRunActiveLearningCampaignExecutor,
 };
 
 pub use autonomous_campaign::{

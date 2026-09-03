@@ -82,6 +82,7 @@ fn main() {
                      glioma_information_design,\n\
                      glioma_adaptive_information_campaign,\n\
                      glioma_active_learning,\n\
+                     glioma_active_learning_campaign_execute,\n\
                      glioma_multi_fidelity_optimize,\n\
                      glioma_stratified_causal_adjustment,\n\
                      glioma_adaptive_allocation,\n\

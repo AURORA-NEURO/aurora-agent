@@ -79,6 +79,8 @@ crates/research/src/glioma/
                                              P07 context-to-selection-to-execution autonomous cycle
     p07_protocol_simulation/evidence_campaign.rs
                                              P07 execution bridge from evidence-priority queue to local adapters
+    p07_protocol_simulation/active_learning_campaign.rs
+                                             P07 bounded autonomous assay execution and observation-driven replanning
     p08_instrument_robotics/preflight.rs   P08 typed instrument/robotics interlock planning
     p08_instrument_robotics/execution.rs   P08 guarded execution with live rechecks and emergency stop
     p09_reproducible_computation/robustness.rs
@@ -361,3 +363,11 @@ conservative residual uncertainty so contradictory evidence cannot be averaged a
 a diverse next assay batch under budget, risk, cost, replicate, and redundancy limits. The output
 is a next-batch plan only; institution-owned executors remain responsible for any physical or
 computational effect.
+
+P07 closes that planning loop with `execute_glioma_active_learning_campaign`. The campaign
+controller repeatedly invokes the P06 surrogate, sends each admitted candidate to a caller-owned
+local executor, validates candidate-bound content-addressed observations, and replans from those
+observations. Retry, budget, replicate, redundancy, unresolved-evidence, executor-failure, and
+maximum-round gates are persisted in a replayable campaign record; the bundled MCP route uses a
+deterministic sandbox executor and cannot contact hardware, move raw data, or make a clinical
+decision.

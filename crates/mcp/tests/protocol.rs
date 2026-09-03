@@ -314,7 +314,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 57;
-const TOOL_DEFINITION_COUNT: usize = 577;
+const TOOL_DEFINITION_COUNT: usize = 578;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -2138,6 +2138,53 @@ fn glioma_active_learning_selects_an_uncertain_safe_assay() {
     assert_eq!(plan["plan"]["selected_order"], json!(["matrix", "egfr"]));
     assert_eq!(plan["plan"]["blocked_order"], json!(["unsafe"]));
     assert_eq!(plan["plan"]["disposition"], json!("partial"));
+}
+
+#[test]
+fn glioma_active_learning_campaign_executes_and_replans_in_sandbox() {
+    let mut server = server();
+    let artifact_hash = "0".repeat(64);
+    let campaign = call(
+        &mut server,
+        "glioma_active_learning_campaign_execute",
+        json!({
+            "request": {
+                "active_learning": {
+                    "objective": "refine an organoid invasion mechanism",
+                    "model_system": "organoid",
+                    "direction": "maximize",
+                    "budget_units": 4,
+                    "max_selections": 1,
+                    "min_observations_per_candidate": 1,
+                    "exploration_weight_milli": 500,
+                    "exploitation_weight_milli": 500,
+                    "cost_penalty_milli": 1,
+                    "risk_penalty_milli": 1,
+                    "max_risk_milli": 800,
+                    "min_uncertainty_milli": 900
+                },
+                "candidates": [
+                    {"candidate_id":"egfr","mechanism_id":"egfr-signaling","feature_vector":[100,0],"cost_units":2,"risk_milli":100,"max_replicates":2,"redundancy_group":"receptor","output_schema":"Assay1@1"},
+                    {"candidate_id":"matrix","mechanism_id":"matrix-remodeling","feature_vector":[0,100],"cost_units":2,"risk_milli":100,"max_replicates":2,"redundancy_group":"matrix","output_schema":"Assay1@1"}
+                ],
+                "observations": [{"observation_id":"seed","candidate_id":"egfr","outcome_milli":500,"uncertainty_milli":50,"artifact":{"artifact_id":"seed","content_hash":artifact_hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}}],
+                "max_rounds": 3,
+                "max_retries": 1,
+                "stop_on_unresolved": false
+            }
+        }),
+    );
+    assert_eq!(campaign["dispatch"], json!("not_started"));
+    assert_eq!(campaign["simulation_only"], json!(true));
+    assert!(campaign["campaign"]["rounds"]
+        .as_array()
+        .is_some_and(|rounds| !rounds.is_empty()));
+    assert!(
+        campaign["campaign"]["budget_spent_units"]
+            .as_u64()
+            .unwrap_or_default()
+            > 0
+    );
 }
 
 #[test]

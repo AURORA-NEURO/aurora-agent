@@ -340,6 +340,7 @@ pub fn implemented_feature_ids() -> Vec<&'static str> {
         crate::glioma::programs::p07_protocol_simulation::simulator::FEATURE_ID,
         crate::glioma::programs::p07_protocol_simulation::execution::FEATURE_ID,
         crate::glioma::programs::p07_protocol_simulation::action_execution::FEATURE_ID,
+        crate::glioma::programs::p07_protocol_simulation::active_learning_campaign::FEATURE_ID,
         crate::glioma::programs::p07_protocol_simulation::autonomous_campaign::FEATURE_ID,
         crate::glioma::programs::p07_protocol_simulation::research_autopilot::FEATURE_ID,
         crate::glioma::programs::p07_protocol_simulation::evidence_campaign::FEATURE_ID,
