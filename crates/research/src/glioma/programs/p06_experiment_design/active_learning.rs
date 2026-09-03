@@ -274,7 +274,7 @@ fn validate_request(
             || candidate
                 .feature_vector
                 .iter()
-                .any(|value| value.abs() > VALUE_LIMIT)
+                .any(|value| value.unsigned_abs() > VALUE_LIMIT as u64)
             || candidate.cost_units == 0
             || candidate.risk_milli > 1_000
             || candidate.max_replicates == 0
@@ -289,7 +289,7 @@ fn validate_request(
     for observation in observations {
         if observation.observation_id.trim().is_empty()
             || !candidate_ids.contains(&observation.candidate_id)
-            || observation.outcome_milli.abs() > VALUE_LIMIT
+            || observation.outcome_milli.unsigned_abs() > VALUE_LIMIT as u64
             || observation.uncertainty_milli > 1_000
             || !observation_ids.insert(observation.observation_id.clone())
         {
