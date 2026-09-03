@@ -110,6 +110,8 @@ crates/research/src/glioma/
     p06_experiment_design/adaptive_information_campaign.rs P06 closed-loop posterior updating and re-planning through a caller-owned assay executor
     p06_experiment_design/multi_fidelity.rs P06 cost-aware multi-fidelity surrogate optimization across screening, mechanistic, and validation models
     p06_experiment_design/active_learning.rs P06 uncertainty-aware kernel active learning for next-assay selection
+    p06_experiment_design/robust_active_learning.rs
+                                             P06 model-ensemble lower-tail active learning under disagreement
     p03_multimodal_ingestion_qc/concordance.rs
                                              P03 feature-level modality concordance analysis
   p03_multimodal_ingestion_qc/consensus.rs
@@ -371,3 +373,10 @@ observations. Retry, budget, replicate, redundancy, unresolved-evidence, executo
 maximum-round gates are persisted in a replayable campaign record; the bundled MCP route uses a
 deterministic sandbox executor and cannot contact hardware, move raw data, or make a clinical
 decision.
+
+The robust active-learning surface (`plan_glioma_robust_active_learning`) keeps competing
+mechanistic and spatial surrogates separate. It shrinks local observations toward reliability- and
+prior-weighted predictions, scores lower-tail utility plus expected information, and treats model
+disagreement, contradictory replicates, unsupported models, and safety/resource ceilings as
+explicit product states. This gives a glioma program lead a defensible assay queue when models
+disagree instead of a brittle single-model ranking.

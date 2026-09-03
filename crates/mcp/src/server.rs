@@ -485,20 +485,21 @@ use bioprism_research::{
     harmonize_multimodal_inputs, plan_decision_actions, plan_glioma_active_learning,
     plan_glioma_adaptive_information_campaign, plan_glioma_closed_loop_campaign,
     plan_glioma_information_design, plan_glioma_multi_fidelity_optimization,
-    plan_glioma_robust_intervention_portfolio, plan_glioma_workflow, preflight_glioma_instrument,
-    prioritize_glioma_evidence, prioritize_knowledge_frontier, propagate_glioma_mechanism_graph,
-    qualify_evidence, select_glioma_actions, simulate_glioma_counterfactual,
-    simulate_glioma_counterfactual_ensemble, simulate_glioma_protocol, surveil_glioma_evidence,
-    validate_feature_catalog, ActionPortfolioExecutionRequest, ActiveLearningCampaignRequest,
-    ActiveLearningCandidate, ActiveLearningObservation, ActiveLearningRequest,
-    AdaptiveAllocationRequest, AdaptiveArmObservation, AdaptiveInformationCampaignRequest,
-    AdaptiveInformationObservation, AnalysisDataset, AnalysisRequest, CalibrationRequest,
-    CalibrationRun, CampaignAction, CampaignMechanism, CampaignObservation, CausalContrastRequest,
-    ClosedLoopCampaignRequest, CombinationObservation, CombinationSynergyRequest,
-    ComputationExecutionRequest, ConcordanceRequest, ConsensusRequest,
-    CounterfactualEnsembleRequest, CounterfactualIntervention, CounterfactualModel,
-    CounterfactualRequest, DecisionActionPlanRequest, DecisionContext, DecisionContextRequest,
-    DesignAction, DesignMechanism, DoseResponseObservation, DoseResponseRequest,
+    plan_glioma_robust_active_learning, plan_glioma_robust_intervention_portfolio,
+    plan_glioma_workflow, preflight_glioma_instrument, prioritize_glioma_evidence,
+    prioritize_knowledge_frontier, propagate_glioma_mechanism_graph, qualify_evidence,
+    select_glioma_actions, simulate_glioma_counterfactual, simulate_glioma_counterfactual_ensemble,
+    simulate_glioma_protocol, surveil_glioma_evidence, validate_feature_catalog,
+    ActionPortfolioExecutionRequest, ActiveLearningCampaignRequest, ActiveLearningCandidate,
+    ActiveLearningObservation, ActiveLearningRequest, AdaptiveAllocationRequest,
+    AdaptiveArmObservation, AdaptiveInformationCampaignRequest, AdaptiveInformationObservation,
+    AnalysisDataset, AnalysisRequest, CalibrationRequest, CalibrationRun, CampaignAction,
+    CampaignMechanism, CampaignObservation, CausalContrastRequest, ClosedLoopCampaignRequest,
+    CombinationObservation, CombinationSynergyRequest, ComputationExecutionRequest,
+    ConcordanceRequest, ConsensusRequest, CounterfactualEnsembleRequest,
+    CounterfactualIntervention, CounterfactualModel, CounterfactualRequest,
+    DecisionActionPlanRequest, DecisionContext, DecisionContextRequest, DesignAction,
+    DesignMechanism, DoseResponseObservation, DoseResponseRequest,
     DryRunActiveLearningCampaignExecutor, DryRunGliomaActionExecutor,
     DryRunGliomaComputationExecutor, DryRunGliomaProtocolExecutor, DryRunInstrumentExecutor,
     EvidencePriorityRequest, EvidenceRecord, EvidenceRequest, EvidenceSurveillanceRequest,
@@ -514,7 +515,8 @@ use bioprism_research::{
     MechanismRequest, MediationObservation, MediationRequest, MetaAnalysisRequest, ModalityVector,
     MultiFidelityOptimizationRequest, MultimodalObservation, MultimodalRequest,
     ProtocolExecutionRequest, ProtocolSimulationRequest, ReplicationRequest, ReplicationStudy,
-    ResearchObjectRequest, RobustInterventionCandidate, RobustInterventionRequest,
+    ResearchObjectRequest, RobustActiveLearningCandidate, RobustActiveLearningObservation,
+    RobustActiveLearningRequest, RobustInterventionCandidate, RobustInterventionRequest,
     RobustnessRequest, SensitivityObservation, SensitivityRequest, SpatialCell,
     SpatialCommunicationCell, SpatialCommunicationRequest, SpatialNicheRequest,
     SpatialPropagationRequest, StateTransitionObservation, StateTransitionRequest,
@@ -2015,6 +2017,7 @@ impl Server {
             "glioma_active_learning_campaign_execute" => {
                 self.glioma_active_learning_campaign_execute(&arguments)
             }
+            "glioma_robust_active_learning" => self.glioma_robust_active_learning(&arguments),
             "glioma_multi_fidelity_optimize" => self.glioma_multi_fidelity_optimize(&arguments),
             "glioma_instrument_calibration" => self.glioma_instrument_calibration(&arguments),
             "glioma_instrument_preflight" => self.glioma_instrument_preflight(&arguments),
@@ -4649,6 +4652,48 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma active-learning campaign: {error}"))
+    }
+
+    /// Score the next local assay across competing mechanistic surrogates. This route compiles a
+    /// conservative batch only; it never dispatches biology or converts model disagreement into a
+    /// clinical conclusion.
+    fn glioma_robust_active_learning(&self, arguments: &Value) -> Result<Value, String> {
+        let request: RobustActiveLearningRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_robust_active_learning requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma robust active-learning request: {error}"))?;
+        let candidates: Vec<RobustActiveLearningCandidate> = serde_json::from_value(
+            arguments
+                .get("candidates")
+                .cloned()
+                .ok_or_else(|| "glioma_robust_active_learning requires candidates".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma robust active-learning candidates: {error}"))?;
+        let observations: Vec<RobustActiveLearningObservation> = arguments
+            .get("observations")
+            .cloned()
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(|error| {
+                format!("invalid glioma robust active-learning observations: {error}")
+            })?
+            .unwrap_or_default();
+        let plan = plan_glioma_robust_active_learning(&request, &candidates, &observations)
+            .map_err(|error| format!("glioma robust active-learning refused: {error}"))?;
+        serde_json::to_value(json!({
+            "plan": plan,
+            "dispatch": "not_started",
+            "guarantees": [
+                "competing mechanistic surrogates are reliability- and prior-weighted without collapsing disagreement",
+                "lower-tail acquisition retains residual uncertainty and contradiction as explicit gates",
+                "selection respects risk, replicate, budget, model-support, and redundancy limits",
+                "MCP compiles a local next batch only; an institution-owned executor must authorize and run any assay"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma robust active-learning plan: {error}"))
     }
 
     /// Choose a bounded next batch across screening, mechanistic, and validation model systems.
@@ -45003,6 +45048,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_adaptive_information_campaign",
                 "glioma_active_learning",
                 "glioma_active_learning_campaign_execute",
+                "glioma_robust_active_learning",
                 "glioma_multi_fidelity_optimize",
                 "glioma_instrument_calibration",
                 "glioma_instrument_preflight",
@@ -52433,6 +52479,19 @@ pub fn tool_definitions() -> Vec<Value> {
                 "request": {"type": "object", "description": "ActiveLearningCampaignRequest1@1 containing ActiveLearningRequest1@1, candidates, local observations, round/retry bounds, and unresolved-stop policy."}
             },
             "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_robust_active_learning",
+        "description": "Compile a conservative next-batch plan for preclinical glioma assays across competing mechanistic surrogate models. Reliability- and prior-weighted predictions produce lower-tail utility, model-disagreement and information scores; contradiction, unsupported models, risk, replicate, cost, budget, and redundancy gates remain explicit. This route never executes biology or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "RobustActiveLearningRequest1@1 with objective, model-system, acquisition weights, budget, reliability, risk, and model ensemble declarations."},
+                "candidates": {"type": "array", "items": {"type": "object"}, "description": "RobustActiveLearningCandidate1@1 interventions with typed vectors, cost/risk, replicate ceilings, redundancy groups, and output schemas."},
+                "observations": {"type": "array", "items": {"type": "object"}, "description": "Optional RobustActiveLearningObservation1@1 local outcomes with uncertainty and content-addressed artifacts."}
+            },
+            "required": ["request", "candidates"]
         }
     }));
     definitions.push(json!({

@@ -314,7 +314,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 57;
-const TOOL_DEFINITION_COUNT: usize = 578;
+const TOOL_DEFINITION_COUNT: usize = 579;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -2185,6 +2185,49 @@ fn glioma_active_learning_campaign_executes_and_replans_in_sandbox() {
             .unwrap_or_default()
             > 0
     );
+}
+
+#[test]
+fn glioma_robust_active_learning_preserves_model_disagreement() {
+    let mut server = server();
+    let plan = call(
+        &mut server,
+        "glioma_robust_active_learning",
+        json!({
+            "request": {
+                "objective": "choose a robust organoid invasion assay",
+                "model_system": "organoid",
+                "direction": "maximize",
+                "budget_units": 4,
+                "max_selections": 2,
+                "min_observations_per_candidate": 1,
+                "lower_tail_weight_milli": 600,
+                "disagreement_weight_milli": 300,
+                "information_weight_milli": 100,
+                "cost_penalty_milli": 1,
+                "risk_penalty_milli": 1,
+                "max_risk_milli": 800,
+                "min_model_reliability_milli": 500,
+                "models": [
+                    {"model_id":"mechanistic","prior_weight_milli":600,"intercept_milli":100,"feature_weights":[4,1],"residual_milli":50,"reliability_milli":900},
+                    {"model_id":"spatial","prior_weight_milli":400,"intercept_milli":50,"feature_weights":[1,4],"residual_milli":80,"reliability_milli":800}
+                ]
+            },
+            "candidates": [
+                {"candidate_id":"egfr","mechanism_id":"egfr","feature_vector":[100,0],"cost_units":2,"risk_milli":100,"max_replicates":2,"redundancy_group":"receptor","output_schema":"Assay1@1"},
+                {"candidate_id":"matrix","mechanism_id":"matrix","feature_vector":[0,100],"cost_units":2,"risk_milli":100,"max_replicates":2,"redundancy_group":"matrix","output_schema":"Assay1@1"}
+            ]
+        }),
+    );
+    assert_eq!(plan["dispatch"], json!("not_started"));
+    assert!(plan["plan"]["selected_order"]
+        .as_array()
+        .is_some_and(|items| !items.is_empty()));
+    assert!(plan["plan"]["scores"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|score| score["model_support_count"].as_u64().unwrap_or_default() == 2));
 }
 
 #[test]

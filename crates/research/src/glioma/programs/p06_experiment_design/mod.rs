@@ -9,6 +9,7 @@ pub mod campaign;
 pub mod dose_response;
 pub mod information_design;
 pub mod multi_fidelity;
+pub mod robust_active_learning;
 pub mod synergy;
 
 pub use active_learning::{
@@ -51,6 +52,13 @@ pub use multi_fidelity::{
     FidelityCandidate, FidelityEstimate, FidelityLevel, FidelityObservation,
     MultiFidelityDisposition, MultiFidelityOptimizationError, MultiFidelityOptimizationPlan,
     MultiFidelityOptimizationRequest, OptimizationDirection,
+};
+
+pub use robust_active_learning::{
+    plan_glioma_robust_active_learning, RobustActiveLearningCandidate,
+    RobustActiveLearningCandidateDisposition, RobustActiveLearningDisposition,
+    RobustActiveLearningError, RobustActiveLearningModel, RobustActiveLearningObservation,
+    RobustActiveLearningPlan, RobustActiveLearningRequest, RobustActiveLearningScore,
 };
 pub use synergy::{
     analyze_glioma_combination_synergy, CombinationCell, CombinationCellDisposition,
