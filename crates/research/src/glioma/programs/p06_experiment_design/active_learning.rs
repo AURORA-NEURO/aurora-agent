@@ -384,15 +384,22 @@ fn score_candidate(
         .map(|observation| u64::from(observation.uncertainty_milli))
         .max()
         .unwrap_or(0);
+    let direct_count = observations
+        .iter()
+        .filter(|observation| observation.candidate_id == candidate.candidate_id)
+        .count();
     let distance_uncertainty = if nearest_count == 0 {
         1_000_000
     } else {
         (1_000_000_u64 / kernel_sum.max(1)).min(1_000_000)
     };
-    let uncertainty = residual
+    let mut uncertainty = residual
         .max(measurement)
         .max(distance_uncertainty)
         .min(1_000) as u16;
+    if direct_count > 0 && direct_count < request.min_observations_per_candidate {
+        uncertainty = 1_000;
+    }
     let exploit = i128::from(posterior_mean)
         .saturating_mul(i128::from(request.exploitation_weight_milli))
         / SCORE_SCALE;
@@ -412,6 +419,8 @@ fn score_candidate(
     let rationale = if nearest_count == 0 {
         "no local observations; exploration uncertainty is explicit and requires a first assay"
             .into()
+    } else if direct_count > 0 && direct_count < request.min_observations_per_candidate {
+        "direct replicate floor is incomplete; the candidate remains on an uncertainty hold".into()
     } else if residual > u64::from(request.min_uncertainty_milli) {
         "nearby observations disagree; uncertainty-weighted exploration remains active".into()
     } else {
