@@ -77,6 +77,8 @@ crates/research/src/glioma/
                                              P07 observation-driven campaign replanning over local actions
     p07_protocol_simulation/research_autopilot.rs
                                              P07 context-to-selection-to-execution autonomous cycle
+    p07_protocol_simulation/evidence_campaign.rs
+                                             P07 execution bridge from evidence-priority queue to local adapters
     p08_instrument_robotics/preflight.rs   P08 typed instrument/robotics interlock planning
     p09_reproducible_computation/robustness.rs
                                              P09 leave-one-batch/row-out robustness battery
@@ -140,7 +142,7 @@ portfolio plan and executable code; it does not promote a planned slot to implem
 | P04 Question-to-decision context | principal investigator | intent normalization, context compilation | bounded decision context, selected executable action batches, and unresolved omissions |
 | P05 Mechanism exploration | mechanism scientist | molecular landscape, mechanism exploration | residual-fit competing mechanisms, posterior-weighted next-assay information gain, signed mechanism-network propagation, model-averaged counterfactuals, robust lower-tail intervention portfolios, and discriminating actions |
 | P06 Power-aware experiment design | experimentalist | experiment design | falsifiable allocation, power, blocking, dose-response, adaptive replicate allocation, mechanism-aware closed-loop campaign rounds, combination-synergy fitting, and null-result plan |
-| P07 Protocol simulation | lab operations lead | protocol simulation, adaptive workflow planning | critical-path resource scheduling, context-to-action execution cycles, utilization, deterministic next batches, and repair/abstain routing before physical effects |
+| P07 Protocol simulation | lab operations lead | protocol simulation, adaptive workflow planning | critical-path scheduling, evidence-priority execution cycles, context-to-action execution, utilization, deterministic next batches, and repair/abstain routing before physical effects |
 | P08 Instrument and robotics preflight | instrument operator | instrument preflight | robust control calibration, drift detection, and signed interlocked action planning |
 | P09 Reproducible computation | computational scientist | computational execution | checkpointed/replayable computation plus omission-stress robustness suite |
 | P10 Causal interpretation and replication | methods reviewer | statistical interpretation, replication/robustness | uncertainty-aware endpoint, longitudinal, stratified causal, causal-contrast, meta-analytic, and cross-site verdicts |
@@ -305,6 +307,11 @@ The context-to-action autopilot (`execute_glioma_research_autopilot`) closes the
 path: it consumes the P04 context, selects the next dependency-safe batch, executes it through the
 same local worker seam, and returns the exact ids to recompile after new artifacts arrive. A hold
 with no runnable action produces no synthetic execution result.
+The evidence campaign bridge (`execute_glioma_evidence_campaign`) closes the preceding P01-to-P07
+handoff: it accepts the content-addressed priority plan, admits only typed local action adapters
+for selected evidence work, computes dependency closure, executes through the same portfolio
+executor, and reports missing adapters, policy blocks, partial effects, negative outcomes, and
+requeue instructions as first-class states.
 P08 now also includes deterministic instrument preflight (`preflight_glioma_instrument`). It combines
 qualified calibration, live interlock telemetry, typed operation parameters, operator authorization,
 serialized scheduling, and risk/duration budgets into a dispatch-permitted or fail-closed plan. The

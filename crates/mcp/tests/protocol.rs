@@ -314,7 +314,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 57;
-const TOOL_DEFINITION_COUNT: usize = 574;
+const TOOL_DEFINITION_COUNT: usize = 575;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -1806,6 +1806,62 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
     assert_eq!(
         evidence_priority["priority"]["actions"][0]["kind"],
         json!("refresh_stale")
+    );
+
+    let priority_action_id = evidence_priority["priority"]["selected_order"][0]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let evidence_campaign = call(
+        &mut server,
+        "glioma_evidence_campaign_execute",
+        json!({
+            "request": {
+                "objective": "rank invasion evidence refreshes",
+                "priority": evidence_priority["priority"].clone(),
+                "candidates": [{
+                    "action_id": priority_action_id,
+                    "stage_kind": "evidence_surveillance",
+                    "modality": "genomics",
+                    "model_system": "organoid",
+                    "depends_on": [],
+                    "cost_units": 1,
+                    "information_gain_milli": 900,
+                    "frontier_novelty_milli": 800,
+                    "workflow_leverage_milli": 800,
+                    "cross_stage_unlock_milli": 800,
+                    "reproducibility_safety_milli": 900,
+                    "federation_value_milli": 500,
+                    "feasibility_milli": 900,
+                    "autonomy_tier": "a1",
+                    "effects": ["read_local_data", "execute_local_computation", "write_local_artifact"]
+                }],
+                "completed_action_order": [],
+                "selection": {
+                    "budget_units": 2,
+                    "max_actions": 1,
+                    "approval_granted": true,
+                    "allow_instrument_execution": false,
+                    "allow_federation": false,
+                    "weights": {
+                        "information_gain": 25,
+                        "frontier_novelty": 20,
+                        "workflow_leverage": 15,
+                        "cross_stage_unlock": 15,
+                        "reproducibility_safety": 10,
+                        "federation_value": 10,
+                        "feasibility": 5
+                    }
+                },
+                "max_retries": 1,
+                "require_artifacts": true
+            }
+        }),
+    );
+    assert_eq!(evidence_campaign["dispatch"], json!("not_started"));
+    assert_eq!(
+        evidence_campaign["campaign"]["disposition"],
+        json!("completed")
     );
 
     let knowledge = call(

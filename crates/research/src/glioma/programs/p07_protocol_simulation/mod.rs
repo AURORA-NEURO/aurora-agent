@@ -12,6 +12,7 @@ pub use crate::glioma::workflow::{
 };
 pub mod action_execution;
 pub mod autonomous_campaign;
+pub mod evidence_campaign;
 pub mod execution;
 pub mod research_autopilot;
 pub mod simulator;
@@ -41,6 +42,11 @@ pub use execution::{
 pub use research_autopilot::{
     execute_glioma_research_autopilot, GliomaResearchAutopilotDisposition,
     GliomaResearchAutopilotError, GliomaResearchAutopilotRequest, GliomaResearchAutopilotRun,
+};
+
+pub use evidence_campaign::{
+    execute_glioma_evidence_campaign, GliomaEvidenceCampaignDisposition,
+    GliomaEvidenceCampaignError, GliomaEvidenceCampaignExecution, GliomaEvidenceCampaignRequest,
 };
 
 pub use simulator::{
