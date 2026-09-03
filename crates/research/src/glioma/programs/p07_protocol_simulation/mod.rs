@@ -16,6 +16,7 @@ pub mod autonomous_campaign;
 pub mod evidence_campaign;
 pub mod execution;
 pub mod research_autopilot;
+pub mod robust_active_learning_campaign;
 pub mod simulator;
 
 pub use action_execution::{
@@ -50,6 +51,14 @@ pub use execution::{
 pub use research_autopilot::{
     execute_glioma_research_autopilot, GliomaResearchAutopilotDisposition,
     GliomaResearchAutopilotError, GliomaResearchAutopilotRequest, GliomaResearchAutopilotRun,
+};
+
+pub use robust_active_learning_campaign::{
+    execute_glioma_robust_active_learning_campaign, DryRunRobustActiveLearningCampaignExecutor,
+    RobustActiveLearningCampaign, RobustActiveLearningCampaignDisposition,
+    RobustActiveLearningCampaignError, RobustActiveLearningCampaignExecutor,
+    RobustActiveLearningCampaignRequest, RobustActiveLearningCampaignRound,
+    RobustActiveLearningCampaignStopReason, RobustActiveLearningExecutionFailure,
 };
 
 pub use evidence_campaign::{

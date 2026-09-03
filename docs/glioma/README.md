@@ -81,6 +81,8 @@ crates/research/src/glioma/
                                              P07 execution bridge from evidence-priority queue to local adapters
     p07_protocol_simulation/active_learning_campaign.rs
                                              P07 bounded autonomous assay execution and observation-driven replanning
+    p07_protocol_simulation/robust_active_learning_campaign.rs
+                                             P07 ensemble-guided autonomous rounds with lower-tail safety gates
     p08_instrument_robotics/preflight.rs   P08 typed instrument/robotics interlock planning
     p08_instrument_robotics/execution.rs   P08 guarded execution with live rechecks and emergency stop
     p09_reproducible_computation/robustness.rs
@@ -373,6 +375,12 @@ observations. Retry, budget, replicate, redundancy, unresolved-evidence, executo
 maximum-round gates are persisted in a replayable campaign record; the bundled MCP route uses a
 deterministic sandbox executor and cannot contact hardware, move raw data, or make a clinical
 decision.
+
+P07 also exposes `execute_glioma_robust_active_learning_campaign`, which carries the ensemble
+planner through repeated local assay rounds. It re-evaluates model disagreement after every typed
+observation, keeps lower-tail and contradiction holds visible, and stops on explicit budget,
+replicate, reliability, unresolved, retry, or executor-failure gates. The result is a resumable
+research campaign rather than a one-shot ranking.
 
 The robust active-learning surface (`plan_glioma_robust_active_learning`) keeps competing
 mechanistic and spatial surrogates separate. It shrinks local observations toward reliability- and
