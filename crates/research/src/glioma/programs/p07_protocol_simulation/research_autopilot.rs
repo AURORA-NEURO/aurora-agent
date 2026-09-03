@@ -113,6 +113,7 @@ impl GliomaResearchAutopilotRun {
             || !canonical(&self.negative_evidence)
             || !canonical(&self.uncertainty)
             || self.next_step.trim().is_empty()
+            || self.action_plan.context_digest != self.context_digest
             || self.selected_order != self.action_plan.selected_order
             || self
                 .executed_order
