@@ -484,8 +484,8 @@ use bioprism_research::{
     plan_glioma_adaptive_information_campaign, plan_glioma_closed_loop_campaign,
     plan_glioma_information_design, plan_glioma_multi_fidelity_optimization,
     plan_glioma_robust_intervention_portfolio, plan_glioma_workflow, preflight_glioma_instrument,
-    propagate_glioma_mechanism_graph, qualify_evidence, select_glioma_actions,
-    simulate_glioma_counterfactual, simulate_glioma_counterfactual_ensemble,
+    prioritize_knowledge_frontier, propagate_glioma_mechanism_graph, qualify_evidence,
+    select_glioma_actions, simulate_glioma_counterfactual, simulate_glioma_counterfactual_ensemble,
     simulate_glioma_protocol, surveil_glioma_evidence, validate_feature_catalog,
     ActionPortfolioExecutionRequest, AdaptiveAllocationRequest, AdaptiveArmObservation,
     AdaptiveInformationCampaignRequest, AdaptiveInformationObservation, AnalysisDataset,
@@ -500,16 +500,17 @@ use bioprism_research::{
     FederatedBenchmarkRequest, FederatedBenchmarkSite, FidelityCandidate, FidelityObservation,
     GliomaActionCandidate, GliomaAutonomousCampaignRequest, GliomaResearchAutopilotRequest,
     GliomaResearchIntent, GliomaWorkflowRequest, HarmonizationRequest, HarmonizationVector,
-    InformationDesignRequest, InstrumentPreflightRequest, KnowledgeRequest, LatentFactorRequest,
-    LatentFactorVector, LigandReceptorPair, MechanismActionPlannerConfig, MechanismCandidate,
-    MechanismDiscrimination, MechanismDiscriminationRequest, MechanismDiscriminatorAction,
-    MechanismFeatureObservation, MechanismGraphEdge, MechanismGraphNode, MechanismGraphRequest,
-    MechanismHypothesis, MechanismRequest, MediationObservation, MediationRequest,
-    MetaAnalysisRequest, ModalityVector, MultiFidelityOptimizationRequest, MultimodalObservation,
-    MultimodalRequest, ProtocolExecutionRequest, ProtocolSimulationRequest, ReplicationRequest,
-    ReplicationStudy, ResearchObjectRequest, RobustInterventionCandidate,
-    RobustInterventionRequest, RobustnessRequest, SensitivityObservation, SensitivityRequest,
-    SpatialCell, SpatialCommunicationCell, SpatialCommunicationRequest, SpatialNicheRequest,
+    InformationDesignRequest, InstrumentPreflightRequest, KnowledgeFrontierRequest,
+    KnowledgeRequest, LatentFactorRequest, LatentFactorVector, LigandReceptorPair,
+    MechanismActionPlannerConfig, MechanismCandidate, MechanismDiscrimination,
+    MechanismDiscriminationRequest, MechanismDiscriminatorAction, MechanismFeatureObservation,
+    MechanismGraphEdge, MechanismGraphNode, MechanismGraphRequest, MechanismHypothesis,
+    MechanismRequest, MediationObservation, MediationRequest, MetaAnalysisRequest, ModalityVector,
+    MultiFidelityOptimizationRequest, MultimodalObservation, MultimodalRequest,
+    ProtocolExecutionRequest, ProtocolSimulationRequest, ReplicationRequest, ReplicationStudy,
+    ResearchObjectRequest, RobustInterventionCandidate, RobustInterventionRequest,
+    RobustnessRequest, SensitivityObservation, SensitivityRequest, SpatialCell,
+    SpatialCommunicationCell, SpatialCommunicationRequest, SpatialNicheRequest,
     SpatialPropagationRequest, StateTransitionObservation, StateTransitionRequest,
     StaticGliomaActionPlanner, StratifiedCausalRequest, StratifiedObservation,
     TrajectoryObservation, TrajectoryRequest, TypedKnowledge,
@@ -1983,6 +1984,7 @@ impl Server {
             "glioma_evidence_qualify" => self.glioma_evidence_qualify(&arguments),
             "glioma_evidence_surveillance" => self.glioma_evidence_surveillance(&arguments),
             "glioma_knowledge_compile" => self.glioma_knowledge_compile(&arguments),
+            "glioma_knowledge_frontier" => self.glioma_knowledge_frontier(&arguments),
             "glioma_decision_context" => self.glioma_decision_context(&arguments),
             "glioma_decision_action_plan" => self.glioma_decision_action_plan(&arguments),
             "glioma_multimodal_qc" => self.glioma_multimodal_qc(&arguments),
@@ -4050,6 +4052,38 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma typed knowledge: {error}"))
+    }
+
+    /// Rank the claims that should drive the next autonomous glioma research cycle. This is a
+    /// local prioritizer over typed knowledge; it does not fetch evidence or promote a claim.
+    fn glioma_knowledge_frontier(&self, arguments: &Value) -> Result<Value, String> {
+        let request: KnowledgeFrontierRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_knowledge_frontier requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma knowledge-frontier request: {error}"))?;
+        let knowledge: TypedKnowledge = serde_json::from_value(
+            arguments
+                .get("knowledge")
+                .cloned()
+                .ok_or_else(|| "glioma_knowledge_frontier requires knowledge".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma typed knowledge: {error}"))?;
+        let frontier = prioritize_knowledge_frontier(&request, &knowledge)
+            .map_err(|error| format!("glioma knowledge frontier refused: {error}"))?;
+        serde_json::to_value(json!({
+            "frontier": frontier,
+            "dispatch": "not_started",
+            "guarantees": [
+                "coverage debt, contradiction, uncertainty, support, and workflow leverage are scored deterministically",
+                "selected claim ids are suitable for the next P04 decision-context cycle",
+                "negative and unresolved evidence remain visible and no claim evidence state is upgraded",
+                "the route performs no external retrieval, biological execution, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma knowledge frontier: {error}"))
     }
 
     /// Turn typed glioma knowledge gaps into executable candidates for the bounded action
@@ -44781,6 +44815,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_evidence_qualify",
                 "glioma_evidence_surveillance",
                 "glioma_knowledge_compile",
+                "glioma_knowledge_frontier",
                 "glioma_decision_context",
                 "glioma_decision_action_plan",
                 "glioma_multimodal_qc",
@@ -52009,6 +52044,18 @@ pub fn tool_definitions() -> Vec<Value> {
                 "records": {"type": "array", "items": {"type": "object"}, "description": "Local EvidenceRecord1@1 values."}
             },
             "required": ["request", "records"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_knowledge_frontier",
+        "description": "Prioritize the next scientific frontier in typed preclinical glioma knowledge. Scores coverage debt, contradiction, unresolved evidence, support, and workflow leverage, returns explicit action modes for the next decision-context cycle, preserves negative findings, and performs no retrieval, biological execution, or clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "KnowledgeFrontierRequest1@1 with objective, selection bound, minimum priority, and 1,000-unit weighting policy."},
+                "knowledge": {"type": "object", "description": "TypedKnowledge1@1 from glioma_knowledge_compile."}
+            },
+            "required": ["request", "knowledge"]
         }
     }));
     definitions.push(json!({

@@ -1,7 +1,13 @@
 //! Evidence-to-typed-knowledge program ownership.
 
+pub mod claim_frontier;
 pub mod knowledge_graph;
 
+pub use claim_frontier::{
+    prioritize_knowledge_frontier, FrontierActionKind, KnowledgeFrontier,
+    KnowledgeFrontierDisposition, KnowledgeFrontierError, KnowledgeFrontierRequest,
+    KnowledgeFrontierScore, KnowledgeFrontierWeights,
+};
 pub use knowledge_graph::{
     compile_typed_knowledge, KnowledgeClaim, KnowledgeClaimDisposition, KnowledgeDisposition,
     KnowledgeError, KnowledgeRequest, TypedKnowledge,

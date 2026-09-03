@@ -39,8 +39,10 @@ pub use programs::p01_evidence_surveillance::{
     EvidenceSurveillanceError, EvidenceSurveillanceRequest,
 };
 pub use programs::p02_evidence_knowledge::{
-    compile_typed_knowledge, KnowledgeClaim, KnowledgeClaimDisposition, KnowledgeDisposition,
-    KnowledgeError, KnowledgeRequest, TypedKnowledge,
+    compile_typed_knowledge, prioritize_knowledge_frontier, FrontierActionKind, KnowledgeClaim,
+    KnowledgeClaimDisposition, KnowledgeDisposition, KnowledgeError, KnowledgeFrontier,
+    KnowledgeFrontierDisposition, KnowledgeFrontierError, KnowledgeFrontierRequest,
+    KnowledgeFrontierScore, KnowledgeFrontierWeights, KnowledgeRequest, TypedKnowledge,
 };
 pub use programs::p03_multimodal_ingestion_qc::{
     analyze_glioma_latent_factors, analyze_glioma_spatial_communication,

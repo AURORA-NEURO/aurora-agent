@@ -20,6 +20,8 @@ crates/research/src/glioma/
   evidence.rs                              P01 evidence qualification
   programs/p02_evidence_knowledge/knowledge_graph.rs
                                              P02 scoped claim graph and support/contradiction synthesis
+  programs/p02_evidence_knowledge/claim_frontier.rs
+                                             P02 uncertainty/coverage/contradiction frontier prioritization
   programs/p04_decision_context/context_compiler.rs
                                              P04 evidence-gap to typed next-action compilation
   programs/p04_decision_context/action_bridge.rs
@@ -131,7 +133,7 @@ portfolio plan and executable code; it does not promote a planned slot to implem
 | Program | Product owner | Engine stages | Observable product result |
 | --- | --- | --- | --- |
 | P01 Evidence surveillance | evidence curator | evidence surveillance | snapshot deltas, prioritized review/revalidation actions, and stale/unknown/contradictory coverage |
-| P02 Evidence-to-typed-knowledge | knowledge engineer | evidence compilation | scoped claims and competing explanations bound to source artifacts |
+| P02 Evidence-to-typed-knowledge | knowledge engineer | evidence compilation | scoped claims, ranked uncertainty frontiers, and competing explanations bound to source artifacts |
 | P03 Multimodal ingestion and QC | data steward | multimodal ingestion/QC | comparable cells, robust batch harmonization, feature-level concordance, consensus clusters, spatial niches, ligand-receptor communication, spatial-state diffusion, and explicit defects |
 | P04 Question-to-decision context | principal investigator | intent normalization, context compilation | bounded decision context, selected executable action batches, and unresolved omissions |
 | P05 Mechanism exploration | mechanism scientist | molecular landscape, mechanism exploration | residual-fit competing mechanisms, posterior-weighted next-assay information gain, signed mechanism-network propagation, model-averaged counterfactuals, robust lower-tail intervention portfolios, and discriminating actions |
@@ -220,6 +222,9 @@ imputes isolated cells, or presents a spatial simulation as biological proof.
 P02 now includes typed-knowledge compilation (`compile_typed_knowledge`) that coalesces scoped
 claims, ranks support against contradiction, preserves negative/unknown evidence, and exposes
 missing modality/model coverage for the next workflow action.
+The claim frontier (`prioritize_knowledge_frontier`) then scores coverage debt, contradiction,
+unresolved evidence, support, and workflow leverage to choose which claims should drive the next
+P04/P07 cycle; it returns explicit action modes and never upgrades a claim's evidence state.
 P04 now includes decision-context compilation (`compile_decision_context`) that converts those
 gaps into typed A1 candidates for coverage closure, contradiction replication, negative-result
 falsification, evidence resolution, or mechanism validation; the existing action selector then

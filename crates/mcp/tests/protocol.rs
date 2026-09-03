@@ -314,7 +314,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 57;
-const TOOL_DEFINITION_COUNT: usize = 572;
+const TOOL_DEFINITION_COUNT: usize = 573;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -1795,6 +1795,34 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
     );
     assert_eq!(knowledge["dispatch"], json!("not_started"));
     assert_eq!(knowledge["knowledge"]["disposition"], json!("qualified"));
+
+    let knowledge_frontier = call(
+        &mut server,
+        "glioma_knowledge_frontier",
+        json!({
+            "request": {
+                "objective": "rank invasion mechanisms",
+                "max_selected_claims": 8,
+                "min_priority_milli": 0,
+                "weights": {
+                    "coverage_debt_milli": 250,
+                    "contradiction_milli": 250,
+                    "uncertainty_milli": 200,
+                    "support_milli": 150,
+                    "workflow_leverage_milli": 150
+                }
+            },
+            "knowledge": knowledge["knowledge"].clone()
+        }),
+    );
+    assert_eq!(knowledge_frontier["dispatch"], json!("not_started"));
+    assert_eq!(
+        knowledge_frontier["frontier"]["selected_order"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
 
     let decision_context = call(
         &mut server,
