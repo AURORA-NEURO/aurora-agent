@@ -34,9 +34,11 @@ pub use multimodal::{
     harmonize_multimodal_inputs, MultimodalObservation, MultimodalQcReport, MultimodalRequest,
 };
 pub use programs::p01_evidence_surveillance::{
-    surveil_glioma_evidence, EvidenceChange, EvidenceChangeKind, EvidenceSurveillance,
-    EvidenceSurveillanceAction, EvidenceSurveillanceActionKind, EvidenceSurveillanceDisposition,
-    EvidenceSurveillanceError, EvidenceSurveillanceRequest,
+    prioritize_glioma_evidence, surveil_glioma_evidence, EvidenceChange, EvidenceChangeKind,
+    EvidencePriorityAction, EvidencePriorityActionKind, EvidencePriorityDisposition,
+    EvidencePriorityError, EvidencePriorityPlan, EvidencePriorityRequest, EvidencePriorityWeights,
+    EvidenceSurveillance, EvidenceSurveillanceAction, EvidenceSurveillanceActionKind,
+    EvidenceSurveillanceDisposition, EvidenceSurveillanceError, EvidenceSurveillanceRequest,
 };
 pub use programs::p02_evidence_knowledge::{
     compile_typed_knowledge, prioritize_knowledge_frontier, FrontierActionKind, KnowledgeClaim,

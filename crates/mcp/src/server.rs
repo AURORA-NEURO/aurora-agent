@@ -484,18 +484,19 @@ use bioprism_research::{
     plan_glioma_adaptive_information_campaign, plan_glioma_closed_loop_campaign,
     plan_glioma_information_design, plan_glioma_multi_fidelity_optimization,
     plan_glioma_robust_intervention_portfolio, plan_glioma_workflow, preflight_glioma_instrument,
-    prioritize_knowledge_frontier, propagate_glioma_mechanism_graph, qualify_evidence,
-    select_glioma_actions, simulate_glioma_counterfactual, simulate_glioma_counterfactual_ensemble,
-    simulate_glioma_protocol, surveil_glioma_evidence, validate_feature_catalog,
-    ActionPortfolioExecutionRequest, AdaptiveAllocationRequest, AdaptiveArmObservation,
-    AdaptiveInformationCampaignRequest, AdaptiveInformationObservation, AnalysisDataset,
-    AnalysisRequest, CalibrationRequest, CalibrationRun, CampaignAction, CampaignMechanism,
-    CampaignObservation, CausalContrastRequest, ClosedLoopCampaignRequest, CombinationObservation,
-    CombinationSynergyRequest, ComputationExecutionRequest, ConcordanceRequest, ConsensusRequest,
-    CounterfactualEnsembleRequest, CounterfactualIntervention, CounterfactualModel,
-    CounterfactualRequest, DecisionActionPlanRequest, DecisionContext, DecisionContextRequest,
-    DesignAction, DesignMechanism, DoseResponseObservation, DoseResponseRequest,
-    DryRunGliomaActionExecutor, DryRunGliomaComputationExecutor, DryRunGliomaProtocolExecutor,
+    prioritize_glioma_evidence, prioritize_knowledge_frontier, propagate_glioma_mechanism_graph,
+    qualify_evidence, select_glioma_actions, simulate_glioma_counterfactual,
+    simulate_glioma_counterfactual_ensemble, simulate_glioma_protocol, surveil_glioma_evidence,
+    validate_feature_catalog, ActionPortfolioExecutionRequest, AdaptiveAllocationRequest,
+    AdaptiveArmObservation, AdaptiveInformationCampaignRequest, AdaptiveInformationObservation,
+    AnalysisDataset, AnalysisRequest, CalibrationRequest, CalibrationRun, CampaignAction,
+    CampaignMechanism, CampaignObservation, CausalContrastRequest, ClosedLoopCampaignRequest,
+    CombinationObservation, CombinationSynergyRequest, ComputationExecutionRequest,
+    ConcordanceRequest, ConsensusRequest, CounterfactualEnsembleRequest,
+    CounterfactualIntervention, CounterfactualModel, CounterfactualRequest,
+    DecisionActionPlanRequest, DecisionContext, DecisionContextRequest, DesignAction,
+    DesignMechanism, DoseResponseObservation, DoseResponseRequest, DryRunGliomaActionExecutor,
+    DryRunGliomaComputationExecutor, DryRunGliomaProtocolExecutor, EvidencePriorityRequest,
     EvidenceRecord, EvidenceRequest, EvidenceSurveillanceRequest, ExperimentArm, ExperimentRequest,
     FederatedBenchmarkRequest, FederatedBenchmarkSite, FidelityCandidate, FidelityObservation,
     GliomaActionCandidate, GliomaAutonomousCampaignRequest, GliomaResearchAutopilotRequest,
@@ -1983,6 +1984,7 @@ impl Server {
             "glioma_program_catalog" => self.glioma_program_catalog(&arguments),
             "glioma_evidence_qualify" => self.glioma_evidence_qualify(&arguments),
             "glioma_evidence_surveillance" => self.glioma_evidence_surveillance(&arguments),
+            "glioma_evidence_priority" => self.glioma_evidence_priority(&arguments),
             "glioma_knowledge_compile" => self.glioma_knowledge_compile(&arguments),
             "glioma_knowledge_frontier" => self.glioma_knowledge_frontier(&arguments),
             "glioma_decision_context" => self.glioma_decision_context(&arguments),
@@ -4020,6 +4022,39 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma evidence surveillance: {error}"))
+    }
+
+    /// Rank concrete refresh, resolution, measurement, revalidation, coverage, and replication
+    /// actions for the next local glioma research cycle. This route only schedules work over a
+    /// caller-supplied snapshot; it does not fetch evidence or execute biology.
+    fn glioma_evidence_priority(&self, arguments: &Value) -> Result<Value, String> {
+        let request: EvidencePriorityRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_evidence_priority requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma evidence-priority request: {error}"))?;
+        let records: Vec<EvidenceRecord> = serde_json::from_value(
+            arguments
+                .get("records")
+                .cloned()
+                .ok_or_else(|| "glioma_evidence_priority requires records".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma evidence-priority records: {error}"))?;
+        let priority = prioritize_glioma_evidence(&request, &records)
+            .map_err(|error| format!("glioma evidence prioritization refused: {error}"))?;
+        serde_json::to_value(json!({
+            "priority": priority,
+            "dispatch": "not_started",
+            "guarantees": [
+                "recency, evidence state pressure, quality, relevance, reproducibility, and coverage debt are scored deterministically",
+                "stale, contradictory, unknown, negative, coverage-deficient, and supported records become explicit bounded actions",
+                "negative evidence and unresolved uncertainty remain visible in the plan and are never promoted",
+                "the route performs no external retrieval, source movement, biological execution, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma evidence priority: {error}"))
     }
 
     /// Compile caller-supplied local evidence into scoped, ranked preclinical glioma knowledge.
@@ -44814,6 +44849,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_program_catalog",
                 "glioma_evidence_qualify",
                 "glioma_evidence_surveillance",
+                "glioma_evidence_priority",
                 "glioma_knowledge_compile",
                 "glioma_knowledge_frontier",
                 "glioma_decision_context",
@@ -52032,6 +52068,18 @@ pub fn tool_definitions() -> Vec<Value> {
                 "current": {"type": "array", "items": {"type": "object"}, "description": "Current local EvidenceRecord1@1 snapshot."}
             },
             "required": ["request", "previous", "current"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_evidence_priority",
+        "description": "Prioritize concrete next actions over a current local preclinical glioma evidence snapshot using deterministic recency decay, evidence-state pressure, quality, relevance, reproducibility, and modality/model coverage debt. Returns refresh, contradiction-resolution, unknown-measurement, negative-revalidation, coverage, and supported-replication actions with bounded selection and explicit uncertainty; it does not fetch sources, move raw data, execute biology, or make a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "EvidencePriorityRequest1@1 with objective, current epoch, recency half-life, required modality/model coverage, action bound, minimum priority, and weights summing to 1,000 milli-units."},
+                "records": {"type": "array", "items": {"type": "object"}, "description": "Current local EvidenceRecord1@1 snapshot; negative, stale, contradictory, unknown, and unmeasured records are valid inputs."}
+            },
+            "required": ["request", "records"]
         }
     }));
     definitions.push(json!({

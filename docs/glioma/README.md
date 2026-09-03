@@ -40,6 +40,8 @@ crates/research/src/glioma/
                                              P05 compiler from discriminator information gain to executable assay actions
   programs/p01_evidence_surveillance/surveillance.rs
                                              P01 snapshot delta surveillance and prioritized evidence review actions
+  programs/p01_evidence_surveillance/priority.rs
+                                             P01 recency/state/coverage action queue for the next autonomous cycle
   programs/p08_instrument_robotics/calibration.rs
                                              P08 robust control calibration and Theil-Sen instrument drift detection
   programs/p06_experiment_design/adaptive_allocation.rs
@@ -132,7 +134,7 @@ portfolio plan and executable code; it does not promote a planned slot to implem
 
 | Program | Product owner | Engine stages | Observable product result |
 | --- | --- | --- | --- |
-| P01 Evidence surveillance | evidence curator | evidence surveillance | snapshot deltas, prioritized review/revalidation actions, and stale/unknown/contradictory coverage |
+| P01 Evidence surveillance | evidence curator | evidence surveillance | snapshot deltas, recency/state/coverage action queues, review/revalidation actions, and stale/unknown/contradictory coverage |
 | P02 Evidence-to-typed-knowledge | knowledge engineer | evidence compilation | scoped claims, ranked uncertainty frontiers, and competing explanations bound to source artifacts |
 | P03 Multimodal ingestion and QC | data steward | multimodal ingestion/QC | comparable cells, robust batch harmonization, feature-level concordance, consensus clusters, spatial niches, ligand-receptor communication, spatial-state diffusion, and explicit defects |
 | P04 Question-to-decision context | principal investigator | intent normalization, context compilation | bounded decision context, selected executable action batches, and unresolved omissions |
@@ -185,7 +187,12 @@ into explicit hold/abstain branches. Checkpoint output digests are bound into th
 a resumed campaign cannot silently swap a local evidence, QC, mechanism, or design object. P04
 retains an explicit ownership folder and catalog route. P08 now includes robust instrument-control
 calibration and Theil–Sen drift detection, while P12 includes aggregate-only federated benchmark
-consensus with heterogeneity and leave-site-out influence bounds. P09 now includes a bounded robustness suite (`assess_glioma_robustness`) that
+consensus with heterogeneity and leave-site-out influence bounds. P01 now also compiles a deterministic
+evidence-priority queue from the current local snapshot: stale, contradictory, unknown, negative,
+coverage-deficient, and supported records become explicit refresh, resolution, measurement,
+revalidation, coverage, or replication actions for the next P04/P07 cycle. The queue is bounded,
+content-addressed, and keeps negative/uncertain records visible; it never fetches sources or
+promotes a claim. P09 now includes a bounded robustness suite (`assess_glioma_robustness`) that
 recomputes the declared effect under leave-one-batch-out and optional leave-one-row-out omissions;
 unresolved subsets, fragile effects, and null results remain explicit. Provider-specific execution
 for the remaining programs remains subsequent build work rather than being implied as complete.

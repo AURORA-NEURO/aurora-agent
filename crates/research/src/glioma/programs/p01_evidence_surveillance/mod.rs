@@ -2,8 +2,14 @@
 
 use crate::glioma::catalog::{glioma_program_catalog, GliomaProgramDescriptor, GliomaProgramId};
 
+pub mod priority;
 pub mod surveillance;
 
+pub use priority::{
+    prioritize_glioma_evidence, EvidencePriorityAction, EvidencePriorityActionKind,
+    EvidencePriorityDisposition, EvidencePriorityError, EvidencePriorityPlan,
+    EvidencePriorityRequest, EvidencePriorityWeights,
+};
 pub use surveillance::{
     surveil_glioma_evidence, EvidenceChange, EvidenceChangeKind, EvidenceSurveillance,
     EvidenceSurveillanceAction, EvidenceSurveillanceActionKind, EvidenceSurveillanceDisposition,

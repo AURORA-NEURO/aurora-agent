@@ -314,7 +314,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 57;
-const TOOL_DEFINITION_COUNT: usize = 573;
+const TOOL_DEFINITION_COUNT: usize = 574;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -1763,6 +1763,49 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
     assert_eq!(
         evidence_surveillance["surveillance"]["actions"][0]["kind"],
         json!("investigate_contradiction")
+    );
+
+    let evidence_priority = call(
+        &mut server,
+        "glioma_evidence_priority",
+        json!({
+            "request": {
+                "objective": "rank invasion evidence refreshes",
+                "current_epoch": 10,
+                "recency_half_life_epochs": 4,
+                "required_modalities": [],
+                "required_model_systems": [],
+                "max_actions": 8,
+                "min_priority_milli": 0,
+                "weights": {
+                    "recency_milli": 100,
+                    "state_pressure_milli": 300,
+                    "quality_milli": 100,
+                    "relevance_milli": 150,
+                    "reproducibility_milli": 150,
+                    "coverage_debt_milli": 200
+                }
+            },
+            "records": [{
+                "evidence_id": "mcp-priority-1",
+                "source_artifact": {"artifact_id":"mcp-priority-artifact","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-evidence+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},
+                "source_kind": "dataset",
+                "claim": "EGFR signaling increases invasion",
+                "scope": "preclinical glioma",
+                "modality": "genomics",
+                "model_system": "organoid",
+                "state": "stale",
+                "relevance_milli": 900,
+                "quality_milli": 900,
+                "reproducibility_milli": 900,
+                "release_epoch": 1
+            }]
+        }),
+    );
+    assert_eq!(evidence_priority["dispatch"], json!("not_started"));
+    assert_eq!(
+        evidence_priority["priority"]["actions"][0]["kind"],
+        json!("refresh_stale")
     );
 
     let knowledge = call(
