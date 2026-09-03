@@ -246,7 +246,6 @@ fn validate_request(
     if request.objective.trim().is_empty()
         || request.budget_units == 0
         || request.max_selections == 0
-        || candidates.is_empty()
         || candidates.len() > MAX_CANDIDATES
         || observations.len() > MAX_OBSERVATIONS
         || request.min_observations_per_candidate == 0
@@ -258,7 +257,13 @@ fn validate_request(
             "objective, bounded candidates, positive budget/selection/replicate floors, and weights summing to 1,000 are required".into(),
         ));
     }
-    let dimensions = candidates[0].feature_vector.len();
+    let dimensions = candidates
+        .first()
+        .map(|candidate| candidate.feature_vector.len())
+        .unwrap_or(0);
+    if candidates.is_empty() {
+        return Ok(0);
+    }
     if dimensions == 0 || dimensions > MAX_DIMENSIONS {
         return Err(ActiveLearningError::InvalidCandidate(
             "feature vectors must have a shared non-zero bounded dimension".into(),
@@ -696,5 +701,14 @@ mod tests {
             .scores
             .iter()
             .all(|score| score.rationale.contains("no local observations")));
+    }
+
+    #[test]
+    fn empty_candidate_pool_is_an_explicit_hold() {
+        let plan = plan_glioma_active_learning(&request(), &[], &[]).unwrap();
+        assert_eq!(plan.disposition, ActiveLearningDisposition::NoCandidates);
+        assert!(plan.selected_order.is_empty());
+        assert!(plan.uncertainty.is_empty());
+        plan.validate().unwrap();
     }
 }
