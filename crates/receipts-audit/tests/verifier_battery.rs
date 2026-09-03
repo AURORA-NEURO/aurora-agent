@@ -306,7 +306,7 @@ const WORKBENCH_REQUEST_INPUT: &str = "a caller-supplied input to the verificati
     Refusing an unrecognised key on them would reject a forward-compatible request without \
     protecting any digest, so the reader drops it and this entry records the decision";
 
-const KNOWN_GAPS: [KnownGap; 34] = [
+const KNOWN_GAPS: [KnownGap; 36] = [
     KnownGap {
         label: "cookbook_report",
         mutator: "digest_length_change",
@@ -560,6 +560,23 @@ const KNOWN_GAPS: [KnownGap; 34] = [
         pointer: "/ci_replay",
         subtree: true,
         reason: DEFAULTED_FIELD,
+    },
+    KnownGap {
+        label: "workbench_verification",
+        mutator: "sibling_swap",
+        pointer: "/ci_replay/triggers",
+        subtree: false,
+        reason: "CiRequest triggers are a set semantically: `plan_ci` validates uniqueness and
+                 sorts them before rendering the content-addressed plan, so exchanging two
+                 trigger values leaves the requested workflow unchanged",
+    },
+    KnownGap {
+        label: "workbench_verification",
+        mutator: "array_reordering",
+        pointer: "/ci_replay/triggers",
+        subtree: false,
+        reason: "the same set semantics as sibling swaps: trigger order is canonicalized before
+                 the CI plan digest is produced",
     },
     KnownGap {
         label: "external_payload_replay_request",
@@ -847,7 +864,7 @@ const COVERED_BY_THE_RECEIPT_BATTERY: [(&str, &str); 5] = [
 ///
 /// A battery of document mutations has nothing to say to any of these: there is no document, or
 /// the integrity claim belongs to a chain, a key, or a live struct rather than to bytes on a wire.
-const NOT_A_DOCUMENT_VERIFIER: [(&str, &str); 31] = [
+const NOT_A_DOCUMENT_VERIFIER: [(&str, &str); 63] = [
     (
         "bundle/src/attestation.rs::verify",
         "a MAC tag over a key and purpose preimage, not a document",
@@ -971,6 +988,134 @@ const NOT_A_DOCUMENT_VERIFIER: [(&str, &str); 31] = [
     (
         "fabric/src/synth.rs::verifying",
         "a builder that inserts a role edge; the name prefix is a coincidence",
+    ),
+    (
+        "adapter/src/quality_control.rs::verify_payload",
+        "checks a caller-owned quality-control payload against a live artifact contract; it does not verify a self-sealed document",
+    ),
+    (
+        "adapter/src/research_ingest.rs::verify_ingestion",
+        "compares a live ingestion bundle with its local source manifest before publication",
+    ),
+    (
+        "bioethics/src/prospective_computational_execution_assurance.rs::verify",
+        "validates and plans a live ResearchWorkflowSpec; the returned execution run is not a document self-verifier",
+    ),
+    (
+        "bioethics/src/prospective_computational_execution_assurance.rs::verify_json",
+        "deserializes a workflow request and delegates to the live prospective execution assurance gate",
+    ),
+    (
+        "bioir/src/knowledge.rs::verify",
+        "checks a live evidence-synthesis object against a payload and policy, with no self-sealing digest",
+    ),
+    (
+        "brain/src/evidence_safety_assurance.rs::verify_evidence_safety",
+        "runs a live evidence-feed assurance harness and returns witnesses rather than verifying serialized bytes",
+    ),
+    (
+        "brain/src/federated_retrieval_assurance_harness.rs::verify_federated_retrieval_assurance",
+        "assures a live federated retrieval request through policy and locality gates",
+    ),
+    (
+        "brain/src/federated_safety_assurance.rs::verify_federated_safety",
+        "assures a live federation feed request; its result is a capability receipt, not a sealed input document",
+    ),
+    (
+        "brain/src/multimodal_retrieval_assurance_harness.rs::verify_multimodal_retrieval_assurance",
+        "assures a live multimodal retrieval query and its coverage witnesses",
+    ),
+    (
+        "brain/src/multimodal_safety_assurance.rs::verify_multimodal_safety",
+        "assures a live multimodal evidence feed against coverage and policy predicates",
+    ),
+    (
+        "brain/src/retrieval_assurance_harness.rs::verify_retrieval_assurance",
+        "assures a live scoped retrieval query and replay witnesses",
+    ),
+    (
+        "brain/src/throughput_retrieval_assurance_harness.rs::verify_throughput_retrieval_assurance",
+        "assures a live throughput retrieval request with queue and overflow witnesses",
+    ),
+    (
+        "brain/src/throughput_safety_assurance.rs::verify_throughput_safety",
+        "assures a live high-throughput evidence feed under capacity and replay constraints",
+    ),
+    (
+        "cli/src/computational_execution_assurance.rs::verify",
+        "validates a live computational execution request for the CLI surface",
+    ),
+    (
+        "cli/src/computational_execution_assurance.rs::verify_json",
+        "deserializes and validates a CLI computational execution request, not a self-sealed document",
+    ),
+    (
+        "cli/src/federated_retrieval_assurance.rs::verify",
+        "validates a live federated retrieval request for the CLI surface",
+    ),
+    (
+        "cli/src/federated_retrieval_assurance.rs::verify_json",
+        "deserializes and validates a CLI federated retrieval request",
+    ),
+    (
+        "cli/src/knowledge_interop.rs::verify",
+        "checks live knowledge interoperability constraints rather than a serialized digest",
+    ),
+    (
+        "cli/src/protocol_simulation_assurance.rs::verify",
+        "assures a live protocol-simulation request and returns a run projection",
+    ),
+    (
+        "cli/src/protocol_simulation_assurance.rs::verify_json",
+        "deserializes and validates a CLI protocol-simulation request",
+    ),
+    (
+        "cli/src/retrieval_synthesis_assurance.rs::verify",
+        "assures a live retrieval-synthesis request for the CLI surface",
+    ),
+    (
+        "cli/src/retrieval_synthesis_assurance.rs::verify_json",
+        "deserializes and validates a CLI retrieval-synthesis request",
+    ),
+    (
+        "evalengine/src/replication.rs::verify_payload",
+        "checks a caller-owned replication payload against an evaluation contract",
+    ),
+    (
+        "fiber/src/research_context.rs::verify_payload",
+        "checks a live research-context payload; integrity belongs to its referenced artifact",
+    ),
+    (
+        "foundation/src/research.rs::verify_payload",
+        "checks a live research payload against foundation invariants",
+    ),
+    (
+        "lab/src/experiment_design.rs::verify_artifact",
+        "verifies a referenced experiment-design artifact's bytes, not a serialized self-sealed record",
+    ),
+    (
+        "lab/src/protocol_simulation.rs::verify_artifact",
+        "verifies a referenced protocol-simulation artifact's bytes",
+    ),
+    (
+        "runtime/src/replay_audit.rs::verify_payload",
+        "checks a live replay-audit payload against its runtime contract",
+    ),
+    (
+        "runtime/src/research_run.rs::verify",
+        "validates a live research run and its execution state",
+    ),
+    (
+        "services/src/federation.rs::verify_signed_federation",
+        "verifies a signed federation artifact with a caller-supplied key and payload bytes",
+    ),
+    (
+        "services/src/federation.rs::verifying_key",
+        "derives an in-memory verification key; the name begins with verify but performs no verification",
+    ),
+    (
+        "services/src/research_release.rs::verify_research_release",
+        "verifies a signed research release using a receiving institution's key and live object",
     ),
 ];
 
@@ -1125,8 +1270,8 @@ fn every_document_verifier_in_the_workspace_is_covered_or_recorded() {
             NOT_A_DOCUMENT_VERIFIER.len(),
             UNCOVERED_DOCUMENT_VERIFIERS.len(),
         ),
-        (11, 5, 31, 10),
-        "eleven entry points driven here, five by the first battery, thirty-one that verify \
+        (11, 5, 63, 10),
+        "eleven entry points driven here, five by the first battery, sixty-three that verify \
          something other than a document, and ten document verifiers no battery reaches yet"
     );
 }
@@ -1279,7 +1424,7 @@ fn the_whole_battery_finds_no_hole_outside_the_gaps_this_repository_has_named() 
     // about coverage, so exactness lives where it is meaningful and the total is a floor.
     assert_eq!(
         total_positions,
-        5_221,
+        5_229,
         "every position the battery visits is a pinned claim; bounds were:\n{}",
         bounds.join("\n")
     );
@@ -1446,7 +1591,7 @@ fn object_key_reordering_never_changes_a_verdict_at_any_position() {
         cases_run += cases.len();
     }
     assert_eq!(
-        cases_run, 1_271,
+        cases_run, 1_273,
         "reordering cases across thirteen documents"
     );
 }
@@ -1474,7 +1619,7 @@ fn array_reordering_always_changes_a_verdict_at_any_position() {
         cases_run, 541,
         "array reordering cases across thirteen documents"
     );
-    excused.pin(3, &[("repair_acceptance_report", 4)], "array reordering");
+    excused.pin(4, &[("repair_acceptance_report", 4)], "array reordering");
 }
 
 // -- absent, malformed, and mismatching digests stay three different answers ---------------------
@@ -1574,7 +1719,7 @@ fn deleting_any_field_at_any_visited_position_is_rejected_and_never_silently_acc
         }
         cases_run += cases.len();
     }
-    assert_eq!(cases_run, 5_208, "deletion cases across thirteen documents");
+    assert_eq!(cases_run, 5_216, "deletion cases across thirteen documents");
     excused.pin(23, &[("repair_acceptance_report", 16)], "deletion");
 }
 
@@ -1599,7 +1744,7 @@ fn replacing_any_visited_value_with_an_empty_string_or_null_is_rejected() {
         cases_run += cases.len();
     }
     assert_eq!(
-        cases_run, 10_400,
+        cases_run, 10_416,
         "empty-or-null cases across thirteen documents"
     );
     excused.pin(0, &[("repair_acceptance_report", 21)], "empty or null");
@@ -1647,8 +1792,8 @@ fn a_swapped_pair_of_same_typed_siblings_is_rejected_at_every_visited_container(
         }
         cases_run += cases.len();
     }
-    assert_eq!(cases_run, 1_018, "sibling swaps across thirteen documents");
-    excused.pin(2, &[("repair_acceptance_report", 3)], "sibling swap");
+    assert_eq!(cases_run, 1_020, "sibling swaps across thirteen documents");
+    excused.pin(3, &[("repair_acceptance_report", 3)], "sibling swap");
 }
 
 #[test]

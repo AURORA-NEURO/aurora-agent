@@ -78,7 +78,13 @@ fn attestation_verdict(attestation: Attestation) -> Verdict {
             format!("claims {claimed}, recomputes to {recomputed}"),
         ),
         Attestation::Malformed(detail) => {
-            let class = if detail.contains("missing") {
+            // `serde` includes every allowed enum variant in its error text. Several of
+            // those variants contain the word `missing` (for example `missing_witnesses`),
+            // but that is not an absent sealing digest. Only the explicit top-level digest
+            // messages deserve the DigestAbsent class; structural/type errors remain malformed.
+            let class = if detail.contains("missing bundle_sha256")
+                || detail.contains("missing pack_sha256")
+            {
                 RejectionClass::DigestAbsent
             } else if detail.contains("not a 64-character lowercase hex digest") {
                 RejectionClass::DigestMalformed

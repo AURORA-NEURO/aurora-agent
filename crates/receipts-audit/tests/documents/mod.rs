@@ -109,18 +109,25 @@ fn step(id: &str, tool: &str, depends_on: &[&str]) -> Value {
 
 fn workflow_binding(step_ids: &[&str]) -> Value {
     let plan = json!({
-        "steps": step_ids.iter().map(|id| json!({ "step_id": id })).collect::<Vec<_>>()
+        "steps": step_ids
+            .iter()
+            .map(|id| json!({ "step_id": id, "tool": format!("tool_{id}") }))
+            .collect::<Vec<_>>()
     });
     let digest = ContentHash::of_value(&plan)
         .expect("the evidence plan canonicalises")
+        .to_string();
+    let domain_contract = json!({});
+    let domain_contract_digest = ContentHash::of_value(&domain_contract)
+        .expect("the domain contract canonicalises")
         .to_string();
     let zeros = "0".repeat(64);
     json!({
         "workflow_id": "workflow.audit",
         "workflow_digest": zeros,
         "catalog_digest": zeros,
-        "domain_contract_digest": zeros,
-        "domain_contract": {},
+        "domain_contract_digest": domain_contract_digest,
+        "domain_contract": domain_contract,
         "evidence_plan": plan,
         "evidence_plan_digest": digest,
     })
@@ -156,7 +163,10 @@ fn mission_report(dispatched: &Value, results: Vec<MissionStepResult>) -> Value 
     let request: MissionRequest =
         serde_json::from_value(dispatched.clone()).expect("the dispatched mission parses");
     let plan = plan_mission(&request).expect("the dispatched mission plans");
-    let succeeded = results.iter().filter(|row| row.status == "succeeded").count();
+    let succeeded = results
+        .iter()
+        .filter(|row| row.status == "succeeded")
+        .count();
     let report = MissionReport {
         schema_version: MISSION_SCHEMA_VERSION.into(),
         plan,
@@ -201,10 +211,7 @@ pub fn autopilot_report() -> Value {
     };
     let report = mission_report(
         &dispatched,
-        vec![
-            succeeded_step("a", "tool_a"),
-            succeeded_step("b", "tool_b"),
-        ],
+        vec![succeeded_step("a", "tool_a"), succeeded_step("b", "tool_b")],
     );
     history.push(
         AttemptRecord::delivered(

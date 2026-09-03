@@ -161,6 +161,24 @@ fn partition(
     Ok(())
 }
 
+fn partition_with_missing(
+    observed: &[String],
+    parts: &[&[String]],
+    missing: &[String],
+    label: &str,
+) -> Result<(), LaboratoryIntegrationError> {
+    partition(observed, parts, label)?;
+    if !canonical(missing)
+        || missing.iter().any(|id| observed.contains(id))
+        || missing.windows(2).any(|pair| pair[0] == pair[1])
+    {
+        return Err(invalid(format!(
+            "{label} missing state overlaps observed endpoints or is not canonical"
+        )));
+    }
+    Ok(())
+}
+
 impl LaboratoryIntegrationReceipt7 {
     pub fn validate(&self) -> Result<(), LaboratoryIntegrationError> {
         if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION
@@ -208,14 +226,14 @@ impl LaboratoryIntegrationReceipt7 {
                 return Err(invalid("laboratory integration ordering is not canonical"));
             }
         }
-        partition(
+        partition_with_missing(
             &self.ranked_endpoint_order,
             &[
                 &self.selected_endpoint_order,
                 &self.unresolved_endpoint_order,
                 &self.blocked_endpoint_order,
-                &self.missing_endpoint_order,
             ],
+            &self.missing_endpoint_order,
             "endpoint",
         )?;
         partition(
@@ -455,8 +473,15 @@ pub fn negotiate_laboratory_integration(
         .flat_map(|x| x.interlock_order.iter().cloned())
         .filter(|id| interlocks.contains(id))
         .collect::<BTreeSet<_>>();
+    let unresolved_interlocks = rows
+        .iter()
+        .filter(|x| unresolved.contains(&x.endpoint_id))
+        .flat_map(|x| x.interlock_order.iter().cloned())
+        .filter(|id| interlocks.contains(id))
+        .collect::<BTreeSet<_>>();
     let missing_interlocks = interlocks
         .difference(&selected_interlocks)
+        .filter(|id| !unresolved_interlocks.contains(*id))
         .cloned()
         .collect::<BTreeSet<_>>();
     let open = request.policy_allow
@@ -466,16 +491,22 @@ pub fn negotiate_laboratory_integration(
         && request.raw_data_local
         && request.aggregate_only
         && request.adversarial_event_order.is_empty();
+    let endpoint_floor_unresolvable =
+        selected.len() + unresolved.len() < request.minimum_endpoint_count as usize;
+    let endpoint_floor_unresolved = selected.len() < request.minimum_endpoint_count as usize;
     let disposition = if !open
         || !blocked.is_empty()
         || !missing.is_empty()
         || !blocked_capabilities.is_empty()
         || !missing_capabilities.is_empty()
         || !missing_interlocks.is_empty()
-        || selected.len() < request.minimum_endpoint_count as usize
+        || endpoint_floor_unresolvable
     {
         LaboratoryIntegrationDisposition::Blocked
-    } else if !unresolved.is_empty() || !unresolved_capabilities.is_empty() {
+    } else if !unresolved.is_empty()
+        || !unresolved_capabilities.is_empty()
+        || endpoint_floor_unresolved
+    {
         LaboratoryIntegrationDisposition::Unresolved
     } else {
         LaboratoryIntegrationDisposition::Qualified

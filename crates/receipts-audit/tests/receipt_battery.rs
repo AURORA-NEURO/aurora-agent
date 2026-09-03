@@ -178,7 +178,8 @@ fn subjects() -> Vec<Subject> {
 }
 
 /// A case the battery generates, a verifier answers wrongly, and this repository has decided not
-/// to close — recorded here so the exemption is visible, justified, and load-bearing.
+/// to close — if one is ever recorded, the exemption must remain visible, justified, and
+/// load-bearing.
 ///
 /// A gap on this list is asserted twice over: cases matching it are excused from the hole count,
 /// *and* the gap must still fire. Closing the underlying behaviour without deleting the entry
@@ -190,16 +191,7 @@ struct KnownGap {
     reason: &'static str,
 }
 
-const KNOWN_GAPS: [KnownGap; 1] = [KnownGap {
-    label: "delivery_receipt",
-    mutator: "unexpected_key",
-    pointer: "",
-    reason: "verify_delivery_receipt compares every field the recomputation produces and ignores \
-             fields it does not: the shipped MCP surface returns the receipt with ok, workflow, \
-             valid, receipt_ready, and delivery written onto the same object, so treating an \
-             unrecognised key as tampering would reject every receipt the server hands out. An \
-             unrecognised key at the root of a receipt is therefore not checked at all",
-}];
+const KNOWN_GAPS: [KnownGap; 0] = [];
 
 impl KnownGap {
     fn matches(&self, label: &str, mutator: &str, pointer: &str) -> bool {
@@ -288,7 +280,7 @@ fn the_whole_battery_finds_no_hole_outside_the_gaps_this_repository_has_named() 
     }
     assert_eq!(
         (total_cases, total_positions, total_pinned),
-        (18_320, 2_275, 375),
+        (18_318, 2_275, 375),
         "the battery's coverage is a pinned claim; bounds were:\n{}",
         bounds.join("\n")
     );
@@ -705,7 +697,7 @@ fn every_body_edit_forbids_the_two_answers_that_would_blame_the_digest() {
         }
     }
     assert_eq!(
-        body_edits, 17_310,
+        body_edits, 17_308,
         "body edits across the five sealed documents, none of which may be blamed on the digest"
     );
 }
@@ -883,7 +875,7 @@ fn a_string_replaced_by_a_confusable_form_is_rejected_at_every_visited_position(
         family.assert_no_unexplained_hole();
         cases_run += family.executed();
     }
-    assert_eq!(cases_run, 3_667, "confusable cases across six documents");
+    assert_eq!(cases_run, 3_665, "confusable cases across six documents");
 }
 
 #[test]
@@ -930,8 +922,8 @@ fn an_unexpected_key_at_any_level_is_rejected_except_where_a_recorded_gap_says_o
     }
     assert_eq!(
         (cases_run, excused),
-        (754, 2),
-        "unexpected-key cases across six documents, two of them excused by a recorded gap"
+        (754, 0),
+        "unexpected-key cases across six documents; every added key is now checked"
     );
 }
 

@@ -259,6 +259,7 @@ export {
   INSTRUMENT_PREFLIGHT_FEATURE_ID,
   MULTIMODAL_HARMONIZATION_FEATURE_ID,
   ANALYSIS_QUALIFICATION_FEATURE_ID,
+  evidenceReceiptDigest,
   researchArtifactDigest,
   researchIngestionBundleDigest,
   experimentDesignPlanDigest,

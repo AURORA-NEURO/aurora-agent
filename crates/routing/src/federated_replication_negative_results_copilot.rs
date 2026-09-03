@@ -394,8 +394,8 @@ pub fn assure_federated_replication(
     };
     let effects = if disposition == "qualified" {
         vec![
-            format!("retain:replication-receipt:{}", q.request_id),
             format!("exchange:aggregate-replication-summary:{}", q.request_id),
+            format!("retain:replication-receipt:{}", q.request_id),
         ]
     } else {
         vec!["block:unsafe-release".into()]

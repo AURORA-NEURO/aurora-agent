@@ -26,7 +26,7 @@
 //! * **No state of its own.** Nothing persists across a process except what a tool was
 //!   explicitly asked to write to an explicitly named path inside the root.
 
-#![recursion_limit = "256"]
+#![recursion_limit = "1024"]
 
 mod brain_control;
 pub mod evolution_assurance;
