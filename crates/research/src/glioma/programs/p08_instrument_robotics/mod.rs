@@ -3,6 +3,7 @@
 use crate::glioma::catalog::{glioma_program_catalog, GliomaProgramDescriptor, GliomaProgramId};
 
 pub mod calibration;
+pub mod execution;
 pub mod preflight;
 
 pub use calibration::{
@@ -15,6 +16,13 @@ pub use preflight::{
     InstrumentActionDisposition, InstrumentAuthorization, InstrumentInterlockSnapshot,
     InstrumentOperation, InstrumentParameter, InstrumentPreflightDisposition,
     InstrumentPreflightError, InstrumentPreflightPlan, InstrumentPreflightRequest,
+};
+
+pub use execution::{
+    execute_glioma_instrument_plan, DryRunInstrumentExecutor, InstrumentExecutionDisposition,
+    InstrumentExecutionError, InstrumentExecutionFailure, InstrumentExecutionRequest,
+    InstrumentExecutionResult, InstrumentExecutionRun, InstrumentExecutionStopReason,
+    InstrumentExecutor,
 };
 
 pub const PROGRAM_ID: GliomaProgramId = GliomaProgramId::InstrumentRobotics;

@@ -89,6 +89,7 @@ fn main() {
                      glioma_evidence_priority,\n\
                      glioma_instrument_calibration,\n\
                      glioma_instrument_preflight,\n\
+                     glioma_instrument_execute,\n\
                      glioma_computation_execute,\n\
                      glioma_federated_benchmark_consensus,\n\
                      Resources: fiber-world, fiber-query, context-certificate schemas and the\n\

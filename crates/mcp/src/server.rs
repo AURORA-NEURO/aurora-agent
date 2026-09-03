@@ -478,10 +478,10 @@ use bioprism_research::{
     build_research_object_manifest, compile_decision_context, compile_mechanism_action_plan,
     compile_typed_knowledge, design_preclinical_experiment, discriminate_mechanisms,
     dry_run_glioma_research, execute_glioma_action_portfolio, execute_glioma_autonomous_campaign,
-    execute_glioma_computation, execute_glioma_evidence_campaign, execute_glioma_protocol,
-    execute_glioma_research_autopilot, explore_mechanisms, generate_feature_catalog,
-    glioma_program_catalog, harmonize_glioma_multimodal_batches, harmonize_multimodal_inputs,
-    plan_decision_actions, plan_glioma_adaptive_information_campaign,
+    execute_glioma_computation, execute_glioma_evidence_campaign, execute_glioma_instrument_plan,
+    execute_glioma_protocol, execute_glioma_research_autopilot, explore_mechanisms,
+    generate_feature_catalog, glioma_program_catalog, harmonize_glioma_multimodal_batches,
+    harmonize_multimodal_inputs, plan_decision_actions, plan_glioma_adaptive_information_campaign,
     plan_glioma_closed_loop_campaign, plan_glioma_information_design,
     plan_glioma_multi_fidelity_optimization, plan_glioma_robust_intervention_portfolio,
     plan_glioma_workflow, preflight_glioma_instrument, prioritize_glioma_evidence,
@@ -497,21 +497,22 @@ use bioprism_research::{
     CounterfactualRequest, DecisionActionPlanRequest, DecisionContext, DecisionContextRequest,
     DesignAction, DesignMechanism, DoseResponseObservation, DoseResponseRequest,
     DryRunGliomaActionExecutor, DryRunGliomaComputationExecutor, DryRunGliomaProtocolExecutor,
-    EvidencePriorityRequest, EvidenceRecord, EvidenceRequest, EvidenceSurveillanceRequest,
-    ExperimentArm, ExperimentRequest, FederatedBenchmarkRequest, FederatedBenchmarkSite,
-    FidelityCandidate, FidelityObservation, GliomaActionCandidate, GliomaAutonomousCampaignRequest,
-    GliomaEvidenceCampaignRequest, GliomaResearchAutopilotRequest, GliomaResearchIntent,
-    GliomaWorkflowRequest, HarmonizationRequest, HarmonizationVector, InformationDesignRequest,
-    InstrumentPreflightRequest, KnowledgeFrontierRequest, KnowledgeRequest, LatentFactorRequest,
-    LatentFactorVector, LigandReceptorPair, MechanismActionPlannerConfig, MechanismCandidate,
-    MechanismDiscrimination, MechanismDiscriminationRequest, MechanismDiscriminatorAction,
-    MechanismFeatureObservation, MechanismGraphEdge, MechanismGraphNode, MechanismGraphRequest,
-    MechanismHypothesis, MechanismRequest, MediationObservation, MediationRequest,
-    MetaAnalysisRequest, ModalityVector, MultiFidelityOptimizationRequest, MultimodalObservation,
-    MultimodalRequest, ProtocolExecutionRequest, ProtocolSimulationRequest, ReplicationRequest,
-    ReplicationStudy, ResearchObjectRequest, RobustInterventionCandidate,
-    RobustInterventionRequest, RobustnessRequest, SensitivityObservation, SensitivityRequest,
-    SpatialCell, SpatialCommunicationCell, SpatialCommunicationRequest, SpatialNicheRequest,
+    DryRunInstrumentExecutor, EvidencePriorityRequest, EvidenceRecord, EvidenceRequest,
+    EvidenceSurveillanceRequest, ExperimentArm, ExperimentRequest, FederatedBenchmarkRequest,
+    FederatedBenchmarkSite, FidelityCandidate, FidelityObservation, GliomaActionCandidate,
+    GliomaAutonomousCampaignRequest, GliomaEvidenceCampaignRequest, GliomaResearchAutopilotRequest,
+    GliomaResearchIntent, GliomaWorkflowRequest, HarmonizationRequest, HarmonizationVector,
+    InformationDesignRequest, InstrumentExecutionRequest, InstrumentPreflightRequest,
+    KnowledgeFrontierRequest, KnowledgeRequest, LatentFactorRequest, LatentFactorVector,
+    LigandReceptorPair, MechanismActionPlannerConfig, MechanismCandidate, MechanismDiscrimination,
+    MechanismDiscriminationRequest, MechanismDiscriminatorAction, MechanismFeatureObservation,
+    MechanismGraphEdge, MechanismGraphNode, MechanismGraphRequest, MechanismHypothesis,
+    MechanismRequest, MediationObservation, MediationRequest, MetaAnalysisRequest, ModalityVector,
+    MultiFidelityOptimizationRequest, MultimodalObservation, MultimodalRequest,
+    ProtocolExecutionRequest, ProtocolSimulationRequest, ReplicationRequest, ReplicationStudy,
+    ResearchObjectRequest, RobustInterventionCandidate, RobustInterventionRequest,
+    RobustnessRequest, SensitivityObservation, SensitivityRequest, SpatialCell,
+    SpatialCommunicationCell, SpatialCommunicationRequest, SpatialNicheRequest,
     SpatialPropagationRequest, StateTransitionObservation, StateTransitionRequest,
     StaticGliomaActionPlanner, StratifiedCausalRequest, StratifiedObservation,
     TrajectoryObservation, TrajectoryRequest, TypedKnowledge,
@@ -2009,6 +2010,7 @@ impl Server {
             "glioma_multi_fidelity_optimize" => self.glioma_multi_fidelity_optimize(&arguments),
             "glioma_instrument_calibration" => self.glioma_instrument_calibration(&arguments),
             "glioma_instrument_preflight" => self.glioma_instrument_preflight(&arguments),
+            "glioma_instrument_execute" => self.glioma_instrument_execute(&arguments),
             "glioma_experiment_design" => self.glioma_experiment_design(&arguments),
             "glioma_analysis_run" => self.glioma_analysis_run(&arguments),
             "glioma_replication_assess" => self.glioma_replication_assess(&arguments),
@@ -4670,6 +4672,37 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma instrument preflight: {error}"))
+    }
+
+    /// Execute an admitted preclinical instrument plan through the deterministic local gateway
+    /// seam. MCP uses a dry-run executor; institution-owned callers can supply a gateway that
+    /// performs hardware authentication, interlock reads, and emergency-stop wiring.
+    fn glioma_instrument_execute(&self, arguments: &Value) -> Result<Value, String> {
+        let request: InstrumentExecutionRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_instrument_execute requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma instrument execution request: {error}"))?;
+        let mut executor = DryRunInstrumentExecutor {
+            interlocks: request.live_interlocks.clone(),
+            emergency_stop_called: false,
+        };
+        let execution = execute_glioma_instrument_plan(&request, &mut executor)
+            .map_err(|error| format!("glioma instrument execution refused: {error}"))?;
+        serde_json::to_value(json!({
+            "execution": execution,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "the admitted P08 preflight digest, authorization scope, and action order are checked before dispatch",
+                "live interlocks and gateway authorization are rechecked before every operation",
+                "retries are bounded and partial, failed, blocked, negative, and emergency-stop outcomes remain explicit",
+                "MCP emits local synthetic artifacts only; production hardware effects require an institution-owned InstrumentExecutor"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma instrument execution: {error}"))
     }
 
     fn glioma_experiment_design(&self, arguments: &Value) -> Result<Value, String> {
@@ -44897,6 +44930,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_multi_fidelity_optimize",
                 "glioma_instrument_calibration",
                 "glioma_instrument_preflight",
+                "glioma_instrument_execute",
                 "glioma_experiment_design",
                 "glioma_analysis_run",
                 "glioma_replication_assess",
@@ -52333,6 +52367,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "InstrumentPreflightRequest1@1 containing InstrumentAction1@1 values, InstrumentCalibration1@1, interlocks, authorization, and bounded budgets."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_instrument_execute",
+        "description": "Execute an admitted preclinical glioma instrument plan through a guarded, caller-owned gateway seam. Rechecks the preflight digest, authorization scope, live safety interlocks, typed action order, bounded retries, local artifact requirements, and emergency-stop behavior before classifying completed, negative, partial, failed, blocked, or unresolved outcomes. MCP uses a deterministic dry-run gateway and creates no hardware or biological effect.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "InstrumentExecutionRequest1@1 containing an admitted InstrumentPreflightPlan1@1, matching InstrumentAction1@1 records, authorization, live interlocks, tick/budget bounds, retry bound, and artifact policy."}
             },
             "required": ["request"]
         }
