@@ -2,6 +2,7 @@
 
 use crate::glioma::catalog::{glioma_program_catalog, GliomaProgramDescriptor, GliomaProgramId};
 
+pub mod active_learning;
 pub mod adaptive_allocation;
 pub mod adaptive_information_campaign;
 pub mod campaign;
@@ -10,6 +11,11 @@ pub mod information_design;
 pub mod multi_fidelity;
 pub mod synergy;
 
+pub use active_learning::{
+    plan_glioma_active_learning, ActiveLearningCandidate, ActiveLearningCandidateDisposition,
+    ActiveLearningDirection, ActiveLearningDisposition, ActiveLearningError,
+    ActiveLearningObservation, ActiveLearningPlan, ActiveLearningRequest, ActiveLearningScore,
+};
 pub use adaptive_allocation::{
     allocate_glioma_assays, AdaptiveAllocation, AdaptiveAllocationActionKind,
     AdaptiveAllocationDisposition, AdaptiveAllocationError, AdaptiveAllocationRequest,

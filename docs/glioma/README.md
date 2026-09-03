@@ -107,6 +107,7 @@ crates/research/src/glioma/
     p06_experiment_design/information_design.rs P06 integer Bayesian assay selection by expected mechanism-information reduction
     p06_experiment_design/adaptive_information_campaign.rs P06 closed-loop posterior updating and re-planning through a caller-owned assay executor
     p06_experiment_design/multi_fidelity.rs P06 cost-aware multi-fidelity surrogate optimization across screening, mechanistic, and validation models
+    p06_experiment_design/active_learning.rs P06 uncertainty-aware kernel active learning for next-assay selection
     p03_multimodal_ingestion_qc/concordance.rs
                                              P03 feature-level modality concordance analysis
   p03_multimodal_ingestion_qc/consensus.rs
@@ -353,3 +354,10 @@ calibrates paired designs across screening, mechanistic, and validation scales, 
 and local neighborhood estimates with uncertainty, and selects a bounded next batch with a
 cost/risk-aware beam search. A high-fidelity candidate without qualified lower-fidelity support is
 blocked or deferred instead of being treated as an unexplained positive result.
+
+P06 also includes deterministic active learning (`plan_glioma_active_learning`). It combines
+same-candidate and nearby-candidate observations with an inverse-distance kernel surrogate, uses
+conservative residual uncertainty so contradictory evidence cannot be averaged away, and selects
+a diverse next assay batch under budget, risk, cost, replicate, and redundancy limits. The output
+is a next-batch plan only; institution-owned executors remain responsible for any physical or
+computational effect.

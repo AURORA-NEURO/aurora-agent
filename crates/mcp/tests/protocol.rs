@@ -314,7 +314,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 57;
-const TOOL_DEFINITION_COUNT: usize = 576;
+const TOOL_DEFINITION_COUNT: usize = 577;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -2100,6 +2100,44 @@ fn glioma_action_portfolio_execution_is_reachable_through_mcp() {
         execution["execution"]["completed_order"],
         json!(["local-genomics"])
     );
+}
+
+#[test]
+fn glioma_active_learning_selects_an_uncertain_safe_assay() {
+    let mut server = server();
+    let artifact_hash = "0".repeat(64);
+    let plan = call(
+        &mut server,
+        "glioma_active_learning",
+        json!({
+            "request": {
+                "objective": "select the next invasion mechanism assay",
+                "model_system": "organoid",
+                "direction": "maximize",
+                "budget_units": 4,
+                "max_selections": 2,
+                "min_observations_per_candidate": 1,
+                "exploration_weight_milli": 400,
+                "exploitation_weight_milli": 600,
+                "cost_penalty_milli": 1,
+                "risk_penalty_milli": 1,
+                "max_risk_milli": 800,
+                "min_uncertainty_milli": 900
+            },
+            "candidates": [
+                {"candidate_id":"egfr","mechanism_id":"egfr-signaling","feature_vector":[100,0],"cost_units":2,"risk_milli":100,"max_replicates":3,"redundancy_group":"receptor","output_schema":"Assay1@1"},
+                {"candidate_id":"matrix","mechanism_id":"matrix-remodeling","feature_vector":[0,100],"cost_units":2,"risk_milli":100,"max_replicates":3,"redundancy_group":"matrix","output_schema":"Assay1@1"},
+                {"candidate_id":"unsafe","mechanism_id":"unsafe","feature_vector":[50,50],"cost_units":1,"risk_milli":900,"max_replicates":3,"redundancy_group":"unsafe","output_schema":"Assay1@1"}
+            ],
+            "observations": [
+                {"observation_id":"obs-egfr","candidate_id":"egfr","outcome_milli":700,"uncertainty_milli":20,"artifact":{"artifact_id":"obs-egfr","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-active-learning+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}}
+            ]
+        }),
+    );
+    assert_eq!(plan["dispatch"], json!("not_started"));
+    assert_eq!(plan["plan"]["selected_order"], json!(["matrix", "egfr"]));
+    assert_eq!(plan["plan"]["blocked_order"], json!(["unsafe"]));
+    assert_eq!(plan["plan"]["disposition"], json!("partial"));
 }
 
 #[test]

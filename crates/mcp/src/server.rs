@@ -481,30 +481,32 @@ use bioprism_research::{
     execute_glioma_computation, execute_glioma_evidence_campaign, execute_glioma_instrument_plan,
     execute_glioma_protocol, execute_glioma_research_autopilot, explore_mechanisms,
     generate_feature_catalog, glioma_program_catalog, harmonize_glioma_multimodal_batches,
-    harmonize_multimodal_inputs, plan_decision_actions, plan_glioma_adaptive_information_campaign,
-    plan_glioma_closed_loop_campaign, plan_glioma_information_design,
-    plan_glioma_multi_fidelity_optimization, plan_glioma_robust_intervention_portfolio,
-    plan_glioma_workflow, preflight_glioma_instrument, prioritize_glioma_evidence,
-    prioritize_knowledge_frontier, propagate_glioma_mechanism_graph, qualify_evidence,
-    select_glioma_actions, simulate_glioma_counterfactual, simulate_glioma_counterfactual_ensemble,
-    simulate_glioma_protocol, surveil_glioma_evidence, validate_feature_catalog,
-    ActionPortfolioExecutionRequest, AdaptiveAllocationRequest, AdaptiveArmObservation,
-    AdaptiveInformationCampaignRequest, AdaptiveInformationObservation, AnalysisDataset,
-    AnalysisRequest, CalibrationRequest, CalibrationRun, CampaignAction, CampaignMechanism,
-    CampaignObservation, CausalContrastRequest, ClosedLoopCampaignRequest, CombinationObservation,
-    CombinationSynergyRequest, ComputationExecutionRequest, ConcordanceRequest, ConsensusRequest,
-    CounterfactualEnsembleRequest, CounterfactualIntervention, CounterfactualModel,
-    CounterfactualRequest, DecisionActionPlanRequest, DecisionContext, DecisionContextRequest,
-    DesignAction, DesignMechanism, DoseResponseObservation, DoseResponseRequest,
-    DryRunGliomaActionExecutor, DryRunGliomaComputationExecutor, DryRunGliomaProtocolExecutor,
-    DryRunInstrumentExecutor, EvidencePriorityRequest, EvidenceRecord, EvidenceRequest,
-    EvidenceSurveillanceRequest, ExperimentArm, ExperimentRequest, FederatedBenchmarkRequest,
-    FederatedBenchmarkSite, FidelityCandidate, FidelityObservation, GliomaActionCandidate,
-    GliomaAutonomousCampaignRequest, GliomaEvidenceCampaignRequest, GliomaResearchAutopilotRequest,
-    GliomaResearchIntent, GliomaWorkflowRequest, HarmonizationRequest, HarmonizationVector,
-    InformationDesignRequest, InstrumentExecutionRequest, InstrumentPreflightRequest,
-    KnowledgeFrontierRequest, KnowledgeRequest, LatentFactorRequest, LatentFactorVector,
-    LigandReceptorPair, MechanismActionPlannerConfig, MechanismCandidate, MechanismDiscrimination,
+    harmonize_multimodal_inputs, plan_decision_actions, plan_glioma_active_learning,
+    plan_glioma_adaptive_information_campaign, plan_glioma_closed_loop_campaign,
+    plan_glioma_information_design, plan_glioma_multi_fidelity_optimization,
+    plan_glioma_robust_intervention_portfolio, plan_glioma_workflow, preflight_glioma_instrument,
+    prioritize_glioma_evidence, prioritize_knowledge_frontier, propagate_glioma_mechanism_graph,
+    qualify_evidence, select_glioma_actions, simulate_glioma_counterfactual,
+    simulate_glioma_counterfactual_ensemble, simulate_glioma_protocol, surveil_glioma_evidence,
+    validate_feature_catalog, ActionPortfolioExecutionRequest, ActiveLearningCandidate,
+    ActiveLearningObservation, ActiveLearningRequest, AdaptiveAllocationRequest,
+    AdaptiveArmObservation, AdaptiveInformationCampaignRequest, AdaptiveInformationObservation,
+    AnalysisDataset, AnalysisRequest, CalibrationRequest, CalibrationRun, CampaignAction,
+    CampaignMechanism, CampaignObservation, CausalContrastRequest, ClosedLoopCampaignRequest,
+    CombinationObservation, CombinationSynergyRequest, ComputationExecutionRequest,
+    ConcordanceRequest, ConsensusRequest, CounterfactualEnsembleRequest,
+    CounterfactualIntervention, CounterfactualModel, CounterfactualRequest,
+    DecisionActionPlanRequest, DecisionContext, DecisionContextRequest, DesignAction,
+    DesignMechanism, DoseResponseObservation, DoseResponseRequest, DryRunGliomaActionExecutor,
+    DryRunGliomaComputationExecutor, DryRunGliomaProtocolExecutor, DryRunInstrumentExecutor,
+    EvidencePriorityRequest, EvidenceRecord, EvidenceRequest, EvidenceSurveillanceRequest,
+    ExperimentArm, ExperimentRequest, FederatedBenchmarkRequest, FederatedBenchmarkSite,
+    FidelityCandidate, FidelityObservation, GliomaActionCandidate, GliomaAutonomousCampaignRequest,
+    GliomaEvidenceCampaignRequest, GliomaResearchAutopilotRequest, GliomaResearchIntent,
+    GliomaWorkflowRequest, HarmonizationRequest, HarmonizationVector, InformationDesignRequest,
+    InstrumentExecutionRequest, InstrumentPreflightRequest, KnowledgeFrontierRequest,
+    KnowledgeRequest, LatentFactorRequest, LatentFactorVector, LigandReceptorPair,
+    MechanismActionPlannerConfig, MechanismCandidate, MechanismDiscrimination,
     MechanismDiscriminationRequest, MechanismDiscriminatorAction, MechanismFeatureObservation,
     MechanismGraphEdge, MechanismGraphNode, MechanismGraphRequest, MechanismHypothesis,
     MechanismRequest, MediationObservation, MediationRequest, MetaAnalysisRequest, ModalityVector,
@@ -2007,6 +2009,7 @@ impl Server {
             "glioma_adaptive_information_campaign" => {
                 self.glioma_adaptive_information_campaign(&arguments)
             }
+            "glioma_active_learning" => self.glioma_active_learning(&arguments),
             "glioma_multi_fidelity_optimize" => self.glioma_multi_fidelity_optimize(&arguments),
             "glioma_instrument_calibration" => self.glioma_instrument_calibration(&arguments),
             "glioma_instrument_preflight" => self.glioma_instrument_preflight(&arguments),
@@ -4575,6 +4578,46 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma adaptive information campaign: {error}"))
+    }
+
+    /// Select the next local preclinical glioma assay with an uncertainty-aware kernel surrogate.
+    /// The optimizer is deterministic and bounded; it only compiles a next batch and never
+    /// dispatches biology or turns a surrogate estimate into a clinical recommendation.
+    fn glioma_active_learning(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ActiveLearningRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_active_learning requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma active-learning request: {error}"))?;
+        let candidates: Vec<ActiveLearningCandidate> = serde_json::from_value(
+            arguments
+                .get("candidates")
+                .cloned()
+                .ok_or_else(|| "glioma_active_learning requires candidates".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma active-learning candidates: {error}"))?;
+        let observations: Vec<ActiveLearningObservation> = arguments
+            .get("observations")
+            .cloned()
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(|error| format!("invalid glioma active-learning observations: {error}"))?
+            .unwrap_or_default();
+        let plan = plan_glioma_active_learning(&request, &candidates, &observations)
+            .map_err(|error| format!("glioma active-learning refused: {error}"))?;
+        serde_json::to_value(json!({
+            "plan": plan,
+            "dispatch": "not_started",
+            "guarantees": [
+                "same-candidate and nearby-candidate observations are combined with an integer inverse-distance kernel",
+                "contradictory or sparse support widens uncertainty instead of being averaged into confidence",
+                "selection respects cost, risk, replicate, budget, and redundancy-group limits with explicit blocked/deferred states",
+                "MCP compiles a local next batch only; an institution-owned executor must authorize and run any assay"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma active-learning plan: {error}"))
     }
 
     /// Choose a bounded next batch across screening, mechanistic, and validation model systems.
@@ -44927,6 +44970,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_robust_intervention_portfolio",
                 "glioma_information_design",
                 "glioma_adaptive_information_campaign",
+                "glioma_active_learning",
                 "glioma_multi_fidelity_optimize",
                 "glioma_instrument_calibration",
                 "glioma_instrument_preflight",
@@ -52333,6 +52377,19 @@ pub fn tool_definitions() -> Vec<Value> {
                 "observations": {"type": "array", "items": {"type": "object"}, "description": "Optional AdaptiveInformationObservation1@1 local artifact-backed outcomes for resumable replanning."}
             },
             "required": ["request", "mechanisms", "actions"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_active_learning",
+        "description": "Select the next local preclinical glioma assay with a deterministic mechanism-aware kernel surrogate. Combines same-candidate and nearby-candidate observations, widens uncertainty for sparse or contradictory support, and applies exploitation/exploration, cost, risk, replicate, budget, and redundancy gates. The route compiles a next batch only and never dispatches biology or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ActiveLearningRequest1@1 with model/direction binding, acquisition weights, budget, risk, uncertainty, and selection bounds."},
+                "candidates": {"type": "array", "items": {"type": "object"}, "description": "ActiveLearningCandidate1@1 assay interventions with feature vectors, mechanism ids, cost/risk, replicate ceilings, redundancy groups, and output schemas."},
+                "observations": {"type": "array", "items": {"type": "object"}, "description": "Optional ActiveLearningObservation1@1 local outcomes with content-addressed artifacts."}
+            },
+            "required": ["request", "candidates"]
         }
     }));
     definitions.push(json!({
