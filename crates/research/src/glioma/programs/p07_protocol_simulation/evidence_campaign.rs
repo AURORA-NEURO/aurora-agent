@@ -125,10 +125,6 @@ impl GliomaEvidenceCampaignExecution {
                 .unavailable_priority_order
                 .iter()
                 .any(|id| self.selected_priority_order.binary_search(id).is_err())
-            || self
-                .completed_priority_order
-                .iter()
-                .any(|id| self.selected_priority_order.binary_search(id).is_err())
         {
             return Err(GliomaEvidenceCampaignError::InvalidOutput(
                 "identity, canonical ordering, priority partition, or next-step contract is invalid"
