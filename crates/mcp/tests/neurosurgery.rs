@@ -2843,7 +2843,16 @@ fn mcp_renders_real_glioma_context_without_invoking_a_provider() {
     assert!(value["context_text"].as_str().is_some_and(|context| context
         .contains("SAFETY_BOUNDARY:")
         && context.contains("<public_record>")));
-    assert_eq!(value["included_citation_count"], json!(2));
+    let citations = value["citations"]
+        .as_array()
+        .expect("reasoning context carries a citation index");
+    assert_eq!(value["included_citation_count"], json!(citations.len()));
+    assert_eq!(citations.len(), 3);
+    assert!(citations.iter().any(|citation| {
+        citation["record_kind"] == json!("genomic_project")
+            && citation["record_id"] == json!("TCGA-GBM")
+    }));
+    assert_eq!(text.matches("<public_record>").count(), 2);
     assert_eq!(value["omitted_citation_count"], json!(32));
     assert!(value["context_digest"]
         .as_str()
