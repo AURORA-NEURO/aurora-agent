@@ -18,6 +18,16 @@ the brain or into MCP:
   Both execution commands can additionally activate the SDK's exact curated read-only domain
   bindings, so the process boundary uses the same registry, activation, and capability narrowing
   path as an embedding application.
+* ``grounded-portfolio`` runs the source-separated real-glioma and PubMed research loops through
+  Ollama or an explicit in-memory fixture, with an atomic digest-bound ledger for restart/resume;
+  opt-in ``--refresh-*`` flags can acquire current public snapshots without a credential.
+* ``grounded-autopilot`` routes a free-text neurosurgical research question before any model call,
+  gates the required real snapshot, and then invokes the same bounded source-separated loops;
+  refreshes are explicit, allow-listed, and recorded as receipts.
+* ``refresh-public-literature`` refreshes six bounded PubMed lanes without a credential and
+  atomically installs the candidate only after local provenance/hash validation.
+* ``refresh-real-glioma`` refreshes aggregate ClinicalTrials.gov, NCI GDC, cBioPortal, NCI PDQ,
+  and PubMed metadata without a credential and atomically installs a validated population bundle.
 
 The command line parser deliberately has no API-key, token, header, or secret argument.  Keys
 are accepted only through the existing no-echo prompt or an explicitly named environment
@@ -29,6 +39,7 @@ from __future__ import annotations
 
 import argparse
 import getpass
+import hashlib
 import json
 import os
 import shlex
@@ -84,10 +95,20 @@ from .llm_runtime import (
     ProviderToolCall,
     ProviderToolResult,
     anthropic_provider,
+    ollama_provider,
     openai_compatible_provider,
     openai_provider,
 )
 from .memory import BrainEpisodicMemory
+from .neurosurgery import LocalNeurosurgicalAgent
+from .public_literature_refresh import atomic_refresh_neurosurgical_public_literature
+from .real_data_refresh import (
+    DEFAULT_GDC_PROJECT_IDS,
+    DEFAULT_PORTAL_STUDY_IDS,
+    DEFAULT_PUBMED_SOURCE_ID,
+    DEFAULT_PUBMED_TERM,
+    atomic_refresh_real_glioma_data,
+)
 from .tooling import ToolCatalogue
 
 
@@ -109,6 +130,14 @@ _MAX_DOMAIN_TOOL_BINDING_FILE_BYTES = 512_000
 _MAX_EVIDENCE_FILE_BYTES = 128_000
 _MAX_ACTION_PLAN_FILE_BYTES = 4_000_000
 _MAX_ACTION_ADMISSION_STORE_BYTES = 4_000_000
+_MAX_GROUNDED_PORTFOLIO_BUNDLE_BYTES = 2_000_000
+_MAX_GROUNDED_PORTFOLIO_STORE_BYTES = 8_000_000
+_MAX_GROUNDED_QUERY_FILE_BYTES = 64_000
+GROUNDED_PORTFOLIO_CLI_SCHEMA = "aurora-grounded-portfolio-cli/0.1"
+GROUNDED_INTAKE_CLI_SCHEMA = "aurora-grounded-intake-cli/0.1"
+GROUNDED_INTAKE_STORE_SCHEMA = "aurora-grounded-intake-store/0.1"
+PUBLIC_LITERATURE_REFRESH_CLI_SCHEMA = "aurora-public-literature-refresh-cli/0.1"
+REAL_DATA_REFRESH_CLI_SCHEMA = "aurora-real-data-refresh-cli/0.1"
 CLI_DOMAIN_TOOL_BINDINGS_SCHEMA = "aurora-cli-domain-tool-bindings/0.1"
 
 
@@ -160,7 +189,10 @@ def _write_json(writer: TextIO, value: Any) -> None:
     writer.write(
         json.dumps(
             value,
-            ensure_ascii=False,
+            # Keep the process boundary portable across Windows code pages.  JSON consumers
+            # decode these escapes back to the original Unicode source metadata, while a local
+            # console that is not UTF-8 capable cannot crash the otherwise valid handoff.
+            ensure_ascii=True,
             sort_keys=True,
             indent=2,
             allow_nan=False,
@@ -189,6 +221,8 @@ def _provider_config(args: argparse.Namespace):
         return openai_provider(base_url=base_url or "https://api.openai.com")
     if provider == "anthropic":
         return anthropic_provider(base_url=base_url or "https://api.anthropic.com")
+    if provider == "ollama":
+        return ollama_provider(base_url=base_url or "http://127.0.0.1:11434/v1")
     if not base_url:
         raise ValueError("--base-url is required for a custom OpenAI-compatible provider")
     return openai_compatible_provider(
@@ -483,7 +517,7 @@ def _activate_domain_tools(
     registered_names = sorted(
         row["name"] for row in registered if isinstance(row, Mapping) and isinstance(row.get("name"), str)
     )
-    return {
+    descriptor = {
         "requested": True,
         "domains": list(domains),
         "plan_digest": activation.get("plan_digest"),
@@ -503,6 +537,7 @@ def _activate_domain_tools(
         "effect_authority": "separate_operator_mission_dispatch_required",
         "retention": "plan_and_registry_digests; tool names and safety counts only",
     }
+    return descriptor
 
 
 def _load_activation_store(
@@ -897,7 +932,20 @@ def _collect_credentials(
 
 def _parse_mcp_command(value: str) -> tuple[str, ...]:
     try:
-        command = tuple(shlex.split(value, posix=True))
+        # POSIX mode treats Windows path separators as escape characters (for example,
+        # ``C:\\Users\\...`` becomes ``C:Users...``).  Use the native Windows tokenization
+        # when this process runs there, then remove only balanced command-string quotes; the
+        # resulting argv is still passed to ``subprocess`` with ``shell=False``.
+        if os.name == "nt":
+            raw_command = shlex.split(value, posix=False)
+            command = tuple(
+                token[1:-1]
+                if len(token) >= 2 and token[0] == token[-1] and token[0] in {"'", '"'}
+                else token
+                for token in raw_command
+            )
+        else:
+            command = tuple(shlex.split(value, posix=True))
     except ValueError as error:
         raise ValueError("--mcp-command has invalid quoting") from error
     if not command:
@@ -2034,6 +2082,592 @@ def _load_evidence_file(path_value: str | None) -> dict[str, Any] | None:
     return dict(raw)
 
 
+def _load_grounded_portfolio_bundle(
+    path_value: str | None,
+    *,
+    expected_schema: str,
+) -> dict[str, Any] | None:
+    """Load one caller-owned, real-data snapshot for the grounded portfolio command.
+
+    The CLI only transports the snapshot to the authoritative MCP tools.  It still applies a
+    small process-boundary contract first: bounded UTF-8 JSON, the expected source schema, an
+    explicit non-synthetic marker, and no credential-shaped fields.
+    """
+
+    if path_value is None:
+        return None
+    path = _resolve_grounded_path(path_value)
+    if not path.exists() or not path.is_file():
+        raise ValueError("grounded portfolio bundle is missing")
+    if path.stat().st_size > _MAX_GROUNDED_PORTFOLIO_BUNDLE_BYTES:
+        raise ValueError("grounded portfolio bundle exceeds its bounded size")
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise ValueError("grounded portfolio bundle is unreadable") from error
+    _batch_request_json_safe(raw)
+    if not isinstance(raw, Mapping):
+        raise ValueError("grounded portfolio bundle must contain a JSON object")
+    if raw.get("schema_version") != expected_schema:
+        raise ValueError("grounded portfolio bundle schema is invalid")
+    if raw.get("synthetic_data") is not False:
+        raise ValueError("grounded portfolio requires an explicit non-synthetic snapshot")
+    return dict(raw)
+
+
+def _load_grounded_case_asset_manifest(path_value: str | None) -> dict[str, Any] | None:
+    """Load a caller-owned de-identified case manifest without opening any asset bytes."""
+
+    if path_value is None:
+        return None
+    path = _resolve_grounded_path(path_value)
+    if not path.exists() or not path.is_file():
+        raise ValueError("grounded case-asset manifest is missing")
+    if path.stat().st_size > _MAX_GROUNDED_PORTFOLIO_BUNDLE_BYTES:
+        raise ValueError("grounded case-asset manifest exceeds its bounded size")
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise ValueError("grounded case-asset manifest is unreadable") from error
+    _batch_request_json_safe(raw)
+    if not isinstance(raw, Mapping):
+        raise ValueError("grounded case-asset manifest must contain a JSON object")
+    if raw.get("schema_version") != "bioprism-neurosurgery-case-asset-manifest/0.1":
+        raise ValueError("grounded case-asset manifest schema is invalid")
+    if raw.get("synthetic_data") is not False:
+        raise ValueError("grounded case-asset manifest requires synthetic_data=false")
+    if raw.get("direct_identifier_fields") not in (None, []):
+        raise ValueError("grounded case-asset manifest contains direct identifier fields")
+    return dict(raw)
+
+
+def _resolve_grounded_path(path_value: str | os.PathLike[str]) -> Path:
+    """Resolve a grounded snapshot path consistently for reads and atomic refreshes.
+
+    The checked-in defaults are intentionally usable from either the repository root or the
+    ``python`` package directory.  A caller-owned path that does not exist is left relative to
+    the current working directory so an explicitly requested refresh can create it there.
+    """
+
+    path = Path(path_value)
+    if not path.is_absolute() and not path.exists():
+        repository_path = Path(__file__).resolve().parents[2] / path
+        if repository_path.exists():
+            path = repository_path
+    return path
+
+
+def _refresh_grounded_sources(
+    *,
+    real_data_path: str | None,
+    public_literature_path: str | None,
+    refresh_real_data: bool,
+    refresh_public_literature: bool,
+    approve_network: bool,
+    timeout: float,
+    resume: bool,
+) -> dict[str, dict[str, Any]]:
+    """Optionally refresh public snapshots before a grounded worker starts.
+
+    Refresh is deliberately opt-in and cannot be combined with resume: a new snapshot changes
+    the evidence digest, so silently mixing it into a persisted loop would make the checkpoint
+    non-replayable.  Both refreshers are credentialless and atomically validate their candidate
+    before replacing the caller-selected file.
+    """
+
+    requested = refresh_real_data or refresh_public_literature
+    if not requested:
+        return {}
+    if resume:
+        raise ValueError("source refresh cannot be combined with --resume; refresh first, then resume with the new digest")
+    if not approve_network:
+        raise ValueError("source refresh requires --approve-network")
+    if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not 1 <= timeout <= 120:
+        raise ValueError("--refresh-timeout must be between 1 and 120 seconds")
+    if refresh_real_data and real_data_path is None:
+        raise ValueError("--refresh-real-data requires the real-glioma plane")
+    if refresh_public_literature and public_literature_path is None:
+        raise ValueError("--refresh-public-literature requires the public-literature plane")
+
+    reports: dict[str, dict[str, Any]] = {}
+    if refresh_real_data:
+        report = atomic_refresh_real_glioma_data(
+            _resolve_grounded_path(real_data_path),
+            timeout=float(timeout),
+        )
+        reports["real_glioma_population"] = (
+            report.to_dict() if hasattr(report, "to_dict") else dict(report)
+        )
+    if refresh_public_literature:
+        report = atomic_refresh_neurosurgical_public_literature(
+            _resolve_grounded_path(public_literature_path),
+            timeout=float(timeout),
+        )
+        reports["public_literature"] = (
+            report.to_dict() if hasattr(report, "to_dict") else dict(report)
+        )
+    return reports
+
+
+def _validate_grounded_source_refresh(value: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Validate the redacted refresh receipt retained by a grounded checkpoint.
+
+    The receipt is intentionally separate from the source-plane loop digest: it records which
+    credentialless public refreshes produced the snapshots used by the run, while the loops bind
+    the resulting bundle digests.  Keeping this envelope in the checkpoint makes the provenance
+    visible after restart without retaining request bodies, credentials, or patient data.
+    """
+
+    if value is None:
+        value = {}
+    if not isinstance(value, Mapping):
+        raise ValueError("grounded source refresh receipt is invalid")
+    _batch_request_json_safe(value)
+    performed = value.get("performed", {})
+    if not isinstance(performed, Mapping):
+        raise ValueError("grounded source refresh receipt entries are invalid")
+    allowed_planes = {"real_glioma_population", "public_literature"}
+    if any(not isinstance(key, str) or key not in allowed_planes for key in performed):
+        raise ValueError("grounded source refresh receipt names an unknown plane")
+    if any(not isinstance(report, Mapping) for report in performed.values()):
+        raise ValueError("grounded source refresh receipt report is invalid")
+    expected = {
+        "performed": dict(performed),
+        "network_approved": bool(performed),
+        "credentials_required": False,
+        "synthetic_data": False,
+        "human_review_required": True,
+    }
+    for key, expected_value in expected.items():
+        if key in value and value.get(key) != expected_value:
+            raise ValueError("grounded source refresh receipt safety posture is invalid")
+    return expected
+
+
+def _load_grounded_real_data_query(path_value: str | None) -> dict[str, Any] | None:
+    """Load a bounded structured real-data query for the grounded operator commands."""
+
+    if path_value is None:
+        return None
+    path = Path(path_value)
+    if not path.is_absolute() and not path.exists():
+        repository_path = Path(__file__).resolve().parents[2] / path
+        if repository_path.exists():
+            path = repository_path
+    if not path.exists() or not path.is_file() or path.stat().st_size > _MAX_GROUNDED_QUERY_FILE_BYTES:
+        raise ValueError("grounded real-data query file is missing or outside its bounded size")
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise ValueError("grounded real-data query file is unreadable") from error
+    _batch_request_json_safe(raw)
+    if not isinstance(raw, Mapping):
+        raise ValueError("grounded real-data query file must contain a JSON object")
+    return dict(raw)
+
+
+def _load_grounded_public_literature_query(path_value: str | None) -> dict[str, Any] | None:
+    """Load a bounded structured PubMed query for the grounded operator commands."""
+
+    return _load_grounded_real_data_query(path_value)
+
+
+def _grounded_portfolio_digest_descriptor(
+    portfolio: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Project exactly the digest descriptor emitted by ``LocalNeurosurgicalAgent``."""
+
+    descriptor = {
+        "schema_version": portfolio.get("schema_version"),
+        "question_digest": portfolio.get("question_digest"),
+        "provider": portfolio.get("provider"),
+        "model": portfolio.get("model"),
+        "specialty": portfolio.get("specialty"),
+        "source_planes": portfolio.get("source_planes"),
+        "real_data_bundle_digest": portfolio.get("real_data_bundle_digest"),
+        "public_literature_bundle_digest": portfolio.get("public_literature_bundle_digest"),
+        "real_data_loop_digest": (
+            portfolio.get("real_data_loop", {}).get("loop_digest")
+            if isinstance(portfolio.get("real_data_loop"), Mapping)
+            else None
+        ),
+        "public_literature_loop_digest": (
+            portfolio.get("public_literature_loop", {}).get("loop_digest")
+            if isinstance(portfolio.get("public_literature_loop"), Mapping)
+            else None
+        ),
+        "pending_real_data_queries": portfolio.get("pending_real_data_queries"),
+        "pending_public_literature_queries": portfolio.get("pending_public_literature_queries"),
+        "completed_pass_count": portfolio.get("completed_pass_count"),
+        "claim_count": portfolio.get("claim_count"),
+        "grounded_claim_count": portfolio.get("grounded_claim_count"),
+        "blocked_claim_count": portfolio.get("blocked_claim_count"),
+    }
+    if "real_data_query" in portfolio:
+        descriptor["real_data_query"] = portfolio.get("real_data_query")
+    if "public_literature_query" in portfolio:
+        descriptor["public_literature_query"] = portfolio.get("public_literature_query")
+    # Preserve digest compatibility with pre-link-audit checkpoints while binding the new
+    # optional reviewer artifact whenever it is present in a freshly emitted portfolio.
+    if "literature_link_audit" in portfolio:
+        link_audit = portfolio.get("literature_link_audit")
+        descriptor["literature_link_audit_digest"] = (
+            link_audit.get("audit_digest") if isinstance(link_audit, Mapping) else None
+        )
+    if "case_asset_manifest" in portfolio:
+        manifest = portfolio.get("case_asset_manifest")
+        descriptor["case_asset_manifest_digest"] = (
+            manifest.get("report_digest") if isinstance(manifest, Mapping) else None
+        )
+    if "case_asset_manifest_query" in portfolio:
+        descriptor["case_asset_manifest_query"] = portfolio.get("case_asset_manifest_query")
+    return descriptor
+
+
+def _validate_grounded_portfolio_result(value: Mapping[str, Any]) -> dict[str, Any]:
+    """Verify the SDK portfolio envelope before it is persisted or resumed."""
+
+    required = {
+        "schema_version",
+        "portfolio_digest",
+        "question_digest",
+        "provider",
+        "model",
+        "specialty",
+        "source_planes",
+        "real_data_loop",
+        "public_literature_loop",
+        "pending_real_data_queries",
+        "pending_public_literature_queries",
+    }
+    if not isinstance(value, Mapping) or not required.issubset(value):
+        raise ValueError("grounded portfolio result is incomplete")
+    if value.get("schema_version") != "bioprism-neurosurgery-grounded-research-portfolio/0.1":
+        raise ValueError("grounded portfolio result schema is invalid")
+    digest = value.get("portfolio_digest")
+    if not isinstance(digest, str) or digest != content_digest(_grounded_portfolio_digest_descriptor(value)):
+        raise ValueError("grounded portfolio digest does not match its contents")
+    planes = value.get("source_planes")
+    if not isinstance(planes, list) or not planes or any(
+        plane not in {"real_glioma_population", "public_literature"} for plane in planes
+    ):
+        raise ValueError("grounded portfolio source planes are invalid")
+    real_loop = value.get("real_data_loop")
+    public_loop = value.get("public_literature_loop")
+    if "real_glioma_population" in planes and not isinstance(real_loop, Mapping):
+        raise ValueError("grounded portfolio is missing its real-data loop")
+    if "public_literature" in planes and not isinstance(public_loop, Mapping):
+        raise ValueError("grounded portfolio is missing its literature loop")
+    if "real_data_query" in value and not isinstance(value.get("real_data_query"), Mapping):
+        raise ValueError("grounded portfolio real-data query is invalid")
+    if "public_literature_query" in value and not isinstance(value.get("public_literature_query"), Mapping):
+        raise ValueError("grounded portfolio public-literature query is invalid")
+    return dict(value)
+
+
+def _grounded_intake_digest_descriptor(value: Mapping[str, Any]) -> dict[str, Any]:
+    """Project the exact envelope identity used by ``grounded_research_intake``."""
+
+    portfolio = value.get("portfolio")
+    return {
+        "schema_version": value.get("schema_version"),
+        "question_digest": value.get("question_digest"),
+        "intake_digest": value.get("intake_digest"),
+        "routed_specialty": value.get("routed_specialty"),
+        "source_planes": value.get("source_planes"),
+        "status": value.get("status"),
+        "portfolio_digest": portfolio.get("portfolio_digest") if isinstance(portfolio, Mapping) else None,
+    }
+
+
+def _validate_grounded_intake_result(value: Mapping[str, Any]) -> dict[str, Any]:
+    """Verify a persisted routed intake before allowing a worker to continue its loops."""
+
+    required = {
+        "schema_version",
+        "envelope_digest",
+        "question_digest",
+        "intake_digest",
+        "intake",
+        "routed_specialty",
+        "source_planes",
+        "status",
+        "portfolio",
+        "required_evidence",
+        "next_actions",
+        "human_review_required",
+    }
+    if not isinstance(value, Mapping) or not required.issubset(value):
+        raise ValueError("grounded intake result is incomplete")
+    if value.get("schema_version") != "bioprism-neurosurgery-grounded-research-intake/0.1":
+        raise ValueError("grounded intake result schema is invalid")
+    digest = value.get("envelope_digest")
+    if not isinstance(digest, str) or digest != content_digest(_grounded_intake_digest_descriptor(value)):
+        raise ValueError("grounded intake envelope digest does not match its contents")
+    question_digest = value.get("question_digest")
+    intake_digest = value.get("intake_digest")
+    if (
+        not isinstance(question_digest, str)
+        or len(question_digest) != 64
+        or any(character not in "0123456789abcdef" for character in question_digest)
+        or not isinstance(intake_digest, str)
+        or len(intake_digest) != 64
+        or any(character not in "0123456789abcdef" for character in intake_digest)
+    ):
+        raise ValueError("grounded intake digest fields are invalid")
+    routed = value.get("routed_specialty")
+    supported = {
+        "glioma",
+        "cranial_base",
+        "craniosynostosis",
+        "encephalocele",
+        "spina_bifida",
+        "chiari_malformation",
+    }
+    if routed is not None and routed not in supported:
+        raise ValueError("grounded intake specialty is invalid")
+    intake = value.get("intake")
+    if (
+        not isinstance(intake, Mapping)
+        or intake.get("plan_digest") != intake_digest
+        or intake.get("question_digest") != question_digest
+        or intake.get("selected_specialty") != routed
+    ):
+        raise ValueError("grounded intake plan digest is inconsistent")
+    planes = value.get("source_planes")
+    if not isinstance(planes, list) or any(plane not in {"real_glioma_population", "public_literature"} for plane in planes):
+        raise ValueError("grounded intake source planes are invalid")
+    status = value.get("status")
+    if status not in {"abstained", "needs_evidence", "grounded_for_human_review", "blocked"}:
+        raise ValueError("grounded intake status is invalid")
+    portfolio = value.get("portfolio")
+    if portfolio is None:
+        if status not in {"abstained", "needs_evidence"} or planes:
+            raise ValueError("grounded intake hold is inconsistent")
+    else:
+        if not isinstance(portfolio, Mapping):
+            raise ValueError("grounded intake portfolio must be an object")
+        verified_portfolio = _validate_grounded_portfolio_result(portfolio)
+        if status not in {"grounded_for_human_review", "blocked"}:
+            raise ValueError("grounded intake portfolio status is inconsistent")
+        if verified_portfolio.get("question_digest") != question_digest or verified_portfolio.get("source_planes") != planes:
+            raise ValueError("grounded intake portfolio identity is inconsistent")
+        value = {**dict(value), "portfolio": verified_portfolio}
+    if value.get("human_review_required") is not True:
+        raise ValueError("grounded intake must remain human-review gated")
+    for field in ("required_evidence", "next_actions"):
+        if not isinstance(value.get(field), list):
+            raise ValueError(f"grounded intake {field} must be a list")
+    return dict(value)
+
+
+def _load_grounded_intake_store(path_value: str) -> dict[str, Any]:
+    """Read and verify a digest-bound routed-intake checkpoint."""
+
+    path = Path(path_value)
+    if not path.exists() or not path.is_file():
+        raise ValueError("grounded intake resume requires an existing output store")
+    if path.stat().st_size > _MAX_GROUNDED_PORTFOLIO_STORE_BYTES:
+        raise ValueError("grounded intake output store exceeds its bounded size")
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise ValueError("grounded intake output store is unreadable") from error
+    _batch_request_json_safe(raw)
+    if not isinstance(raw, Mapping) or raw.get("schema") != GROUNDED_INTAKE_STORE_SCHEMA:
+        raise ValueError("grounded intake output store has an invalid schema")
+    unsigned = dict(raw)
+    supplied_digest = unsigned.pop("store_digest", None)
+    if not isinstance(supplied_digest, str) or supplied_digest != content_digest(unsigned):
+        raise ValueError("grounded intake output store digest does not match its contents")
+    if raw.get("command") != "grounded-autopilot":
+        raise ValueError("grounded intake output command marker is invalid")
+    intake = raw.get("intake")
+    if not isinstance(intake, Mapping):
+        raise ValueError("grounded intake output is missing its intake")
+    verified = _validate_grounded_intake_result(intake)
+    raw_provider = raw.get("provider")
+    if raw_provider not in {"ollama", "local", "in_memory"}:
+        raise ValueError("grounded intake output provider is invalid")
+    raw_model = raw.get("model")
+    if not isinstance(raw_model, str) or not raw_model.strip():
+        raise ValueError("grounded intake output model is invalid")
+    portfolio = verified.get("portfolio")
+    if isinstance(portfolio, Mapping):
+        if raw_provider != portfolio.get("provider"):
+            raise ValueError("grounded intake output provider does not match its portfolio")
+        if raw_model != portfolio.get("model"):
+            raise ValueError("grounded intake output model does not match its portfolio")
+    if raw.get("question_digest") != verified.get("question_digest"):
+        raise ValueError("grounded intake output question identity does not match its intake")
+    if raw.get("routed_specialty") != verified.get("routed_specialty"):
+        raise ValueError("grounded intake output specialty identity does not match its intake")
+    source_paths = raw.get("source_paths")
+    if not isinstance(source_paths, Mapping):
+        raise ValueError("grounded intake output source paths are invalid")
+    controls = raw.get("controls")
+    if not isinstance(controls, Mapping):
+        raise ValueError("grounded intake output controls are invalid")
+    source_refresh = _validate_grounded_source_refresh(raw.get("source_refresh"))
+    return {
+        **dict(raw),
+        "intake": verified,
+        "source_paths": dict(source_paths),
+        "controls": dict(controls),
+        "source_refresh": source_refresh,
+    }
+
+
+def _persist_grounded_intake_store(
+    path_value: str,
+    *,
+    intake: Mapping[str, Any],
+    provider: str,
+    model: str,
+    source_paths: Mapping[str, str | None],
+    controls: Mapping[str, Any],
+    source_refresh: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Atomically persist the complete routed intake and any caller-owned portfolio ledger."""
+
+    verified = _validate_grounded_intake_result(intake)
+    unsigned: dict[str, Any] = {
+        "schema": GROUNDED_INTAKE_STORE_SCHEMA,
+        "command": "grounded-autopilot",
+        "provider": provider,
+        "model": model,
+        "question_digest": verified["question_digest"],
+        "routed_specialty": verified["routed_specialty"],
+        "source_paths": dict(source_paths),
+        "controls": dict(controls),
+        "source_refresh": _validate_grounded_source_refresh(source_refresh),
+        "intake": verified,
+        "retention": "caller_owned_grounded_answers_and_claims; no_credentials_or_patient_data",
+    }
+    payload = {**unsigned, "store_digest": content_digest(unsigned)}
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2, allow_nan=False) + "\n"
+    if len(encoded.encode("utf-8")) > _MAX_GROUNDED_PORTFOLIO_STORE_BYTES:
+        raise ValueError("grounded intake output store exceeds its bounded size")
+    destination = Path(path_value)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary_name: str | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=str(destination.parent),
+            prefix=f".{destination.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as temporary:
+            temporary_name = temporary.name
+            temporary.write(encoded)
+            temporary.flush()
+            os.fsync(temporary.fileno())
+        os.replace(temporary_name, destination)
+        temporary_name = None
+    finally:
+        if temporary_name is not None:
+            try:
+                os.unlink(temporary_name)
+            except FileNotFoundError:
+                pass
+    persisted = _load_grounded_intake_store(str(destination))
+    return persisted
+
+
+def _load_grounded_portfolio_store(path_value: str) -> dict[str, Any]:
+    """Read and verify a digest-bound grounded portfolio checkpoint."""
+
+    path = Path(path_value)
+    if not path.exists() or not path.is_file():
+        raise ValueError("grounded portfolio resume requires an existing output store")
+    if path.stat().st_size > _MAX_GROUNDED_PORTFOLIO_STORE_BYTES:
+        raise ValueError("grounded portfolio output store exceeds its bounded size")
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise ValueError("grounded portfolio output store is unreadable") from error
+    _batch_request_json_safe(raw)
+    if not isinstance(raw, Mapping) or raw.get("schema") != GROUNDED_PORTFOLIO_CLI_SCHEMA:
+        raise ValueError("grounded portfolio output store has an invalid schema")
+    supplied_digest = raw.get("store_digest")
+    unsigned = dict(raw)
+    unsigned.pop("store_digest", None)
+    if supplied_digest != content_digest(unsigned):
+        raise ValueError("grounded portfolio output store digest does not match its contents")
+    if raw.get("command") != "grounded-portfolio":
+        raise ValueError("grounded portfolio output command marker is invalid")
+    portfolio = raw.get("portfolio")
+    if not isinstance(portfolio, Mapping):
+        raise ValueError("grounded portfolio output is missing its portfolio")
+    if (
+        raw.get("provider") != portfolio.get("provider")
+        or raw.get("model") != portfolio.get("model")
+        or raw.get("question_digest") != portfolio.get("question_digest")
+    ):
+        raise ValueError("grounded portfolio output identity does not match its portfolio")
+    source_refresh = _validate_grounded_source_refresh(raw.get("source_refresh"))
+    return {
+        **dict(raw),
+        "portfolio": _validate_grounded_portfolio_result(portfolio),
+        "source_refresh": source_refresh,
+    }
+
+
+def _persist_grounded_portfolio_store(
+    path_value: str,
+    *,
+    portfolio: Mapping[str, Any],
+    provider: str,
+    model: str,
+    source_paths: Mapping[str, str | None],
+    source_refresh: Mapping[str, Any] | None = None,
+) -> None:
+    """Atomically persist a complete, digest-bound loop ledger for restart/resume."""
+
+    verified = _validate_grounded_portfolio_result(portfolio)
+    unsigned: dict[str, Any] = {
+        "schema": GROUNDED_PORTFOLIO_CLI_SCHEMA,
+        "command": "grounded-portfolio",
+        "provider": provider,
+        "model": model,
+        "question_digest": verified["question_digest"],
+        "source_paths": dict(source_paths),
+        "source_refresh": _validate_grounded_source_refresh(source_refresh),
+        "portfolio": verified,
+        "retention": "caller_owned_grounded_answers_and_claims; no_credentials_or_patient_data",
+    }
+    payload = {**unsigned, "store_digest": content_digest(unsigned)}
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2, allow_nan=False) + "\n"
+    if len(encoded.encode("utf-8")) > _MAX_GROUNDED_PORTFOLIO_STORE_BYTES:
+        raise ValueError("grounded portfolio output store exceeds its bounded size")
+    destination = Path(path_value)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary_name: str | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=str(destination.parent),
+            prefix=f".{destination.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as temporary:
+            temporary_name = temporary.name
+            temporary.write(encoded)
+            temporary.flush()
+            os.fsync(temporary.fileno())
+        os.replace(temporary_name, destination)
+        temporary_name = None
+    finally:
+        if temporary_name is not None:
+            try:
+                os.unlink(temporary_name)
+            except FileNotFoundError:
+                pass
+
+
 def _load_launch_admission_file(path_value: str | None) -> dict[str, Any] | None:
     """Load one bounded, digest-verified admission record without exposing its contents."""
 
@@ -2647,6 +3281,469 @@ def _batch_run(
             learning_memory.close()
         if learning_ledger is not None:
             learning_ledger.close()
+
+
+def _grounded_portfolio(
+    args: argparse.Namespace,
+    *,
+    client_factory: Callable[..., Client] = Client,
+) -> dict[str, Any]:
+    """Run the source-separated neurosurgical portfolio from a no-key operator process."""
+
+    if args.provider not in {"ollama", "local", "in_memory"}:
+        raise ValueError("grounded-portfolio only permits credentialless local or loopback providers")
+    if not args.approve_provider_call:
+        raise ValueError("grounded-portfolio requires --approve-provider-call")
+    if args.without_real_data and args.without_public_literature:
+        raise ValueError("at least one grounded portfolio source must be enabled")
+    if (args.freshness_as_of is None) != (args.freshness_max_age_days is None):
+        raise ValueError("--freshness-as-of and --freshness-max-age-days must be supplied together")
+    if not 1 <= args.max_passes <= 8:
+        raise ValueError("--max-passes must be between 1 and 8")
+    if not 0 <= args.max_follow_ups_per_pass <= 8:
+        raise ValueError("--max-follow-ups-per-pass must be between 0 and 8")
+    if not 128 <= args.max_output_tokens <= 16_384:
+        raise ValueError("--max-output-tokens must be between 128 and 16384")
+    if not 1 <= args.max_hits <= 128:
+        raise ValueError("--max-hits must be between 1 and 128")
+    if not 1 <= args.max_chars <= 65_536:
+        raise ValueError("--max-chars must be between 1 and 65536")
+    if not 1 <= args.max_tool_turns <= 8:
+        raise ValueError("--max-tool-turns must be between 1 and 8")
+    if not 1 <= args.max_tool_calls <= 32:
+        raise ValueError("--max-tool-calls must be between 1 and 32")
+
+    real_data_path = None if args.without_real_data else args.real_data_file
+    public_literature_path = (
+        None if args.without_public_literature else args.public_literature_file
+    )
+    source_refresh = _refresh_grounded_sources(
+        real_data_path=real_data_path,
+        public_literature_path=public_literature_path,
+        refresh_real_data=args.refresh_real_data,
+        refresh_public_literature=args.refresh_public_literature,
+        approve_network=args.approve_network,
+        timeout=args.refresh_timeout,
+        resume=args.resume,
+    )
+    source_refresh_payload = _validate_grounded_source_refresh({"performed": source_refresh})
+    real_data = _load_grounded_portfolio_bundle(
+        real_data_path,
+        expected_schema="bioprism-neurosurgery-real/0.1",
+    )
+    public_literature = _load_grounded_portfolio_bundle(
+        public_literature_path,
+        expected_schema="bioprism-neurosurgery-public-literature/0.1",
+    )
+    real_data_query = _load_grounded_real_data_query(args.real_data_query_file)
+    public_literature_query = _load_grounded_public_literature_query(args.public_literature_query_file)
+    case_asset_manifest = _load_grounded_case_asset_manifest(args.case_asset_manifest)
+    case_asset_manifest_query = _load_grounded_real_data_query(args.case_asset_manifest_query)
+    if case_asset_manifest_query is not None and case_asset_manifest is None:
+        raise ValueError("--case-asset-manifest-query requires --case-asset-manifest")
+    if real_data_query is not None and real_data is None:
+        raise ValueError("--real-data-query-file requires the real-glioma plane")
+    if public_literature_query is not None and public_literature is None:
+        raise ValueError("--public-literature-query-file requires the public-literature plane")
+    source_paths: dict[str, str | None] = {
+        "real_data_file": real_data_path,
+        "public_literature_file": public_literature_path,
+    }
+    if args.real_data_query_file is not None:
+        source_paths["real_data_query_file"] = args.real_data_query_file
+    if args.public_literature_query_file is not None:
+        source_paths["public_literature_query_file"] = args.public_literature_query_file
+    if args.case_asset_manifest is not None:
+        source_paths["case_asset_manifest"] = args.case_asset_manifest
+        source_paths["case_asset_manifest_content_digest"] = content_digest(case_asset_manifest)
+    if args.case_asset_manifest_query is not None:
+        source_paths["case_asset_manifest_query"] = args.case_asset_manifest_query
+        source_paths["case_asset_manifest_query_content_digest"] = content_digest(case_asset_manifest_query)
+    output_path = Path(args.portfolio_output)
+    prior_store = _load_grounded_portfolio_store(str(output_path)) if args.resume else None
+    if prior_store is not None and not source_refresh:
+        source_refresh_payload = prior_store["source_refresh"]
+    if output_path.exists() and not args.resume:
+        raise ValueError("existing grounded portfolio output requires --resume")
+    prior_portfolio = None if prior_store is None else prior_store["portfolio"]
+    expected_planes = [
+        plane
+        for plane, enabled in (
+            ("real_glioma_population", real_data is not None),
+            ("public_literature", public_literature is not None),
+        )
+        if enabled
+    ]
+    if prior_portfolio is not None:
+        question_digest = hashlib.sha256(args.question.encode("utf-8")).hexdigest()
+        if prior_portfolio.get("question_digest") != question_digest:
+            raise ValueError("--resume question does not match the persisted portfolio")
+        if prior_portfolio.get("provider") != args.provider or prior_portfolio.get("model") != args.model:
+            raise ValueError("--resume provider/model does not match the persisted portfolio")
+        if prior_portfolio.get("specialty") != args.specialty:
+            raise ValueError("--resume specialty does not match the persisted portfolio")
+        if prior_portfolio.get("source_planes") != expected_planes:
+            raise ValueError("--resume source selection does not match the persisted portfolio")
+        if dict(prior_store.get("source_paths", {})) != source_paths:
+            raise ValueError("--resume source paths do not match the persisted portfolio")
+
+    freshness = None
+    if args.freshness_as_of is not None:
+        freshness = {
+            "as_of": args.freshness_as_of,
+            "max_age_days": args.freshness_max_age_days,
+        }
+    command = _parse_mcp_command(args.mcp_command)
+    runtime, onboarding = _runtime_with_provider(args)
+    session = onboarding.start_session()
+    try:
+        client = client_factory(command, cwd=args.mcp_cwd, timeout=args.mcp_timeout)
+        with client:
+            agent = LocalNeurosurgicalAgent(client)
+            portfolio = agent.grounded_research_portfolio(
+                args.question,
+                runtime,
+                args.provider,
+                args.model,
+                real_glioma_data=real_data,
+                public_literature=public_literature,
+                case_asset_manifest=case_asset_manifest,
+                case_asset_manifest_query=case_asset_manifest_query,
+                specialty=args.specialty,
+                approve_provider_call=True,
+                max_passes=args.max_passes,
+                max_follow_ups_per_pass=args.max_follow_ups_per_pass,
+                max_output_tokens=args.max_output_tokens,
+                max_hits=args.max_hits,
+                max_chars=args.max_chars,
+                include_abstracts=not args.no_abstracts,
+                freshness=freshness,
+                real_data_query=real_data_query,
+                public_literature_query=public_literature_query,
+                tool_loop=args.tool_loop,
+                max_tool_turns=args.max_tool_turns,
+                max_tool_calls=args.max_tool_calls,
+                real_resume_from=(
+                    None
+                    if prior_portfolio is None
+                    else prior_portfolio.get("real_data_loop")
+                ),
+                public_resume_from=(
+                    None
+                    if prior_portfolio is None
+                    else prior_portfolio.get("public_literature_loop")
+                ),
+            )
+        _persist_grounded_portfolio_store(
+            str(output_path),
+            portfolio=portfolio,
+            provider=args.provider,
+            model=args.model,
+            source_paths=source_paths,
+            source_refresh=source_refresh_payload,
+        )
+        persisted_store = _load_grounded_portfolio_store(str(output_path))
+        return {
+            "schema": CLI_SCHEMA,
+            "command": "grounded-portfolio",
+            "portfolio": portfolio,
+            "portfolio_output": str(output_path),
+            "source_refresh": source_refresh_payload,
+            "persistence": {
+                "store": str(output_path),
+                "store_digest": persisted_store["store_digest"],
+                "resume_requested": args.resume,
+                "resumed": prior_portfolio is not None,
+                "retention": "caller_owned_grounded_answers_and_claims; no_credentials_or_patient_data",
+            },
+            "provider_status": runtime.provider_status(args.provider),
+            "credential_session": session.status().to_dict(),
+            "authorization": {
+                "provider_call_approved": True,
+                "network": args.provider == "ollama" or bool(source_refresh),
+                "source_refresh_network_approved": bool(source_refresh),
+                "clinical_actions_authorized": False,
+                "human_review_required": True,
+            },
+            "secret_material": "never_returned",
+        }
+    finally:
+        session.close()
+
+
+def _refresh_public_literature(
+    args: argparse.Namespace,
+    *,
+    refresher: Callable[..., Any] | None = None,
+) -> dict[str, Any]:
+    """Refresh the checked-in PubMed plane through the credentialless public-data boundary."""
+
+    if not args.approve_network:
+        raise ValueError("refresh-public-literature requires --approve-network")
+    if not 1 <= args.per_specialty_limit <= 50:
+        raise ValueError("--per-specialty-limit must be between 1 and 50")
+    if not 1 <= args.timeout <= 120:
+        raise ValueError("--timeout must be between 1 and 120 seconds")
+    if refresher is None:
+        refresher = atomic_refresh_neurosurgical_public_literature
+    report = refresher(
+        args.output,
+        per_specialty_limit=args.per_specialty_limit,
+        timeout=args.timeout,
+    )
+    projected = report.to_dict() if hasattr(report, "to_dict") else dict(report)
+    return {
+        "schema": CLI_SCHEMA,
+        "refresh_schema": PUBLIC_LITERATURE_REFRESH_CLI_SCHEMA,
+        "command": "refresh-public-literature",
+        "refresh": projected,
+        "authorization": {
+            "network_approved": True,
+            "credentials_required": False,
+            "synthetic_data": False,
+            "human_review_required": True,
+        },
+        "secret_material": "never_returned",
+    }
+
+
+def _refresh_real_glioma(args: argparse.Namespace) -> dict[str, Any]:
+    """Refresh the public aggregate glioma bundle through the credentialless network edge."""
+
+    if not args.approve_network:
+        raise ValueError("refresh-real-glioma requires --approve-network")
+    gdc_project_ids = tuple(args.gdc_project_id or DEFAULT_GDC_PROJECT_IDS)
+    portal_study_ids = tuple(args.portal_study_id or DEFAULT_PORTAL_STUDY_IDS)
+    report = atomic_refresh_real_glioma_data(
+        args.output,
+        gdc_project_ids=gdc_project_ids,
+        trial_page_size=args.trial_page_size,
+        portal_study_ids=portal_study_ids,
+        portal_study_limit=args.portal_study_limit,
+        pubmed_limit=args.pubmed_limit,
+        pubmed_term=args.pubmed_term or DEFAULT_PUBMED_TERM,
+        pubmed_source_id=args.pubmed_source_id or DEFAULT_PUBMED_SOURCE_ID,
+        timeout=args.timeout,
+    )
+    projected = report.to_dict() if hasattr(report, "to_dict") else dict(report)
+    return {
+        "schema": CLI_SCHEMA,
+        "refresh_schema": REAL_DATA_REFRESH_CLI_SCHEMA,
+        "command": "refresh-real-glioma",
+        "refresh": projected,
+        "authorization": {
+            "network_approved": True,
+            "credentials_required": False,
+            "synthetic_data": False,
+            "patient_data_access": False,
+            "human_review_required": True,
+        },
+        "secret_material": "never_returned",
+    }
+
+
+def _grounded_autopilot(
+    args: argparse.Namespace,
+    *,
+    client_factory: Callable[..., Client] = Client,
+) -> dict[str, Any]:
+    """Route and run one source-gated neurosurgical research question without a key."""
+
+    if args.provider not in {"ollama", "local", "in_memory"}:
+        raise ValueError("grounded-autopilot only permits credentialless local or loopback providers")
+    if not args.approve_provider_call:
+        raise ValueError("grounded-autopilot requires --approve-provider-call")
+    if (args.freshness_as_of is None) != (args.freshness_max_age_days is None):
+        raise ValueError("--freshness-as-of and --freshness-max-age-days must be supplied together")
+    if not 1 <= args.max_passes <= 8:
+        raise ValueError("--max-passes must be between 1 and 8")
+    if not 0 <= args.max_follow_ups_per_pass <= 8:
+        raise ValueError("--max-follow-ups-per-pass must be between 0 and 8")
+    if not 128 <= args.max_output_tokens <= 16_384:
+        raise ValueError("--max-output-tokens must be between 128 and 16384")
+    if not 1 <= args.max_hits <= 128:
+        raise ValueError("--max-hits must be between 1 and 128")
+    if not 1 <= args.max_chars <= 65_536:
+        raise ValueError("--max-chars must be between 1 and 65536")
+    if not 1 <= args.max_tool_turns <= 8:
+        raise ValueError("--max-tool-turns must be between 1 and 8")
+    if not 1 <= args.max_tool_calls <= 32:
+        raise ValueError("--max-tool-calls must be between 1 and 32")
+
+    output_path = Path(args.intake_output)
+    prior_store = _load_grounded_intake_store(str(output_path)) if args.resume else None
+    if output_path.exists() and not args.resume:
+        raise ValueError("existing grounded intake output requires --resume")
+
+    real_data_path = None if args.without_real_data else args.real_data_file
+    public_literature_path = (
+        None if args.without_public_literature else args.public_literature_file
+    )
+    source_refresh = _refresh_grounded_sources(
+        real_data_path=real_data_path,
+        public_literature_path=public_literature_path,
+        refresh_real_data=args.refresh_real_data,
+        refresh_public_literature=args.refresh_public_literature,
+        approve_network=args.approve_network,
+        timeout=args.refresh_timeout,
+        resume=args.resume,
+    )
+    source_refresh_payload = _validate_grounded_source_refresh({"performed": source_refresh})
+    real_data = _load_grounded_portfolio_bundle(
+        real_data_path,
+        expected_schema="bioprism-neurosurgery-real/0.1",
+    )
+    public_literature = _load_grounded_portfolio_bundle(
+        public_literature_path,
+        expected_schema="bioprism-neurosurgery-public-literature/0.1",
+    )
+    real_data_query = _load_grounded_real_data_query(args.real_data_query_file)
+    public_literature_query = _load_grounded_public_literature_query(args.public_literature_query_file)
+    case_asset_manifest = _load_grounded_case_asset_manifest(args.case_asset_manifest)
+    case_asset_manifest_query = _load_grounded_real_data_query(args.case_asset_manifest_query)
+    if case_asset_manifest_query is not None and case_asset_manifest is None:
+        raise ValueError("--case-asset-manifest-query requires --case-asset-manifest")
+    if real_data_query is not None and real_data is None:
+        raise ValueError("--real-data-query-file requires the real-glioma plane")
+    if public_literature_query is not None and public_literature is None:
+        raise ValueError("--public-literature-query-file requires the public-literature plane")
+    expected_source_paths = {
+        "real_data_file": None if args.without_real_data else args.real_data_file,
+        "public_literature_file": None if args.without_public_literature else args.public_literature_file,
+    }
+    if args.real_data_query_file is not None:
+        expected_source_paths["real_data_query_file"] = args.real_data_query_file
+    if args.public_literature_query_file is not None:
+        expected_source_paths["public_literature_query_file"] = args.public_literature_query_file
+    if args.case_asset_manifest is not None:
+        expected_source_paths["case_asset_manifest"] = args.case_asset_manifest
+    if args.case_asset_manifest_query is not None:
+        expected_source_paths["case_asset_manifest_query"] = args.case_asset_manifest_query
+    prior_intake = None if prior_store is None else prior_store["intake"]
+    if prior_store is not None and not source_refresh:
+        source_refresh_payload = prior_store["source_refresh"]
+    if prior_store is not None:
+        question_digest = hashlib.sha256(args.question.encode("utf-8")).hexdigest()
+        if prior_store.get("question_digest") != question_digest:
+            raise ValueError("--resume question does not match the persisted intake")
+        if prior_store.get("provider") != args.provider or prior_store.get("model") != args.model:
+            raise ValueError("--resume provider/model does not match the persisted intake")
+        if prior_store.get("routed_specialty") != prior_intake.get("routed_specialty"):
+            raise ValueError("persisted intake specialty identity is inconsistent")
+        if dict(prior_store.get("source_paths", {})) != expected_source_paths:
+            raise ValueError("--resume source selection does not match the persisted intake")
+        if args.specialty is not None and prior_intake.get("routed_specialty") != args.specialty:
+            raise ValueError("--resume specialty does not match the persisted intake")
+    freshness = None
+    if args.freshness_as_of is not None:
+        freshness = {
+            "as_of": args.freshness_as_of,
+            "max_age_days": args.freshness_max_age_days,
+        }
+    controls = {
+        "max_passes": args.max_passes,
+        "max_follow_ups_per_pass": args.max_follow_ups_per_pass,
+        "max_output_tokens": args.max_output_tokens,
+        "max_hits": args.max_hits,
+        "max_chars": args.max_chars,
+        "tool_loop": args.tool_loop,
+        "max_tool_turns": args.max_tool_turns,
+        "max_tool_calls": args.max_tool_calls,
+        "include_abstracts": not args.no_abstracts,
+        "freshness": freshness,
+        "case_asset_manifest": None if case_asset_manifest is None else content_digest(case_asset_manifest),
+        "case_asset_manifest_query": case_asset_manifest_query,
+    }
+    if prior_store is not None:
+        prior_controls = prior_store.get("controls")
+        if not isinstance(prior_controls, Mapping):
+            raise ValueError("persisted intake controls are invalid")
+        for key, value in controls.items():
+            if key == "max_passes":
+                previous = prior_controls.get(key)
+                if not isinstance(previous, int) or value < previous:
+                    raise ValueError("--resume max-passes cannot shrink the persisted budget")
+            elif prior_controls.get(key) != value:
+                raise ValueError(f"--resume control {key} does not match the persisted intake")
+    command = _parse_mcp_command(args.mcp_command)
+    runtime, onboarding = _runtime_with_provider(args)
+    session = onboarding.start_session()
+    try:
+        client = client_factory(command, cwd=args.mcp_cwd, timeout=args.mcp_timeout)
+        with client:
+            agent = LocalNeurosurgicalAgent(client)
+            intake = agent.grounded_research_intake(
+                args.question,
+                runtime,
+                args.provider,
+                args.model,
+                specialty=args.specialty,
+                real_glioma_data=real_data,
+                public_literature=public_literature,
+                case_asset_manifest=case_asset_manifest,
+                case_asset_manifest_query=case_asset_manifest_query,
+                approve_provider_call=True,
+                max_passes=args.max_passes,
+                max_follow_ups_per_pass=args.max_follow_ups_per_pass,
+                max_output_tokens=args.max_output_tokens,
+                max_hits=args.max_hits,
+                max_chars=args.max_chars,
+                include_abstracts=not args.no_abstracts,
+                freshness=freshness,
+                real_data_query=real_data_query,
+                public_literature_query=public_literature_query,
+                tool_loop=args.tool_loop,
+                max_tool_turns=args.max_tool_turns,
+                max_tool_calls=args.max_tool_calls,
+                real_resume_from=(
+                    None
+                    if prior_intake is None or not isinstance(prior_intake.get("portfolio"), Mapping)
+                    else prior_intake["portfolio"].get("real_data_loop")
+                ),
+                public_resume_from=(
+                    None
+                    if prior_intake is None or not isinstance(prior_intake.get("portfolio"), Mapping)
+                    else prior_intake["portfolio"].get("public_literature_loop")
+                ),
+            )
+        persisted_store = _persist_grounded_intake_store(
+            str(output_path),
+            intake=intake,
+            provider=args.provider,
+            model=args.model,
+            source_paths=expected_source_paths,
+            controls=controls,
+            source_refresh=source_refresh_payload,
+        )
+        return {
+            "schema": CLI_SCHEMA,
+            "intake_schema": GROUNDED_INTAKE_CLI_SCHEMA,
+            "command": "grounded-autopilot",
+            "intake": intake,
+            "source_refresh": source_refresh_payload,
+            "source_paths": {
+                **expected_source_paths,
+            },
+            "persistence": {
+                "store": str(output_path),
+                "store_digest": persisted_store["store_digest"],
+                "resume_requested": args.resume,
+                "resumed": prior_intake is not None,
+                "retention": "caller_owned_grounded_answers_and_claims; no_credentials_or_patient_data",
+            },
+            "provider_status": runtime.provider_status(args.provider),
+            "credential_session": session.status().to_dict(),
+            "authorization": {
+                "provider_call_approved": True,
+                "network": args.provider == "ollama" or bool(source_refresh),
+                "source_refresh_network_approved": bool(source_refresh),
+                "clinical_actions_authorized": False,
+                "human_review_required": True,
+            },
+            "secret_material": "never_returned",
+        }
+    finally:
+        session.close()
 
 
 def _settle_learning(
@@ -3498,6 +4595,237 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("--approve-mission-dispatch", action="store_true", help="authorize mission effects")
     _add_credential_arguments(run)
 
+    refresh_literature = subparsers.add_parser(
+        "refresh-public-literature",
+        help="refresh six bounded real PubMed specialty lanes without an API key",
+    )
+    refresh_literature.add_argument(
+        "--output",
+        default="data/neurosurgery/neurosurgical_public_literature_snapshot.json",
+        help="same-directory atomic output snapshot path",
+    )
+    refresh_literature.add_argument(
+        "--per-specialty-limit",
+        type=int,
+        default=10,
+        help="maximum PubMed records requested per specialty lane (1-50)",
+    )
+    refresh_literature.add_argument(
+        "--timeout",
+        type=float,
+        default=_DEFAULT_TIMEOUT,
+        help="per-request NCBI timeout in seconds (1-120)",
+    )
+    refresh_literature.add_argument(
+        "--approve-network",
+        action="store_true",
+        help="explicitly authorize public NCBI network retrieval; no credential is accepted",
+    )
+
+    refresh_real = subparsers.add_parser(
+        "refresh-real-glioma",
+        help="refresh aggregate real glioma registry, genomic, portal, guideline, and PubMed metadata",
+    )
+    refresh_real.add_argument(
+        "--output",
+        default="data/neurosurgery/glioma_public_snapshot.json",
+        help="same-directory atomic output snapshot path",
+    )
+    refresh_real.add_argument("--gdc-project-id", action="append", default=None, help="TCGA project ID; repeat for a broader real population")
+    refresh_real.add_argument("--trial-page-size", type=int, default=5, help="maximum ClinicalTrials.gov studies (1-100)")
+    refresh_real.add_argument("--portal-study-id", action="append", default=None, help="public cBioPortal study ID; repeatable")
+    refresh_real.add_argument("--portal-study-limit", type=int, default=7, help="number of selected cBioPortal studies (1-100)")
+    refresh_real.add_argument("--pubmed-limit", type=int, default=20, help="maximum glioma PubMed records (1-50)")
+    refresh_real.add_argument("--pubmed-term", default=DEFAULT_PUBMED_TERM, help="bounded PubMed search expression")
+    refresh_real.add_argument("--pubmed-source-id", default=DEFAULT_PUBMED_SOURCE_ID, help="stable lowercase PubMed provenance ID")
+    refresh_real.add_argument("--timeout", type=float, default=_DEFAULT_TIMEOUT, help="per-request timeout in seconds (1-120)")
+    refresh_real.add_argument(
+        "--approve-network",
+        action="store_true",
+        help="explicitly authorize public registry/GDC/cBioPortal/PubMed retrieval; no credential is accepted",
+    )
+
+    grounded = subparsers.add_parser(
+        "grounded-portfolio",
+        parents=[provider_parent],
+        help="run bounded real-glioma and PubMed research loops through a no-key local provider",
+    )
+    grounded.set_defaults(provider="ollama")
+    grounded.add_argument("--mcp-command", required=True, help="MCP executable and arguments; no shell is invoked")
+    grounded.add_argument("--mcp-cwd", default=None, help="working directory for the MCP process")
+    grounded.add_argument("--mcp-timeout", type=float, default=_DEFAULT_TIMEOUT)
+    grounded.add_argument("--question", required=True, help="research question; retained only through its digest in the store")
+    grounded.add_argument(
+        "--specialty",
+        choices=("glioma", "cranial_base", "craniosynostosis", "encephalocele", "spina_bifida", "chiari_malformation"),
+        default="glioma",
+    )
+    grounded.add_argument(
+        "--real-data-file",
+        default="data/neurosurgery/glioma_extended_snapshot.json",
+        help="validated non-synthetic glioma snapshot JSON (default: extended TCGA-GBM + TCGA-LGG)",
+    )
+    grounded.add_argument(
+        "--public-literature-file",
+        default="data/neurosurgery/neurosurgical_public_literature_snapshot.json",
+        help="validated non-synthetic six-specialty PubMed snapshot JSON",
+    )
+    grounded.add_argument(
+        "--refresh-real-data",
+        action="store_true",
+        help="refresh the real glioma snapshot from allow-listed public sources before running",
+    )
+    grounded.add_argument(
+        "--refresh-public-literature",
+        action="store_true",
+        help="refresh the six-specialty PubMed snapshot from NCBI before running",
+    )
+    grounded.add_argument(
+        "--approve-network",
+        action="store_true",
+        help="explicitly authorize credentialless public-source refresh (required by refresh flags)",
+    )
+    grounded.add_argument(
+        "--refresh-timeout",
+        type=float,
+        default=_DEFAULT_TIMEOUT,
+        help="per-request timeout for an opt-in public-source refresh (1-120 seconds)",
+    )
+    grounded.add_argument(
+        "--real-data-query-file",
+        default=None,
+        help="optional JSON object with bounded real-data query facets applied to the glioma plane",
+    )
+    grounded.add_argument(
+        "--public-literature-query-file",
+        default=None,
+        help="optional JSON object with bounded PubMed facets applied to the public-literature plane",
+    )
+    grounded.add_argument(
+        "--case-asset-manifest",
+        default=None,
+        help="optional real de-identified case-asset manifest JSON (metadata only; bytes are never opened)",
+    )
+    grounded.add_argument(
+        "--case-asset-manifest-query",
+        default=None,
+        help="optional bounded JSON query selecting case-asset kinds and review-item budget",
+    )
+    grounded.add_argument("--without-real-data", action="store_true", help="run only the public-literature plane")
+    grounded.add_argument("--without-public-literature", action="store_true", help="run only the real-glioma plane")
+    grounded.add_argument("--model", default="llama3.1", help="local model identifier (for example llama3.1)")
+    grounded.add_argument("--max-passes", type=int, default=3, help="maximum passes per source plane (1-8)")
+    grounded.add_argument("--max-follow-ups-per-pass", type=int, default=4, help="maximum unknown-derived follow-ups per pass (0-8)")
+    grounded.add_argument("--max-output-tokens", type=int, default=2_048)
+    grounded.add_argument("--max-hits", type=int, default=32)
+    grounded.add_argument("--max-chars", type=int, default=24_000)
+    grounded.add_argument(
+        "--tool-loop",
+        action="store_true",
+        help="allow the approved local model to use bounded read-only snapshot search, coverage, cohort, and reconciliation views",
+    )
+    grounded.add_argument("--max-tool-turns", type=int, default=4, help="maximum local-model tool-loop turns (1-8)")
+    grounded.add_argument("--max-tool-calls", type=int, default=8, help="maximum snapshot-search calls (1-32)")
+    grounded.add_argument("--no-abstracts", action="store_true", help="exclude bounded PubMed abstracts from local-model context")
+    grounded.add_argument("--freshness-as-of", default=None, help="UTC source-age clock, YYYY-MM-DDTHH:MM:SSZ")
+    grounded.add_argument("--freshness-max-age-days", type=int, default=None)
+    grounded.add_argument("--portfolio-output", default="work/grounded-research-portfolio.json", help="atomic digest-bound portfolio ledger path")
+    grounded.add_argument("--resume", action="store_true", help="resume pending work from --portfolio-output")
+    grounded.add_argument("--approve-provider-call", action="store_true", help="authorize local/loopback model invocation")
+
+    autopilot = subparsers.add_parser(
+        "grounded-autopilot",
+        parents=[provider_parent],
+        help="route a neurosurgical question, gate real evidence, and run bounded no-key research",
+    )
+    autopilot.set_defaults(provider="ollama")
+    autopilot.add_argument("--mcp-command", required=True, help="MCP executable and arguments; no shell is invoked")
+    autopilot.add_argument("--mcp-cwd", default=None, help="working directory for the MCP process")
+    autopilot.add_argument("--mcp-timeout", type=float, default=_DEFAULT_TIMEOUT)
+    autopilot.add_argument("--question", required=True, help="free-text research question")
+    autopilot.add_argument(
+        "--specialty",
+        choices=("glioma", "cranial_base", "craniosynostosis", "encephalocele", "spina_bifida", "chiari_malformation"),
+        default=None,
+        help="optional specialty hint; omit to use deterministic vocabulary routing",
+    )
+    autopilot.add_argument(
+        "--real-data-file",
+        default="data/neurosurgery/glioma_extended_snapshot.json",
+        help="validated non-synthetic glioma snapshot JSON (default: extended TCGA-GBM + TCGA-LGG)",
+    )
+    autopilot.add_argument(
+        "--public-literature-file",
+        default="data/neurosurgery/neurosurgical_public_literature_snapshot.json",
+        help="validated non-synthetic six-specialty PubMed snapshot JSON",
+    )
+    autopilot.add_argument(
+        "--refresh-real-data",
+        action="store_true",
+        help="refresh the real glioma snapshot from allow-listed public sources before routing",
+    )
+    autopilot.add_argument(
+        "--refresh-public-literature",
+        action="store_true",
+        help="refresh the six-specialty PubMed snapshot from NCBI before routing",
+    )
+    autopilot.add_argument(
+        "--approve-network",
+        action="store_true",
+        help="explicitly authorize credentialless public-source refresh (required by refresh flags)",
+    )
+    autopilot.add_argument(
+        "--refresh-timeout",
+        type=float,
+        default=_DEFAULT_TIMEOUT,
+        help="per-request timeout for an opt-in public-source refresh (1-120 seconds)",
+    )
+    autopilot.add_argument(
+        "--real-data-query-file",
+        default=None,
+        help="optional JSON object with bounded real-data query facets applied to the glioma plane",
+    )
+    autopilot.add_argument(
+        "--public-literature-query-file",
+        default=None,
+        help="optional JSON object with bounded PubMed facets applied to the public-literature plane",
+    )
+    autopilot.add_argument(
+        "--case-asset-manifest",
+        default=None,
+        help="optional real de-identified case-asset manifest JSON (metadata only; bytes are never opened)",
+    )
+    autopilot.add_argument(
+        "--case-asset-manifest-query",
+        default=None,
+        help="optional bounded JSON query selecting case-asset kinds and review-item budget",
+    )
+    autopilot.add_argument("--without-real-data", action="store_true", help="withhold the real-glioma plane")
+    autopilot.add_argument("--without-public-literature", action="store_true", help="withhold the PubMed plane")
+    autopilot.add_argument("--model", default="llama3.1", help="local model identifier (for example llama3.1)")
+    autopilot.add_argument("--max-passes", type=int, default=3, help="maximum passes per source plane (1-8)")
+    autopilot.add_argument("--max-follow-ups-per-pass", type=int, default=4, help="maximum unknown-derived follow-ups per pass (0-8)")
+    autopilot.add_argument("--max-output-tokens", type=int, default=2_048)
+    autopilot.add_argument("--max-hits", type=int, default=32)
+    autopilot.add_argument("--max-chars", type=int, default=24_000)
+    autopilot.add_argument(
+        "--tool-loop",
+        action="store_true",
+        help="allow the approved local model to use bounded read-only snapshot search, coverage, cohort, and reconciliation views",
+    )
+    autopilot.add_argument("--max-tool-turns", type=int, default=4, help="maximum local-model tool-loop turns (1-8)")
+    autopilot.add_argument("--max-tool-calls", type=int, default=8, help="maximum snapshot-search calls (1-32)")
+    autopilot.add_argument("--no-abstracts", action="store_true", help="exclude bounded PubMed abstracts from local-model context")
+    autopilot.add_argument("--freshness-as-of", default=None, help="UTC source-age clock, YYYY-MM-DDTHH:MM:SSZ")
+    autopilot.add_argument("--freshness-max-age-days", type=int, default=None)
+    autopilot.add_argument(
+        "--intake-output",
+        default="work/grounded-research-intake.json",
+        help="atomic digest-bound routed-intake checkpoint path",
+    )
+    autopilot.add_argument("--resume", action="store_true", help="resume pending work from --intake-output")
+    autopilot.add_argument("--approve-provider-call", action="store_true", help="authorize local/loopback model invocation")
+
     batch_run = subparsers.add_parser(
         "batch-run",
         parents=[provider_parent],
@@ -3666,6 +4994,14 @@ def main(
             payload = _settle_learning(args, client_factory=client_factory)
         elif args.command == "run":
             payload = _run(args, environ=env, reader=reader, client_factory=client_factory)
+        elif args.command == "refresh-public-literature":
+            payload = _refresh_public_literature(args)
+        elif args.command == "refresh-real-glioma":
+            payload = _refresh_real_glioma(args)
+        elif args.command == "grounded-portfolio":
+            payload = _grounded_portfolio(args, client_factory=client_factory)
+        elif args.command == "grounded-autopilot":
+            payload = _grounded_autopilot(args, client_factory=client_factory)
         elif args.command == "batch-run":
             payload = _batch_run(args, environ=env, reader=reader, client_factory=client_factory)
         else:  # pragma: no cover - argparse enforces the command set
@@ -3689,4 +5025,12 @@ def main(
         return 2
 
 
-__all__ = ["CLI_SCHEMA", "main"]
+__all__ = [
+    "CLI_SCHEMA",
+    "GROUNDED_PORTFOLIO_CLI_SCHEMA",
+    "GROUNDED_INTAKE_CLI_SCHEMA",
+    "GROUNDED_INTAKE_STORE_SCHEMA",
+    "PUBLIC_LITERATURE_REFRESH_CLI_SCHEMA",
+    "REAL_DATA_REFRESH_CLI_SCHEMA",
+    "main",
+]

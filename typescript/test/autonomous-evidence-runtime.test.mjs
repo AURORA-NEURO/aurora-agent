@@ -178,6 +178,106 @@ test("evidence runtime makes evaluation and acquisition failures explicit", asyn
   );
 });
 
+async function replaySingleRequirement(plan, request, journal, value, options = {}) {
+  const snapshot = await journal.snapshot(plan.plan_digest);
+  const restoredJournal = new InMemoryAutonomousEvidenceRuntimeJournal();
+  await restoredJournal.restore(snapshot, plan.plan_digest);
+  const restored = new AutonomousEvidenceRuntime({ plan, journal: restoredJournal });
+  await restored.rehydrate();
+  return restored.execute([request], {
+    acquirer: { acquire: () => { throw new Error("replay must not reacquire evidence"); } },
+    rehydrateValue: () => value,
+    ...options,
+  });
+}
+
+test("evidence runtime preserves missing-output state across replay without inventing pending evaluation", async () => {
+  const profile = (await builtinAutonomousDomainProfiles()).find((item) => item.domain === "science");
+  const baseline = await buildAutonomousEvidencePlan([profile.workflow]);
+  const plan = await buildAutonomousEvidencePlan([profile.workflow], { availableEvidence: baseline.requirements.slice(1).map((item) => item.requirement_id) });
+  const request = requestFor(plan.requirements[0]);
+  const value = { fixture: "missing-output" };
+  const journal = new InMemoryAutonomousEvidenceRuntimeJournal();
+  const fresh = await new AutonomousEvidenceRuntime({ plan, journal }).execute([request], {
+    acquirer: { acquire: () => value },
+  });
+  const replayed = await replaySingleRequirement(plan, request, journal, value);
+
+  assert.equal(fresh.json.status, "partial");
+  assert.equal(replayed.json.status, fresh.json.status);
+  assert.deepEqual(replayed.json.pending_evaluation_requirement_ids, fresh.json.pending_evaluation_requirement_ids);
+  assert.deepEqual(replayed.json.missing_requirement_ids, fresh.json.missing_requirement_ids);
+  assert.deepEqual(replayed.json.pending_evaluation_requirement_ids, []);
+});
+
+test("evidence runtime preserves observed unevaluated state across replay", async () => {
+  const profile = (await builtinAutonomousDomainProfiles()).find((item) => item.domain === "science");
+  const baseline = await buildAutonomousEvidencePlan([profile.workflow]);
+  const plan = await buildAutonomousEvidencePlan([profile.workflow], { availableEvidence: baseline.requirements.slice(1).map((item) => item.requirement_id) });
+  const requirement = plan.requirements[0];
+  const request = requestFor(requirement);
+  const value = { fixture: "observed-unevaluated" };
+  const journal = new InMemoryAutonomousEvidenceRuntimeJournal();
+  const projector = { project: () => [{ label: requirement.label, status: "observed" }] };
+  const fresh = await new AutonomousEvidenceRuntime({ plan, journal }).execute([request], {
+    acquirer: { acquire: () => value },
+    projector,
+  });
+  const replayed = await replaySingleRequirement(plan, request, journal, value);
+
+  assert.equal(fresh.json.status, "awaiting_evaluation");
+  assert.equal(replayed.json.status, fresh.json.status);
+  assert.deepEqual(replayed.json.pending_evaluation_requirement_ids, fresh.json.pending_evaluation_requirement_ids);
+  assert.deepEqual(replayed.json.missing_requirement_ids, fresh.json.missing_requirement_ids);
+});
+
+test("evidence runtime keeps a rejected observed assessment pending across replay", async () => {
+  const profile = (await builtinAutonomousDomainProfiles()).find((item) => item.domain === "science");
+  const baseline = await buildAutonomousEvidencePlan([profile.workflow]);
+  const plan = await buildAutonomousEvidencePlan([profile.workflow], { availableEvidence: baseline.requirements.slice(1).map((item) => item.requirement_id) });
+  const requirement = plan.requirements[0];
+  const request = requestFor(requirement);
+  const value = { fixture: "rejected" };
+  const journal = new InMemoryAutonomousEvidenceRuntimeJournal();
+  const projector = { project: () => [{ label: requirement.label, status: "observed" }] };
+  const evaluator = {
+    evaluator_id: "rejecting-evaluator",
+    evaluator_version: "1",
+    evaluate: () => ({ evaluator_id: "rejecting-evaluator", evaluator_version: "1", verdict: "rejected", score: 0 }),
+  };
+  const fresh = await new AutonomousEvidenceRuntime({ plan, journal }).execute([request], {
+    acquirer: { acquire: () => value },
+    projector,
+    evaluator,
+  });
+  const replayed = await replaySingleRequirement(plan, request, journal, value);
+
+  assert.equal(fresh.json.status, "awaiting_evaluation");
+  assert.equal(replayed.json.status, fresh.json.status);
+  assert.deepEqual(replayed.json.pending_evaluation_requirement_ids, fresh.json.pending_evaluation_requirement_ids);
+  assert.equal(replayed.json.receipts[0].evaluator_status, "rejected");
+  assert.equal(replayed.json.assessments[0].verdict, "rejected");
+
+  const revisionJournal = new InMemoryAutonomousEvidenceRuntimeJournal();
+  await revisionJournal.restore(await journal.snapshot(plan.plan_digest), plan.plan_digest);
+  const revisionRuntime = new AutonomousEvidenceRuntime({ plan, journal: revisionJournal });
+  await revisionRuntime.rehydrate();
+  const revised = await revisionRuntime.execute([request], {
+    acquirer: { acquire: () => { throw new Error("reevaluation must not reacquire evidence"); } },
+    rehydrateValue: () => value,
+    reevaluatePending: true,
+    evaluator: {
+      evaluator_id: "accepting-evaluator",
+      evaluator_version: "2",
+      evaluate: () => ({ evaluator_id: "accepting-evaluator", evaluator_version: "2", verdict: "accepted", score: 1 }),
+    },
+  });
+  assert.equal(revised.json.receipts[0].evaluator_status, "accepted");
+  assert.equal(revised.json.assessments[0].verdict, "accepted");
+  assert.ok(revised.json.completed_requirement_ids.includes(requirement.requirement_id));
+  assert.ok(!revised.json.pending_evaluation_requirement_ids.includes(requirement.requirement_id));
+});
+
 test("evidence runtime replay requires value reconciliation after journal rehydration", async () => {
   const profile = (await builtinAutonomousDomainProfiles()).find((item) => item.domain === "science");
   const completeBaseline = await buildAutonomousEvidencePlan([profile.workflow]);

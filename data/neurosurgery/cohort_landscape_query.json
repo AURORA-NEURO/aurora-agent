@@ -1,0 +1,8 @@
+{
+  "query": {
+    "record_kind": "genomic_project",
+    "genomic_data_type": "Aligned Reads",
+    "limit": 8
+  },
+  "max_projects": 8
+}

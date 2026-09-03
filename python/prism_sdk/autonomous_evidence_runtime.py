@@ -910,7 +910,7 @@ class AutonomousEvidenceRuntime:
         authorization_risk_class: str | None,
     ) -> tuple[AutonomousEvidenceReceipt, AutonomousEvidenceAssessment | None] | None:
         prior = entry.receipt
-        if prior.status not in {"observed", "partial"} or requirement.requirement_id not in prior.observed_requirement_ids or prior.evaluator_status not in {"not_evaluated", "indeterminate", "failed"}:
+        if prior.status not in {"observed", "partial"} or requirement.requirement_id not in prior.observed_requirement_ids or prior.evaluator_status not in {"not_evaluated", "rejected", "indeterminate", "failed"}:
             return None
         replay_base = self._make_receipt(**{**prior.to_dict(), "receipt_digest": None, "replay": "replayed", "evaluator_status": "not_evaluated", "assessment_digest": None})
         self._authorize_operation(
@@ -1054,8 +1054,13 @@ class AutonomousEvidenceRuntime:
                     available.add(evidence_id)
                 if replay_assessment is not None and replay_assessment.verdict == "accepted":
                     completed.add(replayed.requirement_id)
-                elif replayed.evaluator_status in {"not_evaluated", "indeterminate", "failed"}:
+                elif (
+                    replayed.evidence_status == "declared_for_evaluator"
+                    and replayed.requirement_id in replayed.observed_requirement_ids
+                ):
                     pending.add(replayed.requirement_id)
+                    if replay_assessment is None:
+                        saw_pending = True
                 continue
             if saw_failure and stop_on_failure:
                 omitted.append(request_digest)

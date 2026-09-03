@@ -1,0 +1,64 @@
+{
+  "schema_version": "bioprism-neurosurgery/0.1",
+  "case_id": "synthetic-glioma-001",
+  "specialty": "glioma",
+  "request_use": "synthetic_case_simulation",
+  "question": "Which evidence and competing explanations should a reviewer inspect for this synthetic longitudinal case?",
+  "direct_identifier_fields": [],
+  "observations": [
+    {
+      "kind": "imaging",
+      "label": "serial MRI summary",
+      "value": "caller-supplied de-identified sequence and timepoint summary",
+      "status": "observed",
+      "source_id": "synthetic-imaging-001"
+    },
+    {
+      "kind": "histology",
+      "label": "histology summary",
+      "value": "caller-supplied de-identified pathology summary",
+      "status": "observed",
+      "source_id": "synthetic-pathology-001"
+    },
+    {
+      "kind": "molecular",
+      "label": "molecular assay calls",
+      "value": "caller-supplied assay summary; unrun assays remain unmeasured",
+      "status": "observed",
+      "source_id": "synthetic-molecular-001"
+    },
+    {
+      "kind": "neuroanatomy",
+      "label": "anatomic relationships",
+      "value": "caller-supplied compartment and adjacent-structure summary",
+      "status": "observed",
+      "source_id": "synthetic-anatomy-001"
+    },
+    {
+      "kind": "longitudinal_outcome",
+      "label": "time-aligned outcome observations",
+      "value": "caller-supplied longitudinal summary",
+      "status": "observed",
+      "source_id": "synthetic-outcome-001",
+      "observed_at": "2024-03-02T00:00:00Z",
+      "timepoint": "follow-up"
+    }
+  ],
+  "evidence": [
+    {
+      "id": "synthetic-guideline-001",
+      "title": "Caller-selected synthetic evidence record",
+      "citation": "Synthetic citation supplied for local contract testing",
+      "tier": "guideline",
+      "population": "declared synthetic study population",
+      "year": 2024,
+      "supports": ["evidence_synthesis"]
+    }
+  ],
+  "requested_tools": [
+    "imaging_review",
+    "molecular_context",
+    "differential_matrix",
+    "evidence_synthesis"
+  ]
+}

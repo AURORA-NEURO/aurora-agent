@@ -1,0 +1,8 @@
+{
+  "question": "Review Chiari malformation and craniocervical junction evidence",
+  "specialty": "chiari_malformation",
+  "max_hits_per_lane": 2,
+  "max_review_items_per_lane": 2,
+  "max_issues_per_lane": 4,
+  "max_session_steps": 16
+}

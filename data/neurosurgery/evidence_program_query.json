@@ -1,0 +1,13 @@
+{
+  "specialties": [
+    "glioma",
+    "cranial_base",
+    "craniosynostosis",
+    "encephalocele",
+    "spina_bifida",
+    "chiari_malformation"
+  ],
+  "max_tracks_per_lane": 6,
+  "max_references_per_track": 8,
+  "include_abstracts": false
+}

@@ -10,7 +10,7 @@ from prism_sdk.autonomy import AUTONOMOUS_DOMAINS, AutonomousAgent, AutonomousTa
 from prism_sdk.authoring import canonical_json, content_digest
 from prism_sdk.autonomous_action_admission_controller import AutonomousActionAdmissionController
 from prism_sdk.autonomous_action_admission_persistence import InMemoryAutonomousActionAdmissionLedger
-from prism_sdk.llm_runtime import LLMRuntime
+from prism_sdk.llm_runtime import LLMRuntime, ProviderInvocationMetadata, ProviderResponse
 from prism_sdk.goals import (
     AutonomousGoalConflict,
     AutonomousGoalError,
@@ -1226,7 +1226,14 @@ def test_goal_agent_runtime_traces_the_complete_adaptive_loop_across_every_domai
 
     def emit_lifecycle(kwargs: dict[str, object]) -> None:
         observer = kwargs.get("invocation_observer")
-        metadata = SimpleNamespace(provider="local", model="trace-fixture", input_tokens=3, tool_count=0)
+        metadata = ProviderInvocationMetadata(
+            provider="local",
+            model="trace-fixture",
+            kind="invoke",
+            input_tokens=3,
+            requested_output_tokens=2,
+            tool_count=0,
+        )
         if observer is not None:
             observer.before(metadata)  # type: ignore[union-attr]
         callback = kwargs.get("trace_event_callback")
@@ -1260,7 +1267,20 @@ def test_goal_agent_runtime_traces_the_complete_adaptive_loop_across_every_domai
                 failure_code=None,
             )  # type: ignore[operator]
         if observer is not None:
-            observer.after(metadata, SimpleNamespace(usage={"input_tokens": 3, "output_tokens": 2}), None, 1.0)  # type: ignore[union-attr]
+            observer.after(  # type: ignore[union-attr]
+                metadata,
+                ProviderResponse(
+                    provider="local",
+                    model="trace-fixture",
+                    text="private provider output",
+                    status_code=200,
+                    request_id="private-provider-request-id",
+                    usage={"input_tokens": 3, "output_tokens": 2},
+                    raw={"private": "provider payload"},
+                ),
+                None,
+                1.0,
+            )
 
     def run_single(**kwargs: object):
         calls.append(("single", dict(kwargs)))

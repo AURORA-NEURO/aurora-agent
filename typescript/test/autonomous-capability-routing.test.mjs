@@ -63,6 +63,65 @@ test("capability routing abstains on missing or ambiguous evidence and accepts e
   assert.throws(() => validateAutonomousCapabilityRoute("perform the bounded task", tampered), /digest/);
 });
 
+test("neurosurgical vocabulary selects specialty capabilities without a provider", () => {
+  const intake = routeAutonomousCapability("specialty routing", "biomedical");
+  assert.equal(intake.selected_capability, "neurosurgical_intake_routing");
+  assert.equal(intake.abstained, false);
+  const glioma = routeAutonomousCapability("review real glioma data and molecular panel assay coverage", "biomedical");
+  assert.equal(glioma.selected_capability, "neurosurgical_research_route");
+  assert.equal(glioma.abstained, false);
+  const specialty = routeAutonomousCapability("catalogue Chiari and spinal dysraphism neurosurgery", "neuroscience");
+  assert.equal(specialty.selected_capability, "neurosurgical_specialty_discovery");
+  assert.equal(specialty.abstained, false);
+  const nuanced = routeAutonomousCapability("review diffuse midline glioma and pseudoprogression", "biomedical");
+  assert.equal(nuanced.selected_capability, "neurosurgical_specialty_discovery");
+  const molecularMarker = routeAutonomousCapability("ground H3 K27 and CDKN2A molecular evidence", "biomedical");
+  assert.equal(molecularMarker.selected_capability, "neurosurgical_glioma_molecular_map");
+  const anatomy = routeAutonomousCapability("review Chiari cine MRI CSF flow and clivo-axial angle", "neuroscience");
+  assert.equal(anatomy.selected_capability, "neurosurgical_research_route");
+  const cranio = routeAutonomousCapability("compare scaphocephaly and Apert syndrome", "biomedical");
+  assert.equal(cranio.selected_capability, "neurosurgical_specialty_discovery");
+  const graph = routeAutonomousCapability("build an evidence graph and PMID crosswalk", "biomedical");
+  assert.equal(graph.selected_capability, "neurosurgical_evidence_graph");
+  const molecularCoverage = routeAutonomousCapability("inventory cBioPortal molecular assay availability by study", "biomedical");
+  assert.equal(molecularCoverage.selected_capability, "neurosurgical_molecular_coverage");
+  assert.equal(molecularCoverage.abstained, false);
+  const coverage = routeAutonomousCapability("audit real data source coverage and temporal linkage gaps", "biomedical");
+  assert.equal(coverage.selected_capability, "neurosurgical_real_data_coverage");
+  const queue = routeAutonomousCapability("derive the real data metadata review queue", "biomedical");
+  assert.equal(queue.selected_capability, "neurosurgical_real_data_review_queue");
+  const disposition = routeAutonomousCapability("review disposition for a metadata task", "biomedical");
+  assert.equal(disposition.selected_capability, "neurosurgical_real_data_review_disposition");
+  const assetDisposition = routeAutonomousCapability("review imaging asset disposition", "biomedical");
+  assert.equal(assetDisposition.selected_capability, "neurosurgical_case_asset_review_disposition");
+  const dicom = routeAutonomousCapability("import DICOM JSON imaging series metadata", "biomedical");
+  assert.equal(dicom.selected_capability, "neurosurgical_case_dicom_import");
+  const packet = routeAutonomousCapability("assemble a real data evidence packet for reviewer handoff", "biomedical");
+  assert.equal(packet.selected_capability, "neurosurgical_real_data_evidence_packet");
+  const draft = routeAutonomousCapability("audit a citation-bound local model draft for grounded claims", "biomedical");
+  assert.equal(draft.selected_capability, "neurosurgical_real_data_draft_audit");
+});
+
+test("new neurosurgical data tools are routable without a provider", () => {
+  const cases = [
+    ["import a FHIR bundle resource metadata manifest", "neurosurgical_case_fhir_import"],
+    ["run the real data autonomous review wave and dependency closure", "neurosurgical_real_data_autonomous_workflow"],
+    ["perform a PubMed literature refresh audit on a candidate literature snapshot", "neurosurgical_public_literature_refresh_audit"],
+    ["audit PMID citation links for broken literature links", "neurosurgical_literature_link_audit"],
+    ["check citation completeness and publication type completeness", "neurosurgical_public_literature_integrity_audit"],
+    ["work the PubMed literature review queue", "neurosurgical_public_literature_review_queue"],
+    ["open the citation evidence workbench", "neurosurgical_public_literature_workbench"],
+    ["build a multi-lane literature portfolio", "neurosurgical_public_literature_portfolio"],
+    ["create a glioma evidence program plan", "neurosurgical_evidence_program"],
+    ["map the current clinical trial landscape for glioma", "neurosurgical_trial_landscape"],
+  ];
+  for (const [task, expected] of cases) {
+    const route = routeAutonomousCapability(task, "biomedical");
+    assert.equal(route.selected_capability, expected, `${task}: ${JSON.stringify(route)}`);
+    assert.equal(route.abstained, false);
+  }
+});
+
 test("automatic TypeScript blueprints carry the selected capability into planning context", async () => {
   const agent = new AutonomousAgent(new LLMRuntime());
   const envelope = await agent.blueprint("debug a failing stack trace", { domain: "coding" });

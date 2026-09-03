@@ -1,4 +1,5 @@
 //! Protocol conformance and the security properties of 11.11.
+// Intake schema additions remain covered by the full catalogue contract below.
 
 use bioprism_adapter::{TabularProfile, ValueType, VariableMapping};
 use bioprism_adaptive::{AdaptivePanel, PanelConfig};
@@ -348,8 +349,9 @@ fn initialize_reports_the_protocol_version_and_instructions() {
 
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
+    // Keep this test source touched when Windows Application Control requires a relink.
     let tools = on_a_dispatch_sized_stack(tool_definitions);
-    assert_eq!(tools.len(), 264);
+    assert_eq!(tools.len(), 311);
     for tool in &tools {
         assert!(tool["name"].is_string());
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -875,9 +877,9 @@ fn domain_report_projection_checks_catalogue_indexes_idempotently_and_reports_co
         json!({"operation": "coverage", "include_report_digests": true}),
     );
     assert_eq!(coverage["workflow"], json!("domain_report_coverage"));
-    assert_eq!(coverage["group_count"], json!(30));
+    assert_eq!(coverage["group_count"], json!(31));
     assert_eq!(coverage["reported_group_count"], json!(1));
-    assert_eq!(coverage["missing_group_count"], json!(29));
+    assert_eq!(coverage["missing_group_count"], json!(30));
     assert_eq!(coverage["complete"], json!(false));
     assert_eq!(coverage["readiness_claimed"], json!(false));
     assert_eq!(
@@ -1560,7 +1562,7 @@ fn domain_evidence_intake_accepts_one_declared_envelope_from_every_capability_gr
     let groups = catalogue
         .as_array()
         .expect("workspace catalogue is an array");
-    assert_eq!(groups.len(), 30);
+    assert_eq!(groups.len(), 31);
     for group in groups {
         let group_id = group["id"].as_str().expect("group id");
         let source_tool = group["mcp_tools"][0].as_str().expect("source tool");
@@ -1660,9 +1662,9 @@ fn domain_evidence_coverage_preserves_missing_groups_outcomes_and_digest_rows() 
         coverage["workflow"],
         json!("domain_evidence_intake_coverage")
     );
-    assert_eq!(coverage["group_count"], json!(30));
+    assert_eq!(coverage["group_count"], json!(31));
     assert_eq!(coverage["reported_group_count"], json!(1));
-    assert_eq!(coverage["missing_group_count"], json!(29));
+    assert_eq!(coverage["missing_group_count"], json!(30));
     assert_eq!(coverage["complete"], json!(false));
     assert_eq!(coverage["tool_coverage_complete"], json!(false));
     assert_eq!(coverage["domain_coverage_complete"], json!(false));
@@ -3252,8 +3254,8 @@ fn domain_workflow_catalogue_covers_every_capability_group() {
     let mut server = server();
     let report = call(&mut server, "domain_workflow_catalogue", json!({}));
     assert_eq!(report["workflow"], json!("domain_workflow_catalogue"));
-    assert_eq!(report["workflow_count"], json!(30));
-    assert_eq!(report["coverage"]["group_count"], json!(30));
+    assert_eq!(report["workflow_count"], json!(31));
+    assert_eq!(report["coverage"]["group_count"], json!(31));
     assert_eq!(report["coverage"]["all_groups_have_workflow"], json!(true));
     assert_eq!(
         report["coverage"]["all_declared_tools_advertised"],
@@ -3287,7 +3289,7 @@ fn domain_workflow_scaffolds_are_actionable_and_execution_disabled_for_every_gro
     let mut server = server();
     let catalogue = call(&mut server, "domain_workflow_catalogue", json!({}));
     let workflows = catalogue["workflows"].as_array().unwrap();
-    assert_eq!(workflows.len(), 30);
+    assert_eq!(workflows.len(), 31);
 
     for workflow in workflows {
         let workflow_id = workflow["workflow_id"].as_str().unwrap();
@@ -3332,7 +3334,7 @@ fn domain_workflow_bindings_cover_every_available_capability_group() {
     let definitions = Value::Array(on_a_dispatch_sized_stack(tool_definitions));
     let catalogue = build_domain_workflow_catalogue(&capabilities, &definitions).unwrap();
     let workflows = catalogue["workflows"].as_array().unwrap();
-    assert_eq!(workflows.len(), 30);
+    assert_eq!(workflows.len(), 31);
 
     for workflow in workflows {
         let workflow_id = workflow["workflow_id"].as_str().unwrap();
@@ -3423,7 +3425,7 @@ fn domain_workflow_portfolio_preflights_every_capability_group_without_dispatch(
             })
         })
         .collect::<Vec<_>>();
-    assert_eq!(requests.len(), 30);
+    assert_eq!(requests.len(), 31);
 
     let portfolio = call(
         &mut server,
@@ -3438,7 +3440,7 @@ fn domain_workflow_portfolio_preflights_every_capability_group_without_dispatch(
     assert_eq!(portfolio["portfolio_ready"], false);
     assert_eq!(portfolio["portfolio_status"], "partial");
     assert_eq!(portfolio["coverage"]["complete_catalogue"], true);
-    assert_eq!(portfolio["summary"]["instantiated_count"], 30);
+    assert_eq!(portfolio["summary"]["instantiated_count"], 31);
     assert_eq!(portfolio["summary"]["blocked_count"], 0);
     assert!(
         portfolio["summary"]["preflight_blocked_count"]
@@ -3447,7 +3449,7 @@ fn domain_workflow_portfolio_preflights_every_capability_group_without_dispatch(
             > 0
     );
     assert_eq!(portfolio["summary"]["preflight_status"], "blocked");
-    assert_eq!(portfolio["items"].as_array().unwrap().len(), 30);
+    assert_eq!(portfolio["items"].as_array().unwrap().len(), 31);
     for item in portfolio["items"].as_array().unwrap() {
         assert!(matches!(
             item["status"].as_str(),
@@ -3468,7 +3470,7 @@ fn domain_workflow_reconciliation_preserves_outcomes_for_every_capability_group(
         let definitions = Value::Array(tool_definitions());
         let catalogue = build_domain_workflow_catalogue(&capabilities, &definitions).unwrap();
         let workflows = catalogue["workflows"].as_array().unwrap();
-        assert_eq!(workflows.len(), 30);
+        assert_eq!(workflows.len(), 31);
 
         for workflow in workflows {
             let workflow_id = workflow["workflow_id"].as_str().unwrap();
@@ -3841,7 +3843,7 @@ fn mission_evaluator_discovery_covers_domains_without_executing_tools() {
     assert_eq!(all["selection_posture"], json!("candidate_only"));
     assert_eq!(all["total_adapters"], json!(29));
     assert_eq!(all["result_count"], json!(29));
-    assert_eq!(all["coverage"]["capability_group_count"], json!(30));
+    assert_eq!(all["coverage"]["capability_group_count"], json!(31));
     assert_eq!(all["coverage"]["evaluator_group_count"], json!(29));
     assert_eq!(all["coverage"]["complete"], json!(false));
     assert_eq!(
@@ -8564,15 +8566,15 @@ fn domain_acquisition_catalogue_covers_every_declared_domain_in_two_planes() {
     assert_eq!(full["ok"], json!(true));
     assert_eq!(full["workflow"], json!("domain_acquisition_catalogue"));
     let catalogue = &full["catalogue"];
-    assert_eq!(catalogue["total_group_count"], json!(30));
-    assert_eq!(catalogue["selected_group_count"], json!(30));
+    assert_eq!(catalogue["total_group_count"], json!(31));
+    assert_eq!(catalogue["selected_group_count"], json!(31));
     assert_eq!(catalogue["complete"], json!(true));
     assert_eq!(catalogue["truncated"], json!(false));
     assert_eq!(
         catalogue["selected_domain_count"],
         catalogue["total_domain_count"]
     );
-    assert_eq!(catalogue["groups"].as_array().unwrap().len(), 30);
+    assert_eq!(catalogue["groups"].as_array().unwrap().len(), 31);
     assert_eq!(
         catalogue["routes"].as_array().unwrap().len(),
         catalogue["total_domain_count"].as_u64().unwrap() as usize
@@ -8668,13 +8670,13 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
     let result = call(&mut server, "capability_audit", json!({}));
     assert_eq!(result["workflow"], json!("capability_audit"));
     assert_eq!(result["healthy"], json!(true));
-    assert_eq!(result["total_groups"], json!(30));
-    assert_eq!(result["unique_catalog_tools"], json!(264));
-    assert_eq!(result["advertised_tool_count"], json!(264));
+    assert_eq!(result["total_groups"], json!(31));
+    assert_eq!(result["unique_catalog_tools"], json!(311));
+    assert_eq!(result["advertised_tool_count"], json!(311));
     assert_eq!(result["catalog_only_tools"], json!([]));
     assert_eq!(result["advertised_only_tools"], json!([]));
-    assert_eq!(result["schema_quality"]["checked"], json!(264));
-    assert_eq!(result["schema_quality"]["valid"], json!(264));
+    assert_eq!(result["schema_quality"]["checked"], json!(311));
+    assert_eq!(result["schema_quality"]["valid"], json!(311));
     assert_eq!(result["schema_quality"]["findings"], json!([]));
     assert!(!result["duplicate_group_memberships"]
         .as_array()
@@ -8688,7 +8690,7 @@ fn capability_audit_proves_catalogue_and_transport_schema_parity() {
         result["invariants"]["all_input_schemas_are_well_formed"],
         json!(true)
     );
-    assert_eq!(result["groups"].as_array().unwrap().len(), 30);
+    assert_eq!(result["groups"].as_array().unwrap().len(), 31);
 
     let compact = call(
         &mut server,
@@ -9492,7 +9494,7 @@ fn repository_bundle_compiles_a_route_with_progressive_disclosure() {
                 "id": "orientation",
                 "intent": "understand the repository before choosing a domain",
                 "must_read": ["README.md"],
-                "budget": 40000
+                "budget": 50000
             },
             "policy": "normative",
             "include_markdown": true,
@@ -10671,8 +10673,7 @@ fn repair_verify_reports_staleness_against_a_different_world_without_evaluating_
         "the report must name the world the plan was planned from"
     );
     assert_ne!(
-        payload["report"]["found_world_id"],
-        payload["report"]["expected_world_id"],
+        payload["report"]["found_world_id"], payload["report"]["expected_world_id"],
         "if the two worlds were the same this test would prove nothing"
     );
     assert_eq!(

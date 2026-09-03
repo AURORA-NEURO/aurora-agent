@@ -366,8 +366,11 @@ export class ProviderQuotaReservation {
     if (this.finalSettlement !== null) return { ...this.finalSettlement };
     if (!this.active) throw new ProviderRuntimeError("provider quota reservation was released", { code: "protocol" });
     if (!this.dispatched) throw new ProviderRuntimeError("provider quota reservation must be marked dispatched before settlement", { code: "protocol" });
-    this.active = false;
     const actual = actualMetrics(this.estimate, input);
+    // Validate the provider-supplied counters before changing reservation state.  A malformed
+    // usage payload must not strand the bucket as concurrently active or prevent a bounded
+    // fallback settlement from closing the already-dispatched attempt.
+    this.active = false;
     this.finalSettlement = this.controller.settleReservation(this, actual);
     return { ...this.finalSettlement };
   }

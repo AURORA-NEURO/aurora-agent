@@ -29,6 +29,528 @@ refusals distinct. It never invokes a shell, accepts unbounded frames, turns a r
 successful value, or recreates the Rust domain model. `Workspace` helpers are deliberately thin
 facades over exact MCP tools; `tool()` remains available for every current and future domain.
 
+For provider-free neurosurgical research, `LocalNeurosurgicalAgent` exposes the same Rust-backed
+route without an OpenAI key or network provider. `query_public_literature()` searches the validated
+six-specialty PubMed snapshot by specialty and source text, while `plan_with_public_literature()`
+composes a bounded route using only the requested specialty lane as unverified citation metadata.
+`public_literature_evidence_packet()` emits a digest-bound, PMID-only packet for a local model or
+reviewer, and `public_literature_draft_audit()` accepts only non-patient claims that cite records
+from that packet. Accepted claims are structurally `grounded_for_human_review`, not fact-checked
+or clinically interpreted.
+
+For reviewed live acquisition, `ReviewedPubMedRetrievalAdapter` adds a narrow deployment adapter
+over the fixed PubMed specialty catalogue. `prepare()` is deterministic and performs no network
+I/O; `execute()` requires literal `approve_source_dispatch=True`, revalidates the exact plan,
+query-set digest, parser surface, and selected transport before every allow-listed E-utilities
+GET, and returns a caller-owned transient bundle plus a metadata-only receipt:
+
+```python
+from prism_sdk import ReviewedPubMedRetrievalAdapter, ReviewedPubMedRetrievalConfig
+
+adapter = ReviewedPubMedRetrievalAdapter(
+    ReviewedPubMedRetrievalConfig(specialty_lanes=("glioma",), per_specialty_limit=10)
+)
+plan = adapter.prepare()  # pure review artifact
+result = adapter.execute(plan, approve_source_dispatch=True)
+print(result.receipt.to_dict())  # digests, counts, source IDs; no queries or article text
+```
+
+Registered deployments should also pass their actual paired `ncbi_tool` and developer
+`ncbi_email` values to `ReviewedPubMedRetrievalConfig`. The adapter adds both identifiers to every
+ESearch, ESummary, and EFetch request, but retains only a configured flag and integrity digest in
+the config artifact, plan, source URI, and receipt. Supplying values does not register them with
+NCBI; follow the [NCBI E-utilities usage policy](https://www.ncbi.nlm.nih.gov/books/NBK25497/).
+The digest prevents silent substitution but is not anonymization of a guessable email address.
+
+This is one bounded public-literature source, not general browsing or scientific validation.
+Retrieved abstracts remain unverified source text and require independent evidence-quality and
+claim review. The adapter does not provide a shared durable coordinator, uncertain-call
+reconciliation, exactly-once delivery, or durable raw-bundle storage.
+
+When an actual local model is available, `ollama_provider()` configures the Ollama
+OpenAI-compatible loopback server (`http://127.0.0.1:11434/v1`) without reading or requiring an
+API key. Register it with `LLMRuntime`, select an installed model, and retain the normal provider
+and human-review approvals. If Ollama is unavailable, the runtime reports a provider failure; it
+never substitutes a synthetic answer.
+`LocalNeurosurgicalAgent.grounded_real_data_research()` is the composed local-model handoff:
+it renders a digest-bound real-data context, invokes the explicitly approved credentialless
+provider with a structured response contract, and sends returned claims through
+`real_data_draft_audit()`. Use `approve_provider_call=True`; the result is still
+`grounded_for_human_review` and does not fact-check or make patient/clinical claims. A missing
+or unavailable Ollama server is a hard provider error, never a synthetic fallback.
+Claims are additionally checked against the exact citation identities emitted in the bounded
+model context; a citation omitted by query or character truncation fails closed before audit.
+For bounded native autonomy, pass `tool_loop=True` (with `max_tool_turns` and `max_tool_calls`)
+to either grounded helper. The local model may then call only credentialless snapshot tools: row
+search, a ClinicalTrials.gov trial-landscape view, a molecular-coverage view for cBioPortal/GDC
+availability, metadata review-queue, evidence-graph, evidence-acquisition, specialist evidence-map,
+identifier-reconciliation, or (with an explicit freshness clock) freshness views. Every call executes against the caller-supplied bundle, projects bounded metadata,
+and is retained as a sanitized `tool_trace` before the final citation audit. The two views return
+descriptive aggregates plus the exact rows used for citation; they never expose patient-level
+values or infer eligibility, efficacy, safety, or treatment.
+The review-queue view exposes only explicit missing-link, abstract, date, or sample-count
+obligations as bounded human-review tasks; it is citation-closed and never a clinical finding.
+The real-data loop also exposes `neurosurgery_real_data_coverage_view` for source, record-kind,
+temporal, assay, and explicit linkage inventory with digest-bound gaps. The public-literature
+loop exposes `neurosurgery_public_literature_integrity_view` for bounded PubMed completeness and
+identifier-hygiene counts/issues. Both views preserve caller scope, explicit omissions, and
+human-review posture; neither scores evidence or infers patient/clinical meaning.
+The real-data loop's `neurosurgery_real_data_reconciliation_view` projects canonical
+PMID/normalized-DOI missing/shared rows and counts as citation-closed metadata review work; it
+never repairs, merges, fetches, or interprets identifier relationships.
+The loop also provides `neurosurgery_real_data_research_brief_view`, a deterministic extractor for
+the fixed glioma topic lanes (molecular identity, genomics, imaging, pathology, trials, outcomes,
+tumor microenvironment, and treatment effect). It returns bounded exact records and unknowns;
+lexical membership is metadata-only, not evidence quality or clinical meaning, and abstracts are
+omitted from the model-facing projection.
+The cohort-landscape view (`neurosurgery_real_data_cohort_landscape_view`) compares source-linked
+TCGA/GDC project rows already in the validated bundle. It exposes aggregate released-case and
+file/data-type availability metadata with exact `genomic_project` citations, explicit truncation,
+and missingness; it never opens files, exposes samples or molecular values, merges cohorts, or
+makes clinical claims.
+The specialist evidence-map view (`neurosurgery_specialty_evidence_map_view`) adds a bounded
+identity/spatial/functional/temporal coverage ledger for the fixed lane, including explicit
+missingness and reviewer questions. It never returns observation values or clinical inference and
+fails closed if the returned specialty does not match the caller lane.
+When `freshness={"as_of": "...Z", "max_age_days": ...}` is supplied, the loop also exposes a
+caller-clocked freshness view for bounded source-age states and digest metadata. It refuses to run
+without that explicit UTC clock and never fetches or substitutes synthetic data.
+The search tool supports structured real-data facets (record kind, trial status/phase/study type and
+date bounds, molecular/genomic selectors, linked publication/MeSH selectors, and source IDs) and
+structured PubMed facets (publication type, MeSH term, and date bounds). The model may refine an
+unbound facet or lexical text, but caller-provided facets and result limits remain immutable ceilings;
+the selected literature specialty is never exposed as a model-controlled field.
+The lexical field may be omitted for a facet-only search; it then falls back to the current bounded
+question (or caller text).
+Returned rows preserve bounded source metadata (trial status/phase/study type, molecular/genomic
+labels, publication/MeSH labels, aggregate counts, and available abstract excerpts) without
+projecting patient-level values. Existing `related_records` edges are preserved when they carry a
+known record kind and relation (`published_as`, `describes_study`, `has_profile`, or
+`profile_of_study`), so a reviewer can follow the real snapshot crosswalk without a new fetch.
+Grounded HTTP providers are restricted to loopback (`localhost`, `127.0.0.1`, or `::1`); a
+credentialless remote gateway is rejected before the evidence context is opened.
+`grounded_real_data_research_loop()` and `grounded_public_literature_research_loop()` provide a
+finite autonomous fan-out over those same gates: model-reported unknowns become bounded,
+deduplicated metadata queries, every pass is independently audited, and the returned ledger is
+digest-addressed and held for human review.
+The real-data loop accepts the full structured `real_data_query` facet set (registry phase/type and
+update bounds, molecular/genomic selectors, and publication/date selectors). Its normalized query
+is retained in the ledger and included in the loop digest, so resuming with a different evidence
+slice fails closed before another local-model call.
+An explicit lexical `text` facet is honored on the initial pass; unknown-derived follow-up passes
+replace only that text while retaining the registry, molecular, genomic, and provenance facets.
+This keeps autonomous expansion executable without allowing it to widen the approved source slice.
+Each persisted pass also carries a canonical digest of its claim payload; resume rejects missing or
+altered claims before another local-model call.
+The public-literature loop additionally accepts `public_literature_query` facets for specialty,
+publication type, MeSH term, inclusive date bounds, and limit. Autonomous follow-ups replace only
+the lexical text selector while preserving and digest-binding the remaining PubMed slice.
+The provider-free capability router and domain tool profile expose the same complete neurosurgical
+surface: FHIR/DICOM metadata imports, evidence programs and autonomous review waves, trial
+landscapes, and public-literature refresh/link/integrity queue, workbench, and portfolio tools.
+Capability selection is lexical and abstaining; it never grants credentials, patient-file access,
+clinical authority, or effect execution.
+Pass a prior ledger back as `resume_from=...` with a larger total `max_passes` to continue pending
+queries after a restart; schema, source bundle, provider/model, and loop digest are revalidated
+before any additional local-model call.
+`grounded_research_portfolio()` coordinates both planes in one source-separated digest: the real
+glioma population and specialty PubMed loops retain independent audit identities while counts
+and pending work are aggregated for human review.
+With both snapshots present it also attaches an exact PMID/normalized-DOI linkage audit, including
+bounded unmatched and metadata-mismatch rows. This is a separate provenance artifact and never
+asserts cohort overlap, causality, or clinical applicability.
+Pass `case_asset_manifest=` with an optional `case_asset_manifest_query=` to attach a real,
+de-identified multimodal inventory to the portfolio or `grounded_research_intake()`. The
+authoritative projection carries only digest/coverage/reviewer metadata, is specialty-bound, and
+never opens asset bytes or returns clinical values. The grounded CLI exposes the same boundary via
+`--case-asset-manifest` and `--case-asset-manifest-query`; both paths remain separate from source
+population and PMID claims.
+The installed `aurora-agent grounded-portfolio` command is the operator-facing equivalent: it
+loads the checked-in extended non-synthetic TCGA-GBM + TCGA-LGG snapshot by default (and the
+six-specialty PubMed snapshot), invokes Ollama on loopback (or an explicit
+`--provider local` fixture), and atomically writes a complete digest-bound ledger. It requires
+`--approve-provider-call`, never accepts or prompts for an API key, refuses synthetic bundles,
+and resumes only when `--resume` verifies the output store, question/provider/model identity,
+source-plane selection, and child loop digests. Example:
+
+```powershell
+aurora-agent grounded-portfolio `
+  --mcp-command "cargo run -p bioprism-mcp --offline -- --root ." `
+  --question "Which molecular and citation metadata should a reviewer inspect for glioma?" `
+  --model llama3.1 --approve-provider-call `
+  --portfolio-output work/grounded-research-portfolio.json
+```
+
+Add `--tool-loop` to let the approved local model use bounded, read-only snapshot search,
+coverage, and PMID/DOI reconciliation views against the same validated snapshots;
+`--max-tool-turns 1..8` and `--max-tool-calls 1..32` fence the loop and
+are retained in the resumable ledger. The persisted trace stores query digests and facet metadata,
+not model-generated search text.
+
+Use `--resume` with a larger `--max-passes` to continue bounded unknown-derived queries after a
+restart. The command remains research-only: answers are caller-owned, source planes stay
+separate, and every result carries `human_review_required=true`; no diagnosis, prognosis,
+treatment, triage, or procedure/device advice is emitted.
+Pass `--real-data-query-file query.json` to apply the same bounded registry, molecular, genomic,
+and publication facets used by the SDK; the CLI retains that query in the digest-fenced ledger.
+When current public evidence is needed, add `--refresh-real-data` and/or
+`--refresh-public-literature` together with `--approve-network`. These opt-in refreshes use only
+the allow-listed credentialless public endpoints, validate each candidate snapshot, and atomically
+replace the selected files before the first model call. Refresh cannot be combined with `--resume`
+because changing a source digest would invalidate the persisted loop; receipts are returned in
+`source_refresh` and the run remains human-review gated.
+For a free-text question, `aurora-agent grounded-autopilot` adds a provider-free intake gate before
+the same loops. It deterministically routes the six-specialty vocabulary, returns `abstained` for
+ambiguous wording, returns `needs_evidence` without a model call when the routed snapshot is absent,
+and otherwise runs only the required source plane(s). Glioma requires the real glioma snapshot;
+other specialties require the PubMed snapshot. The command has no API-key argument or prompt and
+always returns a source-separated, human-review-gated envelope.
+Use `--intake-output work/grounded-research-intake.json` to persist that envelope as an atomic,
+digest-bound checkpoint. A later `--resume` verifies the store, question, route, source paths,
+provider/model, and all bounded controls before handing any verified child loop ledgers back to
+the intake worker; only `--max-passes` may increase. A changed or tampered checkpoint fails closed.
+Add `--tool-loop` (with the same bounded turn/call flags) to enable the local model's snapshot-only
+search tool after intake; the mode and budgets are resume-fenced.
+The cross-platform `aurora-agent refresh-public-literature --approve-network` command refreshes
+the six bounded PubMed lanes used by that intake. It uses only public NCBI E-utilities, requires
+no API key, validates source hashes and `synthetic_data=false`, and atomically installs a
+last-known-good replacement. Use `--per-specialty-limit 1..50` to bound retrieval; malformed or
+empty lanes fail before the existing snapshot is touched.
+The grounded commands can perform that refresh inline with
+`--refresh-public-literature --approve-network` (and, for glioma, add
+`--refresh-real-data`). Inline refresh is opt-in, refuses `--resume`, and returns source digests
+and retrieval metadata in `source_refresh` so the model never runs against an unreported corpus.
+The same receipt is retained in the digest-bound output store and replayed on `--resume` without
+re-fetching sources.
+For the full real glioma population snapshot, use the cross-platform
+`aurora-agent refresh-real-glioma --approve-network` boundary. It gathers bounded aggregate
+ClinicalTrials.gov, NCI GDC, cBioPortal, NCI PDQ, and PubMed metadata, computes the same Rust
+source/bundle digests, and atomically installs the candidate only after validation. Repeat
+`--gdc-project-id` or `--portal-study-id` to widen the public population scope; no patient-level
+records, assay values, credentials, or synthetic fallback are accepted.
+`grounded_public_literature_research()` provides the same composed handoff for the six-specialty
+PubMed bundle, including cranial-base, craniofacial, encephalocele, spina-bifida, and Chiari lanes;
+it uses `public_literature_draft_audit()` and retains PMID-scoped citations.
+The underlying context now includes each bounded review obligation with its task ID, source
+identity, and rationale, preserving unresolved metadata work for a resumable worker.
+With `tool_loop=True`, the local model can also request
+`neurosurgery_public_literature_review_queue_view` to inspect real missing DOI/abstract/MeSH/
+publication-type and duplicate-identifier tasks. The view is fixed to the caller's specialty
+and limit, returns only reviewer-owned queue metadata, and never treats missingness as negative
+evidence.
+The glioma tool loop additionally exposes `neurosurgery_real_data_evidence_graph_view` for
+bounded study/profile/PMID crosswalk traversal. Nodes and edges are explicit identifiers only;
+they are citation surfaces, not causal or clinical relationships.
+It also exposes `neurosurgery_real_data_evidence_acquisition_view` for a bounded next-evidence
+worklist. Each step is a local replay query with source metadata, match counts, and reviewer
+obligations; no network fetch, patient inference, or clinical action is reachable from the view.
+The public-literature loop exposes the parallel
+`neurosurgery_public_literature_evidence_acquisition_view` for a fixed specialty lane. It compiles
+the checked-in PubMed snapshot into the same bounded reviewer worklist with PMID-scoped references;
+planned queries are not evidence, and the human-review boundary remains explicit.
+`intake_plan()` is the free-text entry point: it performs bounded lexical routing across the six
+specialty profiles, abstains on weak or ambiguous wording, and returns only a SHA-256 question
+digest, route candidates, evidence snapshot classes, and reviewer-safe next actions. An explicit
+specialty is a routing override, not clinical authorization; no provider, network, patient file,
+diagnosis, or procedure capability is added.
+`intake_mission()` composes this with a guarded research-only run: it abstains or reports the
+missing validated snapshot before execution, requires real glioma data for glioma, and requires
+the PubMed snapshot for the other specialties. Executed output is digest-only, provider-free,
+network-free, read-only, and held for human review.
+Pass an optional `case_request=` mapping to carry a de-identified structured case through the
+same validation and route; the case is never echoed in the returned intake envelope.
+Pass `case_asset_manifest=` with an optional `case_asset_manifest_query=` to carry real,
+de-identified multimodal asset metadata into that mission; the report is digest-bound, explicit
+about missingness, and never opens asset bytes.
+Pass a persisted `case_asset_review_disposition=` ledger to resume reviewer state in the same
+call. Its digest and counts are validated before handoff and rebound into synthesis, evidence
+programming, acquisition, and the mission audit; it remains metadata-only.
+The same `intake_mission()` call accepts `case_dicom_import=` and `case_fhir_import=` for
+caller-sanitized metadata exports. They follow the same independently validated, digest-only
+route, may be supplied together for one multimodal mission, and cannot be combined with a second
+asset manifest.
+Both intake methods accept an optional `freshness={"as_of": "...Z", "max_age_days": ...}`
+policy. It is evaluated against the caller-supplied snapshot(s) and returned as a digest-bound
+report; omission makes no freshness claim and the server never uses its own clock.
+`intake_portfolio()` is the cross-specialty extension: it fans out matched terms across one or an
+explicit all-six-lane PubMed portfolio, requires real glioma data whenever glioma is in scope, and
+keeps every lane independent and reviewer-bound. A selected-lane portfolio may also carry the
+same `case_asset_manifest=`/`case_asset_manifest_query=` metadata-only provenance; an explicit
+all-six-lane portfolio refuses that single-specialty attachment. A selected-lane call can also
+carry `case_asset_review_disposition=` so a persisted reviewer ledger remains bound through the
+nested mission.
+`evidence_synthesis()` is the cross-plane evidence handoff: it aligns a redacted case audit,
+caller evidence, the validated real-glioma population snapshot, and/or the six-specialty PubMed
+snapshot without merging their meanings. It returns source identifiers, optional freshness
+reports, exact PMID links, bounded review obligations, and no patient-level conclusion; it never
+needs an OpenAI key or network provider. Pass the optional `case_asset_manifest=` and
+`case_asset_manifest_query=` arguments to bind a previously de-identified, metadata-only asset
+projection into the ledger; the returned `case_asset_report_digest` is the explicit link, while
+`case_asset_summary` provides bounded asset/observation/provenance counts, missing requested kinds,
+review-item counts, and truncation without exposing asset bytes or identifiers; the optional
+`case_asset_review_items` list carries the digest-only obligations themselves.
+`intake_mission()`/mission responses include the same `evidence_synthesis` field automatically
+when a bundle is attached, including a dual-plane linked report for a glioma mission with both
+validated snapshots.
+Mission envelopes also carry the bounded `evidence_acquisition` plan over those same snapshots,
+which can be resumed with the explicit `evidence_acquisition_start()`,
+`evidence_acquisition_advance()`, and `evidence_acquisition_finish()` methods; the accompanying
+`evidence_acquisition_session` is already bound to the mission's request and snapshot digests.
+`evidence_program()` builds the protocol-defined, source-grounded review agenda from the same
+snapshots: each lane keeps bounded molecular/anatomy/imaging/development/function/outcome or
+translation tracks, exact source IDs, required observation kinds, reviewer roles, and explicit
+empty/truncated counts. Tracks additionally expose metadata-only observation coverage and
+provenance gaps from the typed intake audit, so a local worker can prioritize missing caller
+inputs without inventing clinical meaning. It is lexical retrieval metadata only, remains
+provider-free and human-review gated, and never promotes a PMID or population row to a case
+finding.
+Pass `case_asset_manifest=` (and optionally `case_asset_manifest_query=`) to join each track's
+required observation classes to a real, de-identified asset inventory. The response exposes
+digest-only `asset_coverage` rows with `observed`, `present_not_observed`, or `missing` states
+and explicit missing asset kinds; asset bytes and local identifiers remain outside the SDK.
+Each track's `review_worklist` turns those gaps into bounded metadata-only obligations for a local
+worker (for example, bind a source digest or review an unobserved class), never clinical actions.
+When a persisted `case_asset_review_disposition` is passed with the manifest, its digest and
+pending/resolved counts are propagated into the program and every acquisition lifecycle call;
+mismatched or tampered ledgers are rejected.
+Mission envelopes additionally expose `mission_audit`, a digest-bound assembly fuse that checks
+request/snapshot identity, report-plane presence, and the provider-free review boundary. Its
+`integrity_ok` flag is provenance metadata only, not a clinical readiness score. Its checks also
+reject drift between a supplied case-asset manifest and the evidence program's asset-coverage
+projection before a mission is handed to a reviewer.
+`glioma_molecular_map()` grounds selected typed IDH1/IDH2, MGMT, EGFR, TERT, H3, 1p/19q,
+methylation, and related marker terms against exact records in those validated snapshots. It keeps
+assay missingness, source IDs, truncation, and human-review obligations explicit; zero hits are not
+negative evidence and no population or citation match is treated as a patient result.
+`case_asset_manifest()` is the real-data multimodal intake seam. It accepts only a caller-owned,
+de-identified manifest for imaging, pathology, molecular, operative, functional/developmental,
+longitudinal, or anatomical assets, binding each entry to a lowercase SHA-256 content digest and
+source/timepoint metadata plus an explicit asset state. The Rust server refuses synthetic data, direct identifiers, malformed
+or duplicate entries, and specialty drift; it returns digest-only asset references, per-kind
+coverage, provenance/missingness review tasks, `provider: none`, `network: false`, and
+`human_review_required: true`. Asset bytes are never opened or parsed, so this is provenance
+intake—not a pixel/content DICOM, pathology, genomics, EHR, diagnosis, treatment, or operative parser—and it
+requires no OpenAI key or network provider.
+`case_fhir_import()` accepts the same boundary from a caller-sanitized FHIR `Bundle`: only
+resource type/id and an explicit asset-kind hint are inspected, while identifiers, patient
+references, narratives, measurements, codes, and raw text are refused. The bounded report hashes
+resource/source identifiers, marks unclassified resources for review, and can be replayed against
+the exact request, bundle, and hints without a provider or network.
+`case_dicom_import()` accepts standard DICOM JSON metadata from a de-identified archive. It projects
+only bounded series metadata and UID digests, rejects known patient-identifying tags and `PixelData`,
+ignores unknown/private tags, and never opens pixels or DICOM bytes. Missing SeriesInstanceUID,
+dates, modality, body region, and object-byte digests remain explicit reviewer obligations in a
+replayable, non-synthetic report; no OpenAI key or network provider is required.
+`case_dicom_evidence_workflow()` composes that digest-only DICOM projection with the validated
+real-glioma and/or PubMed snapshot, evidence synthesis, the six-track evidence program, and a
+resumable local acquisition checkpoint in one replayable report. It binds the projected manifest
+digest into every nested worker and preserves case metadata, population records, and citations as
+separate planes; it never opens pixels, fetches URLs, invokes a provider, or emits a clinical
+conclusion. Pass `real_glioma_data=` for glioma (required) and `public_literature=` when desired,
+with the bounded `query=` object controlling local filters and reference limits.
+For a mission-level glioma dossier, pass `case_dicom_import=` to `run_research_mission()`.
+The mission carries the DICOM receipt and verifies its manifest digest through evidence synthesis,
+programming, and acquisition. This lane requires `real_glioma_data` and cannot be combined with a
+second case-asset manifest or disposition; use `case_dicom_evidence_workflow()` when a
+cross-specialty PubMed bundle is also needed.
+The same helper accepts `case_fhir_import=` for a caller-sanitized FHIR metadata export. The
+receipt is rebound through synthesis, evidence programming, acquisition, and mission audit for a
+real glioma bundle, a cross-specialty PubMed bundle, or both. Resource payloads and clinical values
+never enter the response; FHIR can be combined with DICOM for one multimodal digest-only manifest,
+but not with a second asset manifest or disposition ledger.
+FHIR and DICOM imports may be supplied together; their independently validated digest-only
+projections are unioned into one multimodal manifest while each child receipt remains visible.
+When replaying a persisted mission with `validate_mission()`, pass the original sanitized
+`case_fhir_import=` or `case_dicom_import=` too; the server fails closed if a receipt is present
+but its source export is omitted.
+For a repeatable CLI worker over this mission-level lane, use
+`scripts/run_neurosurgical_mission_with_dicom.ps1`; it validates the DICOM/manifest/synthesis
+bindings and zero mission-audit failures before persisting the envelope.
+That query may also include `real_data_reasoning_context=` and/or
+`public_literature_reasoning_context=` to return a bounded, digest-addressable context handoff for
+a caller-owned local model; each context remains source text/metadata, is bound to the same bundle
+digest, and is never interpreted by the SDK.
+`evidence_synthesis(..., case_asset_review_disposition=...)` can then resume a persisted reviewer
+ledger for that exact projection; the returned digest and pending/resolved/unresolved counts are
+workflow metadata only and remain human-review gated.
+`case_asset_review_disposition(report, decisions=...)` records caller-owned human-review state for
+the returned sequence-numbered obligations. It accepts only `reviewed`, `unresolved`, or
+`not_applicable`, binds the canonicalized decision set to `report_digest`, rejects duplicates and
+unknown rows, and keeps omitted/undecided rows pending. The stateless envelope never opens asset
+bytes, stores local identifiers, invokes a provider, or represents a clinical conclusion.
+`public_literature_matrix()` fans out the same bounded filters across selected lanes (or all six)
+and returns independent packet/digest rows plus explicit empty and truncation counts.
+`public_literature_reasoning_context()` renders one such packet into bounded, source-addressable
+context for a caller-owned local model, preserving untrusted abstract excerpts and explicit
+omission counts; missions expose the same context report and the ordered `research_plan`
+automatically, so explicit intake gaps become caller-owned next-review tasks.
+`plan_research()` turns the intake audit into bounded caller-owned acquisition, provenance-repair,
+interpretation, corpus-review, and population-context tasks; optional snapshot references remain
+source-linked context rather than patient findings.
+`evidence_acquisition()` compiles the next autonomous, digest-bound local replay wave across both
+validated real-glioma and PubMed planes. It preserves per-step trigger/source/query identity,
+fallback scans, match/truncation state, freshness, missing-source obligations, and reviewer hold;
+it never fetches, invokes a provider, or turns population/citation metadata into a case finding.
+For checkpointed execution, `evidence_acquisition_start()`, `evidence_acquisition_advance()`, and
+`evidence_acquisition_finish()` persist the same digest-bound session contract in caller-owned JSON;
+changed snapshots or requests are refused before replay, and no method opens an API key.
+`research_brief()` performs a deterministic topic-lane extraction over one validated real-glioma
+or six-specialty literature snapshot. It returns exact matched terms, stable source IDs/URIs,
+abstract and truncation counts, cross-topic overlap, explicit unknowns, and reviewer prompts for
+the local/human handoff. It performs no model invocation, ranking, diagnosis, treatment inference,
+or patient-evidence promotion, and always keeps `human_review_required` true; missions include the
+same brief automatically.
+`evidence_graph()` projects a validated real-glioma snapshot into a bounded, digest-addressed
+study/profile/PMID crosswalk with explicit root traversal and omission/isolate counts; it never
+infers biology, causality, or clinical action.
+`real_data_coverage()` audits source and record-kind counts, trial/publication date axes, assay
+modality coverage, abstract availability, and explicit linkage gaps while preserving missingness;
+it exposes a reproducible coverage digest but never scores freshness or evidence quality.
+`real_data_reconciliation()` performs a local, deterministic PMID/normalized-DOI cross-source
+audit over that same snapshot. It surfaces portal citations absent from the bounded literature
+window and duplicated PMIDs/DOIs as metadata-only review work, preserving counts under truncation
+without fetching, merging, repairing, ranking, or making clinical claims.
+`query_real_data()` also accepts case-insensitive PubMed `publication_type` and `mesh_term`
+facets plus inclusive `publication_date_from`/`publication_date_to` bounds, narrowing indexed
+literature metadata without turning labels or chronology into quality or clinical scores. The
+refresh edge leaves year-only or month-only PubMed dates missing rather than inventing a day, so
+bounded chronology never claims precision the source did not provide.
+`real_data_freshness()` and `public_literature_freshness()` classify source retrieval age against
+an explicit caller-supplied UTC `as_of` timestamp and `max_age_days` policy. They preserve
+`current`, `stale`, and `future_dated` states, require review for future-dated metadata, and never
+use the host clock or turn age into a quality or clinical score.
+Real-data `run_research_mission()` responses also carry the default bounded
+`real_data_trial_landscape`, `real_data_molecular_coverage`, `real_data_review_queue`,
+`real_data_evidence_packet`, `real_data_evidence_graph`, and
+`real_data_reasoning_context`, so a caller can inspect stable study/profile/PMID links, explicit
+metadata obligations, and one digest-bound source-addressable handoff before reviewing the route
+report. Trial landscape is a descriptive ClinicalTrials.gov inventory and molecular coverage is a
+cBioPortal assay/profile metadata ledger; neither ranks trials, infers eligibility, or exposes
+patient-level molecular values. Public-literature missions carry the corresponding
+`public_literature_evidence_packet`.
+They also run `public_literature_integrity_audit` automatically for the requested specialty lane
+before assembling that packet, brief, or reasoning context, so missing identifiers and metadata
+remain visible review obligations rather than silently shaping a synthesis.
+Pass `freshness={"as_of": "...Z", "max_age_days": ...}` to carry the explicit source-age report in
+the mission envelope.
+`real_data_diff()` compares two validated snapshots for bounded added/removed/changed records and
+source metadata, preserving before/after digests without copying abstracts or sample values.
+`real_data_refresh_audit()` composes that diff with coverage, optional freshness, metadata review
+obligations, and the deterministic research brief. It is restart-safe and digest-bound, reports
+identity stability and explicit review reasons, and never accepts, merges, fetches, ranks, or writes
+the candidate snapshot; `provider` remains `none`, `network` remains `False`, and human review is
+required.
+`public_literature_refresh_audit()` provides the equivalent restart-safe before/after reconciliation
+for the six-specialty PubMed snapshot: it keeps stable PMID/source identities, changed field names,
+lane coverage, truncation, and optional freshness explicit without copying abstracts or accepting the
+candidate. It is provider-free and human-review-only.
+`literature_link_audit()` joins the real glioma literature index to a selected public lane by exact
+PMID/normalized DOI, exposing linked and unmatched windows plus metadata drift without inferring
+cohorts, evidence quality, or clinical meaning.
+`public_literature_integrity_audit()` is the pre-synthesis corpus gate: it reports source-linked
+missing DOI/abstract/publication-type/MeSH metadata and duplicate normalized DOI groups in bounded
+lane scopes, with no silent repair, quality score, or clinical interpretation.
+`public_literature_review_queue()` converts those findings into bounded, stable, source-linked
+`needs_human_review` tasks with PMID/source URIs, titles, reviewer roles, and explicit reasons;
+missions include the same queue automatically and preserve any omitted rows.
+`public_literature_workbench()` adds a lane-scoped navigation view: each selected specialty's
+closed profile is joined to exact source/record/abstract counts, missing metadata, and integrity
+obligations from the real snapshot. It is not a readiness or quality score, never ranks lanes or
+repairs fields, and remains provider-free with `synthetic_data: false`, `provider: none`, and
+`network: false`; public-literature missions include the request-specialty workbench.
+Workbench lanes also expose non-exclusive metadata-derived design strata with exact PMIDs, keeping
+human-indexed, animal/preclinical, in-vitro, review, imaging, surgical, developmental/genetic,
+outcome, and interventional contexts separate for human review. Unclassified and overlapping rows
+remain explicit obligations rather than quality scores or patient evidence.
+`public_literature_portfolio()` composes one bounded exact-query/workbench/reviewer-queue handoff
+per selected specialty (all six when `specialties` is omitted). The result is digest-bound to the
+validated real snapshot and preserves explicit hit, review-item, omission, and truncation counts;
+it never scores or ranks evidence, infers a clinical conclusion, or repairs missing metadata. The
+helper preserves the provider-free posture (`provider: none`, `network: false`, `synthetic_data:
+false`) and never accepts a key, fetches a URL, or writes durable state.
+Pass `portfolio_query={...}` to `run_research_mission()` with `public_literature` to attach that
+multi-lane report to the mission envelope; a glioma mission may also provide both
+`real_glioma_data` and `public_literature`. In that dual-bundle mode the real snapshot drives the
+session route, the PubMed snapshot remains independent citation context, and the envelope carries
+an exact PMID/DOI `literature_link_audit`; no cohorts are merged and the route remains unchanged.
+Pass `case_asset_manifest={...}` (and, optionally, `case_asset_manifest_query={...}`) to attach
+the same digest-bound, real de-identified multimodal metadata projection to the mission envelope.
+The manifest is never opened as bytes: asset references are hashed and missingness/provenance
+obligations remain explicit for human review. The mission's `evidence_synthesis` ledger carries
+the asset report digest as an explicit cross-plane binding. Supplying a query without its manifest
+is refused. Pass `case_asset_review_disposition={...}` to carry a persisted reviewer ledger into
+the mission; its manifest/synthesis digest bindings are checked and unresolved counts remain
+visible for the next local replay.
+The repository-level `scripts/run_neurosurgical_autonomous_mission.ps1` command can refresh both
+validated snapshots and invoke the same dual-bundle mission without a provider key. It defaults
+to the extended TCGA-GBM + TCGA-LGG glioma population and broad molecular PubMed lane;
+`-SkipRefresh` replays those last validated files offline. Its `-GdcProjectIds`, `-PubMedTerm`,
+and `-PubMedSourceId` parameters forward the exact population/citation scope into the real-data
+refresh while preserving source identity and replay provenance.
+`real_data_review_queue()` derives stable, caller-owned metadata-review tasks from one validated
+snapshot (for example, an absent PMID crosswalk or clipped abstract) and never assigns clinical
+urgency or imputes missing values.
+The acquisition helpers also accept `case_asset_manifest=` and the optional
+`case_asset_manifest_query=` pair. The returned plan/session carries the manifest report digest
+and bounded asset review items, and every replay re-binds that digest before executing another
+local snapshot query. Asset bytes are never opened; this makes multimodal provenance gaps part of
+the same restart-safe worker handoff.
+`real_data_review_disposition()` applies digest-bound `reviewed`, `unresolved`, or `not_applicable`
+workflow state to those tasks; the envelope is stateless and leaves omitted or undecided work
+pending.
+`real_data_evidence_packet()` composes the validated summary, coverage, explicit crosswalk,
+source-linked query hits, canonical ClinicalTrials.gov trial landscape, comparative GDC cohort
+landscape, and review queue into one digest-addressed handoff for a local model or human reviewer.
+Pass `freshness={"as_of": "...Z", "max_age_days": ...}` to carry an optional
+digest-bound current/stale/future-dated source-age posture; the same optional field is accepted by
+`public_literature_evidence_packet()` and no clock is invented when it is omitted.
+`real_data_autonomous_workflow()` turns that packet into a deterministic, resumable
+provenance/completeness/context review wave. It emits source-addressable metadata actions,
+including an explicit `refresh_source_snapshot` action for stale sources and
+`expand_evidence_projection` holds when bounded result limits omit rows,
+accepts a persisted `dispositions=` report to close or reopen queue items, and keeps truncation,
+unresolved work, and the final human-synthesis gate explicit. It does not rank clinical value or
+auto-approve a conclusion.
+`RealDataQueryHit` rows preserve optional ClinicalTrials.gov phases, update date, study type,
+aggregate enrollment target, and intervention names, plus portal sample counts and PubMed
+publication dates. Real-data queries also accept exact cBioPortal `molecular_alteration_type`/
+`molecular_datatype` facets and exact GDC `genomic_data_type` file facets. These fields are copied source metadata; absent upstream fields stay absent and
+are never treated as eligibility or outcome evidence.
+`real_data_trial_landscape()` adds a bounded, digest-bound registry projection over those same
+rows, with explicit multi-phase accounting, study/status/intervention buckets, update-date range,
+and missingness/truncation review reasons. It is provider-free, network-free, and descriptive only.
+`real_data_molecular_coverage()` adds the complementary cBioPortal availability ledger: exact
+alteration-type/datatype facets, per-study profile rows, analysis-visible and patient-level
+metadata flags, description coverage, explicit missing alteration/datatype counts, and explicit
+profile/study truncation. It also reports aggregate GDC project file/data-type facets and missing
+facet obligations when those real availability rows are present. It exposes no
+mutation or expression values and never infers that an assay was run for a specimen. The
+real-data evidence packet includes this ledger automatically (schema `/0.3`).
+`real_data_cohort_landscape()` adds a bounded comparative view over source-linked TCGA/GDC
+projects in the validated bundle. It reports aggregate released-case inventory and per-project
+file/data-type availability with exact project citations, explicit truncation, and missingness;
+it is read-only metadata and never opens files, exposes samples, merges cohorts, or makes clinical
+claims.
+`specialty_evidence_map()` provides the same request's lane-specific identity, spatial,
+functional, and temporal coverage ledger for all six supported specialties. It preserves source
+IDs, timestamp coverage, and missing/uninterpretable/conflicting states without echoing values or
+interpreting them.
+`real_data_reasoning_context()` renders that handoff into a bounded, source-addressable context
+string for a caller-owned local model, with optional untrusted abstract excerpts, digest-bound
+citations, and explicit omission/truncation counts. It performs no model invocation or clinical
+interpretation.
+`real_data_draft_audit()` is the matching local-model boundary: every structured claim must cite a
+record emitted by that packet, `patient_case` and `clinical_action` postures are blocked, and
+accepted rows remain `grounded_for_human_review` rather than clinically validated.
+The bundle digest and provenance status remain in the response, and the route always ends at human
+review rather than producing a diagnosis, prognosis, treatment, triage, or procedure.
+The same bundle can be passed as `public_literature=` to `start_session()`,
+`advance_session()`, `run_session_to_review()`, `finish_session()`, or `run_research_mission()`;
+those checkpoints bind `public_literature_digest` and refuse request or bundle drift.
+`NeurosurgicalObservation` accepts optional caller-supplied `observed_at` timestamps and
+`timepoint` labels; `LocalNeurosurgicalAgent.temporal_audit()` exposes the nested digest-bound
+alignment report without inferring a trajectory.
+
 For a running `bioprism-api` gateway, the same standard-library package provides bounded HTTP
 access:
 

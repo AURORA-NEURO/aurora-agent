@@ -13352,7 +13352,10 @@ mod tests {
         assert_eq!(coverage.status, 200);
         let coverage: Value = serde_json::from_slice(&coverage.body).unwrap();
         assert_eq!(coverage["workflow"], "domain_report_coverage");
-        assert_eq!(coverage["group_count"], 30);
+        assert_eq!(
+            coverage["group_count"].as_u64().unwrap() as usize,
+            coverage["groups"].as_array().unwrap().len()
+        );
         assert_eq!(coverage["reported_group_count"], 1);
         assert!(coverage["groups"]
             .as_array()
@@ -14130,9 +14133,19 @@ mod tests {
         assert_eq!(coverage.status, 200);
         let coverage: Value = serde_json::from_slice(&coverage.body).unwrap();
         assert_eq!(coverage["workflow"], "domain_evidence_intake_coverage");
-        assert_eq!(coverage["group_count"], 30);
         assert_eq!(coverage["reported_group_count"], 1);
-        assert_eq!(coverage["missing_group_count"], 29);
+        let group_count = coverage["group_count"].as_u64().unwrap();
+        let reported_group_count = coverage["reported_group_count"].as_u64().unwrap();
+        let missing_group_count = coverage["missing_group_count"].as_u64().unwrap();
+        assert_eq!(
+            group_count as usize,
+            coverage["groups"].as_array().unwrap().len()
+        );
+        assert_eq!(reported_group_count + missing_group_count, group_count);
+        assert_eq!(
+            missing_group_count as usize,
+            coverage["missing_group_ids"].as_array().unwrap().len()
+        );
         assert_eq!(coverage["complete"], false);
         assert_eq!(coverage["groups_with_artifact_evidence"], 1);
         assert_eq!(coverage["artifact_evidence_records"], 2);
@@ -14272,7 +14285,19 @@ mod tests {
         assert_eq!(catalogue.status, 200);
         let catalogue: Value = serde_json::from_slice(&catalogue.body).unwrap();
         assert_eq!(catalogue["workflow"], "domain_workflow_catalogue");
-        assert_eq!(catalogue["workflow_count"], 30);
+        assert_eq!(
+            catalogue["workflow_count"].as_u64().unwrap() as usize,
+            catalogue["workflows"].as_array().unwrap().len()
+        );
+        assert_eq!(
+            catalogue["workflow_count"],
+            catalogue["coverage"]["group_count"]
+        );
+        assert!(catalogue["workflows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|workflow| workflow["workflow_id"] == "autonomous_research_campaigns"));
         assert_eq!(catalogue["coverage"]["all_groups_have_workflow"], true);
         assert_eq!(
             catalogue["coverage"]["all_workflows_have_domain_contract"],

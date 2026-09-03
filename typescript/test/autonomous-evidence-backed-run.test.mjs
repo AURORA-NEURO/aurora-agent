@@ -114,6 +114,14 @@ function evidenceOptions(plan, runOptions = {}) {
       approveProviderCall: true,
       ...runOptions,
     },
+    resumablePolicyIdentity: {
+      projector: { id: "evidence-options-projector", version: "1" },
+      provider_policy: {
+        id: "evidence-options-provider-policy",
+        version: "1",
+        config_digest: "d".repeat(64),
+      },
+    },
   };
 }
 
@@ -262,6 +270,24 @@ test("evidence-backed execution defaults to metadata-only prompting and blocks u
   assert.equal(unsettled.status, "evidence_incomplete");
   assert.equal(unsettled.evidence.status, "awaiting_evaluation");
   assert.equal(unsettled.run, null);
+  assert.equal(calls.provider, 1);
+});
+
+test("incomplete evidence override runs the provider without claiming completion", async () => {
+  const { agent, registry, calls } = await setup();
+  const plan = await agent.evidencePlan(["science"]);
+  const options = evidenceOptions(plan);
+  const result = await agent.runWithReviewedEvidence("Synthesize a science question while preserving missing evidence.", {
+    registry,
+    ...options,
+    execute: { approveSourceDispatch: true },
+    allowIncompleteEvidence: true,
+  });
+
+  assert.equal(result.status, "evidence_incomplete");
+  assert.equal(result.evidence.status, "partial");
+  assert.ok(result.evidence.runtime.toJSON().missing_requirement_ids.length > 0);
+  assert.equal(result.run.status, "completed");
   assert.equal(calls.provider, 1);
 });
 
@@ -415,6 +441,19 @@ test("brain facade launch admission gates evidence before source work and preser
   assert.equal(calls.evidence, sourceCallsBeforeRefusal);
 
   const checkpoints = [];
+  const checkpointCompareAndStore = (expected, checkpoint) => {
+    const current = checkpoints.at(-1)?.checkpoint_digest ?? null;
+    if (current !== expected) return false;
+    checkpoints.push(structuredClone(checkpoint));
+    return true;
+  };
+  const checkpointDispatchCompareAndStore = (expected, checkpoint, receipt) => {
+    const current = checkpoints.at(-1)?.checkpoint_digest ?? null;
+    if (current !== expected) return false;
+    checkpoints.push(structuredClone(checkpoint));
+    assert.match(receipt.toJSON().provider_idempotency_key_digest, /^[0-9a-f]{64}$/);
+    return true;
+  };
   const resumable = await brain.runWithReviewedEvidenceResumable(
     "Restart-safe facade evidence review.",
     {
@@ -422,6 +461,8 @@ test("brain facade launch admission gates evidence before source work and preser
       ...evidenceOptions(plan),
       jobId: "facade-evidence-resume",
       checkpointSink: (checkpoint) => checkpoints.push(checkpoint),
+      checkpointCompareAndStore,
+      checkpointDispatchCompareAndStore,
     },
   );
   assert.equal(resumable.status, "completed");
@@ -487,11 +528,26 @@ test("brain facade traces restart-safe evidence checkpoints without replaying pr
   const plan = await agent.evidencePlan(["evaluation"]);
   const traceStore = new InMemoryAutonomousRunTraceStore();
   const checkpoints = [];
+  const tracedCheckpointCompareAndStore = (expected, checkpoint) => {
+    const current = checkpoints.at(-1)?.checkpoint_digest ?? null;
+    if (current !== expected) return false;
+    checkpoints.push(structuredClone(checkpoint));
+    return true;
+  };
+  const tracedCheckpointDispatchCompareAndStore = (expected, checkpoint, receipt) => {
+    const current = checkpoints.at(-1)?.checkpoint_digest ?? null;
+    if (current !== expected) return false;
+    checkpoints.push(structuredClone(checkpoint));
+    assert.match(receipt.toJSON().provider_idempotency_key_digest, /^[0-9a-f]{64}$/);
+    return true;
+  };
   const traced = await brain.runWithReviewedEvidenceResumableWithTrace("Traced restart-safe evaluation review.", {
     registry,
     ...evidenceOptions(plan),
     jobId: "facade-evidence-traced-resume",
     checkpointSink: (checkpoint) => checkpoints.push(checkpoint),
+    checkpointCompareAndStore: tracedCheckpointCompareAndStore,
+    checkpointDispatchCompareAndStore: tracedCheckpointDispatchCompareAndStore,
     traceStore,
     runId: "facade-evidence-traced-resume",
   });

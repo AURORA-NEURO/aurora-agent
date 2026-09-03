@@ -8,6 +8,18 @@ import type {
   ToolValidationReport,
 } from "./types.js";
 
+// Canonical digests are an authorization primitive throughout the SDK. Capture JSON string
+// escaping once so an awaited caller hook cannot temporarily replace the global implementation
+// and make a receipt describe bytes other than the value being authorized.
+const nativeJsonStringify = JSON.stringify.bind(JSON);
+const nativeObjectKeys = Object.keys.bind(Object);
+const nativeArrayIsArray = Array.isArray.bind(Array);
+const NativeTextEncoder = globalThis.TextEncoder;
+const nativeTextEncoderEncode = NativeTextEncoder.prototype.encode;
+const NativeUint8Array = globalThis.Uint8Array;
+const NativeUint32Array = globalThis.Uint32Array;
+const nativeSubtleDigest = globalThis.crypto?.subtle?.digest.bind(globalThis.crypto.subtle) ?? null;
+
 export const TOOL_CATALOGUE_SCHEMA = "bioprism-typescript-tool-catalogue/0.1";
 export const MAX_TOOL_DEFINITIONS = 512;
 export const MAX_TOOL_SCHEMA_BYTES = 1_000_000;
@@ -204,7 +216,7 @@ function checkSchemaValue(
 
   const expected = schema.type;
   if (expected !== undefined && !matchesType(value, expected)) {
-    issues.push({ path, code: "type", message: `expected JSON type ${JSON.stringify(expected)}, got ${jsonType(value)}` });
+    issues.push({ path, code: "type", message: `expected JSON type ${nativeJsonStringify(expected)}, got ${jsonType(value)}` });
     return;
   }
   const enumeration = schema.enum;
@@ -235,7 +247,7 @@ function checkObject(value: Record<string, unknown>, schema: Record<string, unkn
   const known = isObject(properties) ? new Set(Object.keys(properties)) : new Set<string>();
   const additional = schema.additionalProperties;
   for (const [name, child] of Object.entries(value)) {
-    const childPath = /^[A-Za-z_$][\w$]*$/.test(name) ? `${path}.${name}` : `${path}[${JSON.stringify(name)}]`;
+    const childPath = /^[A-Za-z_$][\w$]*$/.test(name) ? `${path}.${name}` : `${path}[${nativeJsonStringify(name)}]`;
     if (known.has(name)) checkSchemaValue(child, (properties as Record<string, unknown>)[name], childPath, issues, warnings, depth + 1);
     else if (additional === false) issues.push({ path: childPath, code: "additional_property", message: "property is not allowed by the schema" });
     else if (isObject(additional) || additional === true) checkSchemaValue(child, additional, childPath, issues, warnings, depth + 1);
@@ -329,19 +341,41 @@ function jsonType(value: unknown): string {
 export function canonicalJson(value: unknown, depth = 0): string {
   if (depth > MAX_TOOL_ARGUMENT_DEPTH) throw new ArgumentError(`JSON nesting exceeds ${MAX_TOOL_ARGUMENT_DEPTH} levels`);
   if (value === null) return "null";
-  if (typeof value === "string" || typeof value === "boolean") return JSON.stringify(value);
+  if (typeof value === "string" || typeof value === "boolean") return nativeJsonStringify(value);
   if (typeof value === "number") {
     if (!Number.isFinite(value)) throw new ArgumentError("JSON contains a non-finite number");
-    return JSON.stringify(value);
+    return nativeJsonStringify(value);
   }
-  if (Array.isArray(value)) return `[${value.map((item) => canonicalJson(item, depth + 1)).join(",")}]`;
-  if (isObject(value)) {
-    const entries = Object.keys(value).sort().map((key) => {
-      const child = value[key];
+  if (nativeArrayIsArray(value)) {
+    let encoded = "[";
+    for (let index = 0; index < value.length; index += 1) {
+      if (index > 0) encoded += ",";
+      encoded += canonicalJson(value[index], depth + 1);
+    }
+    return `${encoded}]`;
+  }
+  if (typeof value === "object" && value !== null) {
+    const objectValue = value as Record<string, unknown>;
+    const keys = nativeObjectKeys(objectValue);
+    // Keep canonical ordering self-contained instead of consulting mutable Array.prototype.sort.
+    for (let index = 1; index < keys.length; index += 1) {
+      const selected = keys[index]!;
+      let cursor = index - 1;
+      while (cursor >= 0 && keys[cursor]! > selected) {
+        keys[cursor + 1] = keys[cursor]!;
+        cursor -= 1;
+      }
+      keys[cursor + 1] = selected;
+    }
+    let encoded = "{";
+    for (let index = 0; index < keys.length; index += 1) {
+      const key = keys[index]!;
+      const child = objectValue[key];
       if (child === undefined) throw new ArgumentError(`JSON property ${key} is undefined`);
-      return `${JSON.stringify(key)}:${canonicalJson(child, depth + 1)}`;
-    });
-    return `{${entries.join(",")}}`;
+      if (index > 0) encoded += ",";
+      encoded += `${nativeJsonStringify(key)}:${canonicalJson(child, depth + 1)}`;
+    }
+    return `${encoded}}`;
   }
   throw new ArgumentError("JSON contains an unsupported value");
 }
@@ -379,15 +413,21 @@ export function digestJsonSync(value: unknown): string {
 
 /** Hash bounded caller-owned bytes without requiring Node crypto. */
 export function digestBytesSync(value: Uint8Array): string {
-  if (!(value instanceof Uint8Array)) throw new ArgumentError("SHA-256 input must be a byte array");
+  if (!(value instanceof NativeUint8Array)) throw new ArgumentError("SHA-256 input must be a byte array");
   return sha256BytesHexSync(value);
 }
 
 async function sha256Hex(value: string): Promise<string> {
-  const subtle = globalThis.crypto?.subtle;
-  if (!subtle) throw new ArgumentError("Web Crypto SHA-256 is required for tool catalogue digests");
-  const bytes = await subtle.digest("SHA-256", new TextEncoder().encode(value));
-  return [...new Uint8Array(bytes)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  if (!nativeSubtleDigest) throw new ArgumentError("Web Crypto SHA-256 is required for tool catalogue digests");
+  const bytes = await nativeSubtleDigest("SHA-256", nativeTextEncoderEncode.call(new NativeTextEncoder(), value));
+  const view = new NativeUint8Array(bytes);
+  const hex = "0123456789abcdef";
+  let digest = "";
+  for (let index = 0; index < view.length; index += 1) {
+    const byte = view[index]!;
+    digest += `${hex[byte >>> 4]}${hex[byte & 0x0f]}`;
+  }
+  return digest;
 }
 
 const SHA256_INITIAL_STATE = [
@@ -419,13 +459,13 @@ function rotateRight(value: number, amount: number): number {
 }
 
 function sha256HexSync(value: string): string {
-  return sha256BytesHexSync(new TextEncoder().encode(value));
+  return sha256BytesHexSync(nativeTextEncoderEncode.call(new NativeTextEncoder(), value));
 }
 
 function sha256BytesHexSync(source: Uint8Array): string {
   const paddedLength = Math.ceil((source.length + 9) / 64) * 64;
-  const padded = new Uint8Array(paddedLength);
-  padded.set(source);
+  const padded = new NativeUint8Array(paddedLength);
+  for (let index = 0; index < source.length; index += 1) padded[index] = source[index]!;
   padded[source.length] = 0x80;
   const bitLength = source.length * 8;
   const highLength = Math.floor(bitLength / 0x1_0000_0000);
@@ -440,8 +480,11 @@ function sha256BytesHexSync(source: Uint8Array): string {
   padded[lengthOffset + 6] = (lowLength >>> 8) & 0xff;
   padded[lengthOffset + 7] = lowLength & 0xff;
 
-  const state: number[] = [...SHA256_INITIAL_STATE];
-  const schedule = new Uint32Array(64);
+  const state: number[] = [
+    SHA256_INITIAL_STATE[0], SHA256_INITIAL_STATE[1], SHA256_INITIAL_STATE[2], SHA256_INITIAL_STATE[3],
+    SHA256_INITIAL_STATE[4], SHA256_INITIAL_STATE[5], SHA256_INITIAL_STATE[6], SHA256_INITIAL_STATE[7],
+  ];
+  const schedule = new NativeUint32Array(64);
   for (let offset = 0; offset < padded.length; offset += 64) {
     for (let index = 0; index < 16; index += 1) {
       const position = offset + index * 4;
@@ -488,5 +531,11 @@ function sha256BytesHexSync(source: Uint8Array): string {
     state[6] = (state[6]! + g) >>> 0;
     state[7] = (state[7]! + h) >>> 0;
   }
-  return state.map((word) => word.toString(16).padStart(8, "0")).join("");
+  const hex = "0123456789abcdef";
+  let digest = "";
+  for (let index = 0; index < state.length; index += 1) {
+    const word = state[index]!;
+    for (let shift = 28; shift >= 0; shift -= 4) digest += hex[(word >>> shift) & 0x0f];
+  }
+  return digest;
 }

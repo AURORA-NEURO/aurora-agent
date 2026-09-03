@@ -45,6 +45,7 @@ def evidence(
     domain: str,
     *,
     source: str | None = None,
+    evidence_digest: str | None = None,
     observed_at: str = "2026-08-25T12:00:00Z",
     reliability: float = 0.9,
     support: float = 0.9,
@@ -60,7 +61,7 @@ def evidence(
         claim_ids=(claim_id,),
         source_id=source or f"source-{evidence_id}",
         source_digest=digest(f"source:{source or evidence_id}"),
-        evidence_digest=digest(f"evidence:{evidence_id}"),
+        evidence_digest=evidence_digest or digest(f"evidence:{evidence_id}"),
         observed_at=observed_at,
         reliability=reliability,
         support=support,
@@ -183,6 +184,58 @@ def test_integrity_temporal_firewall_and_secret_metadata_fail_closed() -> None:
     assert by_id["future"].usable is False
     assert by_id["expired"].temporal_state == "expired"
     assert all(item.status in {"blocked", "missing"} for item in result.claims)
+
+
+@pytest.mark.parametrize("missing_field", ("reliability", "support", "status", "stance"))
+def test_integrity_evidence_quality_and_posture_must_be_explicit(missing_field: str) -> None:
+    evidence_row = {
+        "evidence_id": "explicit-evidence",
+        "domain": "science",
+        "claim_ids": ["explicit-claim"],
+        "source_id": "explicit-source",
+        "evidence_digest": digest("explicit-evidence"),
+        "observed_at": "2026-08-25T12:00:00Z",
+        "reliability": 0.9,
+        "support": 0.9,
+        "status": "accepted",
+        "stance": "support",
+    }
+    evidence_row.pop(missing_field)
+
+    with pytest.raises(ArgumentError):
+        assess_autonomous_claim_integrity(
+            context_digest=digest("explicit-task"),
+            claims=(claim("explicit-claim", "science"),),
+            evidence=(evidence_row,),
+            reference_time=REFERENCE,
+        )
+
+
+def test_integrity_rejects_replayed_evidence_but_accepts_distinct_independent_observations() -> None:
+    repeated_digest = digest("same-observation")
+    with pytest.raises(ArgumentError, match="duplicate evidence digests"):
+        assess_autonomous_claim_integrity(
+            context_digest=digest("replayed-task"),
+            claims=(claim("replayed-claim", "science"),),
+            evidence=(
+                evidence("replay-a", "replayed-claim", "science", source="source-a", evidence_digest=repeated_digest),
+                evidence("replay-b", "replayed-claim", "science", source="source-b", evidence_digest=repeated_digest),
+            ),
+            reference_time=REFERENCE,
+        )
+
+    result = assess_autonomous_claim_integrity(
+        context_digest=digest("independent-task"),
+        claims=(claim("independent-claim", "science", required_support=0.8, required_independent_sources=2),),
+        evidence=(
+            evidence("independent-a", "independent-claim", "science", source="source-a", reliability=0.8, support=0.5),
+            evidence("independent-b", "independent-claim", "science", source="source-b", reliability=0.8, support=0.5),
+        ),
+        reference_time=REFERENCE,
+    )
+    assert result.claims[0].status == "supported"
+    assert result.claims[0].independent_source_count == 2
+    assert result.claims[0].support_score == 0.8
 
 
 def test_agent_facade_binds_task_digest_without_provider_or_source_dispatch() -> None:

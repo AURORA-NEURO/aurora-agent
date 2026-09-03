@@ -557,7 +557,7 @@ export class AutonomousEvidenceRuntime {
     value: JsonValue,
     options: AutonomousEvidenceRuntimeExecuteOptions,
   ): Promise<{ receipt: AutonomousEvidenceReceiptJSON; assessment: AutonomousEvidenceAssessmentJSON | null } | null> {
-    if (!options.evaluator || !["observed", "partial"].includes(entry.receipt.status) || !entry.receipt.observed_requirement_ids.includes(requirement.requirement_id) || !["not_evaluated", "indeterminate", "failed"].includes(entry.receipt.evaluator_status)) return null;
+    if (!options.evaluator || !["observed", "partial"].includes(entry.receipt.status) || !entry.receipt.observed_requirement_ids.includes(requirement.requirement_id) || !["not_evaluated", "rejected", "indeterminate", "failed"].includes(entry.receipt.evaluator_status)) return null;
     const replayBase = await this.receipt({
       ...entry.receipt,
       replay: "replayed",
@@ -648,7 +648,13 @@ export class AutonomousEvidenceRuntime {
         for (const id of replay.receipt.observed_requirement_ids) available.add(id);
         if (replay.receipt.status === "reconciliation_required") sawReconciliation = true;
         if (replay.assessment?.verdict === "accepted") completed.add(replay.receipt.requirement_id);
-        else if (replay.receipt.evaluator_status === "not_evaluated" || replay.receipt.evaluator_status === "indeterminate" || replay.receipt.evaluator_status === "failed") pendingEvaluation.add(replay.receipt.requirement_id);
+        else if (
+          replay.receipt.observed_requirement_ids.includes(replay.receipt.requirement_id)
+          && ["not_evaluated", "rejected", "indeterminate", "failed"].includes(replay.receipt.evaluator_status)
+        ) {
+          pendingEvaluation.add(replay.receipt.requirement_id);
+          if (replay.receipt.evaluator_status === "not_evaluated" || replay.receipt.evaluator_status === "failed") sawPendingEvaluation = true;
+        }
         continue;
       }
       if (sawFailure && options.stopOnFailure === true) {

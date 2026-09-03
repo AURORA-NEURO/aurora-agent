@@ -53,6 +53,7 @@ bioprism-lab = { workspace = true }
 bioprism-ledger = { workspace = true }
 bioprism-lens = { workspace = true }
 bioprism-modalities = { workspace = true }
+bioprism-neurosurgery = { workspace = true }
 bioprism-megafactory = { workspace = true }
 bioprism-metrics = { workspace = true }
 bioprism-mutation = { workspace = true }
@@ -67,6 +68,8 @@ bioprism-packs = { workspace = true }
 bioprism-prism = { workspace = true }
 bioprism-project = { workspace = true }
 bioprism-registry = { workspace = true }
+bioprism-research = { workspace = true }
+bioprism-research-campaign = { workspace = true }
 bioprism-repair = { workspace = true }
 bioprism-routing = { workspace = true }
 bioprism-runtime = { workspace = true }

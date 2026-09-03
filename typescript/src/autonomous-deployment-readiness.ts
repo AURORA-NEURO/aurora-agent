@@ -302,6 +302,13 @@ function sortBlockers(rows: readonly AutonomousDeploymentBlocker[]): AutonomousD
   return [...rows].sort((left, right) => `${left.scope}:${left.domain ?? ""}:${left.code}:${left.message}`.localeCompare(`${right.scope}:${right.domain ?? ""}:${right.code}:${right.message}`));
 }
 
+function summarizeToolNames(names: readonly string[], maximum = 1_700): string {
+  const joined = names.join(", ");
+  if (joined.length <= maximum) return joined;
+  const suffix = ` … (+${names.length} total; list truncated)`;
+  return `${joined.slice(0, Math.max(0, maximum - suffix.length))}${suffix}`;
+}
+
 function blocker(code: AutonomousDeploymentBlockerCode, scope: "global" | "domain", domain: AutonomousDomainName | null, message: string, nextAction: string, severity: "blocking" | "warning" = "blocking"): AutonomousDeploymentBlocker {
   return { code, scope, domain, severity, message: boundedText("deployment readiness blocker message", message, 2_048), next_action: boundedText("deployment readiness blocker next action", nextAction, 1_024) };
 }
@@ -396,8 +403,8 @@ export class AutonomousDeploymentReadinessAuditor {
       if (row.state === "provider_registration_required") domainBlockers.push(blocker("provider_registration", "domain", domain, "compatible model providers are not registered", "register the provider transport before invocation"));
       if (row.state === "credential_required") domainBlockers.push(blocker("credential", "domain", domain, "compatible providers have no active caller credential", "collect a short-lived user credential through protected onboarding"));
       if (row.state === "partial") domainBlockers.push(blocker("model_capability", "domain", domain, "domain readiness is partial and requires review before deployment", row.next_actions[0] ?? "resolve the domain readiness next action"));
-      if (this.policy.require_tool_catalogue && row.missing_tools.length > 0) domainBlockers.push(blocker("tool_catalogue", "domain", domain, `required domain tools are missing: ${row.missing_tools.join(", ")}`, "attach and review the live tool catalogue"));
-      else if (row.missing_tools.length > 0) warnings.push(blocker("tool_catalogue", "domain", domain, `optional domain tools are not currently attached: ${row.missing_tools.join(", ")}`, "attach a reviewed tool catalogue for richer execution", "warning"));
+      if (this.policy.require_tool_catalogue && row.missing_tools.length > 0) domainBlockers.push(blocker("tool_catalogue", "domain", domain, `required domain tools are missing: ${summarizeToolNames(row.missing_tools)}`, "attach and review the live tool catalogue"));
+      else if (row.missing_tools.length > 0) warnings.push(blocker("tool_catalogue", "domain", domain, `optional domain tools are not currently attached: ${summarizeToolNames(row.missing_tools)}`, "attach a reviewed tool catalogue for richer execution", "warning"));
       const evidence = isObject(row.evidence_readiness) ? row.evidence_readiness : undefined;
       const evidenceStatus = typeof evidence?.status === "string" ? evidence.status : "not_requested";
       const evidenceDigest = typeof evidence?.report_digest === "string" && /^[0-9a-f]{64}$/.test(evidence.report_digest) ? evidence.report_digest : null;

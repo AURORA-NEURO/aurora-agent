@@ -116,8 +116,8 @@ const DOMAIN_QUALITY_SEEDS: Readonly<Record<AutonomousDomainName, {
     ],
   },
   biomedical: {
-    critical: ["scope_boundary", "provenance", "population_and_applicability", "uncertainty", "human_review_and_escalation"],
-    safety: ["scope_boundary", "uncertainty", "human_review_and_escalation"],
+    critical: ["scope_boundary", "provenance", "population_and_applicability", "neurosurgical_route", "molecular_assay_coverage", "uncertainty", "human_review_and_escalation"],
+    safety: ["scope_boundary", "neurosurgical_route", "molecular_assay_coverage", "uncertainty", "human_review_and_escalation"],
     instructions: [
       "State the clinical or biological scope and explicitly separate educational analysis from diagnosis, treatment, or patient-specific advice.",
       "Track provenance, cohort, sample limitations, applicability, and uncertainty for every clinically meaningful claim.",
@@ -126,8 +126,8 @@ const DOMAIN_QUALITY_SEEDS: Readonly<Record<AutonomousDomainName, {
     ],
   },
   neuroscience: {
-    critical: ["measurement_contract", "preprocessing_and_exclusions", "confounds", "model_sensitivity", "validation_plan"],
-    safety: ["preprocessing_and_exclusions", "confounds", "model_sensitivity", "validation_plan"],
+    critical: ["measurement_contract", "preprocessing_and_exclusions", "neurosurgical_route", "molecular_assay_coverage", "confounds", "model_sensitivity", "validation_plan"],
+    safety: ["preprocessing_and_exclusions", "neurosurgical_route", "molecular_assay_coverage", "confounds", "model_sensitivity", "validation_plan"],
     instructions: [
       "Define the signal, sampling, cohort, task, units, and measurement validity before interpreting a neural effect.",
       "Make preprocessing, exclusions, artifact handling, leakage controls, and multiple-comparison choices explicit.",
@@ -208,8 +208,8 @@ function buildPolicy(domain: AutonomousDomainName): AutonomousDomainQualityPolic
     browser: ["sources", "citations", "freshness", "retrieval_gaps"],
     data: ["schema_and_units", "lineage", "quality_metrics", "anomalies_and_transformations"],
     science: ["estimand_and_assumptions", "evidence_map", "hypotheses_and_predictions", "design_and_controls", "reproduction_plan"],
-    biomedical: ["scope_boundary", "provenance", "population_and_applicability", "uncertainty", "human_review_and_escalation"],
-    neuroscience: ["measurement_contract", "preprocessing_and_exclusions", "confounds", "model_sensitivity", "validation_plan"],
+    biomedical: ["scope_boundary", "provenance", "population_and_applicability", "neurosurgical_route", "molecular_assay_coverage", "uncertainty", "human_review_and_escalation"],
+    neuroscience: ["measurement_contract", "preprocessing_and_exclusions", "neurosurgical_route", "molecular_assay_coverage", "confounds", "model_sensitivity", "validation_plan"],
     operations: ["observed_state", "blast_radius_and_stop_conditions", "rollback_and_recovery", "approval_request", "execution_boundary"],
     enterprise: ["stakeholders_and_owners", "policy_constraints", "options_and_tradeoffs", "decision_and_approver", "audit_plan"],
     multi_agent: ["subtasks_and_interfaces", "assignments_and_budgets", "reconciliation", "conflicts_and_dissent", "accountable_authority"],

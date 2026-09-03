@@ -302,6 +302,29 @@ use bioprism_modalities::{
 use bioprism_mutation::{
     generate as generate_mutations, measure as measure_diversity, standard_suite,
 };
+use bioprism_neurosurgery::{
+    CaseAssetManifest, CaseAssetManifestQuery, CaseAssetReviewDecision,
+    CaseAssetReviewDispositionReport, CaseRequest, DicomCaseImport, DicomEvidenceWorkflowQuery,
+    EvidenceAcquisitionQuery, EvidenceAcquisitionSession, EvidenceGraphQuery, EvidenceProgramQuery,
+    EvidenceSynthesisQuery, FhirCaseImport, GliomaMolecularMapQuery, LiteratureLinkAuditQuery,
+    NeurosurgicalAgent, NeurosurgicalIntakePortfolioQuery, NeurosurgicalIntakeQuery,
+    NeurosurgicalMissionResult, NeurosurgicalResearchBriefQuery, NeurosurgicalSession,
+    PublicLiteratureBundle, PublicLiteratureDraftAuditRequest, PublicLiteratureEvidencePacketQuery,
+    PublicLiteratureIntegrityAuditQuery, PublicLiteratureMatrixQuery,
+    PublicLiteraturePortfolioQuery, PublicLiteratureQuery, PublicLiteratureReasoningContextQuery,
+    PublicLiteratureRefreshAuditQuery, PublicLiteratureReviewQueueQuery,
+    PublicLiteratureWorkbenchQuery, RealDataAutonomousWorkflowQuery, RealDataCohortLandscapeQuery,
+    RealDataCoverageQuery, RealDataDiffQuery, RealDataDraftAuditRequest,
+    RealDataEvidencePacketQuery, RealDataFreshnessQuery, RealDataMolecularCoverageQuery,
+    RealDataQuery, RealDataReasoningContextQuery, RealDataReconciliationQuery,
+    RealDataRefreshAuditQuery, RealDataReviewDecision, RealDataReviewDispositionRequest,
+    RealDataReviewQueueQuery, RealDataTrialLandscapeQuery, RealGliomaBundle,
+    MAX_CASE_ASSET_REVIEW_DISPOSITIONS, MAX_EVIDENCE_ACQUISITION_ADVANCE_STEPS,
+    MAX_EVIDENCE_ACQUISITION_REFERENCES, MAX_EVIDENCE_ACQUISITION_STEPS, MAX_EVIDENCE_GRAPH_EDGES,
+    MAX_EVIDENCE_GRAPH_NODES, MAX_REAL_DATA_DIFF_CHANGES, MAX_REAL_DATA_REVIEW_DISPOSITIONS,
+    MAX_REAL_DATA_REVIEW_ITEMS, MAX_RESEARCH_PLAN_REFERENCES, MAX_RESEARCH_PLAN_TASKS,
+    MAX_SESSION_STEPS, NEUROSURGERY_SCHEMA_VERSION,
+};
 use bioprism_obligation::{may_perform, Action as ObligationAction, ObligationGraph};
 use bioprism_onco::{
     assess as onco_assess, classify as onco_classify, AcquisitionTime, AvailabilityTime,
@@ -1755,6 +1778,113 @@ impl Server {
             "brain_model_select_contextual" => self.brain_model_select_contextual(&arguments),
             "brain_prompt_assemble" => self.brain_prompt_assemble(&arguments),
             "brain_plan" => self.brain_plan(&arguments),
+            "research_campaign_run_offline" => {
+                crate::research_campaign::run_offline(&arguments, |relative| self.resolve(relative))
+            }
+            "neurosurgery_intake_plan" => self.neurosurgery_intake_plan(&arguments),
+            "neurosurgery_intake_mission" => self.neurosurgery_intake_mission(&arguments),
+            "neurosurgery_intake_portfolio" => self.neurosurgery_intake_portfolio(&arguments),
+            "neurosurgery_catalogue" => self.neurosurgery_catalogue(&arguments),
+            "neurosurgery_evidence_audit" => self.neurosurgery_evidence_audit(&arguments),
+            "neurosurgery_specialty_evidence_map" => {
+                self.neurosurgery_specialty_evidence_map(&arguments)
+            }
+            "neurosurgery_case_asset_manifest" => self.neurosurgery_case_asset_manifest(&arguments),
+            "neurosurgery_case_fhir_import" => self.neurosurgery_case_fhir_import(&arguments),
+            "neurosurgery_case_dicom_import" => self.neurosurgery_case_dicom_import(&arguments),
+            "neurosurgery_case_dicom_evidence_workflow" => {
+                self.neurosurgery_case_dicom_evidence_workflow(&arguments)
+            }
+            "neurosurgery_case_asset_review_disposition" => {
+                self.neurosurgery_case_asset_review_disposition(&arguments)
+            }
+            "neurosurgery_evidence_synthesis" => self.neurosurgery_evidence_synthesis(&arguments),
+            "neurosurgery_glioma_molecular_map" => {
+                self.neurosurgery_glioma_molecular_map(&arguments)
+            }
+            "neurosurgery_evidence_graph" => self.neurosurgery_evidence_graph(&arguments),
+            "neurosurgery_real_data_coverage" => self.neurosurgery_real_data_coverage(&arguments),
+            "neurosurgery_real_data_cohort_landscape" => {
+                self.neurosurgery_real_data_cohort_landscape(&arguments)
+            }
+            "neurosurgery_real_data_reconciliation" => {
+                self.neurosurgery_real_data_reconciliation(&arguments)
+            }
+            "neurosurgery_real_data_freshness" => self.neurosurgery_real_data_freshness(&arguments),
+            "neurosurgery_real_data_diff" => self.neurosurgery_real_data_diff(&arguments),
+            "neurosurgery_real_data_refresh_audit" => {
+                self.neurosurgery_real_data_refresh_audit(&arguments)
+            }
+            "neurosurgery_real_data_review_queue" => {
+                self.neurosurgery_real_data_review_queue(&arguments)
+            }
+            "neurosurgery_real_data_review_disposition" => {
+                self.neurosurgery_real_data_review_disposition(&arguments)
+            }
+            "neurosurgery_real_data_evidence_packet" => {
+                self.neurosurgery_real_data_evidence_packet(&arguments)
+            }
+            "neurosurgery_real_data_autonomous_workflow" => {
+                self.neurosurgery_real_data_autonomous_workflow(&arguments)
+            }
+            "neurosurgery_real_data_reasoning_context" => {
+                self.neurosurgery_real_data_reasoning_context(&arguments)
+            }
+            "neurosurgery_real_data_draft_audit" => {
+                self.neurosurgery_real_data_draft_audit(&arguments)
+            }
+            "neurosurgery_public_literature_evidence_packet" => {
+                self.neurosurgery_public_literature_evidence_packet(&arguments)
+            }
+            "neurosurgery_public_literature_reasoning_context" => {
+                self.neurosurgery_public_literature_reasoning_context(&arguments)
+            }
+            "neurosurgery_public_literature_draft_audit" => {
+                self.neurosurgery_public_literature_draft_audit(&arguments)
+            }
+            "neurosurgery_public_literature_matrix" => {
+                self.neurosurgery_public_literature_matrix(&arguments)
+            }
+            "neurosurgery_public_literature_freshness" => {
+                self.neurosurgery_public_literature_freshness(&arguments)
+            }
+            "neurosurgery_public_literature_refresh_audit" => {
+                self.neurosurgery_public_literature_refresh_audit(&arguments)
+            }
+            "neurosurgery_literature_link_audit" => {
+                self.neurosurgery_literature_link_audit(&arguments)
+            }
+            "neurosurgery_public_literature_integrity_audit" => {
+                self.neurosurgery_public_literature_integrity_audit(&arguments)
+            }
+            "neurosurgery_public_literature_review_queue" => {
+                self.neurosurgery_public_literature_review_queue(&arguments)
+            }
+            "neurosurgery_public_literature_workbench" => {
+                self.neurosurgery_public_literature_workbench(&arguments)
+            }
+            "neurosurgery_evidence_program" => self.neurosurgery_evidence_program(&arguments),
+            "neurosurgery_public_literature_portfolio" => {
+                self.neurosurgery_public_literature_portfolio(&arguments)
+            }
+            "neurosurgery_research_brief" => self.neurosurgery_research_brief(&arguments),
+            "neurosurgery_research_plan" => self.neurosurgery_research_plan(&arguments),
+            "neurosurgery_evidence_acquisition" => {
+                self.neurosurgery_evidence_acquisition(&arguments)
+            }
+            "neurosurgery_plan" => self.neurosurgery_plan(&arguments),
+            "neurosurgery_real_data_query" => self.neurosurgery_real_data_query(&arguments),
+            "neurosurgery_real_data_trial_landscape" => {
+                self.neurosurgery_real_data_trial_landscape(&arguments)
+            }
+            "neurosurgery_real_data_molecular_coverage" => {
+                self.neurosurgery_real_data_molecular_coverage(&arguments)
+            }
+            "neurosurgery_public_literature_query" => {
+                self.neurosurgery_public_literature_query(&arguments)
+            }
+            "neurosurgery_session" => self.neurosurgery_session(&arguments),
+            "neurosurgery_mission" => self.neurosurgery_mission(&arguments),
             "brain_bandit_select" => self.brain_bandit_select(&arguments),
             "brain_bandit_update" => self.brain_bandit_update(&arguments),
             "brain_outcome_record" => self.brain_outcome_record(&arguments),
@@ -2115,6 +2245,2335 @@ impl Server {
             plan_autonomous(&request).map_err(|error| format!("brain plan refused: {error}"))?;
         serde_json::to_value(report)
             .map_err(|error| format!("cannot encode brain plan report: {error}"))
+    }
+
+    /// Run the local, read-only neurosurgical research route. The request is accepted either as
+    /// the tool arguments themselves or under a `request` key, so the MCP shape can stay stable
+    /// when a caller wraps this tool in a larger mission. No provider, network, credential, or
+    /// clinical effect is reachable from this handler.
+    fn neurosurgery_plan(&self, arguments: &Value) -> Result<Value, String> {
+        let request = arguments
+            .get("request")
+            .cloned()
+            .unwrap_or_else(|| arguments.clone());
+        let agent = NeurosurgicalAgent::default();
+        if arguments.get("real_glioma_data").is_some()
+            && arguments.get("public_literature").is_some()
+        {
+            return Err(
+                "neurosurgery_plan accepts one evidence bundle: choose real_glioma_data or public_literature"
+                    .to_string(),
+            );
+        }
+        let response = if let Some(real_data) = arguments.get("real_glioma_data") {
+            agent
+                .run_json_with_real_glioma_data(&request, real_data)
+                .map_err(|error| format!("neurosurgical research route refused: {error}"))
+        } else if let Some(public_literature) = arguments.get("public_literature") {
+            let request: CaseRequest = serde_json::from_value(request)
+                .map_err(|error| format!("invalid neurosurgical research request: {error}"))?;
+            let literature: PublicLiteratureBundle =
+                serde_json::from_value(public_literature.clone())
+                    .map_err(|error| format!("invalid public-literature bundle: {error}"))?;
+            agent
+                .run_with_public_literature(&request, &literature)
+                .map_err(|error| format!("public-literature neurosurgical route refused: {error}"))
+        } else {
+            agent
+                .run_json(&request)
+                .map_err(|error| format!("neurosurgical research route refused: {error}"))
+        }
+        .map_err(|error| format!("neurosurgical research route refused: {error}"))?;
+        serde_json::to_value(response)
+            .map_err(|error| format!("cannot encode neurosurgical research response: {error}"))
+    }
+
+    /// Route a bounded natural-language question into the closed neurosurgical specialty/tool
+    /// catalogue. This is lexical, abstaining, provider-free intake; it does not construct a
+    /// clinical case or execute any downstream tool.
+    fn neurosurgery_intake_plan(&self, arguments: &Value) -> Result<Value, String> {
+        let query: NeurosurgicalIntakeQuery = serde_json::from_value(arguments.clone())
+            .map_err(|error| format!("invalid neurosurgical intake query: {error}"))?;
+        let report = NeurosurgicalAgent::default()
+            .intake_plan(&query)
+            .map_err(|error| format!("neurosurgical intake planning refused: {error}"))?;
+        serde_json::to_value(report)
+            .map_err(|error| format!("cannot encode neurosurgical intake plan: {error}"))
+    }
+
+    /// Compose bounded natural-language intake with a digest-only research mission. The
+    /// orchestrator refuses absent or mismatched public evidence before any mission executes and
+    /// can carry a validated metadata-only real case-asset manifest or sanitized DICOM/FHIR
+    /// metadata imports into the nested mission.
+    fn neurosurgery_intake_mission(&self, arguments: &Value) -> Result<Value, String> {
+        let query: NeurosurgicalIntakeQuery = serde_json::from_value(arguments.clone())
+            .map_err(|error| format!("invalid neurosurgical intake query: {error}"))?;
+        let real_data = arguments
+            .get("real_glioma_data")
+            .filter(|value| !value.is_null())
+            .map(|value| {
+                serde_json::from_value::<RealGliomaBundle>(value.clone())
+                    .map_err(|error| format!("invalid real-glioma bundle: {error}"))
+            })
+            .transpose()?;
+        let public_literature = arguments
+            .get("public_literature")
+            .filter(|value| !value.is_null())
+            .map(|value| {
+                serde_json::from_value::<PublicLiteratureBundle>(value.clone())
+                    .map_err(|error| format!("invalid public-literature bundle: {error}"))
+            })
+            .transpose()?;
+        let case_asset_manifest = arguments
+            .get("case_asset_manifest")
+            .filter(|value| !value.is_null())
+            .map(|value| {
+                serde_json::from_value::<CaseAssetManifest>(value.clone())
+                    .map_err(|error| format!("invalid case-asset manifest: {error}"))
+            })
+            .transpose()?;
+        let case_asset_query = arguments
+            .get("case_asset_manifest_query")
+            .filter(|value| !value.is_null())
+            .map(|value| {
+                serde_json::from_value::<CaseAssetManifestQuery>(value.clone())
+                    .map_err(|error| format!("invalid case-asset manifest query: {error}"))
+            })
+            .transpose()?;
+        let case_asset_disposition = arguments
+            .get("case_asset_review_disposition")
+            .filter(|value| !value.is_null())
+            .map(|value| {
+                serde_json::from_value::<CaseAssetReviewDispositionReport>(value.clone()).map_err(
+                    |error| format!("invalid intake case-asset review disposition: {error}"),
+                )
+            })
+            .transpose()?;
+        let case_dicom_import = arguments
+            .get("case_dicom_import")
+            .filter(|value| !value.is_null())
+            .map(|value| {
+                serde_json::from_value::<DicomCaseImport>(value.clone())
+                    .map_err(|error| format!("invalid intake DICOM import: {error}"))
+            })
+            .transpose()?;
+        let case_fhir_import = arguments
+            .get("case_fhir_import")
+            .filter(|value| !value.is_null())
+            .map(|value| {
+                serde_json::from_value::<FhirCaseImport>(value.clone())
+                    .map_err(|error| format!("invalid intake FHIR import: {error}"))
+            })
+            .transpose()?;
+        if case_asset_query.is_some() && case_asset_manifest.is_none() {
+            return Err(
+                "neurosurgery_intake_mission case_asset_manifest_query requires case_asset_manifest"
+                .to_string(),
+            );
+        }
+        if (case_dicom_import.is_some() || case_fhir_import.is_some())
+            && case_asset_manifest.is_some()
+        {
+            return Err(
+                "neurosurgery_intake_mission DICOM/FHIR imports cannot be combined with case_asset_manifest"
+                .to_string(),
+            );
+        }
+        if case_asset_disposition.is_some()
+            && case_asset_manifest.is_none()
+            && case_dicom_import.is_none()
+            && case_fhir_import.is_none()
+        {
+            return Err(
+                "neurosurgery_intake_mission case_asset_review_disposition requires a case asset manifest or DICOM/FHIR import"
+                    .to_string(),
+            );
+        }
+        let freshness = arguments
+            .get("freshness")
+            .filter(|value| !value.is_null())
+            .map(|value| {
+                serde_json::from_value::<RealDataFreshnessQuery>(value.clone()).map_err(|error| {
+                    format!("invalid neurosurgical intake freshness query: {error}")
+                })
+            })
+            .transpose()?;
+        let max_steps = arguments
+            .get("max_session_steps")
+            .and_then(Value::as_u64)
+            .map(|value| {
+                usize::try_from(value)
+                    .map_err(|_| "max_session_steps exceeds platform limits".to_string())
+            })
+            .transpose()?
+            .unwrap_or(MAX_SESSION_STEPS);
+        let report = if case_dicom_import.is_some() || case_fhir_import.is_some() {
+            NeurosurgicalAgent::default().run_intake_mission_with_case_imports_and_dispositions(
+                &query,
+                real_data.as_ref(),
+                public_literature.as_ref(),
+                case_dicom_import.as_ref(),
+                case_fhir_import.as_ref(),
+                freshness.as_ref(),
+                case_asset_disposition.as_ref(),
+                max_steps,
+            )
+        } else {
+            NeurosurgicalAgent::default().run_intake_mission_with_case_assets_and_dispositions(
+                &query,
+                real_data.as_ref(),
+                public_literature.as_ref(),
+                case_asset_manifest.as_ref(),
+                case_asset_query.as_ref(),
+                freshness.as_ref(),
+                case_asset_disposition.as_ref(),
+                max_steps,
+            )
+        };
+        let report =
+            report.map_err(|error| format!("neurosurgical intake mission refused: {error}"))?;
+        serde_json::to_value(report)
+            .map_err(|error| format!("cannot encode neurosurgical intake mission: {error}"))
+    }
+
+    /// Fan out a bounded intake question across one or all six validated public-literature lanes.
+    fn neurosurgery_intake_portfolio(&self, arguments: &Value) -> Result<Value, String> {
+        let query: NeurosurgicalIntakePortfolioQuery = serde_json::from_value(arguments.clone())
+            .map_err(|error| format!("invalid neurosurgical intake portfolio query: {error}"))?;
+        let real_data = arguments
+            .get("real_glioma_data")
+            .filter(|value| !value.is_null())
+            .map(|value| {
+                serde_json::from_value::<RealGliomaBundle>(value.clone())
+                    .map_err(|error| format!("invalid real-glioma bundle: {error}"))
+            })
+            .transpose()?;
+        let public_literature = arguments
+            .get("public_literature")
+            .filter(|value| !value.is_null())
+            .map(|value| {
+                serde_json::from_value::<PublicLiteratureBundle>(value.clone())
+                    .map_err(|error| format!("invalid public-literature bundle: {error}"))
+            })
+            .transpose()?;
+        let case_asset_manifest = arguments
+            .get("case_asset_manifest")
+            .filter(|value| !value.is_null())
+            .map(|value| {
+                serde_json::from_value::<CaseAssetManifest>(value.clone())
+                    .map_err(|error| format!("invalid case-asset manifest: {error}"))
+            })
+            .transpose()?;
+        let case_asset_query = arguments
+            .get("case_asset_manifest_query")
+            .filter(|value| !value.is_null())
+            .map(|value| {
+                serde_json::from_value::<CaseAssetManifestQuery>(value.clone())
+                    .map_err(|error| format!("invalid case-asset manifest query: {error}"))
+            })
+            .transpose()?;
+        let case_asset_disposition = arguments
+            .get("case_asset_review_disposition")
+            .filter(|value| !value.is_null())
+            .map(|value| {
+                serde_json::from_value::<CaseAssetReviewDispositionReport>(value.clone()).map_err(
+                    |error| {
+                        format!("invalid intake portfolio case-asset review disposition: {error}")
+                    },
+                )
+            })
+            .transpose()?;
+        if case_asset_query.is_some() && case_asset_manifest.is_none() {
+            return Err(
+                "neurosurgery_intake_portfolio case_asset_manifest_query requires case_asset_manifest"
+                    .to_string(),
+            );
+        }
+        if case_asset_disposition.is_some() && case_asset_manifest.is_none() {
+            return Err(
+                "neurosurgery_intake_portfolio case_asset_review_disposition requires case_asset_manifest"
+                    .to_string(),
+            );
+        }
+        let freshness = arguments
+            .get("freshness")
+            .filter(|value| !value.is_null())
+            .map(|value| {
+                serde_json::from_value::<RealDataFreshnessQuery>(value.clone()).map_err(|error| {
+                    format!("invalid neurosurgical intake portfolio freshness query: {error}")
+                })
+            })
+            .transpose()?;
+        let report = NeurosurgicalAgent::default()
+            .run_intake_portfolio_with_case_assets_and_freshness_and_dispositions(
+                &query,
+                real_data.as_ref(),
+                public_literature.as_ref(),
+                case_asset_manifest.as_ref(),
+                case_asset_query.as_ref(),
+                freshness.as_ref(),
+                case_asset_disposition.as_ref(),
+            )
+            .map_err(|error| format!("neurosurgical intake portfolio refused: {error}"))?;
+        serde_json::to_value(report)
+            .map_err(|error| format!("cannot encode neurosurgical intake portfolio: {error}"))
+    }
+
+    /// Expose the closed specialty/profile/tool inventory without constructing a run.
+    fn neurosurgery_catalogue(&self, _arguments: &Value) -> Result<Value, String> {
+        let agent = NeurosurgicalAgent::default();
+        serde_json::to_value(json!({
+            "schema_version": NEUROSURGERY_SCHEMA_VERSION,
+            "specialties": agent.specialty_profiles(),
+            "tools": agent.catalogue(),
+            "standalone_tools": [
+                "neurosurgery_intake_plan",
+                "neurosurgery_intake_mission",
+                "neurosurgery_intake_portfolio",
+                "neurosurgery_evidence_audit",
+                "neurosurgery_specialty_evidence_map",
+                "neurosurgery_case_asset_manifest",
+                "neurosurgery_case_asset_review_disposition",
+                "neurosurgery_case_dicom_import",
+                "neurosurgery_case_dicom_evidence_workflow",
+                "neurosurgery_evidence_synthesis",
+                "neurosurgery_glioma_molecular_map",
+                "neurosurgery_evidence_graph",
+                "neurosurgery_real_data_coverage",
+                "neurosurgery_real_data_cohort_landscape",
+                "neurosurgery_real_data_reconciliation",
+                "neurosurgery_real_data_freshness",
+                "neurosurgery_real_data_diff",
+                "neurosurgery_real_data_refresh_audit",
+                "neurosurgery_real_data_review_queue",
+                "neurosurgery_real_data_review_disposition",
+                "neurosurgery_real_data_evidence_packet",
+                "neurosurgery_real_data_autonomous_workflow",
+                "neurosurgery_real_data_reasoning_context",
+                "neurosurgery_real_data_draft_audit",
+                "neurosurgery_real_data_trial_landscape",
+                "neurosurgery_real_data_molecular_coverage",
+                "neurosurgery_public_literature_evidence_packet",
+                "neurosurgery_public_literature_reasoning_context",
+                "neurosurgery_public_literature_draft_audit",
+                "neurosurgery_public_literature_matrix",
+                "neurosurgery_public_literature_freshness",
+                "neurosurgery_public_literature_refresh_audit",
+                "neurosurgery_literature_link_audit",
+                "neurosurgery_public_literature_integrity_audit",
+                "neurosurgery_public_literature_review_queue",
+                "neurosurgery_public_literature_workbench",
+                "neurosurgery_evidence_program",
+                "neurosurgery_public_literature_portfolio",
+                "neurosurgery_research_brief",
+                "neurosurgery_research_plan",
+                "neurosurgery_evidence_acquisition",
+            ],
+            "provider": "none",
+            "network": false,
+            "effects": ["read_only"],
+        }))
+        .map_err(|error| format!("cannot encode neurosurgical catalogue: {error}"))
+    }
+
+    /// Audit specialty-specific observation coverage without interpreting the observations.
+    fn neurosurgery_evidence_audit(&self, arguments: &Value) -> Result<Value, String> {
+        let request_value = arguments
+            .get("request")
+            .ok_or_else(|| "neurosurgery_evidence_audit requires request".to_string())?;
+        let request: CaseRequest = serde_json::from_value(request_value.clone())
+            .map_err(|error| format!("invalid neurosurgical audit request: {error}"))?;
+        let report = NeurosurgicalAgent::default()
+            .audit_evidence(&request)
+            .map_err(|error| format!("neurosurgical evidence audit refused: {error}"))?;
+        serde_json::to_value(report)
+            .map_err(|error| format!("cannot encode neurosurgical evidence audit: {error}"))
+    }
+
+    /// Build a domain-specific identity/spatial/functional/temporal evidence map for a request.
+    /// The map inventories caller metadata only and never interprets clinical content.
+    fn neurosurgery_specialty_evidence_map(&self, arguments: &Value) -> Result<Value, String> {
+        let request_value = arguments
+            .get("request")
+            .ok_or_else(|| "neurosurgery_specialty_evidence_map requires request".to_string())?;
+        let request: CaseRequest = serde_json::from_value(request_value.clone())
+            .map_err(|error| format!("invalid neurosurgical specialty-map request: {error}"))?;
+        let report = NeurosurgicalAgent::default()
+            .specialty_evidence_map(&request)
+            .map_err(|error| format!("neurosurgical specialty evidence map refused: {error}"))?;
+        serde_json::to_value(report)
+            .map_err(|error| format!("cannot encode neurosurgical specialty evidence map: {error}"))
+    }
+
+    /// Project a caller-owned real, de-identified multimodal asset manifest without opening or
+    /// interpreting any asset bytes. Identifiers are returned only as digests for safe handoff.
+    fn neurosurgery_case_asset_manifest(&self, arguments: &Value) -> Result<Value, String> {
+        let request_value = arguments
+            .get("request")
+            .ok_or_else(|| "neurosurgery_case_asset_manifest requires request".to_string())?;
+        let request: CaseRequest = serde_json::from_value(request_value.clone())
+            .map_err(|error| format!("invalid neurosurgical case-asset request: {error}"))?;
+        let manifest_value = arguments.get("manifest").ok_or_else(|| {
+            "neurosurgery_case_asset_manifest requires a de-identified manifest".to_string()
+        })?;
+        let manifest: CaseAssetManifest = serde_json::from_value(manifest_value.clone())
+            .map_err(|error| format!("invalid neurosurgical case-asset manifest: {error}"))?;
+        let query = arguments
+            .get("query")
+            .map(|value| {
+                serde_json::from_value::<CaseAssetManifestQuery>(value.clone())
+                    .map_err(|error| format!("invalid neurosurgical case-asset query: {error}"))
+            })
+            .transpose()?
+            .unwrap_or_default();
+        let report = NeurosurgicalAgent::default()
+            .case_asset_manifest(&request, &manifest, &query)
+            .map_err(|error| format!("neurosurgical case-asset manifest refused: {error}"))?;
+        serde_json::to_value(report)
+            .map_err(|error| format!("cannot encode neurosurgical case-asset report: {error}"))
+    }
+
+    /// Import a caller-sanitized FHIR Bundle as digest-only case-asset metadata. No references,
+    /// codes, narratives, bytes, provider, API key, or network are accessed.
+    fn neurosurgery_case_fhir_import(&self, arguments: &Value) -> Result<Value, String> {
+        let request_value = arguments
+            .get("request")
+            .ok_or_else(|| "neurosurgery_case_fhir_import requires request".to_string())?;
+        let request: CaseRequest = serde_json::from_value(request_value.clone())
+            .map_err(|error| format!("invalid neurosurgical FHIR import request: {error}"))?;
+        let import_value = arguments.get("import").ok_or_else(|| {
+            "neurosurgery_case_fhir_import requires a sanitized FHIR import object".to_string()
+        })?;
+        let import: FhirCaseImport = serde_json::from_value(import_value.clone())
+            .map_err(|error| format!("invalid neurosurgical FHIR import: {error}"))?;
+        let report = NeurosurgicalAgent::default()
+            .case_fhir_import(&request, &import)
+            .map_err(|error| format!("neurosurgical FHIR import refused: {error}"))?;
+        serde_json::to_value(report)
+            .map_err(|error| format!("cannot encode neurosurgical FHIR import report: {error}"))
+    }
+
+    /// Import standard DICOM JSON series metadata without opening pixel bytes or accepting
+    /// patient-identifying tags. The returned inventory is digest-bound and human-review only.
+    fn neurosurgery_case_dicom_import(&self, arguments: &Value) -> Result<Value, String> {
+        let request_value = arguments
+            .get("request")
+            .ok_or_else(|| "neurosurgery_case_dicom_import requires request".to_string())?;
+        let request: CaseRequest = serde_json::from_value(request_value.clone())
+            .map_err(|error| format!("invalid neurosurgical DICOM import request: {error}"))?;
+        let import_value = arguments.get("import").ok_or_else(|| {
+            "neurosurgery_case_dicom_import requires DICOM JSON metadata".to_string()
+        })?;
+        let import: DicomCaseImport = serde_json::from_value(import_value.clone())
+            .map_err(|error| format!("invalid neurosurgical DICOM import: {error}"))?;
+        let report = NeurosurgicalAgent::default()
+            .case_dicom_import(&request, &import)
+            .map_err(|error| format!("neurosurgical DICOM import refused: {error}"))?;
+        serde_json::to_value(report)
+            .map_err(|error| format!("cannot encode neurosurgical DICOM import report: {error}"))
+    }
+
+    /// Project DICOM metadata and bind it into the source-grounded evidence workers in one
+    /// replayable, human-review-only envelope. Pixel bytes and clinical interpretation remain
+    /// outside the MCP boundary.
+    fn neurosurgery_case_dicom_evidence_workflow(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request_value = arguments.get("request").ok_or_else(|| {
+            "neurosurgery_case_dicom_evidence_workflow requires request".to_string()
+        })?;
+        let request: CaseRequest = serde_json::from_value(request_value.clone())
+            .map_err(|error| format!("invalid neurosurgical DICOM workflow request: {error}"))?;
+        let import_value = arguments.get("import").ok_or_else(|| {
+            "neurosurgery_case_dicom_evidence_workflow requires DICOM JSON metadata".to_string()
+        })?;
+        let import: DicomCaseImport = serde_json::from_value(import_value.clone())
+            .map_err(|error| format!("invalid neurosurgical DICOM workflow import: {error}"))?;
+        let real_data = arguments
+            .get("real_glioma_data")
+            .filter(|value| !value.is_null())
+            .map(|value| {
+                serde_json::from_value::<RealGliomaBundle>(value.clone())
+                    .map_err(|error| format!("invalid real glioma bundle: {error}"))
+            })
+            .transpose()?;
+        let public_literature = arguments
+            .get("public_literature")
+            .filter(|value| !value.is_null())
+            .map(|value| {
+                serde_json::from_value::<PublicLiteratureBundle>(value.clone())
+                    .map_err(|error| format!("invalid public literature bundle: {error}"))
+            })
+            .transpose()?;
+        let query = arguments
+            .get("query")
+            .filter(|value| !value.is_null())
+            .map(|value| {
+                serde_json::from_value::<DicomEvidenceWorkflowQuery>(value.clone())
+                    .map_err(|error| format!("invalid DICOM evidence workflow query: {error}"))
+            })
+            .transpose()?
+            .unwrap_or_default();
+        let report = NeurosurgicalAgent::default()
+            .case_dicom_evidence_workflow(
+                &request,
+                &import,
+                real_data.as_ref(),
+                public_literature.as_ref(),
+                &query,
+            )
+            .map_err(|error| format!("neurosurgical DICOM evidence workflow refused: {error}"))?;
+        serde_json::to_value(report).map_err(|error| {
+            format!("cannot encode neurosurgical DICOM evidence workflow: {error}")
+        })
+    }
+
+    /// Apply caller-owned, digest-bound dispositions to a persisted case-asset review projection.
+    /// Sequence numbers address only returned review rows; omitted rows remain pending.
+    fn neurosurgery_case_asset_review_disposition(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let report_value = arguments.get("report").ok_or_else(|| {
+            "neurosurgery_case_asset_review_disposition requires report".to_string()
+        })?;
+        let report = serde_json::from_value::<bioprism_neurosurgery::CaseAssetManifestReport>(
+            report_value.clone(),
+        )
+        .map_err(|error| format!("invalid neurosurgical case-asset manifest report: {error}"))?;
+        let decisions = arguments
+            .get("decisions")
+            .cloned()
+            .unwrap_or_else(|| Value::Array(Vec::new()));
+        let decisions = serde_json::from_value::<Vec<CaseAssetReviewDecision>>(decisions)
+            .map_err(|error| format!("invalid case-asset review decisions: {error}"))?;
+        if decisions.len() > MAX_CASE_ASSET_REVIEW_DISPOSITIONS {
+            return Err(format!(
+                "decisions must contain at most {MAX_CASE_ASSET_REVIEW_DISPOSITIONS} items"
+            ));
+        }
+        let result = NeurosurgicalAgent::default()
+            .case_asset_review_disposition(&report, &decisions)
+            .map_err(|error| {
+                format!("neurosurgical case-asset review disposition refused: {error}")
+            })?;
+        serde_json::to_value(result).map_err(|error| {
+            format!("cannot encode neurosurgical case-asset review disposition report: {error}")
+        })
+    }
+
+    /// Align a de-identified case with validated public evidence planes without generating a
+    /// clinical conclusion. Case text is redacted from the returned ledger; source bundles and
+    /// an optional metadata-only asset manifest are revalidated before any local query runs.
+    fn neurosurgery_evidence_synthesis(&self, arguments: &Value) -> Result<Value, String> {
+        let request_value = arguments
+            .get("request")
+            .ok_or_else(|| "neurosurgery_evidence_synthesis requires request".to_string())?;
+        let request: CaseRequest = serde_json::from_value(request_value.clone())
+            .map_err(|error| format!("invalid neurosurgical synthesis request: {error}"))?;
+        let query = arguments
+            .get("query")
+            .map(|value| {
+                serde_json::from_value::<EvidenceSynthesisQuery>(value.clone())
+                    .map_err(|error| format!("invalid neurosurgical synthesis query: {error}"))
+            })
+            .transpose()?
+            .unwrap_or_default();
+        let real_data = arguments
+            .get("real_glioma_data")
+            .filter(|value| !value.is_null())
+            .map(|value| {
+                serde_json::from_value::<RealGliomaBundle>(value.clone())
+                    .map_err(|error| format!("invalid neurosurgical real glioma bundle: {error}"))
+            })
+            .transpose()?;
+        let public_literature = arguments
+            .get("public_literature")
+            .filter(|value| !value.is_null())
+            .map(|value| {
+                serde_json::from_value::<PublicLiteratureBundle>(value.clone()).map_err(|error| {
+                    format!("invalid neurosurgical public-literature bundle: {error}")
+                })
+            })
+            .transpose()?;
+        let case_asset_manifest = arguments
+            .get("case_asset_manifest")
+            .filter(|value| !value.is_null())
+            .map(|value| {
+                serde_json::from_value::<CaseAssetManifest>(value.clone()).map_err(|error| {
+                    format!("invalid neurosurgical synthesis case asset manifest: {error}")
+                })
+            })
+            .transpose()?;
+        let case_asset_query = arguments
+            .get("case_asset_manifest_query")
+            .filter(|value| !value.is_null())
+            .map(|value| {
+                serde_json::from_value::<CaseAssetManifestQuery>(value.clone()).map_err(|error| {
+                    format!("invalid neurosurgical synthesis case asset query: {error}")
+                })
+            })
+            .transpose()?;
+        let case_asset_disposition = arguments
+            .get("case_asset_review_disposition")
+            .filter(|value| !value.is_null())
+            .map(|value| {
+                serde_json::from_value::<CaseAssetReviewDispositionReport>(value.clone()).map_err(
+                    |error| {
+                        format!(
+                            "invalid neurosurgical synthesis case asset review disposition: {error}"
+                        )
+                    },
+                )
+            })
+            .transpose()?;
+        if case_asset_query.is_some() && case_asset_manifest.is_none() {
+            return Err(
+                "neurosurgery_evidence_synthesis case_asset_manifest_query requires case_asset_manifest"
+                    .to_string(),
+            );
+        }
+        let agent = NeurosurgicalAgent::default();
+        let case_asset_report = case_asset_manifest
+            .as_ref()
+            .map(|manifest| {
+                agent
+                    .case_asset_manifest(
+                        &request,
+                        manifest,
+                        &case_asset_query.clone().unwrap_or_default(),
+                    )
+                    .map_err(|error| {
+                        format!("neurosurgical synthesis asset projection refused: {error}")
+                    })
+            })
+            .transpose()?;
+        let report = agent
+            .evidence_synthesis_with_case_assets_and_dispositions(
+                &request,
+                real_data.as_ref(),
+                public_literature.as_ref(),
+                &query,
+                case_asset_report.as_ref(),
+                case_asset_disposition.as_ref(),
+            )
+            .map_err(|error| format!("neurosurgical evidence synthesis refused: {error}"))?;
+        serde_json::to_value(report).map_err(|error| {
+            format!("cannot encode neurosurgical evidence synthesis report: {error}")
+        })
+    }
+
+    /// Ground a typed glioma molecular panel against exact records in validated local snapshots.
+    /// Marker matches are retrieval metadata only and cannot produce a clinical interpretation.
+    fn neurosurgery_glioma_molecular_map(&self, arguments: &Value) -> Result<Value, String> {
+        let request_value = arguments
+            .get("request")
+            .ok_or_else(|| "neurosurgery_glioma_molecular_map requires request".to_string())?;
+        let request: CaseRequest = serde_json::from_value(request_value.clone())
+            .map_err(|error| format!("invalid glioma molecular-map request: {error}"))?;
+        let query = arguments
+            .get("query")
+            .map(|value| {
+                serde_json::from_value::<GliomaMolecularMapQuery>(value.clone())
+                    .map_err(|error| format!("invalid glioma molecular-map query: {error}"))
+            })
+            .transpose()?
+            .unwrap_or_default();
+        let real_data = arguments
+            .get("real_glioma_data")
+            .filter(|value| !value.is_null())
+            .map(|value| {
+                serde_json::from_value::<RealGliomaBundle>(value.clone())
+                    .map_err(|error| format!("invalid glioma molecular-map real bundle: {error}"))
+            })
+            .transpose()?;
+        let public_literature = arguments
+            .get("public_literature")
+            .filter(|value| !value.is_null())
+            .map(|value| {
+                serde_json::from_value::<PublicLiteratureBundle>(value.clone())
+                    .map_err(|error| format!("invalid glioma molecular-map public bundle: {error}"))
+            })
+            .transpose()?;
+        let report = NeurosurgicalAgent::default()
+            .glioma_molecular_map(
+                &request,
+                real_data.as_ref(),
+                public_literature.as_ref(),
+                &query,
+            )
+            .map_err(|error| format!("glioma molecular evidence map refused: {error}"))?;
+        serde_json::to_value(report)
+            .map_err(|error| format!("cannot encode glioma molecular evidence map report: {error}"))
+    }
+
+    /// Project only explicit study/profile/PMID crosswalks from a validated real glioma bundle.
+    /// This is a bounded provenance view, not a biological knowledge graph or inference engine.
+    fn neurosurgery_evidence_graph(&self, arguments: &Value) -> Result<Value, String> {
+        let data_value = arguments
+            .get("real_glioma_data")
+            .ok_or_else(|| "neurosurgery_evidence_graph requires real_glioma_data".to_string())?;
+        let real_glioma_data: RealGliomaBundle = serde_json::from_value(data_value.clone())
+            .map_err(|error| format!("invalid neurosurgical real glioma bundle: {error}"))?;
+        let query = arguments
+            .get("query")
+            .map(|value| {
+                serde_json::from_value::<EvidenceGraphQuery>(value.clone())
+                    .map_err(|error| format!("invalid neurosurgical evidence-graph query: {error}"))
+            })
+            .transpose()?
+            .unwrap_or_default();
+        if query.max_nodes == 0 || query.max_nodes > MAX_EVIDENCE_GRAPH_NODES {
+            return Err(format!(
+                "query.max_nodes must be between 1 and {MAX_EVIDENCE_GRAPH_NODES}"
+            ));
+        }
+        if query.max_edges == 0 || query.max_edges > MAX_EVIDENCE_GRAPH_EDGES {
+            return Err(format!(
+                "query.max_edges must be between 1 and {MAX_EVIDENCE_GRAPH_EDGES}"
+            ));
+        }
+        let report = NeurosurgicalAgent::default()
+            .evidence_graph(&real_glioma_data, &query)
+            .map_err(|error| format!("neurosurgical evidence graph refused: {error}"))?;
+        serde_json::to_value(report)
+            .map_err(|error| format!("cannot encode neurosurgical evidence graph: {error}"))
+    }
+
+    /// Project source, temporal, assay, and linkage coverage from a validated real glioma bundle.
+    fn neurosurgery_real_data_coverage(&self, arguments: &Value) -> Result<Value, String> {
+        let data_value = arguments.get("real_glioma_data").ok_or_else(|| {
+            "neurosurgery_real_data_coverage requires real_glioma_data".to_string()
+        })?;
+        let real_glioma_data: RealGliomaBundle = serde_json::from_value(data_value.clone())
+            .map_err(|error| format!("invalid neurosurgical real glioma bundle: {error}"))?;
+        let query = arguments
+            .get("query")
+            .map(|value| {
+                serde_json::from_value::<RealDataCoverageQuery>(value.clone()).map_err(|error| {
+                    format!("invalid neurosurgical real-data coverage query: {error}")
+                })
+            })
+            .transpose()?
+            .unwrap_or_default();
+        let report = NeurosurgicalAgent::default()
+            .real_data_coverage(&real_glioma_data, &query)
+            .map_err(|error| format!("neurosurgical real-data coverage refused: {error}"))?;
+        serde_json::to_value(report).map_err(|error| {
+            format!("cannot encode neurosurgical real-data coverage report: {error}")
+        })
+    }
+
+    /// Compare aggregate genomic projects and file-type availability without opening source
+    /// files or treating released-case inventory as patient-level evidence.
+    fn neurosurgery_real_data_cohort_landscape(&self, arguments: &Value) -> Result<Value, String> {
+        let data_value = arguments.get("real_glioma_data").ok_or_else(|| {
+            "neurosurgery_real_data_cohort_landscape requires real_glioma_data".to_string()
+        })?;
+        let real_glioma_data: RealGliomaBundle = serde_json::from_value(data_value.clone())
+            .map_err(|error| format!("invalid neurosurgical real glioma bundle: {error}"))?;
+        let query = arguments
+            .get("query")
+            .map(|value| {
+                serde_json::from_value::<RealDataCohortLandscapeQuery>(value.clone()).map_err(
+                    |error| format!("invalid neurosurgical cohort-landscape query: {error}"),
+                )
+            })
+            .transpose()?
+            .unwrap_or_default();
+        let report = NeurosurgicalAgent::default()
+            .real_data_cohort_landscape(&real_glioma_data, &query)
+            .map_err(|error| format!("neurosurgical cohort landscape refused: {error}"))?;
+        serde_json::to_value(report).map_err(|error| {
+            format!("cannot encode neurosurgical cohort landscape report: {error}")
+        })
+    }
+
+    /// Reconcile exact PMID/DOI identifiers inside a validated real glioma snapshot.
+    fn neurosurgery_real_data_reconciliation(&self, arguments: &Value) -> Result<Value, String> {
+        let data_value = arguments.get("real_glioma_data").ok_or_else(|| {
+            "neurosurgery_real_data_reconciliation requires real_glioma_data".to_string()
+        })?;
+        let real_glioma_data: RealGliomaBundle = serde_json::from_value(data_value.clone())
+            .map_err(|error| format!("invalid neurosurgical real glioma bundle: {error}"))?;
+        let query = arguments
+            .get("query")
+            .map(|value| {
+                serde_json::from_value::<RealDataReconciliationQuery>(value.clone()).map_err(
+                    |error| {
+                        format!("invalid neurosurgical real-data reconciliation query: {error}")
+                    },
+                )
+            })
+            .transpose()?
+            .unwrap_or_default();
+        let report = NeurosurgicalAgent::default()
+            .real_data_reconciliation(&real_glioma_data, &query)
+            .map_err(|error| format!("neurosurgical real-data reconciliation refused: {error}"))?;
+        serde_json::to_value(report).map_err(|error| {
+            format!("cannot encode neurosurgical real-data reconciliation report: {error}")
+        })
+    }
+
+    /// Report source-age posture for a validated real-glioma bundle using an explicit caller-owned
+    /// as-of timestamp. Age is not treated as quality, applicability, or clinical relevance.
+    fn neurosurgery_real_data_freshness(&self, arguments: &Value) -> Result<Value, String> {
+        let data_value = arguments.get("real_glioma_data").ok_or_else(|| {
+            "neurosurgery_real_data_freshness requires real_glioma_data".to_string()
+        })?;
+        let real_glioma_data: RealGliomaBundle = serde_json::from_value(data_value.clone())
+            .map_err(|error| format!("invalid neurosurgical real glioma bundle: {error}"))?;
+        let query_value = arguments
+            .get("query")
+            .ok_or_else(|| "neurosurgery_real_data_freshness requires query".to_string())?;
+        let query: RealDataFreshnessQuery = serde_json::from_value(query_value.clone())
+            .map_err(|error| format!("invalid neurosurgical real-data freshness query: {error}"))?;
+        let report = NeurosurgicalAgent::default()
+            .real_data_freshness(&real_glioma_data, &query)
+            .map_err(|error| format!("neurosurgical real-data freshness refused: {error}"))?;
+        serde_json::to_value(report).map_err(|error| {
+            format!("cannot encode neurosurgical real-data freshness report: {error}")
+        })
+    }
+
+    /// Compare two validated public glioma snapshots without fetching or interpreting records.
+    fn neurosurgery_real_data_diff(&self, arguments: &Value) -> Result<Value, String> {
+        let before_value = arguments.get("before_real_glioma_data").ok_or_else(|| {
+            "neurosurgery_real_data_diff requires before_real_glioma_data".to_string()
+        })?;
+        let after_value = arguments.get("after_real_glioma_data").ok_or_else(|| {
+            "neurosurgery_real_data_diff requires after_real_glioma_data".to_string()
+        })?;
+        let before: RealGliomaBundle = serde_json::from_value(before_value.clone())
+            .map_err(|error| format!("invalid before real glioma bundle: {error}"))?;
+        let after: RealGliomaBundle = serde_json::from_value(after_value.clone())
+            .map_err(|error| format!("invalid after real glioma bundle: {error}"))?;
+        let query = arguments
+            .get("query")
+            .map(|value| {
+                serde_json::from_value::<RealDataDiffQuery>(value.clone())
+                    .map_err(|error| format!("invalid neurosurgical real-data diff query: {error}"))
+            })
+            .transpose()?
+            .unwrap_or_default();
+        if query.max_changes == 0 || query.max_changes > MAX_REAL_DATA_DIFF_CHANGES {
+            return Err(format!(
+                "query.max_changes must be between 1 and {MAX_REAL_DATA_DIFF_CHANGES}"
+            ));
+        }
+        let report = NeurosurgicalAgent::default()
+            .real_data_diff(&before, &after, &query)
+            .map_err(|error| format!("neurosurgical real-data diff refused: {error}"))?;
+        serde_json::to_value(report)
+            .map_err(|error| format!("cannot encode neurosurgical real-data diff report: {error}"))
+    }
+
+    /// Compose the deterministic refresh/reconciliation reports for two validated real-glioma
+    /// snapshots. The candidate is never merged or accepted by the MCP boundary.
+    fn neurosurgery_real_data_refresh_audit(&self, arguments: &Value) -> Result<Value, String> {
+        let request_value = arguments
+            .get("request")
+            .ok_or_else(|| "neurosurgery_real_data_refresh_audit requires request".to_string())?;
+        let request: CaseRequest = serde_json::from_value(request_value.clone())
+            .map_err(|error| format!("invalid neurosurgical refresh-audit request: {error}"))?;
+        let before_value = arguments.get("before_real_glioma_data").ok_or_else(|| {
+            "neurosurgery_real_data_refresh_audit requires before_real_glioma_data".to_string()
+        })?;
+        let after_value = arguments.get("after_real_glioma_data").ok_or_else(|| {
+            "neurosurgery_real_data_refresh_audit requires after_real_glioma_data".to_string()
+        })?;
+        let before: RealGliomaBundle = serde_json::from_value(before_value.clone())
+            .map_err(|error| format!("invalid before real glioma bundle: {error}"))?;
+        let after: RealGliomaBundle = serde_json::from_value(after_value.clone())
+            .map_err(|error| format!("invalid after real glioma bundle: {error}"))?;
+        let query = arguments
+            .get("query")
+            .map(|value| {
+                serde_json::from_value::<RealDataRefreshAuditQuery>(value.clone())
+                    .map_err(|error| format!("invalid neurosurgical refresh-audit query: {error}"))
+            })
+            .transpose()?
+            .unwrap_or_default();
+        let report = NeurosurgicalAgent::default()
+            .real_data_refresh_audit(&request, &before, &after, &query)
+            .map_err(|error| format!("neurosurgical real-data refresh audit refused: {error}"))?;
+        serde_json::to_value(report).map_err(|error| {
+            format!("cannot encode neurosurgical real-data refresh audit report: {error}")
+        })
+    }
+
+    /// Derive explicit metadata-review obligations from one validated public glioma snapshot.
+    fn neurosurgery_real_data_review_queue(&self, arguments: &Value) -> Result<Value, String> {
+        let data_value = arguments.get("real_glioma_data").ok_or_else(|| {
+            "neurosurgery_real_data_review_queue requires real_glioma_data".to_string()
+        })?;
+        let real_glioma_data: RealGliomaBundle = serde_json::from_value(data_value.clone())
+            .map_err(|error| format!("invalid neurosurgical real glioma bundle: {error}"))?;
+        let query = arguments
+            .get("query")
+            .map(|value| {
+                serde_json::from_value::<RealDataReviewQueueQuery>(value.clone()).map_err(|error| {
+                    format!("invalid neurosurgical real-data review-queue query: {error}")
+                })
+            })
+            .transpose()?
+            .unwrap_or_default();
+        if query.max_items == 0 || query.max_items > MAX_REAL_DATA_REVIEW_ITEMS {
+            return Err(format!(
+                "query.max_items must be between 1 and {MAX_REAL_DATA_REVIEW_ITEMS}"
+            ));
+        }
+        let report = NeurosurgicalAgent::default()
+            .real_data_review_queue(&real_glioma_data, &query)
+            .map_err(|error| format!("neurosurgical real-data review queue refused: {error}"))?;
+        serde_json::to_value(report).map_err(|error| {
+            format!("cannot encode neurosurgical real-data review queue report: {error}")
+        })
+    }
+
+    /// Apply caller-owned, digest-bound dispositions to emitted review tasks.
+    fn neurosurgery_real_data_review_disposition(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let queue_value = arguments.get("queue").ok_or_else(|| {
+            "neurosurgery_real_data_review_disposition requires queue".to_string()
+        })?;
+        let queue = serde_json::from_value::<bioprism_neurosurgery::RealDataReviewQueueReport>(
+            queue_value.clone(),
+        )
+        .map_err(|error| format!("invalid neurosurgical real-data review queue: {error}"))?;
+        let decisions = arguments
+            .get("decisions")
+            .cloned()
+            .unwrap_or_else(|| Value::Array(Vec::new()));
+        let decisions = serde_json::from_value::<Vec<RealDataReviewDecision>>(decisions)
+            .map_err(|error| format!("invalid real-data review decisions: {error}"))?;
+        if decisions.len() > MAX_REAL_DATA_REVIEW_DISPOSITIONS {
+            return Err(format!(
+                "decisions must contain at most {MAX_REAL_DATA_REVIEW_DISPOSITIONS} items"
+            ));
+        }
+        let request = RealDataReviewDispositionRequest { queue, decisions };
+        let report = NeurosurgicalAgent::default()
+            .real_data_review_disposition(&request.queue, &request.decisions)
+            .map_err(|error| {
+                format!("neurosurgical real-data review disposition refused: {error}")
+            })?;
+        serde_json::to_value(report).map_err(|error| {
+            format!("cannot encode neurosurgical real-data review disposition report: {error}")
+        })
+    }
+
+    /// Compose the validated snapshot's coverage, crosswalk, query, and review queue into one
+    /// bounded handoff for a local model or human reviewer.
+    fn neurosurgery_real_data_evidence_packet(&self, arguments: &Value) -> Result<Value, String> {
+        let data_value = arguments.get("real_glioma_data").ok_or_else(|| {
+            "neurosurgery_real_data_evidence_packet requires real_glioma_data".to_string()
+        })?;
+        let real_glioma_data: RealGliomaBundle = serde_json::from_value(data_value.clone())
+            .map_err(|error| format!("invalid neurosurgical real glioma bundle: {error}"))?;
+        let query = arguments
+            .get("query")
+            .map(|value| {
+                serde_json::from_value::<RealDataEvidencePacketQuery>(value.clone()).map_err(
+                    |error| {
+                        format!("invalid neurosurgical real-data evidence-packet query: {error}")
+                    },
+                )
+            })
+            .transpose()?
+            .unwrap_or_default();
+        let report = NeurosurgicalAgent::default()
+            .real_data_evidence_packet(&real_glioma_data, &query)
+            .map_err(|error| format!("neurosurgical real-data evidence packet refused: {error}"))?;
+        serde_json::to_value(report).map_err(|error| {
+            format!("cannot encode neurosurgical real-data evidence packet report: {error}")
+        })
+    }
+
+    /// Compose one deterministic, resumable review wave from the validated real-data packet.
+    /// The wave emits only explicit metadata obligations and a final human-review gate.
+    fn neurosurgery_real_data_autonomous_workflow(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let data_value = arguments.get("real_glioma_data").ok_or_else(|| {
+            "neurosurgery_real_data_autonomous_workflow requires real_glioma_data".to_string()
+        })?;
+        let real_glioma_data: RealGliomaBundle = serde_json::from_value(data_value.clone())
+            .map_err(|error| format!("invalid neurosurgical real glioma bundle: {error}"))?;
+        let query = arguments
+            .get("query")
+            .map(|value| {
+                serde_json::from_value::<RealDataAutonomousWorkflowQuery>(value.clone()).map_err(
+                    |error| {
+                        format!(
+                            "invalid neurosurgical real-data autonomous-workflow query: {error}"
+                        )
+                    },
+                )
+            })
+            .transpose()?
+            .unwrap_or_default();
+        let report = NeurosurgicalAgent::default()
+            .real_data_autonomous_workflow(&real_glioma_data, &query)
+            .map_err(|error| {
+                format!("neurosurgical real-data autonomous workflow refused: {error}")
+            })?;
+        serde_json::to_value(report).map_err(|error| {
+            format!("cannot encode neurosurgical real-data autonomous workflow report: {error}")
+        })
+    }
+
+    /// Render one validated real-data packet into bounded, source-addressable context for a
+    /// caller-owned local model. The renderer never invokes a provider or interprets abstracts.
+    fn neurosurgery_real_data_reasoning_context(&self, arguments: &Value) -> Result<Value, String> {
+        let data_value = arguments.get("real_glioma_data").ok_or_else(|| {
+            "neurosurgery_real_data_reasoning_context requires real_glioma_data".to_string()
+        })?;
+        let real_glioma_data: RealGliomaBundle = serde_json::from_value(data_value.clone())
+            .map_err(|error| format!("invalid neurosurgical real glioma bundle: {error}"))?;
+        let query = arguments
+            .get("query")
+            .map(|value| {
+                serde_json::from_value::<RealDataReasoningContextQuery>(value.clone()).map_err(
+                    |error| {
+                        format!("invalid neurosurgical real-data reasoning-context query: {error}")
+                    },
+                )
+            })
+            .transpose()?
+            .unwrap_or_default();
+        let report = NeurosurgicalAgent::default()
+            .real_data_reasoning_context(&real_glioma_data, &query)
+            .map_err(|error| {
+                format!("neurosurgical real-data reasoning context refused: {error}")
+            })?;
+        serde_json::to_value(report).map_err(|error| {
+            format!("cannot encode neurosurgical real-data reasoning context report: {error}")
+        })
+    }
+
+    /// Audit a caller-owned local-model/reviewer draft against a freshly composed real-data
+    /// packet. This verifies record citations and declared posture only; it never interprets text.
+    fn neurosurgery_real_data_draft_audit(&self, arguments: &Value) -> Result<Value, String> {
+        let data_value = arguments.get("real_glioma_data").ok_or_else(|| {
+            "neurosurgery_real_data_draft_audit requires real_glioma_data".to_string()
+        })?;
+        let real_glioma_data: RealGliomaBundle = serde_json::from_value(data_value.clone())
+            .map_err(|error| format!("invalid neurosurgical real glioma bundle: {error}"))?;
+        let query = arguments.get("query").cloned().unwrap_or_else(|| json!({}));
+        let claims = arguments
+            .get("claims")
+            .cloned()
+            .ok_or_else(|| "neurosurgery_real_data_draft_audit requires claims".to_string())?;
+        let request = serde_json::from_value::<RealDataDraftAuditRequest>(json!({
+            "query": query,
+            "claims": claims,
+        }))
+        .map_err(|error| format!("invalid neurosurgical real-data draft: {error}"))?;
+        let report = NeurosurgicalAgent::default()
+            .real_data_draft_audit(&real_glioma_data, &request)
+            .map_err(|error| format!("neurosurgical real-data draft audit refused: {error}"))?;
+        serde_json::to_value(report).map_err(|error| {
+            format!("cannot encode neurosurgical real-data draft audit report: {error}")
+        })
+    }
+
+    /// Compose a bounded cross-specialty PubMed handoff for a local model or human reviewer.
+    fn neurosurgery_public_literature_evidence_packet(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let data_value = arguments.get("public_literature").ok_or_else(|| {
+            "neurosurgery_public_literature_evidence_packet requires public_literature".to_string()
+        })?;
+        let public_literature: PublicLiteratureBundle = serde_json::from_value(data_value.clone())
+            .map_err(|error| format!("invalid neurosurgical public-literature bundle: {error}"))?;
+        let query = arguments
+            .get("query")
+            .map(|value| {
+                serde_json::from_value::<PublicLiteratureEvidencePacketQuery>(value.clone())
+                    .map_err(|error| {
+                        format!(
+                            "invalid neurosurgical public-literature evidence-packet query: {error}"
+                        )
+                    })
+            })
+            .transpose()?
+            .unwrap_or_default();
+        let report = NeurosurgicalAgent::default()
+            .public_literature_evidence_packet(&public_literature, &query)
+            .map_err(|error| {
+                format!("neurosurgical public-literature evidence packet refused: {error}")
+            })?;
+        serde_json::to_value(report).map_err(|error| {
+            format!("cannot encode neurosurgical public-literature evidence packet report: {error}")
+        })
+    }
+
+    /// Render one validated public-literature packet into bounded, source-addressable context for
+    /// a caller-owned local model. The renderer never invokes a provider or interprets abstracts.
+    fn neurosurgery_public_literature_reasoning_context(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let data_value = arguments.get("public_literature").ok_or_else(|| {
+            "neurosurgery_public_literature_reasoning_context requires public_literature"
+                .to_string()
+        })?;
+        let public_literature: PublicLiteratureBundle = serde_json::from_value(data_value.clone())
+            .map_err(|error| format!("invalid neurosurgical public-literature bundle: {error}"))?;
+        let query = arguments
+            .get("query")
+            .map(|value| {
+                serde_json::from_value::<PublicLiteratureReasoningContextQuery>(value.clone())
+                    .map_err(|error| {
+                        format!(
+                            "invalid neurosurgical public-literature reasoning-context query: {error}"
+                        )
+                    })
+            })
+            .transpose()?
+            .unwrap_or_default();
+        let report = NeurosurgicalAgent::default()
+            .public_literature_reasoning_context(&public_literature, &query)
+            .map_err(|error| {
+                format!("neurosurgical public-literature reasoning context refused: {error}")
+            })?;
+        serde_json::to_value(report).map_err(|error| {
+            format!(
+                "cannot encode neurosurgical public-literature reasoning context report: {error}"
+            )
+        })
+    }
+
+    /// Audit a cross-specialty local-model/reviewer draft against emitted PMID citations.
+    fn neurosurgery_public_literature_draft_audit(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let data_value = arguments.get("public_literature").ok_or_else(|| {
+            "neurosurgery_public_literature_draft_audit requires public_literature".to_string()
+        })?;
+        let public_literature: PublicLiteratureBundle = serde_json::from_value(data_value.clone())
+            .map_err(|error| format!("invalid neurosurgical public-literature bundle: {error}"))?;
+        let query = arguments.get("query").cloned().unwrap_or_else(|| json!({}));
+        let claims = arguments.get("claims").cloned().ok_or_else(|| {
+            "neurosurgery_public_literature_draft_audit requires claims".to_string()
+        })?;
+        let request = serde_json::from_value::<PublicLiteratureDraftAuditRequest>(json!({
+            "query": query,
+            "claims": claims,
+        }))
+        .map_err(|error| format!("invalid neurosurgical public-literature draft: {error}"))?;
+        let report = NeurosurgicalAgent::default()
+            .public_literature_draft_audit(&public_literature, &request)
+            .map_err(|error| {
+                format!("neurosurgical public-literature draft audit refused: {error}")
+            })?;
+        serde_json::to_value(report).map_err(|error| {
+            format!("cannot encode neurosurgical public-literature draft audit report: {error}")
+        })
+    }
+
+    /// Fan out one bounded local-literature query across selected specialty lanes. Every lane
+    /// retains its own packet and digest; this is corpus reconnaissance, not cross-specialty
+    /// inference.
+    fn neurosurgery_public_literature_matrix(&self, arguments: &Value) -> Result<Value, String> {
+        let data_value = arguments.get("public_literature").ok_or_else(|| {
+            "neurosurgery_public_literature_matrix requires public_literature".to_string()
+        })?;
+        let public_literature: PublicLiteratureBundle = serde_json::from_value(data_value.clone())
+            .map_err(|error| format!("invalid neurosurgical public-literature bundle: {error}"))?;
+        let query = arguments
+            .get("query")
+            .map(|value| {
+                serde_json::from_value::<PublicLiteratureMatrixQuery>(value.clone()).map_err(
+                    |error| {
+                        format!("invalid neurosurgical public-literature matrix query: {error}")
+                    },
+                )
+            })
+            .transpose()?
+            .unwrap_or_default();
+        let report = NeurosurgicalAgent::default()
+            .public_literature_matrix(&public_literature, &query)
+            .map_err(|error| format!("neurosurgical public-literature matrix refused: {error}"))?;
+        serde_json::to_value(report).map_err(|error| {
+            format!("cannot encode neurosurgical public-literature matrix report: {error}")
+        })
+    }
+
+    /// Report source-age posture for a validated cross-specialty PubMed bundle with an explicit
+    /// caller-owned as-of timestamp.
+    fn neurosurgery_public_literature_freshness(&self, arguments: &Value) -> Result<Value, String> {
+        let data_value = arguments.get("public_literature").ok_or_else(|| {
+            "neurosurgery_public_literature_freshness requires public_literature".to_string()
+        })?;
+        let public_literature: PublicLiteratureBundle = serde_json::from_value(data_value.clone())
+            .map_err(|error| format!("invalid public-literature bundle: {error}"))?;
+        let query_value = arguments
+            .get("query")
+            .ok_or_else(|| "neurosurgery_public_literature_freshness requires query".to_string())?;
+        let query: RealDataFreshnessQuery = serde_json::from_value(query_value.clone())
+            .map_err(|error| format!("invalid public-literature freshness query: {error}"))?;
+        let report = NeurosurgicalAgent::default()
+            .public_literature_freshness(&public_literature, &query)
+            .map_err(|error| format!("public-literature freshness refused: {error}"))?;
+        serde_json::to_value(report)
+            .map_err(|error| format!("cannot encode public-literature freshness report: {error}"))
+    }
+
+    /// Reconcile two validated cross-specialty PubMed snapshots without fetching or promoting
+    /// the candidate. The report retains source/PMID identity, lane coverage, and freshness facts.
+    fn neurosurgery_public_literature_refresh_audit(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let before_value = arguments.get("before_public_literature").ok_or_else(|| {
+            "neurosurgery_public_literature_refresh_audit requires before_public_literature"
+                .to_string()
+        })?;
+        let after_value = arguments.get("after_public_literature").ok_or_else(|| {
+            "neurosurgery_public_literature_refresh_audit requires after_public_literature"
+                .to_string()
+        })?;
+        let before: PublicLiteratureBundle = serde_json::from_value(before_value.clone())
+            .map_err(|error| format!("invalid before public-literature bundle: {error}"))?;
+        let after: PublicLiteratureBundle = serde_json::from_value(after_value.clone())
+            .map_err(|error| format!("invalid after public-literature bundle: {error}"))?;
+        let query = arguments
+            .get("query")
+            .map(|value| {
+                serde_json::from_value::<PublicLiteratureRefreshAuditQuery>(value.clone()).map_err(
+                    |error| format!("invalid public-literature refresh-audit query: {error}"),
+                )
+            })
+            .transpose()?
+            .unwrap_or_default();
+        let report = NeurosurgicalAgent::default()
+            .public_literature_refresh_audit(&before, &after, &query)
+            .map_err(|error| format!("public-literature refresh audit refused: {error}"))?;
+        serde_json::to_value(report).map_err(|error| {
+            format!("cannot encode public-literature refresh audit report: {error}")
+        })
+    }
+
+    /// Link a validated real glioma literature index to a public-literature lane by exact PMID/DOI
+    /// identifiers only. The report never merges either source bundle.
+    fn neurosurgery_literature_link_audit(&self, arguments: &Value) -> Result<Value, String> {
+        let real_value = arguments.get("real_glioma_data").ok_or_else(|| {
+            "neurosurgery_literature_link_audit requires real_glioma_data".to_string()
+        })?;
+        let public_value = arguments.get("public_literature").ok_or_else(|| {
+            "neurosurgery_literature_link_audit requires public_literature".to_string()
+        })?;
+        let real_data: RealGliomaBundle = serde_json::from_value(real_value.clone())
+            .map_err(|error| format!("invalid real glioma bundle: {error}"))?;
+        let public_literature: PublicLiteratureBundle =
+            serde_json::from_value(public_value.clone())
+                .map_err(|error| format!("invalid public-literature bundle: {error}"))?;
+        let query = arguments
+            .get("query")
+            .map(|value| {
+                serde_json::from_value::<LiteratureLinkAuditQuery>(value.clone())
+                    .map_err(|error| format!("invalid literature link-audit query: {error}"))
+            })
+            .transpose()?
+            .unwrap_or_default();
+        let report = NeurosurgicalAgent::default()
+            .literature_link_audit(&real_data, &public_literature, &query)
+            .map_err(|error| format!("literature link audit refused: {error}"))?;
+        serde_json::to_value(report)
+            .map_err(|error| format!("cannot encode literature link audit report: {error}"))
+    }
+
+    /// Audit source/record completeness and identifier hygiene in a validated public snapshot.
+    fn neurosurgery_public_literature_integrity_audit(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let public_value = arguments.get("public_literature").ok_or_else(|| {
+            "neurosurgery_public_literature_integrity_audit requires public_literature".to_string()
+        })?;
+        let public_literature: PublicLiteratureBundle =
+            serde_json::from_value(public_value.clone())
+                .map_err(|error| format!("invalid public-literature bundle: {error}"))?;
+        let query = arguments
+            .get("query")
+            .map(|value| {
+                serde_json::from_value::<PublicLiteratureIntegrityAuditQuery>(value.clone())
+                    .map_err(|error| {
+                        format!("invalid public-literature integrity-audit query: {error}")
+                    })
+            })
+            .transpose()?
+            .unwrap_or_default();
+        let report = NeurosurgicalAgent::default()
+            .public_literature_integrity_audit(&public_literature, &query)
+            .map_err(|error| format!("public-literature integrity audit refused: {error}"))?;
+        serde_json::to_value(report).map_err(|error| {
+            format!("cannot encode public-literature integrity audit report: {error}")
+        })
+    }
+
+    /// Turn validated public-literature integrity findings into bounded reviewer-owned tasks.
+    fn neurosurgery_public_literature_review_queue(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let public_value = arguments.get("public_literature").ok_or_else(|| {
+            "neurosurgery_public_literature_review_queue requires public_literature".to_string()
+        })?;
+        let public_literature: PublicLiteratureBundle =
+            serde_json::from_value(public_value.clone())
+                .map_err(|error| format!("invalid public-literature bundle: {error}"))?;
+        let query = arguments
+            .get("query")
+            .map(|value| {
+                serde_json::from_value::<PublicLiteratureReviewQueueQuery>(value.clone()).map_err(
+                    |error| format!("invalid public-literature review-queue query: {error}"),
+                )
+            })
+            .transpose()?
+            .unwrap_or_default();
+        let report = NeurosurgicalAgent::default()
+            .public_literature_review_queue(&public_literature, &query)
+            .map_err(|error| format!("public-literature review queue refused: {error}"))?;
+        serde_json::to_value(report).map_err(|error| {
+            format!("cannot encode public-literature review queue report: {error}")
+        })
+    }
+
+    /// Join a specialty's explicit research profile to validated real-literature coverage.
+    fn neurosurgery_public_literature_workbench(&self, arguments: &Value) -> Result<Value, String> {
+        let public_value = arguments.get("public_literature").ok_or_else(|| {
+            "neurosurgery_public_literature_workbench requires public_literature".to_string()
+        })?;
+        let public_literature: PublicLiteratureBundle =
+            serde_json::from_value(public_value.clone())
+                .map_err(|error| format!("invalid public-literature bundle: {error}"))?;
+        let query = arguments
+            .get("query")
+            .map(|value| {
+                serde_json::from_value::<PublicLiteratureWorkbenchQuery>(value.clone())
+                    .map_err(|error| format!("invalid public-literature workbench query: {error}"))
+            })
+            .transpose()?
+            .unwrap_or_default();
+        let report = NeurosurgicalAgent::default()
+            .public_literature_workbench(&public_literature, &query)
+            .map_err(|error| format!("public-literature workbench refused: {error}"))?;
+        serde_json::to_value(report)
+            .map_err(|error| format!("cannot encode public-literature workbench report: {error}"))
+    }
+
+    /// Project protocol-defined review tracks onto exact records in one or both validated
+    /// snapshots. This is a retrieval agenda, never a clinical interpretation.
+    fn neurosurgery_evidence_program(&self, arguments: &Value) -> Result<Value, String> {
+        let request_value = arguments
+            .get("request")
+            .ok_or_else(|| "neurosurgery_evidence_program requires request".to_string())?;
+        let request: CaseRequest = serde_json::from_value(request_value.clone())
+            .map_err(|error| format!("invalid neurosurgical evidence-program request: {error}"))?;
+        let query = arguments
+            .get("query")
+            .map(|value| {
+                serde_json::from_value::<EvidenceProgramQuery>(value.clone()).map_err(|error| {
+                    format!("invalid neurosurgical evidence-program query: {error}")
+                })
+            })
+            .transpose()?
+            .unwrap_or_default();
+        let real_data = arguments
+            .get("real_glioma_data")
+            .map(|value| {
+                serde_json::from_value::<RealGliomaBundle>(value.clone())
+                    .map_err(|error| format!("invalid neurosurgical real glioma bundle: {error}"))
+            })
+            .transpose()?;
+        let public_literature = arguments
+            .get("public_literature")
+            .map(|value| {
+                serde_json::from_value::<PublicLiteratureBundle>(value.clone()).map_err(|error| {
+                    format!("invalid neurosurgical public-literature bundle: {error}")
+                })
+            })
+            .transpose()?;
+        let case_asset_manifest = arguments
+            .get("case_asset_manifest")
+            .filter(|value| !value.is_null())
+            .map(|value| {
+                serde_json::from_value::<CaseAssetManifest>(value.clone())
+                    .map_err(|error| format!("invalid neurosurgical case-asset manifest: {error}"))
+            })
+            .transpose()?;
+        let case_asset_query = arguments
+            .get("case_asset_manifest_query")
+            .filter(|value| !value.is_null())
+            .map(|value| {
+                serde_json::from_value::<CaseAssetManifestQuery>(value.clone()).map_err(|error| {
+                    format!("invalid neurosurgical case-asset manifest query: {error}")
+                })
+            })
+            .transpose()?;
+        let case_asset_disposition = arguments
+            .get("case_asset_review_disposition")
+            .filter(|value| !value.is_null())
+            .map(|value| {
+                serde_json::from_value::<CaseAssetReviewDispositionReport>(value.clone()).map_err(
+                    |error| format!("invalid neurosurgical case-asset review disposition: {error}"),
+                )
+            })
+            .transpose()?;
+        let agent = NeurosurgicalAgent::default();
+        let report = match (
+            case_asset_manifest.as_ref(),
+            case_asset_disposition.as_ref(),
+        ) {
+            (Some(manifest), Some(disposition)) => agent
+                .evidence_program_with_case_assets_and_dispositions(
+                    &request,
+                    real_data.as_ref(),
+                    public_literature.as_ref(),
+                    manifest,
+                    &case_asset_query.unwrap_or_default(),
+                    disposition,
+                    &query,
+                ),
+            (Some(manifest), None) => agent.evidence_program_with_case_assets(
+                &request,
+                real_data.as_ref(),
+                public_literature.as_ref(),
+                manifest,
+                &case_asset_query.unwrap_or_default(),
+                &query,
+            ),
+            (None, Some(_)) => Err(bioprism_neurosurgery::NeurosurgeryError::RealDataRejected {
+                reason: "case-asset review disposition requires case_asset_manifest".to_string(),
+            }),
+            (None, None) => agent.evidence_program(
+                &request,
+                real_data.as_ref(),
+                public_literature.as_ref(),
+                &query,
+            ),
+        }
+        .map_err(|error| format!("neurosurgical evidence program refused: {error}"))?;
+        serde_json::to_value(report)
+            .map_err(|error| format!("cannot encode neurosurgical evidence program: {error}"))
+    }
+
+    /// Run one bounded, source-linked portfolio pass across selected public-literature lanes.
+    fn neurosurgery_public_literature_portfolio(&self, arguments: &Value) -> Result<Value, String> {
+        let public_value = arguments.get("public_literature").ok_or_else(|| {
+            "neurosurgery_public_literature_portfolio requires public_literature".to_string()
+        })?;
+        let public_literature: PublicLiteratureBundle =
+            serde_json::from_value(public_value.clone())
+                .map_err(|error| format!("invalid public-literature bundle: {error}"))?;
+        let query = arguments
+            .get("query")
+            .map(|value| {
+                serde_json::from_value::<PublicLiteraturePortfolioQuery>(value.clone())
+                    .map_err(|error| format!("invalid public-literature portfolio query: {error}"))
+            })
+            .transpose()?
+            .unwrap_or_default();
+        let report = NeurosurgicalAgent::default()
+            .public_literature_portfolio(&public_literature, &query)
+            .map_err(|error| format!("public-literature portfolio refused: {error}"))?;
+        serde_json::to_value(report)
+            .map_err(|error| format!("cannot encode public-literature portfolio report: {error}"))
+    }
+
+    /// Build a deterministic topic-and-unknowns brief from one validated public bundle. This is
+    /// intentionally a local extraction pass, not a model-backed clinical synthesis.
+    fn neurosurgery_research_brief(&self, arguments: &Value) -> Result<Value, String> {
+        let request_value = arguments
+            .get("request")
+            .ok_or_else(|| "neurosurgery_research_brief requires request".to_string())?;
+        let request: CaseRequest = serde_json::from_value(request_value.clone())
+            .map_err(|error| format!("invalid neurosurgical research-brief request: {error}"))?;
+        let query = arguments
+            .get("query")
+            .map(|value| {
+                serde_json::from_value::<NeurosurgicalResearchBriefQuery>(value.clone())
+                    .map_err(|error| format!("invalid neurosurgical research-brief query: {error}"))
+            })
+            .transpose()?
+            .unwrap_or_default();
+        let agent = NeurosurgicalAgent::default();
+        let report = match (
+            arguments.get("real_glioma_data"),
+            arguments.get("public_literature"),
+        ) {
+            (Some(real_data), None) => {
+                let real_data: RealGliomaBundle = serde_json::from_value(real_data.clone())
+                    .map_err(|error| {
+                        format!("invalid neurosurgical real glioma bundle: {error}")
+                    })?;
+                agent.research_brief(&request, Some(&real_data), None, &query)
+            }
+            (None, Some(public_literature)) => {
+                let public_literature: PublicLiteratureBundle =
+                    serde_json::from_value(public_literature.clone()).map_err(|error| {
+                        format!("invalid neurosurgical public-literature bundle: {error}")
+                    })?;
+                agent.research_brief(&request, None, Some(&public_literature), &query)
+            }
+            (None, None) => Err(bioprism_neurosurgery::NeurosurgeryError::RealDataRejected {
+                reason:
+                    "neurosurgery_research_brief requires real_glioma_data or public_literature"
+                        .to_string(),
+            }),
+            (Some(_), Some(_)) => Err(bioprism_neurosurgery::NeurosurgeryError::RealDataRejected {
+                reason: "neurosurgery_research_brief accepts one evidence bundle, not both"
+                    .to_string(),
+            }),
+        }
+        .map_err(|error| format!("neurosurgical research brief refused: {error}"))?;
+        serde_json::to_value(report)
+            .map_err(|error| format!("cannot encode neurosurgical research brief: {error}"))
+    }
+
+    /// Compile a bounded, source-linked research handoff from an intake request and an optional
+    /// validated snapshot. This never fetches sources or treats population metadata as case data.
+    fn neurosurgery_research_plan(&self, arguments: &Value) -> Result<Value, String> {
+        let request_value = arguments
+            .get("request")
+            .ok_or_else(|| "neurosurgery_research_plan requires request".to_string())?;
+        let request: CaseRequest = serde_json::from_value(request_value.clone())
+            .map_err(|error| format!("invalid neurosurgical research-plan request: {error}"))?;
+        if arguments.get("real_glioma_data").is_some()
+            && arguments.get("public_literature").is_some()
+        {
+            return Err(
+                "neurosurgery_research_plan accepts one evidence bundle: choose real_glioma_data or public_literature"
+                    .to_string(),
+            );
+        }
+        let max_tasks = arguments
+            .get("max_tasks")
+            .map(|value| {
+                value
+                    .as_u64()
+                    .and_then(|value| usize::try_from(value).ok())
+                    .ok_or_else(|| "max_tasks must be an integer".to_string())
+            })
+            .transpose()?
+            .unwrap_or(8);
+        let max_references = arguments
+            .get("max_references_per_task")
+            .map(|value| {
+                value
+                    .as_u64()
+                    .and_then(|value| usize::try_from(value).ok())
+                    .ok_or_else(|| "max_references_per_task must be an integer".to_string())
+            })
+            .transpose()?
+            .unwrap_or(4);
+        if max_tasks == 0 || max_tasks > MAX_RESEARCH_PLAN_TASKS {
+            return Err(format!(
+                "max_tasks must be between 1 and {MAX_RESEARCH_PLAN_TASKS}"
+            ));
+        }
+        if max_references == 0 || max_references > MAX_RESEARCH_PLAN_REFERENCES {
+            return Err(format!(
+                "max_references_per_task must be between 1 and {MAX_RESEARCH_PLAN_REFERENCES}"
+            ));
+        }
+        let real_data = arguments
+            .get("real_glioma_data")
+            .map(|value| {
+                serde_json::from_value::<RealGliomaBundle>(value.clone())
+                    .map_err(|error| format!("invalid real glioma planning data: {error}"))
+            })
+            .transpose()?;
+        let public_literature = arguments
+            .get("public_literature")
+            .map(|value| {
+                serde_json::from_value::<PublicLiteratureBundle>(value.clone())
+                    .map_err(|error| format!("invalid public literature planning data: {error}"))
+            })
+            .transpose()?;
+        let report = NeurosurgicalAgent::default()
+            .plan_research(
+                &request,
+                real_data.as_ref(),
+                public_literature.as_ref(),
+                max_tasks,
+                max_references,
+            )
+            .map_err(|error| format!("neurosurgical research plan refused: {error}"))?;
+        serde_json::to_value(report)
+            .map_err(|error| format!("cannot encode neurosurgical research plan: {error}"))
+    }
+
+    /// Compile a bounded, dual-plane local acquisition wave from explicit evidence gaps.
+    fn neurosurgery_evidence_acquisition(&self, arguments: &Value) -> Result<Value, String> {
+        let operation = match arguments.get("operation") {
+            Some(value) => value
+                .as_str()
+                .ok_or_else(|| "evidence-acquisition operation must be a string".to_string())?,
+            None => "compile",
+        };
+        if !matches!(operation, "compile" | "start" | "advance" | "finish") {
+            return Err(format!(
+                "unsupported evidence-acquisition operation `{operation}`; expected compile, start, advance, or finish"
+            ));
+        }
+        let request_value = arguments
+            .get("request")
+            .ok_or_else(|| "neurosurgery_evidence_acquisition requires request".to_string())?;
+        let request: CaseRequest = serde_json::from_value(request_value.clone())
+            .map_err(|error| format!("invalid neurosurgical acquisition request: {error}"))?;
+        let query = arguments
+            .get("query")
+            .map(|value| {
+                serde_json::from_value::<EvidenceAcquisitionQuery>(value.clone())
+                    .map_err(|error| format!("invalid evidence-acquisition query: {error}"))
+            })
+            .transpose()?
+            .unwrap_or_default();
+        if query.max_steps == 0 || query.max_steps > MAX_EVIDENCE_ACQUISITION_STEPS {
+            return Err(format!(
+                "max_steps must be between 1 and {MAX_EVIDENCE_ACQUISITION_STEPS}"
+            ));
+        }
+        if query.max_references_per_step == 0
+            || query.max_references_per_step > MAX_EVIDENCE_ACQUISITION_REFERENCES
+        {
+            return Err(format!(
+                "max_references_per_step must be between 1 and {MAX_EVIDENCE_ACQUISITION_REFERENCES}"
+            ));
+        }
+        let real_data = arguments
+            .get("real_glioma_data")
+            .map(|value| {
+                serde_json::from_value::<RealGliomaBundle>(value.clone())
+                    .map_err(|error| format!("invalid real glioma acquisition data: {error}"))
+            })
+            .transpose()?;
+        let public_literature = arguments
+            .get("public_literature")
+            .map(|value| {
+                serde_json::from_value::<PublicLiteratureBundle>(value.clone())
+                    .map_err(|error| format!("invalid public literature acquisition data: {error}"))
+            })
+            .transpose()?;
+        let case_asset_manifest = arguments
+            .get("case_asset_manifest")
+            .filter(|value| !value.is_null())
+            .map(|value| {
+                serde_json::from_value::<CaseAssetManifest>(value.clone())
+                    .map_err(|error| format!("invalid case asset acquisition manifest: {error}"))
+            })
+            .transpose()?;
+        let case_asset_query = arguments
+            .get("case_asset_manifest_query")
+            .filter(|value| !value.is_null())
+            .map(|value| {
+                serde_json::from_value::<CaseAssetManifestQuery>(value.clone()).map_err(|error| {
+                    format!("invalid case asset acquisition manifest query: {error}")
+                })
+            })
+            .transpose()?;
+        let case_asset_disposition = arguments
+            .get("case_asset_review_disposition")
+            .filter(|value| !value.is_null())
+            .map(|value| {
+                serde_json::from_value::<CaseAssetReviewDispositionReport>(value.clone())
+                    .map_err(|error| format!("invalid case asset acquisition disposition: {error}"))
+            })
+            .transpose()?;
+        if case_asset_query.is_some() && case_asset_manifest.is_none() {
+            return Err(
+                "neurosurgery_evidence_acquisition case_asset_manifest_query requires case_asset_manifest"
+                    .to_string(),
+            );
+        }
+        let agent = NeurosurgicalAgent::default();
+        let case_asset_report = case_asset_manifest
+            .as_ref()
+            .map(|manifest| {
+                agent
+                    .case_asset_manifest(
+                        &request,
+                        manifest,
+                        &case_asset_query.clone().unwrap_or_default(),
+                    )
+                    .map_err(|error| {
+                        format!("neurosurgical case asset projection refused: {error}")
+                    })
+            })
+            .transpose()?;
+        let value = match operation {
+            "compile" => {
+                let report = match case_asset_disposition.as_ref() {
+                    Some(disposition) => agent
+                        .evidence_acquisition_with_case_assets_and_dispositions(
+                            &request,
+                            real_data.as_ref(),
+                            public_literature.as_ref(),
+                            case_asset_report.as_ref(),
+                            disposition,
+                            &query,
+                        ),
+                    None => agent.evidence_acquisition_with_case_assets(
+                        &request,
+                        real_data.as_ref(),
+                        public_literature.as_ref(),
+                        case_asset_report.as_ref(),
+                        &query,
+                    ),
+                }
+                .map_err(|error| format!("neurosurgical evidence acquisition refused: {error}"))?;
+                serde_json::to_value(report)
+            }
+            "start" => {
+                let result = match case_asset_disposition.as_ref() {
+                    Some(disposition) => agent
+                        .evidence_acquisition_start_with_case_assets_and_dispositions(
+                            &request,
+                            real_data.as_ref(),
+                            public_literature.as_ref(),
+                            case_asset_report.as_ref(),
+                            disposition,
+                            &query,
+                        ),
+                    None => agent.evidence_acquisition_start_with_case_assets(
+                        &request,
+                        real_data.as_ref(),
+                        public_literature.as_ref(),
+                        case_asset_report.as_ref(),
+                        &query,
+                    ),
+                }
+                .map_err(|error| {
+                    format!("neurosurgical evidence acquisition start refused: {error}")
+                })?;
+                serde_json::to_value(result)
+            }
+            "advance" => {
+                let session_value = arguments.get("session").ok_or_else(|| {
+                    "neurosurgery_evidence_acquisition advance requires session".to_string()
+                })?;
+                let session: EvidenceAcquisitionSession =
+                    serde_json::from_value(session_value.clone()).map_err(|error| {
+                        format!("invalid evidence-acquisition session: {error}")
+                    })?;
+                let max_steps = match arguments.get("max_steps") {
+                    None => 1,
+                    Some(value) => usize::try_from(value.as_u64().ok_or_else(|| {
+                        "evidence-acquisition advance max_steps must be an integer".to_string()
+                    })?)
+                    .map_err(|_| {
+                        "evidence-acquisition advance max_steps exceeds platform bounds".to_string()
+                    })?,
+                };
+                if !(1..=MAX_EVIDENCE_ACQUISITION_ADVANCE_STEPS).contains(&max_steps) {
+                    return Err(format!(
+                        "advance max_steps must be between 1 and {MAX_EVIDENCE_ACQUISITION_ADVANCE_STEPS}"
+                    ));
+                }
+                let result = match case_asset_disposition.as_ref() {
+                    Some(disposition) => agent
+                        .evidence_acquisition_advance_with_case_assets_and_dispositions(
+                            &session,
+                            &request,
+                            real_data.as_ref(),
+                            public_literature.as_ref(),
+                            case_asset_report.as_ref(),
+                            disposition,
+                            &query,
+                            max_steps,
+                        ),
+                    None => agent.evidence_acquisition_advance_with_case_assets(
+                        &session,
+                        &request,
+                        real_data.as_ref(),
+                        public_literature.as_ref(),
+                        case_asset_report.as_ref(),
+                        &query,
+                        max_steps,
+                    ),
+                }
+                .map_err(|error| {
+                    format!("neurosurgical evidence acquisition advance refused: {error}")
+                })?;
+                serde_json::to_value(result)
+            }
+            "finish" => {
+                let session_value = arguments.get("session").ok_or_else(|| {
+                    "neurosurgery_evidence_acquisition finish requires session".to_string()
+                })?;
+                let session: EvidenceAcquisitionSession =
+                    serde_json::from_value(session_value.clone()).map_err(|error| {
+                        format!("invalid evidence-acquisition session: {error}")
+                    })?;
+                let result = match case_asset_disposition.as_ref() {
+                    Some(disposition) => agent
+                        .evidence_acquisition_finish_with_case_assets_and_dispositions(
+                            &session,
+                            &request,
+                            real_data.as_ref(),
+                            public_literature.as_ref(),
+                            case_asset_report.as_ref(),
+                            disposition,
+                            &query,
+                        ),
+                    None => agent.evidence_acquisition_finish_with_case_assets(
+                        &session,
+                        &request,
+                        real_data.as_ref(),
+                        public_literature.as_ref(),
+                        case_asset_report.as_ref(),
+                        &query,
+                    ),
+                }
+                .map_err(|error| {
+                    format!("neurosurgical evidence acquisition finish refused: {error}")
+                })?;
+                serde_json::to_value(result)
+            }
+            _ => unreachable!(),
+        };
+        value.map_err(|error| format!("cannot encode neurosurgical evidence acquisition: {error}"))
+    }
+
+    /// Query a caller-supplied, validated public glioma bundle without network access.
+    fn neurosurgery_real_data_query(&self, arguments: &Value) -> Result<Value, String> {
+        let data_value = arguments
+            .get("real_glioma_data")
+            .ok_or_else(|| "neurosurgery_real_data_query requires real_glioma_data".to_string())?;
+        let data: RealGliomaBundle = serde_json::from_value(data_value.clone())
+            .map_err(|error| format!("invalid real glioma data bundle: {error}"))?;
+        let query_value = arguments
+            .get("query")
+            .ok_or_else(|| "neurosurgery_real_data_query requires query".to_string())?;
+        let query: RealDataQuery = serde_json::from_value(query_value.clone())
+            .map_err(|error| format!("invalid real-data query: {error}"))?;
+        let result = data
+            .query(&query)
+            .map_err(|error| format!("real-data query refused: {error}"))?;
+        serde_json::to_value(result)
+            .map_err(|error| format!("cannot encode real-data query result: {error}"))
+    }
+
+    /// Build a bounded, descriptive ClinicalTrials.gov landscape from a local public snapshot.
+    fn neurosurgery_real_data_trial_landscape(&self, arguments: &Value) -> Result<Value, String> {
+        let data_value = arguments.get("real_glioma_data").ok_or_else(|| {
+            "neurosurgery_real_data_trial_landscape requires real_glioma_data".to_string()
+        })?;
+        let data: RealGliomaBundle = serde_json::from_value(data_value.clone())
+            .map_err(|error| format!("invalid real glioma data bundle: {error}"))?;
+        let query_value = arguments.get("query").cloned().unwrap_or_else(|| json!({}));
+        let query: RealDataTrialLandscapeQuery = serde_json::from_value(query_value)
+            .map_err(|error| format!("invalid trial-landscape query: {error}"))?;
+        let result = data
+            .trial_landscape(&query)
+            .map_err(|error| format!("trial landscape refused: {error}"))?;
+        serde_json::to_value(result)
+            .map_err(|error| format!("cannot encode trial landscape: {error}"))
+    }
+
+    /// Build a bounded, descriptive cBioPortal molecular-assay plus aggregate GDC availability
+    /// inventory from a local public snapshot. The result contains metadata only and never values.
+    fn neurosurgery_real_data_molecular_coverage(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let data_value = arguments.get("real_glioma_data").ok_or_else(|| {
+            "neurosurgery_real_data_molecular_coverage requires real_glioma_data".to_string()
+        })?;
+        let data: RealGliomaBundle = serde_json::from_value(data_value.clone())
+            .map_err(|error| format!("invalid real glioma data bundle: {error}"))?;
+        let query_value = arguments.get("query").cloned().unwrap_or_else(|| json!({}));
+        let query: RealDataMolecularCoverageQuery = serde_json::from_value(query_value)
+            .map_err(|error| format!("invalid molecular-coverage query: {error}"))?;
+        let result = data
+            .molecular_coverage(&query)
+            .map_err(|error| format!("molecular coverage refused: {error}"))?;
+        serde_json::to_value(result)
+            .map_err(|error| format!("cannot encode molecular coverage: {error}"))
+    }
+
+    /// Query a caller-supplied cross-specialty PubMed snapshot without network access.
+    fn neurosurgery_public_literature_query(&self, arguments: &Value) -> Result<Value, String> {
+        let data_value = arguments.get("public_literature").ok_or_else(|| {
+            "neurosurgery_public_literature_query requires public_literature".to_string()
+        })?;
+        let data: PublicLiteratureBundle = serde_json::from_value(data_value.clone())
+            .map_err(|error| format!("invalid public-literature bundle: {error}"))?;
+        let query_value = arguments
+            .get("query")
+            .ok_or_else(|| "neurosurgery_public_literature_query requires query".to_string())?;
+        let query: PublicLiteratureQuery = serde_json::from_value(query_value.clone())
+            .map_err(|error| format!("invalid public-literature query: {error}"))?;
+        let result = data
+            .query(&query)
+            .map_err(|error| format!("public-literature query refused: {error}"))?;
+        serde_json::to_value(result)
+            .map_err(|error| format!("cannot encode public-literature query result: {error}"))
+    }
+
+    /// Advance the stateless neurosurgical session lifecycle. The caller owns the checkpoint and
+    /// must send the same request/data bytes at every step; the Rust core verifies their digests.
+    fn neurosurgery_session(&self, arguments: &Value) -> Result<Value, String> {
+        let operation = arguments
+            .get("operation")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "neurosurgery_session requires operation".to_string())?;
+        let request_value = arguments
+            .get("request")
+            .ok_or_else(|| "neurosurgery_session requires request".to_string())?;
+        let request: CaseRequest = serde_json::from_value(request_value.clone())
+            .map_err(|error| format!("invalid neurosurgical session request: {error}"))?;
+        if operation != "run" && arguments.get("max_steps").is_some() {
+            return Err(
+                "max_steps is only accepted for neurosurgery_session operation=run".to_string(),
+            );
+        }
+        let real_data = arguments
+            .get("real_glioma_data")
+            .map(|value| {
+                serde_json::from_value::<RealGliomaBundle>(value.clone())
+                    .map_err(|error| format!("invalid real glioma session data: {error}"))
+            })
+            .transpose()?;
+        let public_literature = arguments
+            .get("public_literature")
+            .map(|value| {
+                serde_json::from_value::<PublicLiteratureBundle>(value.clone())
+                    .map_err(|error| format!("invalid public literature session data: {error}"))
+            })
+            .transpose()?;
+        if real_data.is_some() && public_literature.is_some() {
+            return Err("neurosurgery_session accepts one evidence bundle: choose real_glioma_data or public_literature".to_string());
+        }
+        let agent = NeurosurgicalAgent::default();
+        let value = match operation {
+            "start" => if let Some(literature) = public_literature.as_ref() {
+                agent
+                    .start_session_with_public_literature(&request, literature)
+            } else {
+                agent.start_session(&request, real_data.as_ref())
+            }
+                .map_err(|error| format!("neurosurgical session start refused: {error}"))
+                .and_then(|session| {
+                    serde_json::to_value(session)
+                        .map_err(|error| format!("cannot encode session start: {error}"))
+                })?,
+            "advance" => {
+                let session_value = arguments
+                    .get("session")
+                    .ok_or_else(|| "advance requires session".to_string())?;
+                let session: NeurosurgicalSession = serde_json::from_value(session_value.clone())
+                    .map_err(|error| format!("invalid neurosurgical session checkpoint: {error}"))?;
+                let result = if let Some(literature) = public_literature.as_ref() {
+                    agent.advance_session_with_public_literature(&session, &request, literature)
+                } else {
+                    agent.advance_session(&session, &request, real_data.as_ref())
+                };
+                result
+                    .map_err(|error| format!("neurosurgical session advance refused: {error}"))
+                    .and_then(|session| {
+                    serde_json::to_value(session)
+                        .map_err(|error| format!("cannot encode session advance: {error}"))
+                    })?
+            }
+            "run" => {
+                let max_steps = match arguments.get("max_steps") {
+                    None => MAX_SESSION_STEPS,
+                    Some(value) => value
+                        .as_u64()
+                        .and_then(|value| usize::try_from(value).ok())
+                        .ok_or_else(|| "max_steps must be an integer".to_string())?,
+                };
+                let result = if let Some(literature) = public_literature.as_ref() {
+                    agent.run_session_to_review_with_public_literature(&request, literature, max_steps)
+                } else {
+                    agent.run_session_to_review(&request, real_data.as_ref(), max_steps)
+                };
+                result
+                    .map_err(|error| format!("neurosurgical session run refused: {error}"))
+                    .and_then(|result| {
+                        serde_json::to_value(result)
+                            .map_err(|error| format!("cannot encode session run: {error}"))
+                    })?
+            }
+            "finish" => {
+                let session_value = arguments
+                    .get("session")
+                    .ok_or_else(|| "finish requires session".to_string())?;
+                let session: NeurosurgicalSession = serde_json::from_value(session_value.clone())
+                    .map_err(|error| format!("invalid neurosurgical session checkpoint: {error}"))?;
+                let result = if let Some(literature) = public_literature.as_ref() {
+                    agent.finish_session_with_public_literature(&session, &request, literature)
+                } else {
+                    agent.finish_session(&session, &request, real_data.as_ref())
+                };
+                result
+                    .map_err(|error| format!("neurosurgical session finish refused: {error}"))
+                    .and_then(|response| {
+                        serde_json::to_value(response)
+                            .map_err(|error| format!("cannot encode session finish: {error}"))
+                    })?
+            }
+            other => {
+                return Err(format!(
+                    "unknown neurosurgery_session operation {other:?}; expected start, advance, run, or finish"
+                ))
+            }
+        };
+        serde_json::to_value(value)
+            .map_err(|error| format!("cannot encode neurosurgical session response: {error}"))
+    }
+
+    /// Compose catalogue discovery, an optional public-bundle query, and the bounded session
+    /// worker into one provider-free mission envelope. The caller still owns the bundle and no
+    /// network or model is contacted by this convenience operation.
+    fn neurosurgery_mission(&self, arguments: &Value) -> Result<Value, String> {
+        let request_value = arguments
+            .get("request")
+            .ok_or_else(|| "neurosurgery_mission requires request".to_string())?;
+        let request: CaseRequest = serde_json::from_value(request_value.clone())
+            .map_err(|error| format!("invalid neurosurgical mission request: {error}"))?;
+        let operation = arguments
+            .get("operation")
+            .and_then(Value::as_str)
+            .unwrap_or("run");
+        if operation == "validate" {
+            let mission_value = arguments.get("mission").ok_or_else(|| {
+                "neurosurgery_mission operation=validate requires mission".to_string()
+            })?;
+            let mission: NeurosurgicalMissionResult = serde_json::from_value(mission_value.clone())
+                .map_err(|error| format!("invalid persisted neurosurgical mission: {error}"))?;
+            let real_data = arguments
+                .get("real_glioma_data")
+                .map(|value| {
+                    serde_json::from_value::<RealGliomaBundle>(value.clone())
+                        .map_err(|error| format!("invalid neurosurgical mission data: {error}"))
+                })
+                .transpose()?;
+            let public_literature = arguments
+                .get("public_literature")
+                .map(|value| {
+                    serde_json::from_value::<PublicLiteratureBundle>(value.clone()).map_err(
+                        |error| format!("invalid neurosurgical mission literature: {error}"),
+                    )
+                })
+                .transpose()?;
+            let case_dicom_import = arguments
+                .get("case_dicom_import")
+                .filter(|value| !value.is_null())
+                .map(|value| {
+                    serde_json::from_value::<DicomCaseImport>(value.clone()).map_err(|error| {
+                        format!("invalid neurosurgical mission DICOM replay import: {error}")
+                    })
+                })
+                .transpose()?;
+            let case_fhir_import = arguments
+                .get("case_fhir_import")
+                .filter(|value| !value.is_null())
+                .map(|value| {
+                    serde_json::from_value::<FhirCaseImport>(value.clone()).map_err(|error| {
+                        format!("invalid neurosurgical mission FHIR replay import: {error}")
+                    })
+                })
+                .transpose()?;
+            mission
+                .validate_for_inputs_with_case_imports(
+                    &request,
+                    real_data.as_ref(),
+                    public_literature.as_ref(),
+                    case_dicom_import.as_ref(),
+                    case_fhir_import.as_ref(),
+                )
+                .map_err(|error| format!("neurosurgical mission replay refused: {error}"))?;
+            return serde_json::to_value(serde_json::json!({
+                "valid": true,
+                "mission_id": mission.mission_id,
+                "specialty": mission.specialty,
+                "status": mission.status,
+                "human_review_required": mission.human_review_required,
+                "request_digest": mission.run.response.request_digest,
+                "audit_digest": mission.mission_audit.as_ref().map(|audit| audit.audit_digest.clone()),
+                "provider": mission.provider,
+                "network": mission.network,
+            }))
+            .map_err(|error| format!("cannot encode neurosurgical mission validation: {error}"));
+        }
+        if operation != "run" {
+            return Err(format!(
+                "unknown neurosurgery_mission operation {operation:?}; expected run or validate"
+            ));
+        }
+        let real_data = arguments
+            .get("real_glioma_data")
+            .map(|value| {
+                serde_json::from_value::<RealGliomaBundle>(value.clone())
+                    .map_err(|error| format!("invalid neurosurgical mission data: {error}"))
+            })
+            .transpose()?;
+        let public_literature = arguments
+            .get("public_literature")
+            .map(|value| {
+                serde_json::from_value::<PublicLiteratureBundle>(value.clone())
+                    .map_err(|error| format!("invalid neurosurgical mission literature: {error}"))
+            })
+            .transpose()?;
+        let case_asset_manifest = arguments
+            .get("case_asset_manifest")
+            .map(|value| {
+                serde_json::from_value::<CaseAssetManifest>(value.clone()).map_err(|error| {
+                    format!("invalid neurosurgical mission case asset manifest: {error}")
+                })
+            })
+            .transpose()?;
+        let case_dicom_import = arguments
+            .get("case_dicom_import")
+            .filter(|value| !value.is_null())
+            .map(|value| {
+                serde_json::from_value::<DicomCaseImport>(value.clone())
+                    .map_err(|error| format!("invalid neurosurgical mission DICOM import: {error}"))
+            })
+            .transpose()?;
+        let case_fhir_import = arguments
+            .get("case_fhir_import")
+            .filter(|value| !value.is_null())
+            .map(|value| {
+                serde_json::from_value::<FhirCaseImport>(value.clone())
+                    .map_err(|error| format!("invalid neurosurgical mission FHIR import: {error}"))
+            })
+            .transpose()?;
+        let case_asset_query = arguments
+            .get("case_asset_manifest_query")
+            .map(|value| {
+                serde_json::from_value::<CaseAssetManifestQuery>(value.clone()).map_err(|error| {
+                    format!("invalid neurosurgical mission case asset query: {error}")
+                })
+            })
+            .transpose()?;
+        let case_asset_disposition = arguments
+            .get("case_asset_review_disposition")
+            .filter(|value| !value.is_null())
+            .map(|value| {
+                serde_json::from_value::<CaseAssetReviewDispositionReport>(value.clone()).map_err(
+                    |error| {
+                        format!("invalid neurosurgical mission case asset disposition: {error}")
+                    },
+                )
+            })
+            .transpose()?;
+        // A mission may bind both validated bundles. In that mode the real glioma snapshot
+        // drives the session route and the PubMed snapshot contributes independent citation
+        // context plus an exact PMID/DOI linkage audit.
+        let query_value = arguments.get("query");
+        let query = if real_data.is_some() {
+            query_value
+                .map(|value| {
+                    serde_json::from_value::<RealDataQuery>(value.clone())
+                        .map_err(|error| format!("invalid neurosurgical mission query: {error}"))
+                })
+                .transpose()?
+        } else {
+            None
+        };
+        let public_query = if public_literature.is_some() {
+            arguments
+                .get("public_literature_query")
+                .or_else(|| {
+                    if real_data.is_none() {
+                        query_value
+                    } else {
+                        None
+                    }
+                })
+                .map(|value| {
+                    serde_json::from_value::<PublicLiteratureQuery>(value.clone()).map_err(
+                        |error| format!("invalid public-literature mission query: {error}"),
+                    )
+                })
+                .transpose()?
+        } else {
+            None
+        };
+        let portfolio_query = arguments
+            .get("portfolio_query")
+            .map(|value| {
+                serde_json::from_value::<PublicLiteraturePortfolioQuery>(value.clone()).map_err(
+                    |error| format!("invalid public-literature mission portfolio query: {error}"),
+                )
+            })
+            .transpose()?;
+        let freshness_value = arguments.get("freshness");
+        let freshness = freshness_value
+            .map(|value| {
+                serde_json::from_value::<RealDataFreshnessQuery>(value.clone()).map_err(|error| {
+                    format!("invalid neurosurgical mission freshness query: {error}")
+                })
+            })
+            .transpose()?;
+        if freshness.is_some() && real_data.is_none() && public_literature.is_none() {
+            return Err(
+                "neurosurgery_mission freshness requires real_glioma_data or public_literature"
+                    .to_string(),
+            );
+        }
+        if query_value.is_some() && real_data.is_none() && public_literature.is_none() {
+            return Err(
+                "neurosurgery_mission query requires real_glioma_data or public_literature"
+                    .to_string(),
+            );
+        }
+        if portfolio_query.is_some() && public_literature.is_none() {
+            return Err(
+                "neurosurgery_mission portfolio_query requires public_literature".to_string(),
+            );
+        }
+        let max_steps = arguments
+            .get("max_steps")
+            .map(|value| {
+                value
+                    .as_u64()
+                    .and_then(|value| usize::try_from(value).ok())
+                    .ok_or_else(|| "neurosurgery_mission max_steps must be an integer".to_string())
+            })
+            .transpose()?
+            .unwrap_or(MAX_SESSION_STEPS);
+        if case_dicom_import.is_some() {
+            if case_asset_manifest.is_some() {
+                return Err(
+                    "neurosurgery_mission accepts either case_dicom_import or case_asset_manifest, not both"
+                        .to_string(),
+                );
+            }
+            if case_asset_query.is_some() || case_asset_disposition.is_some() {
+                return Err(
+                    "neurosurgery_mission DICOM imports do not accept a separate asset query or disposition"
+                        .to_string(),
+                );
+            }
+            if real_data.is_none() {
+                return Err(
+                    "neurosurgery_mission case_dicom_import requires real_glioma_data".to_string(),
+                );
+            }
+            if public_literature.is_some() && case_fhir_import.is_none() {
+                return Err(
+                    "neurosurgery_mission case_dicom_import with public_literature also requires case_fhir_import"
+                        .to_string(),
+                );
+            }
+        }
+        if case_fhir_import.is_some() {
+            if case_asset_manifest.is_some() {
+                return Err(
+                    "neurosurgery_mission accepts case_fhir_import or case_dicom_import, not a separate case_asset_manifest"
+                        .to_string(),
+                );
+            }
+            if case_asset_query.is_some() || case_asset_disposition.is_some() {
+                return Err(
+                    "neurosurgery_mission FHIR imports do not accept a separate asset query or disposition"
+                        .to_string(),
+                );
+            }
+        }
+        let agent = NeurosurgicalAgent::default();
+        let mission = if case_dicom_import.is_some() && case_fhir_import.is_some() {
+            agent.run_research_mission_with_case_imports(
+                &request,
+                real_data.as_ref(),
+                public_literature.as_ref(),
+                query.as_ref(),
+                public_query.as_ref(),
+                freshness.as_ref(),
+                portfolio_query.as_ref(),
+                case_dicom_import.as_ref(),
+                case_fhir_import.as_ref(),
+                max_steps,
+            )
+        } else if let Some(dicom_import) = case_dicom_import.as_ref() {
+            let real_data = real_data
+                .as_ref()
+                .expect("DICOM mission validation requires real data");
+            agent.run_research_mission_with_case_dicom(
+                &request,
+                real_data,
+                query.as_ref(),
+                freshness.as_ref(),
+                dicom_import,
+                max_steps,
+            )
+        } else if let Some(fhir_import) = case_fhir_import.as_ref() {
+            agent.run_research_mission_with_case_fhir(
+                &request,
+                real_data.as_ref(),
+                public_literature.as_ref(),
+                query.as_ref(),
+                public_query.as_ref(),
+                freshness.as_ref(),
+                portfolio_query.as_ref(),
+                fhir_import,
+                max_steps,
+            )
+        } else if let (Some(real_data), Some(literature)) =
+            (real_data.as_ref(), public_literature.as_ref())
+        {
+            let real_query = query_value
+                .map(|value| {
+                    serde_json::from_value::<RealDataQuery>(value.clone())
+                        .map_err(|error| format!("invalid real-data mission query: {error}"))
+                })
+                .transpose()?;
+            agent.run_research_mission_with_real_data_and_public_literature_case_assets_and_dispositions(
+                // The real-data route remains canonical; the optional asset plane is projected
+                // into the same mission envelope without changing session route semantics.
+                &request,
+                real_data,
+                literature,
+                real_query.as_ref(),
+                public_query.as_ref(),
+                freshness.as_ref(),
+                portfolio_query.as_ref(),
+                case_asset_manifest.as_ref(),
+                case_asset_query.as_ref(),
+                case_asset_disposition.as_ref(),
+                max_steps,
+            )
+        } else if let Some(literature) = public_literature.as_ref() {
+            agent.run_research_mission_with_public_literature_case_assets_and_dispositions(
+                &request,
+                literature,
+                public_query.as_ref(),
+                freshness.as_ref(),
+                portfolio_query.as_ref(),
+                case_asset_manifest.as_ref(),
+                case_asset_query.as_ref(),
+                case_asset_disposition.as_ref(),
+                max_steps,
+            )
+        } else {
+            agent.run_research_mission_with_case_assets_and_dispositions(
+                &request,
+                real_data.as_ref(),
+                query.as_ref(),
+                freshness.as_ref(),
+                case_asset_manifest.as_ref(),
+                case_asset_query.as_ref(),
+                case_asset_disposition.as_ref(),
+                max_steps,
+            )
+        }
+        .map_err(|error| format!("neurosurgical mission run refused: {error}"))?;
+        serde_json::to_value(mission)
+            .map_err(|error| format!("cannot encode neurosurgical mission response: {error}"))
     }
 
     /// Select a model/tool arm from caller-persisted online-learning state. State is supplied and
@@ -36392,9 +38851,9 @@ pub fn workspace_capabilities() -> Value {
         },
         {
             "id": "biological_domains",
-            "domains": ["BioIR", "oncology", "modalities", "specimen lineage", "reference worlds"],
-            "crates": ["bioprism-bioir", "bioprism-onco", "bioprism-oncoworlds", "bioprism-modalities", "bioprism-bioworlds", "bioprism-worldfactory"],
-            "mcp_tools": ["bioworlds_catalog", "world_generate", "modality_catalog", "modality_support_check", "modality_transport_check", "modality_comparability_check", "literature_bind_check", "measurement_compare", "contradiction_review", "onco_boundary_check", "onco_response_assess", "onco_worldline_view", "onco_classification_check", "onco_outcome_analyze", "oncoworlds_methylation_classify", "oncoworlds_methylation_compare", "oncoworlds_radiogenomic_check", "oncoworlds_era_shift_check", "oncoworlds_equity_check", "oncoworlds_entity_world_check"],
+            "domains": ["BioIR", "oncology", "neurosurgical research", "modalities", "specimen lineage", "reference worlds"],
+            "crates": ["bioprism-bioir", "bioprism-onco", "bioprism-neurosurgery", "bioprism-oncoworlds", "bioprism-modalities", "bioprism-bioworlds", "bioprism-worldfactory"],
+            "mcp_tools": ["bioworlds_catalog", "world_generate", "modality_catalog", "modality_support_check", "modality_transport_check", "modality_comparability_check", "literature_bind_check", "measurement_compare", "contradiction_review", "onco_boundary_check", "onco_response_assess", "onco_worldline_view", "onco_classification_check", "onco_outcome_analyze", "oncoworlds_methylation_classify", "oncoworlds_methylation_compare", "oncoworlds_radiogenomic_check", "oncoworlds_era_shift_check", "oncoworlds_equity_check", "oncoworlds_entity_world_check", "neurosurgery_intake_plan", "neurosurgery_intake_mission", "neurosurgery_intake_portfolio", "neurosurgery_catalogue", "neurosurgery_evidence_audit", "neurosurgery_specialty_evidence_map", "neurosurgery_case_asset_manifest", "neurosurgery_case_fhir_import", "neurosurgery_case_dicom_import", "neurosurgery_case_dicom_evidence_workflow", "neurosurgery_case_asset_review_disposition", "neurosurgery_evidence_synthesis", "neurosurgery_glioma_molecular_map", "neurosurgery_evidence_graph", "neurosurgery_real_data_coverage", "neurosurgery_real_data_cohort_landscape", "neurosurgery_real_data_reconciliation", "neurosurgery_real_data_freshness", "neurosurgery_real_data_diff", "neurosurgery_real_data_refresh_audit", "neurosurgery_real_data_review_queue", "neurosurgery_real_data_review_disposition", "neurosurgery_real_data_evidence_packet", "neurosurgery_real_data_autonomous_workflow", "neurosurgery_real_data_reasoning_context", "neurosurgery_real_data_draft_audit", "neurosurgery_public_literature_evidence_packet", "neurosurgery_public_literature_reasoning_context", "neurosurgery_public_literature_draft_audit", "neurosurgery_public_literature_matrix", "neurosurgery_public_literature_freshness", "neurosurgery_public_literature_refresh_audit", "neurosurgery_literature_link_audit", "neurosurgery_public_literature_integrity_audit", "neurosurgery_public_literature_review_queue", "neurosurgery_public_literature_workbench", "neurosurgery_public_literature_portfolio", "neurosurgery_research_brief", "neurosurgery_research_plan", "neurosurgery_evidence_acquisition", "neurosurgery_evidence_program", "neurosurgery_plan", "neurosurgery_real_data_query", "neurosurgery_real_data_trial_landscape", "neurosurgery_real_data_molecular_coverage", "neurosurgery_public_literature_query", "neurosurgery_session", "neurosurgery_mission"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -36469,6 +38928,14 @@ pub fn workspace_capabilities() -> Value {
             "mcp_tools": ["weave_protocol_catalog", "weavelang_compile", "choreography_check", "fabric_synthesize", "interweave_workflow_catalogue", "interweave_workflow_execute", "interweave_workflow_execution_evidence", "interweave_workflow_execution_evidence_import", "interweave_workflow_execution_evidence_query", "interweave_workflow_execution_evidence_get", "mission_evaluator_discover", "mission_evaluator_review", "mission_evaluator_replay", "mission_evaluator_replay_compare", "mission_evidence_bundle_verify", "mission_evidence_bundle_import", "mission_evidence_bundle_query", "mission_evidence_bundle_get"],
             "cli_entrypoints": [],
             "status": "available"
+        },
+        {
+            "id": "autonomous_research_campaigns",
+            "domains": ["bounded research DAGs", "durable action authorization", "metadata-only checkpoints", "provider-free research execution"],
+            "crates": ["bioprism-research-campaign", "bioprism-research", "bioprism-brain"],
+            "mcp_tools": ["research_campaign_run_offline"],
+            "cli_entrypoints": [],
+            "status": "available_with_declared_limits"
         },
         {
             "id": "autonomous_brain",
@@ -36639,6 +39106,25 @@ pub fn tool_definitions() -> Vec<Value> {
         },
         "required": ["world", "query"]
     });
+    let case_request_schema = json!({
+        "type": ["object", "null"],
+        "description": "Optional de-identified CaseRequest carried into the guarded research mission. It is validated before any bundle query and is never echoed in the intake envelope.",
+        "properties": {
+            "schema_version": { "type": "string", "default": "bioprism-neurosurgery/0.1" },
+            "case_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+            "specialty": { "type": "string", "enum": ["glioma", "cranial_base", "craniosynostosis", "encephalocele", "spina_bifida", "chiari_malformation"] },
+            "request_use": { "type": "string", "enum": ["research_synthesis", "synthetic_case_simulation", "educational_review", "individual_diagnosis", "individual_prognosis", "treatment_recommendation", "care_triage", "urgent_clinical_alert", "intervention_planning"] },
+            "question": { "type": "string", "minLength": 1, "maxLength": 4000 },
+            "direct_identifier_fields": { "type": "array", "maxItems": 32, "items": { "type": "string", "maxLength": 256 } },
+            "observations": { "type": "array", "maxItems": 256, "items": { "type": "object", "properties": { "kind": { "type": "string", "enum": ["imaging", "histology", "molecular", "neuroanatomy", "neurologic_function", "developmental_trajectory", "spinal_dysraphism", "craniocervical_junction", "surgical_history", "longitudinal_outcome"] }, "label": { "type": "string", "minLength": 1, "maxLength": 4096 }, "value": { "type": "string", "minLength": 1, "maxLength": 4096 }, "status": { "type": "string", "enum": ["observed", "not_collected", "uninterpretable", "conflicting"] }, "source_id": { "type": ["string", "null"] }, "observed_at": { "type": ["string", "null"] }, "timepoint": { "type": ["string", "null"] } }, "required": ["kind", "label", "value"], "additionalProperties": false } },
+            "evidence": { "type": "array", "maxItems": 512, "items": { "type": "object" } },
+            "requested_tools": { "type": "array", "maxItems": 64, "items": { "type": "string" } },
+            "real_data_query": { "type": ["object", "null"] },
+            "glioma_molecular": { "type": ["object", "null"] }
+        },
+        "required": ["case_id", "specialty", "request_use", "question"],
+        "additionalProperties": false
+    });
 
     let definitions = vec![
         json!({
@@ -36716,6 +39202,1885 @@ pub fn tool_definitions() -> Vec<Value> {
                     "max_parallelism": { "type": "integer", "minimum": 1, "maximum": 64, "default": 4, "description": "Maximum steps a caller may schedule in one dependency wave; defaults to 4." }
                 },
                 "required": ["objective", "steps", "allowed_tools", "max_cost"]
+            }
+        }),
+        json!({
+            "name": "research_campaign_run_offline",
+            "description": "Preview or execute one bounded provider-free research campaign from caller-owned files. The tool accepts only root-relative paths, supports synthetic_research and brain_plan stages, persists each linear authorization in an append-only checkpoint/head/claim envelope before execution, and returns metadata rather than objectives, questions, plan arguments, dossiers, or planner reports. confirm defaults to false; brain plans are never executed and synthetic research covers seeded repository fixtures rather than external literature.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "spec_path": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 4096,
+                        "description": "Path to a research-campaign specification, relative to the server root. Its private objective is never echoed."
+                    },
+                    "stage_input_paths": {
+                        "type": "object",
+                        "minProperties": 1,
+                        "maxProperties": 8,
+                        "propertyNames": { "type": "string", "minLength": 1 },
+                        "additionalProperties": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 4096,
+                            "description": "Root-relative path to the native input document for this exact stage id."
+                        },
+                        "description": "Exact stage-id to private input-path map. Missing and extra entries are refused before authorization."
+                    },
+                    "output_dir": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 4096,
+                        "description": "Output directory relative to the server root. Its parent must exist. A confirmed request verifies an existing campaign without dispatch; preview refuses an existing target because it cannot promise a fresh append-only directory. Existing output is never overwritten or blindly resumed."
+                    },
+                    "confirm": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Must be true to authorize actions or create files. False performs validation and returns a not_started preview for a fresh target; true verifies an existing output without dispatch."
+                    }
+                },
+                "required": ["spec_path", "stage_input_paths", "output_dir"],
+                "additionalProperties": false
+            }
+        }),
+        json!({
+            "name": "neurosurgery_catalogue",
+            "description": "Return the provider-free neurosurgical research catalogue before execution: all supported specialty profiles, their identity/spatial/temporal evidence axes, confounders and reviewer roles, plus the closed read-only tool specifications. This discovery call performs no network access, model invocation, credential lookup, patient-file access, diagnosis, treatment recommendation, triage, or procedure.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }),
+        json!({
+            "name": "neurosurgery_intake_plan",
+            "description": "Route a bounded natural-language neurosurgical research question into the closed six-specialty catalogue. The lexical planner returns digest-bound candidates, abstains on weak or ambiguous wording, and lists the read-only route and evidence snapshot classes a caller may supply. Scores are routing units rather than probabilities or clinical risk; no diagnosis, prognosis, treatment, triage, procedure, provider, credential, network, patient-file access, or model invocation is available.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "question": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 4000,
+                        "description": "Transient research/education question. The emitted plan stores only its SHA-256 digest."
+                    },
+                    "specialty": {
+                        "type": ["string", "null"],
+                        "enum": ["glioma", "cranial_base", "craniosynostosis", "encephalocele", "spina_bifida", "chiari_malformation", null],
+                        "description": "Optional explicit specialty. It bypasses lexical ambiguity but never bypasses the research-only boundary."
+                    },
+                    "max_candidates": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 6,
+                        "default": 6
+                    }
+                },
+                "required": ["question"],
+                "additionalProperties": false
+            }
+        }),
+        json!({
+            "name": "neurosurgery_intake_mission",
+            "description": "Compose a bounded natural-language neurosurgical research question into a guarded, digest-only research mission. Ambiguous wording abstains; selected routes require a validated real glioma snapshot for glioma or a validated public-literature snapshot for the other specialties. The mission is provider-free, network-free, read-only, and always requires human review; it never returns the raw question or authorizes diagnosis, prognosis, treatment, triage, urgency, or procedure.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "question": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 4000,
+                        "description": "Transient research/education question. The emitted mission stores only a SHA-256 request digest."
+                    },
+                    "specialty": {
+                        "type": ["string", "null"],
+                        "enum": ["glioma", "cranial_base", "craniosynostosis", "encephalocele", "spina_bifida", "chiari_malformation", null]
+                    },
+                    "max_candidates": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 6,
+                        "default": 6
+                    },
+                    "max_session_steps": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 256,
+                        "default": 256,
+                        "description": "Bound the composed read-only mission session."
+                    },
+                    "case_request": case_request_schema.clone(),
+                    "real_glioma_data": {
+                        "type": ["object", "null"],
+                        "description": "Optional validated bioprism-neurosurgery-real/0.1 snapshot; required for an executed glioma route."
+                    },
+                    "public_literature": {
+                        "type": ["object", "null"],
+                        "description": "Optional validated public-literature snapshot; required for an executed non-glioma route and supplemental for glioma."
+                    },
+                    "case_asset_manifest": {
+                        "type": ["object", "null"],
+                        "description": "Optional validated bioprism-neurosurgery-case-asset-manifest/0.1 real de-identified multimodal asset metadata. It is attached to the nested mission without opening asset bytes."
+                    },
+                    "case_asset_manifest_query": {
+                        "type": ["object", "null"],
+                        "properties": {
+                            "requested_kinds": { "type": ["array", "null"], "items": { "type": "string", "enum": ["imaging_series", "pathology_report", "molecular_assay", "operative_note", "neurofunctional_assessment", "developmental_assessment", "longitudinal_outcome", "anatomical_model"] }, "minItems": 1, "maxItems": 8, "uniqueItems": true },
+                            "max_review_items": { "type": "integer", "minimum": 1, "maximum": 512, "default": 128 }
+                        },
+                        "additionalProperties": false,
+                        "description": "Optional bounded asset projection query; a query without case_asset_manifest is refused."
+                    },
+                    "case_dicom_import": {
+                        "type": ["object", "null"],
+                        "description": "Optional caller-sanitized bioprism-neurosurgery-case-dicom-import/0.1 metadata export. It is projected into the selected intake mission without opening pixel bytes; it can be paired with case_fhir_import, but not with case_asset_manifest."
+                    },
+                    "case_fhir_import": {
+                        "type": ["object", "null"],
+                        "description": "Optional caller-sanitized bioprism-neurosurgery-case-fhir-import/0.1 metadata export. Resource values and narratives are never interpreted; the digest-only projection can be paired with case_dicom_import, but not with case_asset_manifest."
+                    },
+                    "case_asset_review_disposition": {
+                        "type": ["object", "null"],
+                        "description": "Optional persisted, digest-bound reviewer disposition report produced from the exact case-asset projection. It carries workflow counts only; mismatched or tampered reports are refused."
+                    },
+                    "freshness": {
+                        "type": ["object", "null"],
+                        "properties": {
+                            "as_of": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$" },
+                            "max_age_days": { "type": "integer", "minimum": 0, "maximum": 3650, "default": 365 },
+                            "source_id": { "type": ["string", "null"], "maxLength": 512 }
+                        },
+                        "required": ["as_of"],
+                        "additionalProperties": false,
+                        "description": "Optional explicit caller-clocked retrieval-age policy evaluated against supplied real/PubMed snapshots; omitted means freshness is not claimed."
+                    }
+                },
+                "required": ["question"],
+                "additionalProperties": false
+            }
+        }),
+        json!({
+            "name": "neurosurgery_intake_portfolio",
+            "description": "Fan out a bounded natural-language neurosurgical research question across one selected or explicitly all six specialty lanes in a validated public-literature snapshot. The default preserves intake abstention; include_all_specialties is an explicit corpus-reconnaissance override and never creates a combined clinical route. Glioma lanes require the validated real glioma snapshot in addition to PubMed. Results are provider-free, network-free, read-only, digest-bound, and held for human review.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "question": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 4000,
+                        "description": "Transient research/education question; only its SHA-256 digest is returned."
+                    },
+                    "specialty": {
+                        "type": ["string", "null"],
+                        "enum": ["glioma", "cranial_base", "craniosynostosis", "encephalocele", "spina_bifida", "chiari_malformation", null]
+                    },
+                    "max_candidates": { "type": "integer", "minimum": 1, "maximum": 6, "default": 6 },
+                    "include_all_specialties": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Explicitly scan all six independent lanes, including when lexical intake is ambiguous."
+                    },
+                    "max_hits_per_lane": { "type": "integer", "minimum": 1, "maximum": 128, "default": 16 },
+                    "max_review_items_per_lane": { "type": "integer", "minimum": 1, "maximum": 128, "default": 32 },
+                    "max_issues_per_lane": { "type": "integer", "minimum": 1, "maximum": 256, "default": 128 },
+                    "max_session_steps": { "type": "integer", "minimum": 1, "maximum": 256, "default": 256 },
+                    "case_request": case_request_schema.clone(),
+                    "real_glioma_data": {
+                        "type": ["object", "null"],
+                        "description": "Validated bioprism-neurosurgery-real/0.1 snapshot; required whenever the selected lanes include glioma."
+                    },
+                    "public_literature": {
+                        "type": ["object", "null"],
+                        "description": "Required validated bioprism-neurosurgery-public-literature/0.1 snapshot."
+                    },
+                    "case_asset_manifest": {
+                        "type": ["object", "null"],
+                        "description": "Optional validated real de-identified case-asset manifest for the single selected lane; all-specialty portfolios refuse ambiguous attachment."
+                    },
+                    "case_asset_manifest_query": {
+                        "type": ["object", "null"],
+                        "properties": {
+                            "requested_kinds": { "type": ["array", "null"], "items": { "type": "string", "enum": ["imaging_series", "pathology_report", "molecular_assay", "operative_note", "neurofunctional_assessment", "developmental_assessment", "longitudinal_outcome", "anatomical_model"] }, "minItems": 1, "maxItems": 8, "uniqueItems": true },
+                            "max_review_items": { "type": "integer", "minimum": 1, "maximum": 512, "default": 128 }
+                        },
+                        "additionalProperties": false,
+                        "description": "Optional bounded asset projection query; a query without case_asset_manifest is refused."
+                    },
+                    "case_asset_review_disposition": {
+                        "type": ["object", "null"],
+                        "description": "Optional persisted reviewer ledger produced from the exact single-lane case-asset projection; requires case_asset_manifest and is carried into the nested mission."
+                    },
+                    "freshness": {
+                        "type": ["object", "null"],
+                        "properties": {
+                            "as_of": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$" },
+                            "max_age_days": { "type": "integer", "minimum": 0, "maximum": 3650, "default": 365 },
+                            "source_id": { "type": ["string", "null"], "maxLength": 512 }
+                        },
+                        "required": ["as_of"],
+                        "additionalProperties": false,
+                        "description": "Optional explicit caller-clocked retrieval-age policy for the supplied public-literature snapshot; omitted means freshness is not claimed."
+                    }
+                },
+                "required": ["question"],
+                "additionalProperties": false
+            }
+        }),
+        json!({
+            "name": "neurosurgery_evidence_audit",
+            "description": "Audit granular specialty intake coverage for a de-identified research or education request. Returns per-observation-kind measured, unmeasured, uninterpretable, conflicting, and provenance counts, explicit observation date/timepoint alignment coverage, required review classes, evidence-tier counts, next research questions, and a request digest. It never infers a diagnosis, prognosis, treatment, triage, urgency, or procedure; no provider, network, credentials, or patient-file access is available.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "request": {
+                        "type": "object",
+                        "description": "A bioprism-neurosurgery/0.1 CaseRequest. The audit validates its safety boundary and reports specialty-specific research-intake coverage only."
+                    }
+                },
+                "required": ["request"],
+                "additionalProperties": false
+            }
+        }),
+        json!({
+            "name": "neurosurgery_specialty_evidence_map",
+            "description": "Build a digest-bound specialist evidence map for a neurosurgical research request. It decomposes each of the six supported lanes into identity, spatial, functional, and temporal dimensions, reports observed/not-collected/uninterpretable/conflicting coverage, source identifiers, and timestamp coverage, and emits reviewer questions. It never reads asset bytes, interprets clinical content, invokes a provider, accepts an API key, accesses the network, or emits diagnosis, prognosis, treatment, triage, urgency, or procedural instructions.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "request": {
+                        "type": "object",
+                        "description": "Required bioprism-neurosurgery/0.1 CaseRequest. The request's safety boundary and specialty are validated before the map is built. Observation values remain caller-owned and are not echoed in the report."
+                    }
+                },
+                "required": ["request"],
+                "additionalProperties": false
+            }
+        }),
+        json!({
+            "name": "neurosurgery_case_asset_manifest",
+            "description": "Project a caller-owned manifest of real, de-identified imaging, pathology, molecular, operative, functional, developmental, outcome, or anatomical assets. The report returns only bounded metadata and SHA-256 references, preserves missing/uninterpretable/conflicting provenance states, and never opens asset bytes or infers a clinical finding. Provider-free, network-free, read-only, and always held for human review; no patient identifiers or synthetic assets are accepted.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "request": {
+                        "type": "object",
+                        "description": "Required bioprism-neurosurgery/0.1 research-only CaseRequest. Its specialty must match manifest.specialty; direct identifiers and clinical uses are refused."
+                    },
+                    "manifest": {
+                        "type": "object",
+                        "description": "Required bioprism-neurosurgery-case-asset-manifest/0.1 manifest containing only de-identified asset metadata and optional content SHA-256 hashes.",
+                        "properties": {
+                            "schema_version": { "type": "string", "default": "bioprism-neurosurgery-case-asset-manifest/0.1" },
+                            "specialty": { "type": "string", "enum": ["glioma", "cranial_base", "craniosynostosis", "encephalocele", "spina_bifida", "chiari_malformation"] },
+                            "synthetic_data": { "type": "boolean", "description": "Required explicit real-data declaration; must be false because synthetic assets are refused rather than promoted to evidence." },
+                            "direct_identifier_fields": { "type": "array", "maxItems": 32, "items": { "type": "string", "maxLength": 256 } },
+                            "assets": {
+                                "type": "array",
+                                "maxItems": 256,
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "asset_id": { "type": "string", "minLength": 1, "maxLength": 128, "description": "Caller-local de-identified label; returned only as a digest." },
+                                        "kind": { "type": "string", "enum": ["imaging_series", "pathology_report", "molecular_assay", "operative_note", "neurofunctional_assessment", "developmental_assessment", "longitudinal_outcome", "anatomical_model"] },
+                                        "status": { "type": "string", "enum": ["observed", "not_collected", "uninterpretable", "conflicting"], "description": "Required caller-observed state; omitted status is refused rather than defaulted." },
+                                        "source_kind": { "type": "string", "enum": ["dicom_archive", "pathology_laboratory", "molecular_laboratory", "operative_record", "functional_assessment", "research_repository", "caller_export", "other"] },
+                                        "source_id": { "type": ["string", "null"], "maxLength": 128, "description": "Caller-owned provenance key; returned only as a digest." },
+                                        "content_sha256": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$", "description": "Optional lowercase SHA-256 over real asset bytes or a canonical export; bytes are never read here." },
+                                        "modality": { "type": ["string", "null"], "maxLength": 128 },
+                                        "body_region": { "type": ["string", "null"], "maxLength": 128 },
+                                        "observed_at": { "type": ["string", "null"], "description": "Optional caller-supplied UTC RFC3339 acquisition/assessment time." },
+                                        "timepoint": { "type": ["string", "null"], "maxLength": 128 }
+                                    },
+                                    "required": ["asset_id", "kind", "status", "source_kind"],
+                                    "additionalProperties": false
+                                }
+                            }
+                        },
+                        "required": ["schema_version", "specialty", "synthetic_data", "assets"],
+                        "additionalProperties": false
+                    },
+                    "query": {
+                        "type": "object",
+                        "properties": {
+                            "requested_kinds": { "type": ["array", "null"], "uniqueItems": true, "maxItems": 8, "items": { "type": "string", "enum": ["imaging_series", "pathology_report", "molecular_assay", "operative_note", "neurofunctional_assessment", "developmental_assessment", "longitudinal_outcome", "anatomical_model"] }, "description": "Caller-owned review scope; missing classes become explicit obligations and are never invented by the agent." },
+                            "max_review_items": { "type": "integer", "minimum": 1, "maximum": 512, "default": 128 }
+                        },
+                        "additionalProperties": false,
+                        "default": {}
+                    }
+                },
+                "required": ["request", "manifest"],
+                "additionalProperties": false
+            }
+        }),
+        json!({
+            "name": "neurosurgery_case_asset_review_disposition",
+            "description": "Apply bounded, replay-safe human dispositions to a persisted case-asset manifest report. Decisions address emitted review-item sequence numbers and are bound to the exact report digest; omitted, undecided, and unresolved obligations remain pending. This changes no source facts, asset bytes, identifiers, or clinical meaning and never invokes a provider or network.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "report": {
+                        "type": "object",
+                        "description": "Required bioprism-neurosurgery-case-asset-manifest/0.1 digest-only projection returned by neurosurgery_case_asset_manifest. It is integrity-checked before any decision is accepted."
+                    },
+                    "decisions": {
+                        "type": "array",
+                        "maxItems": 512,
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "sequence": { "type": "integer", "minimum": 1, "maximum": 65535, "description": "Sequence number of a returned review item; omitted rows cannot be addressed." },
+                                "disposition": { "type": "string", "enum": ["reviewed", "unresolved", "not_applicable"] },
+                                "reviewer_id": { "type": "string", "minLength": 1, "maxLength": 128, "description": "Caller-owned reviewer label; no credential or patient identifier." }
+                            },
+                            "required": ["sequence", "disposition", "reviewer_id"],
+                            "additionalProperties": false
+                        },
+                        "default": []
+                    }
+                },
+                "required": ["report"],
+                "additionalProperties": false
+            }
+        }),
+        json!({
+            "name": "neurosurgery_case_fhir_import",
+            "description": "Import a caller-sanitized real FHIR Bundle as digest-only neurosurgical case-asset metadata. Only resourceType/id and an explicit asset-kind hint are used; references, identifiers, narratives, measurements, codes, bytes, providers, API keys, and networks are never accessed. Unclassified resources remain reviewer obligations. The operation is provider-free, read-only, no-synthetic-data, and always requires human review.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "request": {
+                        "type": "object",
+                        "description": "Required research-only bioprism-neurosurgery/0.1 CaseRequest; its specialty must match the FHIR import."
+                    },
+                    "import": {
+                        "type": "object",
+                        "properties": {
+                            "schema_version": { "type": "string", "default": "bioprism-neurosurgery-case-fhir-import/0.1" },
+                            "specialty": { "type": "string", "enum": ["glioma", "cranial_base", "craniosynostosis", "encephalocele", "spina_bifida", "chiari_malformation"] },
+                            "deidentified": { "type": "boolean", "description": "Must be true; direct-identifier-bearing exports are refused." },
+                            "synthetic_data": { "type": "boolean", "description": "Must be false; synthetic bundles are refused rather than promoted to evidence." },
+                            "source_id": { "type": "string", "minLength": 1, "maxLength": 128, "description": "Caller-owned export provenance key; it is returned only as a digest." },
+                            "bundle": { "type": "object", "description": "FHIR R4 Bundle with at most 256 entries and 2 MiB serialized size. It must be de-identified and contain no identifier, subject, patient, narrative, or reference fields." },
+                            "resource_hints": {
+                                "type": "array",
+                                "maxItems": 256,
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "resource_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+                                        "asset_kind": { "type": "string", "enum": ["imaging_series", "pathology_report", "molecular_assay", "operative_note", "neurofunctional_assessment", "developmental_assessment", "longitudinal_outcome", "anatomical_model"] },
+                                        "status": { "type": "string", "enum": ["observed", "not_collected", "uninterpretable", "conflicting"], "description": "Required caller-declared asset metadata state; missingness is never defaulted to observed." },
+                                        "source_id": { "type": ["string", "null"], "maxLength": 128 },
+                                        "content_sha256": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$" },
+                                        "modality": { "type": ["string", "null"], "maxLength": 128 },
+                                        "body_region": { "type": ["string", "null"], "maxLength": 128 },
+                                        "observed_at": { "type": ["string", "null"], "maxLength": 32 },
+                                        "timepoint": { "type": ["string", "null"], "maxLength": 128 }
+                                    },
+                                    "required": ["resource_id", "asset_kind", "status"],
+                                    "additionalProperties": false
+                                }
+                            },
+                            "query": {
+                                "type": "object",
+                                "properties": {
+                                    "requested_kinds": { "type": ["array", "null"], "uniqueItems": true, "maxItems": 8, "items": { "type": "string", "enum": ["imaging_series", "pathology_report", "molecular_assay", "operative_note", "neurofunctional_assessment", "developmental_assessment", "longitudinal_outcome", "anatomical_model"] } },
+                                    "max_review_items": { "type": "integer", "minimum": 1, "maximum": 512, "default": 128 }
+                                },
+                                "additionalProperties": false,
+                                "default": {}
+                            }
+                        },
+                        "required": ["schema_version", "specialty", "deidentified", "synthetic_data", "source_id", "bundle"],
+                        "additionalProperties": false
+                    }
+                },
+                "required": ["request", "import"],
+                "additionalProperties": false
+            }
+        }),
+        json!({
+            "name": "neurosurgery_case_dicom_import",
+            "description": "Import caller-supplied real, de-identified standard DICOM JSON metadata into a digest-only imaging-series inventory. Only bounded series metadata is projected; patient-identifying tags and PixelData are refused, private/unknown tags are ignored, and no bytes, pixels, clinical interpretation, provider, API key, or network are accessed. Missing metadata and object-byte digests remain explicit reviewer obligations. The operation is research-only, read-only, no-synthetic-data, replayable, and always requires human review.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "request": {
+                        "type": "object",
+                        "description": "Required research-only bioprism-neurosurgery/0.1 CaseRequest; its specialty must match the DICOM import."
+                    },
+                    "import": {
+                        "type": "object",
+                        "properties": {
+                            "schema_version": { "type": "string", "default": "bioprism-neurosurgery-case-dicom-import/0.1" },
+                            "specialty": { "type": "string", "enum": ["glioma", "cranial_base", "craniosynostosis", "encephalocele", "spina_bifida", "chiari_malformation"] },
+                            "deidentified": { "type": "boolean", "description": "Must be true; imports declaring deidentified=false are refused." },
+                            "synthetic_data": { "type": "boolean", "description": "Must be false; synthetic datasets are refused rather than promoted to evidence." },
+                            "source_id": { "type": "string", "minLength": 1, "maxLength": 128, "description": "Caller-owned export provenance key; it is not echoed into the report." },
+                            "datasets": {
+                                "type": ["object", "array"],
+                                "description": "One DICOM JSON dataset object or an array of at most 512 dataset objects; serialized metadata is bounded at 4 MiB. Standard tags such as Modality, BodyPartExamined, Study/Series/SOPInstanceUID, dates, descriptions, and SeriesNumber are projected."
+                            },
+                            "query": {
+                                "type": "object",
+                                "properties": {
+                                    "requested_kinds": { "type": ["array", "null"], "uniqueItems": true, "maxItems": 1, "items": { "type": "string", "enum": ["imaging_series"] }, "description": "Optional scope; only imaging_series is supported." },
+                                    "max_review_items": { "type": "integer", "minimum": 1, "maximum": 1024, "default": 128 },
+                                    "allow_missing_series_uid": { "type": "boolean", "default": false, "description": "When true, missing SeriesInstanceUID datasets receive index references but remain review obligations; default refuses projection for those rows." }
+                                },
+                                "additionalProperties": false,
+                                "default": {}
+                            }
+                        },
+                        "required": ["schema_version", "specialty", "deidentified", "synthetic_data", "source_id", "datasets"],
+                        "additionalProperties": false
+                    }
+                },
+                "required": ["request", "import"],
+                "additionalProperties": false
+            }
+        }),
+        json!({
+            "name": "neurosurgery_case_dicom_evidence_workflow",
+            "description": "Compose a real de-identified DICOM JSON metadata projection with source-grounded neurosurgical evidence synthesis, review-program tracks, and a restart-safe acquisition checkpoint. Pixel bytes, private tags, patient identifiers, provider credentials, network calls, and clinical interpretation are never accepted. Glioma requires the validated real glioma snapshot; other lanes require the validated PubMed snapshot. The envelope is read-only and always held for human review.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "request": {
+                        "type": "object",
+                        "description": "Required research-only bioprism-neurosurgery/0.1 CaseRequest; specialty must match the DICOM import."
+                    },
+                    "import": {
+                        "type": "object",
+                        "description": "Required bioprism-neurosurgery-case-dicom-import/0.1 sanitized DICOM JSON metadata object. It contains no PixelData or direct identifiers."
+                    },
+                    "real_glioma_data": {
+                        "type": ["object", "null"],
+                        "description": "Validated non-synthetic bioprism-neurosurgery-real/0.1 snapshot. Required for glioma."
+                    },
+                    "public_literature": {
+                        "type": ["object", "null"],
+                        "description": "Validated non-synthetic bioprism-neurosurgery-public-literature/0.1 snapshot. Required for non-glioma lanes and optional supplemental context for glioma."
+                    },
+                    "query": {
+                        "type": "object",
+                        "description": "Optional bounded DicomEvidenceWorkflowQuery with explicit source queries, freshness, synthesis/program/acquisition limits, and source-text policy.",
+                        "properties": {
+                            "real_data_query": { "type": ["object", "null"], "description": "Optional bounded query over the attached real glioma snapshot; it never fetches a source." },
+                            "public_literature_query": { "type": ["object", "null"], "description": "Optional bounded query over the attached PubMed snapshot; specialty is bound to request.specialty when omitted." },
+                            "freshness": { "type": ["object", "null"], "description": "Optional explicit caller-clocked retrieval-age policy." },
+                            "max_program_tracks_per_lane": { "type": "integer", "minimum": 1, "maximum": 8, "default": 6 },
+                            "max_program_references_per_track": { "type": "integer", "minimum": 1, "maximum": 32, "default": 8 },
+                            "max_acquisition_steps": { "type": "integer", "minimum": 1, "maximum": 64, "default": 16 },
+                            "max_acquisition_references_per_step": { "type": "integer", "minimum": 1, "maximum": 16, "default": 4 },
+                            "max_synthesis_references": { "type": "integer", "minimum": 1, "maximum": 256, "default": 64 },
+                            "include_source_text": { "type": "boolean", "default": false, "description": "Include bounded untrusted abstract excerpts in synthesis references." },
+                            "real_data_reasoning_context": { "type": ["object", "null"], "description": "Optional bounded source-addressable context for a caller-owned local model; no provider is invoked." },
+                            "public_literature_reasoning_context": { "type": ["object", "null"], "description": "Optional bounded PMID-addressable context for a caller-owned local model; abstracts remain untrusted source text." }
+                        },
+                        "additionalProperties": false,
+                        "default": {}
+                    }
+                },
+                "required": ["request", "import"],
+                "additionalProperties": false
+            }
+        }),
+        json!({
+            "name": "neurosurgery_evidence_synthesis",
+            "description": "Align a de-identified neurosurgical case with one or both validated public evidence planes and, optionally, a real de-identified multimodal asset-manifest projection. The digest-bound ledger keeps caller observations, caller evidence, asset provenance, the real glioma population snapshot, and PubMed citations separate; it exposes exact PMID/DOI links and capability-level review obligations without generating a diagnosis, prognosis, treatment, triage decision, or procedure. Asset bytes are never opened. No provider, API key, network, credential, patient-file, or external effect is available.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "request": {
+                        "type": "object",
+                        "description": "Required bioprism-neurosurgery/0.1 de-identified CaseRequest. Raw observation labels and values are accepted for validation but are redacted from the synthesis ledger."
+                    },
+                    "real_glioma_data": {
+                        "type": ["object", "null"],
+                        "description": "Optional validated bioprism-neurosurgery-real/0.1 snapshot. It is accepted only for glioma and remains population-level metadata."
+                    },
+                    "public_literature": {
+                        "type": ["object", "null"],
+                        "description": "Optional validated bioprism-neurosurgery-public-literature/0.1 snapshot. The selected query lane must match request.specialty."
+                    },
+                    "case_asset_manifest": {
+                        "type": ["object", "null"],
+                        "description": "Optional validated bioprism-neurosurgery-case-asset-manifest/0.1 real de-identified multimodal metadata manifest. Asset bytes are never opened or interpreted."
+                    },
+                    "case_asset_manifest_query": {
+                        "type": ["object", "null"],
+                        "properties": {
+                            "requested_kinds": { "type": ["array", "null"], "items": { "type": "string", "enum": ["imaging_series", "pathology_report", "molecular_assay", "operative_note", "neurofunctional_assessment", "developmental_assessment", "longitudinal_outcome", "anatomical_model"] }, "minItems": 1, "maxItems": 8, "uniqueItems": true },
+                            "max_review_items": { "type": "integer", "minimum": 1, "maximum": 512, "default": 128 }
+                        },
+                        "additionalProperties": false,
+                        "description": "Optional bounded asset projection query; a query without case_asset_manifest is refused."
+                    },
+                    "query": {
+                        "type": "object",
+                        "properties": {
+                            "real_data_query": { "type": ["object", "null"], "description": "Optional bounded query over the attached real glioma snapshot." },
+                            "public_literature_query": { "type": ["object", "null"], "description": "Optional bounded query over the attached PubMed snapshot; it must name request.specialty." },
+                            "freshness": { "type": ["object", "null"], "description": "Optional explicit caller-clocked retrieval-age policy; the server never uses its own clock." },
+                            "max_references": { "type": "integer", "minimum": 1, "maximum": 256, "default": 64 },
+                            "include_source_text": { "type": "boolean", "default": false, "description": "Include bounded untrusted abstract excerpts in public reference rows." }
+                        },
+                        "additionalProperties": false,
+                        "default": {}
+                    }
+                },
+                "required": ["request"],
+                "additionalProperties": false
+            }
+        }),
+        json!({
+            "name": "neurosurgery_evidence_graph",
+            "description": "Project a bounded, digest-addressed crosswalk from a validated real glioma snapshot. Nodes are public record metadata and edges are only explicit stable study/profile/PMID relationships already present in the bundle; isolates and omitted records stay counted. It never infers biology or causality, fetches URLs, exposes patient/sample values, invokes a model, or recommends diagnosis, prognosis, treatment, triage, or procedure.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "real_glioma_data": {
+                        "type": "object",
+                        "description": "Required bioprism-neurosurgery-real/0.1 snapshot with verified public-source hashes; synthetic_data=true and unallow-listed or mismatched sources are refused."
+                    },
+                    "query": {
+                        "type": "object",
+                        "properties": {
+                            "root_record_id": { "type": ["string", "null"], "maxLength": 512, "description": "Optional exact stable record id. When supplied, explicit crosswalk edges are traversed in both directions." },
+                            "root_record_kind": { "type": ["string", "null"], "enum": ["clinical_trial", "genomic_project", "portal_study", "portal_molecular_profile", "guideline_reference", "literature_article", null] },
+                            "max_nodes": { "type": "integer", "minimum": 1, "maximum": 512, "default": 128, "description": "Maximum emitted nodes; omitted nodes remain counted." },
+                            "max_edges": { "type": "integer", "minimum": 1, "maximum": 1024, "default": 256, "description": "Maximum emitted edges; omitted edges remain counted." }
+                        },
+                        "additionalProperties": false,
+                        "description": "Optional root and output bounds over the already validated local bundle. No root returns the complete bounded crosswalk."
+                    }
+                },
+                "required": ["real_glioma_data"],
+                "additionalProperties": false
+            }
+        }),
+        json!({
+            "name": "neurosurgery_glioma_molecular_map",
+            "description": "Ground a typed glioma molecular panel against exact records in validated real-glioma and PubMed snapshots. The marker-level report keeps caller state, assay/specimen provenance, local search matches, missingness, and truncation separate; a source hit is retrieval metadata only and never a diagnosis, grade, prognosis, treatment, triage decision, or procedure. No provider, API key, network, credential, patient-file, or external effect is available.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "request": {
+                        "type": "object",
+                        "description": "Required glioma CaseRequest using bioprism-neurosurgery/0.1; typed glioma_molecular is optional but recommended for marker-state coverage."
+                    },
+                    "real_glioma_data": {
+                        "type": ["object", "null"],
+                        "description": "Optional validated bioprism-neurosurgery-real/0.1 population snapshot."
+                    },
+                    "public_literature": {
+                        "type": ["object", "null"],
+                        "description": "Optional validated six-specialty PubMed snapshot; only its glioma lane is queried."
+                    },
+                    "query": {
+                        "type": "object",
+                        "properties": {
+                            "markers": { "type": ["array", "null"], "items": { "type": "string", "enum": ["idh1_mutation", "idh2_mutation", "codeletion1p19q", "h3_k27_alteration", "h3_g34_mutation", "mgmt_promoter_methylation", "tert_promoter_mutation", "egfr_amplification", "chromosome7_gain10_loss", "cdkna2b_homozygous_deletion", "atrx_loss", "tp53_mutation", "pten_loss", "braf_v600e", "ntrk_fusion", "mismatch_repair_deficiency", "methylation_classifier", "tumour_mutational_burden"] }, "maxItems": 18 },
+                            "real_data_query": { "type": ["object", "null"], "description": "Optional non-text facets preserved while the controlled marker term supplies the text filter." },
+                            "public_literature_query": { "type": ["object", "null"], "description": "Optional non-text PubMed facets; specialty is forced to glioma." },
+                            "freshness": { "type": ["object", "null"], "description": "Optional explicit caller-clocked retrieval-age policy." },
+                            "max_hits_per_marker": { "type": "integer", "minimum": 1, "maximum": 32, "default": 8 },
+                            "max_references": { "type": "integer", "minimum": 1, "maximum": 256, "default": 128 },
+                            "include_source_text": { "type": "boolean", "default": false }
+                        },
+                        "additionalProperties": false,
+                        "default": {}
+                    }
+                },
+                "required": ["request"],
+                "additionalProperties": false
+            }
+        }),
+        json!({
+            "name": "neurosurgery_real_data_coverage",
+            "description": "Audit a validated real glioma snapshot as explicit source, temporal, assay-modality, and linkage coverage. It reports matched record-kind/source counts, trial-update and PubMed publication-date axes, abstract missingness, portal-study/PMID crosswalk gaps, source retrieval metadata, and a reproducible digest. It never scores evidence quality, imputes dates, merges cohorts, fetches URLs, exposes patient/sample values, invokes a model, or recommends clinical action.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "real_glioma_data": {
+                        "type": "object",
+                        "description": "Required bioprism-neurosurgery-real/0.1 snapshot with verified public-source hashes; synthetic_data=true and unallow-listed or mismatched sources are refused."
+                    },
+                    "query": {
+                        "type": "object",
+                        "properties": {
+                            "record_kind": { "type": ["string", "null"], "enum": ["clinical_trial", "genomic_project", "portal_study", "portal_molecular_profile", "guideline_reference", "literature_article", null] },
+                            "source_id": { "type": ["string", "null"], "maxLength": 512, "description": "Optional exact source facet; unknown sources are refused." },
+                            "from_year": { "type": ["integer", "null"], "minimum": 1900, "maximum": 2200 },
+                            "to_year": { "type": ["integer", "null"], "minimum": 1900, "maximum": 2200 }
+                        },
+                        "additionalProperties": false,
+                        "description": "Optional record-kind, source, and inclusive year facets. Records with unknown relevant dates remain explicitly missing and are excluded from year ranges."
+                    }
+                },
+                "required": ["real_glioma_data"],
+                "additionalProperties": false
+            }
+        }),
+        json!({
+            "name": "neurosurgery_real_data_cohort_landscape",
+            "description": "Compare aggregate public genomic projects in a validated glioma snapshot. It reports source-linked TCGA project rows, released-case inventory, GDC data-type/file availability, data types shared across returned projects, truncation, and explicit missing metadata. Case counts are aggregate public inventory only, never patient-level evidence; no files, samples, molecular values, cohorts, or clinical conclusions are exposed or inferred. No model, provider, network, credential, or external effect is available.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "real_glioma_data": {
+                        "type": "object",
+                        "description": "Required bioprism-neurosurgery-real/0.1 snapshot with verified public-source hashes; synthetic_data=true and unallow-listed or mismatched sources are refused."
+                    },
+                    "query": {
+                        "type": "object",
+                        "properties": {
+                            "query": { "type": "object", "description": "Optional bounded RealDataQuery; record_kind must be genomic_project when supplied and text/facets are applied to the local project metadata only." },
+                            "max_projects": { "type": "integer", "minimum": 1, "maximum": 128, "default": 32, "description": "Maximum emitted project rows; omitted matching projects remain counted and flagged." }
+                        },
+                        "additionalProperties": false,
+                        "description": "Optional local comparison bounds; no URL is fetched."
+                    }
+                },
+                "required": ["real_glioma_data"],
+                "additionalProperties": false
+            }
+        }),
+        json!({
+            "name": "neurosurgery_real_data_reconciliation",
+            "description": "Reconcile exact public PMID/DOI identifiers inside one validated real glioma snapshot. It exposes portal PMIDs missing from the bounded literature window, PMIDs shared by portal studies, and normalized DOIs shared by literature records with deterministic counts, truncation, and source-linked review metadata. It never repairs, merges, ranks, fetches, invokes a model, exposes patient/sample values, or recommends clinical action.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "real_glioma_data": {
+                        "type": "object",
+                        "description": "Required bioprism-neurosurgery-real/0.1 snapshot with verified public-source hashes. Synthetic or unallow-listed sources are refused."
+                    },
+                    "query": {
+                        "type": "object",
+                        "properties": {
+                            "max_issues": { "type": "integer", "minimum": 1, "maximum": 256, "default": 64, "description": "Maximum emitted identifier findings; omitted findings remain counted." }
+                        },
+                        "additionalProperties": false,
+                        "description": "Optional bound over deterministic cross-source identifier findings."
+                    }
+                },
+                "required": ["real_glioma_data"],
+                "additionalProperties": false
+            }
+        }),
+        json!({
+            "name": "neurosurgery_real_data_freshness",
+            "description": "Audit the age of sources in a validated real glioma snapshot against an explicit caller-supplied UTC as_of timestamp. It reports current, stale, and future-dated source metadata with a digest-bound review posture; max_age_days is a caller policy, not an evidence-quality or clinical-relevance score. No URL is fetched, provider or credential is used, patient/sample value is exposed, or clinical action is emitted.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "real_glioma_data": {
+                        "type": "object",
+                        "description": "Required bioprism-neurosurgery-real/0.1 snapshot with verified public-source hashes."
+                    },
+                    "query": {
+                        "type": "object",
+                        "properties": {
+                            "as_of": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$", "description": "Required caller-owned UTC clock; the server never uses the host clock." },
+                            "max_age_days": { "type": "integer", "minimum": 0, "maximum": 3650, "default": 365, "description": "Caller review-policy bound for current sources; not a quality threshold." },
+                            "source_id": { "type": ["string", "null"], "maxLength": 512, "description": "Optional exact source facet." }
+                        },
+                        "required": ["as_of"],
+                        "additionalProperties": false
+                    }
+                },
+                "required": ["real_glioma_data"],
+                "additionalProperties": false
+            }
+        }),
+        json!({
+            "name": "neurosurgery_real_data_diff",
+            "description": "Compare two validated real glioma snapshots as a bounded provenance refresh audit. It reports added, removed, and changed public records plus source-metadata changes, with stable identifiers and changed field names but no copied abstracts or sample values. It never scores freshness or evidence quality, merges cohorts, fetches URLs, invokes a model, or recommends clinical action.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "before_real_glioma_data": {
+                        "type": "object",
+                        "description": "Required earlier bioprism-neurosurgery-real/0.1 snapshot; it must pass the same public-source and content-hash validator."
+                    },
+                    "after_real_glioma_data": {
+                        "type": "object",
+                        "description": "Required newer/candidate bioprism-neurosurgery-real/0.1 snapshot; it must pass validation independently."
+                    },
+                    "query": {
+                        "type": "object",
+                        "properties": {
+                            "record_kind": { "type": ["string", "null"], "enum": ["clinical_trial", "genomic_project", "portal_study", "portal_molecular_profile", "guideline_reference", "literature_article", null] },
+                            "source_id": { "type": ["string", "null"], "maxLength": 512, "description": "Optional source facet applied to record and source changes. Additions/removals are retained when either snapshot carries the selected source." },
+                            "max_changes": { "type": "integer", "minimum": 1, "maximum": 1024, "default": 256, "description": "Maximum emitted record changes and source changes per projection; omissions remain counted." }
+                        },
+                        "additionalProperties": false
+                    }
+                },
+                "required": ["before_real_glioma_data", "after_real_glioma_data"],
+                "additionalProperties": false
+            }
+        }),
+        json!({
+            "name": "neurosurgery_real_data_refresh_audit",
+            "description": "Reconcile two independently validated real-glioma snapshots into one digest-bound refresh review. It composes structural diff, after-snapshot coverage, optional explicit freshness, metadata review obligations, and a deterministic topic brief while preserving source and record identity stability. It never fetches, merges, accepts, scores, or writes a candidate refresh; all changes remain human-review-only and population-level.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "request": {
+                        "type": "object",
+                        "description": "Required non-clinical research-synthesis CaseRequest used to scope the real-data topic brief; clinical action and patient identifiers are refused by the core."
+                    },
+                    "before_real_glioma_data": {
+                        "type": "object",
+                        "description": "Required earlier bioprism-neurosurgery-real/0.1 snapshot. It must pass public-source allow-list and canonical content-hash validation."
+                    },
+                    "after_real_glioma_data": {
+                        "type": "object",
+                        "description": "Required candidate bioprism-neurosurgery-real/0.1 snapshot. It is validated independently and is never merged automatically."
+                    },
+                    "query": {
+                        "type": "object",
+                        "properties": {
+                            "diff": {
+                                "type": "object",
+                                "description": "Optional RealDataDiffQuery bounds and record/source facets; omitted changes remain counted."
+                            },
+                            "coverage": {
+                                "type": "object",
+                                "description": "Optional RealDataCoverageQuery facets over the candidate snapshot."
+                            },
+                            "review_queue": {
+                                "type": "object",
+                                "description": "Optional RealDataReviewQueueQuery bounds over candidate metadata obligations."
+                            },
+                            "brief": {
+                                "type": "object",
+                                "description": "Optional NeurosurgicalResearchBriefQuery topic bounds, focus terms, source query, abstract opt-in, and explicit freshness policy. The source query must remain real-data scoped."
+                            }
+                        },
+                        "additionalProperties": false,
+                        "description": "Optional nested bounds for each deterministic projection; every nested report retains its own digest and omission counts."
+                    }
+                },
+                "required": ["request", "before_real_glioma_data", "after_real_glioma_data"],
+                "additionalProperties": false
+            }
+        }),
+        json!({
+            "name": "neurosurgery_real_data_review_queue",
+            "description": "Derive a bounded, digest-addressed human-review queue from explicit metadata gaps in a validated real glioma snapshot. It identifies missing study/PMID links, unlinked citations, missing or clipped abstracts, missing trial update dates, and missing public sample counts without imputing values or making clinical claims. It never scores urgency or evidence quality, fetches URLs, exposes patient/sample values, invokes a model, or recommends diagnosis, prognosis, treatment, triage, or procedure.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "real_glioma_data": {
+                        "type": "object",
+                        "description": "Required bioprism-neurosurgery-real/0.1 snapshot with verified public-source hashes; synthetic_data=true and unallow-listed or mismatched sources are refused."
+                    },
+                    "query": {
+                        "type": "object",
+                        "properties": {
+                            "record_kind": { "type": ["string", "null"], "enum": ["clinical_trial", "genomic_project", "portal_study", "portal_molecular_profile", "guideline_reference", "literature_article", null], "description": "Optional exact record-kind facet over queue items." },
+                            "source_id": { "type": ["string", "null"], "maxLength": 512, "description": "Optional exact source facet; unknown sources are refused." },
+                            "max_items": { "type": "integer", "minimum": 1, "maximum": 256, "default": 64, "description": "Maximum emitted review items; omissions remain counted explicitly." }
+                        },
+                        "additionalProperties": false,
+                        "description": "Optional bounded facets over structural obligations in the already validated local snapshot."
+                    }
+                },
+                "required": ["real_glioma_data"],
+                "additionalProperties": false
+            }
+        }),
+        json!({
+            "name": "neurosurgery_real_data_review_disposition",
+            "description": "Apply a bounded, replay-safe human disposition to emitted real-data review tasks. Each task may be marked reviewed, unresolved, or not applicable; the result is bound to the exact queue digest and keeps omitted or undecided obligations pending. Dispositions are workflow metadata only: they do not alter source facts, score evidence, make clinical claims, fetch URLs, invoke a model, or recommend diagnosis, prognosis, treatment, triage, or procedure.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "queue": {
+                        "type": "object",
+                        "description": "Required bioprism-neurosurgery-real-data-review-queue/0.1 report returned by neurosurgery_real_data_review_queue. Its queue_digest is verified before any decision is applied."
+                    },
+                    "decisions": {
+                        "type": "array",
+                        "maxItems": 256,
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "task_id": { "type": "string", "maxLength": 512 },
+                                "disposition": { "type": "string", "enum": ["reviewed", "unresolved", "not_applicable"] },
+                                "reviewer_id": { "type": "string", "maxLength": 128, "description": "Caller-owned reviewer label; no credential or clinical note is accepted." }
+                            },
+                            "required": ["task_id", "disposition", "reviewer_id"],
+                            "additionalProperties": false
+                        },
+                        "default": []
+                    }
+                },
+                "required": ["queue"],
+                "additionalProperties": false
+            }
+        }),
+        json!({
+            "name": "neurosurgery_real_data_evidence_packet",
+            "description": "Compose a bounded, digest-addressed evidence handoff from a validated real glioma snapshot: summary, source/temporal/modality coverage, explicit study/profile/PMID crosswalk, bounded source-linked query hits, canonical ClinicalTrials.gov and aggregate GDC cohort landscapes, and open metadata-review obligations. This is for a local model or qualified human reviewer and preserves missingness and omissions; it never infers biology, merges cohorts, makes diagnosis/prognosis/treatment/triage/procedure claims, fetches URLs, invokes a provider, or accepts an API key.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "real_glioma_data": {
+                        "type": "object",
+                        "description": "Required bioprism-neurosurgery-real/0.1 snapshot with verified public-source hashes; synthetic_data=true and unallow-listed or mismatched sources are refused."
+                    },
+                    "query": {
+                        "type": "object",
+                        "properties": {
+                            "query": { "type": "object", "description": "Bounded RealDataQuery over records already present in the snapshot; supports registry phase/study-type/update-date facets and defaults to limit 32." },
+                            "coverage": { "type": "object", "description": "Optional RealDataCoverageQuery facets; unknown dates remain explicitly missing." },
+                            "graph": { "type": "object", "description": "Optional EvidenceGraphQuery root and max_nodes/max_edges bounds over explicit stable-ID crosswalks." },
+                            "review_queue": { "type": "object", "description": "Optional RealDataReviewQueueQuery facets and max_items bound over structural metadata obligations." },
+                            "freshness": {
+                                "type": "object",
+                                "properties": {
+                                    "as_of": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$", "description": "Caller-owned UTC clock; the packet never uses the host clock." },
+                                    "max_age_days": { "type": "integer", "minimum": 0, "maximum": 3650, "default": 365, "description": "Caller review-policy bound, not a quality threshold." },
+                                    "source_id": { "type": ["string", "null"], "maxLength": 512 }
+                                },
+                                "required": ["as_of"],
+                                "additionalProperties": false,
+                                "description": "Optional explicit source-age posture; omitted means freshness is not claimed."
+                            }
+                        },
+                        "additionalProperties": false,
+                        "description": "Optional nested bounds for each composed projection."
+                    }
+                },
+                "required": ["real_glioma_data"],
+                "additionalProperties": false
+            }
+        }),
+        json!({
+            "name": "neurosurgery_real_data_autonomous_workflow",
+            "description": "Compose a deterministic, resumable review wave from a validated real glioma snapshot. It joins the source-bound evidence packet (including its canonical ClinicalTrials.gov trial and aggregate GDC cohort landscapes) to explicit metadata obligations, optional human dispositions, ordered provenance/completeness/context actions, stale-source refresh and bounded-projection expansion holds, and a human synthesis gate. The tool never ranks clinical value, interprets abstracts, fetches URLs, invokes a provider, accepts an API key, exposes patient/sample values, or recommends diagnosis, prognosis, treatment, triage, or procedure.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "real_glioma_data": {
+                        "type": "object",
+                        "description": "Required bioprism-neurosurgery-real/0.1 snapshot with verified public-source hashes; synthetic_data=true and altered or unallow-listed sources are refused."
+                    },
+                    "query": {
+                        "type": "object",
+                        "properties": {
+                            "packet": {
+                                "type": "object",
+                                "description": "Optional RealDataEvidencePacketQuery bounds for the composed summary, coverage, graph, local query, review queue, and explicit freshness posture."
+                            },
+                            "dispositions": {
+                                "type": ["object", "null"],
+                                "description": "Optional bioprism-neurosurgery-real-data-review-disposition/0.1 report bound to the packet review queue; reviewed/not_applicable items are closed, unresolved items remain open."
+                            },
+                            "max_actions": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 256,
+                                "default": 64,
+                                "description": "Maximum returned actions; omitted actions remain explicitly counted."
+                            }
+                        },
+                        "additionalProperties": false,
+                        "description": "Optional deterministic workflow bounds."
+                    }
+                },
+                "required": ["real_glioma_data"],
+                "additionalProperties": false
+            }
+        }),
+        json!({
+            "name": "neurosurgery_real_data_reasoning_context",
+            "description": "Render a bounded, digest-addressed local-model context from a validated real glioma evidence packet. The context contains only public population metadata, explicit crosswalk identities, bounded query hits, and optionally untrusted abstract excerpts; every included record is returned as a citation and omissions are counted. The tool never invokes a provider, accepts an API key, fetches URLs, stores patient files, fact-checks source text, or emits diagnosis, prognosis, treatment, triage, or procedure.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "real_glioma_data": {
+                        "type": "object",
+                        "description": "Required bioprism-neurosurgery-real/0.1 snapshot with verified public-source hashes; synthetic_data=true and altered or unallow-listed sources are refused."
+                    },
+                    "query": {
+                        "type": "object",
+                        "properties": {
+                            "packet": {
+                                "type": "object",
+                                "properties": {
+                                    "query": { "type": "object", "description": "Optional bounded RealDataQuery controlling which local records may be rendered." },
+                                    "coverage": { "type": "object", "description": "Optional RealDataCoverageQuery bounds." },
+                                    "graph": { "type": "object", "description": "Optional EvidenceGraphQuery bounds." },
+                                    "review_queue": { "type": "object", "description": "Optional RealDataReviewQueueQuery bounds." },
+                                    "freshness": { "type": "object", "properties": { "as_of": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$" }, "max_age_days": { "type": "integer", "minimum": 0, "maximum": 3650, "default": 365 }, "source_id": { "type": ["string", "null"], "maxLength": 512 } }, "required": ["as_of"], "additionalProperties": false, "description": "Optional caller-owned source-age posture." }
+                                },
+                                "additionalProperties": false,
+                                "description": "Optional nested evidence-packet bounds; omitted values use the validated defaults."
+                            },
+                            "max_chars": { "type": "integer", "minimum": 1, "maximum": 65536, "default": 24000, "description": "Maximum Unicode characters in context_text; omissions remain explicit." },
+                            "include_abstracts": { "type": "boolean", "default": false, "description": "Include bounded source abstract excerpts as untrusted data; no summary or interpretation is generated." }
+                        },
+                        "additionalProperties": false,
+                        "description": "Optional deterministic rendering bounds."
+                    }
+                },
+                "required": ["real_glioma_data"],
+                "additionalProperties": false
+            }
+        }),
+        json!({
+            "name": "neurosurgery_real_data_draft_audit",
+            "description": "Audit a caller-owned local-model or reviewer draft against a freshly composed, digest-bound real glioma evidence packet. Every claim must cite emitted public-record metadata; patient-case and clinical-action postures are blocked, while accepted rows remain grounded_for_human_review. Claim text is not fact-checked or clinically interpreted, and the tool never fetches URLs, invokes a provider, accepts an API key, or recommends care.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "real_glioma_data": {
+                        "type": "object",
+                        "description": "Required bioprism-neurosurgery-real/0.1 snapshot with verified public-source hashes; synthetic_data=true and unallow-listed or mismatched sources are refused."
+                    },
+                    "query": {
+                        "type": "object",
+                        "properties": {
+                            "query": { "type": "object", "description": "Optional bounded RealDataQuery controlling which local packet hits may be cited." },
+                            "coverage": { "type": "object", "description": "Optional RealDataCoverageQuery bounds for the packet." },
+                            "graph": { "type": "object", "description": "Optional EvidenceGraphQuery bounds for explicit stable-ID crosswalks." },
+                            "review_queue": { "type": "object", "description": "Optional RealDataReviewQueueQuery bounds for structural metadata obligations." },
+                            "freshness": { "type": "object", "properties": { "as_of": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$" }, "max_age_days": { "type": "integer", "minimum": 0, "maximum": 3650, "default": 365 }, "source_id": { "type": ["string", "null"], "maxLength": 512 } }, "required": ["as_of"], "additionalProperties": false, "description": "Optional caller-owned source-age posture." }
+                        },
+                        "additionalProperties": false,
+                        "description": "Optional packet bounds; the resulting packet digest is carried into the audit."
+                    },
+                    "claims": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 128,
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "claim_id": { "type": "string", "maxLength": 128 },
+                                "kind": { "type": "string", "enum": ["source_observation", "population_summary", "research_hypothesis", "limitation", "clinical_action"] },
+                                "scope": { "type": "string", "enum": ["public_record_metadata", "population_aggregate", "citation_metadata", "patient_case"] },
+                                "text": { "type": "string", "maxLength": 8000, "description": "Caller-owned draft text; the audit does not treat it as fact-checked." },
+                                "citations": {
+                                    "type": "array",
+                                    "maxItems": 16,
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "record_kind": { "type": "string", "enum": ["clinical_trial", "genomic_project", "portal_study", "portal_molecular_profile", "guideline_reference", "literature_article"] },
+                                            "record_id": { "type": "string", "maxLength": 128 }
+                                        },
+                                        "required": ["record_kind", "record_id"],
+                                        "additionalProperties": false
+                                    }
+                                },
+                                "explicitly_hypothetical": { "type": "boolean", "default": false, "description": "Required true for research_hypothesis claims." }
+                            },
+                            "required": ["claim_id", "kind", "scope", "text", "citations"],
+                            "additionalProperties": false
+                        },
+                        "description": "Structured local-model/reviewer claims; clinical_action and patient_case entries are reported as blocked."
+                    }
+                },
+                "required": ["real_glioma_data", "claims"],
+                "additionalProperties": false
+            }
+        }),
+        json!({
+            "name": "neurosurgery_public_literature_evidence_packet",
+            "description": "Compose a bounded, digest-addressed evidence handoff from a validated six-specialty PubMed snapshot. The packet includes source-linked citation metadata, bounded abstract excerpts, specialty coverage counts, and an explicit query digest for glioma, cranial-base, craniosynostosis, encephalocele, spina-bifida, or Chiari review. It never infers biology, study quality, diagnosis, prognosis, treatment, triage, or procedure; it performs no network access, provider invocation, credential handling, or patient-file access.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "public_literature": {
+                        "type": "object",
+                        "description": "Required bioprism-neurosurgery-public-literature/0.1 snapshot with verified PubMed source hashes; synthetic_data=true and altered or unknown source records are refused."
+                    },
+                    "query": {
+                        "type": "object",
+                        "properties": {
+                            "query": {
+                                "type": "object",
+                                "properties": {
+                                    "specialty": { "type": ["string", "null"], "enum": ["glioma", "cranial_base", "craniosynostosis", "encephalocele", "spina_bifida", "chiari_malformation", null] },
+                                    "text": { "type": ["string", "null"], "maxLength": 512 },
+                                    "publication_type": { "type": ["string", "null"], "maxLength": 512 },
+                                    "mesh_term": { "type": ["string", "null"], "maxLength": 512 },
+                                    "from_date": { "type": ["string", "null"], "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+                                    "to_date": { "type": ["string", "null"], "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+                                    "limit": { "type": "integer", "minimum": 1, "maximum": 128, "default": 32 }
+                                },
+                                "additionalProperties": false,
+                                "description": "Bounded local query over the already validated PubMed snapshot."
+                            },
+                            "freshness": { "type": "object", "properties": { "as_of": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$" }, "max_age_days": { "type": "integer", "minimum": 0, "maximum": 3650, "default": 365 }, "source_id": { "type": ["string", "null"], "maxLength": 512 } }, "required": ["as_of"], "additionalProperties": false, "description": "Optional caller-owned source-age posture; omitted means freshness is not claimed." }
+                        },
+                        "required": ["query"],
+                        "additionalProperties": false,
+                        "description": "Optional nested query bounds; omitted values use the default bounded query."
+                    }
+                },
+                "required": ["public_literature"],
+                "additionalProperties": false
+            }
+        }),
+        json!({
+            "name": "neurosurgery_public_literature_reasoning_context",
+            "description": "Render a bounded, digest-addressed local-model context from a validated six-specialty PubMed packet. The context contains specialty-tagged citation metadata, direct PMID/source links, and optionally untrusted abstract excerpts; every included PMID is returned as a citation and omissions are counted. The tool never invokes a provider, accepts an API key, fetches URLs, stores patient files, fact-checks source text, or emits diagnosis, prognosis, treatment, triage, or procedure.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "public_literature": {
+                        "type": "object",
+                        "description": "Required bioprism-neurosurgery-public-literature/0.1 snapshot with verified PubMed source hashes; synthetic_data=true and altered or unknown source records are refused."
+                    },
+                    "query": {
+                        "type": "object",
+                        "properties": {
+                            "packet": {
+                                "type": "object",
+                                "properties": {
+                                    "query": { "type": "object", "description": "Optional bounded PublicLiteratureQuery controlling which local PMIDs may be rendered." },
+                                    "freshness": { "type": "object", "properties": { "as_of": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$" }, "max_age_days": { "type": "integer", "minimum": 0, "maximum": 3650, "default": 365 }, "source_id": { "type": ["string", "null"], "maxLength": 512 } }, "required": ["as_of"], "additionalProperties": false, "description": "Optional caller-owned source-age posture." }
+                                },
+                                "additionalProperties": false,
+                                "description": "Optional nested evidence-packet query; omitted values use the validated default."
+                            },
+                            "max_chars": { "type": "integer", "minimum": 1, "maximum": 65536, "default": 24000, "description": "Maximum Unicode characters in context_text; omissions remain explicit." },
+                            "include_abstracts": { "type": "boolean", "default": false, "description": "Include bounded source abstract excerpts as untrusted data; no summary or interpretation is generated." }
+                        },
+                        "additionalProperties": false,
+                        "description": "Optional deterministic rendering bounds."
+                    }
+                },
+                "required": ["public_literature"],
+                "additionalProperties": false
+            }
+        }),
+        json!({
+            "name": "neurosurgery_public_literature_draft_audit",
+            "description": "Audit a caller-owned local-model or reviewer draft against a freshly composed, digest-bound six-specialty PubMed evidence packet. Every claim must cite an emitted literature_article PMID; patient-case and clinical-action postures are blocked, while accepted rows remain grounded_for_human_review. Claim text is not fact-checked or clinically interpreted, and the tool never fetches URLs, invokes a provider, accepts an API key, or recommends care.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "public_literature": {
+                        "type": "object",
+                        "description": "Required bioprism-neurosurgery-public-literature/0.1 source-hashed PubMed snapshot covering one or more neurosurgical specialty lanes."
+                    },
+                    "query": {
+                        "type": "object",
+                        "properties": {
+                            "query": {
+                                "type": "object",
+                                "description": "Optional bounded PublicLiteratureQuery controlling which emitted PMIDs may be cited."
+                            },
+                            "freshness": { "type": "object", "properties": { "as_of": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$" }, "max_age_days": { "type": "integer", "minimum": 0, "maximum": 3650, "default": 365 }, "source_id": { "type": ["string", "null"], "maxLength": 512 } }, "required": ["as_of"], "additionalProperties": false, "description": "Optional caller-owned source-age posture." }
+                        },
+                        "additionalProperties": false,
+                        "description": "Optional nested packet bounds; the resulting packet digest is carried into the audit."
+                    },
+                    "claims": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 128,
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "claim_id": { "type": "string", "maxLength": 128 },
+                                "kind": { "type": "string", "enum": ["source_observation", "population_summary", "research_hypothesis", "limitation", "clinical_action"] },
+                                "scope": { "type": "string", "enum": ["public_record_metadata", "population_aggregate", "citation_metadata", "patient_case"] },
+                                "text": { "type": "string", "maxLength": 8000, "description": "Caller-owned draft text; the audit does not treat it as fact-checked." },
+                                "citations": {
+                                    "type": "array",
+                                    "maxItems": 16,
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "record_kind": { "type": "string", "enum": ["literature_article"] },
+                                            "record_id": { "type": "string", "maxLength": 128, "description": "PMID emitted by the bounded packet." }
+                                        },
+                                        "required": ["record_kind", "record_id"],
+                                        "additionalProperties": false
+                                    }
+                                },
+                                "explicitly_hypothetical": { "type": "boolean", "default": false, "description": "Required true for research_hypothesis claims." }
+                            },
+                            "required": ["claim_id", "kind", "scope", "text", "citations"],
+                            "additionalProperties": false
+                        },
+                        "description": "Structured local-model/reviewer claims; clinical_action and patient_case entries are reported as blocked."
+                    }
+                },
+                "required": ["public_literature", "claims"],
+                "additionalProperties": false
+            }
+        }),
+        json!({
+            "name": "neurosurgery_public_literature_matrix",
+            "description": "Fan out one bounded query across selected lanes of a validated six-specialty PubMed snapshot. Each lane retains an independent source-linked evidence packet, PMID identities, abstract coverage, and truncation/empty state. The matrix never merges cohorts, infers cross-specialty biology, invokes a provider, fetches URLs, accesses patient files, or emits diagnosis, prognosis, treatment, triage, or procedure.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "public_literature": {
+                        "type": "object",
+                        "description": "Required bioprism-neurosurgery-public-literature/0.1 snapshot with verified PubMed source hashes. Synthetic or altered records are refused."
+                    },
+                    "query": {
+                        "type": "object",
+                        "properties": {
+                            "specialties": {
+                                "type": "array",
+                                "minItems": 1,
+                                "maxItems": 6,
+                                "uniqueItems": true,
+                                "items": { "type": "string", "enum": ["glioma", "cranial_base", "craniosynostosis", "encephalocele", "spina_bifida", "chiari_malformation"] },
+                                "description": "Optional lane selection; omission scans all six supported specialties."
+                            },
+                            "query": {
+                                "type": "object",
+                                "properties": {
+                                    "text": { "type": ["string", "null"], "maxLength": 512 },
+                                    "publication_type": { "type": ["string", "null"], "maxLength": 512 },
+                                    "mesh_term": { "type": ["string", "null"], "maxLength": 512 },
+                                    "from_date": { "type": ["string", "null"], "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+                                    "to_date": { "type": ["string", "null"], "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+                                    "limit": { "type": "integer", "minimum": 1, "maximum": 128, "default": 32 }
+                                },
+                                "additionalProperties": false,
+                                "description": "Shared bounded filters applied independently within each selected lane; specialty is assigned by the matrix."
+                            }
+                        },
+                        "additionalProperties": false,
+                        "description": "Optional lane and query bounds; omitted values use all lanes and the default limit."
+                    }
+                },
+                "required": ["public_literature"],
+                "additionalProperties": false
+            }
+        }),
+        json!({
+            "name": "neurosurgery_public_literature_freshness",
+            "description": "Audit the age of sources in a validated six-specialty PubMed snapshot against an explicit caller-supplied UTC as_of timestamp. It reports current, stale, and future-dated source metadata with a digest-bound review posture; max_age_days is a caller policy, not evidence-quality, applicability, or clinical-relevance scoring. No URL is fetched, provider or credential is used, patient/sample value is exposed, or clinical action is emitted.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "public_literature": {
+                        "type": "object",
+                        "description": "Required bioprism-neurosurgery-public-literature/0.1 snapshot with verified PubMed source hashes."
+                    },
+                    "query": {
+                        "type": "object",
+                        "properties": {
+                            "as_of": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$", "description": "Required caller-owned UTC clock; the server never uses the host clock." },
+                            "max_age_days": { "type": "integer", "minimum": 0, "maximum": 3650, "default": 365, "description": "Caller review-policy bound for current sources; not a quality threshold." },
+                            "source_id": { "type": ["string", "null"], "maxLength": 512, "description": "Optional exact source facet." }
+                        },
+                        "required": ["as_of"],
+                        "additionalProperties": false
+                    }
+                },
+                "required": ["public_literature", "query"],
+                "additionalProperties": false
+            }
+        }),
+        json!({
+            "name": "neurosurgery_public_literature_refresh_audit",
+            "description": "Reconcile two validated six-specialty PubMed snapshots into one digest-bound refresh review. The audit reports stable/added/removed source and PMID identities, changed metadata fields, lane coverage changes, optional source freshness, and explicit truncation or empty-lane obligations. It never fetches, merges, promotes, invokes a provider, accepts an API key, accesses patient files, or emits diagnosis, prognosis, treatment, triage, or procedure.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "before_public_literature": {
+                        "type": "object",
+                        "description": "Required validated bioprism-neurosurgery-public-literature/0.1 baseline snapshot with source hashes."
+                    },
+                    "after_public_literature": {
+                        "type": "object",
+                        "description": "Required validated bioprism-neurosurgery-public-literature/0.1 candidate snapshot with source hashes."
+                    },
+                    "query": {
+                        "type": "object",
+                        "properties": {
+                            "matrix": {
+                                "type": "object",
+                                "description": "Optional bounded PublicLiteratureMatrixQuery applied to the candidate snapshot; omitted scans all lanes with default limits."
+                            },
+                            "freshness": {
+                                "type": ["object", "null"],
+                                "properties": {
+                                    "as_of": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$" },
+                                    "max_age_days": { "type": "integer", "minimum": 0, "maximum": 3650, "default": 365 },
+                                    "source_id": { "type": ["string", "null"], "maxLength": 512 }
+                                },
+                                "required": ["as_of"],
+                                "additionalProperties": false,
+                                "description": "Optional caller-owned source-age posture; age is not a quality or clinical score."
+                            },
+                            "max_source_changes": { "type": "integer", "minimum": 1, "maximum": 128, "default": 64 },
+                            "max_record_changes": { "type": "integer", "minimum": 1, "maximum": 512, "default": 256 }
+                        },
+                        "additionalProperties": false,
+                        "description": "Optional bounded reconciliation and candidate-lane controls."
+                    }
+                },
+                "required": ["before_public_literature", "after_public_literature"],
+                "additionalProperties": false
+            }
+        }),
+        json!({
+            "name": "neurosurgery_literature_link_audit",
+            "description": "Link a validated real glioma literature index to a selected lane of the cross-specialty PubMed snapshot using exact PMID and normalized DOI identifiers. The report preserves unmatched IDs and changed metadata field names, but never infers cohort identity, study quality, biological relationships, or clinical meaning; it never fetches, merges, accepts, promotes, invokes a provider, accepts an API key, accesses patient files, or emits diagnosis, prognosis, treatment, triage, or procedure.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "real_glioma_data": {
+                        "type": "object",
+                        "description": "Required validated bioprism-neurosurgery-real/0.1 public glioma snapshot. Only its literature index is linked; registry/genomic records remain separate."
+                    },
+                    "public_literature": {
+                        "type": "object",
+                        "description": "Required validated bioprism-neurosurgery-public-literature/0.1 snapshot."
+                    },
+                    "query": {
+                        "type": "object",
+                        "properties": {
+                            "public_specialty": {
+                                "type": ["string", "null"],
+                                "enum": ["glioma", "cranial_base", "craniosynostosis", "encephalocele", "spina_bifida", "chiari_malformation", null],
+                                "default": "glioma",
+                                "description": "Selected public lane; null intentionally widens to all six lanes for collision review."
+                            },
+                            "max_links": { "type": "integer", "minimum": 1, "maximum": 256, "default": 128 },
+                            "max_unmatched_ids": { "type": "integer", "minimum": 1, "maximum": 256, "default": 64 }
+                        },
+                        "additionalProperties": false,
+                        "description": "Optional bounded exact-identifier projection controls."
+                    }
+                },
+                "required": ["real_glioma_data", "public_literature"],
+                "additionalProperties": false
+            }
+        }),
+        json!({
+            "name": "neurosurgery_public_literature_integrity_audit",
+            "description": "Audit a validated real PubMed snapshot for explicit source/record completeness and identifier hygiene. It reports missing DOI, abstract, publication-type, and MeSH metadata plus duplicate normalized DOI groups in bounded specialty scopes; it never scores studies, infers biology, or emits diagnosis, prognosis, treatment, triage, or procedural action.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "public_literature": {
+                        "type": "object",
+                        "description": "Required validated bioprism-neurosurgery-public-literature/0.1 snapshot. synthetic_data must be false and source hashes must validate."
+                    },
+                    "query": {
+                        "type": "object",
+                        "properties": {
+                            "specialties": {
+                                "type": ["array", "null"],
+                                "minItems": 1,
+                                "maxItems": 6,
+                                "uniqueItems": true,
+                                "items": {
+                                    "type": "string",
+                                    "enum": ["glioma", "cranial_base", "craniosynostosis", "encephalocele", "spina_bifida", "chiari_malformation"]
+                                },
+                                "description": "Optional explicit lane scope; null or omission audits all six lanes."
+                            },
+                            "max_issues": { "type": "integer", "minimum": 1, "maximum": 256, "default": 128 }
+                        },
+                        "additionalProperties": false,
+                        "description": "Optional bounded issue projection controls."
+                    }
+                },
+                "required": ["public_literature"],
+                "additionalProperties": false
+            }
+        }),
+        json!({
+            "name": "neurosurgery_public_literature_review_queue",
+            "description": "Project a validated real PubMed snapshot's missingness and duplicate-identifier findings into bounded, source-linked human-review tasks. Tasks preserve lane, PMID, title, source URI, and explicit reasons; they never repair records, rank studies, infer biology, or emit diagnosis, prognosis, treatment, triage, or procedural action.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "public_literature": {
+                        "type": "object",
+                        "description": "Required validated bioprism-neurosurgery-public-literature/0.1 snapshot. synthetic_data must be false and source hashes must validate."
+                    },
+                    "query": {
+                        "type": "object",
+                        "properties": {
+                            "specialties": {
+                                "type": ["array", "null"],
+                                "minItems": 1,
+                                "maxItems": 6,
+                                "uniqueItems": true,
+                                "items": {
+                                    "type": "string",
+                                    "enum": ["glioma", "cranial_base", "craniosynostosis", "encephalocele", "spina_bifida", "chiari_malformation"]
+                                },
+                                "description": "Optional explicit lane scope; null or omission covers all six lanes."
+                            },
+                            "max_items": { "type": "integer", "minimum": 1, "maximum": 256, "default": 64 }
+                        },
+                        "additionalProperties": false,
+                        "description": "Optional bounded review-task projection controls."
+                    }
+                },
+                "required": ["public_literature"],
+                "additionalProperties": false
+            }
+        }),
+        json!({
+            "name": "neurosurgery_public_literature_workbench",
+            "description": "Join each selected specialty's explicit neurosurgical research profile to exact coverage and completeness obligations in a validated real PubMed snapshot. The workbench is reviewer navigation metadata, not a readiness score: it never ranks lanes, scores evidence, infers biology, or emits diagnosis, prognosis, treatment, triage, or procedural action.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "public_literature": {
+                        "type": "object",
+                        "description": "Required validated bioprism-neurosurgery-public-literature/0.1 snapshot. synthetic_data must be false and source hashes must validate."
+                    },
+                    "query": {
+                        "type": "object",
+                        "properties": {
+                            "specialties": {
+                                "type": ["array", "null"],
+                                "minItems": 1,
+                                "maxItems": 6,
+                                "uniqueItems": true,
+                                "items": {
+                                    "type": "string",
+                                    "enum": ["glioma", "cranial_base", "craniosynostosis", "encephalocele", "spina_bifida", "chiari_malformation"]
+                                },
+                                "description": "Optional explicit lane scope; null or omission includes all six lanes."
+                            },
+                            "max_issues_per_lane": { "type": "integer", "minimum": 1, "maximum": 256, "default": 128 },
+                            "freshness": {
+                                "type": ["object", "null"],
+                                "description": "Optional caller-owned UTC source-age policy for the selected lanes."
+                            }
+                        },
+                        "additionalProperties": false,
+                        "description": "Optional bounded workbench projection controls."
+                    }
+                },
+                "required": ["public_literature"],
+                "additionalProperties": false
+            }
+        }),
+        json!({
+            "name": "neurosurgery_evidence_program",
+            "description": "Build a bounded source-grounded research agenda for one or more neurosurgical specialty lanes. Each protocol track (molecular, imaging, anatomy, developmental, function, outcomes, or translation) is projected onto exact IDs in validated real snapshots and emits a metadata-only review_worklist for missing observations, provenance gaps, and (when supplied) missing asset classes. An optional persisted case-asset review disposition is digest/count bound and carried into the program for resumable worker replay. Matches are retrieval observations only: no relevance score, diagnosis, prognosis, treatment, triage, urgency, or operative instruction is emitted; no provider, API key, network, credentials, or patient-file access is used.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "request": {
+                        "type": "object",
+                        "description": "Required de-identified bioprism-neurosurgery/0.1 CaseRequest; clinical uses and direct identifiers are refused."
+                    },
+                    "real_glioma_data": {
+                        "type": ["object", "null"],
+                        "description": "Optional validated bioprism-neurosurgery-real/0.1 glioma population snapshot."
+                    },
+                    "public_literature": {
+                        "type": ["object", "null"],
+                        "description": "Optional validated bioprism-neurosurgery-public-literature/0.1 PubMed snapshot covering the six lanes."
+                    },
+                    "case_asset_manifest": {
+                        "type": ["object", "null"],
+                        "description": "Optional real, de-identified metadata manifest for imaging, pathology, molecular, operative, functional, developmental, longitudinal, or anatomical exports. Asset bytes are never read."
+                    },
+                    "case_asset_manifest_query": {
+                        "type": ["object", "null"],
+                        "description": "Optional bounded projection controls for the case asset manifest; requires case_asset_manifest."
+                    },
+                    "case_asset_review_disposition": {
+                        "type": ["object", "null"],
+                        "description": "Optional persisted reviewer ledger produced from the exact case-asset manifest projection; requires case_asset_manifest and is bound by report digest/counts."
+                    },
+                    "query": {
+                        "type": "object",
+                        "properties": {
+                            "specialties": {
+                                "type": ["array", "null"],
+                                "minItems": 1,
+                                "maxItems": 6,
+                                "uniqueItems": true,
+                                "items": { "type": "string", "enum": ["glioma", "cranial_base", "craniosynostosis", "encephalocele", "spina_bifida", "chiari_malformation"] },
+                                "description": "Optional explicit lane list; omission scopes to request.specialty."
+                            },
+                            "max_tracks_per_lane": { "type": "integer", "minimum": 1, "maximum": 8, "default": 6 },
+                            "max_references_per_track": { "type": "integer", "minimum": 1, "maximum": 16, "default": 8 },
+                            "include_abstracts": { "type": "boolean", "default": false, "description": "Include bounded source excerpts copied from the snapshot; false keeps metadata-only output." },
+                            "freshness": { "type": ["object", "null"], "description": "Optional caller-owned UTC source-age policy evaluated against the same snapshot(s)." }
+                        },
+                        "additionalProperties": false
+                    }
+                },
+                "required": ["request"],
+                "additionalProperties": false
+            }
+        }),
+        json!({
+            "name": "neurosurgery_public_literature_portfolio",
+            "description": "Run a bounded autonomous research pass across selected lanes of a validated real PubMed snapshot. Each lane retains its explicit specialty profile, exact lexical query hits, and source-linked metadata review queue; the portfolio never ranks lanes, scores evidence, infers biology, promotes population citations to patient evidence, or emits diagnosis, prognosis, treatment, triage, or procedural action.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "public_literature": {
+                        "type": "object",
+                        "description": "Required validated bioprism-neurosurgery-public-literature/0.1 snapshot. synthetic_data must be false and source hashes must validate."
+                    },
+                    "query": {
+                        "type": "object",
+                        "properties": {
+                            "specialties": {
+                                "type": ["array", "null"],
+                                "minItems": 1,
+                                "maxItems": 6,
+                                "uniqueItems": true,
+                                "items": {
+                                    "type": "string",
+                                    "enum": ["glioma", "cranial_base", "craniosynostosis", "encephalocele", "spina_bifida", "chiari_malformation"]
+                                },
+                                "description": "Optional explicit lane scope; null or omission includes all six lanes."
+                            },
+                            "text": { "type": ["string", "null"], "maxLength": 512, "description": "Optional lexical metadata query applied independently within each selected lane." },
+                            "publication_type": { "type": ["string", "null"], "maxLength": 256 },
+                            "mesh_term": { "type": ["string", "null"], "maxLength": 256 },
+                            "from_date": { "type": ["string", "null"], "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+                            "to_date": { "type": ["string", "null"], "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+                            "max_hits_per_lane": { "type": "integer", "minimum": 1, "maximum": 128, "default": 16 },
+                            "max_review_items_per_lane": { "type": "integer", "minimum": 1, "maximum": 128, "default": 32 },
+                            "max_issues_per_lane": { "type": "integer", "minimum": 1, "maximum": 256, "default": 128 },
+                            "freshness": {
+                                "type": ["object", "null"],
+                                "description": "Optional caller-owned UTC source-age policy for the selected lanes."
+                            }
+                        },
+                        "additionalProperties": false,
+                        "description": "Optional bounded per-lane query, issue, review, and freshness controls."
+                    }
+                },
+                "required": ["public_literature"],
+                "additionalProperties": false
+            }
+        }),
+        json!({
+            "name": "neurosurgery_research_brief",
+            "description": "Build a deterministic, source-linked neurosurgical research brief from one validated real glioma or cross-specialty PubMed snapshot. It groups local records into specialty topic lanes, reports exact matched terms, source IDs, publication tags, abstract availability, cross-topic overlap, truncation, and review prompts. Topic membership is lexical extraction rather than relevance, evidence-quality, diagnostic, prognostic, treatment, triage, or procedural judgment. No model, provider, network, credential, patient-file access, or external effect is available.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "request": {
+                        "type": "object",
+                        "description": "Required de-identified bioprism-neurosurgery/0.1 CaseRequest. Clinical uses and direct identifiers are refused; specialty selects the bounded topic vocabulary."
+                    },
+                    "real_glioma_data": {
+                        "type": "object",
+                        "description": "One validated bioprism-neurosurgery-real/0.1 public glioma snapshot. Choose this or public_literature, never both."
+                    },
+                    "public_literature": {
+                        "type": "object",
+                        "description": "One validated bioprism-neurosurgery-public-literature/0.1 PubMed snapshot. Choose this or real_glioma_data, never both."
+                    },
+                    "query": {
+                        "type": "object",
+                        "properties": {
+                            "real_data_query": { "type": ["object", "null"], "description": "Optional bounded RealDataQuery; allowed only with real_glioma_data." },
+                            "public_literature_query": { "type": ["object", "null"], "description": "Optional bounded PublicLiteratureQuery scoped to the request specialty; allowed only with public_literature." },
+                            "focus_terms": {
+                                "type": "array",
+                                "minItems": 0,
+                                "maxItems": 32,
+                                "items": { "type": "string", "minLength": 1, "maxLength": 96 },
+                                "description": "Optional caller-declared lexical terms; they are reported as a caller_focus lane and never inferred from patient data."
+                            },
+                            "max_topics": { "type": "integer", "minimum": 1, "maximum": 24, "default": 12 },
+                            "max_records_per_topic": { "type": "integer", "minimum": 1, "maximum": 32, "default": 8 },
+                            "include_abstracts": { "type": "boolean", "default": false, "description": "Include bounded source excerpts without rewriting them; false keeps metadata-only output." },
+                            "freshness": { "type": ["object", "null"], "description": "Optional caller-owned UTC source-age policy evaluated against the same bundle." }
+                        },
+                        "additionalProperties": false,
+                        "description": "Optional bounded extraction controls and one source-specific local query."
+                    }
+                },
+                "required": ["request"],
+                "additionalProperties": false,
+                "oneOf": [
+                    { "required": ["real_glioma_data"], "properties": { "public_literature": { "not": {} } } },
+                    { "required": ["public_literature"], "properties": { "real_glioma_data": { "not": {} } } }
+                ]
+            }
+        }),
+        json!({
+            "name": "neurosurgery_research_plan",
+            "description": "Compile a bounded, source-linked neurosurgical research handoff from a de-identified request. It converts explicit intake gaps into caller-owned observation, provenance-repair, interpretation-review, and evidence-review tasks, and may attach local citation or population-metadata candidates from a validated snapshot. It never fetches a source, infers a diagnosis, prognosis, treatment, triage, urgency, or procedure; no provider, network, credentials, or patient-file access is available.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "request": {
+                        "type": "object",
+                        "description": "A bioprism-neurosurgery/0.1 CaseRequest. Clinical uses and direct identifiers are refused."
+                    },
+                    "real_glioma_data": {
+                        "type": "object",
+                        "description": "Optional validated bioprism-neurosurgery-real/0.1 population snapshot for glioma metadata context only."
+                    },
+                    "public_literature": {
+                        "type": "object",
+                        "description": "Optional validated bioprism-neurosurgery-public-literature/0.1 source-hashed PubMed snapshot for citation context only."
+                    },
+                    "max_tasks": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 64,
+                        "default": 8,
+                        "description": "Maximum ordered research tasks returned; omitted tasks remain counted explicitly."
+                    },
+                    "max_references_per_task": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 16,
+                        "default": 4,
+                        "description": "Maximum source-linked candidates attached to each task."
+                    }
+                },
+                "required": ["request"],
+                "additionalProperties": false
+            }
+        }),
+        json!({
+            "name": "neurosurgery_evidence_acquisition",
+            "description": "Run a provider-free, bounded local acquisition lifecycle from explicit neurosurgical evidence gaps. compile emits deterministic source queries and optional digest-only case-asset review obligations; start creates a digest-bound caller checkpoint; advance replays a small checkpoint wave against unchanged validated snapshots; finish verifies all steps and required source planes. An optional persisted case-asset review disposition is revalidated and carried through the plan, session, and execution receipt. It never fetches a URL, uses a provider or API key, opens credentials or case-asset bytes, or turns population/citation metadata into a diagnosis, prognosis, treatment, triage, urgency, or procedure.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "operation": {
+                        "type": "string",
+                        "enum": ["compile", "start", "advance", "finish"],
+                        "default": "compile",
+                        "description": "Lifecycle operation: compile, start, advance, or finish."
+                    },
+                    "request": {
+                        "type": "object",
+                        "description": "A bioprism-neurosurgery/0.1 de-identified CaseRequest. Clinical uses and direct identifiers are refused."
+                    },
+                    "real_glioma_data": {
+                        "type": ["object", "null"],
+                        "description": "Optional validated real glioma population snapshot. It is accepted only for the glioma lane."
+                    },
+                    "public_literature": {
+                        "type": ["object", "null"],
+                        "description": "Optional validated six-specialty PubMed snapshot; it remains citation metadata."
+                    },
+                    "case_asset_manifest": {
+                        "type": ["object", "null"],
+                        "description": "Optional real de-identified multimodal asset manifest. Only its digest-bound review projection is carried; asset bytes are never opened."
+                    },
+                    "case_asset_manifest_query": {
+                        "type": ["object", "null"],
+                        "properties": {
+                            "requested_kinds": {
+                                "type": ["array", "null"],
+                                "items": { "type": "string", "enum": ["imaging_series", "pathology_report", "molecular_assay", "operative_note", "neurofunctional_assessment", "developmental_assessment", "longitudinal_outcome", "anatomical_model"] },
+                                "minItems": 1,
+                                "maxItems": 8,
+                                "uniqueItems": true
+                            },
+                            "max_review_items": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 512,
+                                "default": 128
+                            }
+                        },
+                        "additionalProperties": false,
+                        "description": "Optional bounded requested asset classes and review-item limit; requires case_asset_manifest."
+                    },
+                    "case_asset_review_disposition": {
+                        "type": ["object", "null"],
+                        "description": "Optional persisted reviewer ledger produced from the exact case-asset manifest projection; requires case_asset_manifest and is revalidated for compile/start/advance/finish."
+                    },
+                    "query": {
+                        "type": "object",
+                        "properties": {
+                            "max_steps": { "type": "integer", "minimum": 1, "maximum": 64, "default": 16 },
+                            "max_references_per_step": { "type": "integer", "minimum": 1, "maximum": 16, "default": 4 },
+                            "freshness": {
+                                "type": ["object", "null"],
+                                "properties": {
+                                    "as_of": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$" },
+                                    "max_age_days": { "type": "integer", "minimum": 0, "maximum": 3650, "default": 365 },
+                                    "source_id": { "type": ["string", "null"] }
+                                },
+                                "required": ["as_of"],
+                                "additionalProperties": false
+                            }
+                        },
+                        "additionalProperties": false,
+                        "default": {}
+                    },
+                    "session": {
+                        "type": ["object", "null"],
+                        "description": "Digest-bound checkpoint returned by start or advance; required for advance and finish."
+                    },
+                    "max_steps": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 16,
+                        "default": 1,
+                        "description": "Maximum plan steps replayed by one advance operation."
+                    }
+                },
+                "required": ["request"],
+                "additionalProperties": false
+            }
+        }),
+        json!({
+            "name": "neurosurgery_plan",
+            "description": "Run the provider-neutral neurosurgical research route for a de-identified glioma, cranial-base, craniofacial, encephalocele, spina-bifida, or Chiari request. The response includes a specialty-specific identity/spatial/temporal protocol, evidence questions, confounders, reviewer roles, explicit unmeasured/uninterpretable/conflicting gaps, research hypotheses rather than diagnoses, and a human-review hold. Every tool is read-only; no OpenAI API, credential, network, patient-file access, model invocation, treatment recommendation, triage, or procedural action is available.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "request": {
+                        "type": "object",
+                        "description": "A bioprism-neurosurgery/0.1 CaseRequest with case_id, specialty, request_use (research_synthesis, synthetic_case_simulation, or educational_review), question, optional typed observations, provenance-bearing evidence, optional requested_tools, and optional glioma_molecular. glioma_molecular is a bioprism-neurosurgery-glioma-molecular/0.1 panel of unique IDH1/IDH2, 1p/19q, H3, MGMT, TERT, EGFR, +7/-10, CDKN2A/B and additional research-marker states (present, absent, not_collected, uninterpretable, conflicting) with optional assay/specimen/source/timestamp provenance. It reports coverage only and never classifies or recommends treatment. Direct-identifier fields and clinical uses are refused."
+                    },
+                    "real_glioma_data": {
+                        "type": "object",
+                        "description": "Optional bioprism-neurosurgery-real/0.1 RealGliomaBundle. For glioma research only: every public registry/genomic/study/molecular-profile/guideline record must link to an allow-listed HTTPS source and pass its canonical SHA-256 digest; molecular profiles are modality metadata only, and synthetic_data=true is refused."
+                    },
+                    "public_literature": {
+                        "type": "object",
+                        "description": "Optional bioprism-neurosurgery-public-literature/0.1 snapshot of source-hashed PubMed citation metadata tagged to the six specialty lanes. It is for citation synthesis only and contains no patient-level records or generated conclusions."
+                    }
+                },
+                "required": ["request"]
+            }
+        }),
+        json!({
+            "name": "neurosurgery_public_literature_query",
+            "description": "Query a validated cross-specialty PubMed snapshot by specialty lane, source text, publication type, MeSH term, or inclusive publication-date range. The bounded result exposes PMID/title/journal/date/DOI, a direct PubMed record URI, bounded abstract excerpts, publication-type and MeSH metadata, source URI, specialty coverage counts, and the snapshot digest. It performs no network access and never emits patient-level findings or clinical conclusions.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "public_literature": { "type": "object", "description": "A bioprism-neurosurgery-public-literature/0.1 bundle with verified PubMed source hashes." },
+                    "query": {
+                        "type": "object",
+                        "properties": {
+                            "specialty": { "type": ["string", "null"], "enum": ["glioma", "cranial_base", "craniosynostosis", "encephalocele", "spina_bifida", "chiari_malformation", null] },
+                            "text": { "type": ["string", "null"], "maxLength": 512 },
+                            "publication_type": { "type": ["string", "null"], "maxLength": 512 },
+                            "mesh_term": { "type": ["string", "null"], "maxLength": 512 },
+                            "from_date": { "type": ["string", "null"], "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+                            "to_date": { "type": ["string", "null"], "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+                            "limit": { "type": "integer", "minimum": 1, "maximum": 128, "default": 32 }
+                        },
+                        "additionalProperties": false,
+                        "description": "Optional specialty, case-insensitive text/tag filters, inclusive ISO publication-date bounds, and a bounded result limit over the already validated local snapshot. A zero-match result stays distinct from a truncated result."
+                    }
+                },
+                "required": ["public_literature", "query"],
+                "additionalProperties": false
+            }
+        }),
+        json!({
+            "name": "neurosurgery_real_data_trial_landscape",
+            "description": "Summarize bounded ClinicalTrials.gov registry metadata already present in a validated real glioma snapshot. Returns descriptive status/phase/study-design/intervention buckets, update-date range, explicit missingness and truncation review reasons, and source identity. It never ranks trials, infers eligibility, estimates efficacy/safety/outcomes, fetches URLs, invokes a provider, or exposes patient-level records.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "real_glioma_data": { "type": "object", "description": "A bioprism-neurosurgery-real/0.1 bundle with verified public-source hashes." },
+                    "query": {
+                        "type": "object",
+                        "properties": {
+                            "query": {
+                                "type": "object",
+                                "properties": {
+                                    "text": { "type": ["string", "null"], "maxLength": 512 },
+                                    "status": { "type": ["string", "null"], "maxLength": 512 },
+                                    "trial_phase": { "type": ["string", "null"], "maxLength": 512 },
+                                    "trial_study_type": { "type": ["string", "null"], "maxLength": 512 },
+                                    "trial_updated_from": { "type": ["string", "null"], "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+                                    "trial_updated_to": { "type": ["string", "null"], "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+                                    "record_kind": { "type": ["string", "null"], "enum": ["clinical_trial", null] },
+                                    "source_id": { "type": ["string", "null"], "maxLength": 512 },
+                                    "related_record_id": { "type": ["string", "null"], "maxLength": 512 },
+                                    "limit": { "type": "integer", "minimum": 1, "maximum": 128, "default": 32 }
+                                },
+                                "additionalProperties": false,
+                                "description": "Optional bounded trial query; the landscape normalizes record_kind to clinical_trial."
+                            },
+                            "max_interventions": { "type": "integer", "minimum": 1, "maximum": 256, "default": 128 }
+                        },
+                        "additionalProperties": false
+                    }
+                },
+                "required": ["real_glioma_data"],
+                "additionalProperties": false
+            }
+        }),
+        json!({
+            "name": "neurosurgery_real_data_molecular_coverage",
+            "description": "Inventory bounded cBioPortal molecular-profile metadata plus aggregate GDC project file/data-type availability already present in a validated real glioma snapshot. Returns per-study profile counts, alteration-type/datatype buckets, analysis-visible and patient-level metadata flags, explicit description or missing-facet obligations, bounded truncation reasons, and source identity. It never exposes mutation calls, file contents, or sample identifiers, infers a molecular result, fetches URLs, invokes a provider, or recommends diagnosis, prognosis, treatment, or procedure.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "real_glioma_data": { "type": "object", "description": "A bioprism-neurosurgery-real/0.1 bundle with verified public-source hashes." },
+                    "query": {
+                        "type": "object",
+                        "properties": {
+                            "query": {
+                                "type": "object",
+                                "properties": {
+                                    "text": { "type": ["string", "null"], "maxLength": 512 },
+                                    "status": { "type": ["string", "null"], "maxLength": 512 },
+                                    "molecular_alteration_type": { "type": ["string", "null"], "maxLength": 512 },
+                                    "molecular_datatype": { "type": ["string", "null"], "maxLength": 512 },
+                                    "record_kind": { "type": ["string", "null"], "enum": ["portal_molecular_profile", null] },
+                                    "source_id": { "type": ["string", "null"], "maxLength": 512 },
+                                    "related_record_id": { "type": ["string", "null"], "maxLength": 512 },
+                                    "limit": { "type": "integer", "minimum": 1, "maximum": 128, "default": 32 }
+                                },
+                                "additionalProperties": false,
+                                "description": "Optional bounded profile text/source/relationship facets plus exact case-insensitive molecular alteration-type and datatype facets. Molecular facets require portal_molecular_profile (or implicitly restrict results to profiles)."
+                            },
+                            "max_studies": { "type": "integer", "minimum": 1, "maximum": 256, "default": 128 }
+                        },
+                        "additionalProperties": false
+                    }
+                },
+                "required": ["real_glioma_data"],
+                "additionalProperties": false
+            }
+        }),
+        json!({
+            "name": "neurosurgery_real_data_query",
+            "description": "Query a validated public glioma bundle by stable trial, project, study, cBioPortal molecular-profile modality, guideline, PubMed literature, title, abstract text, publication type, MeSH term, PMID, DOI, registry status, source facet, or explicit cross-record relationship. The bounded deterministic result includes source-linked metadata, optional ClinicalTrials.gov study type/enrollment/intervention metadata, trial update dates and phases, public-study sample counts, bounded abstract excerpts, assay-modality inventory, and explainable study/profile/publication edges. Missing registry fields remain absent rather than guessed; the tool performs no network access and never exposes patient-level records or clinical conclusions.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "real_glioma_data": { "type": "object", "description": "A bioprism-neurosurgery-real/0.1 bundle with verified public-source hashes." },
+                    "query": {
+                        "type": "object",
+                        "properties": {
+                            "text": { "type": ["string", "null"], "maxLength": 512 },
+                            "status": { "type": ["string", "null"], "maxLength": 512 },
+                            "trial_phase": { "type": ["string", "null"], "maxLength": 512, "description": "Case-insensitive exact phase facet for ClinicalTrials.gov records." },
+                            "trial_study_type": { "type": ["string", "null"], "maxLength": 512, "description": "Case-insensitive exact study-design facet for ClinicalTrials.gov records." },
+                            "trial_updated_from": { "type": ["string", "null"], "pattern": "^\\d{4}-\\d{2}-\\d{2}$", "description": "Inclusive YYYY-MM-DD lower bound over registry last-update metadata." },
+                            "trial_updated_to": { "type": ["string", "null"], "pattern": "^\\d{4}-\\d{2}-\\d{2}$", "description": "Inclusive YYYY-MM-DD upper bound over registry last-update metadata." },
+                            "molecular_alteration_type": { "type": ["string", "null"], "maxLength": 512, "description": "Case-insensitive exact cBioPortal alteration-type facet; requires portal_molecular_profile (or implicitly restricts results to profiles)." },
+                            "molecular_datatype": { "type": ["string", "null"], "maxLength": 512, "description": "Case-insensitive exact cBioPortal datatype facet; requires portal_molecular_profile (or implicitly restricts results to profiles)." },
+                            "genomic_data_type": { "type": ["string", "null"], "maxLength": 512, "description": "Case-insensitive exact GDC file data-type facet; requires genomic_project (or implicitly restricts results to projects)." },
+                            "publication_type": { "type": ["string", "null"], "maxLength": 512, "description": "Case-insensitive partial PubMed publication-type facet; requires literature_article (or implicitly restricts results to literature)." },
+                            "mesh_term": { "type": ["string", "null"], "maxLength": 512, "description": "Case-insensitive partial PubMed MeSH descriptor facet; requires literature_article (or implicitly restricts results to literature)." },
+                            "publication_date_from": { "type": ["string", "null"], "pattern": "^\\d{4}-\\d{2}-\\d{2}$", "description": "Inclusive YYYY-MM-DD lower bound over PubMed publication dates; missing dates do not match." },
+                            "publication_date_to": { "type": ["string", "null"], "pattern": "^\\d{4}-\\d{2}-\\d{2}$", "description": "Inclusive YYYY-MM-DD upper bound over PubMed publication dates; missing dates do not match." },
+                            "record_kind": { "type": ["string", "null"], "enum": ["clinical_trial", "genomic_project", "portal_study", "portal_molecular_profile", "guideline_reference", "literature_article", null] },
+                            "source_id": { "type": ["string", "null"], "maxLength": 512 },
+                            "related_record_id": { "type": ["string", "null"], "maxLength": 512 },
+                            "limit": { "type": "integer", "minimum": 1, "maximum": 128, "default": 32 }
+                        },
+                        "additionalProperties": false,
+                        "description": "Optional case-insensitive text/status filters, exact registry phase/study-type facets, inclusive registry update-date bounds, exact cBioPortal molecular and GDC file data-type facets, partial PubMed publication-type/MeSH facets, inclusive PubMed publication-date bounds, record-kind/source/relationship facets, and a bounded result limit. Trial-specific facets require clinical_trial (or implicitly restrict results to trials); molecular alteration/datatype facets require portal_molecular_profile; genomic_data_type requires genomic_project; publication_type/mesh_term/publication_date_from/publication_date_to require literature_article; missing upstream fields do not match a metadata facet. Molecular and genomic matches identify availability metadata only; related_records exposes only explicit study/profile/publication crosswalks; trial hits may carry optional phases, last_update, study_type, aggregate enrollment_count, and intervention_names; portal-study hits may carry sample_count; PubMed hits may carry publication_date plus a bounded source-text excerpt and indexing tags. These are source metadata for reviewer verification, not clinical conclusions."
+                    }
+                },
+                "required": ["real_glioma_data", "query"]
+            }
+        }),
+        json!({
+            "name": "neurosurgery_session",
+            "description": "Run a stateless, resumable neurosurgical research session. operation=start creates a digest-bound route; operation=advance executes exactly one read-only tool and returns a checkpoint; operation=run executes the complete route under a bounded max_steps cap and returns the final report plus terminal checkpoint; operation=finish reconstructs the final report only after every route step is present. The caller owns checkpoint persistence and must resend the same request and optional real_glioma_data or public_literature bundle. No provider, network, credential, diagnosis, treatment recommendation, triage, or procedural action is available.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "operation": { "type": "string", "enum": ["start", "advance", "run", "finish"] },
+                    "request": { "type": "object", "description": "A bioprism-neurosurgery/0.1 CaseRequest; glioma requests may include the typed bioprism-neurosurgery-glioma-molecular/0.1 panel for provenance-aware assay coverage." },
+                    "session": { "type": "object", "description": "A checkpoint returned by start or advance; required for advance and finish." },
+                    "real_glioma_data": { "type": "object", "description": "Optional validated bioprism-neurosurgery-real/0.1 RealGliomaBundle; required on every operation when start included it." },
+                    "public_literature": { "type": "object", "description": "Optional validated bioprism-neurosurgery-public-literature/0.1 PubMed bundle; required on every operation when start included it. Choose this or real_glioma_data, never both." },
+                    "max_steps": { "type": "integer", "minimum": 1, "maximum": 256, "default": 256, "description": "For operation=run only: maximum route steps before a typed refusal." }
+                },
+                "required": ["operation", "request"],
+                "oneOf": [
+                    { "properties": { "operation": { "const": "start" } } },
+                    { "properties": { "operation": { "const": "advance" } }, "required": ["session"] },
+                    { "properties": { "operation": { "const": "run" } } },
+                    { "properties": { "operation": { "const": "finish" } }, "required": ["session"] }
+                ]
+            }
+        }),
+        json!({
+            "name": "neurosurgery_mission",
+            "description": "Compose a provider-free neurosurgical research mission: discover the closed specialty catalogue, compile an ordered source-linked research plan from explicit intake gaps, optionally query caller-supplied validated public bundles, attach deterministic coverage plus bounded ClinicalTrials.gov trial-landscape, aggregate GDC cohort-landscape, and cBioPortal molecular-coverage inventories, review queues, bounded evidence packets, a resumable real-data metadata review wave, stable-ID graphs, source-addressable context, a protocol-defined source-grounded evidence program, a bounded resumable acquisition worklist, and an optional real de-identified multimodal asset-manifest projection (metadata only; asset bytes are never opened). Trial, cohort, and molecular inventories preserve omissions and missingness as review obligations and never rank trials, infer eligibility, claim cohort comparability, or expose patient-level assay values. Sanitized DICOM and FHIR metadata imports can each supply that asset plane, or be composed into one union manifest with both child receipts retained and rebound through synthesis, programming, and acquisition. The mission then runs the bounded resumable route to its human-review hold. The envelope also includes a final mission_audit integrity fuse that checks request/snapshot digests, report-plane presence, and the provider-free boundary. A glioma mission may bind both the real registry/genomics snapshot and the six-lane PubMed snapshot; the two remain separate and an exact PMID/DOI linkage audit is returned. Synthetic bundles, network access, credentials, diagnosis, treatment, triage, and procedure remain unavailable.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "operation": { "type": "string", "enum": ["run", "validate"], "default": "run", "description": "run composes a new mission; validate replays a persisted mission against the request and optional snapshots." },
+                    "request": { "type": "object", "description": "A bioprism-neurosurgery/0.1 CaseRequest. RealGliomaBundle missions are for glioma registry/profile evidence; cross-specialty PubMed missions support any listed specialty." },
+                    "mission": { "type": "object", "description": "Persisted NeurosurgicalMissionResult required when operation=validate; it is never modified." },
+                    "real_glioma_data": { "type": "object", "description": "Optional validated bioprism-neurosurgery-real/0.1 public population bundle." },
+                    "public_literature": { "type": "object", "description": "Optional validated bioprism-neurosurgery-public-literature/0.1 PubMed bundle. It may be supplied alongside real_glioma_data; the bundles remain separate." },
+                    "case_asset_manifest": { "type": "object", "description": "Optional bioprism-neurosurgery-case-asset-manifest/0.1 real de-identified multimodal asset manifest. It is projected into the mission without opening asset bytes." },
+                    "case_dicom_import": { "type": "object", "description": "Optional sanitized bioprism-neurosurgery-case-dicom-import/0.1 DICOM JSON metadata import. For a glioma mission this is projected into the mission asset plane and rebound into synthesis, evidence programming, and acquisition; pixel bytes and clinical interpretation are never opened. It can be composed with case_fhir_import for one multimodal digest-only asset projection, but not with a separate case_asset_manifest, asset query, or disposition." },
+                    "case_fhir_import": { "type": "object", "description": "Optional caller-sanitized bioprism-neurosurgery-case-fhir-import/0.1 FHIR metadata import. Resource payloads, references, identifiers, narratives, measurements, codes, and clinical values are never returned or interpreted; only digest-bound de-identified asset metadata and explicit reviewer obligations are carried into synthesis, evidence programming, and acquisition. It can be composed with case_dicom_import for one multimodal digest-only asset projection, but not with a separate case_asset_manifest, asset query, or disposition." },
+                    "case_asset_manifest_query": {
+                        "type": "object",
+                        "properties": {
+                            "requested_kinds": { "type": ["array", "null"], "items": { "type": "string", "enum": ["imaging_series", "pathology_report", "molecular_assay", "operative_note", "neurofunctional_assessment", "developmental_assessment", "longitudinal_outcome", "anatomical_model"] }, "minItems": 1, "maxItems": 8, "uniqueItems": true },
+                            "max_review_items": { "type": "integer", "minimum": 1, "maximum": 512, "default": 128 }
+                        },
+                        "additionalProperties": false,
+                        "description": "Optional bounded requested asset kinds and review-item limit for case_asset_manifest; a query without its manifest is refused."
+                    },
+                    "case_asset_review_disposition": {
+                        "type": ["object", "null"],
+                        "description": "Optional persisted, digest-bound reviewer disposition report for the exact case-asset projection. Mismatched or tampered reports are refused; counts are workflow metadata only."
+                    },
+                    "query": { "type": "object", "description": "Optional bounded RealDataQuery for real_glioma_data, or PublicLiteratureQuery when public_literature is supplied alone. In a dual-bundle mission this is the real-data query." },
+                    "public_literature_query": { "type": "object", "description": "Optional bounded PublicLiteratureQuery for the public_literature side of a dual-bundle mission." },
+                    "portfolio_query": {
+                        "type": "object",
+                        "properties": {
+                            "specialties": { "type": ["array", "null"], "items": { "type": "string", "enum": ["glioma", "cranial_base", "craniosynostosis", "encephalocele", "spina_bifida", "chiari_malformation"] }, "minItems": 1, "maxItems": 6, "uniqueItems": true },
+                            "text": { "type": ["string", "null"], "maxLength": 4000 },
+                            "publication_type": { "type": ["string", "null"], "maxLength": 4000 },
+                            "mesh_term": { "type": ["string", "null"], "maxLength": 4000 },
+                            "from_date": { "type": ["string", "null"], "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+                            "to_date": { "type": ["string", "null"], "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+                            "max_hits_per_lane": { "type": "integer", "minimum": 1, "maximum": 128, "default": 16 },
+                            "max_review_items_per_lane": { "type": "integer", "minimum": 1, "maximum": 128, "default": 32 },
+                            "max_issues_per_lane": { "type": "integer", "minimum": 1, "maximum": 256, "default": 128 },
+                            "freshness": { "type": ["object", "null"], "properties": { "as_of": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$" }, "max_age_days": { "type": "integer", "minimum": 0, "maximum": 3650, "default": 365 }, "source_id": { "type": ["string", "null"], "maxLength": 512 } }, "required": ["as_of"], "additionalProperties": false }
+                        },
+                        "additionalProperties": false,
+                        "description": "Optional bounded multi-lane portfolio over the same validated public-literature bundle; each lane receives an exact query, workbench coverage, and reviewer queue."
+                    },
+                    "freshness": {
+                        "type": "object",
+                        "properties": {
+                            "as_of": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$", "description": "Caller-owned UTC clock; the mission never uses the host clock." },
+                            "max_age_days": { "type": "integer", "minimum": 0, "maximum": 3650, "default": 365 },
+                            "source_id": { "type": ["string", "null"], "maxLength": 512 }
+                        },
+                        "required": ["as_of"],
+                        "additionalProperties": false,
+                        "description": "Optional source-age posture for the selected evidence bundle."
+                    },
+                    "max_steps": { "type": "integer", "minimum": 1, "maximum": 256, "default": 256 }
+                },
+                "required": ["request"],
+                "additionalProperties": false
             }
         }),
         json!({

@@ -13051,4 +13051,157 @@ export interface SdkRegistryCheckResult extends JsonObject {
   guarantees: string[];
 }
 
+/**
+ * Path-only request for the bounded offline research-campaign runner.
+ *
+ * Research objectives, questions, evidence, and generated artifacts remain in
+ * caller-owned files; they must not be embedded in this transport envelope.
+ */
+export interface ResearchCampaignOfflineRunArgs extends JsonObject {
+  spec_path: string;
+  stage_input_paths: { [stageId: string]: string };
+  output_dir: string;
+  /** `false` performs a fully validated preview with no authorization or writes. */
+  confirm?: boolean;
+}
+
+export type ResearchCampaignExecutionState =
+  | "not_started"
+  | "completed"
+  | "awaiting_human_review"
+  | "refused"
+  | "needs_input"
+  | "exhausted"
+  | "reconciliation_required";
+
+export interface ResearchCampaignNotStartedExecution extends JsonObject {
+  state: "not_started";
+}
+
+export interface ResearchCampaignCompletedExecution extends JsonObject {
+  state: "completed";
+}
+
+export interface ResearchCampaignStagePausedExecution extends JsonObject {
+  state: "awaiting_human_review" | "refused" | "needs_input" | "exhausted";
+  stage_id: string;
+}
+
+export interface ResearchCampaignReconciliationExecution extends JsonObject {
+  state: "reconciliation_required";
+  reason: string;
+}
+
+export type ResearchCampaignExecutionResult =
+  | ResearchCampaignNotStartedExecution
+  | ResearchCampaignCompletedExecution
+  | ResearchCampaignStagePausedExecution
+  | ResearchCampaignReconciliationExecution;
+
+export type ResearchCampaignStatus =
+  | "planned"
+  | "ready"
+  | "in_flight"
+  | "needs_input"
+  | "awaiting_human_review"
+  | "reconciliation_required"
+  | "completed"
+  | "exhausted"
+  | "refused";
+
+export type ResearchCampaignOfflineStatus =
+  | "planned"
+  | "needs_input"
+  | "awaiting_human_review"
+  | "reconciliation_required"
+  | "completed"
+  | "exhausted"
+  | "refused";
+
+export type ResearchCampaignActionKind = "synthetic_research" | "brain_plan";
+
+export type ResearchCampaignReceiptDisposition =
+  | "succeeded"
+  | "completed_with_negative_findings"
+  | "missing_input"
+  | "unknown_completion"
+  | "awaiting_human_review"
+  | "exhausted"
+  | "refused";
+
+export interface ResearchCampaignNotStartedStageResult extends JsonObject {
+  state: "not_started";
+  stage_id: string;
+  kind: ResearchCampaignActionKind;
+  input_digest: string;
+  artifact_locator: string;
+}
+
+export interface ResearchCampaignSettledStageResult extends JsonObject {
+  state: "settled";
+  stage_id: string;
+  kind: ResearchCampaignActionKind;
+  input_digest: string;
+  action_ordinal: number;
+  disposition: ResearchCampaignReceiptDisposition;
+  artifact_digest: string;
+  receipt_digest: string;
+  artifact_locator: string;
+  file_sha256: string;
+}
+
+export interface ResearchCampaignReconciliationStageResult extends JsonObject {
+  state: "reconciliation_required";
+  stage_id: string;
+  kind: ResearchCampaignActionKind;
+  input_digest: string;
+  action_ordinal: number;
+  authorization_digest: string;
+  artifact_locator: string;
+  reason: string;
+}
+
+export type ResearchCampaignStageResult =
+  | ResearchCampaignNotStartedStageResult
+  | ResearchCampaignSettledStageResult
+  | ResearchCampaignReconciliationStageResult;
+
+export interface ResearchCampaignCheckpointResult extends JsonObject {
+  locator: string;
+  schema: "bioprism-research-campaign-checkpoint/0.1";
+  generation: number;
+  snapshot_digest: string;
+}
+
+export interface ResearchCampaignTrustedHeadResult extends JsonObject {
+  locator: string;
+  campaign_id: string;
+  spec_digest: string;
+  generation: number;
+  snapshot_digest: string;
+}
+
+export interface ResearchCampaignManifestResult extends JsonObject {
+  locator: string;
+  digest: string;
+  file_sha256: string;
+}
+
+/** Metadata-only result. Raw source material and artifacts are deliberately absent. */
+export interface ResearchCampaignOfflineRunResult extends JsonObject {
+  schema: "bioprism-mcp/research-campaign-offline-run/0.1";
+  workflow: "research_campaign_run_offline";
+  campaign_id: string;
+  spec_digest: string;
+  execution: ResearchCampaignExecutionResult;
+  campaign_status: ResearchCampaignOfflineStatus;
+  actions_used: number;
+  stages: ResearchCampaignStageResult[];
+  checkpoint: ResearchCampaignCheckpointResult | null;
+  trusted_head: ResearchCampaignTrustedHeadResult | null;
+  manifest: ResearchCampaignManifestResult | null;
+  written: string[];
+  limitations: string[];
+}
+
 export type ToolArguments = JsonObject;

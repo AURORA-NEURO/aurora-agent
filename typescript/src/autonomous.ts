@@ -172,6 +172,10 @@ import type {
 } from "./autonomous-connector-mission.js";
 import type {
   AutonomousEvidenceExecutionCheckpointStore,
+  AutonomousEvidenceExecutionReconciliationAuthorityIdentity,
+  AutonomousEvidenceExecutionReconciliationReceiptJSON,
+  AutonomousEvidenceExecutionResumablePolicyIdentity,
+  AutonomousEvidenceExecutionResumableOptions,
   AutonomousEvidenceExecutionResumableRun,
 } from "./autonomous-evidence-execution-resumable.js";
 import {
@@ -274,6 +278,8 @@ import {
   type AutonomousExecutionPlan,
   type CredentialHandle,
   type ProviderInvocationObserver,
+  type ProviderTransportDispatchContext,
+  type ProviderTransportDispatchFence,
   type ProviderContentPart,
   type ProviderMessage,
   type ProviderRequest,
@@ -1386,6 +1392,12 @@ export type AutonomousEvidenceBackedRunPreflightHook = (
   preflight: AutonomousEvidenceBackedRunPreflight,
 ) => void | Promise<void>;
 
+/** @internal Privileged transport fence used by restart-safe evidence controllers. */
+export type AutonomousEvidenceBackedProviderDispatchHook = (
+  preflight: AutonomousEvidenceBackedRunPreflight,
+  dispatch: ProviderTransportDispatchContext,
+) => void | Promise<void>;
+
 export interface AutonomousEvidenceBackedRunOptions {
   registry: AutonomousEvidenceAdapterRegistry;
   domains?: readonly AutonomousDomainName[];
@@ -1402,20 +1414,28 @@ export interface AutonomousEvidenceBackedRunOptions {
   crossDomain?: Pick<AutonomousCrossDomainRunOptions, "subtasks" | "allowPartial" | "synthesize" | "maxParallelChildren" | "responseAlignments" | "requireResponseAlignment" | "minimumResponseReward" | "minimumResponseAlignmentConfidence" | "responseContradictionConfidenceThreshold">;
   /** Defaults to a metadata-only context. This callback is the explicit transient value bridge. */
   promptBuilder?: AutonomousEvidencePromptBuilder;
-  /** Persist a caller-owned checkpoint immediately before the provider boundary is entered. */
+  /** Prepare caller-owned provider-bound metadata after evidence/prompt projection is settled. */
   beforeProviderRun?: AutonomousEvidenceBackedRunPreflightHook;
+  /** Commit a durable dispatch transaction immediately before every actual provider transport. */
+  beforeProviderDispatch?: AutonomousEvidenceBackedProviderDispatchHook;
   /** Rehydrate an already-completed caller-owned provider result without invoking a provider. */
   providerRunOverride?: AutonomousRunResult;
   /** Rehydrate an already-completed automatic envelope without invoking planning or execution. */
   automaticRunOverride?: AutonomousAutoRunResult;
   /** Rehydrate an already-completed cross-domain fan-out without invoking a provider. */
   crossDomainRunOverride?: AutonomousCrossDomainRunResult;
-  /** Permit a provider run when evidence is partial or awaiting evaluator settlement. */
+  /** Permit synthesis with unsettled evidence; the outer run remains `evidence_incomplete`. */
   allowIncompleteEvidence?: boolean;
   /** Optional job-level source checkpoint; source approval and provider approval remain separate. */
   evidenceCheckpointStore?: AutonomousEvidenceExecutionCheckpointStore;
   /** Required when evidenceCheckpointStore is configured; stable caller-owned source job identity. */
   evidenceJobId?: string;
+  /** Stable deployment-owned reconciliation trust root; pass it before the first source checkpoint. */
+  evidenceReconciliationAuthority?: AutonomousEvidenceExecutionReconciliationAuthorityIdentity;
+  /** Stable callback and mutable-boundary identities for the checkpointed evidence execution. */
+  evidenceExecutionPolicyIdentity?: AutonomousEvidenceExecutionResumablePolicyIdentity;
+  /** Typed authority-bound decision for an uncertain checkpointed source dispatch. */
+  evidenceReconciliationReceipt?: AutonomousEvidenceExecutionReconciliationReceiptJSON;
   /** Explicitly resolve an uncertain source-dispatch checkpoint before retrying. */
   evidenceResumeAfterReconciliation?: boolean;
 }
@@ -1659,9 +1679,12 @@ export interface AutonomousReviewedEvidenceExecutionOptions {
 }
 
 /** Restart-safe reviewed evidence execution options for a caller-owned metadata checkpoint. */
-export interface AutonomousReviewedEvidenceResumableExecutionOptions extends AutonomousReviewedEvidenceExecutionOptions {
+export interface AutonomousReviewedEvidenceResumableExecutionOptions extends Omit<AutonomousReviewedEvidenceExecutionOptions, "execute"> {
   jobId: string;
   checkpointStore: AutonomousEvidenceExecutionCheckpointStore;
+  /** Must remain identical for the full job; approved dispatch is refused when it is absent. */
+  reconciliationAuthority?: AutonomousEvidenceExecutionReconciliationAuthorityIdentity;
+  execute?: AutonomousEvidenceExecutionResumableOptions;
 }
 
 /** Preparation options that keep the caller-owned evidence health ledger at the facade boundary. */
@@ -1709,6 +1732,8 @@ export interface AutonomousProviderPlanningOptions {
   maxProviderFailovers?: number;
   signal?: AbortSignal;
   observer?: ProviderInvocationObserver;
+  /** @internal Privileged final fence immediately before each concrete transport attempt. */
+  providerDispatchFence?: ProviderTransportDispatchFence;
   /** Metadata-only lifecycle callback for each model-selection attempt. */
   selectionEventCallback?: AutonomousModelSelectionTraceEventCallback;
   /** Apply the same provider-free domain admission boundary to the planning call. */
@@ -1943,12 +1968,20 @@ export interface AutonomousRunOptions {
   acceptedSingleDomainPlanRefinement?: AutonomousPlanRefinementResult;
   /** Logical attempt number recorded in execution metadata; it never changes provider authority. */
   executionAttempt?: number;
+  /**
+   * Stable root key for provider requests belonging to one already-authorized operation.
+   * Resumable controllers derive this from their durable operation digest; cross-domain
+   * execution derives distinct child/synthesis keys from the same root.
+   */
+  providerIdempotencyKey?: string;
   /** Maximum number of retryable provider failures that may trigger a new provider selection. */
   maxProviderFailovers?: number;
   /** Internal composition mode for a higher-level session that owns terminal transitions. */
   executionLifecycle?: "managed" | "observe_only";
   signal?: AbortSignal;
   observer?: ProviderInvocationObserver;
+  /** @internal Privileged final fence immediately before each concrete transport attempt. */
+  providerDispatchFence?: ProviderTransportDispatchFence;
   /** Metadata-only lifecycle callback for each model-selection attempt. */
   selectionEventCallback?: AutonomousModelSelectionTraceEventCallback;
   /** Caller-owned value-only tool-arm statistics used to adapt reviewed tool ranking. */
@@ -2218,6 +2251,9 @@ function composeInvocationObservers(...observers: readonly (ProviderInvocationOb
   return {
     before: async (metadata) => {
       for (const observer of active) await observer.before?.(metadata);
+    },
+    dispatch: async (metadata) => {
+      for (const observer of active) await observer.dispatch?.(metadata);
     },
     after: async (metadata, outcome) => {
       for (const observer of active) await observer.after?.(metadata, outcome);
@@ -2608,16 +2644,16 @@ const PROFILE_SEEDS: ProfileSeed[] = [
     toolRows: "literature_bind_check=literature_binding,measurement_compare=measurement_comparison,contradiction_review=contradiction_review,influence_analyze=influence_analysis,lab_plan=laboratory_planning,lab_space_audit=laboratory_space_audit,lab_pareto_audit=laboratory_pareto_audit,lab_branch_audit=laboratory_branch_audit,lab_holdout_audit=laboratory_holdout_audit,lab_evolution_audit=laboratory_evolution_audit,routing_decide=research_routing,routing_lab_run=research_routing_replay,foundation_contract_check=foundation_contract_validation,evaluation_reproduction_check=reproduction_check,epistemic_voi=value_of_information,epistemic_decision_quotient=decision_quotient,epistemic_context_audit=epistemic_context_audit,epistemic_selection_audit=epistemic_selection_audit,epistemic_adaptive_execute=adaptive_acquisition_execution", description: "Literature, measurement, hypothesis, experiment, and reproducibility planning.",
   },
   {
-    domain: "biomedical", riskClass: "biomedical_safety", defaultCapability: "biomedical_review", requiredModelCapabilities: ["reasoning", "biomedical"], capabilities: ["biomedical_review", "provenance", "safety_boundary", "human_review"],
-    terms: ["biomedical", "medicine", "medical", "clinical", "patient", "diagnosis", "diagnostic", "treatment", "therapy", "drug", "disease", "safety", "clinician", "healthcare", "fhir", "phenotype", "biomarker"],
-    systemInstructions: "Act as a biomedical information and workflow assistant within strict safety boundaries. Surface provenance, uncertainty, and escalation needs.", evaluatorDomain: "biomedical", workflowId: "biomedical_review",
-    toolRows: "bioworlds_catalog=biological_world_catalogue,world_validate=world_validation,modality_catalog=modality_catalogue,modality_support_check=modality_support,modality_transport_check=modality_transport,modality_comparability_check=modality_comparability,literature_bind_check=literature_binding,measurement_compare=measurement_comparison,contradiction_review=contradiction_review,bioql_compile=biomedical_query_compilation,medical_boundary_check=medical_boundary,bioethics_action_review=bioethics_action_review,bioethics_human_subject_screen=human_subject_screening,bioethics_dual_use_review=dual_use_review,bioethics_validation_check=bioethics_validation,bioethics_representation_audit=representation_audit,bioeval_reference_audit=biomedical_reference_audit,bioeval_grounding_audit=biomedical_grounding_audit,bioeval_estimand_audit=biomedical_estimand_audit,onco_boundary_check=oncology_boundary,onco_response_assess=oncology_response_assessment,onco_worldline_view=oncology_worldline,onco_classification_check=oncology_classification,onco_outcome_analyze=oncology_outcome_analysis,world_generate=biological_world_generation", description: "Biomedical evidence, safety boundaries, modality checks, and human-review escalation.",
+    domain: "biomedical", riskClass: "biomedical_safety", defaultCapability: "biomedical_review", requiredModelCapabilities: ["reasoning", "biomedical"], capabilities: ["biomedical_review", "provenance", "safety_boundary", "human_review", "neurosurgical_specialty_discovery", "neurosurgical_intake_routing", "neurosurgical_evidence_audit", "neurosurgical_evidence_synthesis", "neurosurgical_evidence_graph", "neurosurgical_glioma_molecular_map", "neurosurgical_molecular_coverage", "neurosurgical_case_asset_manifest", "neurosurgical_case_fhir_import", "neurosurgical_case_dicom_import", "neurosurgical_case_dicom_evidence_workflow", "neurosurgical_case_asset_review_disposition", "neurosurgical_real_data_coverage", "neurosurgical_real_data_reconciliation", "neurosurgical_real_data_freshness", "neurosurgical_real_data_diff", "neurosurgical_real_data_refresh_audit", "neurosurgical_real_data_review_queue", "neurosurgical_real_data_review_disposition", "neurosurgical_real_data_evidence_packet", "neurosurgical_real_data_autonomous_workflow", "neurosurgical_real_data_reasoning_context", "neurosurgical_real_data_draft_audit", "neurosurgical_research_brief", "neurosurgical_research_plan", "neurosurgical_evidence_program", "neurosurgical_evidence_acquisition", "neurosurgical_public_literature_evidence_packet", "neurosurgical_public_literature_reasoning_context", "neurosurgical_public_literature_draft_audit", "neurosurgical_public_literature_matrix", "neurosurgical_public_literature_freshness", "neurosurgical_public_literature_refresh_audit", "neurosurgical_literature_link_audit", "neurosurgical_public_literature_integrity_audit", "neurosurgical_public_literature_review_queue", "neurosurgical_public_literature_workbench", "neurosurgical_public_literature_portfolio", "neurosurgical_research_route", "neurosurgical_public_data_query", "neurosurgical_trial_landscape", "neurosurgical_resumable_session", "neurosurgical_research_mission"],
+     terms: ["biomedical", "medicine", "medical", "clinical", "patient", "diagnosis", "diagnostic", "treatment", "therapy", "drug", "disease", "safety", "clinician", "healthcare", "fhir", "dicom", "dicom json", "dicomweb", "dcm2json", "imaging metadata", "series metadata", "phenotype", "biomarker", "neurosurgery", "neurosurgical", "glioma", "glioblastoma", "cranial base", "craniosynostosis", "encephalocele", "spina bifida", "spinal dysraphism", "chiari", "craniocervical junction", "neuro-oncology"],
+    systemInstructions: "Act as a biomedical information and workflow assistant within strict safety boundaries. For neurosurgical and glioma questions, use the dedicated read-only specialty route, preserve real-data provenance and assay missingness, and surface uncertainty and qualified human review.", evaluatorDomain: "biomedical", workflowId: "biomedical_review",
+    toolRows: "neurosurgery_catalogue=neurosurgical_specialty_discovery,neurosurgery_intake_plan=neurosurgical_intake_routing,neurosurgery_intake_mission=neurosurgical_intake_routing,neurosurgery_intake_portfolio=neurosurgical_intake_routing,neurosurgery_evidence_audit=neurosurgical_evidence_audit,neurosurgery_specialty_evidence_map=neurosurgical_specialty_evidence_map,neurosurgery_case_asset_manifest=neurosurgical_case_asset_manifest,neurosurgery_case_fhir_import=neurosurgical_case_fhir_import,neurosurgery_case_dicom_import=neurosurgical_case_dicom_import,neurosurgery_case_dicom_evidence_workflow=neurosurgical_case_dicom_evidence_workflow,neurosurgery_case_asset_review_disposition=neurosurgical_case_asset_review_disposition,neurosurgery_evidence_synthesis=neurosurgical_evidence_synthesis,neurosurgery_evidence_graph=neurosurgical_evidence_graph,neurosurgery_glioma_molecular_map=neurosurgical_glioma_molecular_map,neurosurgery_real_data_molecular_coverage=neurosurgical_molecular_coverage,neurosurgery_real_data_coverage=neurosurgical_real_data_coverage,neurosurgery_real_data_reconciliation=neurosurgical_real_data_reconciliation,neurosurgery_real_data_freshness=neurosurgical_real_data_freshness,neurosurgery_real_data_diff=neurosurgical_real_data_diff,neurosurgery_real_data_refresh_audit=neurosurgical_real_data_refresh_audit,neurosurgery_real_data_review_queue=neurosurgical_real_data_review_queue,neurosurgery_real_data_review_disposition=neurosurgical_real_data_review_disposition,neurosurgery_real_data_evidence_packet=neurosurgical_real_data_evidence_packet,neurosurgery_real_data_autonomous_workflow=neurosurgical_real_data_autonomous_workflow,neurosurgery_real_data_reasoning_context=neurosurgical_real_data_reasoning_context,neurosurgery_real_data_draft_audit=neurosurgical_real_data_draft_audit,neurosurgery_public_literature_evidence_packet=neurosurgical_public_literature_evidence_packet,neurosurgery_public_literature_reasoning_context=neurosurgical_public_literature_reasoning_context,neurosurgery_public_literature_draft_audit=neurosurgical_public_literature_draft_audit,neurosurgery_public_literature_matrix=neurosurgical_public_literature_matrix,neurosurgery_public_literature_freshness=neurosurgical_public_literature_freshness,neurosurgery_public_literature_refresh_audit=neurosurgical_public_literature_refresh_audit,neurosurgery_literature_link_audit=neurosurgical_literature_link_audit,neurosurgery_public_literature_integrity_audit=neurosurgical_public_literature_integrity_audit,neurosurgery_public_literature_review_queue=neurosurgical_public_literature_review_queue,neurosurgery_public_literature_workbench=neurosurgical_public_literature_workbench,neurosurgery_public_literature_portfolio=neurosurgical_public_literature_portfolio,neurosurgery_research_brief=neurosurgical_research_brief,neurosurgery_research_plan=neurosurgical_research_plan,neurosurgery_evidence_program=neurosurgical_evidence_program,neurosurgery_evidence_acquisition=neurosurgical_evidence_acquisition,neurosurgery_plan=neurosurgical_research_route,neurosurgery_real_data_query=neurosurgical_public_data_query,neurosurgery_real_data_trial_landscape=neurosurgical_trial_landscape,neurosurgery_real_data_molecular_coverage=neurosurgical_molecular_coverage,neurosurgery_public_literature_query=neurosurgical_public_literature_query,neurosurgery_session=neurosurgical_resumable_session,neurosurgery_mission=neurosurgical_research_mission,bioworlds_catalog=biological_world_catalogue,world_validate=world_validation,modality_catalog=modality_catalogue,modality_support_check=modality_support,modality_transport_check=modality_transport,modality_comparability_check=modality_comparability,literature_bind_check=literature_binding,measurement_compare=measurement_comparison,contradiction_review=contradiction_review,bioql_compile=biomedical_query_compilation,medical_boundary_check=medical_boundary,bioethics_action_review=bioethics_action_review,bioethics_human_subject_screen=human_subject_screening,bioethics_dual_use_review=dual_use_review,bioethics_validation_check=bioethics_validation,bioethics_representation_audit=representation_audit,bioeval_reference_audit=biomedical_reference_audit,bioeval_grounding_audit=biomedical_grounding_audit,bioeval_estimand_audit=biomedical_estimand_audit,onco_boundary_check=oncology_boundary,onco_response_assess=oncology_response_assess,onco_worldline_view=oncology_worldline,onco_classification_check=oncology_classification,onco_outcome_analyze=oncology_outcome_analysis,world_generate=biological_world_generation", description: "Biomedical evidence, safety boundaries, modality checks, and human-review escalation.",
   },
   {
-    domain: "neuroscience", riskClass: "neuroscience_inference", defaultCapability: "neuroscience_analysis", requiredModelCapabilities: ["reasoning", "science"], capabilities: ["neuroscience_analysis", "signal_interpretation", "study_design", "reproducibility"],
-    terms: ["neuroscience", "neural", "brain", "neuron", "eeg", "fmri", "meg", "neuroimaging", "electrophysiology", "cognitive", "cognition", "signal", "preprocessing", "connectome", "neurobiology", "neural signal"],
-    systemInstructions: "Act as a neuroscience research assistant. Separate measurement, preprocessing, model interpretation, and biological claims.", evaluatorDomain: "biomedical", workflowId: "neuroscience_analysis",
-    toolRows: "modality_catalog=modality_catalogue,modality_support_check=modality_support,modality_transport_check=modality_transport,modality_comparability_check=modality_comparability,measurement_compare=measurement_comparison,trace_analyze=trajectory_trace_analysis,benchmark_trace_analyze=benchmark_trace_analysis,influence_analyze=influence_analysis,lab_holdout_audit=laboratory_holdout_audit,evaluation_trajectory_check=trajectory_evaluation,epistemic_voi=value_of_information", description: "Neural measurement, signal interpretation, study design, and reproducibility.",
+    domain: "neuroscience", riskClass: "neuroscience_inference", defaultCapability: "neuroscience_analysis", requiredModelCapabilities: ["reasoning", "science"], capabilities: ["neuroscience_analysis", "signal_interpretation", "study_design", "reproducibility", "neurosurgical_specialty_discovery", "neurosurgical_intake_routing", "neurosurgical_evidence_audit", "neurosurgical_evidence_synthesis", "neurosurgical_evidence_graph", "neurosurgical_glioma_molecular_map", "neurosurgical_molecular_coverage", "neurosurgical_case_asset_manifest", "neurosurgical_case_fhir_import", "neurosurgical_case_dicom_import", "neurosurgical_case_dicom_evidence_workflow", "neurosurgical_case_asset_review_disposition", "neurosurgical_real_data_coverage", "neurosurgical_real_data_reconciliation", "neurosurgical_real_data_freshness", "neurosurgical_real_data_diff", "neurosurgical_real_data_refresh_audit", "neurosurgical_real_data_review_queue", "neurosurgical_real_data_review_disposition", "neurosurgical_real_data_evidence_packet", "neurosurgical_real_data_autonomous_workflow", "neurosurgical_real_data_reasoning_context", "neurosurgical_real_data_draft_audit", "neurosurgical_research_brief", "neurosurgical_research_plan", "neurosurgical_evidence_program", "neurosurgical_evidence_acquisition", "neurosurgical_public_literature_evidence_packet", "neurosurgical_public_literature_reasoning_context", "neurosurgical_public_literature_draft_audit", "neurosurgical_public_literature_matrix", "neurosurgical_public_literature_freshness", "neurosurgical_public_literature_refresh_audit", "neurosurgical_literature_link_audit", "neurosurgical_public_literature_integrity_audit", "neurosurgical_public_literature_review_queue", "neurosurgical_public_literature_workbench", "neurosurgical_public_literature_portfolio", "neurosurgical_research_route", "neurosurgical_public_data_query", "neurosurgical_trial_landscape", "neurosurgical_resumable_session", "neurosurgical_research_mission"],
+     terms: ["neuroscience", "neural", "brain", "neuron", "eeg", "fmri", "meg", "neuroimaging", "electrophysiology", "cognitive", "cognition", "signal", "preprocessing", "connectome", "neurobiology", "neural signal", "neurosurgery", "neurosurgical", "glioma", "glioblastoma", "cranial base", "craniosynostosis", "encephalocele", "spina bifida", "spinal dysraphism", "chiari", "craniocervical junction", "neuro-oncology", "dicom", "dicom json", "dicomweb", "dcm2json", "imaging metadata", "series metadata"],
+    systemInstructions: "Act as a neuroscience research assistant. For brain, spinal, Chiari, cranial-base, and glioma questions, route through the dedicated read-only neurosurgical evidence contract; separate measurement, preprocessing, model interpretation, and biological claims.", evaluatorDomain: "biomedical", workflowId: "neuroscience_analysis",
+    toolRows: "neurosurgery_catalogue=neurosurgical_specialty_discovery,neurosurgery_intake_plan=neurosurgical_intake_routing,neurosurgery_intake_mission=neurosurgical_intake_routing,neurosurgery_intake_portfolio=neurosurgical_intake_routing,neurosurgery_evidence_audit=neurosurgical_evidence_audit,neurosurgery_specialty_evidence_map=neurosurgical_specialty_evidence_map,neurosurgery_case_asset_manifest=neurosurgical_case_asset_manifest,neurosurgery_case_fhir_import=neurosurgical_case_fhir_import,neurosurgery_case_dicom_import=neurosurgical_case_dicom_import,neurosurgery_case_dicom_evidence_workflow=neurosurgical_case_dicom_evidence_workflow,neurosurgery_case_asset_review_disposition=neurosurgical_case_asset_review_disposition,neurosurgery_evidence_synthesis=neurosurgical_evidence_synthesis,neurosurgery_evidence_graph=neurosurgical_evidence_graph,neurosurgery_glioma_molecular_map=neurosurgical_glioma_molecular_map,neurosurgery_real_data_molecular_coverage=neurosurgical_molecular_coverage,neurosurgery_real_data_coverage=neurosurgical_real_data_coverage,neurosurgery_real_data_reconciliation=neurosurgical_real_data_reconciliation,neurosurgery_real_data_freshness=neurosurgical_real_data_freshness,neurosurgery_real_data_diff=neurosurgical_real_data_diff,neurosurgery_real_data_refresh_audit=neurosurgical_real_data_refresh_audit,neurosurgery_real_data_review_queue=neurosurgical_real_data_review_queue,neurosurgery_real_data_review_disposition=neurosurgical_real_data_review_disposition,neurosurgery_real_data_evidence_packet=neurosurgical_real_data_evidence_packet,neurosurgery_real_data_autonomous_workflow=neurosurgical_real_data_autonomous_workflow,neurosurgery_real_data_reasoning_context=neurosurgical_real_data_reasoning_context,neurosurgery_real_data_draft_audit=neurosurgical_real_data_draft_audit,neurosurgery_public_literature_evidence_packet=neurosurgical_public_literature_evidence_packet,neurosurgery_public_literature_reasoning_context=neurosurgical_public_literature_reasoning_context,neurosurgery_public_literature_draft_audit=neurosurgical_public_literature_draft_audit,neurosurgery_public_literature_matrix=neurosurgical_public_literature_matrix,neurosurgery_public_literature_freshness=neurosurgical_public_literature_freshness,neurosurgery_public_literature_refresh_audit=neurosurgical_public_literature_refresh_audit,neurosurgery_literature_link_audit=neurosurgical_literature_link_audit,neurosurgery_public_literature_integrity_audit=neurosurgical_public_literature_integrity_audit,neurosurgery_public_literature_review_queue=neurosurgical_public_literature_review_queue,neurosurgery_public_literature_workbench=neurosurgical_public_literature_workbench,neurosurgery_public_literature_portfolio=neurosurgical_public_literature_portfolio,neurosurgery_research_brief=neurosurgical_research_brief,neurosurgery_research_plan=neurosurgical_research_plan,neurosurgery_evidence_program=neurosurgical_evidence_program,neurosurgery_evidence_acquisition=neurosurgical_evidence_acquisition,neurosurgery_plan=neurosurgical_research_route,neurosurgery_real_data_query=neurosurgical_public_data_query,neurosurgery_real_data_trial_landscape=neurosurgical_trial_landscape,neurosurgery_real_data_molecular_coverage=neurosurgical_molecular_coverage,neurosurgery_public_literature_query=neurosurgical_public_literature_query,neurosurgery_session=neurosurgical_resumable_session,neurosurgery_mission=neurosurgical_research_mission,modality_catalog=modality_catalogue,modality_support_check=modality_support,modality_transport_check=modality_transport,modality_comparability_check=modality_comparability,measurement_compare=measurement_comparison,trace_analyze=trajectory_trace_analysis,benchmark_trace_analyze=benchmark_trace_analysis,influence_analyze=influence_analysis,lab_holdout_audit=laboratory_holdout_audit,evaluation_trajectory_check=trajectory_evaluation,epistemic_voi=value_of_information", description: "Neural measurement, signal interpretation, study design, and reproducibility.",
   },
   {
     domain: "operations", riskClass: "operational_effect", defaultCapability: "operations_planning", requiredModelCapabilities: ["reasoning", "operations"], capabilities: ["operations_planning", "runbook", "incident_response", "observability", "risk_review", "rollback", "approval"],
@@ -2679,6 +2715,19 @@ function boundedIdentifier(name: string, value: unknown): string {
   const text = boundedText(name, value, 256);
   if (!/^[A-Za-z0-9_.-]+$/.test(text)) throw new ArgumentError(`${name} must be a bounded identifier`);
   return text;
+}
+
+async function scopedProviderIdempotencyKey(
+  root: string | undefined,
+  scope: JsonObject,
+): Promise<string | undefined> {
+  if (root === undefined) return undefined;
+  const providerIdempotencyKey = boundedIdentifier("provider idempotency key", root);
+  return digestJson({
+    schema: "bioprism-typescript-autonomous-provider-idempotency-scope/0.1",
+    provider_idempotency_key: providerIdempotencyKey,
+    scope,
+  });
 }
 
 type AutonomousCrossDomainExecutionReceiptFields = {
@@ -3300,7 +3349,134 @@ function termMatches(normalized: string, term: string): boolean {
 }
 
 function parseToolRows(seed: ProfileSeed): AutonomousDomainToolBinding[] {
-  return seed.toolRows.split(",").map((row) => {
+  // Seed rows are a declarative manifest; collapse an accidental exact duplicate before
+  // deriving the immutable binding list so activation never emits duplicate missing-tool rows.
+  const rows = [...new Set(seed.toolRows.split(","))];
+  if ((seed.domain === "biomedical" || seed.domain === "neuroscience") &&
+      !rows.some((row) => row.startsWith("neurosurgery_specialty_evidence_map="))) {
+    const auditIndex = rows.findIndex((row) => row.startsWith("neurosurgery_evidence_audit="));
+    rows.splice(
+      auditIndex >= 0 ? auditIndex + 1 : 0,
+      0,
+      "neurosurgery_specialty_evidence_map=neurosurgical_specialty_evidence_map",
+    );
+  }
+  if ((seed.domain === "biomedical" || seed.domain === "neuroscience") &&
+      !rows.some((row) => row.startsWith("neurosurgery_case_asset_manifest="))) {
+    const auditIndex = rows.findIndex((row) => row.startsWith("neurosurgery_evidence_audit="));
+    rows.splice(
+      auditIndex >= 0 ? auditIndex + 1 : 0,
+      0,
+      "neurosurgery_case_asset_manifest=neurosurgical_case_asset_manifest",
+    );
+  }
+  if ((seed.domain === "biomedical" || seed.domain === "neuroscience") &&
+      !rows.some((row) => row.startsWith("neurosurgery_case_asset_review_disposition="))) {
+    const assetIndex = rows.findIndex((row) => row.startsWith("neurosurgery_case_asset_manifest="));
+    rows.splice(assetIndex >= 0 ? assetIndex + 1 : 0, 0,
+      "neurosurgery_case_asset_review_disposition=neurosurgical_case_asset_review_disposition");
+  }
+  if ((seed.domain === "biomedical" || seed.domain === "neuroscience") &&
+      !rows.some((row) => row.startsWith("neurosurgery_case_dicom_import="))) {
+    const assetIndex = rows.findIndex((row) => row.startsWith("neurosurgery_case_asset_manifest="));
+    rows.splice(assetIndex >= 0 ? assetIndex + 1 : 0, 0,
+      "neurosurgery_case_dicom_import=neurosurgical_case_dicom_import");
+  }
+  if ((seed.domain === "biomedical" || seed.domain === "neuroscience") &&
+      !rows.some((row) => row.startsWith("neurosurgery_case_dicom_evidence_workflow="))) {
+    const dicomIndex = rows.findIndex((row) => row.startsWith("neurosurgery_case_dicom_import="));
+    rows.splice(dicomIndex >= 0 ? dicomIndex + 1 : 0, 0,
+      "neurosurgery_case_dicom_evidence_workflow=neurosurgical_case_dicom_evidence_workflow");
+  }
+  if ((seed.domain === "biomedical" || seed.domain === "neuroscience") &&
+      !rows.some((row) => row.startsWith("neurosurgery_real_data_refresh_audit="))) {
+    rows.splice(
+      rows.findIndex((row) => row.startsWith("neurosurgery_real_data_review_queue=")),
+      0,
+      "neurosurgery_real_data_refresh_audit=neurosurgical_real_data_refresh_audit",
+    );
+  }
+  if ((seed.domain === "biomedical" || seed.domain === "neuroscience") &&
+      !rows.some((row) => row.startsWith("neurosurgery_research_brief="))) {
+    rows.splice(
+      rows.findIndex((row) => row.startsWith("neurosurgery_research_plan=")),
+      0,
+      "neurosurgery_research_brief=neurosurgical_research_brief",
+    );
+  }
+  if ((seed.domain === "biomedical" || seed.domain === "neuroscience") &&
+      !rows.some((row) => row.startsWith("neurosurgery_real_data_evidence_packet="))) {
+    rows.splice(
+      rows.findIndex((row) => row.startsWith("neurosurgery_research_plan=")),
+      0,
+      "neurosurgery_real_data_evidence_packet=neurosurgical_real_data_evidence_packet",
+    );
+  }
+  if ((seed.domain === "biomedical" || seed.domain === "neuroscience") &&
+      !rows.some((row) => row.startsWith("neurosurgery_real_data_draft_audit="))) {
+    rows.splice(
+      rows.findIndex((row) => row.startsWith("neurosurgery_research_plan=")),
+      0,
+      "neurosurgery_real_data_draft_audit=neurosurgical_real_data_draft_audit",
+    );
+  }
+  if ((seed.domain === "biomedical" || seed.domain === "neuroscience") &&
+      !rows.some((row) => row.startsWith("neurosurgery_real_data_reasoning_context="))) {
+    rows.splice(
+      rows.findIndex((row) => row.startsWith("neurosurgery_research_plan=")),
+      0,
+      "neurosurgery_real_data_reasoning_context=neurosurgical_real_data_reasoning_context",
+    );
+  }
+  if ((seed.domain === "biomedical" || seed.domain === "neuroscience") &&
+      !rows.some((row) => row.startsWith("neurosurgery_public_literature_evidence_packet="))) {
+    rows.splice(
+      rows.findIndex((row) => row.startsWith("neurosurgery_research_plan=")),
+      0,
+      "neurosurgery_public_literature_evidence_packet=neurosurgical_public_literature_evidence_packet",
+    );
+  }
+  if ((seed.domain === "biomedical" || seed.domain === "neuroscience") &&
+      !rows.some((row) => row.startsWith("neurosurgery_public_literature_reasoning_context="))) {
+    rows.splice(
+      rows.findIndex((row) => row.startsWith("neurosurgery_research_plan=")),
+      0,
+      "neurosurgery_public_literature_reasoning_context=neurosurgical_public_literature_reasoning_context",
+    );
+  }
+  if ((seed.domain === "biomedical" || seed.domain === "neuroscience") &&
+      !rows.some((row) => row.startsWith("neurosurgery_public_literature_draft_audit="))) {
+    rows.splice(
+      rows.findIndex((row) => row.startsWith("neurosurgery_research_plan=")),
+      0,
+      "neurosurgery_public_literature_draft_audit=neurosurgical_public_literature_draft_audit",
+    );
+  }
+  if ((seed.domain === "biomedical" || seed.domain === "neuroscience") &&
+      !rows.some((row) => row.startsWith("neurosurgery_public_literature_matrix="))) {
+    rows.splice(
+      rows.findIndex((row) => row.startsWith("neurosurgery_research_plan=")),
+      0,
+      "neurosurgery_public_literature_matrix=neurosurgical_public_literature_matrix",
+    );
+  }
+  if ((seed.domain === "biomedical" || seed.domain === "neuroscience") &&
+      !rows.some((row) => row.startsWith("neurosurgery_real_data_freshness="))) {
+    rows.splice(
+      rows.findIndex((row) => row.startsWith("neurosurgery_research_plan=")),
+      0,
+      "neurosurgery_real_data_freshness=neurosurgical_real_data_freshness",
+    );
+  }
+  if ((seed.domain === "biomedical" || seed.domain === "neuroscience") &&
+      !rows.some((row) => row.startsWith("neurosurgery_public_literature_freshness="))) {
+    rows.splice(
+      rows.findIndex((row) => row.startsWith("neurosurgery_research_plan=")),
+      0,
+      "neurosurgery_public_literature_freshness=neurosurgical_public_literature_freshness",
+    );
+  }
+  return rows.map((row) => {
     const [name, capability] = row.split("=", 2);
     if (!name || !capability) throw new ArgumentError(`malformed built-in tool row for ${seed.domain}`);
     const risk = EFFECTFUL_TOOLS.get(name) ?? "read_only";
@@ -3335,6 +3511,15 @@ async function makeWorkflow(seed: ProfileSeed): Promise<AutonomousWorkflow> {
 
 async function makeProfile(seed: ProfileSeed): Promise<AutonomousDomainProfile> {
   const workflow = await makeWorkflow(seed);
+  const capabilities = [...seed.capabilities];
+  if (seed.domain === "biomedical" || seed.domain === "neuroscience") {
+    capabilities.push("neurosurgical_specialty_evidence_map");
+    capabilities.push("neurosurgical_case_asset_manifest");
+    capabilities.push("neurosurgical_case_dicom_import");
+    capabilities.push("neurosurgical_case_dicom_evidence_workflow");
+    capabilities.push("neurosurgical_case_asset_review_disposition");
+    capabilities.push("neurosurgical_real_data_freshness", "neurosurgical_public_literature_freshness");
+  }
   const toolProfile: AutonomousDomainToolProfile = {
     schema: AUTONOMOUS_DOMAIN_TOOL_SCHEMA,
     domain: seed.domain,
@@ -3348,7 +3533,7 @@ async function makeProfile(seed: ProfileSeed): Promise<AutonomousDomainProfile> 
     risk_class: seed.riskClass,
     default_capability: seed.defaultCapability,
     required_model_capabilities: [...seed.requiredModelCapabilities],
-    capabilities: [...seed.capabilities],
+    capabilities: [...new Set(capabilities)],
     guardrails: [...COMMON_GUARDRAILS, ...(seed.domain === "biomedical" ? ["do not diagnose, prescribe, or replace qualified human review"] : []), ...(seed.domain === "operations" ? ["plan reversible checkpoints and require explicit authorization before effects"] : []), ...(seed.domain === "coding" ? ["prefer small verifiable changes and report tests actually run"] : []), ...(seed.domain === "science" ? ["do not present a hypothesis, correlation, or simulation as established causality"] : []), ...(seed.domain === "multimodal" ? ["identify modality blind spots and never imply an absent modality was inspected"] : []), ...(seed.domain === "multi_agent" ? ["delegate only bounded subproblems and preserve one accountable effect authority"] : []), ...(seed.domain === "cross_domain" ? ["keep domain-specific claims attached to their source discipline and evaluator"] : []), ...(seed.domain === "evaluation" ? ["do not let the system under evaluation author its own pass signal"] : [])],
     system_instructions: seed.systemInstructions,
     evaluator_domain: seed.evaluatorDomain,
@@ -4090,7 +4275,6 @@ function defaultEvidenceBackedPromptContext(execution: AutonomousEvidenceExecuti
     source_id: receipt.source_id,
     source_digest: receipt.source_digest,
     status: receipt.status,
-    replay: receipt.replay,
     value_digest: receipt.value_digest,
     observations: receipt.observations.map((observation) => ({
       label: observation.label,
@@ -7818,8 +8002,10 @@ export class AutonomousAgent {
     const controller = await this.createEvidenceExecutionController(registry, healthStore);
     const executionPlan = await controller.prepare(plan, controllerPrepareOptions);
     const { AutonomousEvidenceExecutionResumableController } = await import("./autonomous-evidence-execution-resumable.js");
-    const resumable = new AutonomousEvidenceExecutionResumableController(controller, options.checkpointStore, options.jobId);
-    const executeOptions: AutonomousEvidenceExecutionOptions = {
+    const resumable = new AutonomousEvidenceExecutionResumableController(controller, options.checkpointStore, options.jobId, {
+      reconciliationAuthority: options.reconciliationAuthority,
+    });
+    const executeOptions: AutonomousEvidenceExecutionResumableOptions = {
       ...(options.execute ?? {}),
       ...(controllerPrepareOptions.providerContracts !== undefined && options.execute?.providerContracts === undefined
         ? { providerContracts: controllerPrepareOptions.providerContracts }
@@ -7843,6 +8029,9 @@ export class AutonomousAgent {
     if (options.evidenceCheckpointStore !== undefined && (!options.evidenceCheckpointStore || typeof options.evidenceCheckpointStore.read !== "function" || typeof options.evidenceCheckpointStore.write !== "function")) throw new ArgumentError("evidence-backed source checkpoint store is malformed");
     if (options.evidenceCheckpointStore !== undefined && (typeof options.evidenceJobId !== "string" || !options.evidenceJobId.trim())) throw new ArgumentError("evidence-backed source checkpoint requires evidenceJobId");
     if (options.evidenceCheckpointStore === undefined && options.evidenceJobId !== undefined) throw new ArgumentError("evidence-backed evidenceJobId requires evidenceCheckpointStore");
+    if (options.evidenceCheckpointStore === undefined && options.evidenceReconciliationAuthority !== undefined) throw new ArgumentError("evidence-backed evidenceReconciliationAuthority requires evidenceCheckpointStore");
+    if (options.evidenceCheckpointStore === undefined && options.evidenceExecutionPolicyIdentity !== undefined) throw new ArgumentError("evidence-backed evidenceExecutionPolicyIdentity requires evidenceCheckpointStore");
+    if (options.evidenceCheckpointStore === undefined && options.evidenceReconciliationReceipt !== undefined) throw new ArgumentError("evidence-backed evidenceReconciliationReceipt requires evidenceCheckpointStore");
     const taskText = boundedText("evidence-backed autonomous task", task, 32_000);
     const taskDigest = await digestJson({ task: taskText });
     const domains = options.domains ?? AUTONOMOUS_DOMAIN_NAMES;
@@ -7921,9 +8110,13 @@ export class AutonomousAgent {
     let evidence: AutonomousEvidenceExecutionResult | null = null;
     if (options.evidenceCheckpointStore !== undefined) {
       const { AutonomousEvidenceExecutionResumableController } = await import("./autonomous-evidence-execution-resumable.js");
-      const resumable = new AutonomousEvidenceExecutionResumableController(controller, options.evidenceCheckpointStore, options.evidenceJobId!);
+      const resumable = new AutonomousEvidenceExecutionResumableController(controller, options.evidenceCheckpointStore, options.evidenceJobId!, {
+        reconciliationAuthority: options.evidenceReconciliationAuthority,
+      });
       const sourceRun = await resumable.run(executionPlan, plan, options.requests, {
         ...executeOptions,
+        ...(options.evidenceExecutionPolicyIdentity === undefined ? {} : { executionPolicyIdentity: options.evidenceExecutionPolicyIdentity }),
+        ...(options.evidenceReconciliationReceipt === undefined ? {} : { reconciliationReceipt: options.evidenceReconciliationReceipt }),
         resumeAfterReconciliation: options.evidenceResumeAfterReconciliation,
       });
       if (sourceRun.result === null) {
@@ -7936,7 +8129,8 @@ export class AutonomousAgent {
       if (executionPlan.status !== "ready_for_review") return finish("evidence_blocked", null, [], null);
       evidence = await controller.execute(executionPlan, plan, options.requests, executeOptions);
     }
-    if (evidence.status !== "completed" && options.allowIncompleteEvidence !== true) {
+    const evidenceIncomplete = evidence.status !== "completed";
+    if (evidenceIncomplete && options.allowIncompleteEvidence !== true) {
       return finish(evidenceBackedStatus(evidence.status), evidence, [], null);
     }
     const promptProjection: AutonomousEvidencePromptProjection = {
@@ -7977,19 +8171,39 @@ export class AutonomousAgent {
       if (evidenceScopeRoute && overrideRoute.route_digest !== evidenceScopeRoute.route_digest) throw new ArgumentError("evidence-backed cross-domain run override does not match the reviewed evidence route");
       crossDomainRun = options.crossDomainRunOverride;
     } else {
-      await options.beforeProviderRun?.({ executionPlan, evidence, promptContext: projectedContext });
+      // Prepare provider-bound state before routing/planning, but commit attempted state only at
+      // the transport-adjacent observer below. Policy and routing refusals remain pre-attempt.
+      const providerPreflight = { executionPlan, evidence, promptContext: projectedContext };
+      if (runOptions.approveProviderCall === true) {
+        await options.beforeProviderRun?.(providerPreflight);
+      }
+      const providerDispatchFence: ProviderTransportDispatchFence | undefined = options.beforeProviderDispatch === undefined
+        ? undefined
+        : (dispatch) => options.beforeProviderDispatch!(providerPreflight, dispatch);
+      const providerRunOptions: AutonomousAutoRunOptions = {
+        ...runOptions,
+        providerDispatchFence,
+        ...(runOptions.planning === undefined && runOptions.planningMode !== "provider"
+          ? {}
+          : {
+            planning: {
+              ...(runOptions.planning ?? {}),
+              providerDispatchFence,
+            },
+          }),
+      };
       if (runMode === "domain") {
         const evidenceDomain = options.domains?.length === 1 ? options.domains[0] : undefined;
-        if (evidenceDomain !== undefined && runOptions.domain !== undefined && runOptions.domain !== evidenceDomain) throw new ArgumentError("domain evidence scope does not match the requested provider domain");
+        if (evidenceDomain !== undefined && providerRunOptions.domain !== undefined && providerRunOptions.domain !== evidenceDomain) throw new ArgumentError("domain evidence scope does not match the requested provider domain");
         run = await this.run(taskText, {
-          ...runOptions,
+          ...providerRunOptions,
           context,
-          ...(evidenceDomain !== undefined && runOptions.domain === undefined ? { domain: evidenceDomain } : {}),
+          ...(evidenceDomain !== undefined && providerRunOptions.domain === undefined ? { domain: evidenceDomain } : {}),
         });
       } else if (runMode === "cross_domain") {
         if (!evidenceScopeRoute) throw new ProviderRuntimeError("cross-domain evidence route was not compiled");
-        if (runOptions.semanticRouting !== undefined && runOptions.semanticRouting !== false) throw new ArgumentError("cross-domain evidence execution requires provider-free route binding");
-        const { domain: _domain, routeOverride: _routeOverride, semanticRouting: _semanticRouting, ...crossRunOptions } = runOptions;
+        if (providerRunOptions.semanticRouting !== undefined && providerRunOptions.semanticRouting !== false) throw new ArgumentError("cross-domain evidence execution requires provider-free route binding");
+        const { domain: _domain, routeOverride: _routeOverride, semanticRouting: _semanticRouting, ...crossRunOptions } = providerRunOptions;
         crossDomainRun = await this.runCrossDomain(taskText, {
           ...crossRunOptions,
           ...options.crossDomain,
@@ -8000,9 +8214,9 @@ export class AutonomousAgent {
         });
       } else {
         if (evidenceScopeRoute) {
-          if (runOptions.routeOverride !== undefined) throw new ArgumentError("automatic evidence execution owns the evidence-scope route override");
-          if (runOptions.semanticRouting !== undefined && runOptions.semanticRouting !== false) throw new ArgumentError("automatic evidence execution cannot combine an exact evidence scope with provider-assisted semantic routing");
-          const { domain: _domain, routeOverride: _routeOverride, semanticRouting: _semanticRouting, ...automaticRunOptions } = runOptions;
+          if (providerRunOptions.routeOverride !== undefined) throw new ArgumentError("automatic evidence execution owns the evidence-scope route override");
+          if (providerRunOptions.semanticRouting !== undefined && providerRunOptions.semanticRouting !== false) throw new ArgumentError("automatic evidence execution cannot combine an exact evidence scope with provider-assisted semantic routing");
+          const { domain: _domain, routeOverride: _routeOverride, semanticRouting: _semanticRouting, ...automaticRunOptions } = providerRunOptions;
           automatic = await this.runAuto(taskText, {
             ...automaticRunOptions,
             context,
@@ -8011,13 +8225,15 @@ export class AutonomousAgent {
             domainPolicyEvidenceReady: true,
           });
         } else {
-          automatic = await this.runAuto(taskText, { ...runOptions, context, domainPolicyEvidenceReady: true });
+          automatic = await this.runAuto(taskText, { ...providerRunOptions, context, domainPolicyEvidenceReady: true });
         }
         if (automatic.result?.schema === "bioprism-typescript-autonomous-run/0.1") run = automatic.result;
         if (automatic.result?.schema === "bioprism-typescript-autonomous-cross-domain-result/0.1") crossDomainRun = automatic.result;
       }
     }
-    const status = automatic?.status ?? crossDomainRun?.status ?? run?.status ?? "evidence_failed";
+    const status: AutonomousEvidenceBackedRunStatus = evidenceIncomplete
+      ? "evidence_incomplete"
+      : automatic?.status ?? crossDomainRun?.status ?? run?.status ?? "evidence_failed";
     return finish(status, evidence, projectedContext, run, crossDomainRun, automatic);
   }
 
@@ -8780,6 +8996,7 @@ export class AutonomousAgent {
         credentialFor: options.credentialFor,
         signal: options.signal,
         observer: options.observer,
+        providerDispatchFence: options.providerDispatchFence,
         selectionEventCallback: options.selectionEventCallback,
         execution: options.execution,
         executionAttempt: options.executionAttempt,
@@ -8908,6 +9125,7 @@ export class AutonomousAgent {
         credentialFor: options.credentialFor,
         signal: options.signal,
         observer: options.observer,
+        providerDispatchFence: options.providerDispatchFence,
         selectionEventCallback: options.selectionEventCallback,
         execution: options.execution,
         executionAttempt: options.executionAttempt,
@@ -9024,6 +9242,7 @@ export class AutonomousAgent {
         credentialFor: options.credentialFor,
         signal: options.signal,
         observer: options.observer,
+        providerDispatchFence: options.providerDispatchFence,
         selectionEventCallback: options.selectionEventCallback,
         execution: options.execution,
         executionAttempt: options.executionAttempt,
@@ -9110,6 +9329,9 @@ export class AutonomousAgent {
     }
     const planningOptions: AutonomousProviderPlanningOptions = {
       ...(planning ?? {}),
+      ...(planning?.runId === undefined && options.providerIdempotencyKey !== undefined
+        ? { runId: await scopedProviderIdempotencyKey(options.providerIdempotencyKey, { phase: "planning" }) }
+        : {}),
       ...(planning?.promptTemplate === undefined && options.promptTemplate !== undefined ? { promptTemplate: options.promptTemplate } : {}),
       ...(planning?.promptRegistry === undefined && options.promptRegistry !== undefined ? { promptRegistry: options.promptRegistry } : {}),
       ...(planning?.promptSelection === undefined && options.promptSelection !== undefined ? { promptSelection: options.promptSelection } : {}),
@@ -10203,6 +10425,7 @@ export class AutonomousAgent {
       credentialFor: options.credentialFor,
       signal: options.signal,
       observer: feedbackObserver,
+      providerDispatchFence: options.providerDispatchFence,
       selectionEventCallback: options.selectionEventCallback,
       execution: options.execution,
       executionAttempt: options.executionAttempt,
@@ -10416,7 +10639,9 @@ export class AutonomousAgent {
       messages,
       maxOutputTokens: options.maxOutputTokens ?? 1_024,
       temperature: options.temperature,
-      ...(promptProjection ? {
+      ...(options.providerIdempotencyKey !== undefined
+        ? { idempotencyKey: boundedIdentifier("provider idempotency key", options.providerIdempotencyKey) }
+        : promptProjection ? {
         idempotencyKey: await digestJson({
           schema: "bioprism-typescript-autonomous-run-prompt-request/0.1",
           task_digest: blueprint.task_digest,
@@ -10444,7 +10669,7 @@ export class AutonomousAgent {
           ? (calls: ProviderToolCall[]) => this.dispatchActivatedToolCalls(calls, (allowed) => toolRuntime.authorizeAndExecute(allowed, { domains: selectedDomains, approveEffects: options.approveEffects, execution: options.execution, effectBoundary: options.effectBoundary ?? this.effectBoundary, workflowContext: options.workflowContext, authorizationContext: options.authorizationContext }))
           : async (calls: ProviderToolCall[]) => calls.map((call) => ({ callId: call.id, approved: false, isError: true, content: { status: "authorization_required", tool: call.name, secret_material: "never_returned" } })));
       const toolReadOnly = options.toolReadOnly ?? (async (call: ProviderToolCall): Promise<boolean> => this.domainToolRegistry?.binding(call.name, selectedDomains)?.risk_class === "read_only");
-      const loop = await this.runtime.invokeToolLoop(executionPlan, { credential: options.credential, credentialFor: options.credentialFor, authorizeAndExecute, maxTurns: effectiveMaxToolTurns, signal: options.signal, observer: feedbackObserver, selectionEventCallback: options.selectionEventCallback, execution: options.execution, executionAttempt: options.executionAttempt, maxProviderFailovers: effectiveMaxProviderFailovers, reserveCost: costBudget ? (costUnits) => costBudget!.reserve(costUnits) : undefined, toolReadOnly, authorizationContext: options.authorizationContext });
+      const loop = await this.runtime.invokeToolLoop(executionPlan, { credential: options.credential, credentialFor: options.credentialFor, authorizeAndExecute, maxTurns: effectiveMaxToolTurns, signal: options.signal, observer: feedbackObserver, providerDispatchFence: options.providerDispatchFence, selectionEventCallback: options.selectionEventCallback, execution: options.execution, executionAttempt: options.executionAttempt, maxProviderFailovers: effectiveMaxProviderFailovers, reserveCost: costBudget ? (costUnits) => costBudget!.reserve(costUnits) : undefined, toolReadOnly, authorizationContext: options.authorizationContext });
       const responseEvaluation = options.structuredDomainResponse === true && loop.loop.finalResponse
         ? evaluateAutonomousDomainResponseOrThrow(loop.loop.finalResponse, blueprint.response_contract)
         : null;
@@ -10455,7 +10680,7 @@ export class AutonomousAgent {
       );
       return finish({ schema: "bioprism-typescript-autonomous-run/0.1", status, route, blueprint, plan_refinement_digest: planRefinementDigest, selection: loop.selection, response: loop.loop.finalResponse, provider_invocations: loop.provider_invocations, provider_failover: loop.provider_failover, continuation_plan: loop.continuation_plan, context_budget: loop.context_budget, prompt: promptProjection, response_evaluation: responseEvaluation, tool_loop: { status: loop.loop.status, turns: loop.loop.turns, toolCalls: loop.loop.toolCalls }, cross_domain: null, domain_policy_admission: domainPolicyAdmission, learning: this.learner ? "online_bandit_feedback_available" : "provider_health_feedback_only", retention: "provider_response_local; value_only_learning_projection" });
     }
-    const result = await this.runtime.invoke(executionPlan, { credential: options.credential, credentialFor: options.credentialFor, signal: options.signal, observer: feedbackObserver, selectionEventCallback: options.selectionEventCallback, execution: options.execution, executionAttempt: options.executionAttempt, maxProviderFailovers: effectiveMaxProviderFailovers, reserveCost: costBudget ? (costUnits) => costBudget!.reserve(costUnits) : undefined, authorizationContext: options.authorizationContext });
+    const result = await this.runtime.invoke(executionPlan, { credential: options.credential, credentialFor: options.credentialFor, signal: options.signal, observer: feedbackObserver, providerDispatchFence: options.providerDispatchFence, selectionEventCallback: options.selectionEventCallback, execution: options.execution, executionAttempt: options.executionAttempt, maxProviderFailovers: effectiveMaxProviderFailovers, reserveCost: costBudget ? (costUnits) => costBudget!.reserve(costUnits) : undefined, authorizationContext: options.authorizationContext });
     const responseEvaluation = options.structuredDomainResponse === true
       ? evaluateAutonomousDomainResponseOrThrow(result.response, blueprint.response_contract)
       : null;
@@ -10638,9 +10863,15 @@ export class AutonomousAgent {
           maxTotalCostUnits: undefined,
           costBudget,
           executionAttempt: index + 1,
+          providerIdempotencyKey: await scopedProviderIdempotencyKey(options.providerIdempotencyKey, {
+            phase: "cross_domain_child",
+            child_id: childId,
+            child_index: index,
+          }),
           maxProviderFailovers: options.maxProviderFailovers,
           signal: options.signal,
           observer: options.observer,
+          providerDispatchFence: options.providerDispatchFence,
           selectionEventCallback: options.selectionEventCallback,
           toolSelectionState: options.toolSelectionState,
           toolSelectionExploration: options.toolSelectionExploration,
@@ -10796,9 +11027,13 @@ export class AutonomousAgent {
       maxTotalCostUnits: undefined,
       costBudget,
       executionAttempt: totalChildren + 1,
+      providerIdempotencyKey: await scopedProviderIdempotencyKey(options.providerIdempotencyKey, {
+        phase: "cross_domain_synthesis",
+      }),
       maxProviderFailovers: options.maxProviderFailovers,
       signal: options.signal,
       observer: options.observer,
+      providerDispatchFence: options.providerDispatchFence,
       selectionEventCallback: options.selectionEventCallback,
       toolSelectionState: options.toolSelectionState,
       toolSelectionExploration: options.toolSelectionExploration,

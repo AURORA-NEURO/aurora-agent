@@ -74,6 +74,8 @@ CREDENTIAL_ONBOARDING_SCHEMA = "bioprism-llm-credential-onboarding/0.1"
 CREDENTIAL_PROVISIONING_SCHEMA = "bioprism-llm-credential-provisioning/0.1"
 PROVIDER_MODEL_DISCOVERY_SCHEMA = "bioprism-llm-provider-model-discovery/0.1"
 IN_MEMORY_PROVIDER_SCHEMA = "bioprism-llm-in-memory-provider/0.1"
+_PROVIDER_DISPATCH_SCOPE_SCHEMA = "bioprism-llm-provider-dispatch-scope/0.1"
+_PROVIDER_DISPATCH_FENCE_PROVENANCE = object()
 MAX_MODEL_CANDIDATES = 512
 MAX_MODEL_METADATA_BYTES = 256_000
 MAX_PROVIDER_HEALTH_RECORDS = 16_384
@@ -247,8 +249,29 @@ class ProviderInvocationMetadata:
         }
 
 
+def _provider_observer_metadata_projection(
+    metadata: ProviderInvocationMetadata,
+) -> ProviderInvocationMetadata:
+    """Give each ordinary observer a detached value instead of private fence state."""
+
+    return ProviderInvocationMetadata(
+        provider=metadata.provider,
+        model=metadata.model,
+        kind=metadata.kind,
+        input_tokens=metadata.input_tokens,
+        requested_output_tokens=metadata.requested_output_tokens,
+        tool_count=metadata.tool_count,
+    )
+
+
 class ProviderInvocationObserver(Protocol):
-    """Optional per-request admission/outcome hook for autonomous execution accounting."""
+    """Optional per-request admission/outcome hook for autonomous execution accounting.
+
+    A directly installed observer receives the runtime response.  When observers are composed,
+    their outcome is metadata-only: response text, structured output, raw provider payloads,
+    tool calls, continuation items, request ids, exception messages, exception attributes, and
+    exception cause/context chains are removed.
+    """
 
     def before(self, metadata: ProviderInvocationMetadata) -> None:
         ...
@@ -267,19 +290,79 @@ class CompositeProviderInvocationObserver:
     """Fan out value-only provider lifecycle notifications to multiple observers.
 
     The execution-policy observer remains in the chain alongside telemetry observers. Each
-    observer receives the same metadata object, and no composite method accepts provider
-    messages, credentials, response text, or wire payloads.
+    observer receives a detached metadata value and a redacted outcome projection. No ordinary
+    child receives provider messages, credentials, response text, structured output, request
+    ids, tool arguments, continuation items, wire payloads, or original exception objects.
     """
 
-    __slots__ = ("_observers",)
+    __slots__ = (
+        "_observers",
+        "_provider_dispatch_fence",
+        "_provider_dispatch_fence_provenance",
+    )
 
-    def __init__(self, observers: Sequence[ProviderInvocationObserver | None]) -> None:
+    def __init__(
+        self,
+        observers: Sequence[ProviderInvocationObserver | None],
+    ) -> None:
         selected = tuple(observer for observer in observers if observer is not None)
         if not selected:
             raise ValueError("composite provider invocation observer requires at least one observer")
         if any(not callable(getattr(observer, "before", None)) or not callable(getattr(observer, "after", None)) for observer in selected):
             raise TypeError("composite provider invocation observers must implement before and after")
         self._observers = selected
+        self._provider_dispatch_fence = None
+        self._provider_dispatch_fence_provenance = None
+
+    @classmethod
+    def _with_provider_dispatch_fence(
+        cls,
+        observers: Sequence[ProviderInvocationObserver | None],
+        provider_dispatch_fence: Any,
+    ) -> "CompositeProviderInvocationObserver":
+        """Construct the SDK-private request fence carrier.
+
+        The leading underscore and unexported provenance sentinel keep the ordinary observer API
+        metadata-only.  Same-process reflection remains part of the caller's Python trust
+        boundary, but the public constructor cannot self-designate a privileged request hook.
+        """
+
+        selected = tuple(observer for observer in observers if observer is not None)
+        if any(
+            not callable(getattr(observer, "before", None))
+            or not callable(getattr(observer, "after", None))
+            for observer in selected
+        ):
+            raise TypeError(
+                "composite provider invocation observers must implement before and after"
+            )
+        if not callable(getattr(provider_dispatch_fence, "prepare_dispatch", None)) or not callable(
+            getattr(provider_dispatch_fence, "before_transport", None)
+        ):
+            raise TypeError("provider dispatch fence is malformed")
+        if any(
+            type(observer) is cls
+            and observer._sdk_provider_dispatch_fence() is not None
+            for observer in selected
+        ):
+            raise TypeError(
+                "composite provider invocation observer cannot carry multiple private dispatch fences"
+            )
+        instance = cls.__new__(cls)
+        instance._observers = selected
+        instance._provider_dispatch_fence = provider_dispatch_fence
+        instance._provider_dispatch_fence_provenance = (
+            _PROVIDER_DISPATCH_FENCE_PROVENANCE
+        )
+        return instance
+
+    def _sdk_provider_dispatch_fence(self) -> Any | None:
+        if (
+            self._provider_dispatch_fence_provenance
+            is _PROVIDER_DISPATCH_FENCE_PROVENANCE
+        ):
+            return self._provider_dispatch_fence
+        return None
 
     @property
     def observers(self) -> tuple[ProviderInvocationObserver, ...]:
@@ -287,7 +370,65 @@ class CompositeProviderInvocationObserver:
 
     def before(self, metadata: ProviderInvocationMetadata) -> None:
         for observer in self._observers:
-            observer.before(metadata)
+            observer.before(_provider_observer_metadata_projection(metadata))
+
+    def prepare_dispatch(
+        self,
+        provider: str,
+        request: "ProviderRequest",
+    ) -> "ProviderRequest":
+        """Apply only the SDK-owned transport-adjacent request fence.
+
+        Ordinary observers are metadata-only and therefore never receive messages or other
+        request payloads.  The reserved fence may replace only the idempotency key after all
+        local admission decisions and before the provider runtime builds the wire request.
+        """
+
+        prepared = request
+        fence = self._sdk_provider_dispatch_fence()
+        if fence is not None:
+            prepared = fence.prepare_dispatch(
+                provider,
+                prepared,
+            )
+            if type(prepared) is not ProviderRequest:
+                raise ProviderError(
+                    "provider dispatch fence returned a malformed dispatch request"
+                )
+        return prepared
+
+    def before_transport(
+        self,
+        metadata: ProviderInvocationMetadata,
+        dispatch_context: Mapping[str, Any] | None = None,
+    ) -> "ProviderRequest | None":
+        """Notify ordinary observers without widening exact dispatch metadata."""
+
+        for observer in self._observers:
+            hook = getattr(observer, "before_transport", None)
+            if hook is None:
+                continue
+            if not callable(hook):
+                raise ProviderError(
+                    "provider invocation observer before_transport must be callable"
+                )
+            hook(_provider_observer_metadata_projection(metadata))
+        fence = self._sdk_provider_dispatch_fence()
+        if fence is not None:
+            if dispatch_context is None:
+                raise ProviderError(
+                    "provider dispatch fence requires reserved transport context"
+                )
+            prepared = fence.before_transport(
+                metadata,
+                dispatch_context,
+            )
+            if type(prepared) is not ProviderRequest:
+                raise ProviderError(
+                    "provider dispatch fence returned a malformed transport request"
+                )
+            return prepared
+        return None
 
     def after(
         self,
@@ -299,11 +440,107 @@ class CompositeProviderInvocationObserver:
         failures: list[BaseException] = []
         for observer in self._observers:
             try:
-                observer.after(metadata, response, error, latency_ms)
+                observer.after(
+                    _provider_observer_metadata_projection(metadata),
+                    _provider_observer_response_projection(response),
+                    _provider_observer_error_projection(error),
+                    latency_ms,
+                )
             except BaseException as observer_error:
                 failures.append(observer_error)
         if failures:
             raise failures[0]
+
+
+def _provider_observer_response_projection(
+    response: "ProviderResponse | None",
+) -> "ProviderResponse | None":
+    """Return only bounded accounting fields to ordinary composite observers."""
+
+    if response is None:
+        return None
+    safe_usage = {
+        key: value
+        for key, value in response.usage.items()
+        if key
+        in {
+            "input_tokens",
+            "output_tokens",
+            "prompt_tokens",
+            "completion_tokens",
+            "total_tokens",
+        }
+        and type(value) is int
+        and value >= 0
+    }
+    return ProviderResponse(
+        provider=response.provider,
+        model=response.model,
+        text="",
+        status_code=response.status_code,
+        request_id=None,
+        usage=safe_usage,
+        raw={
+            "retention": "metadata_only_no_provider_payloads",
+            "redacted": True,
+        },
+        structured=None,
+        tool_calls=(),
+        provider_output_items=(),
+    )
+
+
+def _provider_observer_error_projection(
+    error: BaseException | None,
+) -> BaseException | None:
+    """Return a detached failure classification without payload-bearing exception state."""
+
+    if error is None:
+        return None
+    retryable = False
+    status_code: int | None = None
+    circuit_open = False
+    code = "provider_error"
+    # Only the SDK's exact error layout is safe to inspect. A subclass may install descriptors
+    # that execute caller code or return payload-bearing values while the projection is built.
+    if type(error) is ProviderError:
+        state = object.__getattribute__(error, "__dict__")
+        observed_retryable = dict.get(state, "retryable")
+        observed_status_code = dict.get(state, "status_code")
+        observed_circuit_open = dict.get(state, "circuit_open")
+        observed_code = dict.get(state, "code")
+        if type(observed_retryable) is bool:
+            retryable = observed_retryable
+        if (
+            type(observed_status_code) is int
+            and 100 <= observed_status_code <= 599
+        ):
+            status_code = observed_status_code
+        if type(observed_circuit_open) is bool:
+            circuit_open = observed_circuit_open
+        if (
+            type(observed_code) is str
+            and 0 < len(observed_code) <= 128
+            and all(
+                character.isascii()
+                and (character.isalnum() or character in {"_", "-", "."})
+                for character in observed_code
+            )
+        ):
+            code = observed_code
+    projected = ProviderError(
+        "provider invocation failed",
+        retryable=retryable,
+        status_code=status_code,
+        circuit_open=circuit_open,
+        code=code,
+    )
+    # Be explicit even though a freshly constructed exception has no traceback or cause. This
+    # prevents a future constructor change from accidentally widening the observer contract.
+    projected.__cause__ = None
+    projected.__context__ = None
+    projected.__suppress_context__ = True
+    return projected.with_traceback(None)
 
 
 class SecretValue:
@@ -442,6 +679,8 @@ class CredentialStore:
     def __init__(self, *, max_credentials: int = 32, clock: Callable[[], float] = time.time) -> None:
         if max_credentials <= 0:
             raise CredentialError("max_credentials must be positive")
+        if not callable(clock):
+            raise CredentialError("credential clock must be callable")
         self._max_credentials = max_credentials
         self._clock = clock
         self._entries: dict[str, _CredentialEntry] = {}
@@ -462,18 +701,26 @@ class CredentialStore:
             raise CredentialError("credential value must be a non-empty string")
         if len(secret.encode("utf-8")) > MAX_CREDENTIAL_BYTES:
             raise CredentialError("credential value exceeds the bounded size")
-        if ttl_seconds is not None and (not isinstance(ttl_seconds, (int, float)) or ttl_seconds <= 0):
+        if ttl_seconds is not None and (
+            not isinstance(ttl_seconds, (int, float))
+            or isinstance(ttl_seconds, bool)
+            or not math.isfinite(float(ttl_seconds))
+            or ttl_seconds <= 0
+        ):
             raise CredentialError("ttl_seconds must be positive or None")
         if not isinstance(source, str) or source not in self._SOURCES:
             raise CredentialError("credential source is not supported")
         with self._lock:
-            self._purge_expired_locked()
+            now = self._clock_now()
+            self._purge_expired_locked(now=now)
             if len(self._entries) >= self._max_credentials:
                 raise CredentialError("credential store capacity is exhausted")
             credential_id = secrets.token_urlsafe(24)
             while credential_id in self._entries:
                 credential_id = secrets.token_urlsafe(24)
-            expires_at = None if ttl_seconds is None else self._clock() + float(ttl_seconds)
+            expires_at = None if ttl_seconds is None else now + float(ttl_seconds)
+            if expires_at is not None and not math.isfinite(expires_at):
+                raise CredentialError("credential expiry must be finite")
             self._entries[credential_id] = _CredentialEntry(
                 provider=provider,
                 secret=SecretValue(secret),
@@ -608,8 +855,22 @@ class CredentialStore:
                 raise CredentialError("credential handle provider mismatch")
             return entry
 
-    def _purge_expired_locked(self) -> None:
-        now = self._clock()
+    def _clock_now(self) -> float:
+        try:
+            now = self._clock()
+        except Exception as error:
+            raise CredentialError("credential clock failed") from error
+        if (
+            not isinstance(now, (int, float))
+            or isinstance(now, bool)
+            or not math.isfinite(float(now))
+        ):
+            raise CredentialError("credential clock must return a finite number")
+        return float(now)
+
+    def _purge_expired_locked(self, *, now: float | None = None) -> None:
+        if now is None:
+            now = self._clock_now()
         expired = [
             identifier
             for identifier, entry in self._entries.items()
@@ -4055,6 +4316,54 @@ class LLMRuntime:
             observer.before(metadata)
 
     @staticmethod
+    def _prepare_invocation_dispatch(
+        observer: ProviderInvocationObserver | None,
+        *,
+        provider: str,
+        request: ProviderRequest,
+    ) -> ProviderRequest:
+        # ProviderInvocationObserver is intentionally metadata-only.  Exact request access is
+        # reserved to the SDK-created composite fence used by resumable execution.
+        if type(observer) is not CompositeProviderInvocationObserver:
+            return request
+        prepared = observer.prepare_dispatch(provider, request)
+        if type(prepared) is not ProviderRequest:
+            raise ProviderError(
+                "provider invocation observer returned a malformed dispatch request"
+            )
+        if replace(prepared, idempotency_key=request.idempotency_key) != request:
+            raise ProviderError(
+                "provider dispatch preparation may replace only the idempotency key"
+            )
+        return prepared
+
+    @staticmethod
+    def _notify_invocation_before_transport(
+        observer: ProviderInvocationObserver | None,
+        metadata: ProviderInvocationMetadata,
+        dispatch_context: Mapping[str, Any],
+    ) -> ProviderRequest | None:
+        if observer is None:
+            return None
+        hook = getattr(observer, "before_transport", None)
+        if hook is None:
+            return None
+        if not callable(hook):
+            raise ProviderError(
+                "provider invocation observer before_transport must be callable"
+            )
+        if type(observer) is CompositeProviderInvocationObserver:
+            prepared = hook(metadata, dispatch_context)
+            if prepared is not None and type(prepared) is not ProviderRequest:
+                raise ProviderError(
+                    "provider invocation observer returned a malformed transport request"
+                )
+            return prepared
+        else:
+            hook(metadata)
+        return None
+
+    @staticmethod
     def _notify_invocation_after(
         observer: ProviderInvocationObserver | None,
         metadata: ProviderInvocationMetadata,
@@ -4113,6 +4422,97 @@ class LLMRuntime:
         config = self._providers.get(provider)
         if config is None:
             raise ProviderError(f"provider {provider!r} is not configured")
+        reserved_dispatch_fence = (
+            invocation_observer._sdk_provider_dispatch_fence()
+            if type(invocation_observer) is CompositeProviderInvocationObserver
+            else None
+        )
+        resumable_dispatch_fenced = reserved_dispatch_fence is not None
+
+        def dispatch_configuration_snapshot() -> tuple[
+            tuple[tuple[str, type[Any], Any], ...],
+            Any,
+            Any,
+        ]:
+            # Keep this literal order aligned with ProviderConfig. The private resumable fence
+            # compares every exact scalar/type pair with its import-time registry snapshot.
+            # ``transport`` and the HTTP constructor are identity-bound separately.
+            scalar_values = tuple(
+                (name, type(value), value)
+                for name, value in (
+                    ("provider", object.__getattribute__(config, "provider")),
+                    ("base_url", object.__getattribute__(config, "base_url")),
+                    ("protocol", object.__getattribute__(config, "protocol")),
+                    ("path", object.__getattribute__(config, "path")),
+                    (
+                        "requires_credential",
+                        object.__getattribute__(config, "requires_credential"),
+                    ),
+                    (
+                        "timeout_seconds",
+                        object.__getattribute__(config, "timeout_seconds"),
+                    ),
+                    (
+                        "max_response_bytes",
+                        object.__getattribute__(config, "max_response_bytes"),
+                    ),
+                    (
+                        "allow_insecure_http",
+                        object.__getattribute__(config, "allow_insecure_http"),
+                    ),
+                    (
+                        "api_key_header",
+                        object.__getattribute__(config, "api_key_header"),
+                    ),
+                    (
+                        "max_attempts",
+                        object.__getattribute__(config, "max_attempts"),
+                    ),
+                    (
+                        "retry_backoff_seconds",
+                        object.__getattribute__(config, "retry_backoff_seconds"),
+                    ),
+                    (
+                        "circuit_breaker_failure_threshold",
+                        object.__getattribute__(
+                            config,
+                            "circuit_breaker_failure_threshold",
+                        ),
+                    ),
+                    (
+                        "circuit_breaker_reset_seconds",
+                        object.__getattribute__(
+                            config,
+                            "circuit_breaker_reset_seconds",
+                        ),
+                    ),
+                    (
+                        "models_path",
+                        object.__getattribute__(config, "models_path"),
+                    ),
+                    (
+                        "structured_output_mode",
+                        object.__getattribute__(config, "structured_output_mode"),
+                    ),
+                )
+            )
+            selected_transport = object.__getattribute__(config, "transport")
+            selected_factory = None
+            if selected_transport is None:
+                base_url = object.__getattribute__(config, "base_url")
+                if type(base_url) is str:
+                    selected_factory = (
+                        http.client.HTTPSConnection
+                        if urlsplit(base_url).scheme == "https"
+                        else http.client.HTTPConnection
+                    )
+            return scalar_values, selected_transport, selected_factory
+
+        dispatch_configuration = (
+            dispatch_configuration_snapshot()
+            if resumable_dispatch_fenced
+            else None
+        )
         self._authorize_provider(
             authorization_context,
             provider=provider,
@@ -4130,6 +4530,25 @@ class LLMRuntime:
                 raise CredentialError("credential provider does not match invocation provider")
             secret = self.credentials._resolve(credential)
         metadata = self._invocation_metadata(provider, request, invocation_kind)
+        invocation_metadata_snapshot = (
+            metadata.provider,
+            metadata.model,
+            metadata.kind,
+            metadata.input_tokens,
+            metadata.requested_output_tokens,
+            metadata.tool_count,
+        )
+        dispatch_scope_digest = content_digest(
+            {
+                "schema": _PROVIDER_DISPATCH_SCOPE_SCHEMA,
+                "provider": provider,
+                "model": request.model,
+                "invocation_kind": invocation_kind,
+                "authorization_domain": authorization_domain,
+                "authorization_attempt": authorization_attempt,
+                "authorization_turn": authorization_turn,
+            }
+        )
         quota = self._provider_quota if provider_quota is None else provider_quota
         quota_reservation = None
         if quota is not None:
@@ -4166,13 +4585,137 @@ class LLMRuntime:
             if cost_reservation is not None:
                 cost_reservation()
             raise
+        if resumable_dispatch_fenced:
+            current_dispatch_configuration = dispatch_configuration_snapshot()
+            assert dispatch_configuration is not None
+            initial_scalars, initial_transport, initial_factory = (
+                dispatch_configuration
+            )
+            current_scalars, current_transport, current_factory = (
+                current_dispatch_configuration
+            )
+            scalar_state_unchanged = (
+                len(initial_scalars) == len(current_scalars)
+                and all(
+                    current_name == initial_name
+                    and current_type is initial_type
+                    and type(current_value) is initial_type
+                    and current_value == initial_value
+                    for (
+                        initial_name,
+                        initial_type,
+                        initial_value,
+                    ), (
+                        current_name,
+                        current_type,
+                        current_value,
+                    ) in zip(initial_scalars, current_scalars)
+                )
+            )
+            if (
+                not scalar_state_unchanged
+                or current_transport is not initial_transport
+                or current_factory is not initial_factory
+            ):
+                if quota_reservation is not None:
+                    quota_reservation.release()
+                if cost_reservation is not None:
+                    cost_reservation()
+                raise ProviderError(
+                    "provider configuration changed during invocation admission"
+                )
         started = time.perf_counter()
+        provider_transport_committed = False
+
         try:
             selected_boundary = effect_boundary if effect_boundary is not None else self._effect_boundary
             if selected_boundary is None:
-                if quota_reservation is not None:
-                    quota_reservation.mark_dispatched()
-                response = self._post(config, self._body(config, request), self._provider_headers(config, secret, request), request)
+                dispatched_request = self._prepare_invocation_dispatch(
+                    invocation_observer,
+                    provider=provider,
+                    request=request,
+                )
+                dispatched_body = (
+                    None
+                    if resumable_dispatch_fenced
+                    else self._body(config, dispatched_request)
+                )
+                dispatched_headers = (
+                    None
+                    if resumable_dispatch_fenced
+                    else self._provider_headers(
+                        config,
+                        secret,
+                        dispatched_request,
+                    )
+                )
+                def notify_transport_boundary(
+                    transport_attempt: int,
+                ) -> ProviderRequest | None:
+                    nonlocal provider_transport_committed
+                    dispatch_context = {
+                        "provider_idempotency_key": (
+                            dispatched_request.idempotency_key
+                        ),
+                        "provider_invocation_metadata": invocation_metadata_snapshot,
+                        "dispatch_scope_digest": dispatch_scope_digest,
+                        "transport_attempt": transport_attempt,
+                    }
+                    if dispatch_configuration is not None:
+                        dispatch_context.update(
+                            {
+                                # Reserved SDK-private context. Composite observers strip these
+                                # objects before notifying ordinary children.
+                                "provider_config": config,
+                                "provider_config_snapshot": (
+                                    dispatch_configuration[0]
+                                ),
+                                "provider_transport": dispatch_configuration[1],
+                                "provider_http_connection_factory": (
+                                    dispatch_configuration[2]
+                                ),
+                                "provider_request": dispatched_request,
+                                "provider_secret": secret,
+                            }
+                        )
+                    # Quota reservations are caller-visible objects. Run their last callback
+                    # before the composite observer's SDK-private fence so any transport-graph
+                    # mutation is rejected by the final attestation. No caller-owned code runs
+                    # between that fence returning and the concrete transport lookup below.
+                    if quota_reservation is not None:
+                        quota_reservation.mark_dispatched()
+                    transport_request = self._notify_invocation_before_transport(
+                        invocation_observer,
+                        metadata,
+                        dispatch_context,
+                    )
+                    provider_transport_committed = True
+                    return transport_request
+
+                before_transport = (
+                    notify_transport_boundary
+                    if quota_reservation is not None
+                    or callable(
+                        getattr(invocation_observer, "before_transport", None)
+                    )
+                    else None
+                )
+                if before_transport is None:
+                    response = self._post(
+                        config,
+                        dispatched_body,
+                        dispatched_headers,
+                        dispatched_request,
+                    )
+                else:
+                    response = self._post(
+                        config,
+                        dispatched_body,
+                        dispatched_headers,
+                        dispatched_request,
+                        before_transport=before_transport,
+                        deferred_secret=secret,
+                    )
             else:
                 request_digest = content_digest({
                     "provider": provider,
@@ -4209,9 +4752,88 @@ class LLMRuntime:
 
                 def dispatch(context: Any) -> ProviderResponse:
                     dispatched_request = request if request.idempotency_key is not None else replace(request, idempotency_key=context.idempotency_key)
-                    if quota_reservation is not None:
-                        quota_reservation.mark_dispatched()
-                    return self._post(config, self._body(config, dispatched_request), self._provider_headers(config, secret, dispatched_request), dispatched_request)
+                    dispatched_request = self._prepare_invocation_dispatch(
+                        invocation_observer,
+                        provider=provider,
+                        request=dispatched_request,
+                    )
+                    dispatched_body = (
+                        None
+                        if resumable_dispatch_fenced
+                        else self._body(config, dispatched_request)
+                    )
+                    dispatched_headers = (
+                        None
+                        if resumable_dispatch_fenced
+                        else self._provider_headers(
+                            config,
+                            secret,
+                            dispatched_request,
+                        )
+                    )
+                    def notify_transport_boundary(
+                        transport_attempt: int,
+                    ) -> ProviderRequest | None:
+                        nonlocal provider_transport_committed
+                        dispatch_context = {
+                            "provider_idempotency_key": (
+                                dispatched_request.idempotency_key
+                            ),
+                            "provider_invocation_metadata": invocation_metadata_snapshot,
+                            "dispatch_scope_digest": dispatch_scope_digest,
+                            "transport_attempt": transport_attempt,
+                        }
+                        if dispatch_configuration is not None:
+                            dispatch_context.update(
+                                {
+                                    # Kept private by CompositeProviderInvocationObserver.
+                                    "provider_config": config,
+                                    "provider_config_snapshot": (
+                                        dispatch_configuration[0]
+                                    ),
+                                    "provider_transport": (
+                                        dispatch_configuration[1]
+                                    ),
+                                    "provider_http_connection_factory": (
+                                        dispatch_configuration[2]
+                                    ),
+                                    "provider_request": dispatched_request,
+                                    "provider_secret": secret,
+                                }
+                            )
+                        if quota_reservation is not None:
+                            quota_reservation.mark_dispatched()
+                        transport_request = self._notify_invocation_before_transport(
+                            invocation_observer,
+                            metadata,
+                            dispatch_context,
+                        )
+                        provider_transport_committed = True
+                        return transport_request
+
+                    before_transport = (
+                        notify_transport_boundary
+                        if quota_reservation is not None
+                        or callable(
+                            getattr(invocation_observer, "before_transport", None)
+                        )
+                        else None
+                    )
+                    if before_transport is None:
+                        return self._post(
+                            config,
+                            dispatched_body,
+                            dispatched_headers,
+                            dispatched_request,
+                        )
+                    return self._post(
+                        config,
+                        dispatched_body,
+                        dispatched_headers,
+                        dispatched_request,
+                        before_transport=before_transport,
+                        deferred_secret=secret,
+                    )
 
                 response = selected_boundary.execute(
                     effect_request,
@@ -4226,7 +4848,7 @@ class LLMRuntime:
                 self._notify_invocation_after(invocation_observer, metadata, None, error, started)
             finally:
                 if quota_reservation is not None:
-                    if quota_reservation.is_dispatched:
+                    if provider_transport_committed:
                         quota_reservation.settle()
                     else:
                         quota_reservation.release()
@@ -5093,13 +5715,23 @@ class LLMRuntime:
     def _post(
         self,
         config: ProviderConfig,
-        body: Mapping[str, Any],
-        headers: Mapping[str, str],
+        body: Mapping[str, Any] | None,
+        headers: Mapping[str, str] | None,
         request: ProviderRequest,
+        *,
+        before_transport: Callable[[int], ProviderRequest | None] | None = None,
+        deferred_secret: SecretValue | None = None,
     ) -> ProviderResponse:
         started = time.perf_counter()
         try:
-            response = self._post_with_retries(config, body, headers, request)
+            response = self._post_with_retries(
+                config,
+                body,
+                headers,
+                request,
+                before_transport=before_transport,
+                deferred_secret=deferred_secret,
+            )
         except ProviderError as error:
             self._notify_observation(
                 config,
@@ -5123,9 +5755,12 @@ class LLMRuntime:
     def _post_with_retries(
         self,
         config: ProviderConfig,
-        body: Mapping[str, Any],
-        headers: Mapping[str, str],
+        body: Mapping[str, Any] | None,
+        headers: Mapping[str, str] | None,
         request: ProviderRequest,
+        *,
+        before_transport: Callable[[int], ProviderRequest | None] | None = None,
+        deferred_secret: SecretValue | None = None,
     ) -> ProviderResponse:
         state = self._circuits.setdefault(config.provider, _CircuitState())
         now = self._clock()
@@ -5140,12 +5775,37 @@ class LLMRuntime:
 
         last_error: ProviderError | None = None
         for attempt in range(config.max_attempts):
+            hook_error: BaseException | None = None
+
+            def guarded_before_transport() -> ProviderRequest | None:
+                nonlocal hook_error
+                if before_transport is None:
+                    return None
+                try:
+                    return before_transport(attempt + 1)
+                except BaseException as error:
+                    hook_error = error
+                    raise
+
             try:
-                response = self._post_once(config, body, headers, request)
+                response = self._post_once(
+                    config,
+                    body,
+                    headers,
+                    request,
+                    before_transport=(
+                        None
+                        if before_transport is None
+                        else guarded_before_transport
+                    ),
+                    deferred_secret=deferred_secret,
+                )
                 state.consecutive_failures = 0
                 state.opened_until = None
                 return response
             except ProviderError as error:
+                if error is hook_error:
+                    raise
                 last_error = error
                 if not error.retryable or attempt + 1 >= config.max_attempts:
                     break
@@ -5162,30 +5822,59 @@ class LLMRuntime:
     def _post_once(
         self,
         config: ProviderConfig,
-        body: Mapping[str, Any],
-        headers: Mapping[str, str],
+        body: Mapping[str, Any] | None,
+        headers: Mapping[str, str] | None,
         request: ProviderRequest,
+        *,
+        before_transport: Callable[[], ProviderRequest | None] | None = None,
+        deferred_secret: SecretValue | None = None,
     ) -> ProviderResponse:
-        if config.transport is not None:
+        # The combined hook runs ordinary metadata-only observers first and the SDK-private
+        # durable fence last. Nothing derived from mutable ProviderConfig state is retained
+        # across that callback boundary on a resumable invocation.
+        if before_transport is not None:
+            prepared_request = before_transport()
+            if prepared_request is not None:
+                if type(prepared_request) is not ProviderRequest:
+                    raise ProviderError(
+                        "provider transport received a malformed fenced request"
+                    )
+                request = prepared_request
+        selected_transport = config.transport
+        if selected_transport is not None:
             try:
-                return config.transport.invoke(request)
+                return selected_transport.invoke(request)
             except ProviderError:
                 raise
             except Exception as error:
                 raise ProviderError(
                     "provider transport failed; credential material was discarded"
                 ) from error
+        if body is None or headers is None:
+            if body is not None or headers is not None:
+                raise ProviderError(
+                    "provider dispatch wire material is only partially prepared"
+                )
+            body = self._body(config, request)
+            headers = self._provider_headers(
+                config,
+                deferred_secret,
+                request,
+            )
         host, port, path, scheme = config.endpoint
         try:
             encoded = json.dumps(body, ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode("utf-8")
         except (TypeError, ValueError) as error:
             raise ProviderError(f"provider request is not JSON-safe: {error}") from error
-        connection: http.client.HTTPConnection | http.client.HTTPSConnection
-        connection = (
-            http.client.HTTPSConnection(host, port, timeout=config.timeout_seconds)
+        # This lookup occurs only after the private fence returned. There is no ordinary callback
+        # between selecting this exact constructor and invoking it.
+        connection_factory = (
+            http.client.HTTPSConnection
             if scheme == "https"
-            else http.client.HTTPConnection(host, port, timeout=config.timeout_seconds)
+            else http.client.HTTPConnection
         )
+        connection: http.client.HTTPConnection | http.client.HTTPSConnection
+        connection = connection_factory(host, port, timeout=config.timeout_seconds)
         try:
             connection.request("POST", path, body=encoded, headers=dict(headers))
             response = connection.getresponse()
@@ -7126,6 +7815,45 @@ def openai_compatible_provider(
         models_path=models_path,
         timeout_seconds=timeout_seconds,
         allow_insecure_http=allow_insecure_http,
+        max_attempts=max_attempts,
+        retry_backoff_seconds=retry_backoff_seconds,
+        circuit_breaker_failure_threshold=circuit_breaker_failure_threshold,
+        circuit_breaker_reset_seconds=circuit_breaker_reset_seconds,
+        structured_output_mode=structured_output_mode,
+    )
+
+
+def ollama_provider(
+    *,
+    base_url: str = "http://127.0.0.1:11434/v1",
+    path: str = "/chat/completions",
+    models_path: str = "/models",
+    timeout_seconds: float = 120.0,
+    max_response_bytes: int = MAX_RESPONSE_BYTES,
+    max_attempts: int = 2,
+    retry_backoff_seconds: float = 0.25,
+    circuit_breaker_failure_threshold: int = 3,
+    circuit_breaker_reset_seconds: float = 30.0,
+    structured_output_mode: str = "json_object",
+) -> ProviderConfig:
+    """Create a credentialless Ollama OpenAI-compatible local-server configuration.
+
+    The preset targets Ollama's documented ``/v1`` compatibility surface and opts into plain
+    HTTP only because the default endpoint is loopback. It never reads an API key; callers that
+    intentionally proxy Ollama elsewhere must provide their own transport boundary and network
+    policy rather than inheriting credentials from another provider.
+    """
+
+    return ProviderConfig(
+        provider="ollama",
+        base_url=base_url,
+        protocol="openai_chat_completions",
+        path=path,
+        models_path=models_path,
+        requires_credential=False,
+        timeout_seconds=timeout_seconds,
+        max_response_bytes=max_response_bytes,
+        allow_insecure_http=True,
         max_attempts=max_attempts,
         retry_backoff_seconds=retry_backoff_seconds,
         circuit_breaker_failure_threshold=circuit_breaker_failure_threshold,

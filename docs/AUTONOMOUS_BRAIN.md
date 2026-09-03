@@ -206,11 +206,13 @@ or task-level success.
 For workers that can be interrupted, `runWithReviewedEvidenceResumable` and
 `runWithReviewedEvidenceResumableWithLaunchAdmission` compose the evidence-backed checkpoint
 protocol. Checkpoints contain task/request/policy and source/provider digests only. A
-`provider_pending` checkpoint requires an explicit provider resume decision or a caller-supplied
-rehydrator whose result matches the stored digest, and `createEvidenceBackedController` adds
-serialized operations plus optional compare-and-swap persistence for a stable job identity. The
-serialized projections never contain evidence values, prompts, provider responses, credentials,
-or source payloads.
+`provider_pending` checkpoint proves that no provider attempt has started and may cross the
+provider boundary only after a new explicit approval. Immediately before a provider-capable call,
+the controller must atomically compare-and-store a successor `provider_in_flight` checkpoint bound
+to a stable operation digest and provider idempotency key. Restored in-flight work is never treated
+as permission to dispatch again: it remains reconciliation-only unless a caller-supplied rehydrator
+proves the matching outcome. The serialized projections never contain evidence values, prompts,
+provider responses, credentials, or source payloads.
 
 `runWithReviewedEvidenceWithTrace` and
 `runWithDomainEvidenceCatalogueWithTrace` add the same lifecycle visibility without changing
@@ -222,9 +224,10 @@ are safe for append-only telemetry, operator queries, and caller-owned persisten
 
 `runWithReviewedEvidenceResumableWithTrace` extends the same guarantee across restart boundaries.
 It composes the caller's checkpoint writer, records checkpoint status/digests after persistence,
-and maps `provider_pending` or `provider_reconciliation_required` to a paused trace. It never
-turns a checkpoint into permission to replay a provider: recovery still requires the explicit
-rehydrator or resume decision defined by the underlying evidence controller.
+and maps `provider_pending`, `provider_in_flight`, or `provider_reconciliation_required` to a
+paused trace. It never turns an attempted-provider checkpoint into permission to replay a
+provider: recovery requires a matching rehydrated outcome. Only a known pre-attempt
+`provider_pending` state can accept a new explicit provider-dispatch decision.
 
 ## Long-horizon goal execution through the brain facade
 
@@ -1541,6 +1544,13 @@ not turn a remote provider into a no-key provider, silently fall back when a cre
 or retain handler payloads in health, planning, learning, or receipts. This gives applications a
 cross-language offline path for deterministic evaluation and local model bridges while preserving
 the same approval and autonomous-selection gates used in production deployments.
+
+For a real local model rather than an in-memory fixture, both SDKs expose an `ollama` provider
+preset. It targets Ollama's OpenAI-compatible loopback endpoint (`http://127.0.0.1:11434/v1`),
+requires no credential, and uses the normal retry, circuit, authorization, model-selection, and
+human-review gates. Python callers use `ollama_provider()`; TypeScript callers use
+`ollamaProvider()`. The preset has no synthetic fallback: an unavailable Ollama server is surfaced
+as a provider failure, and callers must explicitly supply any non-loopback base URL.
 
 ### Connector-backed mission execution and explicit online adaptation
 
@@ -8400,28 +8410,49 @@ For workers that may restart between source dispatch and evaluator settlement,
 `AutonomousEvidenceExecutionResumableController` adds a job-level checkpoint around the reviewed
 execution controller. Its content-addressed state moves through `approval_required`, `blocked`,
 `dispatch_pending`, `awaiting_evaluation`, `partial`, `failed`, `reconciliation_required`, and
-`completed`. The checkpoint retains only the job/plan/request/readiness digests, bounded counts,
-runtime status, and result digest; it never stores requests, source values, prompts, credentials,
-or provider payloads. A `dispatch_pending` or `reconciliation_required` restart pauses until the
-caller explicitly resolves the boundary. A completed restart requires a caller-rehydrated runtime
-journal, so replay can return the prior result without invoking the source again:
+`completed`. The checkpoint retains only the job/plan/request/readiness and execution-policy
+digests, exact required/completed/pending counts, reconciliation-authority identity, monotonic
+generation/predecessor identity, runtime status, and result digest; it never stores requests,
+source values, prompts, credentials, or provider payloads. A `dispatch_pending` or
+`reconciliation_required` restart pauses until the configured authority supplies an exact
+per-request `not_executed`/`succeeded`/`unknown` receipt. `unknown` stays quarantined. A completed
+restart requires a caller-rehydrated, hash-chain-validated runtime journal, so replay can return the
+prior result without invoking the source again:
 
 ```typescript
 const resumable = new AutonomousEvidenceExecutionResumableController(
   reviewedController,
   new TransactionalJsonAutonomousEvidenceExecutionCheckpointStore(textStore),
   "evidence-job-42",
+  {
+    reconciliationAuthority: {
+      id: "source-audit",
+      version: "1",
+      config_digest: sourceAuditConfigDigest,
+    },
+  },
 );
 const outcome = await resumable.run(executionPlan, evidencePlan, requests, {
   approveSourceDispatch: true,
   journal: rehydratedJournal,
   rehydrateValue: callerOwnedValueRehydrator,
+  executionPolicyIdentity: {
+    journal: { id: "research-journal", version: "1", config_digest: journalConfigDigest },
+    value_rehydrator: { id: "protected-value-store", version: "1", config_digest: valueStoreConfigDigest },
+  },
 });
 ```
 
-The checkpoint has in-memory, JSON, transactional JSON, and browser Web Storage seams. CAS
-failure is surfaced as a stale-worker refusal instead of silently merging two source histories;
-readiness and the exact reviewed execution plan remain bound across the restart.
+The checkpoint has in-memory, JSON, transactional JSON, and browser Web Storage seams. Approved
+source dispatch requires a transactional CAS seam, a caller-owned runtime journal, stable journal
+identity, a configured reconciliation authority, and a stable value-rehydrator identity (which may
+be reserved before the callback is available). CAS failure is surfaced as a stale-worker refusal instead of silently
+merging two source histories. Projector/evaluator and other execution callback identities,
+parent-evidence digests, evaluator retry posture, authorization overrides, readiness, and the exact
+reviewed execution plan remain bound across restart; drift fails before a callback or source call.
+Authority ID/version/config binding prevents accidental verifier drift; it is not a signature or an
+identity provider. Deployments must admit reconciliation receipts only through their trusted audit
+transport or verifier and keep its raw evidence outside this metadata-only checkpoint.
 The high-level facade exposes the same path as `agent.executeReviewedEvidenceResumable(...)`,
 carrying preparation-time provider contracts and health stores into the same digest-bound job
 without making credentials or source transport part of the SDK checkpoint.
@@ -8500,22 +8531,41 @@ then applies the provider's separate rehydration or approval decision.
 
 For process-restart recovery, use `runAutonomousEvidenceBackedResumable()` or the
 `AutonomousEvidenceBackedController`. The controller persists only task/request/policy/plan,
-evidence, prompt, and provider-result digests. The caller supplies the same evidence journal and
-`rehydrateValue` callback; the execution controller validates and hydrates the append-only journal
-before dispatch, so completed source requests are replayed without reacquisition and missing raw
-values become `reconciliation_required`. A `provider_pending` checkpoint is not an implicit retry:
-the caller must either provide `rehydrateProviderRun()` whose returned run matches the stored
-provider digest, or set `resumeProvider: true` as a new dispatch decision. A provider result that
-cannot be rehydrated produces `provider_reconciliation_required`, never a duplicate provider call:
+evidence, prompt, provider-operation, provider-result, and provider-dispatch-head digests plus a
+dispatch count and checkpoint lineage. The
+caller supplies the same evidence journal and `rehydrateValue` callback; the execution controller
+validates and hydrates the append-only journal before dispatch, so completed source requests are
+replayed without reacquisition and missing raw values become `reconciliation_required`.
+`provider_pending` is a known pre-attempt state, so `resumeProvider: true` plus a fresh provider
+approval is a new dispatch decision only from that state. Immediately before every actual provider
+transport attempt, the controller must atomically append a private, operation-bound dispatch
+receipt and replace the current checkpoint with a `provider_in_flight` successor. The private
+receipt contains the exact usable idempotency key; the public checkpoint contains only its
+hash-linked receipt head and count. Restored in-flight,
+reconciliation, and completed checkpoints never dispatch based on that boolean; they require a
+matching `rehydrateProviderRun()` outcome or remain `provider_reconciliation_required`. Legacy
+ambiguous checkpoint schemas are rejected before source or provider work. The current
+language-specific checkpoint identities are
+`bioprism-python-autonomous-evidence-backed-checkpoint/0.4` and
+`bioprism-typescript-autonomous-evidence-backed-checkpoint/0.3`; neither implementation treats an
+older or cross-language projection as its current schema:
 
 ```typescript
 const controller = new AutonomousEvidenceBackedController(agent, "job-42", checkpointStore);
+const resumablePolicyIdentity = {
+  provider_policy: {
+    id: "research-provider-policy",
+    version: "2026-09-02",
+    config_digest: providerPolicyDigest,
+  },
+};
 const first = await controller.run(task, {
   registry: adapters,
   domains: ["science"],
   requests,
   execute: { approveSourceDispatch: true, journal, rehydrateValue },
   run: { domain: "science", candidates, approveProviderCall: true },
+  resumablePolicyIdentity,
 });
 
 const resumed = await controller.run(task, {
@@ -8524,14 +8574,70 @@ const resumed = await controller.run(task, {
   requests,
   execute: { approveSourceDispatch: true, journal, rehydrateValue },
   run: { domain: "science", candidates, approveProviderCall: true },
+  resumablePolicyIdentity,
   rehydrateProviderRun: ({ checkpoint }) => loadProviderResult(checkpoint.provider_result_digest),
 });
 ```
 
-`InMemoryAutonomousEvidenceBackedCheckpointStore`, the bounded JSON adapter, and its
-compare-and-swap variant are reference persistence seams; deployment code owns the actual durable
-store. Checkpoints and resumable projections never contain task text, evidence values, prompts,
-provider responses, credentials, or resolver references.
+Both SDKs require an aggregate `provider_policy` identity with a non-null configuration digest on
+every resumable run (`resumablePolicyIdentity.provider_policy` in TypeScript and
+`resumable_policy_identity["provider_policy"]` in Python). Canonical provider-visible model,
+routing, prompt, memory, tool, planning, and fan-out controls are value-bound and snapshotted;
+unsupported or ambiguous modes fail before source or provider callbacks. The aggregate digest is
+the caller's assertion for opaque callback, credential-account, registry, and runtime state that
+cannot safely enter the checkpoint. It is a trust root, not authentication: callers must derive it
+from immutable reviewed configuration and restore the same configuration on restart.
+
+`InMemoryAutonomousEvidenceBackedCheckpointStore`, the bounded JSON adapter, and their
+transactional variants are reference persistence seams; deployment code owns the actual durable
+store. Ordinary terminal transitions use checkpoint compare-and-swap. Provider-capable execution
+additionally requires `checkpointDispatchCompareAndStore` / Python
+`checkpoint_dispatch_compare_and_store`, or the corresponding controller-store method, to commit
+the successor checkpoint and its private dispatch receipt as one caller-owned transaction. Only an
+explicit `true` result authorizes transport. A stale result, exception, timeout, or lost
+acknowledgement performs no transport and requires an authoritative reload; the SDK neither retries
+nor attempts a compensating write. Each successor names the previous checkpoint digest and
+increments its generation. Detecting rollback of the latest checkpoint and dispatch ledger still
+requires a caller-owned trusted head. Checkpoints and resumable projections never contain raw
+idempotency keys, task text, evidence values, prompts, provider responses, credentials, or resolver
+references.
+
+Provider work is formed from authoritative snapshots rather than live caller-owned objects after
+an await. The SDK captures the request and wire-shaping inputs, credential binding, normalized
+provider configuration, HTTP endpoint/fetch dependency or local handler, and outcome fields before
+observers run. Observers receive detached request/outcome projections, and resumable rehydrators
+receive detached value-only checkpoint projections. The caller-owned dispatch transaction must
+make the private receipt durable with the matching public checkpoint before transport; a successful
+transport cannot retroactively authorize a missing receipt. Credential binding/expiry and the
+provider/transport graph are checked again after awaited callbacks, after that commit, and before
+terminal settlement, so callback mutation cannot rewrite the sent request, receipt digest, or
+recorded outcome. These fences do not authenticate caller code or storage and do not move
+same-process reflection, provider idempotency, or uncertain-outcome reconciliation out of the
+deployment trust boundary.
+
+The fenced provider surface is deliberately narrower than the complete one-shot brain. TypeScript
+derives separate request keys for provider planning, model failover, every tool-loop turn, each
+cross-domain child, and synthesis; provider-assisted semantic routing remains refused at this
+restart boundary. Every retry, failover, child, turn, and synthesis call that reaches a transport
+gets its own ordered dispatch receipt, while transport retries of the same exact request retain the
+same provider-visible key. Python currently admits direct domain execution, deterministic automatic
+routing with a reviewed route override, and direct-provider cross-domain fan-out/synthesis with
+exactly one explicit model candidate. It refuses tool-loop/mission execution, provider planning,
+semantic routing, workflows, and learning rather than admitting a path whose provider requests are
+not covered by the dispatch transaction.
+
+The fence is a property of the exact SDK `AutonomousAgent`/brain/`LLMRuntime` implementation and
+its registered transport adapters. Resumable mode rejects subclassed, instance-overridden, or
+duck-typed core runtimes and effect boundaries because they could return a provider result without
+crossing the final transport hook. Registered provider transports remain caller-owned and must
+honor the supplied idempotency key. One committed receipt authorizes one invocation of the
+registered handler; the SDK cannot prevent that handler from performing multiple downstream
+effects, and same-process reflection over private receipt state remains inside the embedding
+application's trust boundary. The SDK does not claim exactly-once external execution: the
+deployment must durably store private receipts, query the provider by the recorded key (or protected
+key handle), authenticate the result, and supply the aggregate rehydrated result. A receipt committed
+just before a crash may legitimately resolve to provider “not found”; that uncertainty remains
+visible rather than being converted into automatic redispatch.
 
 ```typescript
 const contracts = new AutonomousEvidenceProviderContractRegistry(adapters);
@@ -12727,19 +12833,74 @@ accidentally approve a route that changed after review.
 The same controller is available through `AutonomousAgent.prepare_reviewed_evidence()` and
 `AutonomousAgent.execute_reviewed_evidence()`. `execute_reviewed_evidence_resumable()` adds a
 checkpoint store whose identity is bound to the evidence plan digest, selection/execution plan,
-request-set digest, readiness report, and job ID. The checkpoint lifecycle is explicit:
+request-set digest, readiness report, execution-policy digest, required-requirement count,
+reconciliation trust root, monotonic generation/predecessor, and job ID. The checkpoint lifecycle is explicit:
 `approval_required` -> `dispatch_pending` -> a settled runtime status, with
 `reconciliation_required` after an ambiguous failure. JSON persistence is canonical and
-tamper-evident; transactional stores use compare-and-swap to fence stale workers.
+tamper-evident. Approved source dispatch requires transactional compare-and-swap persistence, a
+caller-owned runtime journal with a stable identity, a configured reconciliation authority, and a
+stable (or explicitly reserved) value-rehydrator identity. Projector/evaluator, retry
+observers/classifier, parent
+evidence, source-boundary, authorization, clock, and sleeper policy are digest-bound, so a restart
+cannot silently mix prior receipts with new callback behavior.
+The authority identity/config fields are a stable trust-root binding, not cryptographic
+authentication of a receipt. The deployment still owns authenticated receipt admission and the
+underlying reconciliation evidence.
 
 Runtime journals remain append-only when a restarted worker replays a prior request or revises an
 evaluator result. The prior receipt is retained as history and the replay/reconciliation receipt
-is appended as the next chain entry. Rehydrated values must still be supplied by the caller and
+is appended as the next chain entry. The complete journal chain, receipt and assessment digests,
+and exact request/source binding are validated before any redispatch. Rehydrated values must still be supplied by the caller and
 must match the stored digest; without them, the runtime fails closed rather than dispatching a
 duplicate source call. Provider contracts now also bind provider-neutral adapter manifests, with
 `caller_owned` as the explicit provider identity when a generic manifest does not declare one.
 No API key, credential, raw source value, prompt, provider response, or exception message is
 written to the execution plan, checkpoint, health ledger, or durable runtime journal.
+
+## Bounded research campaigns and the offline runner
+
+`bioprism-research-campaign` is the Rust composition kernel for a fixed, caller-supplied research
+DAG. It validates a canonical campaign/spec identity, authorizes at most one live action, consumes
+only native verifier-created receipts, and checkpoints a hash-linked event history. Campaign
+status does not collapse important uncertainty: `needs_input`, `awaiting_human_review`,
+`reconciliation_required`, `exhausted`, and `refused` remain distinct from `completed`, while a
+synthetic-research dossier with valid negative findings retains
+`completed_with_negative_findings` at the stage boundary.
+
+Authorization and durable state advance as one caller-owned transaction. Before returning a linear
+action token, the kernel asks `CampaignCheckpointCoordinator` to compare the expected trusted head,
+store the exact candidate in-flight checkpoint, and advance the head atomically. The first action
+uses create-if-absent. A rejection leaves the local campaign unchanged; an ambiguous/lost storage
+acknowledgement releases no token, and restoration of a candidate that did reach storage requires
+reconciliation. The coordinator, protected trusted-head storage, journal authentication, and
+executor provenance are deployment trust roots rather than guarantees supplied by the trait.
+
+`research_campaign_run_offline` is the initial MCP execution surface. Its request contains only a
+workspace-relative spec path, an exact stage-to-input-path map, a confined output directory, and an
+explicit confirmation flag. Preview performs the complete bounded preflight and writes nothing.
+The confirmed `0.1` runner admits only `synthetic_research` and `brain_plan`, persists append-only
+authorization/checkpoint artifacts, and returns a closed metadata-only result containing typed
+execution state, campaign status, digests, counts, and relative locators. Raw objectives,
+questions, evidence, prompts, plans, and artifacts do not cross the MCP response.
+
+This surface deliberately does not claim open-ended or external-world research. It does not browse,
+call a model/provider, execute the steps in a brain plan, authenticate third-party observations, or
+resolve uncertain external effects. Separate Python and TypeScript `ReviewedPubMedRetrievalAdapter`
+implementations provide the first reviewed live source boundary: a deterministic network-free
+preflight binds 1--6 fixed specialty lanes, and literal approval permits exactly one ESearch →
+ESummary → EFetch sequence per lane. Both implementations bound request count, response and
+aggregate bytes, parse-tree depth/size, records, and the final bundle. They strip only the
+allow-listed external NLM DTD declaration before EFetch XML parsing/projection and refuse entity,
+internal-subset, alternate-doctype, or malformed inputs. A separately registered NCBI `tool` and
+developer-email pair identifies every request while only its configured state and integrity digest
+enter durable artifacts. The one-lane
+`create_reviewed_pubmed_autonomous_evidence_registration()` /
+`createReviewedPubMedAutonomousEvidenceRegistration()` helpers bind an exact single-lane plan to
+the generic evidence runtime's acquire/project callbacks; they validate the transient bundle and
+receipt while projecting only digest metadata. That narrow adapter does not make the offline
+campaign a live orchestrator. Full autonomous external research still requires broader reviewed
+retrieval, a shared authenticated execution journal and reconciliation authority, and independent
+source-quality and claim-integrity validation layered on this campaign contract.
 
 ## Coordinated agent persistence lifecycle
 

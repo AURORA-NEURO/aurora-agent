@@ -1,0 +1,8 @@
+{
+  "question": "Compare glioma IDH evidence with Chiari and cranial-base research gaps",
+  "include_all_specialties": true,
+  "max_hits_per_lane": 2,
+  "max_review_items_per_lane": 2,
+  "max_issues_per_lane": 4,
+  "max_session_steps": 16
+}

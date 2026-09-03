@@ -28,8 +28,10 @@ import {
   LLMRuntime,
   LLMRuntimeHealthPersistenceCoordinator,
   digestJson,
+  ProviderQuotaController,
   ProviderRuntimeError,
   anthropicProvider,
+  ollamaProvider,
   openaiCompatibleProvider,
   openaiProvider,
   providerModelsToCandidates,
@@ -189,6 +191,24 @@ test("multimodal content refuses insecure URLs, malformed base64, secret-shaped 
   );
 });
 
+test("Ollama preset uses the credentialless loopback OpenAI-compatible surface", async () => {
+  const calls = [];
+  const runtime = new LLMRuntime({
+    fetch: async (_url, init) => {
+      calls.push(requestRecord(_url, init));
+      return jsonResponse({ choices: [{ message: { content: "local model" }, finish_reason: "stop" }] });
+    },
+  });
+  runtime.registerProvider(ollamaProvider());
+  assert.equal(runtime.providerMetadata()[0].provider, "ollama");
+  assert.equal(runtime.providerMetadata()[0].requires_credential, false);
+  assert.equal(runtime.providerMetadata()[0].transport, "http");
+  const response = await runtime.invoke("ollama", request("llama3.1"));
+  assert.equal(response.text, "local model");
+  assert.equal(calls[0].url, "http://127.0.0.1:11434/v1/chat/completions");
+  assert.equal(calls[0].headers.has("authorization"), false);
+});
+
 test("autonomous facade carries transient multimodal evidence through every domain and cross-domain synthesis", async () => {
   const calls = [];
   const runtime = new LLMRuntime({
@@ -298,6 +318,16 @@ test("BYOK credentials are opaque, provider-scoped, and revocable", async () => 
   assert.equal(calls.length, 1, "revoked credentials must fail before network dispatch");
 });
 
+test("TTL credential registration rejects non-finite clock values", () => {
+  for (const now of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+    const store = new CredentialStore({ clock: () => now });
+    assert.throws(
+      () => store.register("openai", "bounded-secret", { ttlMs: 1_000 }),
+      /clock must return a finite number|expiry must be finite/,
+    );
+  }
+});
+
 test("non-interactive provisioning resolves deployment sources into a short-lived session", async () => {
   const runtime = new LLMRuntime({
     credentials: new CredentialStore(),
@@ -404,6 +434,40 @@ test("model discovery fails closed on malformed rows and missing credentials", a
   await assert.rejects(runtime.discoverModels("groq"), CredentialError);
   const handle = runtime.credentials.register("groq", "groq-secret");
   await assert.rejects(runtime.discoverModels("groq", { credential: handle }), ProviderRuntimeError);
+  assert.equal(calls, 1);
+});
+
+test("local model discovery honors caller cancellation before and during its handler", async () => {
+  let calls = 0;
+  const beforeRuntime = new LLMRuntime();
+  beforeRuntime.registerInMemoryProvider("cancelled-discovery-before", () => "unused", {
+    discoverModels: () => {
+      calls += 1;
+      return { data: [] };
+    },
+  });
+  const alreadyAborted = new AbortController();
+  alreadyAborted.abort();
+  await assert.rejects(
+    beforeRuntime.discoverModels("cancelled-discovery-before", { signal: alreadyAborted.signal }),
+    (error) => error instanceof ProviderRuntimeError && error.code === "aborted",
+  );
+  assert.equal(calls, 0);
+
+  const duringAbort = new AbortController();
+  const duringRuntime = new LLMRuntime();
+  duringRuntime.registerInMemoryProvider("cancelled-discovery-during", () => "unused", {
+    discoverModels: async () => {
+      calls += 1;
+      duringAbort.abort();
+      await Promise.resolve();
+      return { data: [] };
+    },
+  });
+  await assert.rejects(
+    duringRuntime.discoverModels("cancelled-discovery-during", { signal: duringAbort.signal }),
+    (error) => error instanceof ProviderRuntimeError && error.code === "aborted",
+  );
   assert.equal(calls, 1);
 });
 
@@ -538,6 +602,34 @@ test("provider deadlines are classified as retryable timeouts", async () => {
   );
 });
 
+test("provider deadlines remain active while a response body is being consumed", async () => {
+  const runtime = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async (_url, init) => new Response(new ReadableStream({
+      start(controller) {
+        init.signal.addEventListener(
+          "abort",
+          () => controller.error(new DOMException("aborted", "AbortError")),
+          { once: true },
+        );
+      },
+    }), { headers: { "content-type": "application/json" } }),
+  });
+  runtime.registerProvider(openaiCompatibleProvider("timed-body", "https://timed-body.test", {
+    requiresCredential: false,
+    timeoutMs: 1,
+    maxAttempts: 1,
+  }));
+  await assert.rejects(
+    runtime.invoke("timed-body", request()),
+    (error) => error instanceof ProviderRuntimeError
+      && error.code === "timeout"
+      && error.provider === "timed-body"
+      && error.operation === "invoke"
+      && error.retryable === true,
+  );
+});
+
 test("OpenAI Responses parsing preserves structured output and tool calls", async () => {
   let captured;
   const credentials = new CredentialStore();
@@ -664,6 +756,212 @@ test("stream collection accepts a terminal sentinel at body EOF", async () => {
   assert.equal(response.text, "complete");
 });
 
+test("caller abort remains active for the full HTTP stream body lifetime", async () => {
+  const encoder = new TextEncoder();
+  let bodyCancelled = 0;
+  const body = new ReadableStream({
+    start(controller) {
+      controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"first"}}]}\n\n'));
+    },
+    cancel() { bodyCancelled += 1; },
+  });
+  const runtime = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async () => new Response(body, { headers: { "content-type": "text/event-stream" } }),
+  });
+  runtime.registerProvider(openaiCompatibleProvider("abort-stream-gateway", "https://abort-stream.test", { requiresCredential: false }));
+  const abort = new AbortController();
+  const iterator = runtime.invokeStream(
+    "abort-stream-gateway",
+    request(),
+    { signal: abort.signal },
+  )[Symbol.asyncIterator]();
+  const first = await iterator.next();
+  assert.equal(first.value.textDelta, "first");
+  abort.abort();
+  await assert.rejects(
+    () => iterator.next(),
+    (error) => error instanceof ProviderRuntimeError && error.code === "aborted",
+  );
+  assert.equal(bodyCancelled, 1);
+});
+
+test("closing an HTTP stream early cancels its response body", async () => {
+  const encoder = new TextEncoder();
+  let bodyCancelled = 0;
+  const body = new ReadableStream({
+    start(controller) {
+      controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"first"}}]}\n\n'));
+    },
+    cancel() { bodyCancelled += 1; },
+  });
+  const runtime = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async () => new Response(body, { headers: { "content-type": "text/event-stream" } }),
+  });
+  runtime.registerProvider(openaiCompatibleProvider("closed-stream-gateway", "https://closed-stream.test", { requiresCredential: false }));
+  const iterator = runtime.invokeStream("closed-stream-gateway", request())[Symbol.asyncIterator]();
+  const first = await iterator.next();
+  assert.equal(first.value.textDelta, "first");
+  await iterator.return?.();
+  assert.equal(bodyCancelled, 1);
+});
+
+test("caller abort stops and closes a local provider stream between events", async () => {
+  let localClosed = false;
+  const runtime = new LLMRuntime({ fetch: async () => { throw new Error("HTTP must not be reached"); } });
+  runtime.registerInMemoryProvider("abort-local-stream", () => "unused", {
+    stream: async function* (input) {
+      try {
+        yield { provider: "abort-local-stream", model: input.model, sequence: 0, eventType: "text", textDelta: "first", requestId: null, usage: {}, done: false };
+        yield { provider: "abort-local-stream", model: input.model, sequence: 1, eventType: "done", textDelta: "second", requestId: null, usage: {}, done: true };
+      } finally {
+        localClosed = true;
+      }
+    },
+  });
+  const abort = new AbortController();
+  const iterator = runtime.invokeStream(
+    "abort-local-stream",
+    request("local-stream-model"),
+    { signal: abort.signal },
+  )[Symbol.asyncIterator]();
+  const first = await iterator.next();
+  assert.equal(first.value.textDelta, "first");
+  abort.abort();
+  await assert.rejects(
+    () => iterator.next(),
+    (error) => error instanceof ProviderRuntimeError && error.code === "aborted",
+  );
+  assert.equal(localClosed, true);
+});
+
+test("closing a dispatched stream finalizes its quota reservation", async () => {
+  const quota = new ProviderQuotaController({ clock: () => 1_000 });
+  quota.setPolicy({ provider: "quota-stream", model: "quota-stream-model", windowMs: 10_000, maxRequests: 4, maxOutputTokens: 512, maxConcurrent: 1 });
+  const runtime = new LLMRuntime({ providerQuota: quota, fetch: async () => { throw new Error("HTTP must not be reached"); } });
+  runtime.registerInMemoryProvider("quota-stream", () => "unused", {
+    stream: async function* (input) {
+      yield { provider: "quota-stream", model: input.model, sequence: 0, eventType: "text", textDelta: "first", requestId: null, usage: {}, done: false };
+      yield { provider: "quota-stream", model: input.model, sequence: 1, eventType: "done", textDelta: "", requestId: null, usage: {}, done: true };
+    },
+  });
+  const iterator = runtime.invokeStream("quota-stream", request("quota-stream-model"))[Symbol.asyncIterator]();
+  await iterator.next();
+  await iterator.return?.();
+  const [status] = quota.status("quota-stream", "quota-stream-model");
+  assert.equal(status.concurrent, 0);
+  assert.equal(status.requests_reserved, 0);
+  assert.equal(status.requests_used, 1);
+});
+
+test("closing a dispatched stream records an aborted observer, health, and execution outcome", async () => {
+  const journal = new InMemoryAutonomousExecutionJournal();
+  const execution = await AutonomousExecutionController.create({
+    executionId: "closed-stream-execution",
+    domain: "general",
+    capability: "reasoning",
+    riskClass: "read_only",
+    policy: { max_steps: 4, max_provider_calls: 2, stop_on_error: false },
+    journal,
+  });
+  const outcomes = [];
+  const runtime = new LLMRuntime();
+  runtime.registerInMemoryProvider("closed-outcome-stream", () => "unused", {
+    stream: async function* (input) {
+      yield { provider: "closed-outcome-stream", model: input.model, sequence: 0, eventType: "text", textDelta: "first", requestId: null, usage: {}, done: false };
+      yield { provider: "closed-outcome-stream", model: input.model, sequence: 1, eventType: "done", textDelta: "", requestId: null, usage: {}, done: true };
+    },
+  });
+
+  const iterator = runtime.invokeStream("closed-outcome-stream", request("closed-outcome-model"), {
+    observer: { after: (_metadata, outcome) => outcomes.push({ ...outcome }) },
+    execution,
+  })[Symbol.asyncIterator]();
+  assert.equal((await iterator.next()).value.textDelta, "first");
+  await iterator.return?.();
+
+  assert.equal(outcomes.length, 1);
+  assert.equal(outcomes[0].success, false);
+  assert.equal(outcomes[0].failureClass, "aborted");
+  assert.equal(outcomes[0].failureCode, "aborted");
+  const health = runtime.providerStatus("closed-outcome-stream");
+  assert.equal(health.attempts, 1);
+  assert.equal(health.failures, 1);
+  const providerEvents = (await journal.events({ executionId: "closed-stream-execution" }))
+    .filter((row) => row.event.kind === "provider_call");
+  assert.equal(providerEvents.length, 2);
+  assert.equal(providerEvents.at(-1).event.status, "provider_refused");
+  assert.equal(providerEvents.at(-1).event.failure_class, "aborted");
+});
+
+test("outcome observer failures do not relabel or retry a successful provider response", async () => {
+  let calls = 0;
+  const runtime = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async () => {
+      calls += 1;
+      return jsonResponse({ choices: [{ message: { role: "assistant", content: "settled" }, finish_reason: "stop" }] });
+    },
+  });
+  runtime.registerProvider(openaiCompatibleProvider("observer-success", "https://observer-success.test", { requiresCredential: false }));
+  const response = await runtime.invoke("observer-success", request("observer-model"), {
+    observer: { after: () => { throw new Error("diagnostic sink failed"); } },
+  });
+  assert.equal(response.text, "settled");
+  assert.equal(calls, 1);
+  const health = runtime.providerStatus("observer-success");
+  assert.equal(health.attempts, 1);
+  assert.equal(health.successes, 1);
+  assert.equal(health.failures, 0);
+});
+
+test("stream outcome observer failures cannot leak concurrent quota", async () => {
+  const quota = new ProviderQuotaController({ clock: () => 1_000 });
+  quota.setPolicy({ provider: "observer-quota-stream", model: "observer-quota-model", windowMs: 10_000, maxRequests: 4, maxOutputTokens: 512, maxConcurrent: 1 });
+  const runtime = new LLMRuntime({ providerQuota: quota, fetch: async () => { throw new Error("HTTP must not be reached"); } });
+  runtime.registerInMemoryProvider("observer-quota-stream", () => "unused", {
+    stream: (input) => [
+      { provider: "observer-quota-stream", model: input.model, sequence: 0, eventType: "done", textDelta: "done", requestId: null, usage: {}, done: true },
+    ],
+  });
+  const events = [];
+  for await (const event of runtime.invokeStream("observer-quota-stream", request("observer-quota-model"), {
+    observer: { after: () => { throw new Error("stream diagnostic sink failed"); } },
+  })) events.push(event);
+  assert.equal(events.length, 1);
+  const [status] = quota.status("observer-quota-stream", "observer-quota-model");
+  assert.equal(status.concurrent, 0);
+  assert.equal(status.requests_reserved, 0);
+  assert.equal(status.requests_used, 1);
+});
+
+test("malformed provider usage cannot strand a quota reservation or mask its failure", async () => {
+  const quota = new ProviderQuotaController({ clock: () => 1_000 });
+  quota.setPolicy({ provider: "malformed-usage", model: "usage-model", windowMs: 10_000, maxRequests: 4, maxConcurrent: 1 });
+  let malformed = true;
+  const runtime = new LLMRuntime({ providerQuota: quota });
+  runtime.registerInMemoryProvider("malformed-usage", () => malformed
+    ? { output_text: "invalid counters", usage: { input_tokens: 2_000_000_001, output_tokens: 0 } }
+    : { output_text: "bounded counters", usage: { input_tokens: 4, output_tokens: 2 } });
+
+  await assert.rejects(
+    runtime.invoke("malformed-usage", request("usage-model")),
+    (error) => error instanceof ProviderRuntimeError && !error.message.includes("reservation was released"),
+  );
+  let [status] = quota.status("malformed-usage", "usage-model");
+  assert.equal(status.concurrent, 0);
+  assert.equal(status.requests_reserved, 0);
+  assert.equal(status.requests_used, 1);
+
+  malformed = false;
+  assert.equal((await runtime.invoke("malformed-usage", request("usage-model"))).text, "bounded counters");
+  [status] = quota.status("malformed-usage", "usage-model");
+  assert.equal(status.concurrent, 0);
+  assert.equal(status.requests_reserved, 0);
+  assert.equal(status.requests_used, 2);
+});
+
 test("provider invocation effect boundary projects transient responses and blocks blind replay", async () => {
   const journal = new InMemoryAutonomousEffectJournal();
   let calls = 0;
@@ -684,6 +982,37 @@ test("provider invocation effect boundary projects transient responses and block
   assert.deepEqual((await journal.events()).map((row) => row.event.status), ["prepared", "dispatching", "dispatched", "completed"]);
   await assert.rejects(() => runtime.invoke("offline-effect", input), AutonomousEffectReconciliationRequiredError);
   assert.equal(calls, 1);
+});
+
+test("effect reconciliation releases the new invocation's quota and cost admission", async () => {
+  const journal = new InMemoryAutonomousEffectJournal();
+  const quota = new ProviderQuotaController({ clock: () => 1_000 });
+  quota.setPolicy({ provider: "effect-quota", model: "effect-model", windowMs: 10_000, maxRequests: 4, maxConcurrent: 1 });
+  const runtime = new LLMRuntime({
+    effectBoundary: new AutonomousEffectBoundary({ journal }),
+    providerQuota: quota,
+  });
+  let calls = 0;
+  runtime.registerInMemoryProvider("effect-quota", () => {
+    calls += 1;
+    return { output_text: "bounded" };
+  });
+  const first = request("effect-model", { idempotencyKey: "effect-quota-first" });
+  await runtime.invoke("effect-quota", first);
+  await assert.rejects(
+    runtime.invoke("effect-quota", first),
+    AutonomousEffectReconciliationRequiredError,
+  );
+  let [status] = quota.status("effect-quota", "effect-model");
+  assert.equal(status.concurrent, 0);
+  assert.equal(status.requests_reserved, 0);
+  assert.equal(status.requests_used, 1);
+
+  await runtime.invoke("effect-quota", request("effect-model", { idempotencyKey: "effect-quota-second" }));
+  [status] = quota.status("effect-quota", "effect-model");
+  assert.equal(status.concurrent, 0);
+  assert.equal(status.requests_used, 2);
+  assert.equal(calls, 2);
 });
 
 test("provider authorization rejects before credential resolution or transport", async () => {
@@ -721,6 +1050,503 @@ test("provider authorization consumes one fresh budget entry per invocation and 
   );
   assert.deepEqual(calls, { invoke: 1, stream: 1 });
   assert.equal(ledger.grants()[0].used_count, 2);
+});
+
+test("local provider dispatch digests normalize explicit undefined option fields", async () => {
+  const dispatches = [];
+  const runtime = new LLMRuntime();
+  runtime.registerInMemoryProvider("normalized-dispatch", () => "bounded", {
+    stream: (input) => [{
+      provider: "normalized-dispatch",
+      model: input.model,
+      sequence: 0,
+      eventType: "done",
+      textDelta: "",
+      requestId: null,
+      usage: {},
+      done: true,
+    }],
+  });
+  const input = request("normalized-model", {
+    temperature: undefined,
+    requireJson: undefined,
+    messages: [{ role: "user", content: "Return a bounded answer.", name: undefined }],
+  });
+  const options = { providerDispatchFence: async (context) => { dispatches.push(context); } };
+
+  await runtime.invoke("normalized-dispatch", input, options);
+  for await (const _event of runtime.invokeStream("normalized-dispatch", input, options)) { /* consume */ }
+
+  assert.equal(dispatches.length, 2);
+  assert.match(dispatches[0].requestDigest, /^[0-9a-f]{64}$/);
+  assert.equal(dispatches[1].requestDigest, dispatches[0].requestDigest);
+});
+
+test("local transport consumes the detached request whose dispatch digest was fenced", async () => {
+  let observedContent = null;
+  const dispatches = [];
+  const runtime = new LLMRuntime();
+  runtime.registerInMemoryProvider("detached-local-dispatch", (input) => {
+    observedContent = input.messages[0].content;
+    return "bounded";
+  });
+  const input = request("detached-model");
+
+  await runtime.invoke("detached-local-dispatch", input, {
+    observer: {
+      dispatch: () => {
+        input.messages[0].content = "mutated after request validation";
+      },
+    },
+    providerDispatchFence: (context) => {
+      dispatches.push(context);
+    },
+  });
+
+  assert.equal(observedContent, "Return a bounded answer.");
+  assert.match(dispatches[0].requestDigest, /^[0-9a-f]{64}$/);
+});
+
+test("credential resolution is snapshotted before ordinary observers can replace it", async () => {
+  let authorization = null;
+  const runtime = new LLMRuntime({
+    fetch: async (_url, init) => {
+      authorization = new Headers(init.headers).get("Authorization");
+      return jsonResponse({ choices: [{ message: { role: "assistant", content: "bounded" }, finish_reason: "stop" }] });
+    },
+  });
+  runtime.registerProvider(openaiCompatibleProvider("credential-snapshot", "https://credential-snapshot.test"));
+  const handle = runtime.credentials.register("credential-snapshot", "original-secret");
+  const originalResolve = CredentialStore.prototype.resolve;
+  try {
+    await runtime.invoke("credential-snapshot", request("credential-model"), {
+      credential: handle,
+      observer: {
+        before: () => {
+          CredentialStore.prototype.resolve = () => "replacement-secret";
+        },
+      },
+    });
+  } finally {
+    CredentialStore.prototype.resolve = originalResolve;
+  }
+  assert.equal(authorization, "Bearer original-secret");
+});
+
+test("provider wire bytes and endpoint ignore globals replaced by awaited callbacks", async () => {
+  let observed = null;
+  let dispatch = null;
+  const runtime = new LLMRuntime({
+    fetch: async (url, init) => {
+      observed = { url: String(url), body: String(init.body) };
+      return jsonResponse({ choices: [{ message: { role: "assistant", content: "bounded" }, finish_reason: "stop" }] });
+    },
+  });
+  runtime.registerProvider(openaiCompatibleProvider("intrinsic-snapshot", "https://intrinsic-snapshot.test", { requiresCredential: false }));
+  const originalStringify = JSON.stringify;
+  const originalObjectKeys = Object.keys;
+  const originalFreeze = Object.freeze;
+  const originalTextEncoderEncode = TextEncoder.prototype.encode;
+  const originalUrlToString = Object.getOwnPropertyDescriptor(URL.prototype, "toString");
+  try {
+    await runtime.invoke("intrinsic-snapshot", request("expected-model"), {
+      observer: {
+        before: () => {
+          JSON.stringify = () => '{"model":"forged-model"}';
+          Object.keys = (value) => {
+            const keys = originalObjectKeys(value);
+            return value?.provider === "intrinsic-snapshot" && value?.protocol === "openai_chat_completions" && "body" in value
+              ? keys.filter((key) => key !== "body")
+              : keys;
+          };
+          TextEncoder.prototype.encode = () => originalTextEncoderEncode.call(new TextEncoder(), "");
+        },
+        dispatch: () => {
+          JSON.stringify = originalStringify;
+          Object.keys = originalObjectKeys;
+          TextEncoder.prototype.encode = originalTextEncoderEncode;
+          Object.freeze = (value) => {
+            Object.freeze = originalFreeze;
+            return originalFreeze({ ...value, requestDigest: "0".repeat(64) });
+          };
+        },
+      },
+      providerDispatchFence: (context) => {
+        Object.freeze = originalFreeze;
+        dispatch = context;
+        Object.defineProperty(URL.prototype, "toString", {
+          configurable: true,
+          value: () => "https://attacker.test/",
+          writable: true,
+        });
+      },
+    });
+  } finally {
+    JSON.stringify = originalStringify;
+    Object.keys = originalObjectKeys;
+    Object.freeze = originalFreeze;
+    TextEncoder.prototype.encode = originalTextEncoderEncode;
+    Object.defineProperty(URL.prototype, "toString", originalUrlToString);
+  }
+  assert.equal(observed.url, "https://intrinsic-snapshot.test/v1/chat/completions");
+  assert.equal(JSON.parse(observed.body).model, "expected-model");
+  assert.equal(dispatch.requestDigest, await digestJson({
+    provider: "intrinsic-snapshot",
+    protocol: "openai_chat_completions",
+    stream: false,
+    body: JSON.parse(observed.body),
+  }));
+});
+
+test("credential revocation queued by the private fence is rechecked before transport", async () => {
+  let calls = 0;
+  const runtime = new LLMRuntime({
+    fetch: async () => {
+      calls += 1;
+      return jsonResponse({ choices: [{ message: { role: "assistant", content: "must not run" }, finish_reason: "stop" }] });
+    },
+  });
+  runtime.registerProvider(openaiCompatibleProvider("credential-final-probe", "https://credential-final-probe.test"));
+  const handle = runtime.credentials.register("credential-final-probe", "short-lived-secret");
+
+  await assert.rejects(
+    () => runtime.invoke("credential-final-probe", request("credential-model"), {
+      credential: handle,
+      providerDispatchFence: () => {
+        queueMicrotask(() => runtime.credentials.revoke(handle));
+      },
+    }),
+    CredentialError,
+  );
+  assert.equal(calls, 0);
+});
+
+test("caller abort during the durable fence releases quota without charging transport", async () => {
+  let calls = 0;
+  const quota = new ProviderQuotaController({ clock: () => 1_000 });
+  quota.setPolicy({ provider: "fence-abort", model: "fence-model", windowMs: 10_000, maxRequests: 4, maxConcurrent: 1 });
+  const runtime = new LLMRuntime({
+    providerQuota: quota,
+    fetch: async () => {
+      calls += 1;
+      return jsonResponse({ choices: [{ message: { role: "assistant", content: "must not run" }, finish_reason: "stop" }] });
+    },
+  });
+  runtime.registerProvider(openaiCompatibleProvider("fence-abort", "https://fence-abort.test", { requiresCredential: false }));
+  const abort = new AbortController();
+
+  await assert.rejects(
+    runtime.invoke("fence-abort", request("fence-model"), {
+      signal: abort.signal,
+      providerDispatchFence: async () => {
+        abort.abort();
+        await Promise.resolve();
+      },
+    }),
+    (error) => error instanceof ProviderRuntimeError && error.code === "aborted",
+  );
+  assert.equal(calls, 0);
+  const [status] = quota.status("fence-abort", "fence-model");
+  assert.equal(status.concurrent, 0);
+  assert.equal(status.requests_reserved, 0);
+  assert.equal(status.requests_used, 0);
+});
+
+test("cost admission rejection unwinds quota for invoke and stream", async () => {
+  const quota = new ProviderQuotaController({ clock: () => 1_000 });
+  quota.setPolicy({ provider: "cost-admission", model: "cost-model", windowMs: 10_000, maxRequests: 4, maxConcurrent: 1 });
+  const runtime = new LLMRuntime({ providerQuota: quota });
+  runtime.registerInMemoryProvider("cost-admission", () => "bounded", {
+    stream: (input) => [{
+      provider: "cost-admission",
+      model: input.model,
+      sequence: 0,
+      eventType: "done",
+      textDelta: "bounded",
+      requestId: null,
+      usage: {},
+      done: true,
+    }],
+  });
+  const rejectCost = () => { throw new Error("cost admission refused"); };
+
+  await assert.rejects(
+    runtime.invoke("cost-admission", request("cost-model"), { reserveCost: rejectCost }),
+    /cost admission refused/,
+  );
+  let [status] = quota.status("cost-admission", "cost-model");
+  assert.equal(status.concurrent, 0);
+  assert.equal(status.requests_reserved, 0);
+  assert.equal(status.requests_used, 0);
+
+  const iterator = runtime.invokeStream("cost-admission", request("cost-model"), {
+    reserveCost: rejectCost,
+  })[Symbol.asyncIterator]();
+  await assert.rejects(() => iterator.next(), /cost admission refused/);
+  [status] = quota.status("cost-admission", "cost-model");
+  assert.equal(status.concurrent, 0);
+  assert.equal(status.requests_reserved, 0);
+  assert.equal(status.requests_used, 0);
+
+  assert.equal((await runtime.invoke("cost-admission", request("cost-model"))).text, "bounded");
+});
+
+test("a later retry fence refusal retains quota and cost for an entered attempt", async () => {
+  const quota = new ProviderQuotaController({ clock: () => 1_000 });
+  quota.setPolicy({ provider: "retry-fence", model: "retry-model", windowMs: 10_000, maxRequests: 4, maxConcurrent: 1 });
+  const budget = new AutonomousCostBudget(1);
+  const fenceFailure = new Error("second retry fence refused");
+  let calls = 0;
+  const runtime = new LLMRuntime({
+    providerQuota: quota,
+    fetch: async () => {
+      calls += 1;
+      return jsonResponse({ error: "retry" }, 503);
+    },
+  });
+  runtime.registerProvider(openaiCompatibleProvider("retry-fence", "https://retry-fence.test", {
+    requiresCredential: false,
+    maxAttempts: 2,
+    retryBackoffMs: 0,
+  }));
+
+  await assert.rejects(
+    runtime.invoke("retry-fence", request("retry-model"), {
+      estimatedCostUnits: 0.25,
+      reserveCost: (costUnits) => budget.reserve(costUnits),
+      providerDispatchFence: (context) => {
+        if (context.transportAttempt === 2) throw fenceFailure;
+      },
+    }),
+    (error) => error === fenceFailure,
+  );
+
+  assert.equal(calls, 1);
+  const [status] = quota.status("retry-fence", "retry-model");
+  assert.equal(status.concurrent, 0);
+  assert.equal(status.requests_reserved, 0);
+  assert.equal(status.requests_used, 1);
+  assert.equal(budget.consumedCostUnits, 0.25);
+});
+
+test("pending failure diagnostics observe settled quota before they resume", { timeout: 2_000 }, async () => {
+  const quota = new ProviderQuotaController({ clock: () => 1_000 });
+  quota.setPolicy({ provider: "pending-failure", model: "pending-model", windowMs: 10_000, maxRequests: 4, maxConcurrent: 1 });
+  const budget = new AutonomousCostBudget(1);
+  let enterObserver;
+  let resumeObserver;
+  const observerEntered = new Promise((resolve) => { enterObserver = resolve; });
+  const observerResume = new Promise((resolve) => { resumeObserver = resolve; });
+  const runtime = new LLMRuntime({
+    providerQuota: quota,
+    fetch: async () => jsonResponse({ error: "unavailable" }, 503),
+  });
+  runtime.registerProvider(openaiCompatibleProvider("pending-failure", "https://pending-failure.test", {
+    requiresCredential: false,
+    maxAttempts: 1,
+  }));
+
+  const failure = runtime.invoke("pending-failure", request("pending-model"), {
+    estimatedCostUnits: 0.25,
+    reserveCost: (costUnits) => budget.reserve(costUnits),
+    observer: {
+      after: async () => {
+        enterObserver();
+        await observerResume;
+      },
+    },
+  }).then(() => null, (error) => error);
+
+  await observerEntered;
+  const [status] = quota.status("pending-failure", "pending-model");
+  assert.equal(status.concurrent, 0);
+  assert.equal(status.requests_reserved, 0);
+  assert.equal(status.requests_used, 1);
+  assert.equal(budget.consumedCostUnits, 0.25);
+  resumeObserver();
+  const error = await failure;
+  assert.ok(error instanceof ProviderRuntimeError);
+  assert.equal(error.statusCode, 503);
+});
+
+test("pending pretransport diagnostics observe released quota and cost", { timeout: 2_000 }, async () => {
+  const quota = new ProviderQuotaController({ clock: () => 1_000 });
+  quota.setPolicy({ provider: "pending-predispatch", model: "pending-model", windowMs: 10_000, maxRequests: 4, maxConcurrent: 1 });
+  const budget = new AutonomousCostBudget(1);
+  let calls = 0;
+  let enterObserver;
+  let resumeObserver;
+  const observerEntered = new Promise((resolve) => { enterObserver = resolve; });
+  const observerResume = new Promise((resolve) => { resumeObserver = resolve; });
+  const runtime = new LLMRuntime({
+    providerQuota: quota,
+    fetch: async () => {
+      calls += 1;
+      return jsonResponse({ choices: [{ message: { role: "assistant", content: "must not run" } }] });
+    },
+  });
+  runtime.registerProvider(openaiCompatibleProvider("pending-predispatch", "https://pending-predispatch.test"));
+  const credential = runtime.credentials.register("pending-predispatch", "short-lived-secret");
+
+  const failure = runtime.invoke("pending-predispatch", request("pending-model"), {
+    credential,
+    estimatedCostUnits: 0.25,
+    reserveCost: (costUnits) => budget.reserve(costUnits),
+    observer: {
+      before: () => runtime.credentials.revoke(credential),
+      after: async () => {
+        enterObserver();
+        await observerResume;
+      },
+    },
+  }).then(() => null, (error) => error);
+
+  await observerEntered;
+  const [status] = quota.status("pending-predispatch", "pending-model");
+  assert.equal(status.concurrent, 0);
+  assert.equal(status.requests_reserved, 0);
+  assert.equal(status.requests_used, 0);
+  assert.equal(budget.consumedCostUnits, 0);
+  assert.equal(calls, 0);
+  resumeObserver();
+  assert.ok((await failure) instanceof CredentialError);
+});
+
+test("pending early-stream diagnostics observe finalized quota", { timeout: 2_000 }, async () => {
+  const quota = new ProviderQuotaController({ clock: () => 1_000 });
+  quota.setPolicy({ provider: "pending-stream", model: "pending-model", windowMs: 10_000, maxRequests: 4, maxConcurrent: 1 });
+  const budget = new AutonomousCostBudget(1);
+  let enterObserver;
+  let resumeObserver;
+  const observerEntered = new Promise((resolve) => { enterObserver = resolve; });
+  const observerResume = new Promise((resolve) => { resumeObserver = resolve; });
+  const runtime = new LLMRuntime({ providerQuota: quota });
+  runtime.registerInMemoryProvider("pending-stream", () => "unused", {
+    stream: async function* (input) {
+      yield { provider: "pending-stream", model: input.model, sequence: 0, eventType: "text", textDelta: "first", requestId: null, usage: {}, done: false };
+      yield { provider: "pending-stream", model: input.model, sequence: 1, eventType: "done", textDelta: "", requestId: null, usage: {}, done: true };
+    },
+  });
+  const iterator = runtime.invokeStream("pending-stream", request("pending-model"), {
+    estimatedCostUnits: 0.25,
+    reserveCost: (costUnits) => budget.reserve(costUnits),
+    observer: {
+      after: async () => {
+        enterObserver();
+        await observerResume;
+      },
+    },
+  })[Symbol.asyncIterator]();
+
+  assert.equal((await iterator.next()).value.textDelta, "first");
+  const closed = iterator.return().then(() => null, (error) => error);
+  await observerEntered;
+  const [status] = quota.status("pending-stream", "pending-model");
+  assert.equal(status.concurrent, 0);
+  assert.equal(status.requests_reserved, 0);
+  assert.equal(status.requests_used, 1);
+  assert.equal(budget.consumedCostUnits, 0.25);
+  resumeObserver();
+  assert.equal(await closed, null);
+});
+
+test("caller abort during a local handler is authoritative after transport starts", async () => {
+  const abort = new AbortController();
+  let calls = 0;
+  const runtime = new LLMRuntime();
+  runtime.registerInMemoryProvider("local-midflight-abort", async () => {
+    calls += 1;
+    abort.abort();
+    await Promise.resolve();
+    return { output_text: "must not be accepted" };
+  });
+
+  await assert.rejects(
+    runtime.invoke("local-midflight-abort", request("local-midflight-model"), { signal: abort.signal }),
+    (error) => error instanceof ProviderRuntimeError && error.code === "aborted",
+  );
+  assert.equal(calls, 1);
+  const health = runtime.providerStatus("local-midflight-abort");
+  assert.equal(health.attempts, 1);
+  assert.equal(health.failures, 1);
+});
+
+test("outcome observers and feedback cannot rewrite authoritative invocation receipts", async () => {
+  const runtime = new LLMRuntime({
+    fetch: async () => jsonResponse({
+      choices: [{ message: { role: "assistant", content: "authoritative result" }, finish_reason: "stop" }],
+      usage: { prompt_tokens: 7, completion_tokens: 3, total_tokens: 10 },
+    }),
+  });
+  runtime.registerProvider(openaiCompatibleProvider("outcome-integrity", "https://outcome-integrity.test", { requiresCredential: false }));
+  const agent = new AutonomousRuntime(runtime);
+  const feedback = [];
+  const result = await agent.invoke({
+    task: "Keep provider outcome accounting authoritative.",
+    domain: "general",
+    capability: "reasoning",
+    candidates: [{
+      provider: "outcome-integrity",
+      model: "outcome-model",
+      context_window_tokens: 8_000,
+      max_output_tokens: 256,
+      quality: 0.9,
+      latency_ms: 20,
+      cost_per_million_tokens: 1,
+      reliability: 0.99,
+    }],
+    request: request("selection-placeholder"),
+  }, {
+    observer: {
+      after: (_metadata, outcome) => {
+        outcome.success = false;
+        outcome.status = "provider_refused";
+        outcome.inputTokens = 999_999;
+      },
+    },
+    feedback: (_selection, outcome) => feedback.push({ ...outcome }),
+  });
+
+  assert.equal(result.response.text, "authoritative result");
+  assert.equal(result.provider_invocations.length, 1);
+  assert.equal(result.provider_invocations[0].outcome, "success");
+  assert.equal(result.provider_invocations[0].status, "completed");
+  assert.equal(result.provider_invocations[0].input_tokens, 7);
+  assert.equal(feedback[0].success, true);
+  assert.equal(feedback[0].status, "completed");
+  assert.equal(feedback[0].inputTokens, 7);
+});
+
+test("diagnostic observer failures cannot suppress autonomous feedback or receipts", async () => {
+  const runtime = new LLMRuntime();
+  runtime.registerInMemoryProvider("feedback-isolation", () => ({ output_text: "authoritative result", usage: { input_tokens: 3, output_tokens: 2 } }));
+  const agent = new AutonomousRuntime(runtime);
+  const feedback = [];
+  const result = await agent.invoke({
+    task: "Preserve internal learning when diagnostics fail.",
+    domain: "general",
+    capability: "reasoning",
+    candidates: [{
+      provider: "feedback-isolation",
+      model: "feedback-model",
+      context_window_tokens: 8_000,
+      max_output_tokens: 256,
+      quality: 0.9,
+      latency_ms: 20,
+      cost_per_million_tokens: 1,
+      reliability: 0.99,
+    }],
+    request: request("selection-placeholder"),
+  }, {
+    observer: { after: () => { throw new Error("diagnostic observer failed"); } },
+    feedback: (_selection, outcome) => feedback.push({ ...outcome }),
+  });
+
+  assert.equal(result.response.text, "authoritative result");
+  assert.equal(result.provider_invocations.length, 1);
+  assert.equal(result.provider_invocations[0].outcome, "success");
+  assert.equal(feedback.length, 1);
+  assert.equal(feedback[0].success, true);
 });
 
 test("provider authorization is consumed for each tool-loop turn", async () => {
@@ -1390,8 +2216,8 @@ test("autonomous runtime performs bounded provider failover and journals the adm
   const calls = [];
   const runtime = new LLMRuntime({
     credentials: new CredentialStore(),
-    fetch: async (url) => {
-      calls.push(String(url));
+    fetch: async (url, init) => {
+      calls.push({ url: String(url), idempotencyKey: new Headers(init.headers).get("Idempotency-Key") });
       if (String(url).startsWith("https://unstable.test")) return jsonResponse({ error: "busy" }, 503);
       return jsonResponse({ choices: [{ message: { role: "assistant", content: "stable answer" }, finish_reason: "stop" }] });
     },
@@ -1409,6 +2235,7 @@ test("autonomous runtime performs bounded provider failover and journals the adm
     journal,
   });
   const agent = new AutonomousRuntime(runtime);
+  const rootedRequest = request("selection-placeholder", { idempotencyKey: "operation-root-key" });
   const result = await agent.invoke({
     task: "Answer with one bounded sentence.",
     domain: "general",
@@ -1417,7 +2244,7 @@ test("autonomous runtime performs bounded provider failover and journals the adm
       { provider: "unstable", model: "unstable-model", context_window_tokens: 8_000, max_output_tokens: 512, quality: 0.99, latency_ms: 10, cost_per_million_tokens: 1, reliability: 0.99 },
       { provider: "stable", model: "stable-model", context_window_tokens: 8_000, max_output_tokens: 512, quality: 0.6, latency_ms: 100, cost_per_million_tokens: 5, reliability: 0.7 },
     ],
-    request: request("selection-placeholder"),
+    request: rootedRequest,
   }, { execution, selectionEventCallback: (event) => selectionEvents.push(event) });
   assert.equal(result.selection.selected_model.provider, "stable");
   assert.equal(result.response.text, "stable answer");
@@ -1432,9 +2259,35 @@ test("autonomous runtime performs bounded provider failover and journals the adm
   assert.equal(result.continuation_plan.steps.map((step) => step.model_id).join(","), "unstable/unstable-model,stable/stable-model");
   assert.equal(result.provider_failover.continuation_plan_digest, result.continuation_plan.plan_digest);
   assert.doesNotMatch(JSON.stringify({ provider_invocations: result.provider_invocations, provider_failover: result.provider_failover }), /stable answer|\"busy\"|provider body|api[_ -]?key/i);
+  const attemptKey = async (provider, model, attempt) => {
+    const requestDigest = await digestJson({
+      model,
+      messages: rootedRequest.messages,
+      max_output_tokens: rootedRequest.maxOutputTokens,
+      temperature: rootedRequest.temperature ?? null,
+      require_json: rootedRequest.requireJson ?? false,
+      response_schema: rootedRequest.responseSchema ?? null,
+      tools: rootedRequest.tools ?? [],
+      tool_choice: rootedRequest.toolChoice ?? null,
+    });
+    return digestJson({
+      schema: "bioprism-typescript-autonomous-provider-attempt-idempotency/0.1",
+      root_idempotency_key: "operation-root-key",
+      phase: "invoke",
+      attempt,
+      provider,
+      model,
+      request_digest: requestDigest,
+    });
+  };
+  const firstAttemptKey = await attemptKey("unstable", "unstable-model", 1);
+  const failoverKey = await attemptKey("stable", "stable-model", 2);
   assert.equal(calls.length, 2);
-  assert.equal(calls[0], "https://unstable.test/v1/chat/completions");
-  assert.equal(calls[1], "https://stable.test/v1/chat/completions");
+  assert.deepEqual(calls, [
+    { url: "https://unstable.test/v1/chat/completions", idempotencyKey: firstAttemptKey },
+    { url: "https://stable.test/v1/chat/completions", idempotencyKey: failoverKey },
+  ]);
+  assert.notEqual(calls[0].idempotencyKey, calls[1].idempotencyKey);
   assert.equal(execution.state.provider_calls, 2);
   assert.equal(execution.state.provider_failovers, 1);
   assert.deepEqual(selectionEvents.map((event) => event.phase), ["model_selection_started", "model_selection_finished", "model_selection_started", "model_selection_finished"]);

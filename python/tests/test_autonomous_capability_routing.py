@@ -75,6 +75,64 @@ def test_capability_routing_abstains_and_supports_explicit_overrides() -> None:
     assert set(AUTONOMOUS_CAPABILITY_ROUTE_REASONS) >= {"selected", "explicit_capability"}
 
 
+def test_neurosurgical_terms_select_specialty_capabilities_without_a_provider() -> None:
+    intake = route_autonomous_capability("specialty routing", "biomedical")
+    assert intake.selected_capability == "neurosurgical_intake_routing"
+    assert intake.abstained is False
+    glioma = route_autonomous_capability("review real glioma data and molecular panel assay coverage", "biomedical")
+    assert glioma.selected_capability == "neurosurgical_research_route"
+    assert glioma.abstained is False
+    specialty = route_autonomous_capability("catalogue Chiari and spinal dysraphism neurosurgery", "neuroscience")
+    assert specialty.selected_capability == "neurosurgical_specialty_discovery"
+    assert specialty.abstained is False
+    nuanced = route_autonomous_capability("review diffuse midline glioma and pseudoprogression", "biomedical")
+    assert nuanced.selected_capability == "neurosurgical_specialty_discovery"
+    molecular_marker = route_autonomous_capability("ground H3 K27 and CDKN2A molecular evidence", "biomedical")
+    assert molecular_marker.selected_capability == "neurosurgical_glioma_molecular_map"
+    anatomy = route_autonomous_capability("review Chiari cine MRI CSF flow and clivo-axial angle", "neuroscience")
+    assert anatomy.selected_capability == "neurosurgical_research_route"
+    cranio = route_autonomous_capability("compare scaphocephaly and Apert syndrome", "biomedical")
+    assert cranio.selected_capability == "neurosurgical_specialty_discovery"
+    graph = route_autonomous_capability("build an evidence graph and PMID crosswalk", "biomedical")
+    assert graph.selected_capability == "neurosurgical_evidence_graph"
+    molecular_coverage = route_autonomous_capability("inventory cBioPortal molecular assay availability by study", "biomedical")
+    assert molecular_coverage.selected_capability == "neurosurgical_molecular_coverage"
+    assert molecular_coverage.abstained is False
+    coverage = route_autonomous_capability("audit real data source coverage and temporal linkage gaps", "biomedical")
+    assert coverage.selected_capability == "neurosurgical_real_data_coverage"
+    queue = route_autonomous_capability("derive the real data metadata review queue", "biomedical")
+    assert queue.selected_capability == "neurosurgical_real_data_review_queue"
+    disposition = route_autonomous_capability("review disposition for a metadata task", "biomedical")
+    assert disposition.selected_capability == "neurosurgical_real_data_review_disposition"
+    asset_disposition = route_autonomous_capability("review imaging asset disposition", "biomedical")
+    assert asset_disposition.selected_capability == "neurosurgical_case_asset_review_disposition"
+    dicom = route_autonomous_capability("import DICOM JSON imaging series metadata", "biomedical")
+    assert dicom.selected_capability == "neurosurgical_case_dicom_import"
+    packet = route_autonomous_capability("assemble a real data evidence packet for reviewer handoff", "biomedical")
+    assert packet.selected_capability == "neurosurgical_real_data_evidence_packet"
+    draft = route_autonomous_capability("audit a citation-bound local model draft for grounded claims", "biomedical")
+    assert draft.selected_capability == "neurosurgical_real_data_draft_audit"
+
+
+def test_new_neurosurgical_data_tools_are_routable_without_a_provider() -> None:
+    cases = {
+        "import a FHIR bundle resource metadata manifest": "neurosurgical_case_fhir_import",
+        "run the real data autonomous review wave and dependency closure": "neurosurgical_real_data_autonomous_workflow",
+        "perform a PubMed literature refresh audit on a candidate literature snapshot": "neurosurgical_public_literature_refresh_audit",
+        "audit PMID citation links for broken literature links": "neurosurgical_literature_link_audit",
+        "check citation completeness and publication type completeness": "neurosurgical_public_literature_integrity_audit",
+        "work the PubMed literature review queue": "neurosurgical_public_literature_review_queue",
+        "open the citation evidence workbench": "neurosurgical_public_literature_workbench",
+        "build a multi-lane literature portfolio": "neurosurgical_public_literature_portfolio",
+        "create a glioma evidence program plan": "neurosurgical_evidence_program",
+        "map the current clinical trial landscape for glioma": "neurosurgical_trial_landscape",
+    }
+    for task, expected in cases.items():
+        route = route_autonomous_capability(task, "biomedical")
+        assert route.selected_capability == expected, (task, route.to_dict())
+        assert route.abstained is False
+
+
 def test_automatic_python_blueprints_use_selected_capability() -> None:
     blueprint = AutonomousTaskOrchestrator(AutonomousBrain(object(), LLMRuntime())).prepare(
         task="debug a failing stack trace",
