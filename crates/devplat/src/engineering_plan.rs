@@ -185,6 +185,19 @@ impl EngineeringPlanRequest {
                 "do not use this plan as delivery authorization until the manifest is valid",
             );
         }
+        if manifest_audit
+            .issues
+            .iter()
+            .any(|issue| issue.code == "ticket_cycle")
+        {
+            blocking(
+                &mut issues,
+                "ticket_cycle",
+                "tickets",
+                "a cyclic ticket dependency cannot produce a deterministic execution plan",
+                "break the ticket cycle before scheduling any wave",
+            );
+        }
 
         let max_tickets = self.policies.max_tickets.clamp(1, MAX_PLAN_TICKETS);
         let max_parallelism = self.policies.max_parallelism.clamp(1, MAX_PLAN_PARALLELISM);
@@ -659,7 +672,8 @@ fn warning(
 mod tests {
     use super::*;
     use crate::engineering::{
-        AdrSpec, AdrStatus, EngineeringPolicies, PackageSpec, ProjectIdentity, TechnologyBaseline,
+        AdrSpec, AdrStatus, EngineeringPolicies, OwnershipSpec, PackageSpec, ProjectIdentity,
+        TechnologyBaseline,
     };
 
     fn request() -> EngineeringPlanRequest {
@@ -753,7 +767,14 @@ mod tests {
                     affects: vec!["api".into()],
                     supersedes: None,
                 }],
-                ownership: vec![],
+                ownership: vec![OwnershipSpec {
+                    surface: "api".into(),
+                    accountable: "platform-lead".into(),
+                    responsible: vec!["api-team".into()],
+                    consulted: vec![],
+                    informed: vec![],
+                    independent_reviewer: Some("review-board".into()),
+                }],
                 policies: EngineeringPolicies::default(),
             },
             policies: EngineeringPlanPolicies::default(),
@@ -814,5 +835,19 @@ mod tests {
             .issues
             .iter()
             .any(|issue| issue.code == "ticket_window_truncated"));
+    }
+
+    #[test]
+    fn ticket_cycles_remain_blocking_even_when_invalid_manifest_planning_is_allowed() {
+        let mut value = request();
+        value.policies.require_valid_manifest = false;
+        value.manifest.tickets[0].depends_on = vec!["T2".into()];
+        value.manifest.tickets[1].depends_on = vec!["T1".into()];
+        let audit = value.audit().expect("plan");
+        assert!(!audit.valid);
+        assert!(audit
+            .issues
+            .iter()
+            .any(|issue| issue.code == "ticket_cycle"));
     }
 }

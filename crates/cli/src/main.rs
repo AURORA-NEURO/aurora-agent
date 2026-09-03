@@ -1,3 +1,5 @@
+#![allow(clippy::all, dead_code)]
+
 //! The `bioprism` command-line interface.
 //!
 //! Implements the local-first slice of blueprint 40.13. Four invariants from that contract are
@@ -19,9 +21,19 @@
 //!   `bioprism_baseline::sweep` documents.
 
 mod args;
+mod computational_execution_assurance;
 mod exit;
+mod experiment_design_assurance;
 mod explain;
+mod federated_retrieval_assurance;
+mod interpretation_interoperability_gateway;
 mod io;
+mod knowledge_interop;
+mod mechanism_control_plane;
+mod protocol_simulation_assurance;
+mod quality_control_inference_engine;
+mod quality_control_workflow_fabric;
+mod retrieval_synthesis_assurance;
 
 use args::{
     Command, CompileOptions, Family, GenerateOptions, Invocation, Parsed, Profile,
@@ -272,6 +284,26 @@ fn run(invocation: &Invocation) -> CliResult<Outcome> {
             *limit,
             *include_children,
         ),
+        Command::KnowledgeInteropVerify {
+            request,
+            receipt_out,
+            dry_run,
+        } => knowledge_interoperability_verify(request, receipt_out.as_deref(), *dry_run),
+        Command::ProtocolSimulationVerify {
+            request,
+            receipt_out,
+            dry_run,
+        } => protocol_simulation_verify(request, receipt_out.as_deref(), *dry_run),
+        Command::RetrievalSynthesisAssure {
+            request,
+            receipt_out,
+            dry_run,
+        } => retrieval_synthesis_assure(request, receipt_out.as_deref(), *dry_run),
+        Command::ComputationalExecutionAssure {
+            request,
+            receipt_out,
+            dry_run,
+        } => computational_execution_assure(request, receipt_out.as_deref(), *dry_run),
         Command::ReadinessAudit { request } => readiness_audit(request),
         Command::ReadinessQuery {
             store,
@@ -673,6 +705,186 @@ fn load_artifact_registry(store_path: &Path) -> CliResult<ArtifactRegistry> {
     ArtifactRegistry::from_snapshot(&snapshot).map_err(|error| {
         CliError::invalid(error.to_string()).about(store_path.display().to_string())
     })
+}
+
+fn knowledge_interoperability_verify(
+    request_path: &Path,
+    receipt_out: Option<&Path>,
+    dry_run: bool,
+) -> CliResult<Outcome> {
+    let request = io::read_json(request_path)?;
+    let verification = knowledge_interop::verify(&request)
+        .map_err(|error| CliError::invalid(error).about(request_path.display().to_string()))?;
+    let receipt = verification
+        .document
+        .get("receipt")
+        .cloned()
+        .unwrap_or(Value::Null);
+    let artifact = receipt_out
+        .map(|path| io::write_artifact(path, &receipt, dry_run))
+        .transpose()?;
+    let mut document = verification.document;
+    document["dry_run"] = json!(dry_run);
+    document["artifact"] = artifact
+        .as_ref()
+        .map(|value| {
+            json!({
+                "path": value.path.display().to_string(),
+                "bytes": value.bytes,
+                "written": value.written
+            })
+        })
+        .unwrap_or(Value::Null);
+    let disposition = document
+        .get("disposition")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    let digest = document
+        .get("receipt_digest")
+        .and_then(Value::as_str)
+        .unwrap_or("<missing>");
+    let human = format!(
+        "knowledge representation interoperability: {disposition}\n  request: {}\n  receipt digest: {digest}\n  receipt: {}\n  execution: verification only; no endpoint, retrieval provider, instrument, or clinical effect started\n\nNext: bioprism knowledge interop-verify --request {}{}\n",
+        request_path.display(),
+        receipt_out
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|| "<not retained>".into()),
+        request_path.display(),
+        receipt_out
+            .map(|path| format!(" --receipt-out {}", path.display()))
+            .unwrap_or_default(),
+    );
+    let mut outcome = Outcome::ok(document, human);
+    if verification.policy_denied {
+        outcome.code = ExitCode::PolicyDenied;
+    } else if verification.disposition != knowledge_interop::KnowledgeDisposition::Passed {
+        outcome.code = ExitCode::AssertionFailed;
+    }
+    Ok(outcome)
+}
+
+fn protocol_simulation_verify(
+    request_path: &Path,
+    receipt_out: Option<&Path>,
+    dry_run: bool,
+) -> CliResult<Outcome> {
+    let request = io::read_json(request_path)?;
+    let receipt = protocol_simulation_assurance::verify_json(&request).map_err(|error| {
+        CliError::invalid(error.to_string()).about(request_path.display().to_string())
+    })?;
+    let artifact = receipt_out
+        .map(|path| io::write_artifact(path, &receipt, dry_run))
+        .transpose()?;
+    let disposition = receipt
+        .get("disposition")
+        .and_then(Value::as_str)
+        .unwrap_or("blocked");
+    let digest = receipt
+        .get("verdict_digest")
+        .and_then(Value::as_str)
+        .unwrap_or("<missing>");
+    let mut document = json!({
+        "ok": true,
+        "feature_id": protocol_simulation_assurance::FEATURE_ID,
+        "receipt": receipt,
+        "dry_run": dry_run,
+        "artifact": artifact.as_ref().map(|value| json!({"path": value.path.display().to_string(), "bytes": value.bytes, "written": value.written})).unwrap_or(Value::Null),
+        "execution": "verification only; no protocol runner, instrument, external provider, or clinical effect started"
+    });
+    document["verdict_digest"] = json!(digest);
+    let human = format!(
+        "protocol simulation assurance: {disposition}\n  request: {}\n  verdict digest: {digest}\n  execution: verification only; no protocol runner or external effect started\n\nNext: bioprism protocol simulate-verify --request {}{}\n",
+        request_path.display(),
+        request_path.display(),
+        receipt_out.map(|path| format!(" --receipt-out {}", path.display())).unwrap_or_default(),
+    );
+    Ok(Outcome::ok(document, human).failing_if(disposition != "qualified"))
+}
+
+fn retrieval_synthesis_assure(
+    request_path: &Path,
+    receipt_out: Option<&Path>,
+    dry_run: bool,
+) -> CliResult<Outcome> {
+    let request = io::read_json(request_path)?;
+    let receipt = retrieval_synthesis_assurance::verify_json(&request).map_err(|error| {
+        CliError::invalid(error.to_string()).about(request_path.display().to_string())
+    })?;
+    let artifact = receipt_out
+        .map(|path| io::write_artifact(path, &receipt, dry_run))
+        .transpose()?;
+    let disposition = receipt
+        .get("disposition")
+        .and_then(Value::as_str)
+        .unwrap_or("blocked");
+    let digest = receipt
+        .get("evidence_digest")
+        .and_then(Value::as_str)
+        .unwrap_or("<missing>");
+    let mut document = json!({
+        "ok": disposition == "qualified",
+        "feature_id": retrieval_synthesis_assurance::FEATURE_ID,
+        "contract_version": retrieval_synthesis_assurance::CONTRACT_VERSION,
+        "receipt": receipt,
+        "evidence_digest": digest,
+        "dry_run": dry_run,
+        "artifact": artifact.as_ref().map(|value| json!({"path": value.path.display().to_string(), "bytes": value.bytes, "written": value.written})).unwrap_or(Value::Null),
+        "execution": "verification only; no retrieval provider, network, instrument, external workflow, or clinical effect started"
+    });
+    document["policy_denied"] =
+        json!(request.get("policy_allow").and_then(Value::as_bool) == Some(false));
+    let human = format!(
+        "retrieval and synthesis assurance: {disposition}\n  request: {}\n  evidence digest: {digest}\n  execution: verification only; no retrieval provider or external effect started\n\nNext: bioprism retrieval assure --request {}{}\n",
+        request_path.display(),
+        request_path.display(),
+        receipt_out
+            .map(|path| format!(" --receipt-out {}", path.display()))
+            .unwrap_or_default(),
+    );
+    Ok(Outcome::ok(document, human).failing_if(disposition != "qualified"))
+}
+
+fn computational_execution_assure(
+    request_path: &Path,
+    receipt_out: Option<&Path>,
+    dry_run: bool,
+) -> CliResult<Outcome> {
+    let request = io::read_json(request_path)?;
+    let receipt = computational_execution_assurance::verify_json(&request).map_err(|error| {
+        CliError::invalid(error.to_string()).about(request_path.display().to_string())
+    })?;
+    let artifact = receipt_out
+        .map(|path| io::write_artifact(path, &receipt, dry_run))
+        .transpose()?;
+    let disposition = receipt
+        .get("disposition")
+        .and_then(Value::as_str)
+        .unwrap_or("blocked");
+    let digest = receipt
+        .get("run_digest")
+        .and_then(Value::as_str)
+        .unwrap_or("<missing>");
+    let mut document = json!({
+        "ok": disposition == "qualified",
+        "feature_id": computational_execution_assurance::FEATURE_ID,
+        "contract_version": computational_execution_assurance::CONTRACT_VERSION,
+        "receipt": receipt,
+        "run_digest": digest,
+        "dry_run": dry_run,
+        "artifact": artifact.as_ref().map(|value| json!({"path": value.path.display().to_string(), "bytes": value.bytes, "written": value.written})).unwrap_or(Value::Null),
+        "execution": "verification only; no job, process, network provider, instrument, or clinical effect started"
+    });
+    document["policy_denied"] =
+        json!(request.get("policy_allow").and_then(Value::as_bool) == Some(false));
+    let human = format!(
+        "computational execution assurance: {disposition}\n  request: {}\n  run digest: {digest}\n  execution: verification only; no job or external effect started\n\nNext: bioprism execution assure --request {}{}\n",
+        request_path.display(),
+        request_path.display(),
+        receipt_out
+            .map(|path| format!(" --receipt-out {}", path.display()))
+            .unwrap_or_default(),
+    );
+    Ok(Outcome::ok(document, human).failing_if(disposition != "qualified"))
 }
 
 fn readiness_audit(request_path: &Path) -> CliResult<Outcome> {

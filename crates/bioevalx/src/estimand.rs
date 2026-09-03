@@ -46,11 +46,16 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::EstimandError;
 
+const MAX_ESTIMAND_TEXT_BYTES: usize = 256;
+const MAX_ASSUMPTIONS: usize = 256;
+const MAX_IDENTIFICATION_CHECKS: usize = 256;
+const MAX_CORROBORATIONS: usize = 1024;
+
 /// The five elements 26.09 requires before any causal analysis.
 ///
 /// Public fields on a private-constructed type: reading them is fine, assembling one without going
 /// through [`Estimand::declare`] is not.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Estimand {
     intervention: String,
     comparator: String,
@@ -94,11 +99,30 @@ impl Estimand {
             if value.trim().is_empty() {
                 return Err(EstimandError::MissingElement(name));
             }
+            validate_estimand_text(name, value)?;
         }
         if estimand.scope.trim().is_empty() {
             return Err(EstimandError::MissingElement("scope"));
         }
+        validate_estimand_text("scope", &estimand.scope)?;
         Ok(estimand)
+    }
+
+    fn validate(&self) -> Result<(), EstimandError> {
+        for (name, value) in [
+            ("intervention", &self.intervention),
+            ("comparator", &self.comparator),
+            ("unit", &self.unit),
+            ("outcome", &self.outcome),
+            ("horizon", &self.horizon),
+            ("scope", &self.scope),
+        ] {
+            if value.trim().is_empty() {
+                return Err(EstimandError::MissingElement(name));
+            }
+            validate_estimand_text(name, value)?;
+        }
+        Ok(())
     }
 
     /// The intervention being evaluated.
@@ -136,7 +160,12 @@ impl Estimand {
     /// There is no transport *rule* here: `bioprism-scope` owns scope mappings and their loss
     /// ledgers. This is the gate that says a transport was never declared, which is 26.09's "scope
     /// violation rate" made into a refusal rather than a counter.
-    pub fn transport_to(&self, target: &str, declared: &BTreeSet<String>) -> Result<(), EstimandError> {
+    pub fn transport_to(
+        &self,
+        target: &str,
+        declared: &BTreeSet<String>,
+    ) -> Result<(), EstimandError> {
+        validate_estimand_text("target", target)?;
         if declared.contains(target) {
             Ok(())
         } else {
@@ -146,6 +175,28 @@ impl Estimand {
             })
         }
     }
+}
+
+fn validate_estimand_text(field: &str, value: &str) -> Result<(), EstimandError> {
+    if value != value.trim() {
+        return Err(EstimandError::InvalidField {
+            field: field.to_string(),
+            detail: "leading or trailing whitespace is not allowed".into(),
+        });
+    }
+    if value.len() > MAX_ESTIMAND_TEXT_BYTES {
+        return Err(EstimandError::InvalidField {
+            field: field.to_string(),
+            detail: format!("text exceeds {MAX_ESTIMAND_TEXT_BYTES} bytes"),
+        });
+    }
+    if value.chars().any(char::is_control) {
+        return Err(EstimandError::InvalidField {
+            field: field.to_string(),
+            detail: "control characters are not allowed".into(),
+        });
+    }
+    Ok(())
 }
 
 /// What a finding is evidence about.
@@ -165,6 +216,21 @@ impl Evidentiary {
     /// Whether this finding's truth is contingent on a model being right.
     pub fn is_model_conditional(&self) -> bool {
         matches!(self, Evidentiary::ModelConditional { .. })
+    }
+
+    fn validate(&self) -> Result<(), EstimandError> {
+        let (field, value) = match self {
+            Evidentiary::ModelConditional { model } => ("model", model),
+            Evidentiary::Observational { dataset } => ("dataset", dataset),
+            Evidentiary::Experimental { study } => ("study", study),
+        };
+        if value.trim().is_empty() {
+            return Err(EstimandError::InvalidField {
+                field: field.into(),
+                detail: "value must not be empty".into(),
+            });
+        }
+        validate_estimand_text(field, value)
     }
 }
 
@@ -212,6 +278,54 @@ impl Identification {
     pub fn was_probed(&self) -> bool {
         matches!(self, Identification::Probed { .. })
     }
+
+    fn validate(&self) -> Result<(), EstimandError> {
+        let (strategy, assumptions, checks) = match self {
+            Identification::NotAssessed => return Ok(()),
+            Identification::Declared {
+                strategy,
+                assumptions,
+            } => (strategy, assumptions, None),
+            Identification::Probed {
+                strategy,
+                assumptions,
+                checks,
+            } => (strategy, assumptions, Some(checks)),
+        };
+
+        validate_identification_text("strategy", strategy)?;
+        if assumptions.is_empty() {
+            return Err(EstimandError::InvalidIdentification {
+                detail: "at least one identification assumption is required".into(),
+            });
+        }
+        validate_identification_list("assumptions", assumptions, MAX_ASSUMPTIONS)?;
+        if let Some(checks) = checks {
+            if checks.is_empty() {
+                return Err(EstimandError::InvalidIdentification {
+                    detail: "probed identification requires at least one check".into(),
+                });
+            }
+            if checks.len() > MAX_IDENTIFICATION_CHECKS {
+                return Err(EstimandError::InvalidIdentification {
+                    detail: format!(
+                        "checks exceed the {MAX_IDENTIFICATION_CHECKS}-item limit"
+                    ),
+                });
+            }
+            let mut names = BTreeSet::new();
+            for check in checks {
+                validate_identification_text("check name", &check.name)?;
+                validate_identification_text("check detail", &check.detail)?;
+                if !names.insert(&check.name) {
+                    return Err(EstimandError::InvalidIdentification {
+                        detail: format!("check `{}` appears more than once", check.name),
+                    });
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 /// One negative control or sensitivity analysis and what it showed.
@@ -235,8 +349,16 @@ pub struct Corroboration {
     pub detail: String,
 }
 
+impl Corroboration {
+    fn validate(&self) -> Result<(), EstimandError> {
+        validate_identification_text("source", &self.source)?;
+        validate_identification_text("detail", &self.detail)?;
+        Ok(())
+    }
+}
+
 /// A causal finding: an estimand, what kind of claim it makes, and what it rests on.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Finding {
     pub estimand: Estimand,
     pub kind: ClaimKind,
@@ -260,9 +382,13 @@ impl Finding {
     }
 
     /// Record what was done about identification.
-    pub fn identified_by(mut self, identification: Identification) -> Self {
+    pub fn identified_by(
+        mut self,
+        identification: Identification,
+    ) -> Result<Self, EstimandError> {
+        identification.validate()?;
         self.identification = identification;
-        self
+        Ok(self)
     }
 
     /// Promote a model-conditional finding, naming what corroborated it.
@@ -271,6 +397,29 @@ impl Finding {
     /// simulator corroborating a simulator is not external evidence, so a promotion whose
     /// corroborating source is the same model is refused.
     pub fn promote(&mut self, corroboration: Corroboration) -> Result<(), EstimandError> {
+        self.validate()?;
+        corroboration.validate()?;
+        if corroboration.kind != self.kind {
+            return Err(EstimandError::InvalidCorroboration {
+                source_id: corroboration.source,
+                detail: "claim kind does not match the finding".into(),
+            });
+        }
+        if self.corroborations.len() >= MAX_CORROBORATIONS {
+            return Err(EstimandError::InvalidCorroboration {
+                source_id: corroboration.source,
+                detail: format!("corroborations exceed the {MAX_CORROBORATIONS}-item limit"),
+            });
+        }
+        if self
+            .corroborations
+            .iter()
+            .any(|existing| existing.source == corroboration.source)
+        {
+            return Err(EstimandError::DuplicateCorroboration {
+                source_id: corroboration.source,
+            });
+        }
         if let Evidentiary::ModelConditional { model } = &self.basis {
             if corroboration.source == *model {
                 return Err(EstimandError::NoAutomaticPromotion {
@@ -279,6 +428,41 @@ impl Finding {
             }
         }
         self.corroborations.push(corroboration);
+        Ok(())
+    }
+
+    fn validate(&self) -> Result<(), EstimandError> {
+        self.estimand.validate()?;
+        self.basis.validate()?;
+        self.identification.validate()?;
+        if self.corroborations.len() > MAX_CORROBORATIONS {
+            return Err(EstimandError::InvalidCorroboration {
+                source_id: "<collection>".into(),
+                detail: format!("corroborations exceed the {MAX_CORROBORATIONS}-item limit"),
+            });
+        }
+        let mut sources = BTreeSet::new();
+        for corroboration in &self.corroborations {
+            corroboration.validate()?;
+            if corroboration.kind != self.kind {
+                return Err(EstimandError::InvalidCorroboration {
+                    source_id: corroboration.source.clone(),
+                    detail: "claim kind does not match the finding".into(),
+                });
+            }
+            if !sources.insert(&corroboration.source) {
+                return Err(EstimandError::DuplicateCorroboration {
+                    source_id: corroboration.source.clone(),
+                });
+            }
+            if let Evidentiary::ModelConditional { model } = &self.basis {
+                if corroboration.source == *model {
+                    return Err(EstimandError::NoAutomaticPromotion {
+                        target: corroboration.source.clone(),
+                    });
+                }
+            }
+        }
         Ok(())
     }
 
@@ -330,4 +514,50 @@ impl Finding {
             format!("{core} [{}]", qualifiers.join("; "))
         }
     }
+}
+
+fn validate_identification_text(field: &str, value: &str) -> Result<(), EstimandError> {
+    if value.trim().is_empty() {
+        return Err(EstimandError::InvalidIdentification {
+            detail: format!("{field} must not be empty"),
+        });
+    }
+    if value != value.trim() {
+        return Err(EstimandError::InvalidIdentification {
+            detail: format!("{field} must not have leading or trailing whitespace"),
+        });
+    }
+    if value.len() > MAX_ESTIMAND_TEXT_BYTES {
+        return Err(EstimandError::InvalidIdentification {
+            detail: format!("{field} exceeds {MAX_ESTIMAND_TEXT_BYTES} bytes"),
+        });
+    }
+    if value.chars().any(char::is_control) {
+        return Err(EstimandError::InvalidIdentification {
+            detail: format!("{field} contains a control character"),
+        });
+    }
+    Ok(())
+}
+
+fn validate_identification_list(
+    field: &str,
+    values: &[String],
+    limit: usize,
+) -> Result<(), EstimandError> {
+    if values.len() > limit {
+        return Err(EstimandError::InvalidIdentification {
+            detail: format!("{field} exceed the {limit}-item limit"),
+        });
+    }
+    let mut unique = BTreeSet::new();
+    for value in values {
+        validate_identification_text(field, value)?;
+        if !unique.insert(value) {
+            return Err(EstimandError::InvalidIdentification {
+                detail: format!("{field} contain a duplicate `{}`", value),
+            });
+        }
+    }
+    Ok(())
 }

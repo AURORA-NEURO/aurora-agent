@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aurora-neuro.org/schemas/aurora-research-contract-v1/design-frontier-receipt.json",
+  "title": "AURORA experiment design frontier receipt",
+  "description": "Scenario-replayed power-aware preclinical design results that retain feasible and resource-blocked cells.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "feature_id", "study_id", "feasible_scenarios", "blocked_scenarios", "scenarios", "artifact", "boundary"],
+  "properties": {
+    "schema_version": { "const": "aurora-research-contract/1.0" },
+    "feature_id": { "const": "AFA-lab-P09-F02" },
+    "study_id": { "type": "string", "minLength": 1 },
+    "feasible_scenarios": { "type": "integer", "minimum": 0 },
+    "blocked_scenarios": { "type": "integer", "minimum": 0 },
+    "scenarios": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["scenario_id", "disposition", "request_digest", "plan_digest", "total_units", "minimum_projected_power", "reasons"],
+        "properties": {
+          "scenario_id": { "type": "string", "minLength": 1 },
+          "disposition": { "enum": ["feasible", "blocked"] },
+          "request_digest": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$" },
+          "plan_digest": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$" },
+          "total_units": { "type": ["integer", "null"], "minimum": 0 },
+          "minimum_projected_power": { "type": ["number", "null"] },
+          "reasons": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } }
+        }
+      }
+    },
+    "artifact": { "type": "object", "required": ["content_hash"], "properties": { "content_hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" } } },
+    "boundary": { "const": "preclinical-research-only; no human-subject or clinical-source data; no diagnosis, treatment, triage, enrollment, or clinical decisions" }
+  }
+}

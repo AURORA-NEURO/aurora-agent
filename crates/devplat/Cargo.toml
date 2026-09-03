@@ -7,6 +7,7 @@ description = "Developer platform remainder and reference examples: which of the
 [dependencies]
 bioprism-adapter = { workspace = true }
 bioprism-ids = { workspace = true }
+bioprism-foundation = { workspace = true }
 bioprism-interweave = { workspace = true }
 bioprism-devx = { workspace = true }
 bioprism-cookbook = { workspace = true }

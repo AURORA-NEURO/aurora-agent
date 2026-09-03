@@ -1,0 +1,5 @@
+"""Graph P32 throughput research_copilot projection-integrity feature F11."""
+from .projection_integrity_support import ProjectionRequest4,ProjectionCard7,ProjectionIntegrityError,manifest,qualify
+FEATURE_ID="AFA-graph-P32-F11";CONTRACT_VERSION="graph-throughput_projection_integrity_research_copilot/1.0"
+def throughput_projection_integrity_research_copilot_manifest():return manifest(feature_id=FEATURE_ID,contract_version=CONTRACT_VERSION,scale="throughput",mode="research_copilot")
+def qualify_throughput_projection_integrity_research_copilot(request:ProjectionRequest4)->ProjectionCard7:return qualify(request,feature_id=FEATURE_ID,contract_version=CONTRACT_VERSION,scale="throughput",mode="research_copilot")

@@ -93,12 +93,12 @@ impl fmt::Display for FieldChange {
                 "removed {} ({}, {}, {})",
                 spec.path, spec.ty, spec.presence, spec.digest
             ),
-            FieldChange::TypeChanged {
-                path, from, to, ..
-            } => write!(f, "{path} retyped {from} -> {to}"),
-            FieldChange::PresenceChanged {
-                path, from, to, ..
-            } => write!(f, "{path} presence {from} -> {to}"),
+            FieldChange::TypeChanged { path, from, to, .. } => {
+                write!(f, "{path} retyped {from} -> {to}")
+            }
+            FieldChange::PresenceChanged { path, from, to, .. } => {
+                write!(f, "{path} presence {from} -> {to}")
+            }
             FieldChange::DigestRoleChanged { path, from, to } => {
                 write!(f, "{path} digest role {from} -> {to}")
             }

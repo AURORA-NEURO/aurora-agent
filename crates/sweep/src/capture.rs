@@ -286,22 +286,51 @@ impl ArtifactBuilder {
         need!(retention);
         need!(encryption);
         if !missing.is_empty() {
-            return Err(SweepError::MissingField { what: "Artifact", fields: missing });
+            return Err(SweepError::MissingField {
+                what: "Artifact",
+                fields: missing,
+            });
         }
-        let artifact = Artifact {
-            media_type: self.media_type.unwrap(),
-            logical_role: self.logical_role.unwrap(),
-            source_event: self.source_event.unwrap(),
-            digest: self.digest.unwrap(),
-            size_bytes: self.size_bytes.unwrap(),
-            sensitivity: self.sensitivity.unwrap(),
-            license: self.license.unwrap(),
-            retention: self.retention.unwrap(),
-            encryption: self.encryption.unwrap(),
+        let artifact = match (
+            self.media_type,
+            self.logical_role,
+            self.source_event,
+            self.digest,
+            self.size_bytes,
+            self.sensitivity,
+            self.license,
+            self.retention,
+            self.encryption,
+        ) {
+            (
+                Some(media_type),
+                Some(logical_role),
+                Some(source_event),
+                Some(digest),
+                Some(size_bytes),
+                Some(sensitivity),
+                Some(license),
+                Some(retention),
+                Some(encryption),
+            ) => Artifact {
+                media_type,
+                logical_role,
+                source_event,
+                digest,
+                size_bytes,
+                sensitivity,
+                license,
+                retention,
+                encryption,
+            },
+            _ => {
+                return Err(SweepError::MissingField {
+                    what: "Artifact",
+                    fields: missing,
+                })
+            }
         };
-        if artifact.sensitivity == Sensitivity::Secret
-            && artifact.encryption == Encryption::None
-        {
+        if artifact.sensitivity == Sensitivity::Secret && artifact.encryption == Encryption::None {
             return Err(SweepError::malformed(
                 "Artifact",
                 "a secret artifact must be excluded or separately encrypted (04.04)",
@@ -315,7 +344,9 @@ impl ArtifactBuilder {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "pin")]
 pub enum Pin {
-    Pinned { version: String },
+    Pinned {
+        version: String,
+    },
     /// 04.04: "Unpinned dependencies reduce reproducibility level."
     Unpinned,
 }
@@ -329,19 +360,25 @@ pub struct Dependency {
 
 impl Dependency {
     pub fn pinned(name: impl Into<String>, version: impl Into<String>) -> Self {
-        Dependency { name: name.into(), pin: Pin::Pinned { version: version.into() } }
+        Dependency {
+            name: name.into(),
+            pin: Pin::Pinned {
+                version: version.into(),
+            },
+        }
     }
 
     pub fn unpinned(name: impl Into<String>) -> Self {
-        Dependency { name: name.into(), pin: Pin::Unpinned }
+        Dependency {
+            name: name.into(),
+            pin: Pin::Unpinned,
+        }
     }
 
     fn declaration(&self) -> Result<Declaration, SweepError> {
         match &self.pin {
             Pin::Pinned { .. } => Ok(Declaration::exact()),
-            Pin::Unpinned => {
-                Declaration::degraded(format!("dependency {} is unpinned", self.name))
-            }
+            Pin::Unpinned => Declaration::degraded(format!("dependency {} is unpinned", self.name)),
         }
     }
 }
@@ -408,9 +445,7 @@ impl Capture {
     pub fn undeclared(&self) -> Vec<Dimension> {
         Dimension::ALL
             .into_iter()
-            .filter(|d| {
-                !self.included.contains(d) && self.omissions.reason(d.as_str()).is_none()
-            })
+            .filter(|d| !self.included.contains(d) && self.omissions.reason(d.as_str()).is_none())
             .collect()
     }
 
@@ -422,7 +457,10 @@ impl Capture {
         }
         Err(SweepError::Undeclared {
             what: "capture",
-            items: undeclared.into_iter().map(|d| d.as_str().to_string()).collect(),
+            items: undeclared
+                .into_iter()
+                .map(|d| d.as_str().to_string())
+                .collect(),
         })
     }
 
@@ -461,9 +499,10 @@ mod tests {
     use super::*;
 
     fn complete() -> Capture {
-        Dimension::ALL
-            .into_iter()
-            .fold(Capture::new(CaptureProfile::ArtifactsAndManifest), |c, d| c.including(d))
+        Dimension::ALL.into_iter().fold(
+            Capture::new(CaptureProfile::ArtifactsAndManifest),
+            |c, d| c.including(d),
+        )
     }
 
     fn artifact() -> ArtifactBuilder {
@@ -505,8 +544,13 @@ mod tests {
         let capture = Dimension::ALL
             .into_iter()
             .filter(|d| *d != Dimension::Hardware)
-            .fold(Capture::new(CaptureProfile::MetadataOnly), |c, d| c.including(d))
-            .omitting(Dimension::Hardware, "single-node CI, hardware is fixed by the image")
+            .fold(Capture::new(CaptureProfile::MetadataOnly), |c, d| {
+                c.including(d)
+            })
+            .omitting(
+                Dimension::Hardware,
+                "single-node CI, hardware is fixed by the image",
+            )
             .unwrap();
         assert!(capture.validate().is_ok());
         assert_eq!(capture.reproducibility().unwrap().level(), Level::Absent);
@@ -527,7 +571,11 @@ mod tests {
             .with_dependency(Dependency::unpinned("libblas"));
         assert_eq!(capture.reproducibility().unwrap().level(), Level::Degraded);
         assert!(!capture.fully_reproducible().unwrap());
-        assert!(capture.reproducibility().unwrap().basis().contains("libblas"));
+        assert!(capture
+            .reproducibility()
+            .unwrap()
+            .basis()
+            .contains("libblas"));
     }
 
     #[test]
@@ -547,7 +595,10 @@ mod tests {
 
     #[test]
     fn an_artifact_missing_fields_names_all_of_them_at_once() {
-        let err = ArtifactBuilder::new().media_type("text/csv").build().unwrap_err();
+        let err = ArtifactBuilder::new()
+            .media_type("text/csv")
+            .build()
+            .unwrap_err();
         match err {
             SweepError::MissingField { fields, .. } => {
                 assert_eq!(fields.len(), 8);
@@ -568,7 +619,9 @@ mod tests {
         assert!(matches!(err, SweepError::Malformed { .. }));
         assert!(artifact()
             .sensitivity(Sensitivity::Secret)
-            .encryption(Encryption::ToKey { key_id: "org-1".into() })
+            .encryption(Encryption::ToKey {
+                key_id: "org-1".into()
+            })
             .build()
             .is_ok());
     }
@@ -583,9 +636,14 @@ mod tests {
     #[test]
     fn the_omission_ledger_records_narrow_exclusions_as_well_as_whole_dimensions() {
         let mut ledger = OmissionLedger::new();
-        ledger.declare("/etc/secrets", "credentials are excluded by policy").unwrap();
+        ledger
+            .declare("/etc/secrets", "credentials are excluded by policy")
+            .unwrap();
         assert_eq!(ledger.len(), 1);
-        assert!(ledger.reason("/etc/secrets").unwrap().contains("credentials"));
+        assert!(ledger
+            .reason("/etc/secrets")
+            .unwrap()
+            .contains("credentials"));
         assert!(ledger.reason("/etc/hosts").is_none());
     }
 }

@@ -15,7 +15,7 @@ use crate::ci_provider_evidence::{
 };
 use bioprism_ids::ContentHash;
 use serde_json::{json, Value};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
 pub const CI_PROVIDER_EVIDENCE_REGISTRY_SCHEMA_VERSION: &str =
@@ -29,6 +29,9 @@ pub const CI_PROVIDER_EVIDENCE_GET_SCHEMA_VERSION: &str =
 pub const MAX_CI_PROVIDER_EVIDENCE_RECORDS: usize = 512;
 pub const MAX_CI_PROVIDER_EVIDENCE_REGISTRY_BYTES: usize = 32 * 1024 * 1024;
 pub const MAX_CI_PROVIDER_EVIDENCE_QUERY_ITEMS: usize = 256;
+const MAX_TEXT_BYTES: usize = 512;
+const MAX_FINDINGS: usize = 512;
+const MAX_CHECKS: usize = 64;
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum CiProviderEvidenceRegistryError {
@@ -107,7 +110,7 @@ impl CiProviderEvidenceRegistry {
     }
 
     pub fn get(&self, digest: &str) -> Result<Value, CiProviderEvidenceRegistryError> {
-        if ContentHash::parse(digest.to_owned()).is_err() {
+        if !valid_digest(digest) {
             return Err(CiProviderEvidenceRegistryError::InvalidSnapshot(
                 "provider_evidence_digest must be a lowercase SHA-256 digest".into(),
             ));
@@ -170,11 +173,20 @@ impl CiProviderEvidenceRegistry {
         }
         for (field, value) in [("plan_digest", plan_digest), ("after", after)] {
             if let Some(value) = value {
-                ContentHash::parse(value.to_owned()).map_err(|_| {
-                    CiProviderEvidenceRegistryError::InvalidSnapshot(format!(
+                if !valid_digest(value) {
+                    return Err(CiProviderEvidenceRegistryError::InvalidSnapshot(format!(
                         "{field} must be a lowercase SHA-256 digest"
-                    ))
-                })?;
+                    )));
+                }
+            }
+        }
+        for (field, value) in [("provider", provider), ("run_id", run_id)] {
+            if let Some(value) = value {
+                if !valid_text(value) {
+                    return Err(CiProviderEvidenceRegistryError::InvalidSnapshot(format!(
+                        "{field} must be bounded visible text"
+                    )));
+                }
             }
         }
         let mut rows = Vec::new();
@@ -302,11 +314,18 @@ impl CiProviderEvidenceRegistry {
             .ok_or_else(|| {
                 CiProviderEvidenceRegistryError::InvalidSnapshot("state_digest is missing".into())
             })?;
+        if !valid_digest(claimed_state_digest) {
+            return Err(CiProviderEvidenceRegistryError::InvalidSnapshot(
+                "state_digest must be a canonical lowercase content hash".into(),
+            ));
+        }
         let mut unsigned = document.clone();
-        unsigned
-            .as_object_mut()
-            .expect("snapshot object was checked above")
-            .remove("state_digest");
+        let Some(unsigned_object) = unsigned.as_object_mut() else {
+            return Err(CiProviderEvidenceRegistryError::InvalidSnapshot(
+                "snapshot is not an object after cloning".into(),
+            ));
+        };
+        unsigned_object.remove("state_digest");
         if claimed_state_digest != snapshot_digest(&unsigned)? {
             return Err(CiProviderEvidenceRegistryError::InvalidSnapshot(
                 "state_digest does not match snapshot contents".into(),
@@ -318,6 +337,28 @@ impl CiProviderEvidenceRegistry {
             .ok_or_else(|| {
                 CiProviderEvidenceRegistryError::InvalidSnapshot("generation is invalid".into())
             })?;
+        if object.get("execution").and_then(Value::as_str) != Some("not_started") {
+            return Err(CiProviderEvidenceRegistryError::InvalidSnapshot(
+                "execution must remain not_started".into(),
+            ));
+        }
+        let retention = object
+            .get("retention")
+            .and_then(Value::as_object)
+            .ok_or_else(|| {
+                CiProviderEvidenceRegistryError::InvalidSnapshot(
+                    "retention must be an object".into(),
+                )
+            })?;
+        if retention.get("max_records").and_then(Value::as_u64)
+            != Some(MAX_CI_PROVIDER_EVIDENCE_RECORDS as u64)
+            || retention.get("max_bytes").and_then(Value::as_u64)
+                != Some(MAX_CI_PROVIDER_EVIDENCE_REGISTRY_BYTES as u64)
+        {
+            return Err(CiProviderEvidenceRegistryError::InvalidSnapshot(
+                "retention does not match the registry bounds".into(),
+            ));
+        }
         let rows = object
             .get("records")
             .and_then(Value::as_array)
@@ -329,10 +370,16 @@ impl CiProviderEvidenceRegistry {
                 maximum: MAX_CI_PROVIDER_EVIDENCE_RECORDS,
             });
         }
+        if generation < rows.len() as u64 {
+            return Err(CiProviderEvidenceRegistryError::InvalidSnapshot(
+                "generation cannot be below the retained record count".into(),
+            ));
+        }
         let mut registry = Self {
             generation,
             records: BTreeMap::new(),
         };
+        let mut previous_digest: Option<&str> = None;
         for row in rows {
             let row_object = row.as_object().ok_or_else(|| {
                 CiProviderEvidenceRegistryError::InvalidSnapshot(
@@ -347,6 +394,17 @@ impl CiProviderEvidenceRegistry {
                         "provider_evidence_digest is missing".into(),
                     )
                 })?;
+            if !valid_digest(claimed_digest) {
+                return Err(CiProviderEvidenceRegistryError::InvalidSnapshot(
+                    "provider_evidence_digest must be a canonical lowercase content hash".into(),
+                ));
+            }
+            if previous_digest.is_some_and(|previous| previous >= claimed_digest) {
+                return Err(CiProviderEvidenceRegistryError::InvalidSnapshot(
+                    "records must be in strict provider evidence digest order".into(),
+                ));
+            }
+            previous_digest = Some(claimed_digest);
             let audit: CiProviderEvidenceAudit =
                 serde_json::from_value(row_object.get("audit").cloned().ok_or_else(|| {
                     CiProviderEvidenceRegistryError::InvalidSnapshot("audit is missing".into())
@@ -356,7 +414,11 @@ impl CiProviderEvidenceRegistry {
                         "record {claimed_digest} is not a typed provider evidence audit: {error}"
                     ))
                 })?;
-            validate_record(&audit)?;
+            validate_record(&audit).map_err(|error| {
+                CiProviderEvidenceRegistryError::InvalidSnapshot(format!(
+                    "record {claimed_digest} is invalid: {error}"
+                ))
+            })?;
             let recomputed = record_digest(&audit)?;
             if recomputed != claimed_digest {
                 return Err(CiProviderEvidenceRegistryError::InvalidSnapshot(format!(
@@ -460,7 +522,7 @@ fn index_row(
         .iter()
         .filter(|finding| finding.severity == "blocking")
         .count();
-    let mut row = json!({
+    let row = json!({
         "provider_evidence_digest": digest,
         "schema": audit.schema,
         "provider": audit.provider,
@@ -487,10 +549,136 @@ fn index_row(
         "log_record_digest": audit.log_record_digest,
         "attestation_record_digest": audit.attestation_record_digest
     });
-    Ok(row
-        .as_object_mut()
-        .expect("index row literal is an object")
-        .clone())
+    let Some(object) = row.as_object() else {
+        return Err(CiProviderEvidenceRegistryError::InvalidRecord(
+            "index row is not an object".into(),
+        ));
+    };
+    Ok(object.clone())
+}
+
+fn validate_finding(
+    finding: &crate::ci_evidence::CiEvidenceFinding,
+    field: &str,
+) -> Result<(), CiProviderEvidenceRegistryError> {
+    if !valid_text(&finding.code)
+        || finding.severity != "blocking"
+        || !valid_text(&finding.subject)
+        || !valid_text(&finding.detail)
+    {
+        return Err(CiProviderEvidenceRegistryError::InvalidRecord(format!(
+            "{field} contains a malformed canonical finding"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_findings(
+    findings: &[crate::ci_evidence::CiEvidenceFinding],
+    field: &str,
+) -> Result<(), CiProviderEvidenceRegistryError> {
+    if findings.len() > MAX_FINDINGS {
+        return Err(CiProviderEvidenceRegistryError::InvalidRecord(format!(
+            "{field} exceeds the {MAX_FINDINGS}-finding bound"
+        )));
+    }
+    for finding in findings {
+        validate_finding(finding, field)?;
+    }
+    Ok(())
+}
+
+fn validate_run_evidence(
+    audit: &CiProviderEvidenceAudit,
+) -> Result<(), CiProviderEvidenceRegistryError> {
+    let evidence = &audit.evidence;
+    if !valid_text(&evidence.run_id)
+        || !valid_text(&evidence.provider)
+        || !valid_digest(&evidence.plan_digest)
+        || evidence.checks.is_empty()
+        || evidence.checks.len() > MAX_CHECKS
+        || evidence
+            .environment_digest
+            .as_deref()
+            .is_some_and(|value| !valid_digest(value))
+        || evidence
+            .run_url
+            .as_deref()
+            .is_some_and(|value| !valid_text(value))
+    {
+        return Err(CiProviderEvidenceRegistryError::InvalidRecord(
+            "retained CI run evidence has invalid identity, digest, URL, or check bounds".into(),
+        ));
+    }
+    for check in &evidence.checks {
+        if !valid_text(&check.name)
+            || !valid_digest(&check.result_digest)
+            || check
+                .detail
+                .as_deref()
+                .is_some_and(|value| !valid_text(value))
+        {
+            return Err(CiProviderEvidenceRegistryError::InvalidRecord(
+                "retained CI check evidence has invalid identity, digest, or detail".into(),
+            ));
+        }
+    }
+    if evidence.run_id != audit.run_id
+        || evidence.provider != audit.provider
+        || evidence.source != audit.source
+        || evidence.plan_digest != audit.plan_digest
+        || evidence.conclusion != audit.ci_evidence.conclusion
+    {
+        return Err(CiProviderEvidenceRegistryError::InvalidRecord(
+            "retained CI run evidence is not bound to the audit identity".into(),
+        ));
+    }
+    let passed = evidence
+        .checks
+        .iter()
+        .filter(|check| check.status == crate::ci_evidence::CiCheckStatus::Passed)
+        .count();
+    let failed = evidence
+        .checks
+        .iter()
+        .filter(|check| check.status == crate::ci_evidence::CiCheckStatus::Failed)
+        .count();
+    let skipped = evidence
+        .checks
+        .iter()
+        .filter(|check| check.status == crate::ci_evidence::CiCheckStatus::Skipped)
+        .count();
+    let unknown = evidence
+        .checks
+        .iter()
+        .filter(|check| {
+            matches!(
+                check.status,
+                crate::ci_evidence::CiCheckStatus::Cancelled
+                    | crate::ci_evidence::CiCheckStatus::Unknown
+            )
+        })
+        .count();
+    if audit.ci_evidence.observed_check_count > audit.evidence.checks.len()
+        || audit.ci_evidence.passed_check_count > passed
+        || audit.ci_evidence.failed_check_count > failed
+        || audit.ci_evidence.skipped_check_count > skipped
+        || audit.ci_evidence.unknown_check_count > unknown
+        || audit.ci_evidence.passed_check_count > audit.ci_evidence.observed_check_count
+        || audit.ci_evidence.failed_check_count > audit.ci_evidence.observed_check_count
+        || audit.ci_evidence.skipped_check_count > audit.ci_evidence.observed_check_count
+        || audit.ci_evidence.unknown_check_count > audit.ci_evidence.observed_check_count
+        || audit.ci_evidence.passed_check_count
+            + audit.ci_evidence.failed_check_count
+            + audit.ci_evidence.skipped_check_count
+            + audit.ci_evidence.unknown_check_count
+            != audit.ci_evidence.observed_check_count
+    {
+        return Err(CiProviderEvidenceRegistryError::InvalidRecord(
+            "CI check status counts are inconsistent".into(),
+        ));
+    }
+    Ok(())
 }
 
 fn validate_record(audit: &CiProviderEvidenceAudit) -> Result<(), CiProviderEvidenceRegistryError> {
@@ -509,11 +697,14 @@ fn validate_record(audit: &CiProviderEvidenceAudit) -> Result<(), CiProviderEvid
             "provider is unsupported".into(),
         ));
     }
-    if audit.run_id.trim().is_empty() {
+    if !valid_text(&audit.run_id) {
         return Err(CiProviderEvidenceRegistryError::InvalidRecord(
-            "run_id is empty".into(),
+            "run_id is invalid".into(),
         ));
     }
+    validate_findings(&audit.findings, "provider findings")?;
+    validate_findings(&audit.ci_evidence.findings, "CI evidence findings")?;
+    validate_run_evidence(audit)?;
     for (field, value) in [
         ("payload_digest", &audit.payload_digest),
         ("plan_digest", &audit.plan_digest),
@@ -525,7 +716,7 @@ fn validate_record(audit: &CiProviderEvidenceAudit) -> Result<(), CiProviderEvid
             &audit.attestation_record_digest,
         ),
     ] {
-        if ContentHash::parse(value.to_owned()).is_err() {
+        if !valid_digest(value) {
             return Err(CiProviderEvidenceRegistryError::InvalidRecord(format!(
                 "{field} is not a lowercase SHA-256 digest"
             )));
@@ -539,7 +730,275 @@ fn validate_record(audit: &CiProviderEvidenceAudit) -> Result<(), CiProviderEvid
             "record counts do not match retained rows".into(),
         ));
     }
+    let mut subject_keys = BTreeSet::from([audit.run_id.to_ascii_lowercase()]);
+    for artifact in &audit.artifacts {
+        if !valid_text(&artifact.id)
+            || !valid_text(&artifact.kind)
+            || !valid_digest(&artifact.digest)
+            || !subject_keys.insert(artifact.id.to_ascii_lowercase())
+        {
+            return Err(CiProviderEvidenceRegistryError::InvalidRecord(
+                "artifact identity, digest, or subject namespace is invalid".into(),
+            ));
+        }
+        if artifact.provider.as_deref() != Some(audit.provider.as_str())
+            || artifact.run_id.as_deref() != Some(audit.run_id.as_str())
+            || artifact
+                .check
+                .as_deref()
+                .is_some_and(|value| !valid_text(value))
+            || artifact
+                .uri
+                .as_deref()
+                .is_some_and(|value| !valid_text(value))
+        {
+            return Err(CiProviderEvidenceRegistryError::InvalidRecord(
+                "artifact provider, run, check, or URI binding is invalid".into(),
+            ));
+        }
+        validate_digest_scope(artifact.digest_scope.as_deref(), artifact.uri.as_deref())?;
+    }
+    for log in &audit.logs {
+        if !valid_text(&log.id)
+            || !valid_digest(&log.digest)
+            || !subject_keys.insert(log.id.to_ascii_lowercase())
+        {
+            return Err(CiProviderEvidenceRegistryError::InvalidRecord(
+                "log identity, digest, or subject namespace is invalid".into(),
+            ));
+        }
+        if log.provider.as_deref() != Some(audit.provider.as_str())
+            || log.run_id.as_deref() != Some(audit.run_id.as_str())
+            || log.check.as_deref().is_some_and(|value| !valid_text(value))
+            || log.uri.as_deref().is_some_and(|value| !valid_text(value))
+        {
+            return Err(CiProviderEvidenceRegistryError::InvalidRecord(
+                "log provider, run, check, or URI binding is invalid".into(),
+            ));
+        }
+        validate_digest_scope(log.digest_scope.as_deref(), log.uri.as_deref())?;
+    }
+    let mut attestation_ids = BTreeSet::new();
+    for attestation in &audit.attestations {
+        if !valid_text(&attestation.id)
+            || !valid_text(&attestation.subject)
+            || !valid_text(&attestation.issuer)
+            || !valid_text(&attestation.method)
+            || !valid_digest(&attestation.statement_digest)
+            || !attestation_ids.insert(attestation.id.to_ascii_lowercase())
+            || attestation
+                .subject_digest
+                .as_deref()
+                .is_some_and(|digest| !valid_digest(digest))
+        {
+            return Err(CiProviderEvidenceRegistryError::InvalidRecord(
+                "attestation identity, digest, or subject namespace is invalid".into(),
+            ));
+        }
+    }
+    if audit.execution != "evidence_supplied_not_executed_here"
+        || audit.verification != "structural_only"
+            && audit.verification != "structural_only_with_digest_bindings"
+    {
+        return Err(CiProviderEvidenceRegistryError::InvalidRecord(
+            "record execution or verification posture is invalid".into(),
+        ));
+    }
+    if audit.evidence.provider != audit.provider
+        || audit.evidence.source != audit.source
+        || audit.evidence.run_id != audit.run_id
+        || audit.ci_evidence.schema != crate::ci_evidence::CI_EXECUTION_EVIDENCE_SCHEMA
+        || audit.ci_evidence.plan_digest != audit.plan_digest
+        || audit.ci_evidence.evidence_digest != audit.evidence_digest
+        || audit.ci_evidence.run_id != audit.run_id
+        || audit.ci_evidence.provider != audit.provider
+        || audit.ci_evidence.source != audit.source
+        || audit.ci_evidence.execution != "evidence_supplied_not_executed_here"
+        || audit.ci_evidence.verification != "structural_only"
+    {
+        return Err(CiProviderEvidenceRegistryError::InvalidRecord(
+            "nested CI evidence identity is inconsistent".into(),
+        ));
+    }
+    let evidence_value = serde_json::to_value((&audit.ci_evidence.plan_digest, &audit.evidence))
+        .map_err(|error| CiProviderEvidenceRegistryError::Canonical(error.to_string()))?;
+    let recomputed_evidence_digest = ContentHash::of_value(&evidence_value)
+        .map_err(|error| CiProviderEvidenceRegistryError::Canonical(error.to_string()))?
+        .to_string();
+    if recomputed_evidence_digest != audit.evidence_digest {
+        return Err(CiProviderEvidenceRegistryError::InvalidRecord(
+            "evidence_digest does not match the retained run evidence".into(),
+        ));
+    }
+    if audit.artifact_record_digest != rows_digest(&audit.artifacts)?
+        || audit.log_record_digest != rows_digest(&audit.logs)?
+        || audit.attestation_record_digest != rows_digest(&audit.attestations)?
+    {
+        return Err(CiProviderEvidenceRegistryError::InvalidRecord(
+            "retained row digests do not match their rows".into(),
+        ));
+    }
+    let linked_artifacts = audit
+        .artifacts
+        .iter()
+        .filter(|artifact| artifact.check.is_some())
+        .count();
+    let linked_logs = audit.logs.iter().filter(|log| log.check.is_some()).count();
+    let local_artifacts = audit
+        .artifacts
+        .iter()
+        .filter(|artifact| {
+            artifact.digest_scope.as_deref()
+                == Some(crate::ci_provider_evidence::DIGEST_SCOPE_LOCAL_RESPONSE_BYTES)
+        })
+        .count();
+    let local_logs = audit
+        .logs
+        .iter()
+        .filter(|log| {
+            log.digest_scope.as_deref()
+                == Some(crate::ci_provider_evidence::DIGEST_SCOPE_LOCAL_RESPONSE_BYTES)
+        })
+        .count();
+    if audit.linked_artifact_count != linked_artifacts
+        || audit.linked_log_count != linked_logs
+        || audit.local_byte_hash_artifact_count != local_artifacts
+        || audit.local_byte_hash_log_count != local_logs
+    {
+        return Err(CiProviderEvidenceRegistryError::InvalidRecord(
+            "derived artifact and log counts are inconsistent".into(),
+        ));
+    }
+    let mut known_subjects = std::collections::BTreeSet::from([audit.run_id.clone()]);
+    let mut known_digests = BTreeMap::from([(audit.run_id.clone(), audit.payload_digest.clone())]);
+    for artifact in &audit.artifacts {
+        known_subjects.insert(artifact.id.clone());
+        known_digests.insert(artifact.id.clone(), artifact.digest.clone());
+    }
+    for log in &audit.logs {
+        known_subjects.insert(log.id.clone());
+        known_digests.insert(log.id.clone(), log.digest.clone());
+    }
+    let subject_count = audit
+        .attestations
+        .iter()
+        .filter(|attestation| known_subjects.contains(&attestation.subject))
+        .count();
+    let subject_digest_binding_count = audit
+        .attestations
+        .iter()
+        .filter(|attestation| {
+            attestation
+                .subject_digest
+                .as_ref()
+                .zip(known_digests.get(&attestation.subject))
+                .is_some_and(|(digest, expected)| digest == expected)
+        })
+        .count();
+    if audit.attestation_subject_count != subject_count
+        || audit.attestation_subject_digest_binding_count != subject_digest_binding_count
+    {
+        return Err(CiProviderEvidenceRegistryError::InvalidRecord(
+            "derived attestation subject counts are inconsistent".into(),
+        ));
+    }
+    let expected_verification =
+        if local_artifacts > 0 || local_logs > 0 || subject_digest_binding_count > 0 {
+            "structural_only_with_digest_bindings"
+        } else {
+            "structural_only"
+        };
+    if audit.verification != expected_verification {
+        return Err(CiProviderEvidenceRegistryError::InvalidRecord(
+            "verification posture does not match retained digest bindings".into(),
+        ));
+    }
+    let ci_structurally_valid = audit.ci_evidence.findings.iter().all(|finding| {
+        !matches!(
+            finding.code.as_str(),
+            "plan_digest_mismatch"
+                | "duplicate_check_evidence"
+                | "unknown_check_evidence"
+                | "missing_check_evidence"
+        )
+    });
+    let ci_complete = audit.ci_evidence.required_missing.is_empty()
+        && audit.ci_evidence.observed_check_count == audit.ci_evidence.expected_check_count;
+    let ci_release_candidate = ci_structurally_valid
+        && ci_complete
+        && audit.ci_evidence.conclusion == crate::ci_evidence::CiRunConclusion::Success
+        && audit.ci_evidence.passed_check_count == audit.ci_evidence.expected_check_count;
+    let expected_structurally_valid = audit.ci_evidence.structurally_valid
+        && audit
+            .findings
+            .iter()
+            .all(|finding| finding.severity != "blocking");
+    if audit.ci_evidence.structurally_valid != ci_structurally_valid
+        || audit.ci_evidence.complete != ci_complete
+        || audit.ci_evidence.release_candidate != ci_release_candidate
+        || audit.structurally_valid != expected_structurally_valid
+        || audit.conformance_ready
+            != (audit.structurally_valid && audit.ci_evidence.release_candidate)
+    {
+        return Err(CiProviderEvidenceRegistryError::InvalidRecord(
+            "nested CI evidence readiness fields are inconsistent".into(),
+        ));
+    }
+    if audit.guarantees.is_empty()
+        || audit.limitations.is_empty()
+        || audit.guarantees.iter().any(|value| !valid_text(value))
+        || audit.limitations.iter().any(|value| !valid_text(value))
+    {
+        return Err(CiProviderEvidenceRegistryError::InvalidRecord(
+            "record guarantees and limitations must be non-empty".into(),
+        ));
+    }
     Ok(())
+}
+
+fn valid_text(value: &str) -> bool {
+    !value.trim().is_empty()
+        && value.len() <= MAX_TEXT_BYTES
+        && value == value.trim()
+        && !value.chars().any(char::is_control)
+}
+
+fn validate_digest_scope(
+    scope: Option<&str>,
+    uri: Option<&str>,
+) -> Result<(), CiProviderEvidenceRegistryError> {
+    match scope {
+        None
+        | Some(crate::ci_provider_evidence::DIGEST_SCOPE_PROVIDER_METADATA)
+        | Some(crate::ci_provider_evidence::DIGEST_SCOPE_CALLER_DECLARED) => Ok(()),
+        Some(crate::ci_provider_evidence::DIGEST_SCOPE_LOCAL_RESPONSE_BYTES) if uri.is_some() => {
+            Ok(())
+        }
+        Some(crate::ci_provider_evidence::DIGEST_SCOPE_LOCAL_RESPONSE_BYTES) => {
+            Err(CiProviderEvidenceRegistryError::InvalidRecord(
+                "local_response_bytes digest scope requires a source URI".into(),
+            ))
+        }
+        Some(_) => Err(CiProviderEvidenceRegistryError::InvalidRecord(
+            "digest scope is unsupported".into(),
+        )),
+    }
+}
+
+fn valid_digest(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        && ContentHash::parse(value.to_owned()).is_ok()
+}
+
+fn rows_digest<T: serde::Serialize>(rows: &[T]) -> Result<String, CiProviderEvidenceRegistryError> {
+    let value = serde_json::to_value(rows)
+        .map_err(|error| CiProviderEvidenceRegistryError::Canonical(error.to_string()))?;
+    ContentHash::of_value(&value)
+        .map(|digest| digest.to_string())
+        .map_err(|error| CiProviderEvidenceRegistryError::Canonical(error.to_string()))
 }
 
 fn record_digest(
@@ -697,6 +1156,168 @@ mod tests {
             .import(&serde_json::to_value(&typed).unwrap())
             .unwrap();
         assert_eq!(report["plan_digest"].as_str().unwrap().len(), 64);
+    }
+
+    fn reseal_snapshot(mut document: Value) -> Value {
+        document
+            .as_object_mut()
+            .expect("snapshot fixture must be an object")
+            .remove("state_digest");
+        let digest = snapshot_digest(&document).unwrap();
+        document["state_digest"] = Value::String(digest);
+        document
+    }
+
+    #[test]
+    fn digest_valid_snapshot_metadata_still_has_to_match_registry_contract() {
+        let mut registry = CiProviderEvidenceRegistry::new();
+        registry.import(&request(46, "success")).unwrap();
+
+        let mut execution = registry.snapshot().unwrap();
+        execution["execution"] = json!("executed");
+        assert!(matches!(
+            CiProviderEvidenceRegistry::from_snapshot(&reseal_snapshot(execution)),
+            Err(CiProviderEvidenceRegistryError::InvalidSnapshot(_))
+        ));
+
+        let mut retention = registry.snapshot().unwrap();
+        retention["retention"]["max_records"] = json!(1);
+        assert!(matches!(
+            CiProviderEvidenceRegistry::from_snapshot(&reseal_snapshot(retention)),
+            Err(CiProviderEvidenceRegistryError::InvalidSnapshot(_))
+        ));
+
+        let mut generation = registry.snapshot().unwrap();
+        generation["generation"] = json!(0);
+        assert!(matches!(
+            CiProviderEvidenceRegistry::from_snapshot(&reseal_snapshot(generation)),
+            Err(CiProviderEvidenceRegistryError::InvalidSnapshot(_))
+        ));
+    }
+
+    #[test]
+    fn resealed_snapshot_rejects_noncanonical_record_order() {
+        let mut registry = CiProviderEvidenceRegistry::new();
+        registry.import(&request(51, "success")).unwrap();
+        registry.import(&request(52, "success")).unwrap();
+        let mut snapshot = registry.snapshot().unwrap();
+        snapshot["records"].as_array_mut().unwrap().reverse();
+        assert!(matches!(
+            CiProviderEvidenceRegistry::from_snapshot(&reseal_snapshot(snapshot)),
+            Err(CiProviderEvidenceRegistryError::InvalidSnapshot(message))
+                if message.contains("strict provider evidence digest order")
+        ));
+    }
+
+    #[test]
+    fn digest_valid_record_tampering_cannot_break_nested_identity() {
+        let mut registry = CiProviderEvidenceRegistry::new();
+        registry.import(&request(47, "success")).unwrap();
+        let mut snapshot = registry.snapshot().unwrap();
+        snapshot["records"][0]["audit"]["artifact_record_digest"] = json!("a".repeat(64));
+        assert!(matches!(
+            CiProviderEvidenceRegistry::from_snapshot(&reseal_snapshot(snapshot)),
+            Err(CiProviderEvidenceRegistryError::InvalidSnapshot(_))
+        ));
+    }
+
+    #[test]
+    fn query_rejects_an_untyped_cursor() {
+        let registry = CiProviderEvidenceRegistry::new();
+        assert!(matches!(
+            registry.query(
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                Some("not-a-digest"),
+                1,
+                false
+            ),
+            Err(CiProviderEvidenceRegistryError::InvalidSnapshot(_))
+        ));
+        assert!(matches!(
+            registry.query(
+                Some(" github_actions"),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                1,
+                false
+            ),
+            Err(CiProviderEvidenceRegistryError::InvalidSnapshot(_))
+        ));
+    }
+
+    #[test]
+    fn registry_rejects_noncanonical_nested_digests_and_control_identity() {
+        let mut registry = CiProviderEvidenceRegistry::new();
+        registry.import(&request(48, "success")).unwrap();
+        let snapshot = registry.snapshot().unwrap();
+        let mut audit: CiProviderEvidenceAudit =
+            serde_json::from_value(snapshot["records"][0]["audit"].clone()).unwrap();
+        let original_payload_digest = audit.payload_digest.clone();
+        audit.payload_digest = "A".repeat(64);
+        assert!(record_digest(&audit).is_err());
+        audit.payload_digest = original_payload_digest;
+        audit.run_id = "48\u{0000}".into();
+        assert!(record_digest(&audit).is_err());
+    }
+
+    #[test]
+    fn registry_rejects_padded_bindings_invalid_scopes_and_false_conformance() {
+        let mut registry = CiProviderEvidenceRegistry::new();
+        let mut value = request(49, "success");
+        value["artifacts"] = serde_json::json!([{
+            "id": "artifact-49",
+            "kind": "package",
+            "digest": "a".repeat(64),
+            "check": "unit",
+            "run_id": "49",
+            "provider": "github_actions",
+            "uri": "https://example.test/artifact-49"
+        }]);
+        registry.import(&value).unwrap();
+        let snapshot = registry.snapshot().unwrap();
+        let mut audit: CiProviderEvidenceAudit =
+            serde_json::from_value(snapshot["records"][0]["audit"].clone()).unwrap();
+
+        audit.artifacts[0].run_id = Some(" 49".into());
+        assert!(record_digest(&audit).is_err());
+
+        audit.artifacts[0].run_id = Some("49".into());
+        audit.artifacts[0].digest_scope = Some("untrusted_remote_claim".into());
+        assert!(record_digest(&audit).is_err());
+
+        audit.artifacts[0].digest_scope = None;
+        audit.conformance_ready = false;
+        assert!(record_digest(&audit).is_err());
+    }
+
+    #[test]
+    fn registry_rejects_malformed_nested_run_evidence_and_findings() {
+        let mut registry = CiProviderEvidenceRegistry::new();
+        registry.import(&request(50, "failure")).unwrap();
+        let snapshot = registry.snapshot().unwrap();
+        let mut audit: CiProviderEvidenceAudit =
+            serde_json::from_value(snapshot["records"][0]["audit"].clone()).unwrap();
+
+        audit.evidence.checks[0].detail = Some(" padded detail".into());
+        assert!(record_digest(&audit).is_err());
+
+        let mut audit: CiProviderEvidenceAudit =
+            serde_json::from_value(snapshot["records"][0]["audit"].clone()).unwrap();
+        audit.ci_evidence.findings[0].severity = "warning".into();
+        assert!(record_digest(&audit).is_err());
     }
 
     #[allow(dead_code)]

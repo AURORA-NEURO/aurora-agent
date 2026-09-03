@@ -46,7 +46,7 @@
 //! `event_time == record_time` is a data-integrity question that must stay expressible.
 
 use crate::bioql::ast::{
-    BinaryOp, Expr, ExpansionClause, ExpansionPolicy, Literal, Path, Projection, ProvenanceMode,
+    BinaryOp, ExpansionClause, ExpansionPolicy, Expr, Literal, Path, Projection, ProvenanceMode,
     Query, ScopeLiteral, UnaryOp,
 };
 use crate::bioql::parser::parse;
@@ -121,13 +121,12 @@ pub fn compile(source: &str, schema: &QuerySchema) -> Result<TypedQuery, QueryEr
 
 /// Type-checks an already-parsed query.
 pub fn check(query: &Query, schema: &QuerySchema) -> Result<TypedQuery, TypeError> {
-    let collection =
-        schema
-            .get(&query.from.name)
-            .ok_or_else(|| TypeError::UnknownCollection {
-                name: query.from.name.clone(),
-                span: query.from.span,
-            })?;
+    let collection = schema
+        .get(&query.from.name)
+        .ok_or_else(|| TypeError::UnknownCollection {
+            name: query.from.name.clone(),
+            span: query.from.span,
+        })?;
 
     let labels = query
         .labels
@@ -181,16 +180,17 @@ pub fn check(query: &Query, schema: &QuerySchema) -> Result<TypedQuery, TypeErro
 
     let mut aggregations = Vec::new();
     if let Some(clause) = &query.aggregate {
-        let provenance = clause
-            .provenance
-            .ok_or_else(|| TypeError::AggregationWithoutProvenance {
-                function: clause
-                    .items
-                    .first()
-                    .map(|item| item.function.clone())
-                    .unwrap_or_else(|| "aggregate".to_string()),
-                span: clause.span,
-            })?;
+        let provenance =
+            clause
+                .provenance
+                .ok_or_else(|| TypeError::AggregationWithoutProvenance {
+                    function: clause
+                        .items
+                        .first()
+                        .map(|item| item.function.clone())
+                        .unwrap_or_else(|| "aggregate".to_string()),
+                    span: clause.span,
+                })?;
         for item in &clause.items {
             if !AGGREGATE_FUNCTIONS.contains(&item.function.as_str()) {
                 return Err(TypeError::UnknownFunction {
@@ -202,8 +202,10 @@ pub fn check(query: &Query, schema: &QuerySchema) -> Result<TypedQuery, TypeErro
             let result_type = match item.function.as_str() {
                 "count" => BioType::Number,
                 _ => {
-                    if !matches!(argument_type, BioType::Quantity { .. } | BioType::Extent { .. } | BioType::Number)
-                    {
+                    if !matches!(
+                        argument_type,
+                        BioType::Quantity { .. } | BioType::Extent { .. } | BioType::Number
+                    ) {
                         return Err(TypeError::AggregateOverNonMeasured {
                             function: item.function.clone(),
                             found: argument_type.to_string(),
@@ -498,14 +500,12 @@ impl<'a> Checker<'a> {
             (true, true) => {
                 let left_label = describe(left);
                 let right_label = describe(right);
-                let mut left_measurement = left_type
-                    .as_measurement(&left_label)
-                    .map_err(|reason| {
+                let mut left_measurement =
+                    left_type.as_measurement(&left_label).map_err(|reason| {
                         TypeError::incomparable(&left_label, &right_label, reason, span)
                     })?;
-                let mut right_measurement = right_type
-                    .as_measurement(&right_label)
-                    .map_err(|reason| {
+                let mut right_measurement =
+                    right_type.as_measurement(&right_label).map_err(|reason| {
                         TypeError::incomparable(&left_label, &right_label, reason, span)
                     })?;
                 if !left.is_literal() && !right.is_literal() {
@@ -563,14 +563,16 @@ impl<'a> Checker<'a> {
         use BioType::*;
         match (op, left_type, right_type) {
             (_, Number, Number) => Ok(Number),
-            (BinaryOp::Add | BinaryOp::Subtract, _, _) if left_type.is_measured() && right_type.is_measured() => {
+            (BinaryOp::Add | BinaryOp::Subtract, _, _)
+                if left_type.is_measured() && right_type.is_measured() =>
+            {
                 self.compare(op, left, right, left_type, right_type, span)?;
                 Ok(left_type.clone())
             }
             (BinaryOp::Multiply | BinaryOp::Divide, Quantity { unit }, Number)
-            | (BinaryOp::Multiply, Number, Quantity { unit }) => Ok(Quantity {
-                unit: unit.clone(),
-            }),
+            | (BinaryOp::Multiply, Number, Quantity { unit }) => {
+                Ok(Quantity { unit: unit.clone() })
+            }
             (BinaryOp::Multiply | BinaryOp::Divide, Quantity { unit: a }, Quantity { unit: b }) => {
                 compose(op, a, b, span).map(|unit| Quantity { unit })
             }
@@ -602,7 +604,9 @@ fn literal_type(value: &Literal) -> BioType {
     match value {
         Literal::Bool { .. } => BioType::Bool,
         Literal::Text { .. } => BioType::Text,
-        Literal::Number { unit: Some(unit), .. } => BioType::Quantity { unit: unit.clone() },
+        Literal::Number {
+            unit: Some(unit), ..
+        } => BioType::Quantity { unit: unit.clone() },
         Literal::Number { unit: None, .. } => BioType::Number,
         Literal::Instant { .. } => BioType::Instant { clock: None },
     }

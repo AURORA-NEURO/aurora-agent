@@ -16,6 +16,8 @@ use serde_json::{json, Value};
 pub const DELIVERY_RECEIPT_SCHEMA: &str = "bioprism-devplat-delivery-receipt/0.1";
 const MAX_RECEIPT_ID: usize = 128;
 const MAX_TARGETS: usize = 16;
+const MAX_TEXT_BYTES: usize = 4_096;
+const MAX_TARGET_MESSAGES: usize = 256;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct DeliveryReceiptRequest {
@@ -118,18 +120,36 @@ fn digest(value: &Value, label: &str) -> Result<String, String> {
         .map_err(|error| format!("cannot hash {label}: {error}"))
 }
 
-fn non_empty_text(value: &Value, field: &str) -> Option<String> {
-    value
+fn valid_text(value: &str) -> bool {
+    let trimmed = value.trim();
+    !trimmed.is_empty()
+        && value == trimmed
+        && value.len() <= MAX_TEXT_BYTES
+        && !value.chars().any(char::is_control)
+}
+
+fn valid_identifier(value: &str) -> bool {
+    valid_text(value) && value.len() <= MAX_RECEIPT_ID && value == value.trim()
+}
+
+fn valid_digest(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        && ContentHash::parse(value.to_owned()).is_ok()
+}
+
+fn required_text(value: &Value, field: &str) -> Result<String, String> {
+    let text = value
         .as_str()
-        .filter(|text| !text.trim().is_empty() && text.len() <= MAX_RECEIPT_ID)
-        .map(str::to_string)
-        .or_else(|| {
-            if value.is_string() {
-                None
-            } else {
-                Some(format!("{field} is not text"))
-            }
-        })
+        .ok_or_else(|| format!("{field} must be text"))?;
+    if !valid_text(text) {
+        return Err(format!(
+            "{field} must be non-empty, at most {MAX_TEXT_BYTES} bytes, and contain no control characters"
+        ));
+    }
+    Ok(text.to_owned())
 }
 
 fn evidence_present(value: Option<&Value>) -> bool {
@@ -140,7 +160,10 @@ fn evidence_present(value: Option<&Value>) -> bool {
     }
 }
 
-fn evidence_rows(delivery: &Value) -> Result<Vec<DeliveryReceiptEvidence>, String> {
+fn evidence_rows(
+    delivery: &Value,
+    findings: &mut Vec<DeliveryReceiptFinding>,
+) -> Result<Vec<DeliveryReceiptEvidence>, String> {
     let readiness = delivery
         .get("readiness")
         .and_then(Value::as_object)
@@ -163,16 +186,32 @@ fn evidence_rows(delivery: &Value) -> Result<Vec<DeliveryReceiptEvidence>, Strin
         .map(|(name, readiness_name)| {
             let value = delivery.get(name);
             let present = evidence_present(value);
-            let ready = readiness
-                .get(readiness_name)
-                .and_then(Value::as_bool)
-                .unwrap_or(false);
+            let ready = match readiness.get(readiness_name) {
+                None => false,
+                Some(Value::Bool(value)) => *value,
+                Some(_) => {
+                    return Err(format!(
+                        "delivery.readiness.{readiness_name} must be boolean"
+                    ));
+                }
+            };
+            if ready && !present {
+                finding(
+                    findings,
+                    "ready_evidence_missing",
+                    name,
+                    "readiness cannot report evidence as ready when its evidence payload is absent",
+                );
+            }
             Ok(DeliveryReceiptEvidence {
                 name: name.into(),
                 present,
                 ready,
                 digest: if present {
-                    Some(digest(value.expect("present evidence has a value"), name)?)
+                    let value = value.ok_or_else(|| {
+                        format!("delivery.{name} was marked present without a value")
+                    })?;
+                    Some(digest(value, name)?)
                 } else {
                     None
                 },
@@ -216,16 +255,26 @@ fn target_rows(
         })?;
         let target = object
             .get("target")
-            .and_then(|value| non_empty_text(value, "target"))
-            .ok_or_else(|| {
-                format!("delivery.release_request.targets[{index}].target is invalid")
+            .ok_or_else(|| format!("delivery.release_request.targets[{index}].target is missing"))
+            .and_then(|value| {
+                required_text(value, "target")
+                    .and_then(|text| {
+                        if valid_identifier(&text) {
+                            Ok(text)
+                        } else {
+                            Err("target must be a bounded identifier without surrounding whitespace".into())
+                        }
+                    })
+                    .map_err(|error| {
+                        format!("delivery.release_request.targets[{index}].target {error}")
+                    })
             })?;
-        if !seen.insert(target.clone()) {
+        if !seen.insert(target.to_ascii_lowercase()) {
             finding(
                 findings,
                 "duplicate_release_target",
                 target.clone(),
-                "each requested delivery target must occur exactly once",
+                "each requested delivery target must occur exactly once, case-insensitively",
             );
         }
         let available = object
@@ -236,29 +285,46 @@ fn target_rows(
             .get("eligible")
             .and_then(Value::as_bool)
             .ok_or_else(|| format!("delivery target {target}.eligible must be boolean"))?;
-        let blockers = object
+        let raw_blockers = object
             .get("blockers")
             .and_then(Value::as_array)
-            .ok_or_else(|| format!("delivery target {target}.blockers must be an array"))?
+            .ok_or_else(|| format!("delivery target {target}.blockers must be an array"))?;
+        if raw_blockers.len() > MAX_TARGET_MESSAGES {
+            return Err(format!(
+                "delivery target {target}.blockers must contain at most {MAX_TARGET_MESSAGES} entries"
+            ));
+        }
+        let mut blockers = raw_blockers
             .iter()
-            .map(|value| {
-                value.as_str().map(str::to_string).ok_or_else(|| {
-                    format!("delivery target {target}.blockers must contain strings")
-                })
+            .enumerate()
+            .map(|(message_index, value)| {
+                required_text(
+                    value,
+                    &format!("delivery target {target}.blockers[{message_index}]"),
+                )
             })
             .collect::<Result<Vec<_>, _>>()?;
-        let notes = object
+        blockers.sort();
+        let raw_notes = object
             .get("notes")
             .and_then(Value::as_array)
-            .ok_or_else(|| format!("delivery target {target}.notes must be an array"))?
+            .ok_or_else(|| format!("delivery target {target}.notes must be an array"))?;
+        if raw_notes.len() > MAX_TARGET_MESSAGES {
+            return Err(format!(
+                "delivery target {target}.notes must contain at most {MAX_TARGET_MESSAGES} entries"
+            ));
+        }
+        let mut notes = raw_notes
             .iter()
-            .map(|value| {
-                value
-                    .as_str()
-                    .map(str::to_string)
-                    .ok_or_else(|| format!("delivery target {target}.notes must contain strings"))
+            .enumerate()
+            .map(|(message_index, value)| {
+                required_text(
+                    value,
+                    &format!("delivery target {target}.notes[{message_index}]"),
+                )
             })
             .collect::<Result<Vec<_>, _>>()?;
+        notes.sort();
         let ready = available && eligible && blockers.is_empty();
         if eligible && !available {
             finding(
@@ -306,12 +372,9 @@ fn target_rows(
 pub fn build_delivery_receipt(
     request: &DeliveryReceiptRequest,
 ) -> Result<DeliveryReceiptAudit, String> {
-    if request.receipt_id.trim().is_empty()
-        || request.receipt_id.len() > MAX_RECEIPT_ID
-        || request.receipt_id.chars().any(char::is_control)
-    {
+    if !valid_identifier(&request.receipt_id) {
         return Err(format!(
-            "receipt_id must be non-empty, free of control characters, and at most {MAX_RECEIPT_ID} bytes"
+            "receipt_id must be a bounded identifier without surrounding whitespace or control characters (at most {MAX_RECEIPT_ID} bytes)"
         ));
     }
     let object = request
@@ -327,10 +390,16 @@ pub fn build_delivery_receipt(
     let delivery_digest = digest(&request.delivery, "delivery audit")?;
     let mut findings = Vec::new();
     let (targets, release_request_ready) = target_rows(&request.delivery, &mut findings)?;
-    let evidence = evidence_rows(&request.delivery)?;
+    let evidence = evidence_rows(&request.delivery, &mut findings)?;
     let target_value = serde_json::to_value(&targets)
         .map_err(|error| format!("cannot encode receipt targets: {error}"))?;
     let target_digest = digest(&target_value, "receipt targets")?;
+    let available_target_count = targets.iter().filter(|row| row.available).count();
+    let ready_target_count = targets.iter().filter(|row| row.ready).count();
+    let blocked_target_count = targets.len().saturating_sub(ready_target_count);
+    let ready_evidence_count = evidence.iter().filter(|row| row.ready).count();
+    let structurally_valid = findings.is_empty();
+    let release_candidate = structurally_valid && release_request_ready && !targets.is_empty();
     let receipt_seed = json!({
         "schema": DELIVERY_RECEIPT_SCHEMA,
         "workflow": "developer_delivery_receipt",
@@ -339,15 +408,17 @@ pub fn build_delivery_receipt(
         "target_digest": target_digest,
         "targets": targets,
         "evidence": evidence,
+        "findings": findings,
+        "target_count": targets.len(),
+        "available_target_count": available_target_count,
+        "ready_target_count": ready_target_count,
+        "blocked_target_count": blocked_target_count,
+        "ready_evidence_count": ready_evidence_count,
         "release_request_ready": release_request_ready,
+        "structurally_valid": structurally_valid,
+        "release_candidate": release_candidate,
     });
     let receipt_digest = digest(&receipt_seed, "delivery receipt")?;
-    let available_target_count = targets.iter().filter(|row| row.available).count();
-    let ready_target_count = targets.iter().filter(|row| row.ready).count();
-    let blocked_target_count = targets.len().saturating_sub(ready_target_count);
-    let ready_evidence_count = evidence.iter().filter(|row| row.ready).count();
-    let structurally_valid = findings.is_empty();
-    let release_candidate = structurally_valid && release_request_ready && !targets.is_empty();
 
     Ok(DeliveryReceiptAudit {
         schema: DELIVERY_RECEIPT_SCHEMA.into(),
@@ -401,32 +472,39 @@ fn compare_value(
     }
 }
 
-/// The fields whose comparison carries its own finding code, because a caller needs to tell those
-/// mismatches apart. Everything else the recomputation produces is compared under
-/// `receipt_projection_mismatch`.
-const SEPARATELY_REPORTED_FIELDS: [&str; 6] = [
-    "delivery_digest",
-    "target_digest",
-    "receipt_digest",
-    "targets",
-    "evidence",
-    "release_candidate",
-];
+fn compare_digest(
+    findings: &mut Vec<DeliveryReceiptFinding>,
+    code: &str,
+    subject: &str,
+    supplied: Option<&Value>,
+    expected: &Value,
+) -> bool {
+    if supplied.and_then(Value::as_str).is_none_or(valid_digest) {
+        compare_value(findings, code, subject, supplied, expected)
+    } else {
+        finding(
+            findings,
+            &format!("{code}_noncanonical"),
+            subject,
+            "stored receipt digest must be a lowercase canonical SHA-256 digest",
+        );
+        finding(
+            findings,
+            &format!("{code}_malformed"),
+            subject,
+            "the stored receipt digest has the wrong shape; this is a defect in the claimed digest, not evidence that the projection moved",
+        );
+        false
+    }
+}
+
+fn expected_field<'a>(expected: &'a Value, field: &str) -> Result<&'a Value, String> {
+    expected
+        .get(field)
+        .ok_or_else(|| format!("recomputed delivery receipt omitted required field {field:?}"))
+}
 
 /// Recompute a receipt from a stored delivery audit and detect tampering in its projection.
-///
-/// Every field the recomputation produces is compared against the stored receipt, not only the
-/// digests and the target and evidence rows. `receipt_digest` is taken over the receipt's
-/// identity, digests, targets, evidence, and readiness flag; it deliberately does not cover the
-/// derived counts, the structural verdict, the findings, or the guarantee and limitation text, so
-/// a digest that matched would say nothing about whether those had been edited. Comparing the
-/// whole projection is what makes an edit to them detectable.
-///
-/// The comparison is one-directional: a stored receipt may carry fields the recomputation does
-/// not, and those are ignored. The shipped MCP surface returns a receipt with transport fields
-/// added to the same object, so treating an unrecognised field as tampering would reject every
-/// receipt the server hands out. An unrecognised field is therefore not checked at all, which is
-/// a bound on what this function proves rather than a judgement that such a field is harmless.
 pub fn verify_delivery_receipt(
     request: &DeliveryReceiptVerificationRequest,
 ) -> Result<DeliveryReceiptVerification, String> {
@@ -445,93 +523,104 @@ pub fn verify_delivery_receipt(
     let expected_value = serde_json::to_value(&expected)
         .map_err(|error| format!("cannot encode recomputed delivery receipt: {error}"))?;
     let mut findings = Vec::new();
-    let delivery_digest_match = compare_value(
+    compare_value(
+        &mut findings,
+        "schema_mismatch",
+        "schema",
+        receipt.get("schema"),
+        expected_field(&expected_value, "schema")?,
+    );
+    compare_value(
+        &mut findings,
+        "workflow_mismatch",
+        "workflow",
+        receipt.get("workflow"),
+        expected_field(&expected_value, "workflow")?,
+    );
+    compare_value(
+        &mut findings,
+        "receipt_id_mismatch",
+        "receipt_id",
+        receipt.get("receipt_id"),
+        expected_field(&expected_value, "receipt_id")?,
+    );
+    let delivery_digest_match = compare_digest(
         &mut findings,
         "delivery_digest_mismatch",
         "delivery_digest",
         receipt.get("delivery_digest"),
-        expected_value
-            .get("delivery_digest")
-            .expect("serialized receipt has delivery digest"),
+        expected_field(&expected_value, "delivery_digest")?,
     );
-    let target_digest_match = compare_value(
+    let target_digest_match = compare_digest(
         &mut findings,
         "target_digest_mismatch",
         "target_digest",
         receipt.get("target_digest"),
-        expected_value
-            .get("target_digest")
-            .expect("serialized receipt has target digest"),
+        expected_field(&expected_value, "target_digest")?,
     );
-    let supplied_receipt_digest = receipt
-        .get("receipt_digest")
-        .and_then(Value::as_str)
-        .map(str::to_string);
-    let receipt_digest_shape_broken = supplied_receipt_digest
-        .as_ref()
-        .is_some_and(|digest| ContentHash::parse(digest.clone()).is_err());
-    let receipt_digest_match = if receipt_digest_shape_broken {
-        finding(
-            &mut findings,
-            "receipt_digest_malformed",
-            "receipt_digest",
-            "the stored receipt digest is not a lowercase 64-character SHA-256 digest, which is a \
-             defect in the claimed digest rather than evidence that the projection moved",
-        );
-        false
-    } else {
-        compare_value(
-            &mut findings,
-            "receipt_digest_mismatch",
-            "receipt_digest",
-            receipt.get("receipt_digest"),
-            expected_value
-                .get("receipt_digest")
-                .expect("serialized receipt has receipt digest"),
-        )
-    };
+    let receipt_digest_match = compare_digest(
+        &mut findings,
+        "receipt_digest_mismatch",
+        "receipt_digest",
+        receipt.get("receipt_digest"),
+        expected_field(&expected_value, "receipt_digest")?,
+    );
     let targets_match = compare_value(
         &mut findings,
         "targets_mismatch",
         "targets",
         receipt.get("targets"),
-        expected_value
-            .get("targets")
-            .expect("serialized receipt has targets"),
+        expected_field(&expected_value, "targets")?,
     );
     let evidence_match = compare_value(
         &mut findings,
         "evidence_mismatch",
         "evidence",
         receipt.get("evidence"),
-        expected_value
-            .get("evidence")
-            .expect("serialized receipt has evidence"),
+        expected_field(&expected_value, "evidence")?,
     );
     compare_value(
         &mut findings,
         "readiness_projection_mismatch",
         "release_candidate",
         receipt.get("release_candidate"),
-        expected_value
-            .get("release_candidate")
-            .expect("serialized receipt has release candidate"),
+        expected_field(&expected_value, "release_candidate")?,
     );
-    for (field, recomputed) in expected_value
-        .as_object()
-        .expect("serialized receipt is an object")
-    {
-        if SEPARATELY_REPORTED_FIELDS.contains(&field.as_str()) {
-            continue;
-        }
+    for field in [
+        "target_count",
+        "available_target_count",
+        "ready_target_count",
+        "blocked_target_count",
+        "ready_evidence_count",
+        "release_request_ready",
+        "structurally_valid",
+        "findings",
+    ] {
         compare_value(
             &mut findings,
-            "receipt_projection_mismatch",
+            "receipt_summary_mismatch",
             field,
             receipt.get(field),
-            recomputed,
+            expected_field(&expected_value, field)?,
         );
     }
+    let receipt_projection = canonical_receipt_value(
+        &request.receipt,
+        &expected,
+        &request.delivery,
+        &mut findings,
+    )?;
+    compare_value(
+        &mut findings,
+        "receipt_projection_mismatch",
+        "receipt",
+        Some(&receipt_projection),
+        &expected_value,
+    );
+    let supplied_receipt_digest = receipt
+        .get("receipt_digest")
+        .and_then(Value::as_str)
+        .map(str::to_string);
     let valid = findings.is_empty();
     Ok(DeliveryReceiptVerification {
         schema: DELIVERY_RECEIPT_SCHEMA.into(),
@@ -557,6 +646,39 @@ pub fn verify_delivery_receipt(
             "the route does not verify signatures, fetch logs, execute checks, or provide durable revocation".into(),
         ],
     })
+}
+
+fn canonical_receipt_value(
+    supplied: &Value,
+    expected: &DeliveryReceiptAudit,
+    delivery: &Value,
+    findings: &mut Vec<DeliveryReceiptFinding>,
+) -> Result<Value, String> {
+    let mut projection = supplied.clone();
+    let object = projection
+        .as_object_mut()
+        .ok_or("receipt must be an object")?;
+    for (field, expected_value) in [
+        ("ok", json!(true)),
+        ("valid", json!(expected.structurally_valid)),
+        ("receipt_ready", json!(expected.release_candidate)),
+        ("delivery", delivery.clone()),
+    ] {
+        if let Some(supplied_value) = object.get(field) {
+            compare_value(
+                findings,
+                "receipt_envelope_mismatch",
+                field,
+                Some(supplied_value),
+                &expected_value,
+            );
+            object.remove(field);
+        }
+    }
+    // `__isError` is MCP test/client transport metadata added beside the serialized payload; it
+    // is not part of the receipt contract and must not change the canonical receipt projection.
+    object.remove("__isError");
+    Ok(projection)
 }
 
 #[cfg(test)]
@@ -650,6 +772,77 @@ mod tests {
     }
 
     #[test]
+    fn receipt_rejects_case_collisions_control_text_and_ready_missing_evidence() {
+        let mut ambiguous = delivery(true);
+        ambiguous["release_request"]["targets"] = json!([
+            {"target": "Execution_Provenance", "available": true, "eligible": true, "blockers": [], "notes": []},
+            {"target": "execution_provenance", "available": true, "eligible": true, "blockers": [], "notes": []}
+        ]);
+        let receipt = build_delivery_receipt(&DeliveryReceiptRequest {
+            receipt_id: "receipt-case-collision".into(),
+            delivery: ambiguous,
+        })
+        .unwrap();
+        assert!(!receipt.structurally_valid);
+        assert!(receipt
+            .findings
+            .iter()
+            .any(|finding| finding.code == "duplicate_release_target"));
+
+        let mut control_text = delivery(true);
+        control_text["release_request"]["targets"][0]["notes"] = json!(["unsafe\nannotation"]);
+        let error = build_delivery_receipt(&DeliveryReceiptRequest {
+            receipt_id: "receipt-control-text".into(),
+            delivery: control_text,
+        })
+        .expect_err("control-bearing target metadata must be rejected");
+        assert!(error.contains("no control characters"));
+
+        let mut whitespace_text = delivery(true);
+        whitespace_text["release_request"]["targets"][0]["notes"] = json!([" unsafe note"]);
+        let error = build_delivery_receipt(&DeliveryReceiptRequest {
+            receipt_id: "receipt-whitespace-text".into(),
+            delivery: whitespace_text,
+        })
+        .expect_err("surrounding message whitespace must be rejected");
+        assert!(error.contains("no control characters"));
+
+        let mut missing_evidence = delivery(true);
+        missing_evidence["readiness"]["ci_provider_evidence_ready"] = json!(true);
+        let receipt = build_delivery_receipt(&DeliveryReceiptRequest {
+            receipt_id: "receipt-missing-evidence".into(),
+            delivery: missing_evidence,
+        })
+        .unwrap();
+        assert!(!receipt.structurally_valid);
+        assert!(receipt
+            .findings
+            .iter()
+            .any(|finding| finding.code == "ready_evidence_missing"));
+    }
+
+    #[test]
+    fn receipt_target_digest_is_independent_of_message_order() {
+        let mut first = delivery(false);
+        first["release_request"]["targets"][0]["notes"] = json!(["z-note", "a-note"]);
+        let mut second = first.clone();
+        second["release_request"]["targets"][0]["notes"] = json!(["a-note", "z-note"]);
+
+        let first = build_delivery_receipt(&DeliveryReceiptRequest {
+            receipt_id: "receipt-message-order".into(),
+            delivery: first,
+        })
+        .unwrap();
+        let second = build_delivery_receipt(&DeliveryReceiptRequest {
+            receipt_id: "receipt-message-order".into(),
+            delivery: second,
+        })
+        .unwrap();
+        assert_eq!(first.target_digest, second.target_digest);
+        assert_ne!(first.delivery_digest, second.delivery_digest);
+    }
+
+    #[test]
     fn receipt_verification_recomputes_and_detects_projection_tampering() {
         let delivery = delivery(true);
         let receipt = build_delivery_receipt(&DeliveryReceiptRequest {
@@ -667,11 +860,35 @@ mod tests {
         assert!(verified.structurally_valid);
         assert_eq!(verified.recomputed_receipt_digest, receipt.receipt_digest);
 
+        let mut envelope = stored.clone();
+        envelope["ok"] = json!(true);
+        envelope["valid"] = json!(receipt.structurally_valid);
+        envelope["receipt_ready"] = json!(receipt.release_candidate);
+        envelope["delivery"] = delivery.clone();
+        let verified_envelope = verify_delivery_receipt(&DeliveryReceiptVerificationRequest {
+            receipt: envelope.clone(),
+            delivery: delivery.clone(),
+        })
+        .unwrap();
+        assert!(verified_envelope.valid);
+
+        envelope["delivery"]["workflow"] = json!("tampered");
+        let rejected_envelope = verify_delivery_receipt(&DeliveryReceiptVerificationRequest {
+            receipt: envelope,
+            delivery: delivery.clone(),
+        })
+        .unwrap();
+        assert!(!rejected_envelope.valid);
+        assert!(rejected_envelope
+            .findings
+            .iter()
+            .any(|finding| finding.code == "receipt_envelope_mismatch"));
+
         let mut tampered = stored;
         tampered["targets"][0]["ready"] = json!(false);
         let rejected = verify_delivery_receipt(&DeliveryReceiptVerificationRequest {
             receipt: tampered,
-            delivery,
+            delivery: delivery.clone(),
         })
         .unwrap();
         assert!(!rejected.valid);
@@ -679,118 +896,23 @@ mod tests {
             .findings
             .iter()
             .any(|finding| finding.code == "targets_mismatch"));
-    }
 
-    #[test]
-    fn a_field_the_receipt_digest_does_not_cover_is_still_compared_against_the_recomputation() {
-        let delivery = delivery(true);
-        let receipt = build_delivery_receipt(&DeliveryReceiptRequest {
-            receipt_id: "receipt-projection".into(),
-            delivery: delivery.clone(),
-        })
-        .unwrap();
-        let stored = serde_json::to_value(&receipt).unwrap();
-        for field in [
-            "ready_target_count",
-            "structurally_valid",
-            "verification",
-            "limitations",
-            "guarantees",
-            "findings",
-            "schema",
-        ] {
-            let mut edited = stored.clone();
-            edited[field] = json!(match field {
-                "ready_target_count" => json!(99),
-                "structurally_valid" => json!(false),
-                _ => json!("edited after the receipt was built"),
-            });
-            let verified = verify_delivery_receipt(&DeliveryReceiptVerificationRequest {
-                receipt: edited,
-                delivery: delivery.clone(),
-            })
-            .unwrap();
-            assert!(
-                !verified.valid,
-                "an edit to {field} survived verification; the receipt digest does not cover it, \
-                 so the projection comparison is the only thing that can catch it"
-            );
-            assert!(verified
-                .findings
-                .iter()
-                .any(|finding| finding.code == "receipt_projection_mismatch"
-                    && finding.subject == field));
-            assert_eq!(
-                verified.recomputed_receipt_digest, receipt.receipt_digest,
-                "the digest still matches, which is exactly why comparing it alone was not enough"
-            );
-        }
-    }
-
-    #[test]
-    fn a_field_the_recomputation_does_not_produce_is_tolerated_rather_than_checked() {
-        let delivery = delivery(true);
-        let receipt = build_delivery_receipt(&DeliveryReceiptRequest {
-            receipt_id: "receipt-transport".into(),
-            delivery: delivery.clone(),
-        })
-        .unwrap();
-        let mut carried = serde_json::to_value(&receipt).unwrap();
-        carried["receipt_ready"] = json!(true);
-        carried["delivery"] = delivery.clone();
-        let verified = verify_delivery_receipt(&DeliveryReceiptVerificationRequest {
-            receipt: carried,
+        let mut malformed = serde_json::to_value(&receipt).unwrap();
+        malformed["schema"] = json!("wrong-schema");
+        malformed["receipt_digest"] = json!(receipt.receipt_digest.to_uppercase());
+        let rejected = verify_delivery_receipt(&DeliveryReceiptVerificationRequest {
+            receipt: malformed,
             delivery,
         })
         .unwrap();
-        assert!(
-            verified.valid,
-            "a transport that adds fields to the receipt object must not be read as tampering"
-        );
-    }
-
-    #[test]
-    fn a_shape_broken_receipt_digest_is_reported_as_malformed_rather_than_as_a_mismatch() {
-        let delivery = delivery(true);
-        let receipt = build_delivery_receipt(&DeliveryReceiptRequest {
-            receipt_id: "receipt-malformed".into(),
-            delivery: delivery.clone(),
-        })
-        .unwrap();
-        let mut broken = serde_json::to_value(&receipt).unwrap();
-        broken["receipt_digest"] = json!("NOT-A-DIGEST");
-        let verified = verify_delivery_receipt(&DeliveryReceiptVerificationRequest {
-            receipt: broken,
-            delivery: delivery.clone(),
-        })
-        .unwrap();
-        assert!(!verified.valid);
-        assert!(!verified.receipt_digest_match);
-        let codes: Vec<&str> = verified
+        assert!(!rejected.valid);
+        assert!(rejected
             .findings
             .iter()
-            .map(|finding| finding.code.as_str())
-            .collect();
-        assert!(codes.contains(&"receipt_digest_malformed"), "{codes:?}");
-        assert!(
-            !codes.contains(&"receipt_digest_mismatch"),
-            "a digest of the wrong shape is a defect in the claimed digest, not evidence that the \
-             projection moved: {codes:?}"
-        );
-
-        let mut wrong = serde_json::to_value(&receipt).unwrap();
-        wrong["receipt_digest"] = json!("0".repeat(64));
-        let verified = verify_delivery_receipt(&DeliveryReceiptVerificationRequest {
-            receipt: wrong,
-            delivery,
-        })
-        .unwrap();
-        let codes: Vec<&str> = verified
+            .any(|finding| finding.code == "schema_mismatch"));
+        assert!(rejected
             .findings
             .iter()
-            .map(|finding| finding.code.as_str())
-            .collect();
-        assert!(codes.contains(&"receipt_digest_mismatch"), "{codes:?}");
-        assert!(!codes.contains(&"receipt_digest_malformed"), "{codes:?}");
+            .any(|finding| finding.code == "receipt_digest_mismatch_noncanonical"));
     }
 }

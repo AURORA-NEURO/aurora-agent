@@ -271,10 +271,9 @@ fn print_stmt(statement: &Stmt, depth: usize, out: &mut String) {
             out.push_str(&format!("{pad}match {} {{\n", print_expr(scrutinee)));
             for arm in arms {
                 match &arm.pattern.binding {
-                    Some(binding) => out.push_str(&format!(
-                        "{pad}  {}({binding}) =>\n",
-                        arm.pattern.case
-                    )),
+                    Some(binding) => {
+                        out.push_str(&format!("{pad}  {}({binding}) =>\n", arm.pattern.case))
+                    }
                     None => out.push_str(&format!("{pad}  {} =>\n", arm.pattern.case)),
                 }
                 print_block(&arm.body, depth + 2, out);
@@ -340,10 +339,9 @@ fn print_stmt(statement: &Stmt, depth: usize, out: &mut String) {
             ));
             for action in actions {
                 match action {
-                    WatchAction::PauseEffects { effects, .. } => out.push_str(&format!(
-                        "{pad}  pause effects [{}]\n",
-                        join_paths(effects)
-                    )),
+                    WatchAction::PauseEffects { effects, .. } => {
+                        out.push_str(&format!("{pad}  pause effects [{}]\n", join_paths(effects)))
+                    }
                     WatchAction::SpawnRole { role, .. } => {
                         out.push_str(&format!("{pad}  spawn role {role}\n"))
                     }
@@ -377,9 +375,7 @@ fn print_stmt(statement: &Stmt, depth: usize, out: &mut String) {
             "{pad}stop {outcome} when {}\n",
             print_expr(condition)
         )),
-        Stmt::Return { value, .. } => {
-            out.push_str(&format!("{pad}return {}\n", print_expr(value)))
-        }
+        Stmt::Return { value, .. } => out.push_str(&format!("{pad}return {}\n", print_expr(value))),
         Stmt::Execute { value, .. } => {
             out.push_str(&format!("{pad}execute {}\n", print_expr(value)))
         }
@@ -389,10 +385,9 @@ fn print_stmt(statement: &Stmt, depth: usize, out: &mut String) {
         Stmt::Delegate { value, .. } => {
             out.push_str(&format!("{pad}delegate {}\n", print_expr(value)))
         }
-        Stmt::Publish { value, into, .. } => out.push_str(&format!(
-            "{pad}publish {} into {into}\n",
-            print_expr(value)
-        )),
+        Stmt::Publish { value, into, .. } => {
+            out.push_str(&format!("{pad}publish {} into {into}\n", print_expr(value)))
+        }
         Stmt::Repeat { until, body, .. } => {
             out.push_str(&format!("{pad}repeat until {} {{\n", print_expr(until)));
             print_block(body, depth + 1, out);

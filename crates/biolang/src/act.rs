@@ -120,7 +120,11 @@ pub struct BioRole {
 }
 
 impl BioRole {
-    pub fn new(role: impl Into<String>, capability: impl Into<String>, domain: impl Into<String>) -> Self {
+    pub fn new(
+        role: impl Into<String>,
+        capability: impl Into<String>,
+        domain: impl Into<String>,
+    ) -> Self {
         BioRole {
             role: role.into(),
             capability: capability.into(),
@@ -158,9 +162,15 @@ pub enum CommitmentType {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "evidence_transition", rename_all = "snake_case")]
 pub enum EvidenceTransition {
-    Introduced { evidence: EvidenceId },
-    Corroborated { evidence: EvidenceId },
-    Contradicted { evidence: EvidenceId },
+    Introduced {
+        evidence: EvidenceId,
+    },
+    Corroborated {
+        evidence: EvidenceId,
+    },
+    Contradicted {
+        evidence: EvidenceId,
+    },
     /// Superseded rather than removed. Weave keeps both positions; so does this.
     Superseded {
         evidence: EvidenceId,
@@ -255,7 +265,11 @@ impl ScientificAct {
     }
 
     /// The invariants 25.15 states, given the role that performed the act and what material is left.
-    pub fn validate(&self, role: &BioRole, available: &dyn Fn(&SpecimenId) -> f64) -> Result<(), ActError> {
+    pub fn validate(
+        &self,
+        role: &BioRole,
+        available: &dyn Fn(&SpecimenId) -> f64,
+    ) -> Result<(), ActError> {
         let act = self.act_id.to_string();
 
         if !role.allowed_acts.contains(&self.kind) {
@@ -267,7 +281,9 @@ impl ScientificAct {
 
         if matches!(
             self.kind,
-            ScientificActKind::Hypothesize | ScientificActKind::Challenge | ScientificActKind::Attest
+            ScientificActKind::Hypothesize
+                | ScientificActKind::Challenge
+                | ScientificActKind::Attest
         ) {
             if self.cites.is_empty() {
                 return Err(ActError::ClaimWithout {

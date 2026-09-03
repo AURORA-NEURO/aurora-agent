@@ -102,6 +102,31 @@ fn an_inverted_interval_is_refused() {
 }
 
 #[test]
+fn an_interval_basis_must_name_a_method_and_independent_support() {
+    let empty_method = Interval::new(
+        0.1,
+        0.2,
+        ConfidenceLevel::ninety_five(),
+        IntervalBasis::new(" ", ClusteringUnit::ParentWorld, 30),
+    );
+    assert!(matches!(
+        empty_method,
+        Err(MetricsError::MalformedIntervalBasis { .. })
+    ));
+
+    let no_support = Interval::new(
+        0.1,
+        0.2,
+        ConfidenceLevel::ninety_five(),
+        IntervalBasis::new("bootstrap", ClusteringUnit::ParentWorld, 0),
+    );
+    assert!(matches!(
+        no_support,
+        Err(MetricsError::MalformedIntervalBasis { .. })
+    ));
+}
+
+#[test]
 fn a_confidence_level_outside_the_open_unit_interval_is_refused() {
     assert!(ConfidenceLevel::new(0.0).is_err());
     assert!(ConfidenceLevel::new(1.0).is_err());

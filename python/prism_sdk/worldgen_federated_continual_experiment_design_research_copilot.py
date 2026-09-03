@@ -1,0 +1,4 @@
+from .worldgen_experiment_design_copilot_support import ExperimentDesignCopilotRequest, ExperimentDesignCopilotReceipt, run, manifest
+FEATURE_ID="AFA-worldgen-P09-F12"; CONTRACT_VERSION="worldgen-federated_continual-experiment_design-copilot/1.0"
+def worldgen_federated_continual_experiment_design_research_copilot_manifest(): return manifest(feature_id=FEATURE_ID,contract_version=CONTRACT_VERSION,input_schema="ExperimentDesignCopilotRequest1@1",scale="federated continual autonomous",autonomy_tier="A1")
+def run_worldgen_federated_continual_experiment_design_research_copilot(request:ExperimentDesignCopilotRequest)->ExperimentDesignCopilotReceipt: return run(request,feature_id=FEATURE_ID,contract_version=CONTRACT_VERSION,scale="federated continual autonomous",require_approval=False,require_federation=True)

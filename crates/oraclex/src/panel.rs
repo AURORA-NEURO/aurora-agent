@@ -85,8 +85,7 @@ impl Read {
     }
 
     pub fn citing(mut self, evidence: impl IntoIterator<Item = impl Into<String>>) -> Self {
-        self.evidence
-            .extend(evidence.into_iter().map(Into::into));
+        self.evidence.extend(evidence.into_iter().map(Into::into));
         self
     }
 }
@@ -133,7 +132,11 @@ pub struct Adjudication {
 }
 
 impl Adjudication {
-    pub fn new(adjudicator: impl Into<String>, call: impl Into<String>, blinding: Blinding) -> Self {
+    pub fn new(
+        adjudicator: impl Into<String>,
+        call: impl Into<String>,
+        blinding: Blinding,
+    ) -> Self {
         Adjudication {
             adjudicator: adjudicator.into(),
             call: call.into(),

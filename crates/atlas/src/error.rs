@@ -32,7 +32,9 @@ pub enum AtlasError {
     #[error("capability {capability} declares an is_a parent {parent} that does not exist")]
     UnknownParent { capability: String, parent: String },
 
-    #[error("capability {capability} declares a {relation} relation to {target}, which does not exist")]
+    #[error(
+        "capability {capability} declares a {relation} relation to {target}, which does not exist"
+    )]
     UnknownRelationTarget {
         capability: String,
         relation: &'static str,
@@ -105,6 +107,12 @@ pub enum AtlasError {
     #[error("failure {failure_id}: label distribution is empty")]
     EmptyLabelDistribution { failure_id: String },
 
+    #[error("failure {failure_id}: label mechanism {mechanism} is declared more than once")]
+    DuplicateLabelMechanism {
+        failure_id: String,
+        mechanism: &'static str,
+    },
+
     #[error("failure {failure_id}: label weights sum to {total}, expected 1.0")]
     MalformedLabelDistribution { failure_id: String, total: f64 },
 
@@ -116,7 +124,9 @@ pub enum AtlasError {
     },
 
     /// 43.40: "No lower tier justifies a higher-tier claim."
-    #[error("claim about {capability} requested at {requested} but evidence supports only {permitted}")]
+    #[error(
+        "claim about {capability} requested at {requested} but evidence supports only {permitted}"
+    )]
     ClaimAboveEvidence {
         capability: String,
         requested: ClaimTier,
@@ -128,7 +138,9 @@ pub enum AtlasError {
 
     /// 03.09 refuses to pretend capabilities are perfectly separable. Weighting two capabilities
     /// that the ontology marks `confounds_with` counts one signal twice.
-    #[error("weighting policy aggregates confounded capabilities {left} and {right} as independent")]
+    #[error(
+        "weighting policy aggregates confounded capabilities {left} and {right} as independent"
+    )]
     ConfoundedAggregation { left: String, right: String },
 
     #[error("weighting policy is malformed: {detail}")]

@@ -469,4 +469,3 @@ fn clause_set(value: &Value) -> Result<BTreeSet<String>, String> {
         other => Err(other.to_string()),
     }
 }
-

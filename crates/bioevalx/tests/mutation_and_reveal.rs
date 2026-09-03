@@ -111,7 +111,10 @@ fn a_family_cannot_mix_relations() {
         Response::Unchanged,
     ));
 
-    assert!(matches!(outcome, Err(MetamorphicError::RelationMismatch { .. })));
+    assert!(matches!(
+        outcome,
+        Err(MetamorphicError::RelationMismatch { .. })
+    ));
 }
 
 #[test]
@@ -122,7 +125,7 @@ fn a_suite_of_only_invariance_families_cannot_detect_a_blind_spot_and_says_so() 
         family
             .record(trial("t", Relation::Invariant, Response::Unchanged))
             .expect("distinct");
-        suite.add(family);
+        suite.add(family).expect("distinct valid family");
     }
 
     let covered = suite.relations_covered();
@@ -136,7 +139,96 @@ fn a_suite_of_only_invariance_families_cannot_detect_a_blind_spot_and_says_so() 
 fn an_empty_family_refuses_rather_than_reporting_perfect_consistency() {
     let family = Family::declaring("rename", Relation::Invariant);
 
-    assert!(matches!(family.report(), Err(MetamorphicError::EmptyFamily)));
+    assert!(matches!(
+        family.report(),
+        Err(MetamorphicError::EmptyFamily)
+    ));
+}
+
+#[test]
+fn malformed_persisted_families_are_rebuilt_through_trial_admission() {
+    let duplicate_trials = json!({
+        "id": "rename",
+        "relation": "invariant",
+        "trials": [
+            {
+                "id": "t1",
+                "relation": "invariant",
+                "response": "unchanged"
+            },
+            {
+                "id": "t1",
+                "relation": "invariant",
+                "response": "unchanged"
+            }
+        ]
+    });
+    let wrong_relation = json!({
+        "id": "effect",
+        "relation": "invariant",
+        "trials": [{
+            "id": "t1",
+            "relation": {
+                "directional_change": {
+                    "expected": "increase"
+                }
+            },
+            "response": "unchanged"
+        }]
+    });
+
+    let duplicate_result: Result<Family, _> = serde_json::from_value(duplicate_trials);
+    let wrong_relation_result: Result<Family, _> = serde_json::from_value(wrong_relation);
+    assert!(duplicate_result.is_err());
+    assert!(wrong_relation_result.is_err());
+}
+
+#[test]
+fn suites_reject_duplicate_family_identity() {
+    let family = Family::declaring("rename", Relation::Invariant);
+    let mut suite = Suite::new();
+    suite.add(family.clone()).expect("first family");
+
+    assert!(matches!(
+        suite.add(family),
+        Err(MetamorphicError::DuplicateFamily(id)) if id == "rename"
+    ));
+
+    let encoded = serde_json::json!({
+        "families": [
+            {
+                "id": "rename",
+                "relation": "invariant",
+                "trials": [{
+                    "id": "t1",
+                    "relation": "invariant",
+                    "response": "unchanged"
+                }]
+            },
+            {
+                "id": "rename",
+                "relation": "invariant",
+                "trials": [{
+                    "id": "t2",
+                    "relation": "invariant",
+                    "response": "unchanged"
+                }]
+            }
+        ]
+    });
+    let parsed: Result<Suite, _> = serde_json::from_value(encoded);
+    assert!(parsed.is_err());
+}
+
+#[test]
+fn malformed_family_identity_is_refused_on_admission() {
+    let mut family = Family::declaring("rename\n", Relation::Invariant);
+    let result = family.record(trial("t1", Relation::Invariant, Response::Unchanged));
+
+    assert!(matches!(
+        result,
+        Err(MetamorphicError::InvalidFamily { .. })
+    ));
 }
 
 #[test]
@@ -146,7 +238,10 @@ fn a_commitment_cannot_be_added_after_the_seal() {
         .commit(Commitment::new("gene-x", json!({"effect": "up"}), "plan-a"))
         .expect("first commitment");
     let sealed = registration
-        .seal(&json!({"rule": "sign agreement"}), at("2026-06-01T00:00:00Z"))
+        .seal(
+            &json!({"rule": "sign agreement"}),
+            at("2026-06-01T00:00:00Z"),
+        )
         .expect("something was committed");
 
     assert!(matches!(
@@ -162,9 +257,14 @@ fn a_rubric_edited_between_seal_and_score_cannot_be_used() {
         .commit(Commitment::new("gene-x", json!({"effect": "up"}), "plan-a"))
         .expect("first commitment");
     let sealed = registration
-        .seal(&json!({"rule": "sign agreement"}), at("2026-06-01T00:00:00Z"))
+        .seal(
+            &json!({"rule": "sign agreement"}),
+            at("2026-06-01T00:00:00Z"),
+        )
         .expect("something was committed");
-    let revealed = sealed.reveal(vec![Outcome::new("gene-x", json!({"effect": "up"}))]);
+    let revealed = sealed
+        .reveal(vec![Outcome::new("gene-x", json!({"effect": "up"}))])
+        .expect("valid reveal");
 
     match revealed.score_under(&json!({"rule": "sign agreement", "bonus": "partial"})) {
         Err(RevealError::RubricChanged { sealed, presented }) => {
@@ -184,7 +284,9 @@ fn a_reformatted_but_identical_rubric_still_scores() {
     let sealed = registration
         .seal(&rubric, at("2026-06-01T00:00:00Z"))
         .expect("something was committed");
-    let revealed = sealed.reveal(vec![Outcome::new("gene-x", json!({"effect": "up"}))]);
+    let revealed = sealed
+        .reveal(vec![Outcome::new("gene-x", json!({"effect": "up"}))])
+        .expect("valid reveal");
 
     let scoring = revealed
         .score_under(&json!({"a": 1, "b": 2}))
@@ -204,7 +306,9 @@ fn an_outcome_for_something_nobody_committed_cannot_be_scored() {
     let sealed = registration
         .seal(&rubric, at("2026-06-01T00:00:00Z"))
         .expect("something was committed");
-    let revealed = sealed.reveal(vec![Outcome::new("gene-z", json!({"effect": "up"}))]);
+    let revealed = sealed
+        .reveal(vec![Outcome::new("gene-z", json!({"effect": "up"}))])
+        .expect("valid reveal");
 
     assert!(matches!(
         revealed.score_under(&rubric),
@@ -224,7 +328,9 @@ fn commitments_that_never_got_an_outcome_are_listed_rather_than_dropped() {
     let sealed = registration
         .seal(&rubric, at("2026-06-01T00:00:00Z"))
         .expect("something was committed");
-    let revealed = sealed.reveal(vec![Outcome::new("gene-x", json!({"effect": "up"}))]);
+    let revealed = sealed
+        .reveal(vec![Outcome::new("gene-x", json!({"effect": "up"}))])
+        .expect("valid reveal");
 
     let scoring = revealed.score_under(&rubric).expect("rubric is unchanged");
 
@@ -239,6 +345,65 @@ fn sealing_with_nothing_committed_refuses() {
     assert!(matches!(
         registration.seal(&json!({}), at("2026-06-01T00:00:00Z")),
         Err(RevealError::NothingCommitted)
+    ));
+}
+
+#[test]
+fn commitment_and_outcome_records_are_validated_at_state_boundaries() {
+    let mut invalid_study = Registration::open("study\n");
+    assert!(matches!(
+        invalid_study.commit(Commitment::new("gene-x", json!({}), "plan-a")),
+        Err(RevealError::InvalidStudy(_))
+    ));
+
+    let mut registration = Registration::open("prospective-2026-q3");
+    assert!(matches!(
+        registration.commit(Commitment::new(" ", json!({}), "plan-a")),
+        Err(RevealError::InvalidCommitment { .. })
+    ));
+    registration
+        .commit(Commitment::new("gene-x", json!({"effect": "up"}), "plan-a"))
+        .expect("valid commitment");
+    let sealed = registration
+        .seal(&json!({"rule": "sign agreement"}), at("2026-06-01T00:00:00Z"))
+        .expect("sealed");
+
+    let duplicate = sealed.reveal(vec![
+        Outcome::new("gene-x", json!({"effect": "up"})),
+        Outcome::new("gene-x", json!({"effect": "up"})),
+    ]);
+    assert!(matches!(
+        duplicate,
+        Err(RevealError::DuplicateOutcome(target)) if target == "gene-x"
+    ));
+}
+
+#[test]
+fn persisted_open_registrations_are_rebuilt_through_commit_admission() {
+    let mut registration = Registration::open("prospective-2026-q3");
+    registration
+        .commit(Commitment::new("gene-x", json!({"effect": "up"}), "plan-a"))
+        .expect("valid commitment");
+    let mut encoded = serde_json::to_value(&registration).expect("registration serializes");
+    encoded["commitments"]["gene-x"]["target"] = serde_json::json!("gene-y");
+
+    let parsed: Result<Registration, _> = serde_json::from_value(encoded);
+    assert!(parsed.is_err());
+}
+
+#[test]
+fn invalid_outcome_identity_is_refused_before_scoring() {
+    let mut registration = Registration::open("prospective-2026-q3");
+    registration
+        .commit(Commitment::new("gene-x", json!({"effect": "up"}), "plan-a"))
+        .expect("valid commitment");
+    let sealed = registration
+        .seal(&json!({"rule": "sign agreement"}), at("2026-06-01T00:00:00Z"))
+        .expect("sealed");
+
+    assert!(matches!(
+        sealed.reveal(vec![Outcome::new("gene\n", json!({}))]),
+        Err(RevealError::InvalidOutcome { .. })
     ));
 }
 
@@ -317,7 +482,11 @@ fn an_interaction_names_the_cells_a_design_would_need_to_estimate_it() {
         ["planner".to_string(), "verifier".to_string()],
         "base",
     );
-    for (id, planner, verifier) in [("base", "react", "off"), ("p1", "tree", "off"), ("v1", "react", "on")] {
+    for (id, planner, verifier) in [
+        ("base", "react", "off"),
+        ("p1", "tree", "off"),
+        ("v1", "react", "on"),
+    ] {
         design
             .add(Arm::new(
                 id,
@@ -339,7 +508,9 @@ fn an_interaction_names_the_cells_a_design_would_need_to_estimate_it() {
         full.estimable_interactions(),
         vec![("planner".to_string(), "verifier".to_string())]
     );
-    assert!(full.missing_for_interaction("planner", "verifier").is_empty());
+    assert!(full
+        .missing_for_interaction("planner", "verifier")
+        .is_empty());
 }
 
 #[test]
@@ -380,4 +551,55 @@ fn two_arms_occupying_the_same_cell_are_refused() {
     ));
 
     assert!(matches!(outcome, Err(DesignError::DuplicateCell { .. })));
+}
+
+#[test]
+fn persisted_designs_are_rebuilt_through_complete_arm_admission() {
+    let design = design_of_two_factors();
+    let mut encoded = serde_json::to_value(&design).expect("design serializes");
+    encoded["arms"][1]["levels"]
+        .as_object_mut()
+        .expect("levels object")
+        .remove("verifier");
+    let parsed: Result<FactorialDesign, _> = serde_json::from_value(encoded);
+
+    assert!(parsed.is_err());
+}
+
+#[test]
+fn a_persisted_design_cannot_move_its_baseline_after_observing_arms() {
+    let design = design_of_two_factors();
+    let mut encoded = serde_json::to_value(&design).expect("design serializes");
+    encoded["baseline"] = serde_json::json!("post-hoc-favourite");
+    let parsed: Result<FactorialDesign, _> = serde_json::from_value(encoded);
+
+    assert!(parsed.is_err());
+}
+
+#[test]
+fn malformed_arm_identity_is_refused_before_it_can_form_a_contrast() {
+    let mut design = FactorialDesign::declare(
+        "cell-7",
+        ["planner".to_string()],
+        "base",
+    );
+    let result = design.add(Arm::new(
+        "base",
+        levels(&[("planner", " ")]),
+        Conclusion::Pass,
+        ScoreTier::Execution,
+    ));
+
+    assert!(matches!(result, Err(DesignError::InvalidArm { .. })));
+}
+
+#[test]
+fn a_mutated_design_identity_is_rechecked_before_fork_generation() {
+    let mut design = design_of_two_factors();
+    design.cell_id = "cell-7\n".into();
+
+    assert!(matches!(
+        design.contrast_forks(true),
+        Err(DesignError::InvalidDesign { .. })
+    ));
 }

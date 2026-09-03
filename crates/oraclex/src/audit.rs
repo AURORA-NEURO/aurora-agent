@@ -36,7 +36,7 @@ use bioprism_ids::ContentHash;
 use bioprism_oracle::EvidenceTier;
 use serde::{Deserialize, Serialize};
 
-use crate::verdict::{Determination, Missing, Unresolved, Witness};
+use crate::verdict::{Determination, Unresolved, Witness};
 
 /// A duty in the evaluation pipeline.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -175,17 +175,14 @@ pub fn unilateral_control(assignment: &RoleAssignment, role: Role) -> Determinat
         .filter(|reviewer| !holders.contains(reviewer))
         .collect();
     if reviewers.is_empty() {
-        return Determination::Unresolved(
-            Unresolved::new([Missing::new(
-                "an independent reviewer who does not hold this role",
-                format!(
-                    "{:?} hold {} with no separate reviewer, so the role is exercised unilaterally",
-                    holders,
-                    role.as_str()
-                ),
-            )])
-            .expect("one item is not zero"),
-        );
+        return Determination::Unresolved(Unresolved::of(
+            "an independent reviewer who does not hold this role",
+            format!(
+                "{:?} hold {} with no separate reviewer, so the role is exercised unilaterally",
+                holders,
+                role.as_str()
+            ),
+        ));
     }
     Determination::supported(
         EvidenceTier::Deterministic,

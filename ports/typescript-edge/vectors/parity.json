@@ -1,0 +1,22 @@
+{
+  "_provenance": {
+    "rust": "integrations/agent-fabric/src/ids.rs and src/shard.rs executed under rustc 1.97.1",
+    "python": "integrations/scale-5m/aurora_scale manifest and fleet semantics executed under CPython 3.12.10",
+    "typescript": "Node 24 runtime and TypeScript 5 compiler target; generated values are checked by test/core.test.mjs"
+  },
+  "mix64": {
+    "0": "e220a8397b1dcdaf",
+    "1": "910a2dec89025cc1",
+    "12345": "22118258a9d111a0"
+  },
+  "rendezvous": {
+    "home_16_12345": 10,
+    "preference_7_42": [5, 3, 6, 0, 1, 2, 4]
+  },
+  "manifest_summary_2048x100": {
+    "total_files": 2048,
+    "total_lines": 204800,
+    "chunk_count": 8,
+    "root_digest": "881c41fae8f9a88a70422de893de63067158cda909f98cf793a8af20d8d353b5"
+  }
+}

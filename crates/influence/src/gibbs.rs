@@ -146,17 +146,47 @@ impl<'a> Specification<'a> {
         })
     }
 
-    fn entry(&self, factor_position: usize, assignment: &BTreeMap<&str, usize>) -> f64 {
-        let factor = &self.region.factors()[factor_position];
+    fn entry(
+        &self,
+        factor_position: usize,
+        assignment: &BTreeMap<&str, usize>,
+    ) -> Result<f64, UnknownReason> {
+        let Some(factor) = self.region.factors().get(factor_position) else {
+            return Err(outside(format!(
+                "factor position {factor_position} is outside the region's factor list"
+            )));
+        };
         let mut index = 0usize;
         for name in factor.scope() {
-            let card = self
-                .region
-                .cardinality_of(name)
-                .expect("a factor's scope variables are region variables");
-            index = index * card + assignment[name.as_str()];
+            let Some(card) = self.region.cardinality_of(name) else {
+                return Err(outside(format!(
+                    "factor {:?} references variable {name:?} without a declared cardinality",
+                    factor.id()
+                )));
+            };
+            let Some(value) = assignment.get(name.as_str()).copied() else {
+                return Err(outside(format!(
+                    "factor {:?} is missing an assignment for variable {name:?}",
+                    factor.id()
+                )));
+            };
+            if value >= card {
+                return Err(outside(format!(
+                    "assignment {value} is outside cardinality {card} for variable {name:?}"
+                )));
+            }
+            index = index * card + value;
         }
-        self.tables[factor_position][index]
+        self.tables
+            .get(factor_position)
+            .and_then(|table| table.get(index))
+            .copied()
+            .ok_or_else(|| {
+                outside(format!(
+                    "factor {:?} table does not contain entry {index}",
+                    factor.id()
+                ))
+            })
     }
 
     /// `γ_site(· | assignment)`, normalised, or `None` when the conditional has no mass.
@@ -166,21 +196,21 @@ impl<'a> Specification<'a> {
         touching: &[usize],
         assignment: &mut BTreeMap<&'k str, usize>,
         cardinality: usize,
-    ) -> Option<Vec<f64>> {
+    ) -> Result<Option<Vec<f64>>, UnknownReason> {
         let mut row = Vec::with_capacity(cardinality);
         for value in 0..cardinality {
             assignment.insert(site, value);
             let mut product = 1.0f64;
             for position in touching {
-                product *= self.entry(*position, assignment);
+                product *= self.entry(*position, assignment)?;
             }
             row.push(product);
         }
         let mass: f64 = row.iter().sum();
         if !mass.is_finite() || mass <= 0.0 {
-            return None;
+            return Ok(None);
         }
-        Some(row.into_iter().map(|value| value / mass).collect())
+        Ok(Some(row.into_iter().map(|value| value / mass).collect()))
     }
 }
 
@@ -260,14 +290,15 @@ impl ComparisonSystem {
             .collect();
 
         for pivot in 0..size {
-            let (best, magnitude) = (pivot..size).fold((pivot, 0.0f64), |(best, magnitude), row| {
-                let candidate = matrix[row][pivot].abs();
-                if candidate > magnitude {
-                    (row, candidate)
-                } else {
-                    (best, magnitude)
-                }
-            });
+            let (best, magnitude) =
+                (pivot..size).fold((pivot, 0.0f64), |(best, magnitude), row| {
+                    let candidate = matrix[row][pivot].abs();
+                    if candidate > magnitude {
+                        (row, candidate)
+                    } else {
+                        (best, magnitude)
+                    }
+                });
             if magnitude < 1e-12 {
                 return None;
             }
@@ -285,10 +316,7 @@ impl ComparisonSystem {
                 if factor == 0.0 {
                     continue;
                 }
-                for (value, base) in row[pivot..=size]
-                    .iter_mut()
-                    .zip(&pivot_row[pivot..=size])
-                {
+                for (value, base) in row[pivot..=size].iter_mut().zip(&pivot_row[pivot..=size]) {
                     *value -= factor * base;
                 }
             }
@@ -324,10 +352,14 @@ fn conditionals_of_site<'k>(
     radices: &[usize],
     configurations: usize,
 ) -> Result<Vec<Vec<f64>>, UnknownReason> {
-    let cardinality = specification
-        .region
-        .cardinality_of(site)
-        .expect("sites are region variables");
+    let Some(cardinality) = specification.region.cardinality_of(site) else {
+        return Err(outside(format!(
+            "site {site:?} has no declared cardinality"
+        )));
+    };
+    if cardinality == 0 {
+        return Err(outside(format!("site {site:?} has zero cardinality")));
+    }
     let mut rows = Vec::with_capacity(configurations);
     for encoded in 0..configurations {
         let mut assignment: BTreeMap<&str, usize> = BTreeMap::new();
@@ -338,7 +370,7 @@ fn conditionals_of_site<'k>(
         }
         assignment.insert(site, 0);
         let row = specification
-            .conditional(site, touching, &mut assignment, cardinality)
+            .conditional(site, touching, &mut assignment, cardinality)?
             .ok_or_else(|| {
                 outside(format!(
                     "the single-site conditional at {site:?} has no mass under some neighbourhood configuration"
@@ -369,9 +401,22 @@ fn interdependence_matrix(
                 specification
                     .region
                     .cardinality_of(name)
-                    .expect("neighbours are region variables")
+                    .ok_or_else(|| {
+                        outside(format!(
+                            "site {site:?} has neighbour {name:?} without a declared cardinality"
+                        ))
+                    })
+                    .and_then(|cardinality| {
+                        if cardinality == 0 {
+                            Err(outside(format!(
+                                "site {site:?} has neighbour {name:?} with zero cardinality"
+                            )))
+                        } else {
+                            Ok(cardinality)
+                        }
+                    })
             })
-            .collect();
+            .collect::<Result<_, _>>()?;
         let mut configurations = 1usize;
         for radix in &radices {
             configurations = configurations.saturating_mul(*radix);
@@ -396,13 +441,16 @@ fn interdependence_matrix(
         }
 
         for (position, neighbour) in neighbours.iter().enumerate() {
-            let column = index_of[neighbour.as_str()];
+            let Some(&column) = index_of.get(neighbour.as_str()) else {
+                return Err(outside(format!(
+                    "site {site:?} neighbour {neighbour:?} is absent from the site index"
+                )));
+            };
             let mut worst = 0.0f64;
             for encoded in 0..configurations {
                 let current = (encoded / strides[position]) % radices[position];
                 for alternative in (current + 1)..radices[position] {
-                    let shifted =
-                        encoded + (alternative - current) * strides[position];
+                    let shifted = encoded + (alternative - current) * strides[position];
                     worst = worst.max(total_variation_of_rows(&rows[encoded], &rows[shifted]));
                 }
             }
@@ -431,9 +479,22 @@ fn removal_displacement(
                 declared
                     .region
                     .cardinality_of(name)
-                    .expect("neighbours are region variables")
+                    .ok_or_else(|| {
+                        outside(format!(
+                            "site {site:?} has neighbour {name:?} without a declared cardinality"
+                        ))
+                    })
+                    .and_then(|cardinality| {
+                        if cardinality == 0 {
+                            Err(outside(format!(
+                                "site {site:?} has neighbour {name:?} with zero cardinality"
+                            )))
+                        } else {
+                            Ok(cardinality)
+                        }
+                    })
             })
-            .collect();
+            .collect::<Result<_, _>>()?;
         let mut configurations = 1usize;
         for radix in &radices {
             configurations = configurations.saturating_mul(*radix);
@@ -547,9 +608,7 @@ pub fn comparison_system(
                             .factors()
                             .iter()
                             .find(|factor| factor.id() == factor_id.as_str())
-                            .is_some_and(|factor| {
-                                factor.scope().iter().any(|name| name == site)
-                            })
+                            .is_some_and(|factor| factor.scope().iter().any(|name| name == site))
                     })
                     .count();
                 if touching == 0 {

@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aurora-neuro.org/schemas/aurora-research-contract-v1/experiment-design-plan.json",
+  "title": "AURORA preclinical experiment design plan",
+  "description": "Deterministic power-aware allocation and acceptance gates for preclinical research.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["payload", "artifact"],
+  "properties": {
+    "payload": {
+      "type": "object",
+      "required": ["schema_version", "feature_id", "allocations", "total_units", "boundary"],
+      "properties": {
+        "schema_version": { "const": "aurora-research-contract/1.0" },
+        "feature_id": { "const": "AFA-lab-P09-F01" },
+        "allocations": { "type": "array", "minItems": 2, "items": { "type": "object", "required": ["arm_id", "units"], "properties": { "arm_id": { "type": "string", "minLength": 1 }, "units": { "type": "integer", "minimum": 2 } } } },
+        "total_units": { "type": "integer", "minimum": 4 },
+        "boundary": { "const": "preclinical-research-only; no human-subject or clinical-source data; no diagnosis, treatment, triage, enrollment, or clinical decisions" }
+      }
+    },
+    "artifact": { "type": "object", "required": ["content_hash"], "properties": { "content_hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" } } }
+  }
+}

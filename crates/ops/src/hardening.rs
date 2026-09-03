@@ -234,9 +234,9 @@ pub fn audit_credentials(config: &EffectiveConfig, leases: &[SecretLease]) -> Cr
     let mut leased = Vec::new();
 
     for reference in config.secret_references() {
-        let scoped = leases.iter().any(|lease| {
-            lease.reference() == reference && !lease.boundary().trim().is_empty()
-        });
+        let scoped = leases
+            .iter()
+            .any(|lease| lease.reference() == reference && !lease.boundary().trim().is_empty());
         if scoped {
             leased.push(reference.to_string());
             continue;

@@ -142,11 +142,7 @@ impl ArtifactCard {
             ("artifact.capability", self.capability.as_str()),
         ] {
             require_text(field, value)?;
-        }
-        if self.path.contains('\0') {
-            return Err(WorkbenchError::ControlCharacter {
-                field: "artifact.path",
-            });
+            check_single_line(field, value)?;
         }
         if let Some(digest) = &self.digest {
             validate_digest("artifact.digest", digest)?;
@@ -164,6 +160,7 @@ impl ArtifactCard {
         let mut tags = BTreeSet::new();
         for tag in &self.tags {
             require_text("artifact.tag", tag)?;
+            check_single_line("artifact.tag", tag)?;
             if !tags.insert(tag) {
                 return Err(WorkbenchError::Duplicate {
                     kind: "artifact tag",
@@ -192,6 +189,7 @@ pub struct CellInput {
 impl CellInput {
     fn validate(&self) -> Result<(), WorkbenchError> {
         require_text("cell input artifact_id", &self.artifact_id)?;
+        check_single_line("cell input artifact_id", &self.artifact_id)?;
         validate_digest("cell input digest", &self.digest)
     }
 }
@@ -213,6 +211,7 @@ pub struct StudioCell {
 impl StudioCell {
     fn validate(&self) -> Result<(), WorkbenchError> {
         require_text("cell.id", &self.id)?;
+        check_single_line("cell.id", &self.id)?;
         require_text("cell.source", &self.source)?;
         if self.source.contains('\0') {
             return Err(WorkbenchError::ControlCharacter {
@@ -252,8 +251,11 @@ pub struct StudioChange {
 impl StudioChange {
     fn validate(&self) -> Result<(), WorkbenchError> {
         require_text("change.id", &self.id)?;
+        check_single_line("change.id", &self.id)?;
         require_text("change.artifact_id", &self.artifact_id)?;
+        check_single_line("change.artifact_id", &self.artifact_id)?;
         require_text("change.actor", &self.actor)?;
+        check_single_line("change.actor", &self.actor)?;
         require_text("change.reason", &self.reason)?;
         if let Some(digest) = &self.input_digest {
             validate_digest("change input_digest", digest)?;
@@ -311,7 +313,9 @@ impl StudioSession {
     /// Validate references, digest syntax, and dependency topology.
     pub fn validate(&self) -> Result<(), WorkbenchError> {
         require_text("session_id", &self.session_id)?;
+        check_single_line("session_id", &self.session_id)?;
         require_text("owner", &self.owner)?;
+        check_single_line("owner", &self.owner)?;
         require_text("goal", &self.goal)?;
         if let Some(digest) = &self.environment_digest {
             validate_digest("environment_digest", digest)?;
@@ -347,7 +351,7 @@ impl StudioSession {
         let mut artifact_ids = BTreeSet::new();
         for artifact in &self.artifacts {
             artifact.validate()?;
-            if !artifact_ids.insert(artifact.id.clone()) {
+            if !artifact_ids.insert(identity_key(&artifact.id)) {
                 return Err(WorkbenchError::Duplicate {
                     kind: "artifact",
                     id: artifact.id.clone(),
@@ -358,7 +362,7 @@ impl StudioSession {
         let mut cell_ids = BTreeSet::new();
         for cell in &self.cells {
             cell.validate()?;
-            if !cell_ids.insert(cell.id.clone()) {
+            if !cell_ids.insert(identity_key(&cell.id)) {
                 return Err(WorkbenchError::Duplicate {
                     kind: "cell",
                     id: cell.id.clone(),
@@ -366,7 +370,11 @@ impl StudioSession {
             }
             let mut inputs = BTreeSet::new();
             for input in &cell.inputs {
-                if !artifact_ids.contains(&input.artifact_id) {
+                if !self
+                    .artifacts
+                    .iter()
+                    .any(|artifact| artifact.id == input.artifact_id)
+                {
                     return Err(WorkbenchError::UnknownReference {
                         kind: "artifact",
                         id: input.artifact_id.clone(),
@@ -385,12 +393,13 @@ impl StudioSession {
             let mut dependencies = BTreeSet::new();
             for dependency in &cell.depends_on {
                 require_text("cell dependency", dependency)?;
+                check_single_line("cell dependency", dependency)?;
                 if dependency == &cell.id {
                     return Err(WorkbenchError::SelfDependency {
                         cell: cell.id.clone(),
                     });
                 }
-                if !cell_ids.contains(dependency) {
+                if !self.cells.iter().any(|cell| cell.id == *dependency) {
                     return Err(WorkbenchError::UnknownReference {
                         kind: "cell",
                         id: dependency.clone(),
@@ -410,14 +419,18 @@ impl StudioSession {
         let mut last_time = None;
         for change in &self.changes {
             change.validate()?;
-            if !artifact_ids.contains(&change.artifact_id) {
+            if !self
+                .artifacts
+                .iter()
+                .any(|artifact| artifact.id == change.artifact_id)
+            {
                 return Err(WorkbenchError::UnknownReference {
                     kind: "artifact",
                     id: change.artifact_id.clone(),
                     subject: change.id.clone(),
                 });
             }
-            if !change_ids.insert(change.id.clone()) {
+            if !change_ids.insert(identity_key(&change.id)) {
                 return Err(WorkbenchError::Duplicate {
                     kind: "change",
                     id: change.id.clone(),
@@ -683,7 +696,7 @@ impl CiRequest {
         let mut names = BTreeSet::new();
         for check in &self.checks {
             check.validate()?;
-            if !names.insert(check.name.clone()) {
+            if !names.insert(identity_key(&check.name)) {
                 return Err(WorkbenchError::Duplicate {
                     kind: "ci check",
                     id: check.name.clone(),
@@ -860,6 +873,16 @@ fn finite(field: &'static str, value: f64) -> Result<(), WorkbenchError> {
 }
 
 fn validate_digest(field: &'static str, value: &str) -> Result<(), WorkbenchError> {
+    if value.len() != 64
+        || !value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        return Err(WorkbenchError::InvalidDigest {
+            field,
+            value: value.to_string(),
+        });
+    }
     ContentHash::parse(value.to_string())
         .map(|_| ())
         .map_err(|_| WorkbenchError::InvalidDigest {
@@ -869,13 +892,17 @@ fn validate_digest(field: &'static str, value: &str) -> Result<(), WorkbenchErro
 }
 
 fn check_single_line(field: &'static str, value: &str) -> Result<(), WorkbenchError> {
-    if value
-        .chars()
-        .any(|character| character == '\n' || character == '\r' || character == '\0')
-    {
+    if value.chars().any(char::is_control) {
         return Err(WorkbenchError::ControlCharacter { field });
     }
+    if value != value.trim() {
+        return Err(WorkbenchError::EmptyField { field });
+    }
     Ok(())
+}
+
+fn identity_key(value: &str) -> String {
+    value.to_ascii_lowercase()
 }
 
 fn session_digest(session: &StudioSession) -> Result<String, WorkbenchError> {
@@ -1080,10 +1107,12 @@ fn yaml_quote(value: &str) -> String {
 /// Generate a deterministic, reviewable GitHub Actions workflow plan.
 pub fn plan_ci(request: &CiRequest) -> Result<CiPlan, WorkbenchError> {
     request.validate()?;
+    let mut triggers = request.triggers.clone();
+    triggers.sort();
     let mut yaml = String::new();
     yaml.push_str(&format!("name: {}\n\n", yaml_quote(&request.workflow)));
     yaml.push_str("on:\n");
-    for trigger in &request.triggers {
+    for trigger in &triggers {
         yaml.push_str(&format!("  {trigger}:\n"));
     }
     yaml.push_str("\njobs:\n  workbench-contracts:\n    runs-on: ubuntu-latest\n    steps:\n");
@@ -1344,21 +1373,22 @@ pub fn verify_workbench(
 
     finish_workbench_verification(
         request,
-        retained_report_digest,
-        report_digest_matched,
-        retained_audit_digest,
-        observed_audit_digest,
-        dashboard_present,
-        dashboard_verified,
-        ci_present,
-        ci_replay_supplied,
-        ci_verified,
-        mismatches,
+        WorkbenchVerificationFacts {
+            retained_report_digest,
+            report_digest_matched,
+            retained_audit_digest,
+            observed_audit_digest,
+            dashboard_present,
+            dashboard_verified,
+            ci_present,
+            ci_replay_supplied,
+            ci_verified,
+            mismatches,
+        },
     )
 }
 
-fn finish_workbench_verification(
-    request: &WorkbenchVerificationRequest,
+struct WorkbenchVerificationFacts {
     retained_report_digest: String,
     report_digest_matched: Option<bool>,
     retained_audit_digest: String,
@@ -1369,7 +1399,24 @@ fn finish_workbench_verification(
     ci_replay_supplied: bool,
     ci_verified: bool,
     mismatches: Vec<WorkbenchMismatch>,
+}
+
+fn finish_workbench_verification(
+    request: &WorkbenchVerificationRequest,
+    facts: WorkbenchVerificationFacts,
 ) -> Result<WorkbenchVerificationReport, WorkbenchError> {
+    let WorkbenchVerificationFacts {
+        retained_report_digest,
+        report_digest_matched,
+        retained_audit_digest,
+        observed_audit_digest,
+        dashboard_present,
+        dashboard_verified,
+        ci_present,
+        ci_replay_supplied,
+        ci_verified,
+        mismatches,
+    } = facts;
     let valid = mismatches.is_empty();
     let status = if !valid {
         "mismatch"
@@ -1558,8 +1605,59 @@ mod tests {
     }
 
     #[test]
+    fn metadata_identifiers_reject_controls_but_code_cells_remain_multiline() {
+        let mut value = session();
+        value.artifacts[0].id = "artifact\tunsafe".into();
+        assert!(matches!(
+            value.validate(),
+            Err(WorkbenchError::ControlCharacter {
+                field: "artifact.id"
+            })
+        ));
+
+        let mut value = session();
+        value.cells[0].source = "line one\nline two".into();
+        assert!(value.validate().is_ok());
+    }
+
+    #[test]
+    fn workbench_rejects_padded_metadata_case_aliases_and_uppercase_digests() {
+        let mut value = session();
+        value.artifacts[0].title = " artifact".into();
+        assert!(matches!(
+            value.validate(),
+            Err(WorkbenchError::EmptyField {
+                field: "artifact.title"
+            })
+        ));
+
+        let mut value = session();
+        value.artifacts.push(ArtifactCard {
+            id: "ARTIFACT-1".into(),
+            ..value.artifacts[0].clone()
+        });
+        assert!(matches!(
+            value.validate(),
+            Err(WorkbenchError::Duplicate {
+                kind: "artifact",
+                ..
+            })
+        ));
+
+        let mut value = session();
+        value.artifacts[0].digest = Some(hash("artifact").to_uppercase());
+        assert!(matches!(
+            value.validate(),
+            Err(WorkbenchError::InvalidDigest {
+                field: "artifact.digest",
+                ..
+            })
+        ));
+    }
+
+    #[test]
     fn ci_plan_is_deterministic_and_explicitly_not_executed() {
-        let plan = plan_ci(&CiRequest {
+        let mut request = CiRequest {
             workflow: "consumer contracts".into(),
             triggers: vec!["push".into(), "pull_request".into()],
             rust_toolchain: "1.85.0".into(),
@@ -1578,8 +1676,12 @@ mod tests {
                 },
             ],
             offline: true,
-        })
-        .unwrap();
+        };
+        let plan = plan_ci(&request).unwrap();
+        request.triggers.reverse();
+        let reordered_triggers = plan_ci(&request).unwrap();
+        assert_eq!(plan.digest, reordered_triggers.digest);
+        assert_eq!(plan.workflow_yaml, reordered_triggers.workflow_yaml);
         assert_eq!(plan.execution, "not_executed");
         assert_eq!(plan.network_access, "denied_by_plan");
         assert!(plan
@@ -1619,6 +1721,23 @@ mod tests {
         assert!(matches!(
             request.validate(),
             Err(WorkbenchError::UnsafePath { .. })
+        ));
+
+        request.checks.push(CiCheck {
+            name: "TESTS".into(),
+            run: "cargo test".into(),
+            working_directory: None,
+            required: true,
+        });
+        request.triggers = vec!["push".into()];
+        request.checks[0].name = "tests".into();
+        request.checks[0].working_directory = None;
+        assert!(matches!(
+            request.validate(),
+            Err(WorkbenchError::Duplicate {
+                kind: "ci check",
+                ..
+            })
         ));
     }
 

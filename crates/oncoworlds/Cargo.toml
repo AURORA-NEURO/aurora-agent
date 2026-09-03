@@ -8,11 +8,13 @@ repository.workspace = true
 description = "OncoWorld domain depth: identity spine, clonal evolution, methylation classes, cross-modal and cross-system transport, era and site shift"
 
 [dependencies]
+bioprism-foundation = { workspace = true }
+bioprism-ids = { workspace = true }
 bioprism-scope = { workspace = true }
 bioprism-onco = { workspace = true }
 bioprism-standards = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
-serde_json = { workspace = true }

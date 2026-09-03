@@ -136,6 +136,9 @@ impl Token {
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum LexError {
+    #[error("unexpected end of input at {span}")]
+    UnexpectedEnd { span: Span },
+
     #[error("unexpected character `{character}` at {span}")]
     UnexpectedCharacter { character: char, span: Span },
 
@@ -155,6 +158,7 @@ pub enum LexError {
 impl Diagnostic for LexError {
     fn code(&self) -> &'static str {
         match self {
+            LexError::UnexpectedEnd { .. } => "WEAVE-E1006",
             LexError::UnexpectedCharacter { .. } => "WEAVE-E1001",
             LexError::UnterminatedString { .. } => "WEAVE-E1002",
             LexError::UnterminatedComment { .. } => "WEAVE-E1003",
@@ -165,7 +169,8 @@ impl Diagnostic for LexError {
 
     fn span(&self) -> Option<Span> {
         Some(match self {
-            LexError::UnexpectedCharacter { span, .. }
+            LexError::UnexpectedEnd { span }
+            | LexError::UnexpectedCharacter { span, .. }
             | LexError::UnterminatedString { span }
             | LexError::UnterminatedComment { span }
             | LexError::MalformedVersion { span, .. }
@@ -406,7 +411,10 @@ fn lex_identifier(cursor: &mut Cursor<'_>, start: usize, line: u32, column: u32)
     while let Some(c) = cursor.peek() {
         let continues = c.is_ascii_alphanumeric()
             || c == '_'
-            || (c == '-' && cursor.peek_at(1).is_some_and(|next| next.is_ascii_alphanumeric()));
+            || (c == '-'
+                && cursor
+                    .peek_at(1)
+                    .is_some_and(|next| next.is_ascii_alphanumeric()));
         if !continues {
             break;
         }
@@ -427,12 +435,16 @@ fn lex_number(
     column: u32,
 ) -> Result<Token, LexError> {
     let mut components: Vec<String> = vec![String::new()];
-    read_digits(cursor, components.last_mut().expect("one component"));
+    if let Some(component) = components.last_mut() {
+        read_digits(cursor, component);
+    }
 
     while cursor.peek() == Some('.') && cursor.peek_at(1).is_some_and(|c| c.is_ascii_digit()) {
         cursor.bump();
         components.push(String::new());
-        read_digits(cursor, components.last_mut().expect("just pushed"));
+        if let Some(component) = components.last_mut() {
+            read_digits(cursor, component);
+        }
     }
 
     if components.len() > 3 {
@@ -541,7 +553,12 @@ fn lex_string(
                     other => {
                         return Err(LexError::UnknownEscape {
                             character: other,
-                            span: Span::new(escape_start, cursor.offset(), escape_line, escape_column),
+                            span: Span::new(
+                                escape_start,
+                                cursor.offset(),
+                                escape_line,
+                                escape_column,
+                            ),
                         })
                     }
                 });
@@ -557,7 +574,11 @@ fn lex_punctuation(
     line: u32,
     column: u32,
 ) -> Result<Token, LexError> {
-    let first = cursor.bump().expect("caller peeked a character");
+    let Some(first) = cursor.bump() else {
+        return Err(LexError::UnexpectedEnd {
+            span: Span::new(start, cursor.offset(), line, column),
+        });
+    };
     let second = cursor.peek();
 
     let (kind, consume_second) = match (first, second) {
@@ -590,7 +611,11 @@ fn lex_punctuation(
         }
     };
     if consume_second {
-        cursor.bump();
+        if cursor.bump().is_none() {
+            return Err(LexError::UnexpectedEnd {
+                span: Span::new(start, cursor.offset(), line, column),
+            });
+        }
     }
 
     Ok(Token {

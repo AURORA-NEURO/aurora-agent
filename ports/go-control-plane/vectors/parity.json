@@ -1,0 +1,241 @@
+{
+  "_provenance": {
+    "rust": "rustc 1.97.1 executed a standalone transcription of integrations/agent-fabric/src/ids.rs (mix64, IdempotencyKey::derive) and src/shard.rs (rendezvous score, preference_order, home_shard); constants copied verbatim from those files, output captured to rust_vectors.txt",
+    "python": "CPython 3.12.10 imported integrations/scale-5m/aurora_scale directly (fleet.assign_shard, fleet.Telemetry.snapshot, manifest.synthetic_records, manifest._record_bytes, manifest.chunks_from_records, manifest.summarize)",
+    "u64_encoding": "unsigned 64-bit values appear as decimal strings to survive JSON tooling"
+  },
+  "mix64": [
+    {
+      "x": "0",
+      "y": "16294208416658607535"
+    },
+    {
+      "x": "1",
+      "y": "10451216379200822465"
+    },
+    {
+      "x": "18446744073709551615",
+      "y": "16490336266968443936"
+    },
+    {
+      "x": "3735928559",
+      "y": "5395234354446855067"
+    },
+    {
+      "x": "12345",
+      "y": "2454886589211414944"
+    }
+  ],
+  "home_shard": [
+    {
+      "shard_count": 16,
+      "key": "12345",
+      "shard": 10
+    },
+    {
+      "shard_count": 8,
+      "key": "0",
+      "shard": 2
+    },
+    {
+      "shard_count": 8,
+      "key": "1",
+      "shard": 6
+    },
+    {
+      "shard_count": 8,
+      "key": "2",
+      "shard": 4
+    },
+    {
+      "shard_count": 8,
+      "key": "3",
+      "shard": 5
+    },
+    {
+      "shard_count": 9,
+      "key": "0",
+      "shard": 2
+    },
+    {
+      "shard_count": 9,
+      "key": "1",
+      "shard": 6
+    },
+    {
+      "shard_count": 16,
+      "key": "999",
+      "shard": 12
+    },
+    {
+      "shard_count": 7,
+      "key": "42",
+      "shard": 5
+    },
+    {
+      "shard_count": 4096,
+      "key": "7",
+      "shard": 1771
+    }
+  ],
+  "preference_order": [
+    {
+      "shard_count": 7,
+      "key": "42",
+      "order": [
+        5,
+        3,
+        6,
+        0,
+        1,
+        2,
+        4
+      ]
+    }
+  ],
+  "idempotency_derive_hex": [
+    {
+      "a": "1",
+      "b": "2",
+      "hex": "910a2dec89025cc1975835de1c9756ce"
+    },
+    {
+      "a": "2",
+      "b": "1",
+      "hex": "975835de1c9756ce910a2dec89025cc1"
+    },
+    {
+      "a": "0",
+      "b": "0",
+      "hex": "e220a8397b1dcdafe220a8397b1dcdaf"
+    }
+  ],
+  "assign_shard": [
+    {
+      "key": "same",
+      "shard_count": 1,
+      "shard": 0
+    },
+    {
+      "key": "same",
+      "shard_count": 8,
+      "shard": 4
+    },
+    {
+      "key": "same",
+      "shard_count": 9,
+      "shard": 8
+    },
+    {
+      "key": "same",
+      "shard_count": 16,
+      "shard": 4
+    },
+    {
+      "key": "task-1",
+      "shard_count": 1,
+      "shard": 0
+    },
+    {
+      "key": "task-1",
+      "shard_count": 8,
+      "shard": 7
+    },
+    {
+      "key": "task-1",
+      "shard_count": 9,
+      "shard": 5
+    },
+    {
+      "key": "task-1",
+      "shard_count": 16,
+      "shard": 15
+    },
+    {
+      "key": "task-2",
+      "shard_count": 1,
+      "shard": 0
+    },
+    {
+      "key": "task-2",
+      "shard_count": 8,
+      "shard": 0
+    },
+    {
+      "key": "task-2",
+      "shard_count": 9,
+      "shard": 4
+    },
+    {
+      "key": "task-2",
+      "shard_count": 16,
+      "shard": 0
+    },
+    {
+      "key": "agent-77",
+      "shard_count": 1,
+      "shard": 0
+    },
+    {
+      "key": "agent-77",
+      "shard_count": 8,
+      "shard": 3
+    },
+    {
+      "key": "agent-77",
+      "shard_count": 9,
+      "shard": 0
+    },
+    {
+      "key": "agent-77",
+      "shard_count": 16,
+      "shard": 11
+    },
+    {
+      "key": "synthetic/module-00000000.src",
+      "shard_count": 1,
+      "shard": 0
+    },
+    {
+      "key": "synthetic/module-00000000.src",
+      "shard_count": 8,
+      "shard": 2
+    },
+    {
+      "key": "synthetic/module-00000000.src",
+      "shard_count": 9,
+      "shard": 4
+    },
+    {
+      "key": "synthetic/module-00000000.src",
+      "shard_count": 16,
+      "shard": 2
+    }
+  ],
+  "synthetic_record": {
+    "path": "synthetic/module-00000000.src",
+    "size": 8000,
+    "lines": 100,
+    "digest": "b8dc8ef1c92346151529d8f273526d6c2bad8713647425d7138e2ddb7a43e54c",
+    "canonical_json_line": "{\"digest\":\"b8dc8ef1c92346151529d8f273526d6c2bad8713647425d7138e2ddb7a43e54c\",\"lines\":100,\"path\":\"synthetic/module-00000000.src\",\"size\":8000}\n",
+    "canonical_json_line_sha256": "802e425bcc10a4e09ad0a8404cbfabddeb442a1467a1ba85a8e982b2169088de"
+  },
+  "manifest_summary": {
+    "file_count": 2048,
+    "lines_per_file": 100,
+    "chunk_records": 256,
+    "total_files": 2048,
+    "total_lines": 204800,
+    "chunk_count": 8,
+    "root_digest": "881c41fae8f9a88a70422de893de63067158cda909f98cf793a8af20d8d353b5"
+  },
+  "telemetry_snapshot_keys": [
+    "completed",
+    "dispatched",
+    "in_flight",
+    "lease_expiries",
+    "peak_in_flight",
+    "rejected_backpressure",
+    "submitted"
+  ]
+}

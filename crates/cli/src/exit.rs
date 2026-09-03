@@ -277,11 +277,13 @@ impl CliError {
             | FiberError::MissingQueryField(_)
             | FiberError::WrongQueryFieldType { .. }
             | FiberError::InvalidIdentifier(_)
+            | FiberError::InvalidBudget(_)
             | FiberError::InvalidDecisionTime(_)
             | FiberError::InvalidDecisionContract(_)
             | FiberError::InvalidRateDistortionContract(_)
             | FiberError::InvalidAdaptiveAcquisitionContract(_)
             | FiberError::World(_) => ExitCode::InvalidInput,
+            FiberError::InvariantViolation(_) => ExitCode::CompileFailed,
             FiberError::BudgetExceeded { .. } => ExitCode::CompileFailed,
             FiberError::UnorderableSplitGroups { .. } => ExitCode::Indeterminate,
             FiberError::Policy(violation) => policy_code(violation),
@@ -302,6 +304,8 @@ impl CliError {
             StoreError::Json(_)
             | StoreError::UnsupportedKey(_)
             | StoreError::UnsupportedValue(_)
+            | StoreError::InvalidIndexName(_)
+            | StoreError::IndexTooLarge
             | StoreError::MalformedWorld => ExitCode::InvalidInput,
         };
         CliError::new(code, error.to_string()).about(path.display().to_string())
@@ -368,7 +372,11 @@ impl CliError {
             ProjectError::Adapter(adapter) => {
                 let code = match &adapter {
                     AdapterError::Io { .. } => ExitCode::Io,
-                    AdapterError::UnsupportedSource { .. }
+                    AdapterError::InvalidSource(_)
+                    | AdapterError::InvalidLoss(_)
+                    | AdapterError::TraversalLimit { .. }
+                    | AdapterError::Conformance(_)
+                    | AdapterError::UnsupportedSource { .. }
                     | AdapterError::UnsupportedFormat { .. }
                     | AdapterError::Csv(_)
                     | AdapterError::AmbiguousIdentity { .. }

@@ -73,7 +73,7 @@ pub struct ContextCertificate {
 
 impl ContextCertificate {
     /// The certificate body, before its own hash is attached.
-    fn body(&self, profile: CertificateProfile) -> Value {
+    fn body(&self, profile: CertificateProfile) -> Result<Value, CanonicalError> {
         let mut map = Map::new();
         let version = match profile {
             CertificateProfile::Reference => CERTIFICATE_SCHEMA_VERSION,
@@ -87,23 +87,29 @@ impl ContextCertificate {
         map.insert("protected_closure".into(), json!(self.protected_closure));
         map.insert(
             "omissions".into(),
-            serde_json::to_value(&self.omissions).expect("omissions are serialisable"),
+            serde_json::to_value(&self.omissions)
+                .map_err(|error| CanonicalError::Serialization(format!("omissions: {error}")))?,
         );
-        map.insert("plan".into(), plan_to_json(&self.plan));
+        map.insert("plan".into(), plan_to_json(&self.plan)?);
         map.insert(
             "oracle".into(),
-            serde_json::to_value(&self.oracle).expect("verdict is serialisable"),
+            serde_json::to_value(&self.oracle)
+                .map_err(|error| CanonicalError::Serialization(format!("verdict: {error}")))?,
         );
         map.insert(
             "source_hashes".into(),
-            serde_json::to_value(&self.source_hashes).expect("hashes are serialisable"),
+            serde_json::to_value(&self.source_hashes).map_err(|error| {
+                CanonicalError::Serialization(format!("source hashes: {error}"))
+            })?,
         );
         map.insert("limitations".into(), json!(self.limitations));
 
         if profile == CertificateProfile::Extended {
             map.insert(
                 "omission_manifest".into(),
-                serde_json::to_value(&self.manifest).expect("manifest is serialisable"),
+                serde_json::to_value(&self.manifest).map_err(|error| {
+                    CanonicalError::Serialization(format!("omission manifest: {error}"))
+                })?,
             );
             map.insert(
                 "supports_sufficiency_claim".into(),
@@ -111,20 +117,24 @@ impl ContextCertificate {
             );
         }
 
-        Value::Object(map)
+        Ok(Value::Object(map))
     }
 
     /// The full certificate, with `certificate_sha256` computed over the body.
     pub fn to_json(&self, profile: CertificateProfile) -> Result<Value, CanonicalError> {
-        let body = self.body(profile);
+        let body = self.body(profile)?;
         let digest = ContentHash::of_value(&body)?;
-        let mut map = body.as_object().expect("body is an object").clone();
+        let Some(mut map) = body.as_object().cloned() else {
+            return Err(CanonicalError::Serialization(
+                "certificate body was not a JSON object".into(),
+            ));
+        };
         map.insert("certificate_sha256".into(), json!(digest.as_str()));
         Ok(Value::Object(map))
     }
 
     pub fn digest(&self, profile: CertificateProfile) -> Result<ContentHash, CanonicalError> {
-        ContentHash::of_value(&self.body(profile))
+        ContentHash::of_value(&self.body(profile)?)
     }
 
     /// Recomputes the embedded digest and checks it, the way a consumer must before trusting a
@@ -178,7 +188,7 @@ impl CertificateVerification {
     }
 }
 
-fn plan_to_json(plan: &PlanDescriptor) -> Value {
+fn plan_to_json(plan: &PlanDescriptor) -> Result<Value, CanonicalError> {
     let mut map = Map::new();
     map.insert("backend".into(), json!(plan.backend.as_str()));
     map.insert(
@@ -199,8 +209,9 @@ fn plan_to_json(plan: &PlanDescriptor) -> Value {
         "fallback".into(),
         match &plan.fallback {
             None => Value::Null,
-            Some(fallback) => serde_json::to_value(fallback).expect("fallback is serialisable"),
+            Some(fallback) => serde_json::to_value(fallback)
+                .map_err(|error| CanonicalError::Serialization(format!("fallback: {error}")))?,
         },
     );
-    Value::Object(map)
+    Ok(Value::Object(map))
 }

@@ -256,7 +256,12 @@ impl BioState {
     ///
     /// The consumption ledger is *carried*, not reset. That is the affine-resource invariant in the
     /// only form an IR can express it: a fork may spend more than its parent and may not spend less.
-    pub fn fork(&self, child_id: StateId, event_time: Timestamp, record_time: Timestamp) -> BioState {
+    pub fn fork(
+        &self,
+        child_id: StateId,
+        event_time: Timestamp,
+        record_time: Timestamp,
+    ) -> BioState {
         BioState {
             state_id: child_id,
             world_id: self.world_id.clone(),

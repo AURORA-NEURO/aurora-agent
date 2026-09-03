@@ -31,8 +31,7 @@ fn main() {
         let facts = eager.facts.len();
         drop(eager);
 
-        let directory =
-            std::env::temp_dir().join(format!("bioprism-bench-{distractors}"));
+        let directory = std::env::temp_dir().join(format!("bioprism-bench-{distractors}"));
         let _ = std::fs::remove_dir_all(&directory);
 
         let started = Instant::now();

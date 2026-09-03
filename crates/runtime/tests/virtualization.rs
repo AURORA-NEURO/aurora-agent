@@ -7,7 +7,7 @@
 
 use bioprism_ids::RunId;
 use bioprism_runtime::{
-    EffectKind, EffectPolicy, EffectSource, EffectRequest, Host, InProcessWorld, RecordingHost,
+    EffectKind, EffectPolicy, EffectRequest, EffectSource, Host, InProcessWorld, RecordingHost,
     RuntimeError, Sandbox,
 };
 
@@ -38,7 +38,8 @@ fn a_write_lands_in_the_overlay_and_the_immutable_base_still_answers_for_untouch
         host.read_file("/work/in.txt").expect("allowed").as_deref(),
         Some("base-content")
     );
-    host.write_file("/work/in.txt", "overlaid").expect("allowed");
+    host.write_file("/work/in.txt", "overlaid")
+        .expect("allowed");
     assert_eq!(
         host.read_file("/work/in.txt").expect("allowed").as_deref(),
         Some("overlaid"),
@@ -64,8 +65,10 @@ fn a_missing_file_is_an_answer_rather_than_an_error() {
 #[test]
 fn the_change_journal_separates_a_create_from_an_overwrite() {
     let mut host = RecordingHost::new(run("run-journal"), world(), policy());
-    host.write_file("/work/in.txt", "overwritten").expect("allowed");
-    host.write_file("/work/new.txt", "created").expect("allowed");
+    host.write_file("/work/in.txt", "overwritten")
+        .expect("allowed");
+    host.write_file("/work/new.txt", "created")
+        .expect("allowed");
 
     let (_, world, _, _) = host.into_parts();
     let journal = world.journal();
@@ -82,7 +85,8 @@ fn the_change_journal_separates_a_create_from_an_overwrite() {
 #[test]
 fn the_state_manifest_digests_every_visible_path() {
     let mut host = RecordingHost::new(run("run-manifest"), world(), policy());
-    host.write_file("/work/new.txt", "created").expect("allowed");
+    host.write_file("/work/new.txt", "created")
+        .expect("allowed");
 
     let (_, world, _, _) = host.into_parts();
     let manifest = world.state_manifest();
@@ -99,7 +103,9 @@ fn the_state_manifest_digests_every_visible_path() {
 fn a_spawned_process_answers_deterministically_and_is_recorded() {
     let mut host = RecordingHost::new(run("run-spawn"), world(), policy());
 
-    let outcome = host.spawn("build", &["--release", "-j2"]).expect("declared");
+    let outcome = host
+        .spawn("build", &["--release", "-j2"])
+        .expect("declared");
     assert_eq!(outcome.integer("exit_code"), Some(0));
     assert_eq!(outcome.text("stdout"), Some("build --release -j2"));
     assert_eq!(host.tape().len(), 1);
@@ -150,4 +156,24 @@ fn the_world_counts_only_the_effects_it_was_actually_asked_to_perform() {
         .perform(&EffectRequest::ClockNow)
         .expect("the clock always answers");
     assert_eq!(world.calls(), 2);
+}
+
+#[test]
+fn virtual_clock_overflow_is_refused_without_saturation() {
+    let mut world = InProcessWorld::new().with_clock_start(u64::MAX);
+    let error = world
+        .perform(&EffectRequest::ClockSleep { millis: 1 })
+        .expect_err("virtual time must not silently saturate");
+    assert!(matches!(error, RuntimeError::InvariantViolation { .. }));
+    assert_eq!(world.task_millis(), u64::MAX);
+}
+
+#[test]
+fn unbounded_random_byte_requests_are_refused_before_allocation() {
+    let mut world = InProcessWorld::new();
+    let error = world
+        .perform(&EffectRequest::RandomBytes { count: u32::MAX })
+        .expect_err("randomness requests must stay within the sandbox bound");
+    assert!(matches!(error, RuntimeError::InvariantViolation { .. }));
+    assert_eq!(world.calls(), 1);
 }

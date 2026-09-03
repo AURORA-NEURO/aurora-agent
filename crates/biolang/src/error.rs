@@ -96,7 +96,9 @@ pub enum StateError {
     UndeclaredPlaneChange { label: String, plane: String },
 
     /// The mirror failure: a declared change that did not happen.
-    #[error("transition {label:?} declares a change to the {plane} plane whose hash did not change")]
+    #[error(
+        "transition {label:?} declares a change to the {plane} plane whose hash did not change"
+    )]
     DeclaredPlaneUnchanged { label: String, plane: String },
 
     /// A resource amount that cannot survive canonical encoding.
@@ -172,7 +174,9 @@ pub enum WorldlineError {
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum InterventionError {
     /// 25.06: "Simulation is never labeled as real intervention."
-    #[error("action {action:?} is a modeled perturbation but declares an effect on the {plane} plane")]
+    #[error(
+        "action {action:?} is a modeled perturbation but declares an effect on the {plane} plane"
+    )]
     SimulationClaimsRealEffect { action: String, plane: String },
 
     /// The mirror: a real-world action with no effect outside the artifact and knowledge planes.
@@ -212,7 +216,9 @@ pub enum FbcError {
     UnreachableObligation { obligation: String },
 
     /// 25.07 validation, "falsifier executable check".
-    #[error("falsifier {falsifier:?} names oracle {oracle:?}, which is not in the contract's mesh")]
+    #[error(
+        "falsifier {falsifier:?} names oracle {oracle:?}, which is not in the contract's mesh"
+    )]
     FalsifierWithoutOracle { falsifier: String, oracle: String },
 
     /// A contract with no falsifier at all.
@@ -228,7 +234,9 @@ pub enum SystemError {
     UnpinnedComponent { component: String, detail: String },
 
     /// 25.14: "Private prompts may be hashed but behavior contracts remain observable."
-    #[error("component {component:?} hides its prompt and declares no observable behaviour contract")]
+    #[error(
+        "component {component:?} hides its prompt and declares no observable behaviour contract"
+    )]
     HiddenBehaviourContract { component: String },
 
     /// A graph edge to a component the manifest does not declare.
@@ -236,7 +244,9 @@ pub enum SystemError {
     DanglingComponent { component: String },
 
     /// A determinism claim contradicted by a declared source of nondeterminism.
-    #[error("component {component:?} claims determinism but declares nondeterministic input {input:?}")]
+    #[error(
+        "component {component:?} claims determinism but declares nondeterministic input {input:?}"
+    )]
     DeterminismContradicted { component: String, input: String },
 }
 
@@ -250,7 +260,9 @@ pub enum ActError {
     ClaimWithout { act: String, missing: String },
 
     /// 25.15: "A specimen act obeys material conservation."
-    #[error("act {act:?} reserves {requested} of specimen {specimen:?} but only {available} remains")]
+    #[error(
+        "act {act:?} reserves {requested} of specimen {specimen:?} but only {available} remains"
+    )]
     MaterialOverdrawn {
         act: String,
         specimen: String,
@@ -348,7 +360,9 @@ pub enum OracleIrError {
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum MutationIrError {
     /// 25.19: "Every descendant retains parent lineage."
-    #[error("mutation {mutation:?} declares no parent; a descendant without lineage cannot be audited")]
+    #[error(
+        "mutation {mutation:?} declares no parent; a descendant without lineage cannot be audited"
+    )]
     LineageBroken { mutation: String },
 
     /// 25.19: "Controlled semantic changes update the oracle."
@@ -380,7 +394,9 @@ pub enum BundleIrError {
     AttestationWithout { run: String, missing: String },
 
     /// An oracle verdict in the bundle for an oracle the run never invoked.
-    #[error("bundle carries a verdict from {oracle:?}, which does not appear in the run's actions")]
+    #[error(
+        "bundle carries a verdict from {oracle:?}, which does not appear in the run's actions"
+    )]
     VerdictFromUninvokedOracle { oracle: String },
 }
 
@@ -521,7 +537,9 @@ pub enum TypeError {
     },
 
     /// 25.21: "time semantics | Required".
-    #[error("collection {collection:?} is longitudinal and the query does not say which clock it means")]
+    #[error(
+        "collection {collection:?} is longitudinal and the query does not say which clock it means"
+    )]
     TimeSemanticsNotDeclared { collection: String },
 
     /// 25.21: "cost estimate | Required".
@@ -543,7 +561,9 @@ pub enum TypeError {
     },
 
     /// The query's scope must sit inside the collection's declared scope.
-    #[error("query scope does not refine the collection's declared scope on dimension {dimension:?}")]
+    #[error(
+        "query scope does not refine the collection's declared scope on dimension {dimension:?}"
+    )]
     ScopeNotRefining { dimension: String },
 
     /// A scope dimension the `bioprism-scope` registry cannot classify.

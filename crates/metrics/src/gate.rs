@@ -63,6 +63,9 @@ pub enum EvaluabilityGap {
         capability: CapabilityId,
         reason: NoIntervalReason,
     },
+    /// The grid itself failed structural validation, so no predicate may claim a result from it.
+    /// This remains a gap rather than a pass, and therefore cannot permit release.
+    InvalidGrid { detail: String },
     /// The grid has no measured cell at all, so a grid-wide predicate has no population.
     GridEmpty,
 }
@@ -152,8 +155,47 @@ impl GatePredicate {
         }
     }
 
+    fn invalid_reason(&self) -> Option<String> {
+        match self {
+            GatePredicate::MinimumScore { floor, .. } if !floor.is_finite() => {
+                Some(format!("minimum score floor {floor} is not finite"))
+            }
+            GatePredicate::WorstCellAtLeast { floor } if !floor.is_finite() => {
+                Some(format!("worst-cell floor {floor} is not finite"))
+            }
+            GatePredicate::MinimumCoverage { floor } if !floor.is_finite() => {
+                Some(format!("coverage floor {floor} is not finite"))
+            }
+            GatePredicate::MinimumCoverage { floor } if !(0.0..=1.0).contains(floor) => {
+                Some(format!("coverage floor {floor} is outside 0..=1"))
+            }
+            GatePredicate::MaximumIntervalWidth { ceiling, .. } if !ceiling.is_finite() => {
+                Some(format!("interval-width ceiling {ceiling} is not finite"))
+            }
+            GatePredicate::MaximumIntervalWidth { ceiling, .. } if *ceiling < 0.0 => {
+                Some(format!("interval-width ceiling {ceiling} is negative"))
+            }
+            GatePredicate::NoUnmeasured { capabilities } if capabilities.is_empty() => {
+                Some("no-unmeasured must name at least one capability".to_string())
+            }
+            _ => None,
+        }
+    }
+
     /// Evaluates one predicate against one grid.
     pub fn evaluate(&self, grid: &CapabilityGrid) -> GateOutcome {
+        if let Some(reason) = self.invalid_reason() {
+            return GateOutcome::Violated {
+                witness: format!("invalid {} predicate: {reason}", self.kind()),
+            };
+        }
+        if let Err(error) = grid.validate() {
+            return GateOutcome::Unevaluable {
+                gap: EvaluabilityGap::InvalidGrid {
+                    detail: error.to_string(),
+                },
+            };
+        }
         match self {
             GatePredicate::MinimumScore { capability, floor } => match resolve(grid, capability) {
                 Err(gap) => GateOutcome::Unevaluable { gap },

@@ -117,8 +117,7 @@ pub struct Interaction {
 /// transformations, so an undeclared interaction comes back unresolved naming the declaration as the
 /// gap rather than being waved through.
 pub fn interaction(interaction: &Interaction) -> Determination {
-    let components_move =
-        !interaction.left.is_invariant() && !interaction.right.is_invariant();
+    let components_move = !interaction.left.is_invariant() && !interaction.right.is_invariant();
     if components_move && interaction.observed.is_invariant() {
         return Determination::contradicted(
             EvidenceTier::Deterministic,

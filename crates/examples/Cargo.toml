@@ -8,6 +8,7 @@ repository.workspace = true
 description = "Reference BioWorlds and runnable vertical slices"
 
 [dependencies]
+bioprism-foundation = { workspace = true }
 bioprism-bundle = { workspace = true }
 bioprism-ids = { workspace = true }
 bioprism-world = { workspace = true }

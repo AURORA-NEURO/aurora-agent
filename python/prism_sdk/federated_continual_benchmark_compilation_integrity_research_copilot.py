@@ -1,0 +1,6 @@
+"""Benchcompiler P32 federated_continual research_copilot benchmark-compilation integrity feature."""
+from .benchmark_compilation_integrity_support import BenchmarkCard7,BenchmarkCompileRequest4,BenchmarkCompilationIntegrityError,manifest,compile
+FEATURE_ID="AFA-benchcompiler-P32-F12";CONTRACT_VERSION="benchcompiler-federated_continual_benchmark_compilation_integrity_research_copilot/1.0"
+def federated_continual_benchmark_compilation_integrity_research_copilot_manifest():return manifest(feature_id=FEATURE_ID,contract_version=CONTRACT_VERSION,scale="federated_continual",mode="research_copilot")
+def compile_federated_continual_benchmark_compilation_integrity_research_copilot(request:BenchmarkCompileRequest4)->BenchmarkCard7:return compile(request,feature_id=FEATURE_ID,contract_version=CONTRACT_VERSION,scale="federated_continual",mode="research_copilot")
+__all__=["FEATURE_ID","CONTRACT_VERSION","federated_continual_benchmark_compilation_integrity_research_copilot_manifest","compile_federated_continual_benchmark_compilation_integrity_research_copilot"]

@@ -38,7 +38,9 @@ pub enum PolicyError {
     )]
     NotADeclassification { id: String, version: u32 },
 
-    #[error("redaction rule {id:?} v{version} states no rationale, so its receipts would be blank")]
+    #[error(
+        "redaction rule {id:?} v{version} states no rationale, so its receipts would be blank"
+    )]
     UnexplainedRedaction { id: String, version: u32 },
 
     #[error("the policy rule set could not be canonicalised for versioning: {0}")]

@@ -8,6 +8,8 @@ repository.workspace = true
 description = "Decision Section IR and Context Certificate: the model-facing context ABI and its omission receipt"
 
 [dependencies]
+bioprism-foundation = { workspace = true }
 bioprism-ids = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+thiserror = { workspace = true }

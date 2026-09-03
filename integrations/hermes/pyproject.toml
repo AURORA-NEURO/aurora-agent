@@ -1,0 +1,9 @@
+[project]
+name = "aurora-hermes"
+version = "0.1.0"
+description = "Dependency-light, secret-safe Hermes MCP configuration adapter for Aurora"
+requires-python = ">=3.10"
+dependencies = []
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

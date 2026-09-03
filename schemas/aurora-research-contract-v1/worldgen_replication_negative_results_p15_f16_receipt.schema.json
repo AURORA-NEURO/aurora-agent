@@ -1,0 +1,128 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aurora-neuro.org/schemas/aurora-research-contract-v1/worldgen-replication-negative-results-p15-f16.json",
+  "title": "AFA-worldgen-P15-F16 receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "contract_version",
+    "feature_id",
+    "workflow_id",
+    "disposition",
+    "stage_order",
+    "completed_stage_order",
+    "pending_stage_order",
+    "compensation_order",
+    "checkpoint_seq",
+    "budget_units",
+    "consumed_units",
+    "replay_identity",
+    "workflow_digest",
+    "copilot",
+    "effect_receipts",
+    "artifact",
+    "raw_data_local",
+    "aggregate_only",
+    "boundary"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string"
+    },
+    "contract_version": {
+      "const": "worldgen-federated_continual-replication-negative-results-workflow/1.0"
+    },
+    "feature_id": {
+      "const": "AFA-worldgen-P15-F16"
+    },
+    "workflow_id": {
+      "type": "string"
+    },
+    "disposition": {
+      "type": "string"
+    },
+    "stage_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "completed_stage_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "pending_stage_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "compensation_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "checkpoint_seq": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "budget_units": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "consumed_units": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "replay_identity": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "workflow_digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "copilot": {
+      "type": "object"
+    },
+    "effect_receipts": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "raw_data_local": {
+      "const": true
+    },
+    "aggregate_only": {
+      "const": true
+    },
+    "boundary": {
+      "type": "string"
+    },
+    "artifact": {
+      "type": "object",
+      "required": [
+        "content_type",
+        "content_hash",
+        "boundary"
+      ],
+      "properties": {
+        "content_type": {
+          "const": "application/vnd.aurora.worldgen.replication-negative-results-workflow-receipt+json"
+        },
+        "content_hash": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "boundary": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

@@ -96,7 +96,10 @@ impl Declaration {
     /// The component restores identically. No basis is required because there is no difference to
     /// explain.
     pub fn exact() -> Self {
-        Declaration { level: Level::Exact, basis: String::new() }
+        Declaration {
+            level: Level::Exact,
+            basis: String::new(),
+        }
     }
 
     /// The component restores differently and `basis` says why that cannot change the decision.
@@ -106,21 +109,30 @@ impl Declaration {
     pub fn equivalent(basis: impl Into<String>) -> Result<Self, SweepError> {
         let basis = basis.into();
         require_nonempty(&basis, "Declaration::equivalent", "basis")?;
-        Ok(Declaration { level: Level::Equivalent, basis })
+        Ok(Declaration {
+            level: Level::Equivalent,
+            basis,
+        })
     }
 
     /// The component restores differently and nobody has established that it does not matter.
     pub fn degraded(reason: impl Into<String>) -> Result<Self, SweepError> {
         let reason = reason.into();
         require_nonempty(&reason, "Declaration::degraded", "reason")?;
-        Ok(Declaration { level: Level::Degraded, basis: reason })
+        Ok(Declaration {
+            level: Level::Degraded,
+            basis: reason,
+        })
     }
 
     /// The component was not captured, and this says so.
     pub fn absent(reason: impl Into<String>) -> Result<Self, SweepError> {
         let reason = reason.into();
         require_nonempty(&reason, "Declaration::absent", "reason")?;
-        Ok(Declaration { level: Level::Absent, basis: reason })
+        Ok(Declaration {
+            level: Level::Absent,
+            basis: reason,
+        })
     }
 
     pub fn level(&self) -> Level {
@@ -150,7 +162,10 @@ impl Declaration {
             return Ok(self.clone());
         }
         match level {
-            Level::Exact => unreachable!("Exact is the maximum, so it cannot be strictly lower"),
+            Level::Exact => Err(SweepError::malformed(
+                "Declaration::lowered_to",
+                "an exact declaration cannot be a strict lower level",
+            )),
             Level::Equivalent => Declaration::equivalent(reason),
             Level::Degraded => Declaration::degraded(reason),
             Level::Absent => Declaration::absent(reason),
@@ -204,8 +219,12 @@ mod tests {
     #[test]
     fn declared_equivalence_outranks_unexplained_difference() {
         assert!(Level::Equivalent > Level::Degraded);
-        assert!(eq("tape replays identical bodies").level().difference_is_immaterial());
-        assert!(!deg("clock skew unmodelled").level().difference_is_immaterial());
+        assert!(eq("tape replays identical bodies")
+            .level()
+            .difference_is_immaterial());
+        assert!(!deg("clock skew unmodelled")
+            .level()
+            .difference_is_immaterial());
     }
 
     #[test]
@@ -254,9 +273,15 @@ mod tests {
         let err = fallback.lowered_to(Level::Exact, "wishful").unwrap_err();
         assert!(matches!(
             err,
-            SweepError::FidelityRaised { from: "degraded", to: "exact", .. }
+            SweepError::FidelityRaised {
+                from: "degraded",
+                to: "exact",
+                ..
+            }
         ));
-        assert!(fallback.lowered_to(Level::Equivalent, "still wishful").is_err());
+        assert!(fallback
+            .lowered_to(Level::Equivalent, "still wishful")
+            .is_err());
     }
 
     #[test]

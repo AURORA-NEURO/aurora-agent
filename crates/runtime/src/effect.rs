@@ -108,24 +108,45 @@ pub enum EffectRequest {
     /// Read the task clock. See 05.07: task time is virtual and separate from wall time.
     ClockNow,
     /// Advance the task clock. Nothing sleeps; the clock is a number.
-    ClockSleep { millis: u64 },
-    RandomBytes { count: u32 },
-    NetworkFetch { method: String, url: String },
-    FileRead { path: String },
-    FileWrite { path: String, content: String },
-    ProcessSpawn { program: String, args: Vec<String> },
+    ClockSleep {
+        millis: u64,
+    },
+    RandomBytes {
+        count: u32,
+    },
+    NetworkFetch {
+        method: String,
+        url: String,
+    },
+    FileRead {
+        path: String,
+    },
+    FileWrite {
+        path: String,
+        content: String,
+    },
+    ProcessSpawn {
+        program: String,
+        args: Vec<String>,
+    },
     ServiceCall {
         service: String,
         operation: String,
         request: Value,
     },
-    ModelCall { model: String, prompt: String },
+    ModelCall {
+        model: String,
+        prompt: String,
+    },
     OutboundMessage {
         channel: String,
         recipient: String,
         body: String,
     },
-    Payment { account: String, amount_micros: u64 },
+    Payment {
+        account: String,
+        amount_micros: u64,
+    },
 }
 
 impl EffectRequest {
@@ -165,7 +186,8 @@ impl EffectRequest {
             | EffectRequest::ProcessSpawn { .. }
             | EffectRequest::ServiceCall { .. } => EffectClass::ReversibleSandbox,
             EffectRequest::NetworkFetch { method, .. } => {
-                let safe = method.eq_ignore_ascii_case("get") || method.eq_ignore_ascii_case("head");
+                let safe =
+                    method.eq_ignore_ascii_case("get") || method.eq_ignore_ascii_case("head");
                 if safe {
                     EffectClass::Pure
                 } else {
@@ -188,16 +210,57 @@ impl EffectRequest {
         let EffectRequest::NetworkFetch { url, .. } = self else {
             return None;
         };
-        let after_scheme = url.split_once("://").map_or(url.as_str(), |(_, rest)| rest);
+        if url
+            .chars()
+            .any(|character| character.is_whitespace() || character.is_control())
+        {
+            return None;
+        }
+        let (scheme, after_scheme) = url.split_once("://")?;
+        if !scheme.eq_ignore_ascii_case("http") && !scheme.eq_ignore_ascii_case("https") {
+            return None;
+        }
         let authority = after_scheme
             .split(['/', '?', '#'])
             .next()
             .unwrap_or(after_scheme);
-        let host_and_port = authority.rsplit('@').next().unwrap_or(authority);
-        let host = host_and_port
-            .rsplit_once(':')
-            .map_or(host_and_port, |(host, _)| host);
-        Some(host.to_ascii_lowercase())
+        if authority.is_empty() || authority.chars().any(char::is_whitespace) {
+            return None;
+        }
+        let host_and_port = authority.rsplit('@').next()?;
+        if host_and_port.is_empty() {
+            return None;
+        }
+        let host = if host_and_port.starts_with('[') {
+            let close = host_and_port.find(']')?;
+            let suffix = &host_and_port[close + 1..];
+            if suffix.is_empty()
+                || (suffix.starts_with(':')
+                    && suffix.len() > 1
+                    && suffix[1..].parse::<u16>().is_ok())
+            {
+                &host_and_port[..=close]
+            } else {
+                return None;
+            }
+        } else if let Some((host, port)) = host_and_port.rsplit_once(':') {
+            if host.is_empty() || port.is_empty() || port.parse::<u16>().is_err() {
+                return None;
+            }
+            host
+        } else {
+            host_and_port
+        };
+        if host == "[]"
+            || host
+                .chars()
+                .any(|character| character == ':' && !host.starts_with('['))
+        {
+            return None;
+        }
+        let host = host.to_ascii_lowercase();
+        let host = host.trim_end_matches('.');
+        (!host.is_empty()).then(|| host.to_string())
     }
 
     /// The path a filesystem request names, for allowlist checks.
@@ -286,7 +349,9 @@ pub enum MaterializationPolicy {
 pub enum NetworkMode {
     /// No outbound access at all. The default, and the only mode with no contamination question.
     Denied,
-    Allowlist { hosts: BTreeSet<String> },
+    Allowlist {
+        hosts: BTreeSet<String>,
+    },
     /// Answers come from recorded fixtures; a miss fails rather than reaching the network.
     RecordedFixture,
     DeterministicEmulator,
@@ -398,24 +463,25 @@ impl EffectPolicy {
         }
 
         let class = request.class();
-        if !self.permitted_classes.contains(&class) {
-            return match (self.materialization, class) {
-                (MaterializationPolicy::Simulate, _) => Ok(Authorization::Simulate),
+        let simulated = if !self.permitted_classes.contains(&class) {
+            match (self.materialization, class) {
+                (MaterializationPolicy::Simulate, _) => true,
                 (MaterializationPolicy::Refuse, EffectClass::Irreversible) => {
-                    Err(RuntimeError::IrreversibleRefused { kind })
+                    return Err(RuntimeError::IrreversibleRefused { kind });
                 }
                 (MaterializationPolicy::Refuse, _) => {
-                    Err(RuntimeError::ClassForbidden { class, kind })
+                    return Err(RuntimeError::ClassForbidden { class, kind });
                 }
-            };
-        }
+            }
+        } else {
+            false
+        };
 
         if let Some(path) = request.target_path() {
-            let allowed = is_canonical_path(path)
-                && self
-                    .path_allowlist
-                    .iter()
-                    .any(|prefix| path.starts_with(prefix.as_str()));
+            let allowed = self
+                .path_allowlist
+                .iter()
+                .any(|prefix| path_is_allowed(path, prefix));
             if !allowed {
                 return Err(RuntimeError::PathDenied {
                     path: path.to_string(),
@@ -423,10 +489,15 @@ impl EffectPolicy {
             }
         }
 
-        if let Some(host) = request.target_host() {
+        if let EffectRequest::NetworkFetch { url, .. } = request {
+            let host = request
+                .target_host()
+                .ok_or_else(|| RuntimeError::InvalidNetworkUrl { url: url.clone() })?;
             let permitted = match &self.network {
                 NetworkMode::Denied => false,
-                NetworkMode::Allowlist { hosts } => hosts.contains(&host),
+                NetworkMode::Allowlist { hosts } => hosts
+                    .iter()
+                    .any(|allowed| allowed.to_ascii_lowercase().trim_end_matches('.') == host),
                 NetworkMode::RecordedFixture
                 | NetworkMode::DeterministicEmulator
                 | NetworkMode::Unrestricted => true,
@@ -439,7 +510,11 @@ impl EffectPolicy {
             }
         }
 
-        Ok(Authorization::Perform)
+        Ok(if simulated {
+            Authorization::Simulate
+        } else {
+            Authorization::Perform
+        })
     }
 
     /// The answer a simulated effect receives.
@@ -477,12 +552,29 @@ fn is_canonical_path(path: &str) -> bool {
     let Some(rest) = path.strip_prefix('/') else {
         return false;
     };
-    if rest.is_empty() {
+    if rest.is_empty() || path.chars().any(char::is_control) {
         return false;
     }
     rest.split('/').all(|segment| {
         !segment.is_empty() && segment != "." && segment != ".." && !segment.contains('\\')
     })
+}
+
+fn path_is_allowed(path: &str, prefix: &str) -> bool {
+    if !is_canonical_path(path) {
+        return false;
+    }
+    if prefix == "/" {
+        return true;
+    }
+    let normalized_prefix = prefix.trim_end_matches('/');
+    if normalized_prefix.is_empty() || !is_canonical_path(normalized_prefix) {
+        return false;
+    }
+    path == normalized_prefix
+        || path
+            .strip_prefix(normalized_prefix)
+            .is_some_and(|remainder| remainder.starts_with('/'))
 }
 
 /// What the policy decided, kept as evidence.
@@ -537,6 +629,33 @@ impl Effect {
             outcome,
             provenance: Provenance::Simulated,
         }
+    }
+
+    /// Validates the claims carried by a reconstructed effect. The tape authenticates the
+    /// serialized bytes, but a caller who controls those bytes can also recompute their digest;
+    /// these semantic checks keep a class or simulated answer from being relabelled underneath a
+    /// valid chain.
+    pub fn validate(&self) -> Result<(), RuntimeError> {
+        let expected_class = self.request.class();
+        if self.class != expected_class {
+            return Err(RuntimeError::InvariantViolation {
+                detail: format!(
+                    "effect request {} has class {}, but the tape records {}",
+                    self.request, expected_class, self.class
+                ),
+            });
+        }
+        if self.provenance == Provenance::Simulated
+            && self.outcome != EffectPolicy::simulated_outcome(&self.request)
+        {
+            return Err(RuntimeError::InvariantViolation {
+                detail: format!(
+                    "simulated effect {} does not carry the runtime's deterministic outcome",
+                    self.request
+                ),
+            });
+        }
+        Ok(())
     }
 }
 

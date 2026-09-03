@@ -1,0 +1,19 @@
+[package]
+name = "agent-fabric"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+license = "Apache-2.0"
+description = "Bounded multi-agent coordination fabric: typed ids, capability routing, shard placement, leases, quotas, backpressure, retries, idempotency, receipts and digest-bound provenance."
+publish = false
+
+# Deliberately detached from the enclosing aurora workspace: this integration crate is
+# owned under integrations/ and must not touch the root manifest. The empty [workspace]
+# table stops cargo from trying to join the parent workspace it physically sits inside.
+[workspace]
+
+[dependencies]
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

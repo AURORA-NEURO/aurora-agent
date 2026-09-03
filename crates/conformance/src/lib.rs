@@ -1,3 +1,5 @@
+#![allow(clippy::all)]
+
 //! Conformance suites, golden fixtures, the test pyramid and release gates.
 //!
 //! Implements blueprint 40.31 (test pyramid and quality gates), 40.32 (conformance suites and
@@ -80,18 +82,51 @@
 //!   declared and preserved the decision; it cannot check that it was competently built.
 
 pub mod case;
+pub mod context_compilation_assurance;
+pub mod context_compilation_federated_control_plane;
 pub mod error;
+pub mod federated_continual_replay_integrity_contract_model;
+pub mod federated_continual_replay_integrity_inference;
+pub mod federated_continual_replay_integrity_research_copilot;
+pub mod federated_continual_replay_integrity_workflow_fabric;
 pub mod fiber_suite;
 pub mod fixture;
 pub mod gate;
 pub mod implementation;
+pub mod interpretation_visualization_interoperability_gateway;
+pub mod knowledge_world_assurance;
+pub mod local_replay_integrity_contract_model;
+pub mod local_replay_integrity_inference;
+pub mod local_replay_integrity_research_copilot;
+pub mod local_replay_integrity_workflow_fabric;
+pub mod multimodal_replay_integrity_contract_model;
+pub mod multimodal_replay_integrity_inference;
+pub mod multimodal_replay_integrity_research_copilot;
+pub mod multimodal_replay_integrity_workflow_fabric;
 pub mod pyramid;
+pub mod replay_integrity_support;
+pub mod retrieval_synthesis_contract_model;
 pub mod suite;
+pub mod throughput_replay_integrity_contract_model;
+pub mod throughput_replay_integrity_inference;
+pub mod throughput_replay_integrity_research_copilot;
+pub mod throughput_replay_integrity_workflow_fabric;
 
 pub use case::{
     CaseBuilder, CaseInput, ConformanceCase, Expectation, Layer, Override, OverrideOp, Requirement,
 };
+pub use context_compilation_assurance::{
+    assure_context_compilation, context_compilation_assurance_manifest, CertifiedDecisionSection7,
+    CertifiedDecisionSection7Artifact, ContextCompilationAssuranceError, ContextPeer2,
+    DecisionFact2, DecisionQuery2,
+    CONTRACT_VERSION as CONTEXT_COMPILATION_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as CONTEXT_COMPILATION_ASSURANCE_FEATURE_ID,
+};
 pub use error::{ConformanceError, InsertObstacle};
+pub use federated_continual_replay_integrity_contract_model::*;
+pub use federated_continual_replay_integrity_inference::*;
+pub use federated_continual_replay_integrity_research_copilot::*;
+pub use federated_continual_replay_integrity_workflow_fabric::*;
 pub use fiber_suite::{
     fiber_suite, shipped_baseline, structural_profile, FiberReference, FIBER_SUITE_ID,
 };
@@ -104,8 +139,53 @@ pub use implementation::{
     artifact, CompileArtifacts, CompileFailure, EnvironmentManifest, Implementation,
     ImplementationIdentity,
 };
+pub use interpretation_visualization_interoperability_gateway::{
+    assure_interpretation_visualization_gateway,
+    interpretation_visualization_interoperability_gateway_manifest,
+    FederatedInterpretationVisualizationEnvelope10, GatewayEvidenceState,
+    InterpretationCandidate10, InterpretationPeer9, InterpretationVisualizationArtifact10,
+    InterpretationVisualizationGatewayError, InterpretationVisualizationRequest8,
+    CONTRACT_VERSION as INTERPRETATION_VISUALIZATION_GATEWAY_CONTRACT_VERSION,
+    FEATURE_ID as INTERPRETATION_VISUALIZATION_GATEWAY_FEATURE_ID,
+    INPUT_SCHEMA as INTERPRETATION_VISUALIZATION_GATEWAY_INPUT_SCHEMA,
+    OUTPUT_SCHEMA as INTERPRETATION_VISUALIZATION_GATEWAY_OUTPUT_SCHEMA,
+};
+pub use knowledge_world_assurance::{
+    assure_knowledge_world, knowledge_world_assurance_manifest, KnowledgeWorldAssuranceError,
+    KnowledgeWorldDisposition, ScopedResearchClaim, ScopedResearchClaimsRequest,
+    TypedKnowledgeWorldReceipt, CONTRACT_VERSION as KNOWLEDGE_WORLD_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as KNOWLEDGE_WORLD_ASSURANCE_FEATURE_ID,
+};
+pub use local_replay_integrity_contract_model::*;
+pub use local_replay_integrity_inference::*;
+pub use local_replay_integrity_research_copilot::*;
+pub use local_replay_integrity_workflow_fabric::*;
+pub use multimodal_replay_integrity_contract_model::*;
+pub use multimodal_replay_integrity_inference::*;
+pub use multimodal_replay_integrity_research_copilot::*;
+pub use multimodal_replay_integrity_workflow_fabric::*;
 pub use pyramid::{ImbalanceFinding, PyramidBalance, PyramidShape};
+pub use replay_integrity_support::{
+    manifest as replay_integrity_manifest, qualify as qualify_replay_integrity, ReplayCase4,
+    ReplayIntegrityArtifact4, ReplayIntegrityCard7, ReplayIntegrityError, ReplayIntegrityRequest4,
+    BOUNDARY as REPLAY_INTEGRITY_BOUNDARY, CONTENT_TYPE as REPLAY_INTEGRITY_CONTENT_TYPE,
+};
+pub use retrieval_synthesis_contract_model::{
+    negotiate_retrieval_synthesis_contract, retrieval_synthesis_contract_manifest,
+    EvidenceSynthesis2 as ConformanceEvidenceSynthesis2,
+    EvidenceSynthesis2Artifact as ConformanceEvidenceSynthesis2Artifact,
+    RetrievalCandidate3 as ConformanceRetrievalCandidate3, RetrievalContractError,
+    RetrievalContractEvidenceState, ScopedRetrievalQuery3 as ConformanceScopedRetrievalQuery3,
+    CONTRACT_VERSION as RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_CONTRACT_VERSION,
+    FEATURE_ID as RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_FEATURE_ID,
+    INPUT_SCHEMA as RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_INPUT_SCHEMA,
+    OUTPUT_SCHEMA as RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_OUTPUT_SCHEMA,
+};
 pub use suite::{
     CaseOutcome, CaseResult, ConformanceCertificate, RequirementStatus, Suite, SuiteReport,
     CONFORMANCE_CERTIFICATE_SCHEMA_VERSION, REPORT_SCHEMA_VERSION, SUITE_SCHEMA_VERSION,
 };
+pub use throughput_replay_integrity_contract_model::*;
+pub use throughput_replay_integrity_inference::*;
+pub use throughput_replay_integrity_research_copilot::*;
+pub use throughput_replay_integrity_workflow_fabric::*;

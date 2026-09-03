@@ -8,7 +8,7 @@
 //! The `limitations` field is not decoration. A bundle that reports a result without stating what
 //! the result does not establish is the artifact 43.43 exists to prevent.
 
-use crate::cell::DecisionCell;
+use crate::cell::{DecisionCell, CELL_SCHEMA_VERSION};
 use crate::fork::ForkResult;
 use crate::minimize::Minimization;
 use bioprism_ids::ContentHash;
@@ -106,7 +106,24 @@ impl ResultBundle {
         }
         let mut body = map.clone();
         body.remove("bundle_sha256");
-        match ContentHash::of_value(&Value::Object(body)) {
+        let body = Value::Object(body);
+        let bundle = match serde_json::from_value::<ResultBundle>(body.clone()) {
+            Ok(bundle) => bundle,
+            Err(error) => return Attestation::Malformed(format!("invalid result bundle: {error}")),
+        };
+        if bundle.schema_version != BUNDLE_SCHEMA_VERSION {
+            return Attestation::Malformed(format!(
+                "unsupported result bundle schema: {}",
+                bundle.schema_version
+            ));
+        }
+        if bundle.cell.schema_version != CELL_SCHEMA_VERSION {
+            return Attestation::Malformed(format!(
+                "unsupported decision cell schema: {}",
+                bundle.cell.schema_version
+            ));
+        }
+        match ContentHash::of_value(&body) {
             Ok(recomputed) if recomputed.as_str() == claimed => Attestation::Valid,
             Ok(recomputed) => Attestation::Mismatch {
                 claimed: claimed.to_string(),

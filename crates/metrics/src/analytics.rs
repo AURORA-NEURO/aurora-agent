@@ -180,6 +180,15 @@ impl MetricObservation {
         if let Some(latency_ms) = self.latency_ms {
             finite_nonnegative("latency_ms", latency_ms, true)?;
         }
+        if self
+            .replicate_group
+            .as_deref()
+            .is_some_and(|group| group.trim().is_empty())
+        {
+            return Err(AnalyticsError::EmptyField {
+                field: "replicate_group",
+            });
+        }
         Ok(())
     }
 }
@@ -237,6 +246,13 @@ impl CalibrationObservation {
         if self.domain.trim().is_empty() {
             return Err(AnalyticsError::EmptyField { field: "domain" });
         }
+        if self
+            .group
+            .as_deref()
+            .is_some_and(|group| group.trim().is_empty())
+        {
+            return Err(AnalyticsError::EmptyField { field: "group" });
+        }
         bounded_probability("predicted", self.predicted)?;
         bounded_probability("observed", self.observed)?;
         Ok(())
@@ -268,9 +284,9 @@ pub struct DescriptiveStats {
 }
 
 impl DescriptiveStats {
-    fn from_values(values: &[f64]) -> Self {
+    fn from_values(values: &[f64]) -> Result<Self, AnalyticsError> {
         if values.is_empty() {
-            return DescriptiveStats {
+            return Ok(DescriptiveStats {
                 count: 0,
                 mean: None,
                 median: None,
@@ -278,25 +294,41 @@ impl DescriptiveStats {
                 minimum: None,
                 maximum: None,
                 population_variance: None,
-            };
+            });
         }
         let mut sorted = values.to_vec();
         sorted.sort_by(f64::total_cmp);
-        let mean = sorted.iter().sum::<f64>() / sorted.len() as f64;
-        let variance = sorted
-            .iter()
-            .map(|value| (value - mean).powi(2))
-            .sum::<f64>()
-            / sorted.len() as f64;
-        DescriptiveStats {
+        let mean = mean(&sorted)?.expect("non-empty values have a mean");
+        let squared_deviations = sorted.iter().try_fold(0.0, |sum, value| {
+            let deviation = *value - mean;
+            let term = deviation.powi(2);
+            let updated = sum + term;
+            if updated.is_finite() {
+                Ok(updated)
+            } else {
+                Err(AnalyticsError::NonFinite {
+                    field: "population_variance",
+                    value: updated,
+                })
+            }
+        })?;
+        let variance = squared_deviations / sorted.len() as f64;
+        let median = quantile(&sorted, 0.5);
+        let p95 = quantile(&sorted, 0.95);
+        for (field, value) in [("mean", mean), ("median", median), ("p95", p95)] {
+            if !value.is_finite() {
+                return Err(AnalyticsError::NonFinite { field, value });
+            }
+        }
+        Ok(DescriptiveStats {
             count: sorted.len(),
             mean: Some(mean),
-            median: Some(quantile(&sorted, 0.5)),
-            p95: Some(quantile(&sorted, 0.95)),
+            median: Some(median),
+            p95: Some(p95),
             minimum: sorted.first().copied(),
             maximum: sorted.last().copied(),
             population_variance: Some(variance),
-        }
+        })
     }
 }
 
@@ -451,7 +483,7 @@ fn quantile(sorted: &[f64], probability: f64) -> f64 {
         return sorted[lower];
     }
     let fraction = position - lower as f64;
-    sorted[lower] + (sorted[upper] - sorted[lower]) * fraction
+    sorted[lower] * (1.0 - fraction) + sorted[upper] * fraction
 }
 
 fn sorted_strings(values: impl IntoIterator<Item = String>) -> Vec<String> {
@@ -512,8 +544,20 @@ pub fn analyse(input: &AnalyticsInput) -> Result<AnalyticsReport, AnalyticsError
     for pair in &input.pairs {
         pair.validate()?;
     }
+    let mut pair_ids = BTreeSet::new();
+    for pair in &input.pairs {
+        if !pair_ids.insert(pair.id.clone()) {
+            return Err(AnalyticsError::DuplicateId {
+                id: pair.id.clone(),
+            });
+        }
+    }
+    let mut calibration_ids = BTreeSet::new();
     for row in &input.calibration {
         row.validate()?;
+        if !calibration_ids.insert(row.id.clone()) {
+            return Err(AnalyticsError::DuplicateId { id: row.id.clone() });
+        }
     }
 
     let mut dimension_rows = Vec::with_capacity(dimensions.len());
@@ -582,16 +626,16 @@ pub fn analyse(input: &AnalyticsInput) -> Result<AnalyticsReport, AnalyticsError
             domains: sorted_strings(domains_in_dimension),
             systems: sorted_strings(systems_in_dimension),
             replicate_groups: sorted_strings(replicate_groups),
-            values: DescriptiveStats::from_values(&values),
+            values: DescriptiveStats::from_values(&values)?,
             cost: if costs.is_empty() {
                 None
             } else {
-                Some(DescriptiveStats::from_values(&costs))
+                Some(DescriptiveStats::from_values(&costs)?)
             },
             latency_ms: if latencies.is_empty() {
                 None
             } else {
-                Some(DescriptiveStats::from_values(&latencies))
+                Some(DescriptiveStats::from_values(&latencies)?)
             },
         });
     }
@@ -637,6 +681,26 @@ pub fn analyse(input: &AnalyticsInput) -> Result<AnalyticsReport, AnalyticsError
                 Direction::LowerIsBetter if row.variant != 0.0 => Some(row.baseline / row.variant),
                 _ => None,
             };
+            if !delta.is_finite() {
+                return Err(AnalyticsError::NonFinite {
+                    field: "oriented_delta",
+                    value: delta,
+                });
+            }
+            if !absolute_delta.is_finite() {
+                return Err(AnalyticsError::NonFinite {
+                    field: "absolute_delta",
+                    value: absolute_delta,
+                });
+            }
+            if let Some(retention) = retention {
+                if !retention.is_finite() {
+                    return Err(AnalyticsError::NonFinite {
+                        field: "retention",
+                        value: retention,
+                    });
+                }
+            }
             oriented_deltas.push(delta);
             absolute_deltas.push(absolute_delta);
             if delta > 0.0 {
@@ -660,9 +724,9 @@ pub fn analyse(input: &AnalyticsInput) -> Result<AnalyticsReport, AnalyticsError
             measured: count,
             excluded,
             domains: sorted_strings(domains_in_pairs),
-            mean_oriented_delta: mean(&oriented_deltas),
-            mean_absolute_delta: mean(&absolute_deltas),
-            mean_retention: mean(&retentions),
+            mean_oriented_delta: mean(&oriented_deltas)?,
+            mean_absolute_delta: mean(&absolute_deltas)?,
+            mean_retention: mean(&retentions)?,
             worst_retention: retentions.iter().copied().reduce(f64::min),
             positive_fraction: fraction(positive, count),
             negative_fraction: fraction(negative, count),
@@ -686,7 +750,7 @@ pub fn analyse(input: &AnalyticsInput) -> Result<AnalyticsReport, AnalyticsError
         Some(calibration_summary(
             &input.calibration,
             input.calibration_bins,
-        ))
+        )?)
     };
     let measured_observations = input
         .observations
@@ -729,15 +793,33 @@ pub fn analyse(input: &AnalyticsInput) -> Result<AnalyticsReport, AnalyticsError
     })
 }
 
-fn mean(values: &[f64]) -> Option<f64> {
-    (!values.is_empty()).then(|| values.iter().sum::<f64>() / values.len() as f64)
+fn mean(values: &[f64]) -> Result<Option<f64>, AnalyticsError> {
+    if values.is_empty() {
+        return Ok(None);
+    }
+    let mut current = 0.0;
+    for (index, value) in values.iter().enumerate() {
+        let count = (index + 1) as f64;
+        let weight = 1.0 / count;
+        current = current * (1.0 - weight) + *value * weight;
+        if !current.is_finite() {
+            return Err(AnalyticsError::NonFinite {
+                field: "mean",
+                value: current,
+            });
+        }
+    }
+    Ok(Some(current))
 }
 
 fn fraction(numerator: usize, denominator: usize) -> Option<f64> {
     (denominator > 0).then(|| numerator as f64 / denominator as f64)
 }
 
-fn calibration_summary(rows: &[CalibrationObservation], bins: usize) -> CalibrationSummary {
+fn calibration_summary(
+    rows: &[CalibrationObservation],
+    bins: usize,
+) -> Result<CalibrationSummary, AnalyticsError> {
     let measured = rows
         .iter()
         .filter(|row| row.evidence.is_measured())
@@ -748,7 +830,7 @@ fn calibration_summary(rows: &[CalibrationObservation], bins: usize) -> Calibrat
             .iter()
             .map(|row| (row.predicted - row.observed).powi(2))
             .collect::<Vec<_>>(),
-    );
+    )?;
     let mut bin_rows = (0..bins)
         .map(|index| CalibrationBin {
             lower: index as f64 / bins as f64,
@@ -780,14 +862,14 @@ fn calibration_summary(rows: &[CalibrationObservation], bins: usize) -> Calibrat
                 bin.absolute_error.unwrap_or(0.0) * bin.count as f64 / measured.len() as f64;
         }
     }
-    CalibrationSummary {
+    Ok(CalibrationSummary {
         observations: rows.len(),
         measured: measured.len(),
         excluded,
         brier_score,
         expected_calibration_error: (!measured.is_empty()).then_some(expected_calibration_error),
         bins: bin_rows,
-    }
+    })
 }
 
 #[cfg(test)]
@@ -926,6 +1008,113 @@ mod tests {
                 calibration_bins: 10,
             }),
             Err(AnalyticsError::DirectionMismatch { .. })
+        ));
+    }
+
+    #[test]
+    fn duplicate_pair_and_calibration_ids_refuse() {
+        let pair = PairedObservation {
+            id: "same".into(),
+            dimension: "verification".into(),
+            domain: "oncology".into(),
+            baseline: 0.5,
+            variant: 0.6,
+            direction: Direction::HigherIsBetter,
+            tolerance: 0.1,
+            evidence: EvidenceState::Observed,
+        };
+        assert!(matches!(
+            analyse(&AnalyticsInput {
+                observations: Vec::new(),
+                pairs: vec![pair.clone(), pair],
+                calibration: Vec::new(),
+                calibration_bins: 10,
+            }),
+            Err(AnalyticsError::DuplicateId { id }) if id == "same"
+        ));
+
+        let calibration = CalibrationObservation {
+            id: "same".into(),
+            domain: "oncology".into(),
+            group: None,
+            predicted: 0.5,
+            observed: 0.5,
+            evidence: EvidenceState::Observed,
+        };
+        assert!(matches!(
+            analyse(&AnalyticsInput {
+                observations: Vec::new(),
+                pairs: Vec::new(),
+                calibration: vec![calibration.clone(), calibration],
+                calibration_bins: 10,
+            }),
+            Err(AnalyticsError::DuplicateId { id }) if id == "same"
+        ));
+    }
+
+    #[test]
+    fn derived_float_overflow_refuses_instead_of_emitting_non_finite_summaries() {
+        assert!(matches!(
+            analyse(&AnalyticsInput {
+                observations: vec![
+                    observation("low", -f64::MAX, EvidenceState::Observed),
+                    observation("high", f64::MAX, EvidenceState::Observed),
+                ],
+                pairs: Vec::new(),
+                calibration: Vec::new(),
+                calibration_bins: 10,
+            }),
+            Err(AnalyticsError::NonFinite {
+                field: "population_variance",
+                ..
+            })
+        ));
+
+        let pair = PairedObservation {
+            id: "overflow".into(),
+            dimension: "verification".into(),
+            domain: "oncology".into(),
+            baseline: -f64::MAX,
+            variant: f64::MAX,
+            direction: Direction::HigherIsBetter,
+            tolerance: 0.1,
+            evidence: EvidenceState::Observed,
+        };
+        assert!(matches!(
+            analyse(&AnalyticsInput {
+                observations: Vec::new(),
+                pairs: vec![pair],
+                calibration: Vec::new(),
+                calibration_bins: 10,
+            }),
+            Err(AnalyticsError::NonFinite {
+                field: "oriented_delta",
+                ..
+            }) | Err(AnalyticsError::NonFinite {
+                field: "absolute_delta",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn empty_optional_group_labels_are_rejected() {
+        let row = CalibrationObservation {
+            id: "one".into(),
+            domain: "oncology".into(),
+            group: Some("  ".into()),
+            predicted: 0.5,
+            observed: 0.5,
+            evidence: EvidenceState::Observed,
+        };
+        assert!(matches!(
+            analyse(&AnalyticsInput {
+                observations: Vec::new(),
+                pairs: Vec::new(),
+                calibration: vec![row],
+                calibration_bins: 10,
+            }),
+            Err(AnalyticsError::EmptyField { field: "group" })
         ));
     }
 }

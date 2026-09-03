@@ -41,6 +41,18 @@ pub enum RoutingError {
     #[error("a task identifier must not be empty")]
     EmptyTaskId,
 
+    #[error("task identifier `{task}` contains padding, control characters, or exceeds the safety bound")]
+    InvalidTaskId { task: String },
+
+    #[error("observation for task `{task}` is invalid: {detail}")]
+    InvalidObservation { task: String, detail: String },
+
+    #[error("routing fingerprint is invalid: {detail}")]
+    InvalidFingerprint { detail: String },
+
+    #[error("routing report is invalid: {detail}")]
+    InvalidReport { detail: String },
+
     #[error("no tasks were supplied; a routing report over zero tasks would report nothing")]
     NoTasks,
 

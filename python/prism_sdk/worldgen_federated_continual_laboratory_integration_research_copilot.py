@@ -1,0 +1,4 @@
+from .worldgen_laboratory_integration_copilot_support import InstrumentCopilotRequest, InstrumentCopilotReceipt, run, manifest
+FEATURE_ID="AFA-worldgen-P11-F12"; CONTRACT_VERSION="worldgen-federated_continual-laboratory_integration-copilot/1.0"
+def worldgen_federated_continual_laboratory_integration_research_copilot_manifest(): return manifest(feature_id=FEATURE_ID,contract_version=CONTRACT_VERSION,input_schema="InstrumentCopilotRequest1@1",scale="federated continual autonomous",autonomy_tier="A1")
+def run_worldgen_federated_continual_laboratory_integration_research_copilot(request:InstrumentCopilotRequest)->InstrumentCopilotReceipt: return run(request,feature_id=FEATURE_ID,contract_version=CONTRACT_VERSION,scale="federated continual autonomous",require_approval=False,require_federation=True)

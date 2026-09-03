@@ -329,10 +329,12 @@ impl CapabilityOntology {
     }
 
     pub fn node(&self, id: &CapabilityId) -> Result<&CapabilityNode, AtlasError> {
-        self.nodes.get(id).ok_or_else(|| AtlasError::UnknownCapability {
-            capability: id.to_string(),
-            ontology_version: self.version.clone(),
-        })
+        self.nodes
+            .get(id)
+            .ok_or_else(|| AtlasError::UnknownCapability {
+                capability: id.to_string(),
+                ontology_version: self.version.clone(),
+            })
     }
 
     /// Refuses every structural defect that would make a later query silently wrong.
@@ -530,8 +532,10 @@ impl CapabilityOntology {
                     }
                     GREY => {
                         let at = stack.iter().position(|&(n, _)| n == parent).unwrap_or(0);
-                        let mut cycle: Vec<String> =
-                            stack[at..].iter().map(|&(n, _)| ids[n].to_string()).collect();
+                        let mut cycle: Vec<String> = stack[at..]
+                            .iter()
+                            .map(|&(n, _)| ids[n].to_string())
+                            .collect();
                         cycle.push(ids[parent].to_string());
                         return Some(cycle);
                     }

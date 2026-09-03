@@ -50,6 +50,59 @@ impl Estimate {
         self.predicted_multiply_ops + self.predicted_aggregate_ops
     }
 
+    /// Validates the numeric and representation invariants consumed by the portfolio.
+    ///
+    /// Estimates are also produced by third-party [`crate::QueryBackend`] implementations, so the
+    /// portfolio cannot assume that a public `Estimate` is well formed. In particular, a NaN cost
+    /// would make comparisons silently false and could turn an invalid candidate into a selected
+    /// plan.
+    pub fn validate(&self) -> Result<(), String> {
+        for (field, value) in [
+            ("predicted_multiply_ops", self.predicted_multiply_ops),
+            ("predicted_aggregate_ops", self.predicted_aggregate_ops),
+            ("predicted_peak_entries", self.predicted_peak_entries),
+            ("predicted_total_entries", self.predicted_total_entries),
+        ] {
+            if !value.is_finite() || value < 0.0 {
+                return Err(format!(
+                    "{field} must be finite and non-negative, got {value}"
+                ));
+            }
+        }
+        if !self.uncertainty.is_finite() || !(0.0..=1.0).contains(&self.uncertainty) {
+            return Err(format!(
+                "uncertainty must be finite and within [0, 1], got {}",
+                self.uncertainty
+            ));
+        }
+        let predicted_ops = self.predicted_ops();
+        if !predicted_ops.is_finite() || predicted_ops < self.predicted_multiply_ops {
+            return Err("predicted operation count overflows a finite value".to_string());
+        }
+        if !self.risk().is_finite() {
+            return Err("risk-adjusted operation count overflows a finite value".to_string());
+        }
+        if self.predicted_total_entries < self.predicted_peak_entries {
+            return Err(format!(
+                "predicted_total_entries {} is below predicted_peak_entries {}",
+                self.predicted_total_entries, self.predicted_peak_entries
+            ));
+        }
+        match (self.width_metric, self.induced_width) {
+            (WidthMetric::InducedWidth, None) => {
+                return Err("induced-width estimates must report induced_width".to_string())
+            }
+            (WidthMetric::NotApplicable, Some(_)) => {
+                return Err("non-eliminating estimates must not report induced_width".to_string())
+            }
+            _ => {}
+        }
+        if self.method.trim().is_empty() {
+            return Err("method must not be blank".to_string());
+        }
+        Ok(())
+    }
+
     /// The risk term of 43.18's objective.
     ///
     /// Defined as the share of predicted work that rests on an assumed cardinality. A region whose
@@ -81,6 +134,22 @@ impl Default for Budget {
 }
 
 impl Budget {
+    /// Validates hard limits. Positive infinity is the explicit unbounded value used by phase
+    /// sweeps; NaN and negative values are never meaningful limits.
+    pub fn validate(&self) -> Result<(), String> {
+        for (field, value) in [
+            ("max_peak_entries", self.max_peak_entries),
+            ("max_ops", self.max_ops),
+        ] {
+            if value.is_nan() || value < 0.0 {
+                return Err(format!(
+                    "{field} must be non-negative or positive infinity, got {value}"
+                ));
+            }
+        }
+        Ok(())
+    }
+
     pub fn with_max_peak_entries(mut self, entries: f64) -> Self {
         self.max_peak_entries = entries;
         self
@@ -121,10 +190,39 @@ impl Default for CostModel {
 }
 
 impl CostModel {
+    /// Validates the ranking weights before they participate in candidate comparisons.
+    pub fn validate(&self) -> Result<(), String> {
+        for (field, value) in [
+            ("memory_weight", self.memory_weight),
+            ("risk_weight", self.risk_weight),
+        ] {
+            if !value.is_finite() || value < 0.0 {
+                return Err(format!(
+                    "{field} must be finite and non-negative, got {value}"
+                ));
+            }
+        }
+        if !self.minimum_speedup.is_finite() || self.minimum_speedup <= 0.0 {
+            return Err(format!(
+                "minimum_speedup must be finite and positive, got {}",
+                self.minimum_speedup
+            ));
+        }
+        Ok(())
+    }
+
     pub fn cost(&self, estimate: &Estimate) -> f64 {
-        estimate.predicted_ops()
+        if self.validate().is_err() || estimate.validate().is_err() {
+            return f64::INFINITY;
+        }
+        let cost = estimate.predicted_ops()
             + self.memory_weight * estimate.predicted_peak_entries
-            + self.risk_weight * estimate.risk()
+            + self.risk_weight * estimate.risk();
+        if cost.is_finite() && cost >= 0.0 {
+            cost
+        } else {
+            f64::INFINITY
+        }
     }
 
     pub fn with_minimum_speedup(mut self, speedup: f64) -> Self {

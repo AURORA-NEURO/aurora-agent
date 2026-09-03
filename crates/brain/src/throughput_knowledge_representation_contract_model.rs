@@ -1,0 +1,567 @@
+//! Prospective high-throughput knowledge-representation contract model.
+//!
+//! Atlas feature: `AFA-brain-P04-F07`. Queue, checkpoint, capacity, and schema
+//! compatibility are part of the typed contract; execution completion is not science.
+
+use bioprism_foundation::{
+    AutonomyTier, CapabilityManifest, Determinism, Effect, EvidenceReference, EvidenceState,
+    ResearchSurface, TypedPort, TypedResearchArtifact, PRECLINICAL_BOUNDARY,
+    RESEARCH_CONTRACT_SCHEMA_VERSION,
+};
+use bioprism_ids::ContentHash;
+use serde::{Deserialize, Serialize};
+use serde_json::json;
+use std::collections::BTreeSet;
+use thiserror::Error;
+
+pub const FEATURE_ID: &str = "AFA-brain-P04-F07";
+pub const CONTRACT_VERSION: &str = "brain-throughput-knowledge-representation-contract-model/1.0";
+pub const INPUT_SCHEMA: &str = "ScopedResearchClaims1@1";
+pub const OUTPUT_SCHEMA: &str = "TypedKnowledgeWorld1@1";
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ThroughputKnowledgeContractJob {
+    pub job_id: String,
+    pub study_id: String,
+    pub claim_count: usize,
+    pub evidence_digest: Option<ContentHash>,
+    pub provenance_digest: Option<ContentHash>,
+    pub state: EvidenceState,
+    pub boundary: String,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ThroughputKnowledgeContractRequest {
+    pub request_id: String,
+    pub batch_id: String,
+    pub partition: String,
+    pub jobs: Vec<ThroughputKnowledgeContractJob>,
+    pub input_schema: String,
+    pub output_schema: String,
+    pub source_revision: u16,
+    pub target_revision: u16,
+    pub migration_requested: bool,
+    pub max_concurrency: usize,
+    pub checkpoint_seq: u64,
+    pub budget_units: u64,
+    pub replay_identity: ContentHash,
+    pub policy_allow: bool,
+    pub protected_closure: bool,
+    pub raw_data_local: bool,
+    pub boundary: String,
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ThroughputKnowledgeContractDisposition {
+    Completed,
+    Migrated,
+    Partial,
+    Blocked,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ThroughputKnowledgeContractReceipt {
+    pub schema_version: String,
+    pub contract_version: String,
+    pub feature_id: String,
+    pub request_id: String,
+    pub batch_id: String,
+    pub partition: String,
+    pub disposition: ThroughputKnowledgeContractDisposition,
+    pub input_schema: String,
+    pub output_schema: String,
+    pub source_revision: u16,
+    pub target_revision: u16,
+    pub max_concurrency: usize,
+    pub checkpoint_seq: u64,
+    pub budget_units: u64,
+    pub candidate_order: Vec<String>,
+    pub admitted_order: Vec<String>,
+    pub unresolved_order: Vec<String>,
+    pub denied_order: Vec<String>,
+    pub capacity_exceeded_order: Vec<String>,
+    pub semantic_loss_order: Vec<String>,
+    pub contract_digest: ContentHash,
+    pub queue_digest: ContentHash,
+    pub migration_digest: ContentHash,
+    pub replay_identity: ContentHash,
+    pub omissions: Vec<String>,
+    pub uncertainty: Vec<String>,
+    pub negative_evidence: Vec<String>,
+    pub effect_receipts: Vec<String>,
+    pub artifact: TypedResearchArtifact,
+    pub raw_data_local: bool,
+    pub boundary: String,
+}
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum ThroughputKnowledgeContractError {
+    #[error("invalid throughput knowledge contract: {0}")]
+    Invalid(String),
+    #[error("throughput knowledge contract artifact failed: {0}")]
+    Artifact(String),
+}
+
+impl ThroughputKnowledgeContractReceipt {
+    pub fn validate(&self) -> Result<(), ThroughputKnowledgeContractError> {
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION
+            || self.contract_version != CONTRACT_VERSION
+            || self.feature_id != FEATURE_ID
+            || self.input_schema != INPUT_SCHEMA
+            || self.output_schema != OUTPUT_SCHEMA
+            || self.boundary != PRECLINICAL_BOUNDARY
+            || !self.raw_data_local
+            || self.request_id.trim().is_empty()
+            || self.batch_id.trim().is_empty()
+            || self.partition.trim().is_empty()
+            || self.source_revision == 0
+            || self.target_revision < self.source_revision
+            || self.max_concurrency == 0
+            || self.checkpoint_seq == 0
+            || self.budget_units == 0
+            || self.candidate_order.is_empty()
+            || self.effect_receipts.is_empty()
+        {
+            return Err(ThroughputKnowledgeContractError::Invalid("throughput contract identity, schema, queue, capacity, checkpoint, budget, locality, or effects are incomplete".into()));
+        }
+        for values in [
+            &self.candidate_order,
+            &self.admitted_order,
+            &self.unresolved_order,
+            &self.denied_order,
+            &self.capacity_exceeded_order,
+            &self.semantic_loss_order,
+            &self.omissions,
+            &self.uncertainty,
+            &self.negative_evidence,
+            &self.effect_receipts,
+        ] {
+            if values.windows(2).any(|p| p[0] >= p[1]) {
+                return Err(ThroughputKnowledgeContractError::Invalid(
+                    "throughput contract ordering is not canonical".into(),
+                ));
+            }
+        }
+        let classified = self
+            .admitted_order
+            .iter()
+            .chain(self.unresolved_order.iter())
+            .chain(self.denied_order.iter())
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        if classified.len() != self.candidate_order.len()
+            || classified
+                .iter()
+                .any(|job| !self.candidate_order.contains(job))
+            || self
+                .capacity_exceeded_order
+                .iter()
+                .any(|job| !self.candidate_order.contains(job))
+            || self
+                .capacity_exceeded_order
+                .iter()
+                .any(|job| !self.unresolved_order.contains(job))
+            || self
+                .semantic_loss_order
+                .iter()
+                .any(|job| !self.admitted_order.contains(job))
+        {
+            return Err(ThroughputKnowledgeContractError::Invalid(
+                "throughput contract states do not partition jobs".into(),
+            ));
+        }
+        for d in [
+            &self.contract_digest,
+            &self.queue_digest,
+            &self.migration_digest,
+            &self.replay_identity,
+            &self.artifact.content_hash,
+        ] {
+            if d.as_str().len() != 64 {
+                return Err(ThroughputKnowledgeContractError::Invalid(
+                    "throughput contract digest is invalid".into(),
+                ));
+            }
+        }
+        if self.effect_receipts.iter().any(|e| {
+            !e.starts_with("read:local-throughput-knowledge-contract:")
+                && e != "block:unsafe-release"
+        }) {
+            return Err(ThroughputKnowledgeContractError::Invalid(
+                "throughput contract effect is outside local read gate".into(),
+            ));
+        }
+        let expected_effect = if self.disposition == ThroughputKnowledgeContractDisposition::Blocked
+        {
+            "block:unsafe-release".into()
+        } else {
+            format!(
+                "read:local-throughput-knowledge-contract:{}",
+                self.request_id
+            )
+        };
+        if self.effect_receipts != [expected_effect] {
+            return Err(ThroughputKnowledgeContractError::Invalid(
+                "throughput contract effect does not match disposition".into(),
+            ));
+        }
+        let expected_queue_digest = ContentHash::of_value(&json!({
+            "batch_id": self.batch_id,
+            "partition": self.partition,
+            "candidate_order": self.candidate_order,
+            "max_concurrency": self.max_concurrency,
+            "checkpoint_seq": self.checkpoint_seq,
+            "budget_units": self.budget_units,
+        }))
+        .map_err(|error| ThroughputKnowledgeContractError::Artifact(error.to_string()))?;
+        if self.queue_digest != expected_queue_digest {
+            return Err(ThroughputKnowledgeContractError::Invalid(
+                "throughput queue digest is not bound to queue state".into(),
+            ));
+        }
+        let expected_contract_digest = ContentHash::of_value(&json!({
+            "queue_digest": self.queue_digest,
+            "admitted_order": self.admitted_order,
+            "unresolved_order": self.unresolved_order,
+            "denied_order": self.denied_order,
+            "capacity_exceeded_order": self.capacity_exceeded_order,
+            "semantic_loss_order": self.semantic_loss_order,
+        }))
+        .map_err(|error| ThroughputKnowledgeContractError::Artifact(error.to_string()))?;
+        if self.contract_digest != expected_contract_digest {
+            return Err(ThroughputKnowledgeContractError::Invalid(
+                "throughput contract digest is not bound to queue state".into(),
+            ));
+        }
+        let expected_migration_digest = ContentHash::of_value(&json!({
+            "source_revision": self.source_revision,
+            "target_revision": self.target_revision,
+            "migration_requested": self.target_revision > self.source_revision,
+            "semantic_loss_order": self.semantic_loss_order,
+        }))
+        .map_err(|error| ThroughputKnowledgeContractError::Artifact(error.to_string()))?;
+        if self.migration_digest != expected_migration_digest {
+            return Err(ThroughputKnowledgeContractError::Invalid(
+                "throughput migration digest is not bound to revision state".into(),
+            ));
+        }
+        let expected_artifact_id =
+            format!("brain-throughput-knowledge-contract:{}", self.request_id);
+        if self.artifact.artifact_id != expected_artifact_id
+            || self.artifact.content_type != "application/vnd.aurora.typed-knowledge-world+json"
+            || !self.artifact.semantic_loss.is_empty()
+            || !self.artifact.provenance.is_empty()
+        {
+            return Err(ThroughputKnowledgeContractError::Invalid(
+                "throughput contract artifact identity or provenance is inconsistent".into(),
+            ));
+        }
+        self.artifact
+            .validate_metadata()
+            .map_err(|e| ThroughputKnowledgeContractError::Artifact(e.to_string()))?;
+        self.artifact
+            .verify_payload(&receipt_payload(self))
+            .map_err(|e| ThroughputKnowledgeContractError::Artifact(e.to_string()))
+    }
+    pub fn digest(&self) -> Result<ContentHash, ThroughputKnowledgeContractError> {
+        self.validate()?;
+        let value = serde_json::to_value(self)
+            .map_err(|e| ThroughputKnowledgeContractError::Artifact(e.to_string()))?;
+        ContentHash::of_value(&value)
+            .map_err(|e| ThroughputKnowledgeContractError::Artifact(e.to_string()))
+    }
+}
+
+fn receipt_payload(receipt: &ThroughputKnowledgeContractReceipt) -> serde_json::Value {
+    json!({
+        "schema_version": receipt.schema_version,
+        "contract_version": receipt.contract_version,
+        "feature_id": receipt.feature_id,
+        "request_id": receipt.request_id,
+        "batch_id": receipt.batch_id,
+        "partition": receipt.partition,
+        "disposition": receipt.disposition,
+        "input_schema": receipt.input_schema,
+        "output_schema": receipt.output_schema,
+        "source_revision": receipt.source_revision,
+        "target_revision": receipt.target_revision,
+        "queue_digest": receipt.queue_digest,
+        "contract_digest": receipt.contract_digest,
+        "migration_digest": receipt.migration_digest,
+        "replay_identity": receipt.replay_identity,
+        "boundary": receipt.boundary,
+    })
+}
+
+pub fn throughput_knowledge_representation_contract_model_manifest() -> CapabilityManifest {
+    CapabilityManifest{schema_version:RESEARCH_CONTRACT_SCHEMA_VERSION.into(),capability_id:FEATURE_ID.into(),version:CONTRACT_VERSION.into(),owner_crate:"brain".into(),consumers:["laboratory automation engineer".into(),"throughput scheduler".into()].into(),behavior:"validates high-throughput typed knowledge contracts with queue capacity, checkpoint, budget, and schema migration witnesses".into(),value:"prevents batch overflow, dropped jobs, or schema coercion from becoming silent scientific claims".into(),inputs:vec![TypedPort{name:"throughput_scoped_research_claims".into(),schema:INPUT_SCHEMA.into(),required:true}],outputs:vec![TypedPort{name:"throughput_typed_knowledge_world_contract".into(),schema:OUTPUT_SCHEMA.into(),required:true}],effects:[Effect::ReadLocalData,Effect::ExecuteLocalComputation,Effect::WriteLocalArtifact].into(),permissions:["read:local-research-artifacts".into()].into(),determinism:Determinism::ByteStable,evidence:vec![EvidenceReference{source_id:"json-schema".into(),state:EvidenceState::Supported,locator:Some("https://json-schema.org/specification".into())}],authority_requirements:Vec::new(),autonomy_tier:AutonomyTier::A1,surfaces:[ResearchSurface::Ui,ResearchSurface::Api,ResearchSurface::Sdk,ResearchSurface::Cli,ResearchSurface::McpTool,ResearchSurface::Policy,ResearchSurface::Operator].into(),boundary:PRECLINICAL_BOUNDARY.into()}
+}
+
+pub fn model_throughput_knowledge_representation_contract(
+    request: &ThroughputKnowledgeContractRequest,
+) -> Result<ThroughputKnowledgeContractReceipt, ThroughputKnowledgeContractError> {
+    if request.request_id.trim().is_empty()
+        || request.batch_id.trim().is_empty()
+        || request.partition.trim().is_empty()
+        || request.jobs.is_empty()
+        || request.input_schema != INPUT_SCHEMA
+        || request.output_schema != OUTPUT_SCHEMA
+        || request.source_revision == 0
+        || request.target_revision < request.source_revision
+        || (request.target_revision > request.source_revision && !request.migration_requested)
+        || request.max_concurrency == 0
+        || request.checkpoint_seq == 0
+        || request.budget_units == 0
+        || request.replay_identity.as_str().len() != 64
+        || !request.raw_data_local
+        || request.boundary != PRECLINICAL_BOUNDARY
+    {
+        return Err(ThroughputKnowledgeContractError::Invalid("throughput contract identity, schemas, queue, revisions, capacity, checkpoint, budget, replay, locality, or boundary is invalid".into()));
+    }
+    let mut jobs = request.jobs.clone();
+    jobs.sort_by(|a, b| a.job_id.cmp(&b.job_id));
+    let candidate = jobs.iter().map(|j| j.job_id.clone()).collect::<Vec<_>>();
+    if candidate.windows(2).any(|p| p[0] == p[1]) || candidate.iter().any(|v| v.trim().is_empty()) {
+        return Err(ThroughputKnowledgeContractError::Invalid(
+            "throughput job identifiers must be unique and non-empty".into(),
+        ));
+    }
+    let mut admitted = BTreeSet::new();
+    let mut unresolved = BTreeSet::new();
+    let mut denied = BTreeSet::new();
+    let mut capacity = BTreeSet::new();
+    let mut semantic_loss = BTreeSet::new();
+    let mut omissions = BTreeSet::new();
+    let mut uncertainty = BTreeSet::from([
+        "gate:queue-order".to_string(),
+        "gate:checkpoint".to_string(),
+        "gate:budget".to_string(),
+        "gate:unknown-is-not-asserted".to_string(),
+        "gate:locality".to_string(),
+    ]);
+    let mut negative = BTreeSet::new();
+    for (index, job) in jobs.iter().enumerate() {
+        if !request.policy_allow
+            || !request.protected_closure
+            || job.boundary != PRECLINICAL_BOUNDARY
+        {
+            denied.insert(job.job_id.clone());
+            negative.insert(format!("job:{}:scope-policy-closure", job.job_id));
+        } else if job.evidence_digest.is_none() || job.provenance_digest.is_none() {
+            unresolved.insert(job.job_id.clone());
+            omissions.insert(format!("job:{}:evidence-or-provenance-missing", job.job_id));
+        } else if matches!(
+            job.state,
+            EvidenceState::Unknown | EvidenceState::Speculative
+        ) {
+            unresolved.insert(job.job_id.clone());
+            uncertainty.insert(format!("job:{}:unknown-not-asserted", job.job_id));
+        } else if matches!(job.state, EvidenceState::Contradicted) {
+            denied.insert(job.job_id.clone());
+            negative.insert(format!("job:{}:contradicted", job.job_id));
+        } else if index >= request.max_concurrency
+            || u64::try_from(job.claim_count).unwrap_or(u64::MAX) > request.budget_units
+        {
+            unresolved.insert(job.job_id.clone());
+            capacity.insert(job.job_id.clone());
+            omissions.insert(format!("job:{}:capacity-or-budget", job.job_id));
+        } else {
+            admitted.insert(job.job_id.clone());
+            if request.target_revision > request.source_revision {
+                semantic_loss.insert(job.job_id.clone());
+            }
+        }
+    }
+    if request.target_revision > request.source_revision {
+        uncertainty.insert(format!(
+            "migration:{}-to-{}",
+            request.source_revision, request.target_revision
+        ));
+    }
+    if !request.policy_allow {
+        omissions.insert("control:policy-denied".into());
+    }
+    if !request.protected_closure {
+        omissions.insert("control:protected-closure-incomplete".into());
+    }
+    let queue_digest=ContentHash::of_value(&json!({"batch_id":request.batch_id,"partition":request.partition,"candidate_order":candidate,"max_concurrency":request.max_concurrency,"checkpoint_seq":request.checkpoint_seq,"budget_units":request.budget_units})).map_err(|e|ThroughputKnowledgeContractError::Artifact(e.to_string()))?;
+    let contract_digest=ContentHash::of_value(&json!({"queue_digest":queue_digest,"admitted_order":admitted,"unresolved_order":unresolved,"denied_order":denied,"capacity_exceeded_order":capacity,"semantic_loss_order":semantic_loss})).map_err(|e|ThroughputKnowledgeContractError::Artifact(e.to_string()))?;
+    let migration_digest=ContentHash::of_value(&json!({"source_revision":request.source_revision,"target_revision":request.target_revision,"migration_requested":request.migration_requested,"semantic_loss_order":semantic_loss})).map_err(|e|ThroughputKnowledgeContractError::Artifact(e.to_string()))?;
+    let disposition =
+        if !request.policy_allow || !request.protected_closure || !request.raw_data_local {
+            ThroughputKnowledgeContractDisposition::Blocked
+        } else if admitted.is_empty() || !unresolved.is_empty() || !denied.is_empty() {
+            ThroughputKnowledgeContractDisposition::Partial
+        } else if request.target_revision > request.source_revision {
+            ThroughputKnowledgeContractDisposition::Migrated
+        } else {
+            ThroughputKnowledgeContractDisposition::Completed
+        };
+    let payload = json!({"schema_version":RESEARCH_CONTRACT_SCHEMA_VERSION,"contract_version":CONTRACT_VERSION,"feature_id":FEATURE_ID,"request_id":request.request_id,"batch_id":request.batch_id,"partition":request.partition,"disposition":disposition,"input_schema":INPUT_SCHEMA,"output_schema":OUTPUT_SCHEMA,"source_revision":request.source_revision,"target_revision":request.target_revision,"queue_digest":queue_digest,"contract_digest":contract_digest,"migration_digest":migration_digest,"replay_identity":request.replay_identity,"boundary":PRECLINICAL_BOUNDARY});
+    let artifact = TypedResearchArtifact::from_payload(
+        format!("brain-throughput-knowledge-contract:{}", request.request_id),
+        "application/vnd.aurora.typed-knowledge-world+json",
+        &payload,
+        Vec::new(),
+        Vec::new(),
+    )
+    .map_err(|e| ThroughputKnowledgeContractError::Artifact(e.to_string()))?;
+    let receipt = ThroughputKnowledgeContractReceipt {
+        schema_version: RESEARCH_CONTRACT_SCHEMA_VERSION.into(),
+        contract_version: CONTRACT_VERSION.into(),
+        feature_id: FEATURE_ID.into(),
+        request_id: request.request_id.clone(),
+        batch_id: request.batch_id.clone(),
+        partition: request.partition.clone(),
+        disposition,
+        input_schema: INPUT_SCHEMA.into(),
+        output_schema: OUTPUT_SCHEMA.into(),
+        source_revision: request.source_revision,
+        target_revision: request.target_revision,
+        max_concurrency: request.max_concurrency,
+        checkpoint_seq: request.checkpoint_seq,
+        budget_units: request.budget_units,
+        candidate_order: candidate,
+        admitted_order: admitted.into_iter().collect(),
+        unresolved_order: unresolved.into_iter().collect(),
+        denied_order: denied.into_iter().collect(),
+        capacity_exceeded_order: capacity.into_iter().collect(),
+        semantic_loss_order: semantic_loss.into_iter().collect(),
+        contract_digest,
+        queue_digest,
+        migration_digest,
+        replay_identity: request.replay_identity.clone(),
+        omissions: omissions.into_iter().collect(),
+        uncertainty: uncertainty.into_iter().collect(),
+        negative_evidence: negative.into_iter().collect(),
+        effect_receipts: if disposition == ThroughputKnowledgeContractDisposition::Blocked {
+            vec!["block:unsafe-release".into()]
+        } else {
+            vec![format!(
+                "read:local-throughput-knowledge-contract:{}",
+                request.request_id
+            )]
+        },
+        artifact,
+        raw_data_local: true,
+        boundary: PRECLINICAL_BOUNDARY.into(),
+    };
+    receipt.validate()?;
+    Ok(receipt)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn hash(v: &str) -> ContentHash {
+        ContentHash::of_bytes(v.as_bytes())
+    }
+    fn request() -> ThroughputKnowledgeContractRequest {
+        let h = hash("throughput-contract");
+        let job = |id: &str, count: usize, state: EvidenceState| ThroughputKnowledgeContractJob {
+            job_id: id.into(),
+            study_id: "study:one".into(),
+            claim_count: count,
+            evidence_digest: Some(h.clone()),
+            provenance_digest: Some(h.clone()),
+            state,
+            boundary: PRECLINICAL_BOUNDARY.into(),
+        };
+        ThroughputKnowledgeContractRequest {
+            request_id: "request:throughput-contract".into(),
+            batch_id: "batch:one".into(),
+            partition: "partition:one".into(),
+            jobs: vec![
+                job("job:a", 1, EvidenceState::Supported),
+                job("job:b", 1, EvidenceState::Supported),
+            ],
+            input_schema: INPUT_SCHEMA.into(),
+            output_schema: OUTPUT_SCHEMA.into(),
+            source_revision: 1,
+            target_revision: 1,
+            migration_requested: false,
+            max_concurrency: 4,
+            checkpoint_seq: 2,
+            budget_units: 10,
+            replay_identity: h,
+            policy_allow: true,
+            protected_closure: true,
+            raw_data_local: true,
+            boundary: PRECLINICAL_BOUNDARY.into(),
+        }
+    }
+    #[test]
+    fn manifest_is_a1() {
+        assert_eq!(
+            throughput_knowledge_representation_contract_model_manifest().autonomy_tier,
+            AutonomyTier::A1
+        );
+    }
+    #[test]
+    fn complete_queue_is_admitted() {
+        assert_eq!(
+            model_throughput_knowledge_representation_contract(&request())
+                .unwrap()
+                .disposition,
+            ThroughputKnowledgeContractDisposition::Completed
+        );
+    }
+    #[test]
+    fn migration_is_explicit() {
+        let mut v = request();
+        v.target_revision = 2;
+        v.migration_requested = true;
+        assert_eq!(
+            model_throughput_knowledge_representation_contract(&v)
+                .unwrap()
+                .disposition,
+            ThroughputKnowledgeContractDisposition::Migrated
+        );
+    }
+    #[test]
+    fn capacity_is_partial() {
+        let mut v = request();
+        v.max_concurrency = 1;
+        let r = model_throughput_knowledge_representation_contract(&v).unwrap();
+        assert_eq!(
+            r.disposition,
+            ThroughputKnowledgeContractDisposition::Partial
+        );
+        assert!(!r.capacity_exceeded_order.is_empty());
+    }
+    #[test]
+    fn missing_evidence_is_partial() {
+        let mut v = request();
+        v.jobs[0].evidence_digest = None;
+        assert_eq!(
+            model_throughput_knowledge_representation_contract(&v)
+                .unwrap()
+                .disposition,
+            ThroughputKnowledgeContractDisposition::Partial
+        );
+    }
+    #[test]
+    fn unknown_is_unresolved() {
+        let mut v = request();
+        v.jobs[0].state = EvidenceState::Unknown;
+        assert_eq!(
+            model_throughput_knowledge_representation_contract(&v)
+                .unwrap()
+                .disposition,
+            ThroughputKnowledgeContractDisposition::Partial
+        );
+    }
+    #[test]
+    fn policy_blocks() {
+        let mut v = request();
+        v.policy_allow = false;
+        assert_eq!(
+            model_throughput_knowledge_representation_contract(&v)
+                .unwrap()
+                .disposition,
+            ThroughputKnowledgeContractDisposition::Blocked
+        );
+    }
+    #[test]
+    fn digest_is_stable() {
+        let r = model_throughput_knowledge_representation_contract(&request()).unwrap();
+        assert_eq!(r.digest().unwrap(), r.digest().unwrap());
+    }
+}

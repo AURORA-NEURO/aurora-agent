@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aurora-neuro.org/schemas/aurora-research-contract-v1/evaluation-card-receipt.json",
+  "title": "AURORA evaluation and observability card receipt",
+  "description": "Cost-normalized, uncertainty-bearing EvaluationCard with explicit baseline coverage and omissions.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "feature_id", "card", "card_digest", "observations_digest", "baseline_counts", "omissions", "reasons", "artifact", "boundary"],
+  "properties": {
+    "schema_version": { "const": "aurora-research-contract/1.0" },
+    "feature_id": { "const": "AFA-evalengine-P23-F01" },
+    "card": {
+      "type": "object",
+      "required": ["schema_version", "capability_id", "benchmark_world", "baselines", "metrics", "uncertainty", "limitations", "release_verdict", "boundary"],
+      "properties": {
+        "schema_version": { "const": "aurora-research-contract/1.0" },
+        "capability_id": { "type": "string", "minLength": 1 },
+        "benchmark_world": { "type": "string", "minLength": 1 },
+        "baselines": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+        "metrics": { "type": "array", "minItems": 1, "items": { "type": "object", "required": ["name", "value", "uncertainty"] } },
+        "uncertainty": { "type": "array", "minItems": 1, "items": { "type": "object", "required": ["kind", "statement"] } },
+        "limitations": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+        "release_verdict": { "enum": ["pass", "conditional", "blocked", "not_evaluated"] },
+        "boundary": { "const": "preclinical-research-only; no human-subject or clinical-source data; no diagnosis, treatment, triage, enrollment, or clinical decisions" }
+      }
+    },
+    "card_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "observations_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "baseline_counts": { "type": "object", "minProperties": 1, "additionalProperties": { "type": "integer", "minimum": 0 } },
+    "omissions": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "reasons": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+    "artifact": { "type": "object", "required": ["content_hash"], "properties": { "content_hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" } } },
+    "boundary": { "const": "preclinical-research-only; no human-subject or clinical-source data; no diagnosis, treatment, triage, enrollment, or clinical decisions" }
+  }
+}

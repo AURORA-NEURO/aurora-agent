@@ -166,6 +166,23 @@ impl IntervalBasis {
             effective_size,
         }
     }
+
+    /// Checks the metadata that gives an interval its evidentiary meaning.  A zero effective size
+    /// is not an independent sample, and an empty method leaves the interval's provenance
+    /// unknowable; both are refused before an interval can carry them into a report.
+    pub fn validate(&self) -> Result<(), MetricsError> {
+        if self.method.trim().is_empty() {
+            return Err(MetricsError::MalformedIntervalBasis {
+                detail: "method must not be empty".to_string(),
+            });
+        }
+        if self.effective_size == 0 {
+            return Err(MetricsError::MalformedIntervalBasis {
+                detail: "effective size must be greater than zero".to_string(),
+            });
+        }
+        Ok(())
+    }
 }
 
 impl fmt::Display for IntervalBasis {
@@ -224,6 +241,7 @@ impl Interval {
         level: ConfidenceLevel,
         basis: IntervalBasis,
     ) -> Result<Self, MetricsError> {
+        basis.validate()?;
         if !low.is_finite() {
             return Err(MetricsError::NotFinite {
                 subject: "interval lower bound",
@@ -512,9 +530,33 @@ impl IntervalEstimate {
 
 /// A number with a stated reason for having no interval.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(try_from = "PointEstimateFields", into = "PointEstimateFields")]
 pub struct PointEstimate {
     value: f64,
     no_interval: NoIntervalReason,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+struct PointEstimateFields {
+    value: f64,
+    no_interval: NoIntervalReason,
+}
+
+impl TryFrom<PointEstimateFields> for PointEstimate {
+    type Error = MetricsError;
+
+    fn try_from(fields: PointEstimateFields) -> Result<Self, Self::Error> {
+        PointEstimate::stated(fields.value, fields.no_interval)
+    }
+}
+
+impl From<PointEstimate> for PointEstimateFields {
+    fn from(estimate: PointEstimate) -> Self {
+        PointEstimateFields {
+            value: estimate.value,
+            no_interval: estimate.no_interval,
+        }
+    }
 }
 
 impl PointEstimate {

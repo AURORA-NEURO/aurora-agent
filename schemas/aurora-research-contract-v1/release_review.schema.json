@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aurora-neuro.org/schemas/aurora-research-contract-v1/release-review.json",
+  "title": "AURORA evidence-backed release review",
+  "description": "Fail-closed production release verdict for a preclinical research capability.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "feature_id", "capability_id", "card_digest", "verdict", "reasons", "replications", "checks", "provenance_complete", "boundary"],
+  "properties": {
+    "schema_version": { "const": "aurora-research-contract/1.0" },
+    "feature_id": { "const": "AFA-evalengine-P13-F01" },
+    "capability_id": { "type": "string", "minLength": 1 },
+    "card_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "verdict": { "enum": ["pass", "conditional", "blocked", "not_evaluated"] },
+    "reasons": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+    "replications": { "type": "array", "items": { "type": "object" } },
+    "checks": { "type": "array", "items": { "type": "object" } },
+    "provenance_complete": { "type": "boolean" },
+    "boundary": { "const": "preclinical-research-only; no human-subject or clinical-source data; no diagnosis, treatment, triage, enrollment, or clinical decisions" }
+  },
+  "allOf": [{
+    "if": { "properties": { "verdict": { "const": "pass" } } },
+    "then": { "properties": { "provenance_complete": { "const": true } } }
+  }]
+}

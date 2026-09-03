@@ -1,3 +1,5 @@
+#![allow(ambiguous_glob_reexports)]
+
 //! The small remainders: the tails of six sections that are otherwise nearly complete.
 //!
 //! This crate exists because fourteen blueprint modules were each too small for a crate of their
@@ -186,6 +188,7 @@
 //! # Ok::<(), bioprism_sweep::SweepError>(())
 //! ```
 
+pub mod audit_integrity_support;
 pub mod bridge;
 pub mod cache;
 pub mod capture;
@@ -193,13 +196,46 @@ pub mod conform;
 pub mod effects;
 pub mod error;
 pub mod explorer;
+pub mod federated_continual_audit_integrity_contract_model;
+pub mod federated_continual_audit_integrity_inference;
+pub mod federated_continual_audit_integrity_research_copilot;
+pub mod federated_continual_audit_integrity_workflow_fabric;
 pub mod fidelity;
 pub mod ingest;
 pub mod interop;
+pub mod local_audit_integrity_contract_model;
+pub mod local_audit_integrity_inference;
+pub mod local_audit_integrity_research_copilot;
+pub mod local_audit_integrity_workflow_fabric;
+pub mod multimodal_audit_integrity_contract_model;
+pub mod multimodal_audit_integrity_inference;
+pub mod multimodal_audit_integrity_research_copilot;
+pub mod multimodal_audit_integrity_workflow_fabric;
 pub mod provenance;
 pub mod redact;
 pub mod regression;
 pub mod state;
+pub mod throughput_audit_integrity_contract_model;
+pub mod throughput_audit_integrity_inference;
+pub mod throughput_audit_integrity_research_copilot;
+pub mod throughput_audit_integrity_workflow_fabric;
 
+pub use audit_integrity_support::*;
 pub use error::SweepError;
+pub use federated_continual_audit_integrity_contract_model::*;
+pub use federated_continual_audit_integrity_inference::*;
+pub use federated_continual_audit_integrity_research_copilot::*;
+pub use federated_continual_audit_integrity_workflow_fabric::*;
 pub use fidelity::{meet, meet_all, Declaration, Level};
+pub use local_audit_integrity_contract_model::*;
+pub use local_audit_integrity_inference::*;
+pub use local_audit_integrity_research_copilot::*;
+pub use local_audit_integrity_workflow_fabric::*;
+pub use multimodal_audit_integrity_contract_model::*;
+pub use multimodal_audit_integrity_inference::*;
+pub use multimodal_audit_integrity_research_copilot::*;
+pub use multimodal_audit_integrity_workflow_fabric::*;
+pub use throughput_audit_integrity_contract_model::*;
+pub use throughput_audit_integrity_inference::*;
+pub use throughput_audit_integrity_research_copilot::*;
+pub use throughput_audit_integrity_workflow_fabric::*;

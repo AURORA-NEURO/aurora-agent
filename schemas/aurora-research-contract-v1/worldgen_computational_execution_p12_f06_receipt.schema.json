@@ -1,0 +1,140 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aurora-neuro.org/schemas/aurora-research-contract-v1/worldgen-computational-execution-p12-f06.json",
+  "title": "AFA-worldgen-P12-F06 receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "contract_version",
+    "feature_id",
+    "request_id",
+    "consumer",
+    "producer",
+    "namespace",
+    "semantic_profile",
+    "negotiated_version",
+    "compatibility",
+    "disposition",
+    "field_order",
+    "retained_field_order",
+    "missing_field_order",
+    "omitted_field_order",
+    "semantic_loss_order",
+    "replay_identity",
+    "contract_digest",
+    "effect_receipts",
+    "raw_data_local",
+    "aggregate_only",
+    "boundary",
+    "artifact"
+  ],
+  "properties": {
+    "effect_receipts": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "replay_identity": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "contract_digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "missing_field_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "feature_id": {
+      "const": "AFA-worldgen-P12-F06"
+    },
+    "negotiated_version": {
+      "type": "string"
+    },
+    "schema_version": {
+      "type": "string"
+    },
+    "aggregate_only": {
+      "const": true
+    },
+    "boundary": {
+      "type": "string"
+    },
+    "omitted_field_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "semantic_loss_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "namespace": {
+      "type": "string"
+    },
+    "disposition": {
+      "type": "string"
+    },
+    "raw_data_local": {
+      "const": true
+    },
+    "field_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "artifact": {
+      "type": "object",
+      "required": [
+        "content_type",
+        "content_hash",
+        "boundary"
+      ],
+      "properties": {
+        "boundary": {
+          "type": "string"
+        },
+        "content_type": {
+          "const": "application/vnd.aurora.worldgen.execution-contract-receipt+json"
+        },
+        "content_hash": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "contract_version": {
+      "const": "worldgen-multimodal-computational_execution-contract/1.0"
+    },
+    "compatibility": {
+      "type": "string"
+    },
+    "retained_field_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "semantic_profile": {
+      "type": "string"
+    },
+    "request_id": {
+      "type": "string"
+    },
+    "producer": {
+      "type": "string"
+    },
+    "consumer": {
+      "type": "string"
+    }
+  }
+}

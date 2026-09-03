@@ -299,17 +299,21 @@ impl ClonalHistory {
     fn check_nesting(&self, population: &TumourPopulation) -> Result<(), PhylogenyRefusal> {
         let parents: BTreeSet<&SubcloneId> = self.edges.iter().map(|(parent, _)| parent).collect();
         for parent in parents {
-            let parent_fraction = population
-                .get(parent)
-                .expect("endpoints were checked above")
-                .fraction;
+            let Some(parent_fraction) = population.get(parent).map(|subclone| subclone.fraction)
+            else {
+                return Err(PhylogenyRefusal::UnknownSubclone {
+                    subclone: parent.as_str().to_string(),
+                });
+            };
             let mut total: u32 = 0;
             for child in self.children_of(parent) {
-                let child_fraction = population
-                    .get(child)
-                    .expect("endpoints were checked above")
-                    .fraction;
-                total += u32::from(child_fraction.parts_per_ten_thousand());
+                let Some(child_fraction) = population.get(child).map(|subclone| subclone.fraction)
+                else {
+                    return Err(PhylogenyRefusal::UnknownSubclone {
+                        subclone: child.as_str().to_string(),
+                    });
+                };
+                total = total.saturating_add(u32::from(child_fraction.parts_per_ten_thousand()));
                 if total > u32::from(parent_fraction.parts_per_ten_thousand()) {
                     return Err(PhylogenyRefusal::ChildExceedsParent {
                         parent: parent.as_str().to_string(),

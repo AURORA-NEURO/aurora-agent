@@ -50,7 +50,8 @@ use crate::lifecycle::Note;
 use crate::name::{Bounds, PackName, Version, VersionReq};
 use crate::registry::Federation;
 use crate::resolve::{resolve_in, Request, Resolution, ResolveError};
-use serde::{Deserialize, Serialize};
+use serde::de::Error as DeError;
+use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
@@ -138,9 +139,27 @@ impl Locked {
 /// entry keeps its [`Resolution`], which means the lock records not just what was chosen but which
 /// registry said so and how current that registry's copy was — the same provenance a single
 /// resolution carries, preserved through the closure rather than flattened out of it.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct Lock {
     entries: BTreeMap<String, Locked>,
+}
+
+#[derive(Debug, Deserialize)]
+struct LockFields {
+    entries: BTreeMap<String, Locked>,
+}
+
+impl<'de> Deserialize<'de> for Lock {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let fields = LockFields::deserialize(deserializer)?;
+        let lock = Lock {
+            entries: fields.entries,
+        };
+        lock.validate().map(|()| lock).map_err(D::Error::custom)
+    }
 }
 
 impl Lock {
@@ -162,6 +181,57 @@ impl Lock {
 
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
+    }
+
+    /// Checks the consistency and explainability invariants of a restored lock.
+    ///
+    /// The map key, resolution subject, and every requirement are three serialized copies of the
+    /// same identity. They must agree, and a pin must satisfy every requirement recorded as its
+    /// justification. This prevents a lock from being made to look valid by changing only its
+    /// index or by deleting the evidence for why a version was selected.
+    pub fn validate(&self) -> Result<(), LockError> {
+        for (key, locked) in &self.entries {
+            locked
+                .resolution
+                .validate()
+                .map_err(|error| LockError::InvalidResolution {
+                    subject: key.clone(),
+                    detail: error.to_string(),
+                })?;
+            let subject = locked.resolution.subject();
+            if key != &subject.name.to_string() {
+                return Err(LockError::EntryKeyMismatch {
+                    key: key.clone(),
+                    subject: subject.name.to_string(),
+                });
+            }
+            if locked.required_by.is_empty() {
+                return Err(LockError::RequirementsMissing {
+                    subject: key.clone(),
+                });
+            }
+            if locked.required_by.windows(2).any(|pair| pair[0] >= pair[1]) {
+                return Err(LockError::RequirementsNotCanonical {
+                    subject: key.clone(),
+                });
+            }
+            for requirement in &locked.required_by {
+                if requirement.on != subject.name {
+                    return Err(LockError::RequirementSubjectMismatch {
+                        subject: key.clone(),
+                        requirement: requirement.on.to_string(),
+                    });
+                }
+                if !requirement.req.matches(&subject.version) {
+                    return Err(LockError::RequirementUnsatisfied {
+                        subject: key.clone(),
+                        version: subject.version.to_string(),
+                        requirement: requirement.req.to_string(),
+                    });
+                }
+            }
+        }
+        Ok(())
     }
 
     /// True when every entry was answered by the registry that owns its namespace.
@@ -213,11 +283,14 @@ pub fn resolve_dependencies(
         for (name, imposed) in &requirements {
             let bounds = intersect(imposed);
             if bounds.is_empty() {
-                return Err(DependencyError::Collision(Box::new(
-                    witness(name, imposed).expect(
-                        "an empty intersection of intervals in a total order has a pairwise witness",
-                    ),
-                )));
+                let Some(collision) = witness(name, imposed) else {
+                    return Err(DependencyError::InconsistentConstraints {
+                        on: name.to_string(),
+                        detail: "the intersection is empty but no pairwise witness was found"
+                            .into(),
+                    });
+                };
+                return Err(DependencyError::Collision(Box::new(collision)));
             }
             let version = select(federation, catalogs, root, name, imposed, &bounds)?;
             next.insert(name.clone(), version);
@@ -382,10 +455,11 @@ fn build(
 ) -> Result<Lock, DependencyError> {
     let mut entries = BTreeMap::new();
     for (name, imposed) in requirements {
-        let version = selection
-            .get(name)
-            .copied()
-            .expect("the fixpoint selected a version for every required name");
+        let Some(version) = selection.get(name).copied() else {
+            return Err(DependencyError::MissingSelection {
+                on: name.to_string(),
+            });
+        };
         let request = Request {
             name: name.clone(),
             req: VersionReq::Exact(version),
@@ -447,8 +521,39 @@ pub enum DependencyError {
         cause: Box<ResolveError>,
     },
 
+    #[error("constraints for {on} are inconsistent: {detail}")]
+    InconsistentConstraints { on: String, detail: String },
+
+    #[error("the stabilized dependency selection is missing {on}")]
+    MissingSelection { on: String },
+
     #[error("the selection did not settle after {rounds} round(s); unstable: {}", packs.join(", "))]
     DidNotStabilise { rounds: usize, packs: Vec<String> },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum LockError {
+    #[error("lock entry key {key} does not match resolved subject {subject}")]
+    EntryKeyMismatch { key: String, subject: String },
+    #[error("lock entry {subject} has no requirements recorded as its justification")]
+    RequirementsMissing { subject: String },
+    #[error("requirements for lock entry {subject} are not in canonical order")]
+    RequirementsNotCanonical { subject: String },
+    #[error("lock entry {subject} records a requirement for {requirement}")]
+    RequirementSubjectMismatch {
+        subject: String,
+        requirement: String,
+    },
+    #[error(
+        "lock entry {subject} pins {version}, which does not satisfy requirement {requirement}"
+    )]
+    RequirementUnsatisfied {
+        subject: String,
+        version: String,
+        requirement: String,
+    },
+    #[error("lock entry {subject} contains an invalid resolution: {detail}")]
+    InvalidResolution { subject: String, detail: String },
 }
 
 #[cfg(test)]
@@ -773,6 +878,24 @@ mod tests {
         let back: Lock = serde_json::from_str(&text).expect("deserialises");
         assert_eq!(back, lock);
         assert!(back.is_fully_authoritative());
+    }
+
+    #[test]
+    fn lock_deserialization_rejects_index_and_justification_tampering() {
+        let lock =
+            resolve_dependencies(&federation(), &[graph()], &request("app")).expect("resolves");
+        let mut value = serde_json::to_value(&lock).expect("serialises");
+        let entries = value
+            .get_mut("entries")
+            .and_then(serde_json::Value::as_object_mut)
+            .expect("entries object");
+        let app = entries.remove("bioprism/app").expect("app entry");
+        entries.insert("bioprism/renamed".into(), app);
+        assert!(serde_json::from_value::<Lock>(value).is_err());
+
+        let mut value = serde_json::to_value(&lock).expect("serialises");
+        value["entries"]["bioprism/app"]["required_by"] = serde_json::json!([]);
+        assert!(serde_json::from_value::<Lock>(value).is_err());
     }
 
     #[test]

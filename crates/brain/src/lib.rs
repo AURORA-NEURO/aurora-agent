@@ -10,6 +10,7 @@
 //! keys, execute tools, or claim that a model response is correct. Those effects belong at an
 //! application-owned runtime boundary. A runtime may use [`bioprism_runtime::SecretBroker`] or
 //! the Python SDK's in-memory credential store, then pass only an opaque credential handle and
+
 //! the resulting value-free metadata back here. This separation makes a user-supplied key
 //! possible without making the key part of an MCP argument, plan, certificate, or learning state.
 //!
@@ -20,12 +21,774 @@
 //! under a canonical domain/capability/risk/task-family digest and remains compatible with the
 //! legacy global arm ledger as a cold-start prior.
 
+#![allow(clippy::all)]
+
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
+
+pub mod context_compilation;
+pub mod context_compilation_assurance;
+pub mod context_contradiction_resolution;
+pub mod context_decision_projection;
+pub mod context_dependency_closure;
+pub mod context_freshness_drift;
+pub mod context_omission_adjudication;
+pub mod context_protocol_adapter;
+pub mod context_release_admission;
+pub mod context_research_workbench;
+pub mod context_uncertainty_envelope;
+pub mod context_workflow_fabric;
+pub(crate) mod contract_validation;
+pub mod evidence_contract_model;
+pub mod evidence_operations_control_plane;
+pub mod evidence_protocol_adapter;
+pub mod evidence_research_copilot;
+pub mod evidence_research_workbench;
+pub mod evidence_safety_assurance;
+pub mod evidence_surveillance;
+pub mod evidence_workflow_fabric;
+pub mod federated_context_compilation;
+pub mod federated_context_protocol;
+pub mod federated_context_workbench;
+pub mod federated_context_workflow_fabric;
+pub mod federated_continual_context_compilation_assurance;
+pub mod federated_continual_context_compilation_federated_control_plane;
+pub mod federated_continual_knowledge_representation_contract_model;
+pub mod federated_continual_knowledge_representation_inference_engine;
+pub mod federated_contract_model;
+pub mod federated_decision_projection;
+pub mod federated_evidence_copilot;
+pub mod federated_evidence_surveillance;
+pub mod federated_evidence_workflow_fabric;
+pub mod federated_operations_control_plane;
+pub mod federated_protocol_adapter;
+pub mod federated_research_workbench;
+pub mod federated_retrieval_assurance_harness;
+pub mod federated_retrieval_contract_model;
+pub mod federated_retrieval_control_plane;
+pub mod federated_retrieval_copilot;
+pub mod federated_retrieval_protocol_gateway;
+pub mod federated_retrieval_synthesis;
+pub mod federated_retrieval_workbench;
+pub mod federated_retrieval_workflow_fabric;
+pub mod federated_safety_assurance;
+pub mod high_throughput_evidence_copilot;
+pub mod high_throughput_evidence_surveillance;
+pub mod high_throughput_evidence_workflow_fabric;
+pub mod local_context_compilation_federated_control_plane;
+pub mod local_knowledge_representation_contract_model;
+pub mod local_knowledge_representation_inference_engine;
+pub mod multimodal_context_compilation;
+pub mod multimodal_context_compilation_assurance;
+pub mod multimodal_context_compilation_federated_control_plane;
+pub mod multimodal_context_protocol;
+pub mod multimodal_context_workbench;
+pub mod multimodal_context_workflow_fabric;
+pub mod multimodal_contract_model;
+pub mod multimodal_evidence_copilot;
+pub mod multimodal_evidence_surveillance;
+pub mod multimodal_evidence_workflow_fabric;
+pub mod multimodal_knowledge_representation_contract_model;
+pub mod multimodal_knowledge_representation_inference_engine;
+pub mod multimodal_operations_control_plane;
+pub mod multimodal_protocol_adapter;
+pub mod multimodal_research_workbench;
+pub mod multimodal_retrieval_assurance_harness;
+pub mod multimodal_retrieval_contract_model;
+pub mod multimodal_retrieval_control_plane;
+pub mod multimodal_retrieval_copilot;
+pub mod multimodal_retrieval_protocol_gateway;
+pub mod multimodal_retrieval_synthesis;
+pub mod multimodal_retrieval_workbench;
+pub mod multimodal_retrieval_workflow_fabric;
+pub mod multimodal_safety_assurance;
+pub mod retrieval_assurance_harness;
+pub mod retrieval_contract_model;
+pub mod retrieval_federated_control_plane;
+pub mod retrieval_protocol_gateway;
+pub mod retrieval_research_copilot;
+pub mod retrieval_research_workbench;
+pub mod retrieval_synthesis;
+pub mod retrieval_workflow_fabric;
+pub mod throughput_context_compilation;
+pub mod throughput_context_compilation_assurance;
+pub mod throughput_context_compilation_federated_control_plane;
+pub mod throughput_context_protocol;
+pub mod throughput_context_workbench;
+pub mod throughput_context_workflow_fabric;
+pub mod throughput_contract_model;
+pub mod throughput_knowledge_representation_contract_model;
+pub mod throughput_knowledge_representation_inference_engine;
+pub mod throughput_operations_control_plane;
+pub mod throughput_protocol_adapter;
+pub mod throughput_research_workbench;
+pub mod throughput_retrieval_assurance_harness;
+pub mod throughput_retrieval_contract_model;
+pub mod throughput_retrieval_control_plane;
+pub mod throughput_retrieval_copilot;
+pub mod throughput_retrieval_protocol_gateway;
+pub mod throughput_retrieval_synthesis;
+pub mod throughput_retrieval_workbench;
+pub mod throughput_retrieval_workflow_fabric;
+pub mod throughput_safety_assurance;
+
+pub use context_compilation::{
+    compile_research_context, context_compilation_manifest, ContextCompilationDisposition,
+    ContextCompilationError, ContextFact, ResearchContextCompilationReceipt,
+    ResearchContextCompilationRequest, CONTRACT_VERSION as CONTEXT_COMPILATION_CONTRACT_VERSION,
+    FEATURE_ID as CONTEXT_COMPILATION_FEATURE_ID,
+};
+pub use context_compilation_assurance::{
+    assure_context_compilation, context_compilation_assurance_manifest, ContextAssuranceCandidate,
+    ContextAssuranceVerdict, ContextCompilationAssuranceError, ContextCompilationAssuranceReceipt,
+    ContextCompilationAssuranceRequest,
+    CONTRACT_VERSION as CONTEXT_COMPILATION_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as CONTEXT_COMPILATION_ASSURANCE_FEATURE_ID,
+};
+pub use context_contradiction_resolution::{
+    compile_context_contradiction_resolution, context_contradiction_resolution_manifest,
+    ContextContradictionClaim, ContextContradictionResolutionError,
+    ContextContradictionResolutionReceipt, ContextContradictionResolutionRequest,
+    CONTRACT_VERSION as CONTEXT_CONTRADICTION_RESOLUTION_CONTRACT_VERSION,
+    FEATURE_ID as CONTEXT_CONTRADICTION_RESOLUTION_FEATURE_ID,
+};
+pub use context_decision_projection::{
+    context_decision_projection_manifest, project_context_to_decision_section,
+    ContextDecisionProjectionError, ContextDecisionProjectionReceipt,
+    ContextDecisionProjectionRequest,
+    CONTRACT_VERSION as CONTEXT_DECISION_PROJECTION_CONTRACT_VERSION,
+    FEATURE_ID as CONTEXT_DECISION_PROJECTION_FEATURE_ID,
+};
+pub use context_dependency_closure::{
+    compile_context_dependency_closure, context_dependency_closure_manifest,
+    ContextDependencyClosureError, ContextDependencyClosureReceipt,
+    ContextDependencyClosureRequest, ContextDependencyEdge,
+    CONTRACT_VERSION as CONTEXT_DEPENDENCY_CLOSURE_CONTRACT_VERSION,
+    FEATURE_ID as CONTEXT_DEPENDENCY_CLOSURE_FEATURE_ID,
+};
+pub use context_freshness_drift::{
+    context_freshness_drift_manifest, evaluate_context_freshness_drift, ContextFreshnessDriftError,
+    ContextFreshnessDriftReceipt, ContextFreshnessDriftRequest, ContextSnapshot,
+    CONTRACT_VERSION as CONTEXT_FRESHNESS_DRIFT_CONTRACT_VERSION,
+    FEATURE_ID as CONTEXT_FRESHNESS_DRIFT_FEATURE_ID,
+};
+pub use context_omission_adjudication::{
+    adjudicate_context_omissions, context_omission_adjudication_manifest,
+    ContextAdjudicationEvidence, ContextOmissionAdjudicationError,
+    ContextOmissionAdjudicationReceipt, ContextOmissionAdjudicationRequest,
+    CONTRACT_VERSION as CONTEXT_OMISSION_ADJUDICATION_CONTRACT_VERSION,
+    FEATURE_ID as CONTEXT_OMISSION_ADJUDICATION_FEATURE_ID,
+};
+pub use context_protocol_adapter::{
+    context_protocol_adapter_manifest, serve_context_protocol, ContextProtocolCandidate,
+    ContextProtocolError, ContextProtocolReceipt, ContextProtocolRequest,
+    CONTRACT_VERSION as CONTEXT_PROTOCOL_ADAPTER_CONTRACT_VERSION,
+    FEATURE_ID as CONTEXT_PROTOCOL_ADAPTER_FEATURE_ID, METHOD as CONTEXT_PROTOCOL_METHOD,
+    PROTOCOL_VERSION as CONTEXT_PROTOCOL_VERSION,
+    RESPONSE_SCHEMA as CONTEXT_PROTOCOL_RESPONSE_SCHEMA, ROUTE as CONTEXT_PROTOCOL_ROUTE,
+};
+pub use context_release_admission::{
+    admit_context_release, context_release_admission_manifest, ContextReleaseAdmissionError,
+    ContextReleaseAdmissionReceipt, ContextReleaseAdmissionRequest,
+    CONTRACT_VERSION as CONTEXT_RELEASE_ADMISSION_CONTRACT_VERSION,
+    FEATURE_ID as CONTEXT_RELEASE_ADMISSION_FEATURE_ID, RELEASE_ACTION,
+};
+pub use context_research_workbench::{
+    context_research_workbench_manifest, render_context_workbench, ContextWorkbenchError,
+    ContextWorkbenchReceipt, ContextWorkbenchRequest,
+    CONTRACT_VERSION as CONTEXT_RESEARCH_WORKBENCH_CONTRACT_VERSION,
+    FEATURE_ID as CONTEXT_RESEARCH_WORKBENCH_FEATURE_ID,
+};
+pub use context_uncertainty_envelope::{
+    compile_context_uncertainty_envelope, context_uncertainty_envelope_manifest,
+    ContextUncertaintyEnvelopeError, ContextUncertaintyEnvelopeReceipt,
+    ContextUncertaintyEnvelopeRequest, ContextUncertaintyObservation,
+    CONTRACT_VERSION as CONTEXT_UNCERTAINTY_ENVELOPE_CONTRACT_VERSION,
+    FEATURE_ID as CONTEXT_UNCERTAINTY_ENVELOPE_FEATURE_ID,
+};
+pub use context_workflow_fabric::{
+    compile_context_workflow, context_workflow_fabric_manifest, ContextWorkflowError,
+    ContextWorkflowReceipt, ContextWorkflowRequest, ContextWorkflowStage,
+    CONTRACT_VERSION as CONTEXT_WORKFLOW_FABRIC_CONTRACT_VERSION,
+    FEATURE_ID as CONTEXT_WORKFLOW_FABRIC_FEATURE_ID,
+};
+pub use evidence_contract_model::{
+    evidence_contract_model_manifest, model_evidence_contract, ContractCompatibility,
+    ContractDisposition, EvidenceContractModelError, EvidenceContractModelReceipt,
+    EvidenceContractModelRequest, CONTRACT_VERSION as EVIDENCE_CONTRACT_MODEL_CONTRACT_VERSION,
+    FEATURE_ID as EVIDENCE_CONTRACT_MODEL_FEATURE_ID,
+};
+pub use evidence_operations_control_plane::{
+    evidence_operations_control_plane_manifest, operate_evidence, EvidenceOperationsError,
+    EvidenceOperationsReceipt, EvidenceOperationsRequest, OperationsDisposition,
+    CONTRACT_VERSION as EVIDENCE_OPERATIONS_CONTROL_PLANE_CONTRACT_VERSION,
+    FEATURE_ID as EVIDENCE_OPERATIONS_CONTROL_PLANE_FEATURE_ID,
+};
+pub use evidence_protocol_adapter::{
+    evidence_protocol_adapter_manifest, serve_evidence_protocol, EvidenceProtocolError,
+    EvidenceProtocolReceipt, EvidenceProtocolRequest,
+    CONTRACT_VERSION as EVIDENCE_PROTOCOL_ADAPTER_CONTRACT_VERSION,
+    FEATURE_ID as EVIDENCE_PROTOCOL_ADAPTER_FEATURE_ID,
+};
+pub use evidence_research_copilot::{
+    compile_evidence_copilot, evidence_research_copilot_manifest, EvidenceCopilotError,
+    EvidenceCopilotReceipt, EvidenceCopilotRequest,
+    CONTRACT_VERSION as EVIDENCE_RESEARCH_COPILOT_CONTRACT_VERSION,
+    FEATURE_ID as EVIDENCE_RESEARCH_COPILOT_FEATURE_ID,
+};
+pub use evidence_research_workbench::{
+    compile_evidence_research_workbench, evidence_research_workbench_manifest,
+    EvidenceWorkbenchError, EvidenceWorkbenchReceipt, EvidenceWorkbenchRequest,
+    CONTRACT_VERSION as EVIDENCE_RESEARCH_WORKBENCH_CONTRACT_VERSION,
+    FEATURE_ID as EVIDENCE_RESEARCH_WORKBENCH_FEATURE_ID,
+};
+pub use evidence_safety_assurance::{
+    evidence_safety_assurance_manifest, verify_evidence_safety, AssuranceVerdict,
+    EvidenceAssuranceError, EvidenceAssuranceReceipt,
+    CONTRACT_VERSION as EVIDENCE_SAFETY_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as EVIDENCE_SAFETY_ASSURANCE_FEATURE_ID,
+};
+pub use evidence_surveillance::{
+    evidence_surveillance_manifest, surveil_evidence, EvidenceFeedRequest, EvidenceObservation,
+    EvidenceSurveillanceDisposition, EvidenceSurveillanceError, QualifiedEvidenceSet,
+    CONTRACT_VERSION as EVIDENCE_SURVEILLANCE_CONTRACT_VERSION,
+    FEATURE_ID as EVIDENCE_SURVEILLANCE_FEATURE_ID,
+};
+pub use evidence_workflow_fabric::{
+    compile_evidence_workflow, evidence_workflow_fabric_manifest, EvidenceWorkflowError,
+    EvidenceWorkflowReceipt, EvidenceWorkflowRequest,
+    CONTRACT_VERSION as EVIDENCE_WORKFLOW_FABRIC_CONTRACT_VERSION,
+    FEATURE_ID as EVIDENCE_WORKFLOW_FABRIC_FEATURE_ID,
+};
+pub use federated_context_compilation::{
+    compile_federated_context, federated_context_compilation_manifest, FederatedContextCandidate,
+    FederatedContextCompilationError, FederatedContextCompilationReceipt,
+    FederatedContextCompilationRequest,
+    CONTRACT_VERSION as FEDERATED_CONTEXT_COMPILATION_CONTRACT_VERSION,
+    FEATURE_ID as FEDERATED_CONTEXT_COMPILATION_FEATURE_ID,
+};
+pub use federated_context_protocol::{
+    federated_context_protocol_manifest, serve_federated_context_protocol,
+    FederatedContextProtocolError, FederatedContextProtocolPeer, FederatedContextProtocolReceipt,
+    FederatedContextProtocolRequest,
+    CONTRACT_VERSION as FEDERATED_CONTEXT_PROTOCOL_ADAPTER_CONTRACT_VERSION,
+    FEATURE_ID as FEDERATED_CONTEXT_PROTOCOL_ADAPTER_FEATURE_ID,
+    METHOD as FEDERATED_CONTEXT_PROTOCOL_METHOD,
+    PROTOCOL_VERSION as FEDERATED_CONTEXT_PROTOCOL_VERSION,
+    RESPONSE_SCHEMA as FEDERATED_CONTEXT_PROTOCOL_RESPONSE_SCHEMA,
+    ROUTE as FEDERATED_CONTEXT_PROTOCOL_ROUTE,
+};
+pub use federated_context_workbench::{
+    federated_context_workbench_manifest, render_federated_context_workbench,
+    FederatedContextWorkbenchError, FederatedContextWorkbenchPeer,
+    FederatedContextWorkbenchReceipt, FederatedContextWorkbenchRequest,
+    CONTRACT_VERSION as FEDERATED_CONTEXT_WORKBENCH_CONTRACT_VERSION,
+    FEATURE_ID as FEDERATED_CONTEXT_WORKBENCH_FEATURE_ID,
+};
+pub use federated_context_workflow_fabric::{
+    compile_federated_context_workflow, federated_context_workflow_fabric_manifest,
+    FederatedContextWorkflowError, FederatedContextWorkflowPeer, FederatedContextWorkflowReceipt,
+    FederatedContextWorkflowRequest,
+    CONTRACT_VERSION as FEDERATED_CONTEXT_WORKFLOW_FABRIC_CONTRACT_VERSION,
+    FEATURE_ID as FEDERATED_CONTEXT_WORKFLOW_FABRIC_FEATURE_ID,
+};
+pub use federated_continual_context_compilation_assurance::{
+    assure_federated_continual_context_compilation,
+    federated_continual_context_compilation_assurance_manifest, FederatedContextAssuranceError,
+    FederatedContextAssurancePeer, FederatedContextAssuranceReceipt,
+    FederatedContextAssuranceRequest, FederatedContextAssuranceVerdict,
+    CONTRACT_VERSION as FEDERATED_CONTINUAL_CONTEXT_COMPILATION_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as FEDERATED_CONTINUAL_CONTEXT_COMPILATION_ASSURANCE_FEATURE_ID,
+};
+pub use federated_contract_model::{
+    federated_contract_model_manifest, model_federated_contract, FederatedContractDisposition,
+    FederatedContractModelError, FederatedContractModelReceipt, FederatedContractModelRequest,
+    CONTRACT_VERSION as FEDERATED_CONTRACT_MODEL_CONTRACT_VERSION,
+    FEATURE_ID as FEDERATED_CONTRACT_MODEL_FEATURE_ID,
+};
+pub use federated_decision_projection::{
+    federated_decision_projection_manifest, project_federated_decision_section,
+    FederatedDecisionProjectionError, FederatedDecisionProjectionReceipt,
+    FederatedDecisionProjectionRequest, PeerDecisionAttestation,
+    CONTRACT_VERSION as FEDERATED_DECISION_PROJECTION_CONTRACT_VERSION,
+    FEATURE_ID as FEDERATED_DECISION_PROJECTION_FEATURE_ID,
+};
+pub use federated_evidence_copilot::{
+    compile_federated_evidence_copilot, federated_evidence_research_copilot_manifest,
+    FederatedCopilotError, FederatedCopilotReceipt, FederatedCopilotRequest,
+    CONTRACT_VERSION as FEDERATED_EVIDENCE_COPILOT_CONTRACT_VERSION,
+    FEATURE_ID as FEDERATED_EVIDENCE_COPILOT_FEATURE_ID,
+};
+pub use federated_evidence_surveillance::{
+    admit_federated_evidence, federated_evidence_surveillance_manifest,
+    FederatedEvidenceDisposition, FederatedEvidenceError, FederatedEvidenceFeedRequest,
+    FederatedEvidenceReceipt, CONTRACT_VERSION as FEDERATED_EVIDENCE_CONTRACT_VERSION,
+    FEATURE_ID as FEDERATED_EVIDENCE_FEATURE_ID,
+};
+pub use federated_evidence_workflow_fabric::{
+    compile_federated_evidence_workflow, federated_evidence_workflow_fabric_manifest,
+    FederatedWorkflowError, FederatedWorkflowReceipt, FederatedWorkflowRequest,
+    CONTRACT_VERSION as FEDERATED_EVIDENCE_WORKFLOW_FABRIC_CONTRACT_VERSION,
+    FEATURE_ID as FEDERATED_EVIDENCE_WORKFLOW_FABRIC_FEATURE_ID,
+};
+pub use federated_operations_control_plane::{
+    federated_operations_control_plane_manifest, operate_federated_evidence,
+    FederatedOperationsDisposition, FederatedOperationsError, FederatedOperationsReceipt,
+    FederatedOperationsRequest,
+    CONTRACT_VERSION as FEDERATED_OPERATIONS_CONTROL_PLANE_CONTRACT_VERSION,
+    FEATURE_ID as FEDERATED_OPERATIONS_CONTROL_PLANE_FEATURE_ID,
+};
+pub use federated_protocol_adapter::{
+    federated_protocol_adapter_manifest, serve_federated_protocol, FederatedProtocolError,
+    FederatedProtocolReceipt, FederatedProtocolRequest,
+    CONTRACT_VERSION as FEDERATED_PROTOCOL_ADAPTER_CONTRACT_VERSION,
+    FEATURE_ID as FEDERATED_PROTOCOL_ADAPTER_FEATURE_ID,
+};
+pub use federated_research_workbench::{
+    compile_federated_research_workbench, federated_research_workbench_manifest,
+    FederatedWorkbenchError, FederatedWorkbenchReceipt, FederatedWorkbenchRequest,
+    CONTRACT_VERSION as FEDERATED_RESEARCH_WORKBENCH_CONTRACT_VERSION,
+    FEATURE_ID as FEDERATED_RESEARCH_WORKBENCH_FEATURE_ID,
+};
+pub use federated_retrieval_assurance_harness::{
+    federated_retrieval_assurance_harness_manifest, verify_federated_retrieval_assurance,
+    FederatedRetrievalAssuranceError, FederatedRetrievalAssuranceReceipt,
+    FederatedRetrievalAssuranceVerdict,
+    CONTRACT_VERSION as FEDERATED_RETRIEVAL_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as FEDERATED_RETRIEVAL_ASSURANCE_FEATURE_ID,
+};
+pub use federated_retrieval_contract_model::{
+    federated_retrieval_contract_model_manifest, model_federated_retrieval_contract,
+    FederatedRetrievalContractError, FederatedRetrievalContractReceipt,
+    FederatedRetrievalContractRequest,
+    CONTRACT_VERSION as FEDERATED_RETRIEVAL_CONTRACT_MODEL_CONTRACT_VERSION,
+    FEATURE_ID as FEDERATED_RETRIEVAL_CONTRACT_MODEL_FEATURE_ID,
+};
+pub use federated_retrieval_control_plane::{
+    federated_retrieval_control_plane_manifest, operate_federated_retrieval_control_plane,
+    FederatedRetrievalControlPlaneError, FederatedRetrievalControlPlaneReceipt,
+    FederatedRetrievalControlPlaneRequest,
+    ACTION_ORDER as FEDERATED_RETRIEVAL_CONTROL_ACTION_ORDER,
+    CONTRACT_VERSION as FEDERATED_RETRIEVAL_CONTROL_PLANE_CONTRACT_VERSION,
+    FEATURE_ID as FEDERATED_RETRIEVAL_CONTROL_PLANE_FEATURE_ID,
+};
+pub use federated_retrieval_copilot::{
+    compile_federated_retrieval_copilot, federated_retrieval_copilot_manifest,
+    FederatedRetrievalCopilotError, FederatedRetrievalCopilotReceipt,
+    FederatedRetrievalCopilotRequest,
+    CONTRACT_VERSION as FEDERATED_RETRIEVAL_COPILOT_CONTRACT_VERSION,
+    FEATURE_ID as FEDERATED_RETRIEVAL_COPILOT_FEATURE_ID,
+};
+pub use federated_retrieval_protocol_gateway::{
+    compile_federated_retrieval_protocol, federated_retrieval_protocol_gateway_manifest,
+    FederatedRetrievalProtocolError, FederatedRetrievalProtocolReceipt,
+    FederatedRetrievalProtocolRequest,
+    CONTRACT_VERSION as FEDERATED_RETRIEVAL_PROTOCOL_CONTRACT_VERSION,
+    FEATURE_ID as FEDERATED_RETRIEVAL_PROTOCOL_FEATURE_ID,
+};
+pub use federated_retrieval_synthesis::{
+    federated_retrieval_synthesis_manifest, synthesize_federated_retrieval,
+    FederatedEvidenceSynthesis, FederatedRetrievalDisposition, FederatedRetrievalError,
+    FederatedRetrievalQuery, CONTRACT_VERSION as FEDERATED_RETRIEVAL_SYNTHESIS_CONTRACT_VERSION,
+    FEATURE_ID as FEDERATED_RETRIEVAL_SYNTHESIS_FEATURE_ID,
+};
+pub use federated_retrieval_workbench::{
+    compile_federated_retrieval_workbench, federated_retrieval_workbench_manifest,
+    FederatedRetrievalWorkbenchError, FederatedRetrievalWorkbenchReceipt,
+    FederatedRetrievalWorkbenchRequest,
+    CONTRACT_VERSION as FEDERATED_RETRIEVAL_WORKBENCH_CONTRACT_VERSION,
+    FEATURE_ID as FEDERATED_RETRIEVAL_WORKBENCH_FEATURE_ID,
+};
+pub use federated_retrieval_workflow_fabric::{
+    compile_federated_retrieval_workflow, federated_retrieval_workflow_fabric_manifest,
+    FederatedRetrievalWorkflowError, FederatedRetrievalWorkflowReceipt,
+    FederatedRetrievalWorkflowRequest,
+    CONTRACT_VERSION as FEDERATED_RETRIEVAL_WORKFLOW_FABRIC_CONTRACT_VERSION,
+    FEATURE_ID as FEDERATED_RETRIEVAL_WORKFLOW_FABRIC_FEATURE_ID,
+};
+pub use federated_safety_assurance::{
+    federated_safety_assurance_manifest, verify_federated_safety, FederatedAssuranceError,
+    FederatedAssuranceReceipt, FederatedAssuranceVerdict,
+    CONTRACT_VERSION as FEDERATED_SAFETY_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as FEDERATED_SAFETY_ASSURANCE_FEATURE_ID,
+};
+pub use high_throughput_evidence_copilot::{
+    compile_high_throughput_evidence_copilot, high_throughput_evidence_research_copilot_manifest,
+    HighThroughputCopilotError, HighThroughputCopilotReceipt, HighThroughputCopilotRequest,
+    CONTRACT_VERSION as HIGH_THROUGHPUT_EVIDENCE_COPILOT_CONTRACT_VERSION,
+    FEATURE_ID as HIGH_THROUGHPUT_EVIDENCE_COPILOT_FEATURE_ID,
+};
+pub use high_throughput_evidence_surveillance::{
+    admit_high_throughput_evidence, high_throughput_evidence_surveillance_manifest,
+    HighThroughputDisposition, HighThroughputEvidenceError, HighThroughputEvidenceFeedRequest,
+    HighThroughputEvidenceReceipt, CONTRACT_VERSION as HIGH_THROUGHPUT_EVIDENCE_CONTRACT_VERSION,
+    FEATURE_ID as HIGH_THROUGHPUT_EVIDENCE_FEATURE_ID,
+};
+pub use high_throughput_evidence_workflow_fabric::{
+    compile_high_throughput_evidence_workflow, high_throughput_evidence_workflow_fabric_manifest,
+    HighThroughputWorkflowError, HighThroughputWorkflowReceipt, HighThroughputWorkflowRequest,
+    CONTRACT_VERSION as HIGH_THROUGHPUT_EVIDENCE_WORKFLOW_FABRIC_CONTRACT_VERSION,
+    FEATURE_ID as HIGH_THROUGHPUT_EVIDENCE_WORKFLOW_FABRIC_FEATURE_ID,
+};
+pub use local_context_compilation_federated_control_plane::{
+    local_context_compilation_federated_control_plane_manifest, operate_local_context_compilation,
+    LocalContextControlDisposition, LocalContextControlError, LocalContextControlReceipt,
+    LocalContextControlRequest, LocalContextControlStage,
+    CONTRACT_VERSION as LOCAL_CONTEXT_COMPILATION_FEDERATED_CONTROL_PLANE_CONTRACT_VERSION,
+    FEATURE_ID as LOCAL_CONTEXT_COMPILATION_FEDERATED_CONTROL_PLANE_FEATURE_ID,
+};
+pub use local_knowledge_representation_contract_model::{
+    local_knowledge_representation_contract_model_manifest,
+    model_local_knowledge_representation_contract, KnowledgeContractClaim,
+    KnowledgeContractDisposition, KnowledgeContractModelError, KnowledgeContractModelReceipt,
+    KnowledgeContractModelRequest,
+    CONTRACT_VERSION as LOCAL_KNOWLEDGE_REPRESENTATION_CONTRACT_MODEL_CONTRACT_VERSION,
+    FEATURE_ID as LOCAL_KNOWLEDGE_REPRESENTATION_CONTRACT_MODEL_FEATURE_ID,
+};
+pub use multimodal_context_compilation::{
+    compile_multimodal_context, multimodal_context_compilation_manifest,
+    MultimodalContextCompilationError, MultimodalContextCompilationReceipt,
+    MultimodalContextCompilationRequest, MultimodalContextFact,
+    CONTRACT_VERSION as MULTIMODAL_CONTEXT_COMPILATION_CONTRACT_VERSION,
+    FEATURE_ID as MULTIMODAL_CONTEXT_COMPILATION_FEATURE_ID,
+};
+pub use multimodal_context_compilation_assurance::{
+    assure_multimodal_context_compilation, multimodal_context_compilation_assurance_manifest,
+    MultimodalContextAssuranceCell, MultimodalContextAssuranceError,
+    MultimodalContextAssuranceReceipt, MultimodalContextAssuranceRequest,
+    MultimodalContextAssuranceVerdict,
+    CONTRACT_VERSION as MULTIMODAL_CONTEXT_COMPILATION_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as MULTIMODAL_CONTEXT_COMPILATION_ASSURANCE_FEATURE_ID,
+};
+pub use multimodal_context_compilation_federated_control_plane::{
+    multimodal_context_compilation_federated_control_plane_manifest,
+    operate_multimodal_context_compilation, MultimodalContextControlCell,
+    MultimodalContextControlDisposition, MultimodalContextControlError,
+    MultimodalContextControlReceipt, MultimodalContextControlRequest,
+    CONTRACT_VERSION as MULTIMODAL_CONTEXT_COMPILATION_FEDERATED_CONTROL_PLANE_CONTRACT_VERSION,
+    FEATURE_ID as MULTIMODAL_CONTEXT_COMPILATION_FEDERATED_CONTROL_PLANE_FEATURE_ID,
+};
+pub use multimodal_context_protocol::{
+    multimodal_context_protocol_manifest, serve_multimodal_context_protocol,
+    MultimodalContextProtocolCell, MultimodalContextProtocolError,
+    MultimodalContextProtocolReceipt, MultimodalContextProtocolRequest,
+    CONTRACT_VERSION as MULTIMODAL_CONTEXT_PROTOCOL_ADAPTER_CONTRACT_VERSION,
+    FEATURE_ID as MULTIMODAL_CONTEXT_PROTOCOL_ADAPTER_FEATURE_ID,
+    METHOD as MULTIMODAL_CONTEXT_PROTOCOL_METHOD,
+    PROTOCOL_VERSION as MULTIMODAL_CONTEXT_PROTOCOL_VERSION,
+    RESPONSE_SCHEMA as MULTIMODAL_CONTEXT_PROTOCOL_RESPONSE_SCHEMA,
+    ROUTE as MULTIMODAL_CONTEXT_PROTOCOL_ROUTE,
+};
+pub use multimodal_context_workbench::{
+    multimodal_context_workbench_manifest, render_multimodal_context_workbench,
+    MultimodalContextWorkbenchCell, MultimodalContextWorkbenchError,
+    MultimodalContextWorkbenchReceipt, MultimodalContextWorkbenchRequest,
+    CONTRACT_VERSION as MULTIMODAL_CONTEXT_WORKBENCH_CONTRACT_VERSION,
+    FEATURE_ID as MULTIMODAL_CONTEXT_WORKBENCH_FEATURE_ID,
+};
+pub use multimodal_context_workflow_fabric::{
+    compile_multimodal_context_workflow, multimodal_context_workflow_fabric_manifest,
+    ModalContextInput, MultimodalContextWorkflowError, MultimodalContextWorkflowReceipt,
+    MultimodalContextWorkflowRequest,
+    CONTRACT_VERSION as MULTIMODAL_CONTEXT_WORKFLOW_FABRIC_CONTRACT_VERSION,
+    FEATURE_ID as MULTIMODAL_CONTEXT_WORKFLOW_FABRIC_FEATURE_ID,
+};
+pub use multimodal_contract_model::{
+    model_multimodal_evidence_contract, multimodal_contract_model_manifest, ModalitySchemaBinding,
+    MultimodalContractDisposition, MultimodalContractModelError, MultimodalEvidenceContractReceipt,
+    MultimodalEvidenceContractRequest,
+    CONTRACT_VERSION as MULTIMODAL_CONTRACT_MODEL_CONTRACT_VERSION,
+    FEATURE_ID as MULTIMODAL_CONTRACT_MODEL_FEATURE_ID,
+};
+pub use multimodal_evidence_copilot::{
+    compile_multimodal_evidence_copilot, multimodal_evidence_research_copilot_manifest,
+    MultimodalCopilotError, MultimodalCopilotReceipt, MultimodalCopilotRequest,
+    CONTRACT_VERSION as MULTIMODAL_EVIDENCE_COPILOT_CONTRACT_VERSION,
+    FEATURE_ID as MULTIMODAL_EVIDENCE_COPILOT_FEATURE_ID,
+};
+pub use multimodal_evidence_surveillance::{
+    multimodal_evidence_surveillance_manifest, surveil_multimodal_evidence,
+    MultimodalEvidenceDisposition, MultimodalEvidenceError, MultimodalEvidenceFeedRequest,
+    QualifiedMultimodalEvidenceSet, CONTRACT_VERSION as MULTIMODAL_EVIDENCE_CONTRACT_VERSION,
+    FEATURE_ID as MULTIMODAL_EVIDENCE_FEATURE_ID,
+};
+pub use multimodal_evidence_workflow_fabric::{
+    compile_multimodal_evidence_workflow, multimodal_evidence_workflow_fabric_manifest,
+    MultimodalWorkflowError, MultimodalWorkflowReceipt, MultimodalWorkflowRequest,
+    CONTRACT_VERSION as MULTIMODAL_EVIDENCE_WORKFLOW_FABRIC_CONTRACT_VERSION,
+    FEATURE_ID as MULTIMODAL_EVIDENCE_WORKFLOW_FABRIC_FEATURE_ID,
+};
+pub use multimodal_operations_control_plane::{
+    multimodal_operations_control_plane_manifest, operate_multimodal_evidence,
+    MultimodalOperationsDisposition, MultimodalOperationsError, MultimodalOperationsReceipt,
+    MultimodalOperationsRequest,
+    CONTRACT_VERSION as MULTIMODAL_OPERATIONS_CONTROL_PLANE_CONTRACT_VERSION,
+    FEATURE_ID as MULTIMODAL_OPERATIONS_CONTROL_PLANE_FEATURE_ID,
+};
+pub use multimodal_protocol_adapter::{
+    multimodal_protocol_adapter_manifest, serve_multimodal_protocol, MultimodalProtocolError,
+    MultimodalProtocolReceipt, MultimodalProtocolRequest,
+    CONTRACT_VERSION as MULTIMODAL_PROTOCOL_ADAPTER_CONTRACT_VERSION,
+    FEATURE_ID as MULTIMODAL_PROTOCOL_ADAPTER_FEATURE_ID,
+};
+pub use multimodal_research_workbench::{
+    compile_multimodal_research_workbench, multimodal_research_workbench_manifest,
+    MultimodalWorkbenchError, MultimodalWorkbenchReceipt, MultimodalWorkbenchRequest,
+    CONTRACT_VERSION as MULTIMODAL_RESEARCH_WORKBENCH_CONTRACT_VERSION,
+    FEATURE_ID as MULTIMODAL_RESEARCH_WORKBENCH_FEATURE_ID,
+};
+pub use multimodal_retrieval_assurance_harness::{
+    multimodal_retrieval_assurance_harness_manifest, verify_multimodal_retrieval_assurance,
+    MultimodalRetrievalAssuranceError, MultimodalRetrievalAssuranceReceipt,
+    MultimodalRetrievalAssuranceVerdict,
+    CONTRACT_VERSION as MULTIMODAL_RETRIEVAL_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as MULTIMODAL_RETRIEVAL_ASSURANCE_FEATURE_ID,
+};
+pub use multimodal_retrieval_contract_model::{
+    model_multimodal_retrieval_contract, multimodal_retrieval_contract_model_manifest,
+    MultimodalRetrievalContractError, MultimodalRetrievalContractReceipt,
+    MultimodalRetrievalContractRequest,
+    CONTRACT_VERSION as MULTIMODAL_RETRIEVAL_CONTRACT_MODEL_CONTRACT_VERSION,
+    FEATURE_ID as MULTIMODAL_RETRIEVAL_CONTRACT_MODEL_FEATURE_ID,
+};
+pub use multimodal_retrieval_control_plane::{
+    multimodal_retrieval_control_plane_manifest, operate_multimodal_retrieval_control_plane,
+    MultimodalRetrievalControlPlaneError, MultimodalRetrievalControlPlaneReceipt,
+    MultimodalRetrievalControlPlaneRequest,
+    ACTION_ORDER as MULTIMODAL_RETRIEVAL_CONTROL_ACTION_ORDER,
+    CONTRACT_VERSION as MULTIMODAL_RETRIEVAL_CONTROL_PLANE_CONTRACT_VERSION,
+    FEATURE_ID as MULTIMODAL_RETRIEVAL_CONTROL_PLANE_FEATURE_ID,
+};
+pub use multimodal_retrieval_copilot::{
+    compile_multimodal_retrieval_copilot, multimodal_retrieval_copilot_manifest,
+    MultimodalRetrievalCopilotError, MultimodalRetrievalCopilotReceipt,
+    MultimodalRetrievalCopilotRequest,
+    CONTRACT_VERSION as MULTIMODAL_RETRIEVAL_COPILOT_CONTRACT_VERSION,
+    FEATURE_ID as MULTIMODAL_RETRIEVAL_COPILOT_FEATURE_ID,
+};
+pub use multimodal_retrieval_protocol_gateway::{
+    compile_multimodal_retrieval_protocol, multimodal_retrieval_protocol_gateway_manifest,
+    MultimodalRetrievalProtocolError, MultimodalRetrievalProtocolReceipt,
+    MultimodalRetrievalProtocolRequest,
+    CONTRACT_VERSION as MULTIMODAL_RETRIEVAL_PROTOCOL_CONTRACT_VERSION,
+    FEATURE_ID as MULTIMODAL_RETRIEVAL_PROTOCOL_FEATURE_ID,
+};
+pub use multimodal_retrieval_synthesis::{
+    multimodal_retrieval_synthesis_manifest, synthesize_multimodal_retrieval,
+    MultimodalEvidenceSynthesis, MultimodalRetrievalError, MultimodalRetrievalQuery,
+    CONTRACT_VERSION as MULTIMODAL_RETRIEVAL_SYNTHESIS_CONTRACT_VERSION,
+    FEATURE_ID as MULTIMODAL_RETRIEVAL_SYNTHESIS_FEATURE_ID,
+};
+pub use multimodal_retrieval_workbench::{
+    compile_multimodal_retrieval_workbench, multimodal_retrieval_workbench_manifest,
+    MultimodalRetrievalWorkbenchError, MultimodalRetrievalWorkbenchReceipt,
+    MultimodalRetrievalWorkbenchRequest,
+    CONTRACT_VERSION as MULTIMODAL_RETRIEVAL_WORKBENCH_CONTRACT_VERSION,
+    FEATURE_ID as MULTIMODAL_RETRIEVAL_WORKBENCH_FEATURE_ID,
+};
+pub use multimodal_retrieval_workflow_fabric::{
+    compile_multimodal_retrieval_workflow, multimodal_retrieval_workflow_fabric_manifest,
+    MultimodalRetrievalWorkflowError, MultimodalRetrievalWorkflowReceipt,
+    MultimodalRetrievalWorkflowRequest,
+    CONTRACT_VERSION as MULTIMODAL_RETRIEVAL_WORKFLOW_FABRIC_CONTRACT_VERSION,
+    FEATURE_ID as MULTIMODAL_RETRIEVAL_WORKFLOW_FABRIC_FEATURE_ID,
+};
+pub use multimodal_safety_assurance::{
+    multimodal_safety_assurance_manifest, verify_multimodal_safety, MultimodalAssuranceError,
+    MultimodalAssuranceReceipt, MultimodalAssuranceVerdict,
+    CONTRACT_VERSION as MULTIMODAL_SAFETY_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as MULTIMODAL_SAFETY_ASSURANCE_FEATURE_ID,
+};
+pub use retrieval_assurance_harness::{
+    retrieval_assurance_harness_manifest, verify_retrieval_assurance, RetrievalAssuranceError,
+    RetrievalAssuranceReceipt, RetrievalAssuranceVerdict,
+    CONTRACT_VERSION as RETRIEVAL_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as RETRIEVAL_ASSURANCE_FEATURE_ID,
+};
+pub use retrieval_contract_model::{
+    model_retrieval_contract, retrieval_contract_model_manifest, RetrievalContractModelError,
+    RetrievalContractModelReceipt, RetrievalContractModelRequest,
+    CONTRACT_VERSION as RETRIEVAL_CONTRACT_MODEL_CONTRACT_VERSION,
+    FEATURE_ID as RETRIEVAL_CONTRACT_MODEL_FEATURE_ID,
+};
+pub use retrieval_federated_control_plane::{
+    operate_retrieval_federated_control_plane, retrieval_federated_control_plane_manifest,
+    RetrievalFederatedControlPlaneError, RetrievalFederatedControlPlaneReceipt,
+    RetrievalFederatedControlPlaneRequest, ACTION_ORDER as RETRIEVAL_CONTROL_ACTION_ORDER,
+    CONTRACT_VERSION as RETRIEVAL_CONTROL_PLANE_CONTRACT_VERSION,
+    FEATURE_ID as RETRIEVAL_CONTROL_PLANE_FEATURE_ID,
+};
+pub use retrieval_protocol_gateway::{
+    compile_retrieval_protocol, retrieval_protocol_gateway_manifest, RetrievalProtocolError,
+    RetrievalProtocolReceipt, RetrievalProtocolRequest,
+    CONTRACT_VERSION as RETRIEVAL_PROTOCOL_CONTRACT_VERSION,
+    FEATURE_ID as RETRIEVAL_PROTOCOL_FEATURE_ID,
+};
+pub use retrieval_research_copilot::{
+    compile_retrieval_copilot, retrieval_research_copilot_manifest, RetrievalCopilotError,
+    RetrievalCopilotReceipt, RetrievalCopilotRequest,
+    CONTRACT_VERSION as RETRIEVAL_RESEARCH_COPILOT_CONTRACT_VERSION,
+    FEATURE_ID as RETRIEVAL_RESEARCH_COPILOT_FEATURE_ID,
+};
+pub use retrieval_research_workbench::{
+    compile_retrieval_research_workbench, retrieval_research_workbench_manifest,
+    RetrievalWorkbenchError, RetrievalWorkbenchReceipt, RetrievalWorkbenchRequest,
+    CONTRACT_VERSION as RETRIEVAL_RESEARCH_WORKBENCH_CONTRACT_VERSION,
+    FEATURE_ID as RETRIEVAL_RESEARCH_WORKBENCH_FEATURE_ID,
+};
+pub use retrieval_synthesis::{
+    retrieval_synthesis_manifest, synthesize_retrieval, EvidenceSynthesis, RetrievalCandidate,
+    RetrievalSynthesisError, ScopedRetrievalQuery, SynthesisDisposition,
+    CONTRACT_VERSION as RETRIEVAL_SYNTHESIS_CONTRACT_VERSION,
+    FEATURE_ID as RETRIEVAL_SYNTHESIS_FEATURE_ID,
+};
+pub use retrieval_workflow_fabric::{
+    compile_retrieval_workflow, retrieval_workflow_fabric_manifest, RetrievalWorkflowError,
+    RetrievalWorkflowReceipt, RetrievalWorkflowRequest,
+    CONTRACT_VERSION as RETRIEVAL_WORKFLOW_FABRIC_CONTRACT_VERSION,
+    FEATURE_ID as RETRIEVAL_WORKFLOW_FABRIC_FEATURE_ID,
+};
+pub use throughput_context_compilation::{
+    compile_throughput_context, throughput_context_compilation_manifest,
+    ThroughputContextCompilationError, ThroughputContextCompilationReceipt,
+    ThroughputContextCompilationRequest, ThroughputContextItem,
+    CONTRACT_VERSION as THROUGHPUT_CONTEXT_COMPILATION_CONTRACT_VERSION,
+    FEATURE_ID as THROUGHPUT_CONTEXT_COMPILATION_FEATURE_ID,
+};
+pub use throughput_context_compilation_assurance::{
+    assure_throughput_context_compilation, throughput_context_compilation_assurance_manifest,
+    ThroughputContextAssuranceError, ThroughputContextAssuranceJob,
+    ThroughputContextAssuranceReceipt, ThroughputContextAssuranceRequest,
+    ThroughputContextAssuranceVerdict,
+    CONTRACT_VERSION as THROUGHPUT_CONTEXT_COMPILATION_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as THROUGHPUT_CONTEXT_COMPILATION_ASSURANCE_FEATURE_ID,
+};
+pub use throughput_context_compilation_federated_control_plane::{
+    operate_throughput_context_compilation,
+    throughput_context_compilation_federated_control_plane_manifest,
+    ThroughputContextControlDisposition, ThroughputContextControlError,
+    ThroughputContextControlJob, ThroughputContextControlReceipt, ThroughputContextControlRequest,
+    CONTRACT_VERSION as THROUGHPUT_CONTEXT_COMPILATION_FEDERATED_CONTROL_PLANE_CONTRACT_VERSION,
+    FEATURE_ID as THROUGHPUT_CONTEXT_COMPILATION_FEDERATED_CONTROL_PLANE_FEATURE_ID,
+};
+pub use throughput_context_protocol::{
+    serve_throughput_context_protocol, throughput_context_protocol_manifest,
+    ThroughputContextProtocolError, ThroughputContextProtocolJob, ThroughputContextProtocolReceipt,
+    ThroughputContextProtocolRequest,
+    CONTRACT_VERSION as THROUGHPUT_CONTEXT_PROTOCOL_ADAPTER_CONTRACT_VERSION,
+    FEATURE_ID as THROUGHPUT_CONTEXT_PROTOCOL_ADAPTER_FEATURE_ID,
+    METHOD as THROUGHPUT_CONTEXT_PROTOCOL_METHOD,
+    PROTOCOL_VERSION as THROUGHPUT_CONTEXT_PROTOCOL_VERSION,
+    RESPONSE_SCHEMA as THROUGHPUT_CONTEXT_PROTOCOL_RESPONSE_SCHEMA,
+    ROUTE as THROUGHPUT_CONTEXT_PROTOCOL_ROUTE,
+};
+pub use throughput_context_workbench::{
+    render_throughput_context_workbench, throughput_context_workbench_manifest,
+    ThroughputContextWorkbenchError, ThroughputContextWorkbenchJob,
+    ThroughputContextWorkbenchReceipt, ThroughputContextWorkbenchRequest,
+    CONTRACT_VERSION as THROUGHPUT_CONTEXT_WORKBENCH_CONTRACT_VERSION,
+    FEATURE_ID as THROUGHPUT_CONTEXT_WORKBENCH_FEATURE_ID,
+};
+pub use throughput_context_workflow_fabric::{
+    compile_throughput_context_workflow, throughput_context_workflow_fabric_manifest,
+    ThroughputContextJob, ThroughputContextWorkflowError, ThroughputContextWorkflowReceipt,
+    ThroughputContextWorkflowRequest,
+    CONTRACT_VERSION as THROUGHPUT_CONTEXT_WORKFLOW_FABRIC_CONTRACT_VERSION,
+    FEATURE_ID as THROUGHPUT_CONTEXT_WORKFLOW_FABRIC_FEATURE_ID,
+};
+pub use throughput_contract_model::{
+    model_throughput_contract, throughput_contract_model_manifest, ThroughputContractDisposition,
+    ThroughputContractModelError, ThroughputContractModelReceipt, ThroughputContractModelRequest,
+    CONTRACT_VERSION as THROUGHPUT_CONTRACT_MODEL_CONTRACT_VERSION,
+    FEATURE_ID as THROUGHPUT_CONTRACT_MODEL_FEATURE_ID,
+};
+pub use throughput_operations_control_plane::{
+    operate_throughput_evidence, throughput_operations_control_plane_manifest,
+    ThroughputOperationsDisposition, ThroughputOperationsError, ThroughputOperationsReceipt,
+    ThroughputOperationsRequest,
+    CONTRACT_VERSION as THROUGHPUT_OPERATIONS_CONTROL_PLANE_CONTRACT_VERSION,
+    FEATURE_ID as THROUGHPUT_OPERATIONS_CONTROL_PLANE_FEATURE_ID,
+};
+pub use throughput_protocol_adapter::{
+    serve_throughput_protocol, throughput_protocol_adapter_manifest, ThroughputProtocolError,
+    ThroughputProtocolReceipt, ThroughputProtocolRequest,
+    CONTRACT_VERSION as THROUGHPUT_PROTOCOL_ADAPTER_CONTRACT_VERSION,
+    FEATURE_ID as THROUGHPUT_PROTOCOL_ADAPTER_FEATURE_ID,
+};
+pub use throughput_research_workbench::{
+    compile_throughput_research_workbench, throughput_research_workbench_manifest,
+    ThroughputWorkbenchError as ThroughputResearchWorkbenchError,
+    ThroughputWorkbenchReceipt as ThroughputResearchWorkbenchReceipt,
+    ThroughputWorkbenchRequest as ThroughputResearchWorkbenchRequest,
+    CONTRACT_VERSION as THROUGHPUT_RESEARCH_WORKBENCH_CONTRACT_VERSION,
+    FEATURE_ID as THROUGHPUT_RESEARCH_WORKBENCH_FEATURE_ID,
+};
+pub use throughput_retrieval_assurance_harness::{
+    throughput_retrieval_assurance_harness_manifest, verify_throughput_retrieval_assurance,
+    ThroughputRetrievalAssuranceError, ThroughputRetrievalAssuranceReceipt,
+    ThroughputRetrievalAssuranceVerdict,
+    CONTRACT_VERSION as THROUGHPUT_RETRIEVAL_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as THROUGHPUT_RETRIEVAL_ASSURANCE_FEATURE_ID,
+};
+pub use throughput_retrieval_contract_model::{
+    model_throughput_retrieval_contract, throughput_retrieval_contract_model_manifest,
+    ThroughputRetrievalContractError, ThroughputRetrievalContractReceipt,
+    ThroughputRetrievalContractRequest,
+    CONTRACT_VERSION as THROUGHPUT_RETRIEVAL_CONTRACT_MODEL_CONTRACT_VERSION,
+    FEATURE_ID as THROUGHPUT_RETRIEVAL_CONTRACT_MODEL_FEATURE_ID,
+};
+pub use throughput_retrieval_control_plane::{
+    operate_throughput_retrieval_control_plane, throughput_retrieval_control_plane_manifest,
+    ThroughputRetrievalControlPlaneError, ThroughputRetrievalControlPlaneReceipt,
+    ThroughputRetrievalControlPlaneRequest,
+    ACTION_ORDER as THROUGHPUT_RETRIEVAL_CONTROL_ACTION_ORDER,
+    CONTRACT_VERSION as THROUGHPUT_RETRIEVAL_CONTROL_PLANE_CONTRACT_VERSION,
+    FEATURE_ID as THROUGHPUT_RETRIEVAL_CONTROL_PLANE_FEATURE_ID,
+};
+pub use throughput_retrieval_copilot::{
+    compile_throughput_retrieval_copilot, throughput_retrieval_copilot_manifest,
+    ThroughputRetrievalCopilotError, ThroughputRetrievalCopilotReceipt,
+    ThroughputRetrievalCopilotRequest,
+    CONTRACT_VERSION as THROUGHPUT_RETRIEVAL_COPILOT_CONTRACT_VERSION,
+    FEATURE_ID as THROUGHPUT_RETRIEVAL_COPILOT_FEATURE_ID,
+};
+pub use throughput_retrieval_protocol_gateway::{
+    compile_throughput_retrieval_protocol, throughput_retrieval_protocol_gateway_manifest,
+    ThroughputRetrievalProtocolError, ThroughputRetrievalProtocolReceipt,
+    ThroughputRetrievalProtocolRequest,
+    CONTRACT_VERSION as THROUGHPUT_RETRIEVAL_PROTOCOL_CONTRACT_VERSION,
+    FEATURE_ID as THROUGHPUT_RETRIEVAL_PROTOCOL_FEATURE_ID,
+};
+pub use throughput_retrieval_synthesis::{
+    synthesize_throughput_retrieval, throughput_retrieval_synthesis_manifest,
+    ThroughputEvidenceSynthesis, ThroughputRetrievalError, ThroughputRetrievalQuery,
+    CONTRACT_VERSION as THROUGHPUT_RETRIEVAL_SYNTHESIS_CONTRACT_VERSION,
+    FEATURE_ID as THROUGHPUT_RETRIEVAL_SYNTHESIS_FEATURE_ID,
+};
+pub use throughput_retrieval_workbench::{
+    compile_throughput_retrieval_workbench, throughput_retrieval_workbench_manifest,
+    ThroughputRetrievalWorkbenchError, ThroughputRetrievalWorkbenchReceipt,
+    ThroughputRetrievalWorkbenchRequest,
+    CONTRACT_VERSION as THROUGHPUT_RETRIEVAL_WORKBENCH_CONTRACT_VERSION,
+    FEATURE_ID as THROUGHPUT_RETRIEVAL_WORKBENCH_FEATURE_ID,
+};
+pub use throughput_retrieval_workflow_fabric::{
+    compile_throughput_retrieval_workflow, throughput_retrieval_workflow_fabric_manifest,
+    ThroughputRetrievalWorkflowError, ThroughputRetrievalWorkflowReceipt,
+    ThroughputRetrievalWorkflowRequest,
+    CONTRACT_VERSION as THROUGHPUT_RETRIEVAL_WORKFLOW_FABRIC_CONTRACT_VERSION,
+    FEATURE_ID as THROUGHPUT_RETRIEVAL_WORKFLOW_FABRIC_FEATURE_ID,
+};
+pub use throughput_safety_assurance::{
+    throughput_safety_assurance_manifest, verify_throughput_safety, ThroughputAssuranceError,
+    ThroughputAssuranceReceipt, ThroughputAssuranceVerdict,
+    CONTRACT_VERSION as THROUGHPUT_SAFETY_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as THROUGHPUT_SAFETY_ASSURANCE_FEATURE_ID,
+};
 
 pub const BRAIN_SCHEMA_VERSION: &str = "bioprism-autonomous-brain/0.1";
 pub const MODEL_SELECTION_SCHEMA: &str = "bioprism-brain-model-selection/0.1";
@@ -46,11 +809,15 @@ const MAX_EVALUATOR_ID_BYTES: usize = 256;
 const MAX_CONTEXT_LABEL_BYTES: usize = 256;
 const MAX_CREDITED_OUTCOMES: usize = 4096;
 const MAX_CONTEXTUAL_STATES: usize = 64;
+const MAX_BANDIT_ARMS: usize = 4096;
 const MAX_MODEL_OBSERVATIONS: usize = 512;
 const MAX_OBSERVATION_PULLS: u64 = 1_000_000_000;
 
 #[derive(Debug, Error)]
 pub enum BrainError {
+    #[error("brain invariant violated: {detail}")]
+    InvariantViolation { detail: String },
+
     #[error("{field} must be non-empty")]
     Empty { field: &'static str },
     #[error("{field} is over the {max}-item bound")]
@@ -447,6 +1214,7 @@ impl ModelHealthEvidence {
             || self.failures > MAX_HEALTH_ATTEMPTS
             || self.successes > self.attempts
             || self.failures > self.attempts
+            || self.successes.saturating_add(self.failures) > self.attempts
         {
             return Err(BrainError::InvalidModelHealth(arm_id.to_string()));
         }
@@ -547,6 +1315,12 @@ pub fn select_model(request: &ModelSelectionRequest) -> Result<ModelSelectionRep
             max: MAX_MODELS,
         });
     }
+    if request.observations.len() > MAX_MODELS {
+        return Err(BrainError::TooMany {
+            field: "observations",
+            max: MAX_MODELS,
+        });
+    }
     for (provider, health) in &request.provider_health {
         health.validate(provider)?;
     }
@@ -585,9 +1359,13 @@ pub fn select_model(request: &ModelSelectionRequest) -> Result<ModelSelectionRep
         }
     }
     let mut effective_metrics = BTreeMap::new();
+    let mut model_ids = BTreeSet::new();
     for model in &request.models {
         model.validate()?;
         let model_id = model.id();
+        if !model_ids.insert(model_id.clone()) {
+            return Err(BrainError::DuplicateArm(model_id));
+        }
         let metrics = request
             .model_health
             .get(&model_id)
@@ -610,8 +1388,8 @@ pub fn select_model(request: &ModelSelectionRequest) -> Result<ModelSelectionRep
         .observations
         .iter()
         .map(|observation| observation.pulls)
-        .sum::<u64>();
-    let log_total = ((total_pulls + 1) as f64).ln();
+        .fold(0_u64, u64::saturating_add);
+    let log_total = (total_pulls.saturating_add(1) as f64).ln();
 
     let mut ranking = Vec::with_capacity(request.models.len());
     for model in &request.models {
@@ -873,6 +1651,12 @@ pub fn select_model_contextual(
     request: &ContextualModelSelectionRequest,
 ) -> Result<ContextualModelSelectionReport, BrainError> {
     request.context.validate()?;
+    if request.observations.len() > MAX_MODELS {
+        return Err(BrainError::TooMany {
+            field: "contextual observations",
+            max: MAX_MODELS,
+        });
+    }
     let context_digest = digest(&request.context)?;
     let mut base = request.base.clone();
     let global_arm_ids = base
@@ -995,7 +1779,11 @@ pub struct PromptAssemblyReport {
 }
 
 fn estimate_tokens(text: &str) -> u64 {
-    ((text.chars().count() as u64).saturating_add(3) / 4).max(1)
+    (u64::try_from(text.chars().count())
+        .unwrap_or(u64::MAX)
+        .saturating_add(3)
+        / 4)
+    .max(1)
 }
 
 fn validate_role(role: &str) -> Result<(), BrainError> {
@@ -1054,7 +1842,7 @@ pub fn assemble_prompt(
     let mut base_tokens = messages
         .iter()
         .map(|message| estimate_tokens(&message.content))
-        .sum::<u64>();
+        .fold(0_u64, u64::saturating_add);
     if let Some(contract) = &request.output_contract {
         if !contract.is_empty() {
             base_tokens = base_tokens.saturating_add(estimate_tokens(contract));
@@ -1220,6 +2008,12 @@ pub fn plan_autonomous(
         });
     }
     let mut errors = Vec::new();
+    if request.allowed_tools.len() > MAX_PLAN_STEPS {
+        return Err(BrainError::TooMany {
+            field: "allowed_tools",
+            max: MAX_PLAN_STEPS,
+        });
+    }
     if request.max_parallelism == 0 || request.max_parallelism > MAX_PLAN_PARALLELISM {
         errors.push(format!(
             "max_parallelism must be within [1, {}]",
@@ -1253,11 +2047,14 @@ pub fn plan_autonomous(
         }
     }
     for step in &request.steps {
+        if step.depends_on.len() > MAX_PLAN_STEPS {
+            errors.push(format!("step {:?} has too many dependencies", step.id));
+        }
         let mut dependencies = BTreeSet::new();
         for dependency in &step.depends_on {
-            if !dependencies.insert(dependency) {
+            if !dependencies.insert(dependency.clone()) {
                 errors.push(format!(
-                    "step {:?} lists dependency {:?} more than once",
+                    "step {:?} repeats dependency {:?}",
                     step.id, dependency
                 ));
             }
@@ -1318,9 +2115,11 @@ pub fn plan_autonomous(
         ordered_step_ids.push(id.clone());
         if let Some(children) = dependents.get(&id) {
             for child in children {
-                let degree = indegree
-                    .get_mut(child)
-                    .expect("dependent was validated against the step map");
+                let Some(degree) = indegree.get_mut(child) else {
+                    return Err(BrainError::InvariantViolation {
+                        detail: format!("dependent {child:?} is missing from the step map"),
+                    });
+                };
                 *degree -= 1;
                 if *degree == 0 {
                     ready.insert(child.clone());
@@ -1336,10 +2135,15 @@ pub fn plan_autonomous(
             errors: vec![BrainError::PlanCycle.to_string()],
         });
     }
-    let steps = ordered_step_ids
-        .iter()
-        .map(|id| (*by_id.get(id).expect("ordered id was validated")).clone())
-        .collect::<Vec<_>>();
+    let mut steps = Vec::with_capacity(ordered_step_ids.len());
+    for id in &ordered_step_ids {
+        let Some(step) = by_id.get(id) else {
+            return Err(BrainError::InvariantViolation {
+                detail: format!("ordered step {id:?} is missing from the step map"),
+            });
+        };
+        steps.push((*step).clone());
+    }
     let mut dependency_wave_by_id = BTreeMap::new();
     let mut critical_path_cost_by_id = BTreeMap::new();
     let mut dependency_waves: Vec<Vec<String>> = Vec::new();
@@ -1893,6 +2697,12 @@ fn hydrate_outcome_arm(
 }
 
 fn validate_bandit_arms(arms: &[BanditArm], policy: &BanditPolicy) -> Result<(), BrainError> {
+    if arms.len() > MAX_BANDIT_ARMS {
+        return Err(BrainError::TooMany {
+            field: "bandit arms",
+            max: MAX_BANDIT_ARMS,
+        });
+    }
     let mut seen = BTreeSet::new();
     for arm in arms {
         non_empty(&arm.arm_id, "arm.arm_id")?;
@@ -2082,8 +2892,12 @@ fn thompson_posterior(
 /// permanently starve an untested model.
 pub fn select_bandit_arm(state: &BanditState) -> Result<BanditSelectionReport, BrainError> {
     validate_bandit_state(state)?;
-    let total_pulls = state.arms.iter().map(|arm| arm.pulls).sum::<u64>();
-    let log_total = ((total_pulls + 1) as f64).ln();
+    let total_pulls = state
+        .arms
+        .iter()
+        .map(|arm| arm.pulls)
+        .fold(0_u64, u64::saturating_add);
+    let log_total = (total_pulls.saturating_add(1) as f64).ln();
     let use_ucb = state.policy.strategy == "ucb1";
     let use_thompson = state.policy.strategy == "thompson_sampling";
     let mut ranking = state
@@ -2272,6 +3086,8 @@ pub fn update_bandit(
         }
     }
     let mut next = state.clone();
+    let min_reward = next.policy.min_reward;
+    let max_reward = next.policy.max_reward;
     let contextual_index = update.context_digest.as_ref().map(|context_digest| {
         next.contextual_states
             .iter()
@@ -2298,11 +3114,12 @@ pub fn update_bandit(
             arms: Vec::new(),
             observed: false,
         });
-        &mut next
-            .contextual_states
-            .last_mut()
-            .expect("contextual state was pushed")
-            .arms
+        let Some(contextual_state) = next.contextual_states.last_mut() else {
+            return Err(BrainError::InvariantViolation {
+                detail: "contextual state disappeared immediately after insertion".into(),
+            });
+        };
+        &mut contextual_state.arms
     } else {
         &mut next.arms
     };
@@ -2313,8 +3130,21 @@ pub fn update_bandit(
     if arm.disabled {
         return Err(BrainError::UnknownArm(update.arm_id.clone()));
     }
-    arm.pulls = arm.pulls.saturating_add(1);
-    arm.reward_sum += update.reward;
+    let next_pulls = arm
+        .pulls
+        .checked_add(1)
+        .ok_or_else(|| BrainError::InvariantViolation {
+            detail: format!("bandit arm {:?} exhausted its pull counter", update.arm_id),
+        })?;
+    let next_reward_sum = arm.reward_sum + update.reward;
+    finite_range(
+        next_reward_sum,
+        "arm.reward_sum",
+        min_reward * next_pulls as f64,
+        max_reward * next_pulls as f64,
+    )?;
+    arm.pulls = next_pulls;
+    arm.reward_sum = next_reward_sum;
     if update.failed {
         arm.failures = arm.failures.saturating_add(1);
     }
@@ -2764,6 +3594,98 @@ mod tests {
     }
 
     #[test]
+    fn model_selection_rejects_ambiguous_model_ids() {
+        let error = select_model(&ModelSelectionRequest {
+            task: "duplicate model identity".into(),
+            required_capabilities: Vec::new(),
+            input_tokens: 1,
+            requested_output_tokens: 1,
+            max_cost_per_million_tokens: None,
+            max_latency_ms: None,
+            min_quality: None,
+            min_selection_confidence: None,
+            models: vec![
+                model("provider", "same", 0.8, 1),
+                model("provider", "same", 0.9, 2),
+            ],
+            observations: Vec::new(),
+            weights: SelectionWeights::default(),
+            provider_health: BTreeMap::new(),
+            model_health: BTreeMap::new(),
+        })
+        .unwrap_err();
+        assert!(matches!(error, BrainError::DuplicateArm(id) if id == "provider/same"));
+    }
+
+    #[test]
+    fn model_selection_rejects_impossible_observation_failures() {
+        let error = select_model(&ModelSelectionRequest {
+            task: "invalid observation".into(),
+            required_capabilities: Vec::new(),
+            input_tokens: 1,
+            requested_output_tokens: 1,
+            max_cost_per_million_tokens: None,
+            max_latency_ms: None,
+            min_quality: None,
+            min_selection_confidence: None,
+            models: vec![model("provider", "model", 0.8, 1)],
+            observations: vec![ModelObservation {
+                arm_id: "provider/model".into(),
+                pulls: 1,
+                reward_sum: 0.5,
+                failures: 2,
+                disabled: false,
+            }],
+            weights: SelectionWeights::default(),
+            provider_health: BTreeMap::new(),
+            model_health: BTreeMap::new(),
+        })
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            BrainError::OutOfRange {
+                field: "observation.failures",
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn model_health_rejects_overlapping_success_and_failure_counts() {
+        let mut model_health = BTreeMap::new();
+        model_health.insert(
+            "provider/model".into(),
+            ModelHealthEvidence {
+                attempts: 2,
+                successes: 2,
+                failures: 1,
+                success_rate: None,
+                mean_latency_ms: None,
+                last_latency_ms: None,
+                prior_adjustment_applied: false,
+                historical: None,
+            },
+        );
+        let error = select_model(&ModelSelectionRequest {
+            task: "invalid model health".into(),
+            required_capabilities: Vec::new(),
+            input_tokens: 1,
+            requested_output_tokens: 1,
+            max_cost_per_million_tokens: None,
+            max_latency_ms: None,
+            min_quality: None,
+            min_selection_confidence: None,
+            models: vec![model("provider", "model", 0.8, 1)],
+            observations: Vec::new(),
+            weights: SelectionWeights::default(),
+            provider_health: BTreeMap::new(),
+            model_health,
+        })
+        .unwrap_err();
+        assert!(matches!(error, BrainError::InvalidModelHealth(id) if id == "provider/model"));
+    }
+
+    #[test]
     fn prompt_assembly_reports_optional_omission_and_digest() {
         let report = assemble_prompt(&PromptAssemblyRequest {
             system: Some("be precise".into()),
@@ -2835,6 +3757,43 @@ mod tests {
     }
 
     #[test]
+    fn planner_rejects_duplicate_dependencies() {
+        let report = plan_autonomous(&AutonomousPlanRequest {
+            objective: "reject duplicate dependency edges".into(),
+            allowed_tools: vec!["inspect".into()],
+            max_cost: 10,
+            require_approval_for_effects: true,
+            max_parallelism: 1,
+            steps: vec![
+                PlanStep {
+                    id: "root".into(),
+                    objective: "inspect context".into(),
+                    tool: "inspect".into(),
+                    arguments: json!({}),
+                    depends_on: Vec::new(),
+                    effect: PlanEffect::ReadOnly,
+                    estimated_cost: 1,
+                },
+                PlanStep {
+                    id: "child".into(),
+                    objective: "repeat dependency".into(),
+                    tool: "inspect".into(),
+                    arguments: json!({}),
+                    depends_on: vec!["root".into(), "root".into()],
+                    effect: PlanEffect::ReadOnly,
+                    estimated_cost: 1,
+                },
+            ],
+        })
+        .unwrap();
+        assert!(!report.ok);
+        assert!(report
+            .errors
+            .iter()
+            .any(|error| error.contains("repeats dependency")));
+    }
+
+    #[test]
     fn bandit_updates_are_explicit_and_unexplored_arms_are_selected() {
         let state = BanditState {
             schema: BANDIT_SCHEMA.into(),
@@ -2877,6 +3836,66 @@ mod tests {
         assert_eq!(next.generation, 1);
         assert_eq!(next.arms[1].pulls, 1);
         assert_eq!(next.arms[1].reward_sum, 0.8);
+    }
+
+    #[test]
+    fn bandit_rejects_unbounded_arm_ledgers() {
+        let mut state = BanditState {
+            schema: BANDIT_SCHEMA.into(),
+            generation: 0,
+            policy: BanditPolicy::default(),
+            arms: Vec::new(),
+            credited_outcomes: Vec::new(),
+            contextual_states: Vec::new(),
+        };
+        state.arms = (0..=MAX_BANDIT_ARMS)
+            .map(|index| BanditArm {
+                arm_id: format!("arm-{index}"),
+                pulls: 0,
+                reward_sum: 0.0,
+                failures: 0,
+                disabled: false,
+            })
+            .collect();
+        assert!(matches!(
+            select_bandit_arm(&state),
+            Err(BrainError::TooMany {
+                field: "bandit arms",
+                max: MAX_BANDIT_ARMS
+            })
+        ));
+    }
+
+    #[test]
+    fn bandit_rejects_pull_counter_exhaustion() {
+        let state = BanditState {
+            schema: BANDIT_SCHEMA.into(),
+            generation: 0,
+            policy: BanditPolicy::default(),
+            arms: vec![BanditArm {
+                arm_id: "saturated".into(),
+                pulls: u64::MAX,
+                reward_sum: 0.0,
+                failures: 0,
+                disabled: false,
+            }],
+            credited_outcomes: Vec::new(),
+            contextual_states: Vec::new(),
+        };
+        let error = update_bandit(
+            &state,
+            &BanditUpdate {
+                arm_id: "saturated".into(),
+                reward: 0.0,
+                failed: false,
+                outcome_digest: None,
+                contract_digest: None,
+                context_digest: None,
+                context: None,
+            },
+        )
+        .unwrap_err();
+        assert!(matches!(error, BrainError::InvariantViolation { .. }));
     }
 
     #[test]

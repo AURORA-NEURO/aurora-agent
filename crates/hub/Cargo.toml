@@ -8,6 +8,7 @@ repository.workspace = true
 description = "BioAtlas public hub: submission, moderation, provenance and ecosystem contracts"
 
 [dependencies]
+bioprism-foundation = { workspace = true }
 bioprism-ids = { workspace = true }
 bioprism-section = { workspace = true }
 serde = { workspace = true }

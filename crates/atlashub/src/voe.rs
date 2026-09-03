@@ -196,7 +196,9 @@ pub enum Privacy {
     WithinPolicy,
     /// The experiment would move or expose data it may not. Named rather than boolean so the
     /// exclusion can say which boundary.
-    CrossesBoundary { boundary: String },
+    CrossesBoundary {
+        boundary: String,
+    },
 }
 
 /// A number the caller wrote down, together with who wrote it and why.
@@ -359,7 +361,19 @@ impl ExchangeRate {
                         axis: axis.to_string(),
                     })
                 }
-                Some(w) => total = total.saturating_add(w.saturating_mul(cost.get(axis))),
+                Some(w) => {
+                    let weighted =
+                        w.checked_mul(cost.get(axis))
+                            .ok_or_else(|| ValueError::CostOverflow {
+                                axis: axis.to_string(),
+                            })?;
+                    total =
+                        total
+                            .checked_add(weighted)
+                            .ok_or_else(|| ValueError::CostOverflow {
+                                axis: axis.to_string(),
+                            })?;
+                }
             }
         }
         Ok(total)
@@ -533,11 +547,11 @@ pub fn rank_with(
     let mut ranked = Vec::new();
     for experiment in admitted {
         let scalar_cost = rate.scalarise(&experiment.cost)?;
-        let declared_value = experiment
-            .value
-            .as_ref()
-            .expect("admit refuses any survivor without a declared value")
-            .get();
+        let Some(declared_value) = experiment.value.as_ref().map(DeclaredValue::get) else {
+            return Err(ValueError::ValueUndetermined {
+                experiment: experiment.id.to_string(),
+            });
+        };
         let value_per_cost = if scalar_cost == 0 {
             f64::INFINITY
         } else {
@@ -582,7 +596,9 @@ mod tests {
     }
 
     fn cost(tissue: u64, money: u64) -> Budget {
-        Budget::new().spending("tissue", tissue).spending("money", money)
+        Budget::new()
+            .spending("tissue", tissue)
+            .spending("money", money)
     }
 
     fn valued(id: &str, tissue: u64, money: u64, value: f64) -> Experiment {
@@ -668,8 +684,7 @@ mod tests {
     #[test]
     fn an_experiment_addressing_only_eliminated_hypotheses_is_excluded_with_a_reason() {
         let experiment = Experiment::new("a", cost(1, 1)).addressing(&h("h3"));
-        let declared =
-            DeclaredValue::uncalibrated(&experiment.id, 5.0, "r", "guess").unwrap();
+        let declared = DeclaredValue::uncalibrated(&experiment.id, 5.0, "r", "guess").unwrap();
         let candidates = vec![experiment.worth(declared)];
         let ranking = rank_with(&candidates, &hypotheses(), &purse(), &rate()).unwrap();
         assert_eq!(
@@ -768,6 +783,29 @@ mod tests {
     }
 
     #[test]
+    fn an_exchange_rate_cost_overflow_is_refused_instead_of_saturated() {
+        let experiment = Experiment::new("overflow", Budget::new().spending("tissue", u64::MAX))
+            .addressing(&h("h1"))
+            .worth(
+                DeclaredValue::uncalibrated(
+                    &ExperimentId::new("overflow"),
+                    1.0,
+                    "board",
+                    "fixture",
+                )
+                .unwrap(),
+            );
+        let available = Budget::new().spending("tissue", u64::MAX);
+        let rate = ExchangeRate::declared("board", "fixture").pricing("tissue", u64::MAX);
+        assert_eq!(
+            rank_with(&[experiment], &hypotheses(), &available, &rate).unwrap_err(),
+            ValueError::CostOverflow {
+                axis: "tissue".into()
+            }
+        );
+    }
+
+    #[test]
     fn every_output_is_labelled_uncalibrated_and_says_so_in_json() {
         let candidates = vec![valued("a", 1, 1, 1.0)];
         let ranking = rank_with(&candidates, &hypotheses(), &purse(), &rate()).unwrap();
@@ -812,7 +850,10 @@ mod tests {
     fn a_free_experiment_with_any_value_ranks_first() {
         let candidates = vec![valued("free", 0, 0, 0.001), valued("dear", 1, 1, 999.0)];
         let ranking = rank_with(&candidates, &hypotheses(), &purse(), &rate()).unwrap();
-        assert_eq!(ranking.best().unwrap().experiment, ExperimentId::new("free"));
+        assert_eq!(
+            ranking.best().unwrap().experiment,
+            ExperimentId::new("free")
+        );
         assert!(ranking.ranked[0].value_per_cost.is_infinite());
     }
 

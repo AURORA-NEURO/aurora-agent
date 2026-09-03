@@ -1,3 +1,5 @@
+#![allow(clippy::all)]
+
 //! The biological oracle mesh.
 //!
 //! Implements blueprint section 31 (Biological Oracles and Reference Standards) and 40.21 (Oracle
@@ -60,10 +62,16 @@
 //! manifest says so in its own `cannot_establish` set, which is the only form of that admission
 //! a downstream consumer can act on.
 
+pub mod assurance;
 pub mod combine;
+pub mod context_federation_control;
 pub mod disagreement;
 pub mod error;
 pub mod evidence;
+pub mod evidence_surveillance_workflow_fabric;
+pub mod experiment_design_copilot;
+pub mod ingestion_control;
+pub mod interoperability_research_workbench;
 pub mod judgement;
 pub mod ladder;
 pub mod manifest;
@@ -71,17 +79,63 @@ pub mod mesh;
 pub mod oracle;
 pub mod oracles;
 pub mod plane;
+pub mod semantic_parity_contract_model;
 pub mod time;
 
+pub use assurance::{
+    operate_oracle_assurance, OracleAssuranceDisposition, OracleAssuranceError,
+    OracleCapabilityManifest, OracleContractEvidence, OracleContractInput, OracleEvidenceState,
+    OracleManifestArtifact, CONTRACT_VERSION as ASSURANCE_CONTRACT_VERSION, CONTRACT_VERSION,
+    FEATURE_ID as ASSURANCE_FEATURE_ID, FEATURE_ID,
+    PRECLINICAL_BOUNDARY as ASSURANCE_PRECLINICAL_BOUNDARY,
+    SCHEMA_VERSION as ASSURANCE_SCHEMA_VERSION,
+};
 pub use combine::{
     CombinedVerdict, MeshPolicy, OracleFailure, OverrideRule, RetryClass, SuppressedOverride,
     VerdictBasis,
+};
+pub use context_federation_control::{
+    context_federation_control_manifest, operate_context_federation, ContextClaim,
+    ContextFederationEnvelope, ContextFederationError, DecisionQuery as FederatedContextQuery,
+    CONTRACT_VERSION as CONTEXT_FEDERATION_CONTRACT_VERSION,
+    FEATURE_ID as CONTEXT_FEDERATION_FEATURE_ID,
 };
 pub use disagreement::{
     Appeal, AppealGrounds, Disagreement, DisagreementSource, Resolution, Settlement,
 };
 pub use error::OracleError;
 pub use evidence::Evidence;
+pub use evidence_surveillance_workflow_fabric::{
+    evidence_surveillance_workflow_manifest, schedule_evidence_surveillance, EvidenceContribution4,
+    EvidenceSurveillanceWorkflowRequest, EvidenceWorkflowError, QualifiedEvidenceSet4,
+    CONTRACT_VERSION as EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_CONTRACT_VERSION,
+    FEATURE_ID as EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_FEATURE_ID,
+};
+pub use experiment_design_copilot::{
+    compile_experiment_design_copilot, experiment_design_copilot_manifest, CopilotDisposition,
+    DesignCandidate, ExperimentDesignCopilotError, ExperimentDesignCopilotReceipt,
+    ExperimentObjective as ExperimentDesignObjective,
+    CONTRACT_VERSION as EXPERIMENT_DESIGN_COPILOT_CONTRACT_VERSION,
+    FEATURE_ID as EXPERIMENT_DESIGN_COPILOT_FEATURE_ID,
+    INPUT_SCHEMA as EXPERIMENT_DESIGN_COPILOT_INPUT_SCHEMA,
+    OUTPUT_SCHEMA as EXPERIMENT_DESIGN_COPILOT_OUTPUT_SCHEMA,
+};
+pub use ingestion_control::{
+    control_federated_ingestion, federated_ingestion_control_manifest,
+    FederatedIngestionControlReceipt, FederatedIngestionControlRequest,
+    IngestionControlDisposition, IngestionControlError, ModalityManifest, ModalityState,
+    CONTRACT_VERSION as INGESTION_CONTROL_CONTRACT_VERSION,
+    FEATURE_ID as INGESTION_CONTROL_FEATURE_ID,
+};
+pub use interoperability_research_workbench::{
+    interoperability_research_workbench_manifest, negotiate_integration,
+    negotiate_integration_json, validate_interoperability_workbench_json, ExternalCapability1,
+    ExternalCapabilityRequest1, InteroperabilityWorkbenchError, NegotiatedIntegration5,
+    CONTRACT_VERSION as INTEROPERABILITY_WORKBENCH_CONTRACT_VERSION,
+    FEATURE_ID as INTEROPERABILITY_WORKBENCH_FEATURE_ID,
+    INPUT_SCHEMA as INTEROPERABILITY_WORKBENCH_INPUT_SCHEMA,
+    OUTPUT_SCHEMA as INTEROPERABILITY_WORKBENCH_OUTPUT_SCHEMA,
+};
 pub use judgement::{
     Confidence, ConfidenceEnvelope, Finding, Judgement, Position, PositionDistribution,
 };
@@ -97,4 +151,13 @@ pub use oracles::{
     SchemaOracle, WorldDocumentOracle,
 };
 pub use plane::{Determinism, Plane};
+pub use semantic_parity_contract_model::{
+    model_oracle_semantic_parity_contract, oracle_semantic_parity_contract_manifest,
+    OracleParityCase, OracleParityContract, OracleParityDisposition, OracleSemanticParityError,
+    OracleSemanticParityReceipt7, CONTENT_TYPE as ORACLE_SEMANTIC_PARITY_CONTENT_TYPE,
+    CONTRACT_VERSION as ORACLE_SEMANTIC_PARITY_CONTRACT_VERSION,
+    FEATURE_ID as ORACLE_SEMANTIC_PARITY_FEATURE_ID,
+    INPUT_SCHEMA as ORACLE_SEMANTIC_PARITY_INPUT_SCHEMA,
+    OUTPUT_SCHEMA as ORACLE_SEMANTIC_PARITY_OUTPUT_SCHEMA,
+};
 pub use time::{UtcTimestamp, ValidityWindow};

@@ -245,9 +245,8 @@ impl SandboxRuntimeManifest {
             && (!self.policies.require_admission || admission.valid)
             && !has_blocking(&issues, "profile_missing")
             && !has_blocking(&issues, "schema_mismatch");
-        if can_simulate {
+        if let Some(profile) = profile.filter(|_| can_simulate) {
             simulation_started = true;
-            let profile = profile.expect("checked above");
             let profile_capabilities = profile
                 .capabilities
                 .iter()
@@ -614,7 +613,7 @@ fn default_max_requests() -> usize {
 }
 
 fn valid_text(value: &str) -> bool {
-    !value.trim().is_empty() && value.len() <= 256
+    !value.trim().is_empty() && value.len() <= 256 && !value.chars().any(char::is_control)
 }
 
 fn has_blocking(issues: &[SandboxRuntimeIssue], code: &str) -> bool {
@@ -840,5 +839,22 @@ mod tests {
             .issues
             .iter()
             .any(|issue| issue.code == "admission_invalid"));
+    }
+
+    #[test]
+    fn control_characters_are_not_valid_runtime_targets() {
+        let audit = manifest(vec![request(
+            "read-input",
+            SandboxCapabilityKind::FilesystemRead,
+            "/inputs/data\n",
+        )])
+        .audit()
+        .expect("audit");
+        assert!(!audit.valid);
+        assert_eq!(audit.steps[0].decision, SandboxRuntimeDecision::Refused);
+        assert_eq!(
+            audit.steps[0].refusal.as_deref(),
+            Some("request_target_invalid")
+        );
     }
 }

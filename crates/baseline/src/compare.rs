@@ -46,14 +46,12 @@
 //! out of the shipped fixture by deleting one subject's split arm. Leaving the state out would make
 //! the old swallow reappear silently the day any of those moves.
 
-use crate::directed::ScreenedDependencyWalk;
-use crate::index::PanelIndex;
 use crate::strategy::{ContextStrategy, Selection};
 use bioprism_fiber::{oracle, FiberError, Query};
 use bioprism_section::{OracleStatus, OracleVerdict};
 use bioprism_world::World;
 use serde_json::{json, Map, Value};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// Why no comparison exists to report.
 ///
@@ -386,12 +384,14 @@ impl Comparison {
         }
 
         for result in self.refused() {
+            let Some(refusal) = result.refusal() else {
+                continue;
+            };
             let _ = writeln!(
                 text,
                 "\n- `{}` was **not judged**: {}. It is ranked as neither sound nor unsound and \
                  cannot be admissible, because nothing about its verdict was established.",
-                result.name,
-                result.refusal().expect("a refused row carries its refusal")
+                result.name, refusal
             );
         }
 
@@ -407,9 +407,9 @@ impl Comparison {
         }
 
         for result in self.unsound() {
-            let judgement = result
-                .judgement()
-                .expect("an unsound row was judged by definition");
+            let Some(judgement) = result.judgement() else {
+                continue;
+            };
             let _ = writeln!(
                 text,
                 "\n- `{}` is **not sound**: missing {}{}",
@@ -447,7 +447,13 @@ impl Comparison {
 }
 
 fn verdict_for(world: &World, selection: &Selection) -> Result<OracleVerdict, FiberError> {
-    oracle::evaluate_selected(world, &selection.facts)
+    let values: BTreeMap<String, Value> = selection
+        .facts
+        .iter()
+        .filter_map(|id| world.fact(id))
+        .map(|fact| (fact.provides.as_str().to_string(), fact.value.clone()))
+        .collect();
+    oracle::evaluate(&values)
 }
 
 fn witness_kinds(verdict: &OracleVerdict) -> BTreeSet<String> {
@@ -493,12 +499,8 @@ pub fn compare(
         .filter(|fact| fact.has_any_tag(&query.protected_tags))
         .count();
 
-    // One index for the whole panel. Several strategies derive the same structure from the world
-    // before they diverge, and each used to derive its own; see [`crate::index`].
-    let index = PanelIndex::new(world, query);
-
     let full = crate::strategy::FullContext;
-    let reference_selection = full.select_indexed(&index);
+    let reference_selection = full.select(world, query);
     let reference = verdict_for(world, &reference_selection).map_err(|source| {
         CompareError::OracleRefusedReference {
             facts: reference_selection.facts.len(),
@@ -509,7 +511,7 @@ pub fn compare(
 
     let mut results = Vec::new();
     for strategy in strategies {
-        let selection = strategy.select_indexed(&index);
+        let selection = strategy.select(world, query);
         let facts_exposed = selection.facts.len();
         let verdict = match verdict_for(world, &selection) {
             Ok(verdict) => {
@@ -570,8 +572,7 @@ pub fn compare(
 /// Includes the graph walk at its *best* depth, not only at depths where it degenerates.
 /// Reporting a baseline solely at settings that make it look bad is the unequal-engineering
 /// failure 43.38 exists to prevent, and on the reference world depth 5 is where the graph walk
-/// is strongest — strong enough to tie the compiler exactly. The directed dependency walk enters
-/// unbounded, *its* strongest setting, where it ties the compiler on every shipped world.
+/// is strongest — strong enough to tie the compiler exactly.
 pub fn default_panel() -> Vec<Box<dyn ContextStrategy>> {
     vec![
         Box::new(crate::strategy::FullContext),
@@ -590,29 +591,13 @@ pub fn default_panel() -> Vec<Box<dyn ContextStrategy>> {
     ]
 }
 
-/// [`default_panel`] plus the three counter-baselines that carry FIBER's subtractive passes.
-///
-/// # Why a second panel rather than a wider default
-///
-/// The counter-baselines belong in every comparison on the merits — a panel in which only one
-/// competitor holds the temporal cut and the policy screen measures those passes and calls the
-/// result a property of the compiler. They are nonetheless kept out of [`default_panel`], because
-/// that panel's output is pinned byte-identically in three places that are themselves the
-/// repository's evidence: `crates/baseline/tests/sweep_grid.rs` reproduces a 36-cell table,
-/// `crates/baseline/tests/equal_engineering.rs` counts the serialised rows, and `docs/FINDINGS.md`
-/// §1, §3 and §6 transcribe tables from it. Widening the default would rewrite those numbers in
-/// the same commit that adds the strategies whose job is to test them, leaving no before-and-after
-/// a reader could check. The numbers stay where they are and the new rows arrive beside them.
-///
-/// No `default_panel` row is displaced or reordered relative to another: the three counter-
-/// baselines are inserted beside the walk they extend, so the default table survives inside the
-/// extended one as a subsequence and the two can be read against each other row by row.
+/// [`default_panel`] plus counter-baselines carrying FIBER's subtractive passes.
 pub fn extended_panel() -> Vec<Box<dyn ContextStrategy>> {
     let mut panel = default_panel();
     let fiber = panel.pop().expect("the default panel ends with fiber");
-    panel.push(Box::new(ScreenedDependencyWalk::cut()));
-    panel.push(Box::new(ScreenedDependencyWalk::screened()));
-    panel.push(Box::new(ScreenedDependencyWalk::compiled()));
+    panel.push(Box::new(crate::directed::ScreenedDependencyWalk::cut()));
+    panel.push(Box::new(crate::directed::ScreenedDependencyWalk::screened()));
+    panel.push(Box::new(crate::directed::ScreenedDependencyWalk::compiled()));
     panel.push(fiber);
     panel
 }

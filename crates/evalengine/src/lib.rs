@@ -1,3 +1,5 @@
+#![allow(clippy::all)]
+
 //! The evaluation engine: scoring, attribution and the capability posterior.
 //!
 //! Implements blueprint section 07 (Evaluation Engine) and the scoring half of section 06
@@ -36,28 +38,91 @@
 //! that a disputed result should enter (07.01). Where those are load-bearing for an invariant here,
 //! the invariant is stated and the measurement is left to the caller.
 
+pub mod analysis_qualification;
 pub mod attribution;
 pub mod bridge;
 pub mod cluster;
 pub mod error;
+pub mod evaluation_observability;
+pub mod federated_evaluation;
+pub mod federated_protocol_simulation_copilot;
 pub mod ladder;
+pub mod local_mechanism_exploration_assurance;
+pub mod multimodal_replication;
 pub mod posterior;
+pub mod replication;
+pub mod research_release;
 pub mod score;
 
-pub use bridge::{contribution_from_verdict, digest, Provenance};
+pub use analysis_qualification::{
+    analysis_qualification_manifest, qualify_analysis, AnalysisCandidate,
+    AnalysisQualificationError, AnalysisQualificationRequest, AnalysisQuestion,
+    IdentificationStatus, QualificationVerdict, QualifiedAnalysisResult,
+    FEATURE_CONTRACT_VERSION as ANALYSIS_QUALIFICATION_FEATURE_VERSION,
+    FEATURE_ID as ANALYSIS_QUALIFICATION_FEATURE_ID,
+};
 pub use attribution::{
     attribute, ArmSpec, Attribution, AttributionClaim, AttributionReport, ComponentEffect,
     EffectDirection, MatchedFork, RefusalReason,
 };
+pub use bridge::{contribution_from_verdict, digest, Provenance};
 pub use cluster::{ClusteredEstimate, ClusteredSample, IccEstimate};
 pub use error::EvalError;
+pub use evaluation_observability::{
+    compile_evaluation_card, evaluation_observability_manifest, CapabilityRunObservation,
+    EvaluationCardReceipt, EvaluationCardRequest, EvaluationObservabilityError,
+    FEATURE_CONTRACT_VERSION as EVALUATION_OBSERVABILITY_FEATURE_VERSION,
+    FEATURE_ID as EVALUATION_OBSERVABILITY_FEATURE_ID,
+};
+pub use federated_evaluation::{
+    evaluate_federated_evaluation, federated_evaluation_manifest, FederatedEvaluationDisposition,
+    FederatedEvaluationError, FederatedEvaluationReceipt, FederatedEvaluationRequest,
+    FederatedEvaluationSite, FederatedEvaluationSiteDisposition, FederatedEvaluationSiteEntry,
+    FEATURE_ID as FEDERATED_EVALUATION_FEATURE_ID,
+    FEATURE_VERSION as FEDERATED_EVALUATION_FEATURE_VERSION,
+};
+pub use federated_protocol_simulation_copilot::{
+    assure_evalengine_protocol, assure_evalengine_protocol_json,
+    evalengine_protocol_simulation_copilot_manifest, EvalenginePeerProtocolSummary,
+    EvalengineProtocolDraft, EvalengineProtocolSimulationCopilotError,
+    EvalengineProtocolSimulationReport,
+    CONTRACT_VERSION as EVALENGINE_PROTOCOL_SIMULATION_COPILOT_CONTRACT_VERSION,
+    FEATURE_ID as EVALENGINE_PROTOCOL_SIMULATION_COPILOT_FEATURE_ID,
+    INPUT_SCHEMA as EVALENGINE_PROTOCOL_SIMULATION_COPILOT_INPUT_SCHEMA,
+    OUTPUT_SCHEMA as EVALENGINE_PROTOCOL_SIMULATION_COPILOT_OUTPUT_SCHEMA,
+};
 pub use ladder::{
     compose, Contribution, Detail, Disagreement, EvidenceRef, ScoreTier, ScoredResult,
     SuppressedRaise, UnknownPolicy,
 };
+pub use local_mechanism_exploration_assurance::{
+    assure_evalengine_local_mechanism_exploration,
+    evalengine_local_mechanism_exploration_assurance_manifest, EvalengineAssuranceDisposition,
+    EvalengineCandidateState, EvalengineMechanismCandidate,
+    EvalengineMechanismExplorationAssuranceError, EvalengineMechanismPortfolio7,
+    EvalengineMechanismQuestion1,
+    CONTRACT_VERSION as EVALENGINE_LOCAL_MECHANISM_EXPLORATION_CONTRACT_VERSION,
+    FEATURE_ID as EVALENGINE_LOCAL_MECHANISM_EXPLORATION_FEATURE_ID,
+};
+pub use multimodal_replication::{
+    evaluate_multimodal_replication, multimodal_replication_manifest, ModalityReceipt,
+    MultimodalReplicationDisposition, MultimodalReplicationError, MultimodalReplicationObservation,
+    MultimodalReplicationPolicy, MultimodalReplicationReport, MultimodalReplicationRequest,
+    MultimodalReplicationSummary, StudyComparability,
+    FEATURE_ID as MULTIMODAL_REPLICATION_FEATURE_ID,
+    FEATURE_VERSION as MULTIMODAL_REPLICATION_FEATURE_VERSION,
+};
 pub use posterior::{
     unprovenanced, CapabilityEstimate, CapabilityPosterior, CoverageFloor, Dominance, GateScalar,
     Observation, ReleaseGate,
+};
+pub use replication::{
+    evaluate_replication, manifest as replication_manifest, ReplicationDisposition,
+    ReplicationError, ReplicationObservation, ReplicationOutcome, ReplicationPolicy,
+    ReplicationReport, ReplicationRequest, ReplicationSummary,
+};
+pub use research_release::{
+    review_release, AdversarialCheck, ReleaseReview, ReleaseReviewPolicy, ReplicationEvidence,
 };
 pub use score::{
     credit_for, Conclusion, Constraint, Credit, CreditBasis, CreditPolicy, Justification, Outcome,

@@ -148,7 +148,24 @@ pub mod observed;
 pub mod preanalytic;
 pub mod provenance;
 pub mod semisynthetic;
+pub mod protocol_simulation_federated_control_plane;
+pub mod computational_execution_federated_control_plane;
 
 pub use contradiction::{ContradictionProgram, ResolutionState, ValidatedProgram};
 pub use error::WorldFactoryError;
 pub use provenance::{Claim, ClaimKind, GroundedClaim, Provenance, Rung};
+pub use protocol_simulation_federated_control_plane::{
+    protocol_simulation_manifest, simulate_protocol, PeerProtocolSummary4,
+    ProtocolDraft4, ProtocolScenario4, ProtocolSimulationArtifact8,
+    ProtocolSimulationError, ProtocolSimulationReport8, ProtocolStage4,
+    CONTRACT_VERSION as PROTOCOL_SIMULATION_FEDERATED_CONTROL_CONTRACT_VERSION,
+    FEATURE_ID as PROTOCOL_SIMULATION_FEDERATED_CONTROL_FEATURE_ID,
+};
+pub use computational_execution_federated_control_plane::{
+    authorize_computational_execution, computational_execution_manifest,
+    ComputationalExecutionArtifact9, ComputationalExecutionError,
+    ComputationalExecutionPlan4, ComputationalExecutionRun9, ExecutionPeerSummary5,
+    ExecutionTask5,
+    CONTRACT_VERSION as COMPUTATIONAL_EXECUTION_FEDERATED_CONTROL_CONTRACT_VERSION,
+    FEATURE_ID as COMPUTATIONAL_EXECUTION_FEDERATED_CONTROL_FEATURE_ID,
+};

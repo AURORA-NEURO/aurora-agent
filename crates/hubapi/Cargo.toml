@@ -9,7 +9,9 @@ bioprism-ids = { workspace = true }
 bioprism-registry = { workspace = true }
 bioprism-hub = { workspace = true }
 bioprism-governance = { workspace = true }
+bioprism-foundation = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]

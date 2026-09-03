@@ -49,6 +49,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::PlaneError;
 
+const MAX_PLANE_TEXT_BYTES: usize = 256;
+const MAX_DIMENSIONS: usize = 4096;
+
 /// The five system kinds 26.17 names under "Evaluation target", ordered by action breadth.
 ///
 /// The order is the blueprint's own listing order and is load-bearing: a tier admits every
@@ -252,12 +255,68 @@ impl Dimension {
 }
 
 /// One system's scores across a declared set of dimensions.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ScorePlane {
     pub system: String,
     pub tier: CapabilityTier,
     dimensions: Vec<Dimension>,
     cells: BTreeMap<String, Cell>,
+}
+
+#[derive(Deserialize)]
+struct ScorePlaneWire {
+    system: String,
+    tier: CapabilityTier,
+    dimensions: Vec<Dimension>,
+    cells: BTreeMap<String, Cell>,
+}
+
+impl<'de> Deserialize<'de> for ScorePlane {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let wire = ScorePlaneWire::deserialize(deserializer)?;
+        let mut plane = ScorePlane::declare(wire.system, wire.tier, wire.dimensions)
+            .map_err(serde::de::Error::custom)?;
+        if wire.cells.len() != plane.dimensions.len() {
+            return Err(serde::de::Error::custom(
+                "serialized cells must contain exactly one entry per declared dimension",
+            ));
+        }
+        for dimension in &plane.dimensions {
+            let cell = wire.cells.get(&dimension.id).ok_or_else(|| {
+                serde::de::Error::custom(format!(
+                    "serialized cells are missing dimension {}",
+                    dimension.id
+                ))
+            })?;
+            match cell {
+                Cell::Scored { .. } | Cell::Unscored { .. }
+                    if !plane.tier.admits(dimension.required) =>
+                {
+                    return Err(serde::de::Error::custom(format!(
+                        "out-of-tier dimension {} cannot carry a scored or unscored cell",
+                        dimension.id
+                    )));
+                }
+                Cell::Inapplicable { required, declared }
+                    if plane.tier.admits(dimension.required)
+                        || *required != dimension.required
+                        || *declared != plane.tier =>
+                {
+                    return Err(serde::de::Error::custom(format!(
+                        "inapplicable cell for {} does not match its declared tier",
+                        dimension.id
+                    )));
+                }
+                _ => {}
+            }
+            plane.cells.insert(dimension.id.clone(), cell.clone());
+        }
+        plane.validate().map_err(serde::de::Error::custom)?;
+        Ok(plane)
+    }
 }
 
 impl ScorePlane {
@@ -272,9 +331,15 @@ impl ScorePlane {
         tier: CapabilityTier,
         dimensions: Vec<Dimension>,
     ) -> Result<Self, PlaneError> {
+        let system = system.into();
+        validate_plane_text(&system, "system")?;
+        if dimensions.len() > MAX_DIMENSIONS {
+            return Err(PlaneError::TooManyDimensions(MAX_DIMENSIONS));
+        }
         let mut seen = BTreeSet::new();
         let mut cells = BTreeMap::new();
         for dimension in &dimensions {
+            validate_dimension(dimension)?;
             if !seen.insert(dimension.id.clone()) {
                 return Err(PlaneError::DuplicateDimension(dimension.id.clone()));
             }
@@ -294,7 +359,7 @@ impl ScorePlane {
             cells.insert(dimension.id.clone(), cell);
         }
         Ok(ScorePlane {
-            system: system.into(),
+            system,
             tier,
             dimensions,
             cells,
@@ -307,6 +372,7 @@ impl ScorePlane {
     /// selection has a bug, and returning [`PlaneError::OutOfTier`] surfaces it at the moment the
     /// number is offered rather than at the moment somebody reads the leaderboard.
     pub fn score(&mut self, dimension: &str, value: f64) -> Result<(), PlaneError> {
+        self.validate()?;
         let declared = self.declared(dimension)?;
         if !self.tier.admits(declared.required) {
             return Err(PlaneError::OutOfTier {
@@ -327,7 +393,9 @@ impl ScorePlane {
         dimension: &str,
         reason: UnscoredReason,
     ) -> Result<(), PlaneError> {
+        self.validate()?;
         self.declared(dimension)?;
+        validate_reason(&reason)?;
         self.cells
             .insert(dimension.to_string(), Cell::Unscored { reason });
         Ok(())
@@ -367,6 +435,7 @@ impl ScorePlane {
     /// who wants a number must first decide, in the open, what to do about the dimensions nobody
     /// measured — by measuring them, or by removing them from the design, or by not folding.
     pub fn fold(&self, policy: FoldPolicy) -> Result<Fold, PlaneError> {
+        self.validate()?;
         let unscored: Vec<String> = self.unscored().into_iter().map(str::to_string).collect();
         if !unscored.is_empty() {
             return Err(PlaneError::UnscoredDimensions { unscored });
@@ -387,11 +456,20 @@ impl ScorePlane {
                     id: dimension.id.clone(),
                     required: *required,
                 }),
-                _ => unreachable!("unscored dimensions were refused above"),
+                _ => {
+                    return Err(PlaneError::InvalidCell {
+                        dimension: dimension.id.clone(),
+                        detail: "a dimension remained unscored after the unscored-cell check"
+                            .into(),
+                    });
+                }
             }
         }
         if included.is_empty() {
             return Err(PlaneError::Empty);
+        }
+        if !total_weight.is_finite() || total_weight <= 0.0 || !accumulated.is_finite() {
+            return Err(PlaneError::FoldOverflow);
         }
         Ok(Fold {
             system: self.system.clone(),
@@ -409,6 +487,108 @@ impl ScorePlane {
             .find(|d| d.id == dimension)
             .ok_or_else(|| PlaneError::UnknownDimension(dimension.to_string()))
     }
+
+    fn validate(&self) -> Result<(), PlaneError> {
+        validate_plane_text(&self.system, "system")?;
+        if self.dimensions.len() > MAX_DIMENSIONS {
+            return Err(PlaneError::TooManyDimensions(MAX_DIMENSIONS));
+        }
+        let mut ids = BTreeSet::new();
+        for dimension in &self.dimensions {
+            validate_dimension(dimension)?;
+            if !ids.insert(&dimension.id) {
+                return Err(PlaneError::DuplicateDimension(dimension.id.clone()));
+            }
+            let cell = self
+                .cells
+                .get(&dimension.id)
+                .ok_or_else(|| PlaneError::InvalidCell {
+                    dimension: dimension.id.clone(),
+                    detail: "no cell exists for the declared dimension".into(),
+                })?;
+            if let Cell::Unscored { reason } = cell {
+                validate_reason(reason)?;
+            }
+            match cell {
+                Cell::Scored { .. } | Cell::Unscored { .. }
+                    if !self.tier.admits(dimension.required) =>
+                {
+                    return Err(PlaneError::InvalidCell {
+                        dimension: dimension.id.clone(),
+                        detail: "out-of-tier dimensions must be inapplicable".into(),
+                    });
+                }
+                Cell::Inapplicable { required, declared }
+                    if self.tier.admits(dimension.required)
+                        || *required != dimension.required
+                        || *declared != self.tier =>
+                {
+                    return Err(PlaneError::InvalidCell {
+                        dimension: dimension.id.clone(),
+                        detail: "inapplicable metadata does not match the dimension".into(),
+                    });
+                }
+                _ => {}
+            }
+        }
+        if self.cells.keys().any(|id| !ids.contains(id)) {
+            return Err(PlaneError::InvalidCell {
+                dimension: "<unknown>".into(),
+                detail: "the cell map contains an undeclared dimension".into(),
+            });
+        }
+        Ok(())
+    }
+}
+
+fn validate_plane_text(value: &str, field: &str) -> Result<(), PlaneError> {
+    if value.trim().is_empty()
+        || value != value.trim()
+        || value.len() > MAX_PLANE_TEXT_BYTES
+        || value.chars().any(char::is_control)
+    {
+        return Err(PlaneError::InvalidSystem(format!(
+            "{field} must be bounded, trimmed, and control-free"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_dimension(dimension: &Dimension) -> Result<(), PlaneError> {
+    if dimension.id.trim().is_empty()
+        || dimension.id != dimension.id.trim()
+        || dimension.id.len() > MAX_PLANE_TEXT_BYTES
+        || dimension.id.chars().any(char::is_control)
+    {
+        return Err(PlaneError::InvalidDimension {
+            dimension: dimension.id.clone(),
+            detail: "identifier must be bounded, trimmed, and control-free".into(),
+        });
+    }
+    if !dimension.weight.is_finite() || dimension.weight <= 0.0 {
+        return Err(PlaneError::BadWeight(dimension.id.clone()));
+    }
+    Ok(())
+}
+
+fn validate_reason(reason: &UnscoredReason) -> Result<(), PlaneError> {
+    let (field, value) = match reason {
+        UnscoredReason::NotAttempted => return Ok(()),
+        UnscoredReason::EvaluatorUnhealthy { evaluator } => ("evaluator", evaluator),
+        UnscoredReason::NoReferenceStandard { note } => ("note", note),
+        UnscoredReason::Sealed { registration } => ("registration", registration),
+    };
+    if value.trim().is_empty()
+        || value != value.trim()
+        || value.len() > MAX_PLANE_TEXT_BYTES
+        || value.chars().any(char::is_control)
+    {
+        return Err(PlaneError::InvalidCell {
+            dimension: "<unscored>".into(),
+            detail: format!("{field} must be bounded, trimmed, and control-free"),
+        });
+    }
+    Ok(())
 }
 
 /// A dimension left out of a fold because the system's tier could not be asked it.
@@ -423,7 +603,7 @@ pub struct ExcludedDimension {
 /// There is no constructor. A `Fold` can only come from [`ScorePlane::fold`], so a number in this
 /// shape has necessarily passed the unscored check, and the excluded list travels with it — two
 /// systems folded over different denominators cannot be compared without that being visible.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Fold {
     pub system: String,
     pub tier: CapabilityTier,

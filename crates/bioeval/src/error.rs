@@ -8,6 +8,7 @@
 use thiserror::Error;
 
 use crate::comparability::Incomparability;
+use crate::layer::CorrectnessLayer;
 use crate::wrongness::BiologicalErrorClass;
 
 /// Rejections raised while building a reference standard (31.01).
@@ -30,6 +31,9 @@ pub enum ReferenceError {
     #[error("state {state:?} declared more than once")]
     DuplicateState { state: String },
 
+    #[error("reference state {state:?} must be a bounded, trimmed, control-free string")]
+    InvalidState { state: String },
+
     #[error("aleatoric fraction {fraction} is outside [0, 1]")]
     AleatoricFractionOutOfRange { fraction: f64 },
 }
@@ -51,6 +55,9 @@ pub enum PredictionError {
 
     #[error("state {state:?} declared more than once")]
     DuplicateState { state: String },
+
+    #[error("predicted state {state:?} must be a bounded, trimmed, control-free string")]
+    InvalidState { state: String },
 }
 
 /// Refusals raised while grading.
@@ -82,6 +89,15 @@ pub enum ScoreError {
         "comparability witness was earned under requirement {found:?}, grader requires {expected:?}"
     )]
     WitnessFromDifferentRequirement { expected: String, found: String },
+
+    #[error("grader configuration is invalid: {reason}")]
+    InvalidGrader { reason: String },
+
+    #[error("prediction is invalid: {reason}")]
+    InvalidPrediction { reason: String },
+
+    #[error("reference standard is invalid: {reason}")]
+    InvalidReference { reason: String },
 }
 
 /// Refusals raised when a caller asks for a single number (31.01, 26.20).
@@ -138,6 +154,15 @@ pub enum CreditError {
 
     #[error("rule {rule_id:?} could not be digested for replay: {detail}")]
     NotDigestible { rule_id: String, detail: String },
+
+    #[error("credit rule {rule_id:?} is invalid: {detail}")]
+    InvalidRule { rule_id: String, detail: String },
+
+    #[error("credit evidence for rule {rule_id:?} is invalid: {detail}")]
+    InvalidEvidence { rule_id: String, detail: String },
+
+    #[error("credit award for rule {rule_id:?} is invalid: {detail}")]
+    InvalidAward { rule_id: String, detail: String },
 }
 
 /// Refusals raised while aggregating (26.15, 26.20).
@@ -161,4 +186,38 @@ pub enum AggregationError {
 
     #[error("rater {rater:?} appears twice in the panel")]
     DuplicateRater { rater: String },
+
+    #[error("panel policy is invalid: {detail}")]
+    InvalidPolicy { detail: String },
+
+    #[error("rating from {rater:?} is invalid: {detail}")]
+    InvalidRating { rater: String, detail: String },
+
+    #[error("panel aggregate is invalid: {detail}")]
+    InvalidPanel { detail: String },
+
+    #[error("score for subject {subject:?} is invalid for pooling: {detail}")]
+    InvalidScore { subject: String, detail: String },
+
+    #[error("a score pool may contain at most {limit} cases")]
+    PoolTooLarge { limit: usize },
+}
+
+/// Rejections raised while constructing a correctness-layer outcome.
+#[derive(Debug, Clone, PartialEq, Error)]
+pub enum LayerError {
+    #[error("layer observation for {layer} was supplied more than once")]
+    DuplicateObservation { layer: CorrectnessLayer },
+
+    #[error("a layer outcome supplied too many observations; at most {limit} are supported")]
+    TooManyObservations { limit: usize },
+
+    #[error("layer {layer} supplied an invalid verdict: {detail}")]
+    InvalidVerdict {
+        layer: CorrectnessLayer,
+        detail: String,
+    },
+
+    #[error("the conclusion is invalid: {detail}")]
+    InvalidConclusion { detail: String },
 }

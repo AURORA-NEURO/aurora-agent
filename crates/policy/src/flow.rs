@@ -248,12 +248,12 @@ impl DeclassificationRegistry {
         principal: &Principal,
         at: Timestamp,
     ) -> Result<(PolicyLabel, DeclassificationReceipt), Refusal> {
-        let rule = self
-            .get(rule_id, version)
-            .ok_or_else(|| Refusal::UnknownDeclassificationRule {
-                rule_id: rule_id.to_string(),
-                version,
-            })?;
+        let rule =
+            self.get(rule_id, version)
+                .ok_or_else(|| Refusal::UnknownDeclassificationRule {
+                    rule_id: rule_id.to_string(),
+                    version,
+                })?;
 
         if !principal.holds(&rule.authority) {
             return Err(Refusal::DeclassificationUnauthorized {
@@ -390,7 +390,8 @@ mod tests {
 
     #[test]
     fn a_flow_that_would_widen_the_permitted_purposes_is_refused() {
-        let source = PolicyLabel::public().with_purposes(PurposeSet::of([Purpose::ResearchAnalysis]));
+        let source =
+            PolicyLabel::public().with_purposes(PurposeSet::of([Purpose::ResearchAnalysis]));
         let destination = PolicyLabel::public().with_purposes(PurposeSet::Any);
 
         match check_flow(&source, &destination) {
@@ -483,7 +484,10 @@ mod tests {
             .apply("declass.cohort-counts", 2, &input, &steward(), at())
             .expect_err("dual-use was outside the analysed ceiling");
 
-        assert!(matches!(refusal, Refusal::DeclassificationOutOfRange { .. }));
+        assert!(matches!(
+            refusal,
+            Refusal::DeclassificationOutOfRange { .. }
+        ));
     }
 
     #[test]

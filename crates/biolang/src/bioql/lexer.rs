@@ -186,13 +186,14 @@ impl<'a> Lexer<'a> {
 
         let text = &self.source[start..self.offset];
         let span = Span::new(start, self.offset, line, column);
-        let value: f64 = text.parse().map_err(|error: std::num::ParseFloatError| {
-            LexError::MalformedNumber {
-                text: text.to_string(),
-                span,
-                detail: error.to_string(),
-            }
-        })?;
+        let value: f64 =
+            text.parse().map_err(
+                |error: std::num::ParseFloatError| LexError::MalformedNumber {
+                    text: text.to_string(),
+                    span,
+                    detail: error.to_string(),
+                },
+            )?;
         if !value.is_finite() {
             return Err(LexError::MalformedNumber {
                 text: text.to_string(),
@@ -239,7 +240,12 @@ impl<'a> Lexer<'a> {
                                 .unwrap_or_else(|| "\\".to_string());
                             return Err(LexError::UnknownEscape {
                                 escape: text,
-                                span: Span::new(self.offset, self.offset + 2, self.line, self.column),
+                                span: Span::new(
+                                    self.offset,
+                                    self.offset + 2,
+                                    self.line,
+                                    self.column,
+                                ),
                             });
                         }
                     };

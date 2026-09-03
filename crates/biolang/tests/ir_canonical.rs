@@ -102,14 +102,10 @@ fn mutation() -> MutationProgram {
 }
 
 fn schema() -> QuerySchema {
-    QuerySchema::new().with(
-        CollectionDecl::new("lesions")
-            .costing(10)
-            .declare(
-                "tumor_volume",
-                BioType::quantity(bioprism_standards::Unit::parse("mm3").expect("known unit")),
-            ),
-    )
+    QuerySchema::new().with(CollectionDecl::new("lesions").costing(10).declare(
+        "tumor_volume",
+        BioType::quantity(bioprism_standards::Unit::parse("mm3").expect("known unit")),
+    ))
 }
 
 #[test]

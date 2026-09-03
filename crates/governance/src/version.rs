@@ -337,7 +337,10 @@ mod tests {
         assert_eq!(written.patch, None);
         assert_eq!(written.to_string(), "0.1");
         assert_eq!(SchemaVersion::with_patch(0, 1, 0).to_string(), "0.1.0");
-        assert_eq!(written.release(), SchemaVersion::with_patch(0, 1, 0).release());
+        assert_eq!(
+            written.release(),
+            SchemaVersion::with_patch(0, 1, 0).release()
+        );
         assert_ne!(written, SchemaVersion::with_patch(0, 1, 0));
     }
 

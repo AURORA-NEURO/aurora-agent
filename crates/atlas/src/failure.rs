@@ -35,7 +35,8 @@
 use crate::error::AtlasError;
 use crate::ontology::CapabilityId;
 use bioprism_ids::RunId;
-use serde::{Deserialize, Serialize};
+use serde::de::Error as DeError;
+use serde::{Deserialize, Deserializer, Serialize};
 use std::fmt;
 
 /// Where in an agent's trajectory a failure sits. Derived from the mechanism; never declared.
@@ -307,12 +308,37 @@ impl FailureLabel {
 /// Ordering is enforced on construction: the initiating cause is at or before the first
 /// divergence, every manifestation is at or after the divergence, and the terminal failure is
 /// last. A chain that violates this is not a weak diagnosis, it is an incoherent one.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct CausalChain {
     initiating_cause: FailureLabel,
     first_divergence: FailureLabel,
     manifestations: Vec<FailureLabel>,
     terminal: FailureLabel,
+}
+
+#[derive(Debug, Deserialize)]
+struct CausalChainFields {
+    initiating_cause: FailureLabel,
+    first_divergence: FailureLabel,
+    manifestations: Vec<FailureLabel>,
+    terminal: FailureLabel,
+}
+
+impl<'de> Deserialize<'de> for CausalChain {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let fields = CausalChainFields::deserialize(deserializer)?;
+        Self::new(
+            "deserialized",
+            fields.initiating_cause,
+            fields.first_divergence,
+            fields.manifestations,
+            fields.terminal,
+        )
+        .map_err(D::Error::custom)
+    }
 }
 
 impl CausalChain {
@@ -423,10 +449,30 @@ pub struct LabelWeight {
 /// distributions and rationale rather than forcing false certainty." So [`LabelDistribution::modal`]
 /// returns `Option` and yields `None` on a tie — a two-way tie has no majority, and inventing one
 /// by declaration order would turn a disagreement into a fact.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct LabelDistribution {
     weights: Vec<LabelWeight>,
     pub rationale: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct LabelDistributionFields {
+    weights: Vec<LabelWeight>,
+    rationale: String,
+}
+
+impl<'de> Deserialize<'de> for LabelDistribution {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let fields = LabelDistributionFields::deserialize(deserializer)?;
+        let weights = fields
+            .weights
+            .into_iter()
+            .map(|entry| (entry.mechanism, entry.weight));
+        Self::contested("deserialized", weights, fields.rationale).map_err(D::Error::custom)
+    }
 }
 
 impl LabelDistribution {
@@ -465,6 +511,16 @@ impl LabelDistribution {
                 });
             }
         }
+        collected.sort_by_key(|entry| entry.mechanism);
+        if let Some(pair) = collected
+            .windows(2)
+            .find(|pair| pair[0].mechanism == pair[1].mechanism)
+        {
+            return Err(AtlasError::DuplicateLabelMechanism {
+                failure_id: failure_id.to_string(),
+                mechanism: pair[0].mechanism.as_str(),
+            });
+        }
         let total: f64 = collected.iter().map(|e| e.weight).sum();
         if (total - 1.0).abs() > 1e-9 {
             return Err(AtlasError::MalformedLabelDistribution {
@@ -472,7 +528,6 @@ impl LabelDistribution {
                 total,
             });
         }
-        collected.sort_by_key(|entry| entry.mechanism);
         Ok(LabelDistribution {
             weights: collected,
             rationale: rationale.into(),

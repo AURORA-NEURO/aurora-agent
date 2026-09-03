@@ -1,0 +1,27 @@
+/** Public TypeScript contracts for Worldgen P22 interoperability/extensibility. */
+import { digestJsonSync } from "./tooling.js";
+import { PRECLINICAL_BOUNDARY, RESEARCH_CONTRACT_SCHEMA_VERSION } from "./research-contracts.js";
+
+export const WORLDGEN_INTEROPERABILITY_EXTENSIBILITY_CONTENT_TYPE = "application/vnd.aurora.worldgen.interoperability-extensibility-receipt-1+json" as const;
+export const WORLDGEN_LOCAL_INTEROPERABILITY_EXTENSIBILITY_FEATURE_ID = "AFA-worldgen-P22-F01" as const;
+export const WORLDGEN_MULTIMODAL_INTEROPERABILITY_EXTENSIBILITY_FEATURE_ID = "AFA-worldgen-P22-F02" as const;
+export const WORLDGEN_THROUGHPUT_INTEROPERABILITY_EXTENSIBILITY_FEATURE_ID = "AFA-worldgen-P22-F03" as const;
+export const WORLDGEN_FEDERATED_INTEROPERABILITY_EXTENSIBILITY_FEATURE_ID = "AFA-worldgen-P22-F04" as const;
+export const WORLDGEN_LOCAL_INTEROPERABILITY_EXTENSIBILITY_CONTRACT_FEATURE_ID = "AFA-worldgen-P22-F05" as const;
+export const WORLDGEN_MULTIMODAL_INTEROPERABILITY_EXTENSIBILITY_CONTRACT_FEATURE_ID = "AFA-worldgen-P22-F06" as const;
+export const WORLDGEN_THROUGHPUT_INTEROPERABILITY_EXTENSIBILITY_CONTRACT_FEATURE_ID = "AFA-worldgen-P22-F07" as const;
+export const WORLDGEN_FEDERATED_INTEROPERABILITY_EXTENSIBILITY_CONTRACT_FEATURE_ID = "AFA-worldgen-P22-F08" as const;
+export const WORLDGEN_LOCAL_INTEROPERABILITY_EXTENSIBILITY_COPILOT_FEATURE_ID = "AFA-worldgen-P22-F09" as const;
+export const WORLDGEN_MULTIMODAL_INTEROPERABILITY_EXTENSIBILITY_COPILOT_FEATURE_ID = "AFA-worldgen-P22-F10" as const;
+export const WORLDGEN_THROUGHPUT_INTEROPERABILITY_EXTENSIBILITY_COPILOT_FEATURE_ID = "AFA-worldgen-P22-F11" as const;
+export const WORLDGEN_FEDERATED_INTEROPERABILITY_EXTENSIBILITY_COPILOT_FEATURE_ID = "AFA-worldgen-P22-F12" as const;
+export const WORLDGEN_LOCAL_INTEROPERABILITY_EXTENSIBILITY_WORKFLOW_FEATURE_ID = "AFA-worldgen-P22-F13" as const;
+export const WORLDGEN_MULTIMODAL_INTEROPERABILITY_EXTENSIBILITY_WORKFLOW_FEATURE_ID = "AFA-worldgen-P22-F14" as const;
+export const WORLDGEN_THROUGHPUT_INTEROPERABILITY_EXTENSIBILITY_WORKFLOW_FEATURE_ID = "AFA-worldgen-P22-F15" as const;
+export const WORLDGEN_FEDERATED_INTEROPERABILITY_EXTENSIBILITY_WORKFLOW_FEATURE_ID = "AFA-worldgen-P22-F16" as const;
+
+export interface WorldgenInteroperabilityExtensibilityReceipt {schema_version:string;contract_version:string;feature_id:string;mode:string;scale:string;request_id:string;negotiated_version:string;disposition:string;capability_order:string[];extension_order:string[];missing_capability_order:string[];unsupported_extension_order:string[];omission_order:string[];uncertainty_order:string[];semantic_loss_order:string[];stage_order:string[];completed_stage_order:string[];pending_stage_order:string[];replay_identity:string;schema_digest:string;artifact_digest_order:string[];receipt_digest:string;artifact:{artifact_id:string;content_type:string;content_hash:string;semantic_loss:string[];boundary:string};effect_receipts:string[];raw_data_local:true;aggregate_only:true;boundary:string}
+const ordered=(v:string[])=>JSON.stringify([...new Set(v)].sort())===JSON.stringify(v);const digest=(v:unknown)=>typeof v==="string"&&/^[0-9a-f]{64}$/.test(v);
+function validate(r:WorldgenInteroperabilityExtensibilityReceipt,id:string):void{if(r.schema_version!==RESEARCH_CONTRACT_SCHEMA_VERSION||r.feature_id!==id||r.boundary!==PRECLINICAL_BOUNDARY||r.raw_data_local!==true||r.aggregate_only!==true||r.artifact.boundary!==PRECLINICAL_BOUNDARY||r.artifact.content_type!==WORLDGEN_INTEROPERABILITY_EXTENSIBILITY_CONTENT_TYPE||!r.capability_order.length||!digest(r.replay_identity)||!digest(r.schema_digest)||!digest(r.receipt_digest)||r.artifact.content_hash!==r.receipt_digest||JSON.stringify(r.artifact.semantic_loss)!==JSON.stringify(r.semantic_loss_order))throw new Error("interoperability/extensibility identity, locality, or digest is invalid");for(const values of [r.capability_order,r.extension_order,r.missing_capability_order,r.unsupported_extension_order,r.omission_order,r.uncertainty_order,r.semantic_loss_order,r.stage_order,r.completed_stage_order,r.pending_stage_order,r.artifact_digest_order,r.effect_receipts])if(!ordered(values))throw new Error("interoperability/extensibility vectors are not canonical");const stages=new Set(r.stage_order),parts=new Set([...r.completed_stage_order,...r.pending_stage_order]);if(stages.size!==parts.size||[...stages].some(s=>!parts.has(s)))throw new Error("workflow stages do not partition")}
+export const validateWorldgenLocalInteroperabilityExtensibilityReceipt=(r:WorldgenInteroperabilityExtensibilityReceipt)=>validate(r,WORLDGEN_LOCAL_INTEROPERABILITY_EXTENSIBILITY_FEATURE_ID);export const validateWorldgenMultimodalInteroperabilityExtensibilityReceipt=(r:WorldgenInteroperabilityExtensibilityReceipt)=>validate(r,WORLDGEN_MULTIMODAL_INTEROPERABILITY_EXTENSIBILITY_FEATURE_ID);export const validateWorldgenThroughputInteroperabilityExtensibilityReceipt=(r:WorldgenInteroperabilityExtensibilityReceipt)=>validate(r,WORLDGEN_THROUGHPUT_INTEROPERABILITY_EXTENSIBILITY_FEATURE_ID);export const validateWorldgenFederatedInteroperabilityExtensibilityReceipt=(r:WorldgenInteroperabilityExtensibilityReceipt)=>validate(r,WORLDGEN_FEDERATED_INTEROPERABILITY_EXTENSIBILITY_FEATURE_ID);
+export const worldgenInteroperabilityExtensibilityDigest=(r:WorldgenInteroperabilityExtensibilityReceipt)=>{validateWorldgenLocalInteroperabilityExtensibilityReceipt(r);return digestJsonSync(r)};

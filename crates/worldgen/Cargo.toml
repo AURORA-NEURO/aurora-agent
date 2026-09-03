@@ -8,8 +8,12 @@ repository.workspace = true
 description = "Synthetic structural benchmark families: worlds whose topology, depth and tag informativeness vary independently"
 
 [dependencies]
+bioprism-foundation = { workspace = true }
+bioprism-world = { workspace = true }
+bioprism-ids = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+thiserror = { workspace = true }
 
 [dev-dependencies]
 # Tests and the scaling example only. The generator emits world and query *documents*; loading one

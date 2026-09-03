@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aurora-neuro.org/schemas/aurora-research-contract-v1/replay-audit-receipt.json",
+  "title": "AURORA replay observability audit receipt",
+  "description": "Fail-closed semantic comparison of two policy-bound research replay bundles.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["payload", "artifact"],
+  "properties": {
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "feature_id", "audit_id", "status", "baseline_digest", "candidate_digest", "reasons", "boundary"],
+      "properties": {
+        "schema_version": { "const": "aurora-research-contract/1.0" },
+        "feature_id": { "const": "AFA-runtime-P23-F01" },
+        "audit_id": { "type": "string", "minLength": 1 },
+        "status": { "enum": ["equivalent", "diverged", "invalid"] },
+        "baseline_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "candidate_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "first_difference": { "type": ["string", "null"] },
+        "reasons": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+        "boundary": { "const": "preclinical-research-only; no human-subject or clinical-source data; no diagnosis, treatment, triage, enrollment, or clinical decisions" }
+      }
+    },
+    "artifact": { "type": "object", "required": ["content_hash"], "properties": { "content_hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" } } }
+  }
+}

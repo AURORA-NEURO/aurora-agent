@@ -1131,10 +1131,10 @@ impl MissionPersistence {
             ]
         });
         let state_digest = mission_checkpoint_digest(&document)?;
-        document
-            .as_object_mut()
-            .expect("mission checkpoint document is an object")
-            .insert("state_digest".into(), Value::String(state_digest));
+        let Some(document_object) = document.as_object_mut() else {
+            return Err("mission checkpoint document is not an object".into());
+        };
+        document_object.insert("state_digest".into(), Value::String(state_digest));
         let bytes = serde_json::to_vec_pretty(&document)
             .map_err(|error| format!("mission state could not be serialized: {error}"))?;
         if bytes.len() > MAX_MISSION_STATE_FILE_BYTES {
@@ -1791,6 +1791,9 @@ impl ApiRouter {
                 self.get_artifact(&request, &request_id)
             }
             ("GET", "/v1/tools") => self.tools(),
+            ("POST", "/v1/research/evolution/admit") => {
+                self.bounded_evolution_admit(&request, &request_id)
+            }
             ("GET", "/v1/metrics") => self.metrics(),
             ("GET", "/v1/events") => self.events(&request),
             ("GET", "/v1/events/stream") => self.event_stream(&request),
@@ -2805,7 +2808,8 @@ impl ApiRouter {
             let missing_tool_count = group
                 .get("missing_tool_count")
                 .and_then(Value::as_u64)
-                .unwrap_or(0) as usize;
+                .map(|value| usize::try_from(value).unwrap_or(usize::MAX))
+                .unwrap_or(0);
             if missing_tool_count > 0 {
                 groups_with_gaps += 1;
             }
@@ -3074,7 +3078,8 @@ impl ApiRouter {
             let matching_artifact_records = artifact_evidence
                 .get("matching_record_count")
                 .and_then(Value::as_u64)
-                .unwrap_or(0) as usize;
+                .map(|value| usize::try_from(value).unwrap_or(usize::MAX))
+                .unwrap_or(0);
             if matching_artifact_records > 0 {
                 groups_with_artifact_evidence += 1;
                 artifact_evidence_records =
@@ -3093,7 +3098,8 @@ impl ApiRouter {
             let missing_tool_count = group
                 .get("missing_tool_count")
                 .and_then(Value::as_u64)
-                .unwrap_or(0) as usize;
+                .map(|value| usize::try_from(value).unwrap_or(usize::MAX))
+                .unwrap_or(0);
             let mut observed_tools = BTreeSet::new();
             let mut completed_tools = BTreeSet::new();
             let mut refused_tools = BTreeSet::new();
@@ -4028,6 +4034,56 @@ impl ApiRouter {
         )
     }
 
+    fn bounded_evolution_admit(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+        let arguments = match self.json_object(request) {
+            Ok(arguments) => arguments,
+            Err(error) => return self.error(400, "invalid_json", &error, request_id),
+        };
+        let call = Request {
+            id: Some(Value::String(request_id.to_string())),
+            method: "tools/call".into(),
+            params: json!({
+                "name": "adapter_bounded_evolution",
+                "arguments": arguments,
+            }),
+        };
+        let mut server = self.server.clone();
+        let Some(response) = server.handle(&call) else {
+            return self.error(
+                500,
+                "dispatch_failed",
+                "bounded evolution dispatch produced no response",
+                request_id,
+            );
+        };
+        let wire = response.to_json();
+        self.record_tool_event(request_id, "adapter_bounded_evolution", &wire);
+        let transport_ok = wire.get("error").is_none();
+        HttpResponse::json(
+            if transport_ok {
+                200
+            } else {
+                response_status(&wire)
+            },
+            &json!({
+                "ok": transport_ok,
+                "api_version": API_VERSION,
+                "feature_id": bioprism_adapter::BOUNDED_EVOLUTION_FEATURE_ID,
+                "tool": "adapter_bounded_evolution",
+                "request_id": request_id,
+                "mcp": wire,
+                "guarantees": [
+                    "REST and MCP use the same bounded evolution dispatcher and receipt contract",
+                    "replay, evidence, safety, policy, budget, protected-closure, and preclinical gates remain explicit",
+                    "the endpoint admits receipt metadata only and never mutates or deploys candidate artifacts"
+                ],
+                "limitations": [
+                    "sandbox execution, independent review, signing, and release governance remain outside this transport endpoint"
+                ]
+            }),
+        )
+    }
+
     fn metrics(&self) -> HttpResponse {
         HttpResponse::json(200, &json!({ "ok": true, "metrics": self.event_metrics() }))
     }
@@ -4070,7 +4126,14 @@ impl ApiRouter {
             (Some(review_id), None) => events.events_for_review(after, limit, review_id),
             (None, Some(receipt_id)) => events.events_for_receipt(after, limit, receipt_id),
             (None, None) => events.events(after, limit),
-            (Some(_), Some(_)) => unreachable!("mutually exclusive event filters were checked"),
+            (Some(_), Some(_)) => {
+                return self.error(
+                    400,
+                    "invalid_query",
+                    "review_id and receipt_id are mutually exclusive event filters",
+                    "query",
+                )
+            }
         };
         match page {
             Ok(page) => HttpResponse::json(200, &json!({ "ok": true, "page": page })),
@@ -4116,7 +4179,14 @@ impl ApiRouter {
             (Some(review_id), None) => events.events_for_review(after, limit, review_id),
             (None, Some(receipt_id)) => events.events_for_receipt(after, limit, receipt_id),
             (None, None) => events.events(after, limit),
-            (Some(_), Some(_)) => unreachable!("mutually exclusive event filters were checked"),
+            (Some(_), Some(_)) => {
+                return self.error(
+                    400,
+                    "invalid_query",
+                    "review_id and receipt_id are mutually exclusive event filters",
+                    "query",
+                )
+            }
         };
         match page {
             Ok(page) => {
@@ -8889,6 +8959,7 @@ impl ApiRouter {
                     "/v1/artifacts/persistence": { "get": { "responses": { "200": { "description": "restart-aware artifact registry checkpoint status" } } } },
                     "/v1/artifacts/persistence/flush": { "post": { "responses": { "200": { "description": "force a bounded artifact registry checkpoint" }, "409": { "description": "persistence is disabled" } } } },
                     "/v1/tools": { "get": { "responses": { "200": { "description": "MCP tool catalog" } } } },
+                    "/v1/research/evolution/admit": { "post": { "responses": { "200": { "description": "bounded-evolution admission receipt shared with MCP" }, "400": { "description": "evolution request JSON was invalid" }, "422": { "description": "candidate admission was blocked or unresolved" } } } },
                     "/v1/tools/{name}": { "post": { "parameters": [{ "name": "name", "in": "path", "required": true }], "responses": { "200": { "description": "tool result" } } } },
                     "/v1/domain-reports": { "post": { "responses": { "200": { "description": "bounded domain-report projection" } } } },
                     "/v1/domain-reports/coverage": { "get": { "responses": { "200": { "description": "domain-report coverage diagnostic" } } } },
@@ -10007,10 +10078,10 @@ fn checkpoint_integrity_from_path(path: Option<&Path>, expected_schema: u64) -> 
         Some(object) => Value::Object(object.clone()),
         None => return Some(false),
     };
-    unsigned
-        .as_object_mut()
-        .expect("checkpoint object was cloned from an object")
-        .remove("state_digest");
+    let Some(unsigned_object) = unsigned.as_object_mut() else {
+        return Some(false);
+    };
+    unsigned_object.remove("state_digest");
     let Ok(computed) = mission_checkpoint_digest(&unsigned) else {
         return Some(false);
     };
@@ -10513,10 +10584,10 @@ fn trim_mission_snapshot_to_bound(missions: &mut [Value]) -> Result<(), String> 
             ]
         });
         let state_digest = mission_checkpoint_digest(&document)?;
-        document
-            .as_object_mut()
-            .expect("mission checkpoint document is an object")
-            .insert("state_digest".into(), Value::String(state_digest));
+        let Some(document_object) = document.as_object_mut() else {
+            return Err("mission checkpoint document is not an object".into());
+        };
+        document_object.insert("state_digest".into(), Value::String(state_digest));
         let size = serde_json::to_vec(&document)
             .map_err(|error| format!("mission state could not be sized: {error}"))?
             .len();
@@ -10950,6 +11021,54 @@ mod tests {
         rpc.headers
             .insert("authorization".into(), "Bearer 0123456789abcdef".into());
         assert_eq!(router.handle(rpc).status, 200);
+    }
+
+    #[test]
+    fn bounded_evolution_rest_alias_returns_typed_receipt_and_preserves_boundary() {
+        let router =
+            ApiRouter::new(std::env::current_dir().unwrap(), ApiConfig::default()).unwrap();
+        let boundary = "preclinical-research-only; no human-subject or clinical-source data; no diagnosis, treatment, triage, enrollment, or clinical decisions";
+        let response = router.handle(request(
+            "POST",
+            "/v1/research/evolution/admit",
+            json!({
+                "request": {
+                    "request_id": "evolution:api",
+                    "workflow_id": "workflow:high-throughput",
+                    "objective_id": "objective:bounded-evolution",
+                    "candidates": [{
+                        "candidate_id": "candidate:a",
+                        "artifact_digest": "a".repeat(64),
+                        "baseline_digest": "b".repeat(64),
+                        "required_evidence": ["c".repeat(64)],
+                        "replayable": true,
+                        "deterministic": true,
+                        "safety_reviewed": true,
+                        "policy_allow": true,
+                        "resource_cost": 1,
+                        "affected_surface": "adapter:research-contract",
+                        "boundary": boundary
+                    }],
+                    "evidence_order": ["c".repeat(64)],
+                    "replay_identity": "d".repeat(64),
+                    "budget": 2,
+                    "max_concurrency": 1,
+                    "policy_allow": true,
+                    "protected_closure": true,
+                    "signed_approval": true,
+                    "raw_data_local": true,
+                    "boundary": boundary
+                }
+            }),
+        ));
+        assert_eq!(response.status, 200);
+        let body: Value = serde_json::from_slice(&response.body).unwrap();
+        assert_eq!(
+            body["feature_id"],
+            bioprism_adapter::BOUNDED_EVOLUTION_FEATURE_ID
+        );
+        assert_eq!(body["tool"], "adapter_bounded_evolution");
+        assert_eq!(body["ok"], true);
     }
 
     #[test]
@@ -11565,8 +11684,8 @@ mod tests {
             "mission_plan_digest": "d".repeat(64),
             "source": "mission_report",
             "completion": {"status": "partial", "ready": false, "review_required": true},
-            "evidence": {"evidence_valid": true},
-            "integrity": {"valid": true, "finding_count": 1},
+            "evidence": {"evidence_valid": false},
+            "integrity": {"valid": true, "finding_count": 1, "findings": [{"code": "evidence_incomplete", "severity": "warning", "message": "evidence remains incomplete"}]},
             "execution": "not_started"
         });
         incomplete_reconciliation["reconciliation_digest"] =
@@ -11637,8 +11756,8 @@ mod tests {
                 "mission_plan_digest": "d".repeat(64),
                 "source": "mission_report",
                 "completion": {"status": "partial", "ready": false, "review_required": true},
-                "evidence": {"evidence_valid": true},
-                "integrity": {"valid": true, "finding_count": 1},
+                "evidence": {"evidence_valid": false},
+                "integrity": {"valid": true, "finding_count": 1, "findings": [{"code": "evidence_incomplete", "severity": "warning", "message": "evidence remains incomplete"}]},
                 "execution": "not_started"
             });
             record["reconciliation_digest"] =
@@ -13039,7 +13158,7 @@ mod tests {
             "source": "mission_report",
             "completion": {"status": "complete", "ready": true, "review_required": true},
             "evidence": {"evidence_valid": true},
-            "integrity": {"valid": true, "finding_count": 0},
+            "integrity": {"valid": true, "finding_count": 0, "findings": []},
             "execution": "not_started"
         });
         record["reconciliation_digest"] =
@@ -13352,10 +13471,12 @@ mod tests {
         assert_eq!(coverage.status, 200);
         let coverage: Value = serde_json::from_slice(&coverage.body).unwrap();
         assert_eq!(coverage["workflow"], "domain_report_coverage");
+        let group_count = coverage["group_count"].as_u64().unwrap();
         assert_eq!(
-            coverage["group_count"].as_u64().unwrap() as usize,
+            group_count as usize,
             coverage["groups"].as_array().unwrap().len()
         );
+        assert!(group_count >= 30);
         assert_eq!(coverage["reported_group_count"], 1);
         assert!(coverage["groups"]
             .as_array()
@@ -14133,7 +14254,6 @@ mod tests {
         assert_eq!(coverage.status, 200);
         let coverage: Value = serde_json::from_slice(&coverage.body).unwrap();
         assert_eq!(coverage["workflow"], "domain_evidence_intake_coverage");
-        assert_eq!(coverage["reported_group_count"], 1);
         let group_count = coverage["group_count"].as_u64().unwrap();
         let reported_group_count = coverage["reported_group_count"].as_u64().unwrap();
         let missing_group_count = coverage["missing_group_count"].as_u64().unwrap();
@@ -14146,6 +14266,9 @@ mod tests {
             missing_group_count as usize,
             coverage["missing_group_ids"].as_array().unwrap().len()
         );
+        assert!(group_count >= 30);
+        assert_eq!(coverage["reported_group_count"], 1);
+        assert_eq!(coverage["missing_group_count"], group_count - 1);
         assert_eq!(coverage["complete"], false);
         assert_eq!(coverage["groups_with_artifact_evidence"], 1);
         assert_eq!(coverage["artifact_evidence_records"], 2);
@@ -14285,10 +14408,12 @@ mod tests {
         assert_eq!(catalogue.status, 200);
         let catalogue: Value = serde_json::from_slice(&catalogue.body).unwrap();
         assert_eq!(catalogue["workflow"], "domain_workflow_catalogue");
+        let workflow_count = catalogue["workflow_count"].as_u64().unwrap();
         assert_eq!(
-            catalogue["workflow_count"].as_u64().unwrap() as usize,
+            workflow_count as usize,
             catalogue["workflows"].as_array().unwrap().len()
         );
+        assert!(workflow_count >= 30);
         assert_eq!(
             catalogue["workflow_count"],
             catalogue["coverage"]["group_count"]

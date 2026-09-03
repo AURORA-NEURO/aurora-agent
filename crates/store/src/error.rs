@@ -14,11 +14,20 @@ pub enum StoreError {
     #[error("index value for key {0:?} contains a newline")]
     UnsupportedValue(String),
 
+    #[error("invalid index name: {0:?}")]
+    InvalidIndexName(String),
+
+    #[error("index is too large to address")]
+    IndexTooLarge,
+
     #[error("corrupt index: {0}")]
     CorruptIndex(String),
 
     #[error("unsupported store schema: expected {expected:?}, got {actual:?}")]
-    UnsupportedSchema { expected: &'static str, actual: String },
+    UnsupportedSchema {
+        expected: &'static str,
+        actual: String,
+    },
 
     #[error("world is not a JSON object with facts, factors and events")]
     MalformedWorld,

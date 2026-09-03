@@ -35,6 +35,13 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::{BTreeMap, BTreeSet};
 
+/// Maximum number of effects retained by one tape.
+pub const MAX_TAPE_ENTRIES: usize = 1_000_000;
+/// Maximum number of named checkpoints retained by one tape.
+pub const MAX_TAPE_CHECKPOINTS: usize = 65_536;
+/// Maximum serialized tape size accepted or emitted by this in-process boundary.
+pub const MAX_TAPE_JSON_BYTES: usize = 64 * 1024 * 1024;
+
 /// One effect, sealed into the chain.
 ///
 /// `digest` covers `step`, `effect` and `previous` — and nothing else. In particular it does not
@@ -154,11 +161,7 @@ impl WorldTape {
     ///
     /// Used by 05.05's fork. The entries are *copies*, not re-performances: the child did not read
     /// those files or send those requests, its world-line simply begins after they happened.
-    pub(crate) fn forked(
-        run: RunId,
-        lineage: TapeLineage,
-        entries: Vec<TapeEntry>,
-    ) -> Self {
+    pub(crate) fn forked(run: RunId, lineage: TapeLineage, entries: Vec<TapeEntry>) -> Self {
         WorldTape {
             run,
             lineage: Some(lineage),
@@ -198,11 +201,20 @@ impl WorldTape {
 
     /// The digest committing to the whole history so far.
     pub fn head(&self) -> &str {
-        self.entries.last().map_or("", |entry| entry.digest.as_str())
+        self.entries
+            .last()
+            .map_or("", |entry| entry.digest.as_str())
     }
 
     /// Seals an effect into the chain.
     pub fn append(&mut self, effect: Effect) -> Result<&TapeEntry, RuntimeError> {
+        if self.entries.len() >= MAX_TAPE_ENTRIES {
+            return Err(RuntimeError::TapeLimitExceeded {
+                kind: "entries",
+                actual: self.entries.len().saturating_add(1),
+                maximum: MAX_TAPE_ENTRIES,
+            });
+        }
         let step = self.len();
         let previous = self.head().to_string();
         let digest = Self::digest_of(step, &effect, &previous)?;
@@ -212,7 +224,11 @@ impl WorldTape {
             previous,
             digest,
         });
-        Ok(self.entries.last().expect("just pushed"))
+        self.entries
+            .last()
+            .ok_or_else(|| RuntimeError::InvariantViolation {
+                detail: "tape entry disappeared immediately after append".into(),
+            })
     }
 
     fn digest_of(step: u64, effect: &Effect, previous: &str) -> Result<String, RuntimeError> {
@@ -254,6 +270,42 @@ impl WorldTape {
         Ok(self.entries[..step as usize].to_vec())
     }
 
+    /// Rewinds this tape to an existing prefix and discards later checkpoints.
+    ///
+    /// A rewind is only valid at or after an inherited fork prefix. Allowing a child tape to
+    /// remove part of its inherited history would invalidate its lineage commitment while leaving
+    /// the lineage metadata apparently intact.
+    pub fn rewind_to(&mut self, step: u64) -> Result<(), RuntimeError> {
+        if step > self.len() {
+            return Err(RuntimeError::StepOutOfRange {
+                step,
+                length: self.len(),
+            });
+        }
+        if self
+            .lineage
+            .as_ref()
+            .is_some_and(|lineage| step < lineage.forked_at_step)
+        {
+            return Err(RuntimeError::InvariantViolation {
+                detail: format!(
+                    "cannot rewind before inherited fork prefix at step {}",
+                    self.lineage
+                        .as_ref()
+                        .map_or(0, |lineage| lineage.forked_at_step)
+                ),
+            });
+        }
+        self.entries.truncate(step as usize);
+        self.checkpoints
+            .retain(|checkpoint| checkpoint.step <= step);
+        self.verify_chain()?;
+        for checkpoint in &self.checkpoints {
+            self.verify_checkpoint(checkpoint)?;
+        }
+        Ok(())
+    }
+
     /// Recomputes the chain from scratch, the way an auditor must before believing any of it.
     pub fn verify_chain(&self) -> Result<(), RuntimeError> {
         let mut expected_previous = String::new();
@@ -269,6 +321,12 @@ impl WorldTape {
                 return Err(RuntimeError::BrokenChain {
                     step,
                     reason: "previous digest does not match the prior entry".into(),
+                });
+            }
+            if let Err(error) = entry.effect.validate() {
+                return Err(RuntimeError::BrokenChain {
+                    step,
+                    reason: error.to_string(),
                 });
             }
             let recomputed = Self::digest_of(entry.step, &entry.effect, &entry.previous)?;
@@ -288,7 +346,14 @@ impl WorldTape {
         &mut self,
         provider: impl Into<String>,
         restoration: RestorationDeclaration,
-    ) -> Checkpoint {
+    ) -> Result<Checkpoint, RuntimeError> {
+        if self.checkpoints.len() >= MAX_TAPE_CHECKPOINTS {
+            return Err(RuntimeError::TapeLimitExceeded {
+                kind: "checkpoints",
+                actual: self.checkpoints.len().saturating_add(1),
+                maximum: MAX_TAPE_CHECKPOINTS,
+            });
+        }
         let checkpoint = Checkpoint {
             id: format!("ckpt-{}-{:06}", self.run.as_str(), self.checkpoints.len()),
             step: self.len(),
@@ -296,8 +361,9 @@ impl WorldTape {
             provider: provider.into(),
             restoration,
         };
+        validate_checkpoint_metadata(&checkpoint)?;
         self.checkpoints.push(checkpoint.clone());
-        checkpoint
+        Ok(checkpoint)
     }
 
     /// Confirms a checkpoint still describes this tape.
@@ -306,6 +372,15 @@ impl WorldTape {
     /// world-line and offered as if it belonged here. 05.03 lists "corrupted checkpoint" as its own
     /// error class for exactly that reason.
     pub fn verify_checkpoint(&self, checkpoint: &Checkpoint) -> Result<(), RuntimeError> {
+        validate_checkpoint_metadata(checkpoint)?;
+        let expected_prefix = format!("ckpt-{}-", self.run.as_str());
+        if !checkpoint.id.starts_with(&expected_prefix) {
+            return Err(RuntimeError::CorruptCheckpoint {
+                id: checkpoint.id.clone(),
+                expected: expected_prefix,
+                found: checkpoint.id.clone(),
+            });
+        }
         let found = self.state_digest_at(checkpoint.step)?;
         if found == checkpoint.tape_head {
             Ok(())
@@ -368,15 +443,31 @@ impl WorldTape {
     }
 
     pub fn to_json(&self) -> Result<String, RuntimeError> {
-        serde_json::to_string(self).map_err(|error| RuntimeError::Uncanonical(error.to_string()))
+        let json = serde_json::to_string(self)
+            .map_err(|error| RuntimeError::Uncanonical(error.to_string()))?;
+        if json.len() > MAX_TAPE_JSON_BYTES {
+            return Err(RuntimeError::TapeTooLarge {
+                actual: json.len(),
+                maximum: MAX_TAPE_JSON_BYTES,
+            });
+        }
+        Ok(json)
     }
 
     /// Loads a tape, verifying the chain before returning one.
     pub fn from_json(raw: &str) -> Result<Self, RuntimeError> {
-        serde_json::from_str(raw).map_err(|error| RuntimeError::BrokenChain {
-            step: 0,
-            reason: error.to_string(),
-        })
+        if raw.len() > MAX_TAPE_JSON_BYTES {
+            return Err(RuntimeError::TapeTooLarge {
+                actual: raw.len(),
+                maximum: MAX_TAPE_JSON_BYTES,
+            });
+        }
+        let repr: TapeRepr =
+            serde_json::from_str(raw).map_err(|error| RuntimeError::BrokenChain {
+                step: 0,
+                reason: error.to_string(),
+            })?;
+        Self::try_from(repr)
     }
 }
 
@@ -390,12 +481,80 @@ impl TryFrom<TapeRepr> for WorldTape {
             entries: repr.entries,
             checkpoints: repr.checkpoints,
         };
+        if tape.entries.len() > MAX_TAPE_ENTRIES {
+            return Err(RuntimeError::TapeLimitExceeded {
+                kind: "entries",
+                actual: tape.entries.len(),
+                maximum: MAX_TAPE_ENTRIES,
+            });
+        }
+        if tape.checkpoints.len() > MAX_TAPE_CHECKPOINTS {
+            return Err(RuntimeError::TapeLimitExceeded {
+                kind: "checkpoints",
+                actual: tape.checkpoints.len(),
+                maximum: MAX_TAPE_CHECKPOINTS,
+            });
+        }
         tape.verify_chain()?;
+        if let Some(lineage) = &tape.lineage {
+            if lineage.parent_run == tape.run {
+                return Err(RuntimeError::InvariantViolation {
+                    detail: "a tape lineage must name a distinct parent run".into(),
+                });
+            }
+            let found = tape.state_digest_at(lineage.forked_at_step)?.to_string();
+            if found != lineage.parent_head {
+                return Err(RuntimeError::LineageMismatch {
+                    step: lineage.forked_at_step,
+                    expected: lineage.parent_head.clone(),
+                    found,
+                });
+            }
+        }
+        let mut checkpoint_ids = BTreeSet::new();
+        for checkpoint in &tape.checkpoints {
+            if !checkpoint_ids.insert(checkpoint.id.clone()) {
+                return Err(RuntimeError::InvariantViolation {
+                    detail: format!("tape contains duplicate checkpoint id {}", checkpoint.id),
+                });
+            }
+        }
         for checkpoint in &tape.checkpoints {
             tape.verify_checkpoint(checkpoint)?;
         }
         Ok(tape)
     }
+}
+
+fn validate_checkpoint_metadata(checkpoint: &Checkpoint) -> Result<(), RuntimeError> {
+    if checkpoint.id.trim().is_empty()
+        || checkpoint.id.trim() != checkpoint.id
+        || checkpoint.id.chars().any(char::is_control)
+        || checkpoint.provider.trim().is_empty()
+        || checkpoint.provider.trim() != checkpoint.provider
+        || checkpoint.provider.chars().any(char::is_control)
+        || checkpoint.restoration.notes.trim().is_empty()
+    {
+        return Err(RuntimeError::InvariantViolation {
+            detail: "checkpoint identity, provider, and restoration notes are required".into(),
+        });
+    }
+    if checkpoint.restoration.portable == checkpoint.restoration.requires_provider.is_some() {
+        return Err(RuntimeError::InvariantViolation {
+            detail: "checkpoint restoration portability and provider requirement disagree".into(),
+        });
+    }
+    if let Some(provider) = &checkpoint.restoration.requires_provider {
+        if provider.trim().is_empty()
+            || provider.trim() != provider
+            || provider.chars().any(char::is_control)
+        {
+            return Err(RuntimeError::InvariantViolation {
+                detail: "checkpoint restoration provider must be non-empty and trimmed".into(),
+            });
+        }
+    }
+    Ok(())
 }
 
 impl From<WorldTape> for TapeRepr {

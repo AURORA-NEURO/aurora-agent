@@ -15,6 +15,9 @@ use thiserror::Error;
 /// Failures of the decision obligation graph (39.06).
 #[derive(Debug, Clone, PartialEq, Error)]
 pub enum ObligationError {
+    #[error("obligation graph invariant violated: {detail}")]
+    InvariantViolation { detail: String },
+
     #[error("obligation `{0}` is already in the graph")]
     DuplicateObligation(String),
 

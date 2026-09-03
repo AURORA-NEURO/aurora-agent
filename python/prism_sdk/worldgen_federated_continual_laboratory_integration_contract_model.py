@@ -1,0 +1,4 @@
+from .worldgen_laboratory_integration_contract_support import InstrumentContractRequest, InstrumentContractReceipt, negotiate, manifest
+FEATURE_ID="AFA-worldgen-P11-F08"; CONTRACT_VERSION="worldgen-federated_continual-laboratory_integration-contract/1.0"
+def worldgen_federated_continual_laboratory_integration_contract_model_manifest(): return manifest(feature_id=FEATURE_ID,contract_version=CONTRACT_VERSION,input_schema="InstrumentContractRequest1@1",scale="federated continual autonomous",autonomy_tier="A1")
+def negotiate_worldgen_federated_continual_laboratory_integration_contract(request:InstrumentContractRequest)->InstrumentContractReceipt: return negotiate(request,feature_id=FEATURE_ID,contract_version=CONTRACT_VERSION,scale="federated continual autonomous",require_federation=True)

@@ -18,6 +18,7 @@
 //! [`LossReport`] enforces non-emptiness at construction. Otherwise `Lossy { entries: vec![] }`
 //! would quietly re-introduce the same conflation the enum was built to remove.
 
+use crate::error::AdapterError;
 use crate::location::{LocationSet, SourceLocation};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -146,6 +147,20 @@ impl LossEntry {
             detail: detail.into(),
         }
     }
+
+    fn validate(&self) -> Result<(), AdapterError> {
+        if self.detail.is_empty() || self.detail.trim() != self.detail {
+            return Err(AdapterError::InvalidLoss(
+                "loss detail must be non-empty and trimmed".into(),
+            ));
+        }
+        if self.detail.len() > 1024 || self.detail.chars().any(char::is_control) {
+            return Err(AdapterError::InvalidLoss(
+                "loss detail is outside its bounded text contract".into(),
+            ));
+        }
+        self.location.validate().map_err(AdapterError::InvalidLoss)
+    }
 }
 
 /// A non-empty, sorted, de-duplicated collection of loss entries.
@@ -193,13 +208,9 @@ impl LossReport {
         self.entries.iter().map(|entry| entry.kind).collect()
     }
 
-    /// The worst severity present. The gate a publisher checks before releasing a world.
-    pub fn max_severity(&self) -> LossSeverity {
-        self.entries
-            .iter()
-            .map(|entry| entry.severity)
-            .max()
-            .expect("a loss report is never empty")
+    /// The worst severity present, or `None` for an invalid/deserialized empty report.
+    pub fn max_severity(&self) -> Option<LossSeverity> {
+        self.entries.iter().map(|entry| entry.severity).max()
     }
 
     pub fn locations(&self) -> LocationSet {
@@ -207,6 +218,23 @@ impl LossReport {
             .iter()
             .map(|entry| entry.location.clone())
             .collect()
+    }
+
+    pub fn validate(&self) -> Result<(), AdapterError> {
+        if self.entries.is_empty() {
+            return Err(AdapterError::InvalidLoss(
+                "a lossy audit must contain at least one entry".into(),
+            ));
+        }
+        for entry in &self.entries {
+            entry.validate()?;
+        }
+        if self.entries.windows(2).any(|pair| pair[0] >= pair[1]) {
+            return Err(AdapterError::InvalidLoss(
+                "loss entries must be strictly sorted and unique".into(),
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -237,6 +265,52 @@ pub enum SemanticLoss {
 }
 
 impl SemanticLoss {
+    pub fn validate(&self) -> Result<(), AdapterError> {
+        match self {
+            SemanticLoss::Unaudited { reason } => {
+                if reason.is_empty() || reason.trim() != reason {
+                    return Err(AdapterError::InvalidLoss(
+                        "unaudited reason must be non-empty and trimmed".into(),
+                    ));
+                }
+                if reason.len() > 1024 || reason.chars().any(char::is_control) {
+                    return Err(AdapterError::InvalidLoss(
+                        "unaudited reason is outside its bounded text contract".into(),
+                    ));
+                }
+            }
+            SemanticLoss::Lossless { mapped } => {
+                for location in mapped {
+                    location.validate().map_err(AdapterError::InvalidLoss)?;
+                }
+            }
+            SemanticLoss::Lossy { mapped, lost } => {
+                for location in mapped {
+                    location.validate().map_err(AdapterError::InvalidLoss)?;
+                }
+                lost.validate()?;
+            }
+        }
+        Ok(())
+    }
+
+    pub fn validate_for_source(&self, source_id: &str) -> Result<(), AdapterError> {
+        self.validate()?;
+        for location in self
+            .mapped()
+            .into_iter()
+            .chain(self.entries().iter().map(|entry| entry.location.clone()))
+        {
+            if location.source != source_id {
+                return Err(AdapterError::InvalidLoss(format!(
+                    "loss location {} belongs to a different source",
+                    location.locator()
+                )));
+            }
+        }
+        Ok(())
+    }
+
     /// True when an audit was performed at all, whichever way it came out.
     pub fn is_audited(&self) -> bool {
         !matches!(self, SemanticLoss::Unaudited { .. })
@@ -278,7 +352,7 @@ impl SemanticLoss {
 
     /// The worst severity found, or `None` when nothing was lost or nothing was checked.
     pub fn max_severity(&self) -> Option<LossSeverity> {
-        self.report().map(LossReport::max_severity)
+        self.report().and_then(LossReport::max_severity)
     }
 
     /// Every entry at or beneath `field`.
@@ -433,5 +507,31 @@ mod tests {
             "free text dropped",
         );
         assert_eq!(audit.finish().max_severity(), Some(LossSeverity::Blocking));
+    }
+
+    #[test]
+    fn deserialized_empty_loss_reports_are_rejected_by_validation() {
+        let loss = SemanticLoss::Lossy {
+            mapped: LocationSet::new(),
+            lost: LossReport {
+                entries: Vec::new(),
+            },
+        };
+        assert!(matches!(loss.validate(), Err(AdapterError::InvalidLoss(_))));
+    }
+
+    #[test]
+    fn loss_locations_must_belong_to_the_ingested_source() {
+        let mut audit = LossAudit::new();
+        audit.record(
+            LossKind::UnmappedColumn,
+            LossSeverity::Degrading,
+            SourceLocation::column("other", "age"),
+            "not from this source",
+        );
+        assert!(matches!(
+            audit.finish().validate_for_source("source"),
+            Err(AdapterError::InvalidLoss(_))
+        ));
     }
 }

@@ -105,6 +105,8 @@ pub enum ArtifactRegistryError {
     Canonicalisation(String),
     #[error("artifact registry snapshot is invalid: {0}")]
     InvalidSnapshot(String),
+    #[error("artifact registry generation counter is exhausted")]
+    GenerationExhausted,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -218,7 +220,7 @@ impl ArtifactRegistry {
                 (true, true) => "declared_group_id_and_artifact_domain_intersection",
                 (true, false) => "artifact_domain_intersection",
                 (false, true) => "declared_group_id",
-                (false, false) => unreachable!("unmatched artifacts are skipped above"),
+                (false, false) => continue,
             };
             *match_basis_counts
                 .entry(match_basis.to_string())
@@ -558,7 +560,10 @@ impl ArtifactRegistry {
         candidate_registry
             .records
             .insert(content_digest.clone(), candidate.clone());
-        candidate_registry.generation = candidate_registry.generation.saturating_add(1);
+        candidate_registry.generation = candidate_registry
+            .generation
+            .checked_add(1)
+            .ok_or(ArtifactRegistryError::GenerationExhausted)?;
         candidate_registry.ensure_snapshot_bound()?;
         self.records = candidate_registry.records;
         self.generation = candidate_registry.generation;
@@ -612,6 +617,15 @@ impl ArtifactRegistry {
                     ARTIFACT_KINDS.join(", ")
                 )));
             }
+        }
+        if let Some(domain) = domain {
+            validate_query_text(domain, "domain")?;
+        }
+        if let Some(subject_id) = subject_id {
+            validate_query_text(subject_id, "subject_id")?;
+        }
+        if let Some(after) = after {
+            validate_digest(after, "after")?;
         }
         let mut rows = Vec::new();
         let mut has_more = false;
@@ -928,10 +942,9 @@ impl ArtifactRegistry {
         let mut visited = BTreeSet::new();
         let mut nodes = Vec::new();
         let mut missing = BTreeSet::new();
-        let mut cycles = BTreeSet::new();
+        let mut graph = BTreeMap::<String, Vec<String>>::new();
         while let Some(current) = pending.pop_front() {
             if !visited.insert(current.clone()) {
-                cycles.insert(current);
                 continue;
             }
             if visited.len() > MAX_ARTIFACT_REGISTRY_LINEAGE_NODES {
@@ -957,6 +970,7 @@ impl ArtifactRegistry {
                     missing.insert(parent.clone());
                 }
             }
+            graph.insert(current.clone(), present.clone());
             nodes.push(json!({
                 "content_digest": current,
                 "kind": record.kind,
@@ -966,6 +980,7 @@ impl ArtifactRegistry {
                 "verification": record.verification,
             }));
         }
+        let cycles = lineage_cycles(&graph);
         Ok(json!({
             "ok": true,
             "schema": ARTIFACT_REGISTRY_LINEAGE_SCHEMA_VERSION,
@@ -1026,12 +1041,25 @@ impl ArtifactRegistry {
                 "schema is invalid".into(),
             ));
         }
+        if object.get("execution").and_then(Value::as_str) != Some("not_started") {
+            return Err(ArtifactRegistryError::InvalidSnapshot(
+                "execution is invalid".into(),
+            ));
+        }
+        let expected_retention = json!({
+            "max_records": MAX_ARTIFACT_REGISTRY_RECORDS,
+            "max_bytes": MAX_ARTIFACT_REGISTRY_BYTES,
+            "max_parents": MAX_ARTIFACT_REGISTRY_PARENTS,
+            "max_lineage_nodes": MAX_ARTIFACT_REGISTRY_LINEAGE_NODES
+        });
+        if object.get("retention") != Some(&expected_retention) {
+            return Err(ArtifactRegistryError::InvalidSnapshot(
+                "retention contract is invalid".into(),
+            ));
+        }
         let claimed = required_digest(object, "state_digest")?;
         let mut unsigned = document.clone();
-        unsigned
-            .as_object_mut()
-            .expect("snapshot object was checked above")
-            .remove("state_digest");
+        remove_object_field(&mut unsigned, "state_digest")?;
         let recomputed = content_digest(&unsigned)?;
         if claimed != recomputed {
             return Err(ArtifactRegistryError::InvalidSnapshot(
@@ -1058,6 +1086,11 @@ impl ArtifactRegistry {
         if object.get("record_count").and_then(Value::as_u64) != Some(rows.len() as u64) {
             return Err(ArtifactRegistryError::InvalidSnapshot(
                 "record_count does not match records".into(),
+            ));
+        }
+        if generation < rows.len() as u64 {
+            return Err(ArtifactRegistryError::InvalidSnapshot(
+                "generation is below the retained record count".into(),
             ));
         }
         let mut registry = Self {
@@ -1115,6 +1148,57 @@ impl ArtifactRegistry {
     }
 }
 
+fn lineage_cycles(graph: &BTreeMap<String, Vec<String>>) -> BTreeSet<String> {
+    fn visit(
+        current: &str,
+        graph: &BTreeMap<String, Vec<String>>,
+        colors: &mut BTreeMap<String, u8>,
+        stack: &mut Vec<String>,
+        positions: &mut BTreeMap<String, usize>,
+        cycles: &mut BTreeSet<String>,
+    ) {
+        match colors.get(current).copied() {
+            Some(1) => {
+                if let Some(start) = positions.get(current).copied() {
+                    cycles.extend(stack[start..].iter().cloned());
+                }
+                return;
+            }
+            Some(2) => return,
+            _ => {}
+        }
+        colors.insert(current.to_string(), 1);
+        positions.insert(current.to_string(), stack.len());
+        stack.push(current.to_string());
+        if let Some(parents) = graph.get(current) {
+            for parent in parents {
+                if graph.contains_key(parent) {
+                    visit(parent, graph, colors, stack, positions, cycles);
+                }
+            }
+        }
+        stack.pop();
+        positions.remove(current);
+        colors.insert(current.to_string(), 2);
+    }
+
+    let mut colors = BTreeMap::new();
+    let mut stack = Vec::new();
+    let mut positions = BTreeMap::new();
+    let mut cycles = BTreeSet::new();
+    for node in graph.keys() {
+        visit(
+            node,
+            graph,
+            &mut colors,
+            &mut stack,
+            &mut positions,
+            &mut cycles,
+        );
+    }
+    cycles
+}
+
 fn normalize_domain_label(value: &str) -> String {
     value.trim().to_ascii_lowercase()
 }
@@ -1129,6 +1213,16 @@ fn optional_text(
             if value.len() > MAX_ARTIFACT_REGISTRY_TEXT_BYTES {
                 return Err(ArtifactRegistryError::InvalidInput(format!(
                     "{field} exceeds the {MAX_ARTIFACT_REGISTRY_TEXT_BYTES}-byte bound"
+                )));
+            }
+            if value.chars().any(char::is_control) {
+                return Err(ArtifactRegistryError::InvalidInput(format!(
+                    "{field} must not contain control characters"
+                )));
+            }
+            if value != value.trim() {
+                return Err(ArtifactRegistryError::InvalidInput(format!(
+                    "{field} must not contain surrounding whitespace"
                 )));
             }
             Ok(Some(value.clone()))
@@ -1381,18 +1475,12 @@ fn verify_known_artifact(
             })?;
             let declared = required_digest(object, "reconciliation_digest")?;
             let mut unsigned = artifact.clone();
-            unsigned
-                .as_object_mut()
-                .expect("reconciliation object was checked above")
-                .remove("reconciliation_digest");
+            remove_object_field(&mut unsigned, "reconciliation_digest")?;
             // `artifact_registry` is a transport projection attached after the canonical
             // reconciliation report has been verified. It is deliberately excluded from the
             // reconciliation's own digest contract so the returned report can be imported again
             // without creating a second semantic record.
-            unsigned
-                .as_object_mut()
-                .expect("reconciliation object was checked above")
-                .remove("artifact_registry");
+            remove_object_field(&mut unsigned, "artifact_registry")?;
             let recomputed = content_digest(&unsigned)?;
             if declared != recomputed {
                 return Err(ArtifactRegistryError::InvalidInput(
@@ -1521,10 +1609,7 @@ fn verify_known_artifact(
             }
             let declared = required_digest(object, "replay_digest")?;
             let mut unsigned = artifact.clone();
-            unsigned
-                .as_object_mut()
-                .expect("replay object was checked above")
-                .remove("replay_digest");
+            remove_object_field(&mut unsigned, "replay_digest")?;
             let recomputed = content_digest(&unsigned)?;
             if declared != recomputed {
                 return Err(ArtifactRegistryError::InvalidInput(
@@ -1555,10 +1640,7 @@ fn verify_known_artifact(
             }
             let declared = required_digest(object, "handoff_digest")?;
             let mut unsigned = artifact.clone();
-            unsigned
-                .as_object_mut()
-                .expect("handoff object was checked above")
-                .remove("handoff_digest");
+            remove_object_field(&mut unsigned, "handoff_digest")?;
             let recomputed = content_digest(&unsigned)?;
             if declared != recomputed {
                 return Err(ArtifactRegistryError::InvalidInput(
@@ -1590,10 +1672,7 @@ fn verify_known_artifact(
             }
             let declared = required_digest(object, "receipt_digest")?;
             let mut unsigned = artifact.clone();
-            unsigned
-                .as_object_mut()
-                .expect("external payload receipt object was checked above")
-                .remove("receipt_digest");
+            remove_object_field(&mut unsigned, "receipt_digest")?;
             let recomputed = content_digest(&unsigned)?;
             if declared != recomputed {
                 return Err(ArtifactRegistryError::InvalidInput(
@@ -1624,10 +1703,7 @@ fn verify_known_artifact(
             }
             let declared = required_digest(object, "replay_digest")?;
             let mut unsigned = artifact.clone();
-            unsigned
-                .as_object_mut()
-                .expect("external payload replay object was checked above")
-                .remove("replay_digest");
+            remove_object_field(&mut unsigned, "replay_digest")?;
             let recomputed = content_digest(&unsigned)?;
             if declared != recomputed {
                 return Err(ArtifactRegistryError::InvalidInput(
@@ -1660,10 +1736,7 @@ fn verify_known_artifact(
             }
             let declared = required_digest(object, "lineage_digest")?;
             let mut unsigned = artifact.clone();
-            unsigned
-                .as_object_mut()
-                .expect("external payload lineage object was checked above")
-                .remove("lineage_digest");
+            remove_object_field(&mut unsigned, "lineage_digest")?;
             let recomputed = content_digest(&unsigned)?;
             if declared != recomputed {
                 return Err(ArtifactRegistryError::InvalidInput(
@@ -1696,10 +1769,7 @@ fn verify_known_artifact(
             }
             let declared = required_digest(object, "evidence_digest")?;
             let mut unsigned = artifact.clone();
-            unsigned
-                .as_object_mut()
-                .expect("external payload execution object was checked above")
-                .remove("evidence_digest");
+            remove_object_field(&mut unsigned, "evidence_digest")?;
             let recomputed = content_digest(&unsigned)?;
             if declared != recomputed {
                 return Err(ArtifactRegistryError::InvalidInput(
@@ -1730,10 +1800,7 @@ fn verify_known_artifact(
             }
             let declared = required_digest(object, "evidence_digest")?;
             let mut unsigned = artifact.clone();
-            unsigned
-                .as_object_mut()
-                .expect("adapter execution evidence object was checked above")
-                .remove("evidence_digest");
+            remove_object_field(&mut unsigned, "evidence_digest")?;
             let recomputed = content_digest(&unsigned)?;
             if declared != recomputed {
                 return Err(ArtifactRegistryError::InvalidInput(
@@ -1796,7 +1863,30 @@ fn required_text(
             "{field} exceeds the {MAX_ARTIFACT_REGISTRY_TEXT_BYTES}-byte bound"
         )));
     }
+    if value.chars().any(char::is_control) {
+        return Err(ArtifactRegistryError::InvalidInput(format!(
+            "{field} must not contain control characters"
+        )));
+    }
+    if value != value.trim() {
+        return Err(ArtifactRegistryError::InvalidInput(format!(
+            "{field} must not contain surrounding whitespace"
+        )));
+    }
     Ok(value.to_string())
+}
+
+fn validate_query_text(value: &str, field: &str) -> Result<(), ArtifactRegistryError> {
+    if value.trim().is_empty()
+        || value.len() > MAX_ARTIFACT_REGISTRY_TEXT_BYTES
+        || value.chars().any(char::is_control)
+        || value != value.trim()
+    {
+        return Err(ArtifactRegistryError::InvalidInput(format!(
+            "{field} must be bounded text without surrounding whitespace or control characters"
+        )));
+    }
+    Ok(())
 }
 
 fn bounded_text_set(
@@ -1816,6 +1906,7 @@ fn bounded_text_set(
         )));
     }
     let mut result = BTreeSet::new();
+    let mut normalized = BTreeSet::new();
     for (index, value) in values.iter().enumerate() {
         let text = value
             .as_str()
@@ -1828,6 +1919,21 @@ fn bounded_text_set(
         if text.len() > MAX_ARTIFACT_REGISTRY_TEXT_BYTES {
             return Err(ArtifactRegistryError::InvalidInput(format!(
                 "{field}[{index}] exceeds the text bound"
+            )));
+        }
+        if text.chars().any(char::is_control) {
+            return Err(ArtifactRegistryError::InvalidInput(format!(
+                "{field}[{index}] must not contain control characters"
+            )));
+        }
+        if text != text.trim() {
+            return Err(ArtifactRegistryError::InvalidInput(format!(
+                "{field}[{index}] must not contain surrounding whitespace"
+            )));
+        }
+        if !result.contains(text) && !normalized.insert(text.to_ascii_lowercase()) {
+            return Err(ArtifactRegistryError::InvalidInput(format!(
+                "{field}[{index}] duplicates or case-collides with another value"
             )));
         }
         result.insert(text.to_string());
@@ -1876,11 +1982,15 @@ fn required_digest(
 }
 
 fn validate_digest(value: &str, field: &str) -> Result<(), ArtifactRegistryError> {
-    ContentHash::parse(value.to_string()).map_err(|_| {
-        ArtifactRegistryError::InvalidInput(format!(
+    let canonical = value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte));
+    if !canonical || ContentHash::parse(value.to_string()).is_err() {
+        return Err(ArtifactRegistryError::InvalidInput(format!(
             "{field} must be a lowercase 64-character SHA-256 digest"
-        ))
-    })?;
+        )));
+    }
     Ok(())
 }
 
@@ -1888,6 +1998,14 @@ fn content_digest(value: &Value) -> Result<String, ArtifactRegistryError> {
     ContentHash::of_value(value)
         .map(|digest| digest.to_string())
         .map_err(|error| ArtifactRegistryError::Canonicalisation(error.to_string()))
+}
+
+fn remove_object_field(value: &mut Value, field: &str) -> Result<(), ArtifactRegistryError> {
+    value
+        .as_object_mut()
+        .ok_or_else(|| ArtifactRegistryError::InvalidInput("expected a JSON object".into()))?
+        .remove(field);
+    Ok(())
 }
 
 fn validate_record(record: &ArtifactRecord) -> Result<(), ArtifactRegistryError> {
@@ -1899,6 +2017,8 @@ fn validate_record(record: &ArtifactRecord) -> Result<(), ArtifactRegistryError>
     }
     if record.subject_id.trim().is_empty()
         || record.subject_id.len() > MAX_ARTIFACT_REGISTRY_TEXT_BYTES
+        || record.subject_id.chars().any(char::is_control)
+        || record.subject_id != record.subject_id.trim()
     {
         return Err(ArtifactRegistryError::InvalidSnapshot(
             "record subject_id is invalid".into(),
@@ -1911,11 +2031,41 @@ fn validate_record(record: &ArtifactRecord) -> Result<(), ArtifactRegistryError>
             "record metadata exceeds its bound".into(),
         ));
     }
+    validate_digest(&record.content_digest, "content_digest")?;
+    let mut domains = BTreeSet::new();
+    let mut domain_keys = BTreeSet::new();
+    for (index, domain) in record.domains.iter().enumerate() {
+        if domain.trim().is_empty()
+            || domain.len() > MAX_ARTIFACT_REGISTRY_TEXT_BYTES
+            || domain.chars().any(char::is_control)
+            || domain != domain.trim()
+        {
+            return Err(ArtifactRegistryError::InvalidSnapshot(format!(
+                "record domains[{index}] is empty or exceeds the text bound"
+            )));
+        }
+        if !domain_keys.insert(domain.to_ascii_lowercase()) || !domains.insert(domain) {
+            return Err(ArtifactRegistryError::InvalidSnapshot(
+                "record domains contain duplicate or case-colliding values".into(),
+            ));
+        }
+    }
+    let mut parents = BTreeSet::new();
     for parent in &record.parent_digests {
         validate_digest(parent, "parent_digest")?;
+        if !parents.insert(parent) {
+            return Err(ArtifactRegistryError::InvalidSnapshot(
+                "record parent_digests contain duplicates".into(),
+            ));
+        }
     }
     if let Some(declared) = &record.declared_digest {
         validate_digest(declared, "declared_digest")?;
+    }
+    if !record.verification.is_object() {
+        return Err(ArtifactRegistryError::InvalidSnapshot(
+            "record verification must be an object".into(),
+        ));
     }
     Ok(())
 }
@@ -1923,6 +2073,15 @@ fn validate_record(record: &ArtifactRecord) -> Result<(), ArtifactRegistryError>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn resign_snapshot(snapshot: &mut Value) {
+        let mut unsigned = snapshot.clone();
+        unsigned
+            .as_object_mut()
+            .expect("snapshot is an object")
+            .remove("state_digest");
+        snapshot["state_digest"] = Value::String(content_digest(&unsigned).unwrap());
+    }
 
     fn artifact(kind: &str, subject: &str, body: Value) -> Value {
         json!({
@@ -1955,6 +2114,71 @@ mod tests {
             .unwrap();
         assert_eq!(query["rows"].as_array().unwrap().len(), 1);
         assert_eq!(query["rows"][0]["domains"], json!(["genomics", "oncology"]));
+    }
+
+    #[test]
+    fn registry_rejects_noncanonical_digests_and_control_metadata() {
+        assert!(matches!(
+            validate_digest(&"A".repeat(64), "cursor"),
+            Err(ArtifactRegistryError::InvalidInput(message))
+                if message.contains("lowercase")
+        ));
+
+        let mut registry = ArtifactRegistry::new();
+        let error = registry
+            .register(&json!({
+                "kind": "domain_report",
+                "subject_id": "subject\nunsafe",
+                "domains": ["oncology"],
+                "parent_digests": [],
+                "artifact": {"status": "review"}
+            }))
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            ArtifactRegistryError::InvalidInput(message)
+                if message.contains("control characters")
+        ));
+
+        let mut registry = ArtifactRegistry::new();
+        let error = registry
+            .register(&json!({
+                "kind": "domain_report",
+                "subject_id": " subject-1",
+                "domains": ["oncology"],
+                "parent_digests": [],
+                "artifact": {"status": "review"}
+            }))
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            ArtifactRegistryError::InvalidInput(message)
+                if message.contains("surrounding whitespace")
+        ));
+
+        let error = registry
+            .register(&json!({
+                "kind": "domain_report",
+                "subject_id": "subject-1",
+                "domains": ["Oncology", "oncology"],
+                "parent_digests": [],
+                "artifact": {"status": "review"}
+            }))
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            ArtifactRegistryError::InvalidInput(message)
+                if message.contains("duplicate") || message.contains("case-colliding")
+        ));
+
+        let error = registry
+            .query(None, None, None, Some(&"A".repeat(64)), 1, false)
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            ArtifactRegistryError::InvalidInput(message)
+                if message.contains("lowercase")
+        ));
     }
 
     #[test]
@@ -2314,6 +2538,35 @@ mod tests {
     }
 
     #[test]
+    fn lineage_does_not_mislabel_a_shared_ancestor_as_a_cycle() {
+        let mut registry = ArtifactRegistry::new();
+        let shared_report = registry
+            .register(&artifact("domain_report", "shared", json!({"v": 1})))
+            .unwrap();
+        let shared_digest = shared_report["content_digest"].as_str().unwrap();
+
+        let mut left = artifact("mission_report", "left", json!({"v": 2}));
+        left["parent_digests"] = json!([shared_digest]);
+        let left_report = registry.register(&left).unwrap();
+        let left_digest = left_report["content_digest"].as_str().unwrap();
+
+        let mut right = artifact("mission_report", "right", json!({"v": 3}));
+        right["parent_digests"] = json!([shared_digest]);
+        let right_report = registry.register(&right).unwrap();
+        let right_digest = right_report["content_digest"].as_str().unwrap();
+
+        let mut root = artifact("mission_report", "root", json!({"v": 4}));
+        root["parent_digests"] = json!([left_digest, right_digest]);
+        let root_report = registry.register(&root).unwrap();
+        let lineage = registry
+            .lineage(root_report["content_digest"].as_str().unwrap())
+            .unwrap();
+
+        assert_eq!(lineage["nodes"].as_array().unwrap().len(), 4);
+        assert_eq!(lineage["cycles"], json!([]));
+    }
+
+    #[test]
     fn snapshot_round_trip_and_tamper_rejection_are_digest_bound() {
         let mut registry = ArtifactRegistry::new();
         registry
@@ -2328,6 +2581,85 @@ mod tests {
             ArtifactRegistry::from_snapshot(&tampered),
             Err(ArtifactRegistryError::InvalidSnapshot(_))
                 | Err(ArtifactRegistryError::Canonicalisation(_))
+        ));
+    }
+
+    #[test]
+    fn snapshot_restore_rejects_duplicate_or_empty_retained_metadata_even_with_a_new_outer_digest()
+    {
+        let mut registry = ArtifactRegistry::new();
+        registry
+            .register(&artifact(
+                "domain_report",
+                "mission-1",
+                json!({"status": "review"}),
+            ))
+            .unwrap();
+        let mut tampered = registry.snapshot().unwrap();
+        tampered["records"][0]["domains"] = json!(["oncology", "oncology"]);
+        let mut unsigned = tampered.clone();
+        unsigned
+            .as_object_mut()
+            .expect("snapshot is an object")
+            .remove("state_digest");
+        tampered["state_digest"] = Value::String(content_digest(&unsigned).unwrap());
+
+        let error = ArtifactRegistry::from_snapshot(&tampered)
+            .expect_err("retained metadata must be validated independently of the outer digest");
+        assert!(matches!(error, ArtifactRegistryError::InvalidSnapshot(_)));
+    }
+
+    #[test]
+    fn snapshot_restore_rejects_contract_drift_and_noncanonical_record_metadata() {
+        let mut registry = ArtifactRegistry::new();
+        registry
+            .register(&artifact(
+                "domain_report",
+                "mission-1",
+                json!({"status": "review"}),
+            ))
+            .unwrap();
+        let baseline = registry.snapshot().unwrap();
+
+        for (field, value) in [
+            ("execution", json!("executed")),
+            ("generation", json!(0)),
+            (
+                "retention",
+                json!({
+                    "max_records": MAX_ARTIFACT_REGISTRY_RECORDS - 1,
+                    "max_bytes": MAX_ARTIFACT_REGISTRY_BYTES,
+                    "max_parents": MAX_ARTIFACT_REGISTRY_PARENTS,
+                    "max_lineage_nodes": MAX_ARTIFACT_REGISTRY_LINEAGE_NODES
+                }),
+            ),
+        ] {
+            let mut tampered = baseline.clone();
+            tampered[field] = value;
+            resign_snapshot(&mut tampered);
+            assert!(
+                matches!(
+                    ArtifactRegistry::from_snapshot(&tampered),
+                    Err(ArtifactRegistryError::InvalidSnapshot(_))
+                ),
+                "snapshot accepted drift in {field}"
+            );
+        }
+
+        let mut subject_tampered = baseline.clone();
+        subject_tampered["records"][0]["subject_id"] = json!(" mission-1 ");
+        resign_snapshot(&mut subject_tampered);
+        assert!(matches!(
+            ArtifactRegistry::from_snapshot(&subject_tampered),
+            Err(ArtifactRegistryError::InvalidSnapshot(_))
+        ));
+
+        let mut verification_tampered = baseline;
+        verification_tampered["records"][0]["verification"] = json!([]);
+        resign_snapshot(&mut verification_tampered);
+        assert!(matches!(
+            ArtifactRegistry::from_snapshot(&verification_tampered),
+            Err(ArtifactRegistryError::InvalidSnapshot(_))
         ));
     }
 

@@ -291,7 +291,9 @@ impl ScoreDimension {
 #[serde(rename_all = "snake_case", tag = "measurement")]
 pub enum Measurement {
     /// Basis points, 0–10000, so the type carries no float and comparison is exact.
-    Measured { basis_points: u16 },
+    Measured {
+        basis_points: u16,
+    },
     Unmeasured,
 }
 
@@ -401,7 +403,11 @@ pub fn compare(left: &Scorecard, right: &Scorecard) -> Dominance {
                     right_better.insert(dimension);
                 }
             }
-            _ => unreachable!("unmeasured dimensions were returned above"),
+            _ => {
+                return Dominance::Undetermined {
+                    unmeasured: [dimension].into_iter().collect(),
+                };
+            }
         }
     }
     match (left_better.is_empty(), right_better.is_empty()) {

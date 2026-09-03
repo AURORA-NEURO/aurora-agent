@@ -76,7 +76,10 @@ fn every_failing_dimension_is_reported_not_only_the_first() {
     )
     .expect_err("three dimensions disagree");
 
-    let dimensions: Vec<FrameDimension> = failures.iter().map(Incomparability::dimension).collect();
+    let dimensions: Vec<FrameDimension> = failures
+        .iter()
+        .filter_map(Incomparability::dimension)
+        .collect();
     assert_eq!(dimensions.len(), 3);
     assert!(dimensions.contains(&FrameDimension::ReferenceBuild));
     assert!(dimensions.contains(&FrameDimension::Unit));
@@ -216,7 +219,7 @@ fn grading_across_incomparable_frames_yields_a_typed_reason_instead_of_a_number(
 
     match refusal {
         ScoreError::Incomparable(reasons) => {
-            assert_eq!(reasons[0].dimension(), FrameDimension::Unit);
+            assert_eq!(reasons[0].dimension(), Some(FrameDimension::Unit));
         }
         other => panic!("expected an incomparability, got {other:?}"),
     }
@@ -252,4 +255,105 @@ fn a_direct_witness_records_no_bridge_loss_on_the_score() {
     assert_eq!(graded.requirement_id(), REQUIREMENT_ID);
     assert_eq!(graded.bridge_loss(), 0.0);
     assert!(witness().is_direct());
+}
+
+#[test]
+fn malformed_requirements_fail_closed_before_frames_are_compared() {
+    let duplicate_dimension = ComparabilityRequirement::over(
+        "r",
+        [FrameDimension::Unit, FrameDimension::Unit],
+    );
+    let failures = gate(
+        &duplicate_dimension,
+        &declared_frame(),
+        &declared_frame(),
+        &[],
+    )
+    .expect_err("duplicate dimensions must not create ambiguous witness state");
+    assert!(matches!(
+        failures.as_slice(),
+        [Incomparability::InvalidRequirement { detail }] if detail.contains("unique")
+    ));
+
+    let invalid_tolerance = ComparabilityRequirement::strict("r").tolerating_loss(f64::NAN);
+    let failures = gate(
+        &invalid_tolerance,
+        &declared_frame(),
+        &declared_frame(),
+        &[],
+    )
+    .expect_err("non-finite tolerance must not admit bridges");
+    assert!(matches!(
+        failures.as_slice(),
+        [Incomparability::InvalidRequirement { detail }] if detail.contains("finite")
+    ));
+}
+
+#[test]
+fn invalid_frame_and_bridge_payloads_are_retained_as_typed_refusals() {
+    let prediction = declared_frame().with(FrameDimension::Unit, " cm");
+    let failures = gate(
+        &ComparabilityRequirement::strict("r"),
+        &prediction,
+        &declared_frame(),
+        &[],
+    )
+    .expect_err("padded frame labels must not compare");
+    assert!(failures.iter().any(|failure| matches!(
+        failure,
+        Incomparability::InvalidDeclaration {
+            dimension: FrameDimension::Unit,
+            side: FrameSide::Prediction,
+            ..
+        }
+    )));
+
+    let invalid_bridge = Bridge {
+        bridge_id: "bridge".into(),
+        dimension: FrameDimension::Unit,
+        from: "cm".into(),
+        to: "mm".into(),
+        loss: f64::INFINITY,
+    };
+    let failures = gate(
+        &ComparabilityRequirement::strict("r"),
+        &declared_frame().with(FrameDimension::Unit, "cm"),
+        &declared_frame().with(FrameDimension::Unit, "mm"),
+        &[invalid_bridge],
+    )
+    .expect_err("non-finite bridge loss must be rejected before application");
+    assert!(failures.iter().any(|failure| matches!(
+        failure,
+        Incomparability::InvalidBridge { bridge_id, detail }
+            if bridge_id == "bridge" && detail.contains("finite")
+    )));
+}
+
+#[test]
+fn applicable_bridges_are_selected_by_loss_then_identity_not_input_order() {
+    let prediction = declared_frame().with(FrameDimension::ReferenceBuild, "GRCh37");
+    let reference = declared_frame().with(FrameDimension::ReferenceBuild, "GRCh38");
+    let lossy = Bridge {
+        bridge_id: "z-lossy".into(),
+        dimension: FrameDimension::ReferenceBuild,
+        from: "GRCh37".into(),
+        to: "GRCh38".into(),
+        loss: 0.2,
+    };
+    let lossless = Bridge {
+        bridge_id: "a-lossless".into(),
+        dimension: FrameDimension::ReferenceBuild,
+        from: "GRCh37".into(),
+        to: "GRCh38".into(),
+        loss: 0.0,
+    };
+    let witness = gate(
+        &ComparabilityRequirement::strict("r").tolerating_loss(0.2),
+        &prediction,
+        &reference,
+        &[lossy, lossless],
+    )
+    .expect("the best applicable bridge should be selected deterministically");
+    assert_eq!(witness.bridges()[0].bridge_id, "a-lossless");
+    assert_eq!(witness.total_bridge_loss(), 0.0);
 }

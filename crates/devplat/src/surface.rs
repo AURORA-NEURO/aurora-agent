@@ -23,6 +23,8 @@ use std::fmt;
 
 use crate::error::SurfaceError;
 
+const MAX_ARTIFACT_BYTES: usize = 4_096;
+
 /// Whether a surface is something this checkout contains.
 ///
 /// Two values, and no third for "partly". A surface either has bytes in this working tree that a
@@ -194,6 +196,14 @@ impl Surface {
         let artifact: String = artifact.into();
         if artifact.trim().is_empty() {
             return Err(SurfaceError::UnnamedArtifact {
+                kind: kind.as_str(),
+            });
+        }
+        if artifact != artifact.trim()
+            || artifact.len() > MAX_ARTIFACT_BYTES
+            || artifact.chars().any(char::is_control)
+        {
+            return Err(SurfaceError::InvalidArtifact {
                 kind: kind.as_str(),
             });
         }

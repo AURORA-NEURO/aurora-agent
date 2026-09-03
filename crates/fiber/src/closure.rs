@@ -42,9 +42,6 @@ pub fn unmatched_tags<S: WorldSource + ?Sized>(
 /// 43.13 treats this as a blocking condition rather than a warning: the closure was declared
 /// mandatory, so a compile that could not deliver it has not satisfied the contract and the
 /// consumer must refine or abstain.
-pub fn dropped_protected(
-    protected: &BTreeSet<String>,
-    selected: &BTreeSet<String>,
-) -> Vec<String> {
+pub fn dropped_protected(protected: &BTreeSet<String>, selected: &BTreeSet<String>) -> Vec<String> {
     protected.difference(selected).cloned().collect()
 }

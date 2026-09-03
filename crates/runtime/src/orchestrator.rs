@@ -27,7 +27,7 @@ use crate::budget::RuntimeResource;
 use crate::error::RuntimeError;
 use bioprism_ids::RunId;
 use serde::{Deserialize, Serialize};
-use std::fmt;
+use std::{collections::BTreeSet, fmt};
 
 macro_rules! execution_id {
     ($(#[$meta:meta])* $name:ident, $kind:literal) => {
@@ -39,7 +39,10 @@ macro_rules! execution_id {
         impl $name {
             pub fn parse(value: impl Into<String>) -> Result<Self, RuntimeError> {
                 let value = value.into();
-                if value.is_empty() || value.chars().any(char::is_control) {
+                if value.is_empty()
+                    || value.trim() != value
+                    || value.chars().any(char::is_control)
+                {
                     return Err(RuntimeError::MalformedId {
                         kind: $kind,
                         value,
@@ -165,15 +168,27 @@ pub struct LifecycleEvent {
 pub enum TerminationReason {
     Completed,
     /// The agent's work failed. Evidence about the agent.
-    TaskFailure { detail: String },
+    TaskFailure {
+        detail: String,
+    },
     /// Evidence about the budget, not about the agent's ability.
-    BudgetExhausted { resource: RuntimeResource },
-    Cancelled { forced: bool },
+    BudgetExhausted {
+        resource: RuntimeResource,
+    },
+    Cancelled {
+        forced: bool,
+    },
     /// The agent proposed something policy refused. Evidence about the agent's judgement.
-    PolicyDenied { detail: String },
+    PolicyDenied {
+        detail: String,
+    },
     /// Evidence about the platform.
-    ProviderUnavailable { provider: String },
-    Incomplete { detail: String },
+    ProviderUnavailable {
+        provider: String,
+    },
+    Incomplete {
+        detail: String,
+    },
 }
 
 /// The finalization record.
@@ -221,7 +236,21 @@ pub struct AttemptRecord {
 
 /// One trial's lifecycle.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "TrialRepr", into = "TrialRepr")]
 pub struct Trial {
+    run: RunId,
+    trial: TrialId,
+    attempt: AttemptId,
+    state: RunState,
+    task_millis: u64,
+    events: Vec<LifecycleEvent>,
+    termination: Option<Termination>,
+    prior_attempts: Vec<AttemptRecord>,
+    aggregation: AggregationPolicy,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct TrialRepr {
     run: RunId,
     trial: TrialId,
     attempt: AttemptId,
@@ -285,13 +314,114 @@ impl Trial {
         self.aggregation
     }
 
+    /// Validates the serialized lifecycle ledger and all state/termination relationships.
+    ///
+    /// A lifecycle record is evidence, not merely a convenient snapshot. Deserializing a record
+    /// with skipped transitions, non-monotonic task time, or a terminal state without a matching
+    /// termination would let a downstream reader infer a result that the state machine never
+    /// produced, so the transport boundary must enforce the same invariants as live execution.
+    pub fn validate(&self) -> Result<(), RuntimeError> {
+        let mut expected_state = RunState::Queued;
+        let mut previous_task_millis = 0;
+        for (index, event) in self.events.iter().enumerate() {
+            if event.seq != index as u64 {
+                return Err(RuntimeError::InvariantViolation {
+                    detail: format!(
+                        "lifecycle event sequence {} is stored at index {}",
+                        event.seq, index
+                    ),
+                });
+            }
+            if event.from != expected_state || !event.from.permits(event.to) {
+                return Err(RuntimeError::InvariantViolation {
+                    detail: format!(
+                        "lifecycle event {} has invalid transition {} -> {}",
+                        index, event.from, event.to
+                    ),
+                });
+            }
+            if event.task_millis < previous_task_millis {
+                return Err(RuntimeError::InvariantViolation {
+                    detail: "lifecycle task time moves backward".into(),
+                });
+            }
+            expected_state = event.to;
+            previous_task_millis = event.task_millis;
+        }
+        if self.state != expected_state || self.task_millis < previous_task_millis {
+            return Err(RuntimeError::InvariantViolation {
+                detail: "lifecycle state or task time does not match its event history".into(),
+            });
+        }
+
+        match (&self.state, &self.termination) {
+            (state, None) if state.is_terminal() => {
+                return Err(RuntimeError::InvariantViolation {
+                    detail: "a terminal lifecycle state requires a termination record".into(),
+                });
+            }
+            (state, Some(termination)) if !state.is_terminal() => {
+                return Err(RuntimeError::InvariantViolation {
+                    detail: "a non-terminal lifecycle state cannot have a termination record"
+                        .into(),
+                });
+            }
+            (_, Some(termination)) => {
+                validate_termination(&termination.reason, &termination.missing_evidence)?;
+                if termination.task_millis != self.task_millis
+                    || termination_target(&termination.reason) != self.state
+                {
+                    return Err(RuntimeError::InvariantViolation {
+                        detail: "termination does not match the final lifecycle state".into(),
+                    });
+                }
+            }
+            (_, None) => {}
+        }
+
+        let mut attempts = BTreeSet::new();
+        for prior in &self.prior_attempts {
+            if prior.attempt == self.attempt || !attempts.insert(prior.attempt.clone()) {
+                return Err(RuntimeError::InvariantViolation {
+                    detail: "prior attempts must have unique identities distinct from the current attempt".into(),
+                });
+            }
+            let Some(termination) = &prior.termination else {
+                return Err(RuntimeError::InvariantViolation {
+                    detail: "a prior attempt must have a termination record".into(),
+                });
+            };
+            validate_termination(&termination.reason, &termination.missing_evidence)?;
+        }
+        Ok(())
+    }
+
     /// Sets the task clock, which lifecycle events are stamped with.
-    pub fn set_task_millis(&mut self, task_millis: u64) {
+    pub fn set_task_millis(&mut self, task_millis: u64) -> Result<(), RuntimeError> {
+        if task_millis < self.task_millis {
+            return Err(RuntimeError::InvariantViolation {
+                detail: format!(
+                    "task time cannot move backward from {} to {}",
+                    self.task_millis, task_millis
+                ),
+            });
+        }
         self.task_millis = task_millis;
+        Ok(())
     }
 
     /// Moves to the next state, or refuses.
     pub fn advance(&mut self, to: RunState) -> Result<&LifecycleEvent, RuntimeError> {
+        if to.is_terminal() {
+            return Err(RuntimeError::IllegalTransition {
+                from: self.state,
+                to,
+            });
+        }
+        self.advance_internal(to)
+    }
+
+    fn advance_internal(&mut self, to: RunState) -> Result<&LifecycleEvent, RuntimeError> {
         if !self.state.permits(to) {
             return Err(RuntimeError::IllegalTransition {
                 from: self.state,
@@ -306,7 +436,11 @@ impl Trial {
         };
         self.state = to;
         self.events.push(event);
-        Ok(self.events.last().expect("just pushed"))
+        self.events
+            .last()
+            .ok_or_else(|| RuntimeError::InvariantViolation {
+                detail: "lifecycle event disappeared immediately after append".into(),
+            })
     }
 
     /// Walks the happy path from wherever the trial is to `Running`.
@@ -329,18 +463,12 @@ impl Trial {
         reason: TerminationReason,
         missing_evidence: Vec<String>,
     ) -> Result<&Termination, RuntimeError> {
+        self.validate()?;
         if self.termination.is_none() {
-            let target = match &reason {
-                TerminationReason::Completed => RunState::Completed,
-                TerminationReason::Cancelled { .. } => RunState::Cancelled,
-                TerminationReason::Incomplete { .. } => RunState::Incomplete,
-                TerminationReason::TaskFailure { .. }
-                | TerminationReason::BudgetExhausted { .. }
-                | TerminationReason::PolicyDenied { .. }
-                | TerminationReason::ProviderUnavailable { .. } => RunState::Failed,
-            };
+            validate_termination(&reason, &missing_evidence)?;
+            let target = termination_target(&reason);
             if !self.state.is_terminal() {
-                self.advance(target)?;
+                self.advance_internal(target)?;
             }
             self.termination = Some(Termination {
                 reason,
@@ -348,7 +476,11 @@ impl Trial {
                 missing_evidence,
             });
         }
-        Ok(self.termination.as_ref().expect("set on the branch above"))
+        self.termination
+            .as_ref()
+            .ok_or_else(|| RuntimeError::InvariantViolation {
+                detail: "termination disappeared immediately after finalization".into(),
+            })
     }
 
     /// Cancels the trial, stating what evidence the cancellation cost.
@@ -371,8 +503,19 @@ impl Trial {
         retry_class: RetryClass,
         tape_head: impl Into<String>,
     ) -> Result<Trial, RuntimeError> {
+        self.validate()?;
         if !self.state.is_terminal() {
             return Err(RuntimeError::RunNotRunnable { state: self.state });
+        }
+        if attempt == self.attempt
+            || self
+                .prior_attempts
+                .iter()
+                .any(|prior| prior.attempt == attempt)
+        {
+            return Err(RuntimeError::InvariantViolation {
+                detail: format!("attempt {} is already recorded for this trial", attempt),
+            });
         }
         let mut prior = self.prior_attempts.clone();
         prior.push(AttemptRecord {
@@ -392,5 +535,94 @@ impl Trial {
             prior_attempts: prior,
             aggregation: self.aggregation,
         })
+    }
+}
+
+impl TryFrom<TrialRepr> for Trial {
+    type Error = String;
+
+    fn try_from(value: TrialRepr) -> Result<Self, Self::Error> {
+        let trial = Trial {
+            run: value.run,
+            trial: value.trial,
+            attempt: value.attempt,
+            state: value.state,
+            task_millis: value.task_millis,
+            events: value.events,
+            termination: value.termination,
+            prior_attempts: value.prior_attempts,
+            aggregation: value.aggregation,
+        };
+        trial.validate().map_err(|error| error.to_string())?;
+        Ok(trial)
+    }
+}
+
+impl From<Trial> for TrialRepr {
+    fn from(value: Trial) -> Self {
+        TrialRepr {
+            run: value.run,
+            trial: value.trial,
+            attempt: value.attempt,
+            state: value.state,
+            task_millis: value.task_millis,
+            events: value.events,
+            termination: value.termination,
+            prior_attempts: value.prior_attempts,
+            aggregation: value.aggregation,
+        }
+    }
+}
+
+fn termination_target(reason: &TerminationReason) -> RunState {
+    match reason {
+        TerminationReason::Completed => RunState::Completed,
+        TerminationReason::Cancelled { .. } => RunState::Cancelled,
+        TerminationReason::Incomplete { .. } => RunState::Incomplete,
+        TerminationReason::TaskFailure { .. }
+        | TerminationReason::BudgetExhausted { .. }
+        | TerminationReason::PolicyDenied { .. }
+        | TerminationReason::ProviderUnavailable { .. } => RunState::Failed,
+    }
+}
+
+fn validate_termination(
+    reason: &TerminationReason,
+    missing_evidence: &[String],
+) -> Result<(), RuntimeError> {
+    if missing_evidence
+        .iter()
+        .any(|evidence| evidence.trim().is_empty())
+    {
+        return Err(RuntimeError::InvariantViolation {
+            detail: "missing-evidence entries must be non-empty".into(),
+        });
+    }
+    match reason {
+        TerminationReason::Completed if !missing_evidence.is_empty() => {
+            Err(RuntimeError::InvariantViolation {
+                detail: "a completed trial cannot report missing evidence".into(),
+            })
+        }
+        TerminationReason::Cancelled { forced: true } if missing_evidence.is_empty() => {
+            Err(RuntimeError::InvariantViolation {
+                detail: "a forced cancellation must name its missing evidence".into(),
+            })
+        }
+        TerminationReason::TaskFailure { detail }
+        | TerminationReason::PolicyDenied { detail }
+        | TerminationReason::Incomplete { detail }
+            if detail.trim().is_empty() =>
+        {
+            Err(RuntimeError::InvariantViolation {
+                detail: "termination details must be non-empty".into(),
+            })
+        }
+        TerminationReason::ProviderUnavailable { provider } if provider.trim().is_empty() => {
+            Err(RuntimeError::InvariantViolation {
+                detail: "provider-unavailable termination must name a provider".into(),
+            })
+        }
+        _ => Ok(()),
     }
 }

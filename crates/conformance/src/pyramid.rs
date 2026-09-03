@@ -92,10 +92,7 @@ impl PyramidShape {
         let unit = self.count(Layer::Unit);
         let end_to_end = self.count(Layer::EndToEnd);
         if end_to_end > unit {
-            findings.push(ImbalanceFinding::Inverted {
-                unit,
-                end_to_end,
-            });
+            findings.push(ImbalanceFinding::Inverted { unit, end_to_end });
         }
 
         if findings.is_empty() {

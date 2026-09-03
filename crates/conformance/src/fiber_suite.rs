@@ -1132,9 +1132,11 @@ fn fiber_failure(error: FiberError) -> CompileFailure {
         FiberError::InvalidAdaptiveAcquisitionContract(_) => {
             "invalid_adaptive_acquisition_contract"
         }
+        FiberError::InvariantViolation(_) => "invariant_violation",
         FiberError::MissingQueryField(_) => "missing_query_field",
         FiberError::WrongQueryFieldType { .. } => "wrong_query_field_type",
         FiberError::InvalidIdentifier(_) => "invalid_identifier",
+        FiberError::InvalidBudget(_) => "invalid_budget",
         FiberError::InvalidDecisionTime(_) => "invalid_decision_time",
         FiberError::BudgetExceeded { .. } => "budget_exceeded",
         FiberError::UnorderableSplitGroups { .. } => "unorderable_split_groups",

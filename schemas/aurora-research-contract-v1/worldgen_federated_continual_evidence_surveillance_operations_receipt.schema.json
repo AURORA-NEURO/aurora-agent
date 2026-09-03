@@ -1,0 +1,4 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema","$id":"https://aurora-neuro.org/schemas/aurora-research-contract-v1/worldgen-federated-continual-evidence-surveillance-operations.json","title":"AURORA worldgen federated continual evidence surveillance operations receipt","type":"object","additionalProperties":false,
+  "allOf":[{"$ref":"worldgen-local-evidence-surveillance-operations.json"}],"properties":{"contract_version":{"const":"worldgen-federated-continual-evidence-surveillance-operations/1.0"},"feature_id":{"const":"AFA-worldgen-P01-F32"},"scale":{"const":"federated continual autonomous"},"input_schema":{"const":"EvidenceFeed4@1"}}
+}

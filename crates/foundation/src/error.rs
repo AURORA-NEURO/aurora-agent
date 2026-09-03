@@ -94,6 +94,75 @@ pub enum ContractError {
     },
 }
 
+/// Refusals from the cross-surface research operating-system contracts.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum ResearchContractError {
+    #[error("missing required field {field}")]
+    MissingField { field: &'static str },
+    #[error("schema version mismatch: expected {expected}, found {found}")]
+    SchemaVersion { expected: String, found: String },
+    #[error("{capability} does not carry the exact preclinical research boundary")]
+    BoundaryMismatch { capability: String },
+    #[error("{item} names no downstream or researcher consumer")]
+    NoConsumer { item: String },
+    #[error("{item} has an incomplete typed input/output contract")]
+    MissingTypedContract { item: String },
+    #[error("{item} at autonomy tier {tier:?} names no authority requirement")]
+    MissingAuthority { item: String, tier: crate::research::AutonomyTier },
+    #[error("{item} at a physical-execution tier does not declare instrument preflight")]
+    MissingInstrumentPreflight { item: String },
+    #[error("duplicate {kind} identifier {id}")]
+    DuplicateId { kind: &'static str, id: String },
+    #[error("workflow edge {from} -> {to} refers to an unknown node")]
+    UnknownWorkflowNode { from: String, to: String },
+    #[error("workflow node {node} has a self-edge")]
+    WorkflowSelfEdge { node: String },
+    #[error("workflow {workflow} contains a cycle through node {node}")]
+    WorkflowCycle { workflow: String, node: String },
+    #[error("invalid resource budget for {resource}")]
+    InvalidBudget { resource: String },
+    #[error("workflow {workflow} has approval-gated nodes but no approval record")]
+    MissingWorkflowApproval { workflow: String },
+    #[error("cannot serialize {item}: {message}")]
+    Serialization { item: String, message: String },
+    #[error("artifact {item} digest mismatch: expected {expected}, found {found}")]
+    DigestMismatch { item: String, expected: String, found: String },
+    #[error("autonomy grant for {actor} is incomplete")]
+    IncompleteGrant { actor: String },
+    #[error("policy receipt {item} has no reason")]
+    MissingReason { item: String },
+    #[error("policy receipt {receipt} cannot allow unresolved evidence")]
+    UnresolvedAllow { receipt: String },
+    #[error("policy receipt {receipt} carries authority before approval")]
+    PrematureAuthority { receipt: String },
+    #[error("execution run {run} is already closed")]
+    RunClosed { run: String },
+    #[error("execution run {run} expected event sequence {expected}, found {found}")]
+    EventSequence { run: String, expected: u64, found: u64 },
+    #[error("execution run {run} has a physical effect without payload evidence")]
+    MissingEffectEvidence { run: String },
+    #[error("execution runs may finish only with succeeded, failed, or cancelled")]
+    InvalidFinalStatus,
+    #[error("evidence receipt {receipt} contains no source")]
+    NoEvidence { receipt: String },
+    #[error("evidence receipt {receipt} contains no derivation")]
+    MissingDerivation { receipt: String },
+    #[error("evidence receipt {receipt} contains a source with no identifier")]
+    MissingSourceId { receipt: String },
+    #[error("evidence receipt {receipt} cannot claim proven with a potentially material omission")]
+    ProtectedOmissionBlocksConclusion { receipt: String },
+    #[error("evaluation card for {capability} is incomplete")]
+    IncompleteEvaluation { capability: String },
+    #[error("evaluation card for {item} has no uncertainty statement")]
+    MissingUncertainty { item: String },
+    #[error("federation envelope {envelope} is incomplete")]
+    IncompleteFederation { envelope: String },
+    #[error("federation envelope {envelope} claims local raw data but does not say so")]
+    LocalizationMismatch { envelope: String },
+    #[error("federation envelope {envelope} is unsigned")]
+    UnsignedFederation { envelope: String },
+}
+
 /// The specific way a proposed refinement broke the contract-inheritance rule (24.07).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 pub enum RefinementViolation {

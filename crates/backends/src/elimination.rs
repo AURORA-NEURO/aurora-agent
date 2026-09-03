@@ -79,6 +79,12 @@ impl QueryBackend for VariableElimination {
 
     fn estimate(&self, region: &QueryRegion) -> Result<Estimate, Declined> {
         let name = backend_name(self.backend());
+        self.budget
+            .validate()
+            .map_err(|detail| Declined::InvalidConfiguration {
+                backend: name,
+                detail,
+            })?;
         let (order, schedule) = self.plan(region);
 
         if order.induced_width > self.budget.max_induced_width {
@@ -116,7 +122,7 @@ impl QueryBackend for VariableElimination {
             }
         ));
 
-        Ok(Estimate {
+        let estimate = Estimate {
             backend: self.backend(),
             method: self.method(),
             width_metric: WidthMetric::InducedWidth,
@@ -129,7 +135,14 @@ impl QueryBackend for VariableElimination {
             predicted_total_entries: schedule.total_entries(),
             uncertainty: region.assumed_cardinality_fraction(),
             assumptions,
-        })
+        };
+        estimate
+            .validate()
+            .map_err(|detail| Declined::InvalidEstimate {
+                backend: name,
+                detail,
+            })?;
+        Ok(estimate)
     }
 
     fn execute(&self, region: &QueryRegion) -> Result<ComputedRegion, Declined> {

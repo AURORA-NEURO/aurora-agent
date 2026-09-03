@@ -1,0 +1,182 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "type": "object",
+  "$id": "https://aurora-neuro.org/schemas/aurora-research-contract-v1/worldgen-laboratory-integration-p11-f03.json",
+  "title": "AFA-worldgen-P11-F03 receipt",
+  "required": [
+    "schema_version",
+    "contract_version",
+    "feature_id",
+    "request_id",
+    "study_id",
+    "purpose",
+    "semantic_profile",
+    "disposition",
+    "required_action_order",
+    "action_order",
+    "admitted_action_order",
+    "unresolved_action_order",
+    "blocked_action_order",
+    "omitted_action_order",
+    "interlock_order",
+    "failure_order",
+    "omissions",
+    "uncertainty",
+    "contradiction",
+    "negative_evidence",
+    "replay_identity",
+    "receipt_digest",
+    "effect_receipts",
+    "raw_data_local",
+    "aggregate_only",
+    "boundary",
+    "artifact"
+  ],
+  "properties": {
+    "aggregate_only": {
+      "const": true
+    },
+    "unresolved_action_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "receipt_digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "blocked_action_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "replay_identity": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "interlock_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "failure_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "effect_receipts": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "omitted_action_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "omissions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "study_id": {
+      "type": "string"
+    },
+    "contract_version": {
+      "const": "worldgen-throughput-laboratory-integration/1.0"
+    },
+    "disposition": {
+      "enum": [
+        "qualified",
+        "partial",
+        "unknown",
+        "blocked"
+      ]
+    },
+    "schema_version": {
+      "type": "string"
+    },
+    "boundary": {
+      "type": "string"
+    },
+    "request_id": {
+      "type": "string"
+    },
+    "purpose": {
+      "type": "string"
+    },
+    "action_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "uncertainty": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "admitted_action_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "contradiction": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "raw_data_local": {
+      "const": true
+    },
+    "semantic_profile": {
+      "type": "string"
+    },
+    "feature_id": {
+      "const": "AFA-worldgen-P11-F03"
+    },
+    "negative_evidence": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "required_action_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "artifact": {
+      "type": "object",
+      "required": [
+        "content_type",
+        "content_hash",
+        "boundary"
+      ],
+      "properties": {
+        "boundary": {
+          "type": "string"
+        },
+        "content_type": {
+          "const": "application/vnd.aurora.worldgen.laboratory-integration-receipt+json"
+        },
+        "content_hash": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    }
+  }
+}

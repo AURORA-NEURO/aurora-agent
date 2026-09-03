@@ -67,8 +67,7 @@ pub fn certificate_reference() -> SchemaDescriptor {
             FieldSpec::required("oracle", FieldType::Object),
             FieldSpec::required("source_hashes", FieldType::Object),
             FieldSpec::required("limitations", FieldType::Array),
-            FieldSpec::required(CERTIFICATE_DIGEST_KEY, FieldType::String)
-                .excluded_from_digest(),
+            FieldSpec::required(CERTIFICATE_DIGEST_KEY, FieldType::String).excluded_from_digest(),
         ],
     )
     .expect("the shipped certificate field set is well formed")
@@ -322,7 +321,8 @@ mod tests {
     fn the_published_json_schema_describes_every_field_the_code_emits() {
         const PUBLISHED: &str =
             include_str!("../../../schemas/fiber-v0.1/context_certificate.schema.json");
-        let published: Value = serde_json::from_str(PUBLISHED).expect("the published schema parses");
+        let published: Value =
+            serde_json::from_str(PUBLISHED).expect("the published schema parses");
         let required: Vec<&str> = published["required"]
             .as_array()
             .expect("the published schema lists required fields")

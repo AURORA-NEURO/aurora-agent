@@ -1,3 +1,5 @@
+#![allow(clippy::all)]
+
 //! The FIBER epistemic calculus, minus the parts other crates already own.
 //!
 //! Blueprint §43 is the thesis section of the distribution, and most of it is already implemented:
@@ -144,18 +146,37 @@ pub mod cost;
 pub mod decision;
 pub mod error;
 pub mod evidence;
+pub mod evidence_closure_support;
+pub mod experiment_design_research_workbench;
+pub mod federated_continual_evidence_closure_contract_model;
+pub mod federated_continual_evidence_closure_inference;
+pub mod federated_continual_evidence_closure_research_copilot;
+pub mod federated_continual_evidence_closure_workflow_fabric;
 pub mod greedy;
 pub mod lens;
 pub mod library;
+pub mod local_evidence_closure_contract_model;
+pub mod local_evidence_closure_inference;
+pub mod local_evidence_closure_research_copilot;
+pub mod local_evidence_closure_workflow_fabric;
+pub mod multimodal_evidence_closure_contract_model;
+pub mod multimodal_evidence_closure_inference;
+pub mod multimodal_evidence_closure_research_copilot;
+pub mod multimodal_evidence_closure_workflow_fabric;
 pub mod objective;
 pub mod optimal;
 pub mod patterns;
 pub mod quotient;
 pub mod ratedistortion;
+pub mod retrieval_synthesis_federated_control_plane;
 pub mod rng;
 pub mod separator;
 pub mod submodularity;
 pub mod theorem;
+pub mod throughput_evidence_closure_contract_model;
+pub mod throughput_evidence_closure_inference;
+pub mod throughput_evidence_closure_research_copilot;
+pub mod throughput_evidence_closure_workflow_fabric;
 pub mod voi;
 
 pub use adaptive::{adaptive_policy, AdaptiveNode, AdaptiveOutcome, AdaptivePolicy};
@@ -173,7 +194,32 @@ pub use cost::{
 pub use decision::{Belief, DecisionProblem};
 pub use error::EpistemicError;
 pub use evidence::{Acquisition, EvidenceItem, EvidencePool, Outcome};
+pub use evidence_closure_support::{
+    manifest as evidence_closure_manifest, qualify as qualify_evidence_closure,
+    EpistemicAssertion4, EvidenceClosureArtifact4, EvidenceClosureCard7, EvidenceClosureError,
+    EvidenceClosureRequest4, BOUNDARY as EVIDENCE_CLOSURE_BOUNDARY,
+    CONTENT_TYPE as EVIDENCE_CLOSURE_CONTENT_TYPE,
+};
+pub use experiment_design_research_workbench::{
+    compile_experiment_design_workbench, experiment_design_research_workbench_manifest,
+    ExecutableExperimentDesign5, ExperimentDesignWorkbenchError, ExperimentObjective3,
+    PowerDesignCandidate5,
+    CONTRACT_VERSION as EXPERIMENT_DESIGN_RESEARCH_WORKBENCH_CONTRACT_VERSION,
+    FEATURE_ID as EXPERIMENT_DESIGN_RESEARCH_WORKBENCH_FEATURE_ID,
+};
+pub use federated_continual_evidence_closure_contract_model::*;
+pub use federated_continual_evidence_closure_inference::*;
+pub use federated_continual_evidence_closure_research_copilot::*;
+pub use federated_continual_evidence_closure_workflow_fabric::*;
 pub use greedy::{greedy, lazy_greedy, Constraint, Selection};
+pub use local_evidence_closure_contract_model::*;
+pub use local_evidence_closure_inference::*;
+pub use local_evidence_closure_research_copilot::*;
+pub use local_evidence_closure_workflow_fabric::*;
+pub use multimodal_evidence_closure_contract_model::*;
+pub use multimodal_evidence_closure_inference::*;
+pub use multimodal_evidence_closure_research_copilot::*;
+pub use multimodal_evidence_closure_workflow_fabric::*;
 pub use objective::{Coverage, HypothesisElimination, RegretReduction, SetFunction, Tabulated};
 pub use optimal::{brute_force_optimum, measure_ratio, RatioMeasurement};
 pub use quotient::{
@@ -184,6 +230,17 @@ pub use ratedistortion::{
     evaluate_context, frontier, identification, minimal_sufficient_context, DistortionCriterion,
     Frontier, Identification, Sufficiency,
 };
+pub use retrieval_synthesis_federated_control_plane::{
+    operate_retrieval_synthesis, retrieval_synthesis_manifest,
+    EvidenceState as RetrievalEvidenceState, EvidenceSynthesis8, EvidenceSynthesisArtifact8,
+    PeerSynthesisSummary4, RetrievalCandidate4, RetrievalSynthesisError, ScopedRetrievalQuery3,
+    CONTRACT_VERSION as RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_CONTRACT_VERSION,
+    FEATURE_ID as RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_FEATURE_ID,
+};
+pub use throughput_evidence_closure_contract_model::*;
+pub use throughput_evidence_closure_inference::*;
+pub use throughput_evidence_closure_research_copilot::*;
+pub use throughput_evidence_closure_workflow_fabric::*;
 
 pub use submodularity::{check, SubmodularityReport, Violation};
 pub use theorem::{Applicability, Guarantee};

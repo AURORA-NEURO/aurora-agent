@@ -19,6 +19,9 @@ use thiserror::Error;
 /// The one error type this crate returns.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum RuntimeError {
+    #[error("runtime invariant violated: {detail}")]
+    InvariantViolation { detail: String },
+
     // --- WorldTape and state ledger (05.04) ---
     #[error("tape chain broken at step {step}: {reason}")]
     BrokenChain { step: u64, reason: String },
@@ -51,7 +54,9 @@ pub enum RuntimeError {
         requested: String,
     },
 
-    #[error("replay consumed {consumed} of {total} recorded effects; the remainder is unaccounted for")]
+    #[error(
+        "replay consumed {consumed} of {total} recorded effects; the remainder is unaccounted for"
+    )]
     ReplayIncomplete { consumed: u64, total: u64 },
 
     // --- Effects and permissions (05.08) ---
@@ -70,12 +75,38 @@ pub enum RuntimeError {
     #[error("network mode {mode} refuses host {host}")]
     NetworkDenied { mode: String, host: String },
 
+    #[error("network request names an invalid target URL: {url}")]
+    InvalidNetworkUrl { url: String },
+
+    #[error("tape contains too many {kind}: {actual} exceeds the maximum of {maximum}")]
+    TapeLimitExceeded {
+        kind: &'static str,
+        actual: usize,
+        maximum: usize,
+    },
+
+    #[error("tape JSON is {actual} bytes, above the maximum of {maximum}")]
+    TapeTooLarge { actual: usize, maximum: usize },
+
+    #[error("tape lineage at step {step} commits to {expected}, but the tape contains {found}")]
+    LineageMismatch {
+        step: u64,
+        expected: String,
+        found: String,
+    },
+
     #[error("irreversible effect {kind} refused: an evaluation run may not materialize it")]
     IrreversibleRefused { kind: EffectKind },
 
     // --- Secret broker (05.08) ---
     #[error("no secret is registered for resource {resource}")]
     UnknownResource { resource: String },
+
+    #[error("capability {id} was not issued by this broker")]
+    UnknownCapability { id: String },
+
+    #[error("capability {id} does not match the broker-issued token")]
+    CapabilityMismatch { id: String },
 
     #[error("capability {id} expired at task time {expires_at_task_millis}ms, redeemed at {now_task_millis}ms")]
     CapabilityExpired {
@@ -115,7 +146,9 @@ pub enum RuntimeError {
     #[error("cannot fork at step {step}: the parent tape has {length} steps")]
     ForkBeyondEnd { step: u64, length: u64 },
 
-    #[error("the suffix host is still replaying its inherited prefix (step {step} of {inherited})")]
+    #[error(
+        "the suffix host is still replaying its inherited prefix (step {step} of {inherited})"
+    )]
     SuffixNotReached { step: u64, inherited: u64 },
 
     // --- Budget and cost (05.09) ---
@@ -136,7 +169,9 @@ pub enum RuntimeError {
     #[error("the trial already aborted on {resource} and cannot resume spending")]
     AlreadyAborted { resource: RuntimeResource },
 
-    #[error("child allocation of {requested} {resource} exceeds the parent's remaining {available}")]
+    #[error(
+        "child allocation of {requested} {resource} exceeds the parent's remaining {available}"
+    )]
     OverAllocatedChild {
         resource: RuntimeResource,
         requested: u64,

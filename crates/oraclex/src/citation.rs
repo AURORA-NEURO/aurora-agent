@@ -113,8 +113,12 @@ pub enum PublicationStatus {
     PeerReviewed,
     /// A correction was issued. The document still supports what survived the correction, which is
     /// why this is not the same as retraction.
-    Corrected { detail: String },
-    Retracted { reason: String },
+    Corrected {
+        detail: String,
+    },
+    Retracted {
+        reason: String,
+    },
 }
 
 /// A source, with the metadata a citation check needs.
@@ -301,18 +305,14 @@ pub fn preferred<'a>(left: &'a Document, right: &'a Document) -> Determination {
         );
     }
     match (&left.status, &right.status) {
-        (PublicationStatus::Preprint, PublicationStatus::PeerReviewed) => {
-            Determination::supported(
-                EvidenceTier::Property,
-                format!("{} is the peer-reviewed version of {}", right.id, left.work),
-            )
-        }
-        (PublicationStatus::PeerReviewed, PublicationStatus::Preprint) => {
-            Determination::supported(
-                EvidenceTier::Property,
-                format!("{} is the peer-reviewed version of {}", left.id, left.work),
-            )
-        }
+        (PublicationStatus::Preprint, PublicationStatus::PeerReviewed) => Determination::supported(
+            EvidenceTier::Property,
+            format!("{} is the peer-reviewed version of {}", right.id, left.work),
+        ),
+        (PublicationStatus::PeerReviewed, PublicationStatus::Preprint) => Determination::supported(
+            EvidenceTier::Property,
+            format!("{} is the peer-reviewed version of {}", left.id, left.work),
+        ),
         _ => Determination::unresolved(
             "a distinguishing publication status between the two versions",
             format!(

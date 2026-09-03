@@ -350,7 +350,8 @@ pub fn confirm(
         )
     });
 
-    Determination::Unresolved(
-        Unresolved::new(missing).expect("the open list was checked non-empty"),
+    Unresolved::new(missing).map_or_else(
+        |_| Determination::not_evaluable("the orthogonal comparison produced no open explanation"),
+        Determination::Unresolved,
     )
 }

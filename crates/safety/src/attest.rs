@@ -334,7 +334,11 @@ impl AuditLog {
             previous,
             digest,
         });
-        Ok(self.records.last().expect("just pushed"))
+        self.records
+            .last()
+            .ok_or_else(|| SafetyError::InvariantViolation {
+                detail: "audit record disappeared immediately after append".into(),
+            })
     }
 
     pub fn len(&self) -> usize {

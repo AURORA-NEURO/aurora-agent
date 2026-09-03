@@ -65,7 +65,9 @@ pub enum AcquisitionKind {
 pub enum PrivacyBoundary {
     Inside,
     /// Names the policy that forbids it. Excluded from every plan, at any value.
-    Crosses { policy: String },
+    Crosses {
+        policy: String,
+    },
 }
 
 /// What an action costs, in units the caller declares.
@@ -186,13 +188,20 @@ pub enum StopReason {
     /// Every obligation the actions target is evidentially discharged.
     ObligationsDischarged,
     /// Hypothesis separation already licenses one answer, so more context cannot change it.
-    DecisionRobustAcrossHypotheses { surviving: String },
+    DecisionRobustAcrossHypotheses {
+        surviving: String,
+    },
     /// The next action's value per unit cost is under the floor.
-    MarginalValueBelowFloor { action: String, ratio: f64 },
+    MarginalValueBelowFloor {
+        action: String,
+        ratio: f64,
+    },
     BudgetExhausted,
     /// Nothing admissible remains, but obligations are still outstanding. The decision is not
     /// ready and this is the case that should escalate rather than proceed.
-    EvidenceUnreachable { outstanding: Vec<String> },
+    EvidenceUnreachable {
+        outstanding: Vec<String>,
+    },
     /// The whole admissible set was planned and the budget still holds.
     AllActionsPlanned,
 }
@@ -225,11 +234,11 @@ pub fn expand(
     marginal_value_floor: f64,
     separation: Option<&SeparationVerdict>,
 ) -> Result<Expansion, LabError> {
-    let effective = graph
-        .effective_states()
-        .map_err(|error| LabError::Separation(crate::error::SeparationError::ObligationGraph(
+    let effective = graph.effective_states().map_err(|error| {
+        LabError::Separation(crate::error::SeparationError::ObligationGraph(
             error.to_string(),
-        )))?;
+        ))
+    })?;
 
     for action in actions {
         if action.targets.is_empty() {
@@ -480,12 +489,14 @@ mod tests {
 
     #[test]
     fn an_action_that_crosses_a_privacy_boundary_is_excluded_rather_than_discounted() {
-        let actions = vec![
-            AcquisitionAction::new("read-patient-notes", AcquisitionKind::ReadRegion, 1_000_000.0)
-                .targeting(["key_stable"])
-                .costing(1, 0)
-                .crossing("consent:no-secondary-use"),
-        ];
+        let actions = vec![AcquisitionAction::new(
+            "read-patient-notes",
+            AcquisitionKind::ReadRegion,
+            1_000_000.0,
+        )
+        .targeting(["key_stable"])
+        .costing(1, 0)
+        .crossing("consent:no-secondary-use")];
         let plan = expand(&actions, &graph(), budget(), 0.0, None).unwrap();
         assert!(plan.ordered.is_empty());
         assert_eq!(

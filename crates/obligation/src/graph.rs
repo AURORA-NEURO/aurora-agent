@@ -122,10 +122,33 @@ impl Obligation {
 }
 
 /// A goal compiled into obligations with dependencies.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ObligationGraph {
     pub goal: String,
     obligations: BTreeMap<String, Obligation>,
+}
+
+impl<'de> Deserialize<'de> for ObligationGraph {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct Wire {
+            goal: String,
+            obligations: BTreeMap<String, Obligation>,
+        }
+
+        let wire = Wire::deserialize(deserializer)?;
+        let graph = ObligationGraph {
+            goal: wire.goal,
+            obligations: wire.obligations,
+        };
+        graph
+            .validate()
+            .map_err(|error| serde::de::Error::custom(error.to_string()))?;
+        Ok(graph)
+    }
 }
 
 impl ObligationGraph {
@@ -189,6 +212,25 @@ impl ObligationGraph {
     /// declared is missing from the graph, and a cycle means no obligation in it can ever be
     /// established without assuming itself.
     pub fn validate(&self) -> Result<(), ObligationError> {
+        for (key, obligation) in &self.obligations {
+            if key != &obligation.id {
+                return Err(ObligationError::InvariantViolation {
+                    detail: format!(
+                        "obligation map key `{key}` does not match embedded id `{}`",
+                        obligation.id
+                    ),
+                });
+            }
+            if !obligation.value.is_finite() {
+                return Err(ObligationError::NonFiniteValue {
+                    obligation: obligation.id.clone(),
+                    value: obligation.value,
+                });
+            }
+            for record in &obligation.history {
+                record.validate(&obligation.id)?;
+            }
+        }
         self.check_references()?;
         self.topological_order().map(|_| ())
     }
@@ -236,8 +278,17 @@ impl ObligationGraph {
         while let Some(id) = ready.pop_front() {
             ordered.push(id);
             for dependent in dependents.get(id).into_iter().flatten() {
-                let degree = indegree.get_mut(dependent).expect("dependent is indexed");
-                *degree -= 1;
+                let Some(degree) = indegree.get_mut(dependent) else {
+                    return Err(ObligationError::InvariantViolation {
+                        detail: format!("dependent `{dependent}` is missing from indegree map"),
+                    });
+                };
+                *degree =
+                    degree
+                        .checked_sub(1)
+                        .ok_or_else(|| ObligationError::InvariantViolation {
+                            detail: format!("dependent `{dependent}` has an exhausted indegree"),
+                        })?;
                 if *degree == 0 {
                     ready.push_back(dependent);
                 }
@@ -271,7 +322,11 @@ impl ObligationGraph {
         let order = self.topological_order()?;
         let mut effective: BTreeMap<String, ObligationState> = BTreeMap::new();
         for id in order {
-            let obligation = self.obligations.get(id).expect("ordered id is present");
+            let Some(obligation) = self.obligations.get(id) else {
+                return Err(ObligationError::InvariantViolation {
+                    detail: format!("ordered obligation `{id}` is missing from graph storage"),
+                });
+            };
             let own = obligation.recorded_state();
             let state = if own == ObligationState::NotApplicable {
                 own

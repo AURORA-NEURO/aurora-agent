@@ -149,10 +149,14 @@
 pub mod clonal;
 pub mod entities;
 pub mod era;
+pub mod federated_statistical_analysis_workbench;
+pub mod federated_resource_discovery_assurance;
 pub mod error;
 pub mod identity;
 pub mod methylation;
 pub mod models;
+pub mod prospective_evidence_surveillance_copilot;
+pub mod prospective_replication_negative_results_assurance;
 pub mod radiogenomics;
 pub mod transport;
 
@@ -173,6 +177,29 @@ pub use era::{
     EquityReport, LabelFate, PooledScore, PopulationDescriptor, SiteAssayContext, SubgroupClaim,
     SubgroupResult, UncertaintyInterval,
 };
+pub use federated_statistical_analysis_workbench::{
+    qualify_oncoworlds_analysis_workbench, oncoworlds_analysis_workbench_manifest,
+    OncoworldsAnalysisCandidate8, OncoworldsAnalysisWorkbenchError,
+    OncoworldsAnalysisWorkbenchReceipt, OncoworldsAnalysisWorkbenchRequest,
+    CONTRACT_VERSION as ONCOWORLDS_ANALYSIS_WORKBENCH_CONTRACT_VERSION,
+    CONTENT_TYPE as ONCOWORLDS_ANALYSIS_WORKBENCH_CONTENT_TYPE,
+    FEATURE_ID as ONCOWORLDS_ANALYSIS_WORKBENCH_FEATURE_ID,
+    INPUT_SCHEMA as ONCOWORLDS_ANALYSIS_WORKBENCH_INPUT_SCHEMA,
+    OUTPUT_SCHEMA as ONCOWORLDS_ANALYSIS_WORKBENCH_OUTPUT_SCHEMA,
+};
+pub use federated_resource_discovery_assurance::{
+    assure_oncoworlds_resources, oncoworlds_resource_discovery_manifest,
+    OncoworldsPeerResourceSummary4, OncoworldsQualifiedResource7,
+    OncoworldsQualifiedResourceSet7, OncoworldsResourceArtifact7,
+    OncoworldsResourceDiscoveryError, OncoworldsResourceDisposition,
+    OncoworldsResourceEndpoint4, OncoworldsResourceManifest, OncoworldsResourceNeed4,
+    EndpointStatus as OncoworldsEndpointStatus, EvidenceState as OncoworldsResourceEvidenceState,
+    CONTRACT_VERSION as ONCOWORLDS_RESOURCE_DISCOVERY_CONTRACT_VERSION,
+    CONTENT_TYPE as ONCOWORLDS_RESOURCE_DISCOVERY_CONTENT_TYPE,
+    FEATURE_ID as ONCOWORLDS_RESOURCE_DISCOVERY_FEATURE_ID,
+    INPUT_SCHEMA as ONCOWORLDS_RESOURCE_DISCOVERY_INPUT_SCHEMA,
+    OUTPUT_SCHEMA as ONCOWORLDS_RESOURCE_DISCOVERY_OUTPUT_SCHEMA,
+};
 pub use error::{
     EntityWorldRefusal, FractionError, JoinRefusal, MethylationRefusal, OncoWorldsError,
     PhylogenyRefusal, PromotionRefusal, ShiftRefusal, TransportRefusal,
@@ -190,6 +217,27 @@ pub use methylation::{
     EvaluationCohort, EvidenceUse, MethylationClass, MethylationOutcome, NearestClass, QcOutcome,
     RawScore, RoleLedger, SampleContext, ScoreValue, UnclassifiableReason, VersionComparison,
     VersionDivergence, VersionedResult,
+};
+pub use prospective_evidence_surveillance_copilot::{
+    oncoworlds_evidence_surveillance_copilot_manifest,
+    run_oncoworlds_evidence_surveillance_copilot, OncoworldsEvidenceCopilotDisposition,
+    OncoworldsEvidenceObservation, OncoworldsEvidenceSurveillanceCopilotError,
+    OncoworldsEvidenceSurveillanceCopilotReceipt, OncoworldsEvidenceSurveillanceCopilotRequest,
+    OncoworldsQualifiedEvidenceSet,
+    CONTRACT_VERSION as ONCOWORLDS_EVIDENCE_SURVEILLANCE_COPILOT_CONTRACT_VERSION,
+    FEATURE_ID as ONCOWORLDS_EVIDENCE_SURVEILLANCE_COPILOT_FEATURE_ID,
+    INPUT_SCHEMA as ONCOWORLDS_EVIDENCE_SURVEILLANCE_COPILOT_INPUT_SCHEMA,
+    OUTPUT_SCHEMA as ONCOWORLDS_EVIDENCE_SURVEILLANCE_COPILOT_OUTPUT_SCHEMA,
+};
+pub use prospective_replication_negative_results_assurance::{
+    assure_oncoworlds_replication, oncoworlds_replication_negative_results_manifest,
+    OncoworldsClaimAndProtocol, OncoworldsReplicationAssuranceError,
+    OncoworldsReplicationClaim, OncoworldsReplicationDisposition,
+    OncoworldsReplicationOutcome, OncoworldsReplicationRecord,
+    CONTRACT_VERSION as ONCOWORLDS_REPLICATION_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as ONCOWORLDS_REPLICATION_ASSURANCE_FEATURE_ID,
+    INPUT_SCHEMA as ONCOWORLDS_REPLICATION_ASSURANCE_INPUT_SCHEMA,
+    OUTPUT_SCHEMA as ONCOWORLDS_REPLICATION_ASSURANCE_OUTPUT_SCHEMA,
 };
 pub use models::{
     transport_to_patients, EstablishmentCohort, FidelityAxis, FidelityEvidence, ModelIdentity,

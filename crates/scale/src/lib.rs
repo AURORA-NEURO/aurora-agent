@@ -52,13 +52,17 @@ pub mod cost;
 pub mod effective;
 pub mod error;
 pub mod escrow;
+pub mod federation_trust_control_plane;
 pub mod portfolio;
 pub mod release;
 pub mod schedule;
 pub mod split;
+pub mod quality_control_contract_model;
+pub mod interpretation_visualization_assurance;
+pub mod interpretation_interoperability_gateway;
 
 pub use accounting::{million_scale_example, MillionScaleAccounting, Reconciliation};
-pub use adaptive::{AdaptivePlan, Selection, Stratum, StoppingDecision};
+pub use adaptive::{AdaptivePlan, Selection, StoppingDecision, Stratum};
 pub use audit::{AuditReport, Auditor, QualityGate, ReleaseAudit};
 pub use cas::{ComputationKey, Delta, ObjectStore, ReplayCache, Snapshot};
 pub use corpus::{content_digest, Corpus, GeneratedItem, NominalCount};
@@ -71,7 +75,43 @@ pub use error::{
     AdaptiveError, AuditError, CacheError, EscrowError, ReleaseError, ScaleError, SplitError,
 };
 pub use escrow::{EscrowVault, Reveal, RevealCondition, Sequence};
+pub use federation_trust_control_plane::{
+    assure_federation, federation_trust_control_plane_manifest, FederationDisposition,
+    FederationEnvelope8, FederationPeer7, FederationRequest4, FederationTrustError,
+    CONTRACT_VERSION as FEDERATION_TRUST_CONTRACT_VERSION,
+    FEATURE_ID as FEDERATION_TRUST_FEATURE_ID,
+};
 pub use portfolio::{Cell, PortfolioPlan, PortfolioReport};
 pub use release::{ReleaseLedger, ReleaseVersion, Supersession};
 pub use schedule::{GenerationSchedule, HiddenSeed, MutationBudget};
 pub use split::{Contamination, FamilySplit, SplitReport, Tier};
+pub use quality_control_contract_model::{
+    model_prospective_quality_control_contract as model_quality_control_contract,
+    model_prospective_quality_control_contract_json as model_quality_control_contract_json,
+    prospective_quality_control_contract_manifest as quality_control_contract_manifest,
+    validate_prospective_quality_control_contract_json as validate_quality_control_contract_json,
+    ContractQualityMetric, ContractResearchObject, QualityControlContractError,
+    QualityControlContractRequest, QualityVerdict2,
+    CONTRACT_VERSION as QUALITY_CONTROL_CONTRACT_MODEL_CONTRACT_VERSION,
+    FEATURE_ID as QUALITY_CONTROL_CONTRACT_MODEL_FEATURE_ID,
+    INPUT_SCHEMA as QUALITY_CONTROL_CONTRACT_MODEL_INPUT_SCHEMA,
+    OUTPUT_SCHEMA as QUALITY_CONTROL_CONTRACT_MODEL_OUTPUT_SCHEMA,
+};
+pub use interpretation_visualization_assurance::{
+    assure_interpretation_visualization, assure_interpretation_visualization_json,
+    interpretation_visualization_assurance_manifest, validate_interpretation_visualization_json,
+    EvidenceBackedResult4, InteractiveInterpretation7, InterpretationCandidate4,
+    InterpretationVisualizationAssuranceError,
+    CONTRACT_VERSION as INTERPRETATION_VISUALIZATION_CONTRACT_VERSION,
+    FEATURE_ID as INTERPRETATION_VISUALIZATION_FEATURE_ID,
+    INPUT_SCHEMA as INTERPRETATION_VISUALIZATION_INPUT_SCHEMA,
+    OUTPUT_SCHEMA as INTERPRETATION_VISUALIZATION_OUTPUT_SCHEMA,
+};
+pub use interpretation_interoperability_gateway::{
+    interoperate_interpretations, interoperate_interpretations_json,
+    interpretation_interoperability_gateway_manifest,
+    validate_interpretation_interoperability_json, EvidenceBackedResult2,
+    InterpretationEndpoint2, InterpretationInteroperabilityError, InteractiveInterpretation6,
+    CONTRACT_VERSION as INTERPRETATION_INTEROPERABILITY_CONTRACT_VERSION,
+    FEATURE_ID as INTERPRETATION_INTEROPERABILITY_FEATURE_ID,
+};

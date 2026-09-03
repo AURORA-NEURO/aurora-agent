@@ -38,7 +38,9 @@
 //! larger dependent set, so it is a second change; the guard below pins the hole open rather than
 //! letting the query fix imply a world fix that did not happen.
 
-use bioprism_fiber::{compile, FiberError, Query, ACCEPTED_QUERY_SCHEMA_VERSIONS, QUERY_FIELD_PATHS};
+use bioprism_fiber::{
+    compile, FiberError, Query, ACCEPTED_QUERY_SCHEMA_VERSIONS, QUERY_FIELD_PATHS,
+};
 use bioprism_governance::classify::{classify, CompatibilityClass};
 use bioprism_governance::descriptor::{FieldSpec, FieldType, SchemaDescriptor};
 use bioprism_governance::diff::diff;
@@ -80,6 +82,63 @@ fn with_extra_key(key: &str, value: Value) -> Value {
         .expect("a query document is an object")
         .insert(key.to_string(), value);
     document
+}
+
+#[test]
+fn required_arrays_and_budget_bounds_are_enforced_at_the_wire_boundary() {
+    let mut missing_tags = reference_query_document();
+    missing_tags
+        .as_object_mut()
+        .expect("a query document is an object")
+        .remove("protected_tags");
+    assert!(matches!(
+        Query::from_json(missing_tags),
+        Err(FiberError::MissingQueryField("protected_tags"))
+    ));
+
+    let mut wrong_tags = reference_query_document();
+    wrong_tags["protected_tags"] = json!("not-an-array");
+    assert!(matches!(
+        Query::from_json(wrong_tags),
+        Err(FiberError::WrongQueryFieldType {
+            field: "protected_tags",
+            ..
+        })
+    ));
+
+    let mut no_targets = reference_query_document();
+    no_targets["targets"] = json!([]);
+    assert!(matches!(
+        Query::from_json(no_targets),
+        Err(FiberError::InvalidIdentifier(_))
+    ));
+
+    let mut zero_budget = reference_query_document();
+    zero_budget["budgets"]["max_facts"] = json!(0);
+    assert!(matches!(
+        Query::from_json(zero_budget),
+        Err(FiberError::InvalidBudget(_))
+    ));
+}
+
+#[test]
+fn policy_must_be_an_array_of_non_empty_strings() {
+    let mut wrong_type = reference_query_document();
+    wrong_type["policy"] = json!({"allow": true});
+    assert!(matches!(
+        Query::from_json(wrong_type),
+        Err(FiberError::WrongQueryFieldType {
+            field: "policy",
+            ..
+        })
+    ));
+
+    let mut empty_clause = reference_query_document();
+    empty_clause["policy"] = json!([""]);
+    assert!(matches!(
+        Query::from_json(empty_clause),
+        Err(FiberError::InvalidDecisionContract(_))
+    ));
 }
 
 fn certificate_digest(document: &Value) -> String {
@@ -315,7 +374,10 @@ fn refusing_unknown_keys_classifies_as_breaking_without_affecting_a_single_diges
     );
     assert_eq!(
         classification.mode_change,
-        Some((CompatibilityMode::PreserveAndForward, CompatibilityMode::Reject))
+        Some((
+            CompatibilityMode::PreserveAndForward,
+            CompatibilityMode::Reject
+        ))
     );
     assert_eq!(classification.class, CompatibilityClass::Breaking);
     assert_eq!(classification.required_bump, VersionBump::Major);

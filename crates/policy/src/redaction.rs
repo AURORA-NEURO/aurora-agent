@@ -227,11 +227,8 @@ impl RedactionPlan {
             match self.rules.iter().find(|rule| rule.matches(&triggers)) {
                 None => projected.push(item.clone()),
                 Some(rule) => {
-                    let matched: Vec<String> = rule
-                        .applies_to
-                        .intersection(&triggers)
-                        .cloned()
-                        .collect();
+                    let matched: Vec<String> =
+                        rule.applies_to.intersection(&triggers).cloned().collect();
                     receipts.push(RedactionReceipt {
                         target: item.id.clone(),
                         rule_id: rule.id.clone(),
@@ -304,9 +301,13 @@ pub struct SmallCellRule {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "release", rename_all = "snake_case")]
 pub enum CellRelease {
-    Exact { count: u64 },
+    Exact {
+        count: u64,
+    },
     /// The count is known to be below `below` and is not released.
-    BoundedUnknown { below: u32 },
+    BoundedUnknown {
+        below: u32,
+    },
 }
 
 impl SmallCellRule {
@@ -381,7 +382,10 @@ mod tests {
         let wire = view.to_json();
         assert!(wire.get("redaction").is_some());
         assert_eq!(wire["redaction"]["applied"], json!(0));
-        assert!(!wire["redaction"]["evaluated"].as_array().unwrap().is_empty());
+        assert!(!wire["redaction"]["evaluated"]
+            .as_array()
+            .unwrap()
+            .is_empty());
     }
 
     #[test]
@@ -398,7 +402,10 @@ mod tests {
             value["policy_redaction"]["generalized_to"],
             json!("age_band_5y")
         );
-        assert_eq!(value["policy_redaction"]["rule"], json!("redact.peds-dob@3"));
+        assert_eq!(
+            value["policy_redaction"]["rule"],
+            json!("redact.peds-dob@3")
+        );
     }
 
     #[test]
@@ -455,13 +462,7 @@ mod tests {
 
     #[test]
     fn a_rule_without_a_rationale_is_rejected_so_receipts_cannot_be_blank() {
-        let rule = RedactionRule::new(
-            "redact.blank",
-            1,
-            ["pediatric"],
-            Replacement::Omitted,
-            "  ",
-        );
+        let rule = RedactionRule::new("redact.blank", 1, ["pediatric"], Replacement::Omitted, "  ");
         assert!(matches!(
             RedactionPlan::new().register(rule),
             Err(PolicyError::UnexplainedRedaction { .. })

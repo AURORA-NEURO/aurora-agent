@@ -407,7 +407,10 @@ impl FlagRegistry {
     /// Every declared flag must be given a value. A pin that omits a flag is not a pin: the omitted
     /// flag takes whatever the next run's declaration says, which is exactly the case
     /// [`OpsError::FlagNotPinned`] describes.
-    pub fn pin(&self, values: impl IntoIterator<Item = (FlagId, bool)>) -> Result<FlagPin, OpsError> {
+    pub fn pin(
+        &self,
+        values: impl IntoIterator<Item = (FlagId, bool)>,
+    ) -> Result<FlagPin, OpsError> {
         let chosen: BTreeMap<FlagId, bool> = values.into_iter().collect();
         let mut pinned = BTreeMap::new();
         for (id, flag) in &self.flags {
@@ -430,7 +433,10 @@ impl FlagRegistry {
     }
 }
 
-fn pin_digest(registry: &FlagRegistry, values: &BTreeMap<FlagId, bool>) -> Result<ContentHash, OpsError> {
+fn pin_digest(
+    registry: &FlagRegistry,
+    values: &BTreeMap<FlagId, bool>,
+) -> Result<ContentHash, OpsError> {
     let mut map = Map::new();
     for (id, value) in values {
         let mut entry = Map::new();
@@ -676,7 +682,8 @@ mod tests {
     fn demoting_a_variant_to_a_toggle_is_breaking_in_both_directions() {
         let promote = classify(FlagChange::Redeclared {
             before: Flag::toggle(id("compile.graph_ranking"), false, "40.10"),
-            after: Flag::variant(id("compile.graph_ranking"), "ranking-v2", false, "40.10").unwrap(),
+            after: Flag::variant(id("compile.graph_ranking"), "ranking-v2", false, "40.10")
+                .unwrap(),
         });
         let demote = classify(FlagChange::Redeclared {
             before: Flag::variant(id("compile.graph_ranking"), "ranking-v2", false, "40.10")
@@ -692,11 +699,16 @@ mod tests {
         let verdict = classify(FlagChange::Redeclared {
             before: Flag::variant(id("compile.graph_ranking"), "ranking-v2", false, "40.10")
                 .unwrap(),
-            after: Flag::variant(id("compile.graph_ranking"), "ranking-v3", false, "40.10").unwrap(),
+            after: Flag::variant(id("compile.graph_ranking"), "ranking-v3", false, "40.10")
+                .unwrap(),
         });
-        let error = verdict.assert_class(FlagChangeClass::Compatible).unwrap_err();
+        let error = verdict
+            .assert_class(FlagChangeClass::Compatible)
+            .unwrap_err();
         match error {
-            OpsError::FlagChangeMisclassified { derived, reason, .. } => {
+            OpsError::FlagChangeMisclassified {
+                derived, reason, ..
+            } => {
                 assert_eq!(derived, "breaking");
                 assert!(reason.contains("ranking-v3"));
             }
@@ -714,7 +726,10 @@ mod tests {
             .unwrap()
             .pin([(id("log.verbose"), false)])
             .unwrap();
-        assert_eq!(before.get(&id("compile.graph_ranking")), after.get(&id("compile.graph_ranking")));
+        assert_eq!(
+            before.get(&id("compile.graph_ranking")),
+            after.get(&id("compile.graph_ranking"))
+        );
         assert_ne!(before.digest(), after.digest());
     }
 
@@ -727,7 +742,12 @@ mod tests {
             .decide(&registry, &id("compile.graph_ranking"), true, Epoch::new(1))
             .is_ok());
         let error = run
-            .decide(&registry, &id("compile.graph_ranking"), false, Epoch::new(2))
+            .decide(
+                &registry,
+                &id("compile.graph_ranking"),
+                false,
+                Epoch::new(2),
+            )
             .unwrap_err();
         assert!(matches!(error, OpsError::FlagChangedDuringPinnedRun { .. }));
     }
@@ -756,8 +776,13 @@ mod tests {
         let mut run = PinnedRun::new(pin);
         run.decide(&registry, &id("log.verbose"), false, Epoch::new(1))
             .unwrap();
-        run.decide(&registry, &id("compile.graph_ranking"), false, Epoch::new(1))
-            .unwrap();
+        run.decide(
+            &registry,
+            &id("compile.graph_ranking"),
+            false,
+            Epoch::new(1),
+        )
+        .unwrap();
         assert_eq!(run.decisions().len(), 2);
         assert_eq!(run.emitting_decisions().len(), 1);
         assert_eq!(
@@ -771,13 +796,23 @@ mod tests {
         let registry = registry();
         let mut log = DecisionLog::new();
 
-        let mut first = PinnedRun::new(registry.pin([(id("compile.graph_ranking"), false)]).unwrap());
+        let mut first = PinnedRun::new(
+            registry
+                .pin([(id("compile.graph_ranking"), false)])
+                .unwrap(),
+        );
         first
-            .decide(&registry, &id("compile.graph_ranking"), false, Epoch::new(1))
+            .decide(
+                &registry,
+                &id("compile.graph_ranking"),
+                false,
+                Epoch::new(1),
+            )
             .unwrap();
         log.extend_from(&first);
 
-        let mut second = PinnedRun::new(registry.pin([(id("compile.graph_ranking"), true)]).unwrap());
+        let mut second =
+            PinnedRun::new(registry.pin([(id("compile.graph_ranking"), true)]).unwrap());
         second
             .decide(&registry, &id("compile.graph_ranking"), true, Epoch::new(2))
             .unwrap();

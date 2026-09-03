@@ -51,6 +51,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::BoundaryError;
 
+const MAX_BOUNDARY_TEXT_BYTES: usize = 256;
+const MAX_POLICIES: usize = 4096;
+const MAX_FLOWS: usize = 8192;
+
 /// The nine channels 07.09 enumerates, in its own order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -268,7 +272,7 @@ impl FlowVerdict {
 }
 
 /// A policy set and the flows assessed against it.
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize)]
 pub struct Assessment {
     policies: Vec<Policy>,
     verdicts: Vec<(String, FlowVerdict)>,
@@ -282,6 +286,10 @@ impl Assessment {
 
     /// Add a policy.
     pub fn allow(&mut self, policy: Policy) -> Result<(), BoundaryError> {
+        validate_policy(&policy)?;
+        if self.policies.len() >= MAX_POLICIES {
+            return Err(BoundaryError::TooManyPolicies(MAX_POLICIES));
+        }
         if self.policies.iter().any(|p| p.id == policy.id) {
             return Err(BoundaryError::DuplicatePolicy(policy.id));
         }
@@ -297,6 +305,13 @@ impl Assessment {
     pub fn assess(&mut self, flow: &Flow) -> Result<FlowVerdict, BoundaryError> {
         if flow.transmission_principle.trim().is_empty() {
             return Err(BoundaryError::NoTransmissionPrinciple(flow.id.clone()));
+        }
+        validate_flow(flow)?;
+        if self.verdicts.len() >= MAX_FLOWS {
+            return Err(BoundaryError::TooManyFlows(MAX_FLOWS));
+        }
+        if self.verdicts.iter().any(|(id, _)| id == &flow.id) {
+            return Err(BoundaryError::DuplicateFlow(flow.id.clone()));
         }
         let verdict = match &flow.effect {
             Effect::BypassAttempted { detail } => FlowVerdict::Bypass {
@@ -374,8 +389,11 @@ impl Assessment {
     }
 
     /// The pair 07.09 asks for, in place of a combined number.
-    pub fn pareto_point(&self, utility: f64) -> (f64, usize) {
-        (utility, self.violations().len())
+    pub fn pareto_point(&self, utility: f64) -> Result<(f64, usize), BoundaryError> {
+        if !utility.is_finite() {
+            return Err(BoundaryError::InvalidUtility);
+        }
+        Ok((utility, self.violations().len()))
     }
 
     /// Refuses while any violation stands.
@@ -384,6 +402,9 @@ impl Assessment {
     /// no violations it returns the utility it was given and nothing else, which makes explicit
     /// that there was never a safety term to combine — the safety result is a gate, not an addend.
     pub fn composite_with_utility(&self, utility: f64) -> Result<f64, BoundaryError> {
+        if !utility.is_finite() {
+            return Err(BoundaryError::InvalidUtility);
+        }
         let violations = self.violations().len();
         if violations > 0 {
             return Err(BoundaryError::CompositeRefused { violations });
@@ -395,4 +416,87 @@ impl Assessment {
     pub fn verdicts(&self) -> &[(String, FlowVerdict)] {
         &self.verdicts
     }
+}
+
+fn validate_boundary_text(value: &str, field: &str) -> Result<(), String> {
+    if value.trim().is_empty()
+        || value != value.trim()
+        || value.len() > MAX_BOUNDARY_TEXT_BYTES
+        || value.chars().any(char::is_control)
+    {
+        return Err(format!(
+            "{field} must be bounded, trimmed, and control-free"
+        ));
+    }
+    Ok(())
+}
+
+fn validate_policy(policy: &Policy) -> Result<(), BoundaryError> {
+    validate_boundary_text(&policy.id, "id").map_err(|detail| BoundaryError::InvalidPolicy {
+        id: policy.id.clone(),
+        detail,
+    })?;
+    validate_boundary_text(&policy.transmission_principle, "transmission_principle").map_err(
+        |detail| BoundaryError::InvalidPolicy {
+            id: policy.id.clone(),
+            detail,
+        },
+    )?;
+    for (field, value) in [
+        ("sender", policy.sender.as_deref()),
+        ("subject", policy.subject.as_deref()),
+        ("recipient", policy.recipient.as_deref()),
+        ("information_type", policy.information_type.as_deref()),
+        ("purpose", policy.purpose.as_deref()),
+    ] {
+        if let Some(value) = value {
+            validate_boundary_text(value, field).map_err(|detail| {
+                BoundaryError::InvalidPolicy {
+                    id: policy.id.clone(),
+                    detail,
+                }
+            })?;
+        }
+    }
+    Ok(())
+}
+
+fn validate_flow(flow: &Flow) -> Result<(), BoundaryError> {
+    for (field, value) in [
+        ("id", flow.id.as_str()),
+        ("sender", flow.sender.as_str()),
+        ("subject", flow.subject.as_str()),
+        ("recipient", flow.recipient.as_str()),
+        ("information_type", flow.information_type.as_str()),
+        ("purpose", flow.purpose.as_str()),
+        (
+            "transmission_principle",
+            flow.transmission_principle.as_str(),
+        ),
+    ] {
+        validate_boundary_text(value, field).map_err(|detail| BoundaryError::InvalidFlow {
+            id: flow.id.clone(),
+            detail,
+        })?;
+    }
+    match &flow.effect {
+        Effect::Proposed { denied_by } => {
+            validate_boundary_text(denied_by, "denied_by").map_err(|detail| {
+                BoundaryError::InvalidFlow {
+                    id: flow.id.clone(),
+                    detail,
+                }
+            })?;
+        }
+        Effect::BypassAttempted { detail } => {
+            validate_boundary_text(detail, "bypass detail").map_err(|detail| {
+                BoundaryError::InvalidFlow {
+                    id: flow.id.clone(),
+                    detail,
+                }
+            })?;
+        }
+        Effect::Materialized => {}
+    }
+    Ok(())
 }

@@ -1,0 +1,5 @@
+//! Safety P32 federated continual autonomous research_copilot control-integrity feature F15.
+use super::control_integrity_support::{qualify,manifest,SafetyIntegrityCard7,SafetyIntegrityRequest4,SafetyIntegrityError};
+const FEATURE_ID:&str="AFA-safety-P32-F15";const CONTRACT_VERSION:&str="safety-federated-control-integrity-research_copilot/1.0";
+pub fn safety_federated_control_integrity_research_copilot_manifest()->serde_json::Value{manifest(FEATURE_ID,CONTRACT_VERSION,"federated continual autonomous","research_copilot")}
+pub fn qualify_safety_federated_control_integrity_research_copilot(request:&SafetyIntegrityRequest4)->Result<SafetyIntegrityCard7,SafetyIntegrityError>{qualify(request,FEATURE_ID,CONTRACT_VERSION,"federated continual autonomous","research_copilot")}

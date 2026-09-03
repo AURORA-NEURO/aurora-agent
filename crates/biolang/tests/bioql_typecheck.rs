@@ -93,7 +93,11 @@ fn schema() -> QuerySchema {
                 )
                 .field(
                     "diagnosis",
-                    FieldDecl::new(BioType::Text).of(term("glioblastoma", "MONDO:0018177", "2026-03-01")),
+                    FieldDecl::new(BioType::Text).of(term(
+                        "glioblastoma",
+                        "MONDO:0018177",
+                        "2026-03-01",
+                    )),
                 ),
         )
         .with(
@@ -357,7 +361,9 @@ fn a_query_reading_an_ontology_bound_field_without_an_expansion_policy_does_not_
         &schema(),
     )
     .unwrap_err();
-    let QueryError::Type(TypeError::OntologyExpansionNotDeclared { field, ontology, .. }) = error
+    let QueryError::Type(TypeError::OntologyExpansionNotDeclared {
+        field, ontology, ..
+    }) = error
     else {
         panic!("expected a missing expansion policy, got {error:?}");
     };

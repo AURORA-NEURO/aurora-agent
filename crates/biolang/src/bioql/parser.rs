@@ -50,8 +50,8 @@
 
 use crate::bioql::ast::{
     AggregateClause, Aggregation, BinaryOp, CollectionRef, CostClause, ExpansionClause,
-    ExpansionPolicy, Expr, LabelClause, Literal, Path, Projection, ProvenanceClause, ProvenanceMode,
-    Query, ScopeBinding, ScopeClause, ScopeLiteral, TimeClause, UnaryOp,
+    ExpansionPolicy, Expr, LabelClause, Literal, Path, Projection, ProvenanceClause,
+    ProvenanceMode, Query, ScopeBinding, ScopeClause, ScopeLiteral, TimeClause, UnaryOp,
 };
 use crate::bioql::lexer::lex;
 use crate::bioql::token::{Keyword, Token, TokenKind};
@@ -220,7 +220,9 @@ impl Parser {
                 Keyword::Labels => query.labels = Some(self.label_clause()?),
                 Keyword::Aggregate => query.aggregate = Some(self.aggregate_clause()?),
                 Keyword::Cost => query.cost = Some(self.cost_clause()?),
-                _ => unreachable!("CLAUSE_ORDER and this match are the same list"),
+                _ => {
+                    return Err(self.unexpected("one of the supported clause keywords"));
+                }
             }
         }
 
@@ -273,7 +275,9 @@ impl Parser {
                 }
             }
         }
-        let end = self.expect(&TokenKind::RBrace, "`}` closing the scope")?.span;
+        let end = self
+            .expect(&TokenKind::RBrace, "`}` closing the scope")?
+            .span;
         Ok(ScopeClause {
             bindings,
             span: start.merge(end),
@@ -361,7 +365,9 @@ impl Parser {
                 }
             }
         }
-        let end = self.expect(&TokenKind::RBrace, "`}` closing the label set")?.span;
+        let end = self
+            .expect(&TokenKind::RBrace, "`}` closing the label set")?
+            .span;
         Ok(LabelClause {
             labels,
             span: start.merge(end),
@@ -425,13 +431,23 @@ impl Parser {
         let token = self.advance();
         match token.kind {
             TokenKind::Number {
-                value,
+                ref text,
                 integral: true,
                 ..
-            } if value >= 0.0 => Ok(CostClause {
-                limit: value as u64,
-                span: start.merge(token.span),
-            }),
+            } => {
+                let limit = text
+                    .parse::<u64>()
+                    .map_err(|_| ParseError::UnexpectedToken {
+                        expected: "a non-negative whole number of cost units within u64"
+                            .to_string(),
+                        found: format!("number `{text}`"),
+                        span: token.span,
+                    })?;
+                Ok(CostClause {
+                    limit,
+                    span: start.merge(token.span),
+                })
+            }
             TokenKind::Number { ref text, .. } => Err(ParseError::UnexpectedToken {
                 expected: "a non-negative whole number of cost units".to_string(),
                 found: format!("number `{text}`"),
@@ -650,7 +666,9 @@ impl Parser {
                         }
                     }
                 }
-                let end = self.expect(&TokenKind::RBrace, "`}` closing a set literal")?.span;
+                let end = self
+                    .expect(&TokenKind::RBrace, "`}` closing a set literal")?
+                    .span;
                 Ok(Expr::Set {
                     items,
                     span: start.merge(end),

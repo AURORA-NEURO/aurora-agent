@@ -98,6 +98,10 @@
 pub mod builder;
 pub mod catalog;
 pub mod error;
+pub mod evaluation_assurance;
+pub mod evidence_workbench;
+pub mod federated_continual_context_research_workbench;
+pub mod federated_ingestion;
 pub mod fixtures;
 pub mod knobs;
 pub mod query;
@@ -109,6 +113,40 @@ pub mod underdetermined;
 pub use builder::{BioWorld, WorldBuilder, WORLD_SCHEMA_VERSION};
 pub use catalog::{CatalogReport, SliceCatalog};
 pub use error::BioWorldError;
+pub use evaluation_assurance::{
+    assure_evaluation_observability, EvaluationAssuranceError, EvaluationAssuranceReceipt,
+    EvaluationAssuranceRequest, EvaluationDisposition, EvaluationObservation, EvaluationSummary,
+    MetricOutcome, ObservationState, CONTRACT_VERSION as EVALUATION_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as EVALUATION_ASSURANCE_FEATURE_ID,
+    PRECLINICAL_BOUNDARY as EVALUATION_ASSURANCE_PRECLINICAL_BOUNDARY,
+    SCHEMA_VERSION as EVALUATION_ASSURANCE_SCHEMA_VERSION,
+};
+pub use evidence_workbench::{
+    operate_evidence_workbench, EvidenceDisposition, EvidenceFeed, EvidenceSource,
+    EvidenceState as WorkbenchEvidenceState, EvidenceWorkbenchError, EvidenceWorkbenchReceipt,
+    Freshness, QualifiedEvidenceSet, CONTRACT_VERSION as EVIDENCE_WORKBENCH_CONTRACT_VERSION,
+    FEATURE_ID as EVIDENCE_WORKBENCH_FEATURE_ID,
+    PRECLINICAL_BOUNDARY as EVIDENCE_WORKBENCH_PRECLINICAL_BOUNDARY,
+    SCHEMA_VERSION as EVIDENCE_WORKBENCH_SCHEMA_VERSION,
+};
+pub use federated_continual_context_research_workbench::{
+    compile_federated_continual_context_workbench,
+    federated_continual_context_research_workbench_manifest, FederatedContextWorkbenchError,
+    FederatedContextWorkbenchPeer, FederatedContextWorkbenchReceipt,
+    FederatedContextWorkbenchRequest, FederatedContextWorkbenchVerdict,
+    CONTENT_TYPE as FEDERATED_CONTEXT_RESEARCH_WORKBENCH_CONTENT_TYPE,
+    CONTRACT_VERSION as FEDERATED_CONTEXT_RESEARCH_WORKBENCH_CONTRACT_VERSION,
+    FEATURE_ID as FEDERATED_CONTEXT_RESEARCH_WORKBENCH_FEATURE_ID,
+};
+pub use federated_ingestion::{
+    operate_federated_ingestion, FederatedIngestionError, FederatedIngestionReceipt,
+    HarmonizedResearchObject as FederatedHarmonizedResearchObject, IngestionDisposition,
+    ModalityArtifact, ModalityState, RawModalityBundle as FederatedRawModalityBundle,
+    CONTRACT_VERSION as FEDERATED_INGESTION_CONTRACT_VERSION,
+    FEATURE_ID as FEDERATED_INGESTION_FEATURE_ID,
+    PRECLINICAL_BOUNDARY as FEDERATED_INGESTION_PRECLINICAL_BOUNDARY,
+    SCHEMA_VERSION as FEDERATED_INGESTION_SCHEMA_VERSION,
+};
 pub use knobs::{MissingGeneratorKnob, REUSED_GENERATOR_KNOBS};
 pub use query::{QueryShape, QUERY_SCHEMA_VERSION};
 pub use slice::{BlockedProperty, CheckOutcome, SliceReport, StructuralCheck, VerticalSlice};
@@ -139,3 +177,17 @@ pub const UNBUILT_BLUEPRINT_WORLDS: [&str; 14] = [
     "38.15 federated external site validation",
     "38.16 prospective blind reveal discovery",
 ];
+pub mod knowledge_workflow_fabric;
+pub mod resource_discovery_copilot;
+pub use knowledge_workflow_fabric::{
+    compile_knowledge_workflow, knowledge_workflow_manifest, KnowledgeObservation6,
+    KnowledgeWorkflowDisposition, KnowledgeWorkflowError, KnowledgeWorkflowReceipt7,
+    KnowledgeWorkflowRequest5, CONTRACT_VERSION as KNOWLEDGE_WORKFLOW_CONTRACT_VERSION,
+    FEATURE_ID as KNOWLEDGE_WORKFLOW_FEATURE_ID,
+};
+pub use resource_discovery_copilot::{
+    qualify_resources, resource_discovery_manifest, QualifiedResourceSet6, ResourceCandidate6,
+    ResourceDiscoveryDisposition, ResourceDiscoveryError, ResourceNeed5,
+    CONTRACT_VERSION as RESOURCE_DISCOVERY_COPILOT_CONTRACT_VERSION,
+    FEATURE_ID as RESOURCE_DISCOVERY_COPILOT_FEATURE_ID,
+};

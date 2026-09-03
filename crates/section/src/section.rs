@@ -48,7 +48,11 @@ impl EvidenceCapsule {
                 .unwrap_or_default()
         };
         EvidenceCapsule {
-            id: raw.get("id").and_then(Value::as_str).unwrap_or_default().to_string(),
+            id: raw
+                .get("id")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
             provides: raw
                 .get("provides")
                 .and_then(Value::as_str)
@@ -117,16 +121,25 @@ impl DecisionSection {
         map.insert("goal".into(), json!(self.goal));
         map.insert(
             "selected_evidence".into(),
-            Value::Array(self.selected_evidence.iter().map(EvidenceCapsule::to_json).collect()),
+            Value::Array(
+                self.selected_evidence
+                    .iter()
+                    .map(EvidenceCapsule::to_json)
+                    .collect(),
+            ),
         );
-        map.insert("selected_factors".into(), Value::Array(self.selected_factors.clone()));
+        map.insert(
+            "selected_factors".into(),
+            Value::Array(self.selected_factors.clone()),
+        );
         map.insert(
             "oracle".into(),
             serde_json::to_value(&self.oracle).expect("oracle verdict is serialisable"),
         );
         map.insert(
             "unresolved_obligations".into(),
-            serde_json::to_value(&self.unresolved_obligations).expect("obligations are serialisable"),
+            serde_json::to_value(&self.unresolved_obligations)
+                .expect("obligations are serialisable"),
         );
         map.insert(
             "refinement_frontier".into(),
@@ -150,6 +163,9 @@ impl DecisionSection {
     }
 
     pub fn evidence_ids(&self) -> Vec<&str> {
-        self.selected_evidence.iter().map(|e| e.id.as_str()).collect()
+        self.selected_evidence
+            .iter()
+            .map(|e| e.id.as_str())
+            .collect()
     }
 }

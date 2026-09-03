@@ -23,6 +23,7 @@ pub const WORKBENCH_REGISTRY_GET_SCHEMA_VERSION: &str = "bioprism-devplat-workbe
 pub const MAX_WORKBENCH_REPORTS: usize = 512;
 pub const MAX_WORKBENCH_REGISTRY_BYTES: usize = 32 * 1024 * 1024;
 pub const MAX_WORKBENCH_QUERY_ITEMS: usize = 256;
+const MAX_REPORT_NOTES: usize = 64;
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum WorkbenchRegistryError {
@@ -32,6 +33,8 @@ pub enum WorkbenchRegistryError {
     InvalidReport(String),
     #[error("workbench registry has reached its {maximum}-report limit")]
     Full { maximum: usize },
+    #[error("workbench report digest conflict for {digest}")]
+    Conflict { digest: String },
     #[error("workbench registry snapshot is invalid: {0}")]
     InvalidSnapshot(String),
     #[error("workbench registry snapshot is {actual} bytes, above the {maximum}-byte bound")]
@@ -76,10 +79,13 @@ impl WorkbenchReportRegistry {
     pub fn import(&mut self, report: &Value) -> Result<Value, WorkbenchRegistryError> {
         let normalized = normalized_report(report)?;
         let digest = verify_report(&normalized)?;
-        let already_present = self
-            .reports
-            .get(&digest)
-            .is_some_and(|existing| existing == &normalized);
+        let already_present = match self.reports.get(&digest) {
+            None => false,
+            Some(existing) if existing == &normalized => true,
+            Some(_) => {
+                return Err(WorkbenchRegistryError::Conflict { digest });
+            }
+        };
         if !already_present && self.reports.len() >= MAX_WORKBENCH_REPORTS {
             return Err(WorkbenchRegistryError::Full {
                 maximum: MAX_WORKBENCH_REPORTS,
@@ -160,6 +166,22 @@ impl WorkbenchReportRegistry {
             return Err(WorkbenchRegistryError::InvalidSnapshot(format!(
                 "max_items must be between 1 and {MAX_WORKBENCH_QUERY_ITEMS}"
             )));
+        }
+        for (field, value) in [
+            ("domain", domain),
+            ("capability", capability),
+            ("state", state),
+        ] {
+            if let Some(value) = value {
+                if value.trim().is_empty()
+                    || value != value.trim()
+                    || value.chars().any(char::is_control)
+                {
+                    return Err(WorkbenchRegistryError::InvalidSnapshot(format!(
+                        "{field} must be bounded text without surrounding whitespace or controls"
+                    )));
+                }
+            }
         }
         for (field, value) in [("session_digest", session_digest), ("after", after)] {
             if let Some(value) = value {
@@ -298,10 +320,12 @@ impl WorkbenchReportRegistry {
                 WorkbenchRegistryError::InvalidSnapshot("state_digest is missing".into())
             })?;
         let mut unsigned = document.clone();
-        unsigned
-            .as_object_mut()
-            .expect("snapshot object was checked above")
-            .remove("state_digest");
+        let Some(unsigned_object) = unsigned.as_object_mut() else {
+            return Err(WorkbenchRegistryError::InvalidSnapshot(
+                "snapshot is not an object after cloning".into(),
+            ));
+        };
+        unsigned_object.remove("state_digest");
         if claimed_digest != snapshot_digest(&unsigned)? {
             return Err(WorkbenchRegistryError::InvalidSnapshot(
                 "state_digest does not match snapshot contents".into(),
@@ -313,6 +337,26 @@ impl WorkbenchReportRegistry {
             .ok_or_else(|| {
                 WorkbenchRegistryError::InvalidSnapshot("generation is invalid".into())
             })?;
+        if object.get("execution").and_then(Value::as_str) != Some("not_started") {
+            return Err(WorkbenchRegistryError::InvalidSnapshot(
+                "execution must remain not_started".into(),
+            ));
+        }
+        let retention = object
+            .get("retention")
+            .and_then(Value::as_object)
+            .ok_or_else(|| {
+                WorkbenchRegistryError::InvalidSnapshot("retention must be an object".into())
+            })?;
+        if retention.get("max_reports").and_then(Value::as_u64)
+            != Some(MAX_WORKBENCH_REPORTS as u64)
+            || retention.get("max_bytes").and_then(Value::as_u64)
+                != Some(MAX_WORKBENCH_REGISTRY_BYTES as u64)
+        {
+            return Err(WorkbenchRegistryError::InvalidSnapshot(
+                "retention does not match the registry bounds".into(),
+            ));
+        }
         let rows = object
             .get("reports")
             .and_then(Value::as_array)
@@ -323,6 +367,11 @@ impl WorkbenchReportRegistry {
             return Err(WorkbenchRegistryError::Full {
                 maximum: MAX_WORKBENCH_REPORTS,
             });
+        }
+        if generation < rows.len() as u64 {
+            return Err(WorkbenchRegistryError::InvalidSnapshot(
+                "generation cannot be below the retained report count".into(),
+            ));
         }
         let mut registry = Self {
             generation,
@@ -395,30 +444,36 @@ fn normalized_report(report: &Value) -> Result<Value, WorkbenchRegistryError> {
         return Err(WorkbenchRegistryError::NotObject);
     }
     let mut normalized = report.clone();
-    let object = normalized
-        .as_object_mut()
-        .expect("report object was checked above");
-    if let Some(ok) = object.get("ok").and_then(Value::as_bool) {
-        if !ok {
+    let Some(object) = normalized.as_object_mut() else {
+        return Err(WorkbenchRegistryError::InvalidReport(
+            "report is not an object after cloning".into(),
+        ));
+    };
+    if let Some(ok) = object.get("ok") {
+        if ok != &Value::Bool(true) {
             return Err(WorkbenchRegistryError::InvalidReport(
-                "ok must be true".into(),
+                "ok must be the boolean true when supplied".into(),
             ));
         }
     }
-    if let Some(workflow) = object.get("workflow").and_then(Value::as_str) {
-        if workflow != "developer_workbench" {
+    if let Some(workflow) = object.get("workflow") {
+        if workflow.as_str() != Some("developer_workbench") {
             return Err(WorkbenchRegistryError::InvalidReport(
-                "workflow must be developer_workbench".into(),
+                "workflow must be the developer_workbench string when supplied".into(),
             ));
         }
     }
-    if let Some(schema) = object
-        .get("workbench_schema_version")
-        .and_then(Value::as_str)
-    {
-        if schema != WORKBENCH_SCHEMA_VERSION {
+    if let Some(schema) = object.get("workbench_schema_version") {
+        if schema.as_str() != Some(WORKBENCH_SCHEMA_VERSION) {
             return Err(WorkbenchRegistryError::InvalidReport(
-                "workbench_schema_version is invalid".into(),
+                "workbench_schema_version must be the canonical string when supplied".into(),
+            ));
+        }
+    }
+    if let Some(is_error) = object.get("__isError") {
+        if is_error != &Value::Bool(false) {
+            return Err(WorkbenchRegistryError::InvalidReport(
+                "__isError must be the boolean false when supplied".into(),
             ));
         }
     }
@@ -459,6 +514,27 @@ fn verify_report(report: &Value) -> Result<String, WorkbenchRegistryError> {
                 "ci.digest must be a lowercase SHA-256 content hash".into(),
             )
         })?;
+        if ci.workflow_yaml.trim().is_empty() {
+            return Err(WorkbenchRegistryError::InvalidReport(
+                "ci.workflow_yaml must be non-empty".into(),
+            ));
+        }
+        let computed_ci_digest = ContentHash::of_bytes(ci.workflow_yaml.as_bytes()).to_string();
+        if ci.digest != computed_ci_digest {
+            return Err(WorkbenchRegistryError::InvalidReport(
+                "ci.digest does not match ci.workflow_yaml".into(),
+            ));
+        }
+        if ci.execution != "not_executed" {
+            return Err(WorkbenchRegistryError::InvalidReport(
+                "ci.execution must remain not_executed".into(),
+            ));
+        }
+        if ci.required_check_count > ci.check_count || ci.check_count == 0 {
+            return Err(WorkbenchRegistryError::InvalidReport(
+                "ci check counts are inconsistent".into(),
+            ));
+        }
     }
     for field in ["schema_version", "audit", "guarantees", "limitations"] {
         if !object.contains_key(field) {
@@ -466,6 +542,27 @@ fn verify_report(report: &Value) -> Result<String, WorkbenchRegistryError> {
                 "{field} is missing"
             )));
         }
+    }
+    for (field, values) in [
+        ("guarantees", &typed.guarantees),
+        ("limitations", &typed.limitations),
+    ] {
+        if values.is_empty()
+            || values.len() > MAX_REPORT_NOTES
+            || values.iter().any(|value| value.trim().is_empty())
+        {
+            return Err(WorkbenchRegistryError::InvalidReport(format!(
+                "{field} must contain between 1 and {MAX_REPORT_NOTES} non-empty entries"
+            )));
+        }
+    }
+    if typed.audit.ordered_cells.len() != typed.audit.cell_count
+        || typed.audit.executed_cell_count > typed.audit.cell_count
+        || (typed.audit.release_ready && !typed.audit.release_blockers.is_empty())
+    {
+        return Err(WorkbenchRegistryError::InvalidReport(
+            "audit counts or release posture are inconsistent".into(),
+        ));
     }
     ContentHash::of_value(report)
         .map(|digest| digest.to_string())
@@ -632,6 +729,130 @@ mod tests {
         assert!(matches!(
             registry.query(None, None, None, None, None, Some("not-a-digest"), 1, false),
             Err(WorkbenchRegistryError::InvalidSnapshot(_))
+        ));
+
+        let mut malformed_wrapper = report();
+        malformed_wrapper["ok"] = json!("true");
+        assert!(matches!(
+            registry.import(&malformed_wrapper),
+            Err(WorkbenchRegistryError::InvalidReport(_))
+        ));
+
+        let mut malformed_error_marker = report();
+        malformed_error_marker["__isError"] = json!(true);
+        assert!(matches!(
+            registry.import(&malformed_error_marker),
+            Err(WorkbenchRegistryError::InvalidReport(_))
+        ));
+
+        assert!(matches!(
+            registry.query(None, Some(" oncology"), None, None, None, None, 1, false),
+            Err(WorkbenchRegistryError::InvalidSnapshot(_))
+        ));
+    }
+
+    #[test]
+    fn import_rejects_a_digest_conflict_instead_of_replacing_retained_report() {
+        let canonical = report();
+        let digest = ContentHash::of_value(&canonical).unwrap().to_string();
+        let mut registry = WorkbenchReportRegistry::new();
+        registry
+            .reports
+            .insert(digest.clone(), json!({"different": "report"}));
+
+        assert!(matches!(
+            registry.import(&canonical),
+            Err(WorkbenchRegistryError::Conflict { digest: received })
+                if received == digest
+        ));
+        assert_eq!(registry.reports[&digest], json!({"different": "report"}));
+        assert_eq!(registry.generation(), 0);
+    }
+
+    fn reseal_snapshot(mut document: Value) -> Value {
+        document
+            .as_object_mut()
+            .expect("snapshot fixture must be an object")
+            .remove("state_digest");
+        let digest = snapshot_digest(&document).unwrap();
+        document["state_digest"] = json!(digest);
+        document
+    }
+
+    #[test]
+    fn digest_valid_snapshot_metadata_still_has_to_match_registry_contract() {
+        let mut registry = WorkbenchReportRegistry::new();
+        registry.import(&report()).unwrap();
+
+        let mut execution = registry.snapshot().unwrap();
+        execution["execution"] = json!("executed");
+        assert!(matches!(
+            WorkbenchReportRegistry::from_snapshot(&reseal_snapshot(execution)),
+            Err(WorkbenchRegistryError::InvalidSnapshot(_))
+        ));
+
+        let mut retention = registry.snapshot().unwrap();
+        retention["retention"]["max_reports"] = json!(1);
+        assert!(matches!(
+            WorkbenchReportRegistry::from_snapshot(&reseal_snapshot(retention)),
+            Err(WorkbenchRegistryError::InvalidSnapshot(_))
+        ));
+
+        let mut generation = registry.snapshot().unwrap();
+        generation["generation"] = json!(0);
+        assert!(matches!(
+            WorkbenchReportRegistry::from_snapshot(&reseal_snapshot(generation)),
+            Err(WorkbenchRegistryError::InvalidSnapshot(_))
+        ));
+    }
+
+    #[test]
+    fn report_metadata_and_audit_posture_are_not_accepted_as_empty_or_inconsistent() {
+        let mut registry = WorkbenchReportRegistry::new();
+
+        let mut empty_guarantees = report();
+        empty_guarantees["guarantees"] = json!([]);
+        assert!(matches!(
+            registry.import(&empty_guarantees),
+            Err(WorkbenchRegistryError::InvalidReport(_))
+        ));
+
+        let mut inconsistent_audit = report();
+        inconsistent_audit["audit"]["ordered_cells"] = json!([]);
+        assert!(matches!(
+            registry.import(&inconsistent_audit),
+            Err(WorkbenchRegistryError::InvalidReport(_))
+        ));
+    }
+
+    #[test]
+    fn retained_ci_plan_is_digest_bound_and_explicitly_not_executed() {
+        let mut value = report();
+        let workflow_yaml = "name: 'ci'\n";
+        let digest = ContentHash::of_bytes(workflow_yaml.as_bytes()).to_string();
+        value["ci"] = json!({
+            "workflow": "ci",
+            "workflow_yaml": workflow_yaml,
+            "digest": digest,
+            "check_count": 1,
+            "required_check_count": 1,
+            "execution": "not_executed",
+            "network_access": "denied_by_plan",
+            "limitations": ["review only"]
+        });
+        let mut registry = WorkbenchReportRegistry::new();
+        registry.import(&value).unwrap();
+
+        value["ci"]["execution"] = json!("executed");
+        assert!(matches!(
+            registry.import(&value),
+            Err(WorkbenchRegistryError::InvalidReport(_))
+        ));
+        value["ci"]["execution"] = json!("not_executed");
+        value["ci"]["digest"] = json!("a".repeat(64));
+        assert!(matches!(
+            registry.import(&value),
+            Err(WorkbenchRegistryError::InvalidReport(_))
         ));
     }
 }

@@ -53,7 +53,12 @@ pub enum Stage {
 }
 
 impl Stage {
-    pub const LADDER: [Stage; 4] = [Stage::Active, Stage::Deprecated, Stage::Sunset, Stage::Removed];
+    pub const LADDER: [Stage; 4] = [
+        Stage::Active,
+        Stage::Deprecated,
+        Stage::Sunset,
+        Stage::Removed,
+    ];
 
     pub fn as_str(self) -> &'static str {
         match self {
@@ -143,12 +148,7 @@ pub struct Transition {
 }
 
 impl Transition {
-    pub fn new(
-        to: Stage,
-        epoch: u64,
-        reason: impl Into<String>,
-        replacement: Replacement,
-    ) -> Self {
+    pub fn new(to: Stage, epoch: u64, reason: impl Into<String>, replacement: Replacement) -> Self {
         Transition {
             to,
             epoch,
@@ -308,7 +308,11 @@ impl DeprecationLedger {
         DeprecationLedger::default()
     }
 
-    pub fn declare(&mut self, subject: impl Into<String>, epoch: u64) -> Result<(), DeprecationError> {
+    pub fn declare(
+        &mut self,
+        subject: impl Into<String>,
+        epoch: u64,
+    ) -> Result<(), DeprecationError> {
         let subject = subject.into();
         if self.records.contains_key(&subject) {
             return Err(DeprecationError::DuplicateSubject(subject));
@@ -403,12 +407,7 @@ mod tests {
         let mut subject = record();
         let error = subject
             .advance(
-                Transition::new(
-                    Stage::Removed,
-                    3,
-                    "cleanup",
-                    Replacement::field("world_id"),
-                ),
+                Transition::new(Stage::Removed, 3, "cleanup", Replacement::field("world_id")),
                 &policy(),
             )
             .expect_err("the ladder is walked one rung at a time");
@@ -450,10 +449,7 @@ mod tests {
                 &policy(),
             )
             .expect_err("14.16 requires a replacement");
-        assert!(matches!(
-            error,
-            DeprecationError::ReplacementMissing { .. }
-        ));
+        assert!(matches!(error, DeprecationError::ReplacementMissing { .. }));
     }
 
     #[test]
@@ -461,7 +457,12 @@ mod tests {
         let mut subject = record();
         assert!(matches!(
             subject.advance(
-                Transition::new(Stage::Deprecated, 1, "encoded a mistake", Replacement::nothing("")),
+                Transition::new(
+                    Stage::Deprecated,
+                    1,
+                    "encoded a mistake",
+                    Replacement::nothing("")
+                ),
                 &policy(),
             ),
             Err(DeprecationError::ReplacementMissing { .. })
@@ -585,10 +586,7 @@ mod tests {
         assert_eq!(subject.stage(), Stage::Sunset);
         assert_eq!(subject.entered_at(), 2);
         assert_eq!(subject.history().len(), 2);
-        assert_eq!(
-            subject.replacement(),
-            Some(&Replacement::field("world_id"))
-        );
+        assert_eq!(subject.replacement(), Some(&Replacement::field("world_id")));
     }
 
     fn schema(version: &str, fields: Vec<FieldSpec>) -> SchemaDescriptor {
@@ -654,14 +652,24 @@ mod tests {
         ledger
             .advance(
                 "world",
-                Transition::new(Stage::Sunset, 2, "no writer emits it", Replacement::field("world_id")),
+                Transition::new(
+                    Stage::Sunset,
+                    2,
+                    "no writer emits it",
+                    Replacement::field("world_id"),
+                ),
                 &policy(),
             )
             .expect("advances");
         ledger
             .advance(
                 "world",
-                Transition::new(Stage::Removed, 3, "readers no longer accept it", Replacement::field("world_id")),
+                Transition::new(
+                    Stage::Removed,
+                    3,
+                    "readers no longer accept it",
+                    Replacement::field("world_id"),
+                ),
                 &policy(),
             )
             .expect("advances");

@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aurora-neuro.org/schemas/aurora-research-contract-v1/federated_multimodal_ingestion_receipt.schema.json",
+  "title": "AURORA Federated Multimodal Ingestion Receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "contract_version", "feature_id", "request_id", "workflow_id", "institution_id", "disposition", "object", "checks", "omissions", "uncertainty", "negative_evidence", "effect_receipts", "raw_data_local", "boundary"],
+  "properties": {
+    "schema_version": {"const": "aurora-research-contract/1.0"},
+    "contract_version": {"const": "bioworlds-federated-multimodal-ingestion/1.0"},
+    "feature_id": {"const": "AFA-bioworlds-P06-F08"},
+    "request_id": {"type": "string", "minLength": 1},
+    "workflow_id": {"type": "string", "minLength": 1},
+    "institution_id": {"type": "string", "minLength": 1},
+    "disposition": {"enum": ["harmonized", "partial", "unknown", "blocked"]},
+    "object": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["object_id", "study_id", "scope", "semantic_profile", "disposition", "modality_order", "accepted_order", "blocked_order", "artifact_order", "provenance_order", "omissions", "uncertainty", "negative_evidence", "replay_identity", "object_digest", "boundary"],
+      "properties": {
+        "object_id": {"type": "string", "minLength": 1},
+        "study_id": {"type": "string", "minLength": 1},
+        "scope": {"type": "string", "minLength": 1},
+        "semantic_profile": {"type": "string"},
+        "disposition": {"enum": ["harmonized", "partial", "unknown", "blocked"]},
+        "modality_order": {"type": "array", "items": {"type": "string"}},
+        "accepted_order": {"type": "array", "items": {"type": "string"}},
+        "blocked_order": {"type": "array", "items": {"type": "string"}},
+        "artifact_order": {"type": "array", "items": {"$ref": "#/$defs/digest"}},
+        "provenance_order": {"type": "array", "items": {"$ref": "#/$defs/digest"}},
+        "omissions": {"type": "array", "items": {"type": "string"}},
+        "uncertainty": {"type": "array", "items": {"type": "string"}},
+        "negative_evidence": {"type": "array", "items": {"type": "string"}},
+        "replay_identity": {"$ref": "#/$defs/digest"},
+        "object_digest": {"$ref": "#/$defs/digest"},
+        "boundary": {"const": "preclinical-research-only; no human-subject or clinical-source data; no diagnosis, treatment, triage, enrollment, or clinical decisions"}
+      }
+    },
+    "checks": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+    "omissions": {"type": "array", "items": {"type": "string"}},
+    "uncertainty": {"type": "array", "items": {"type": "string"}},
+    "negative_evidence": {"type": "array", "items": {"type": "string"}},
+    "effect_receipts": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+    "raw_data_local": {"const": true},
+    "boundary": {"const": "preclinical-research-only; no human-subject or clinical-source data; no diagnosis, treatment, triage, enrollment, or clinical decisions"}
+  },
+  "$defs": {"digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}
+}

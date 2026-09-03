@@ -1,0 +1,33 @@
+"""Python parity for Residue P32 auditable reconciliation cards."""
+from __future__ import annotations
+import hashlib,json,re
+from typing import Any,Mapping
+from .research_contracts import RESEARCH_CONTRACT_SCHEMA_VERSION,ResearchContractError
+BOUNDARY="preclinical-research-only; no human-subject or clinical-source data; no diagnosis, treatment, triage, enrollment, or clinical decisions";CONTENT_TYPE="application/vnd.aurora.residue.reconciliation-integrity-card-1+json"
+ResidueItem4=dict[str,Any];ReconciliationIntegrityRequest4=dict[str,Any];ReconciliationIntegrityCard7=dict[str,Any];ReconciliationIntegrityArtifact4=dict[str,Any];ReconciliationIntegrityError=ResearchContractError
+def _hash(v:Any)->str:return hashlib.sha256(json.dumps(v,sort_keys=True,separators=(",",":"),ensure_ascii=False).encode()).hexdigest()
+def _digest(v:Any)->bool:return isinstance(v,str) and re.fullmatch(r"[0-9a-f]{64}",v) is not None
+def _ordered(v:list[str])->bool:return isinstance(v,list) and v==sorted(set(v))
+def manifest(*,feature_id:str,contract_version:str,scale:str,mode:str)->dict[str,Any]:return {"schema_version":RESEARCH_CONTRACT_SCHEMA_VERSION,"capability_id":feature_id,"version":contract_version,"owner_crate":"residue","consumers":["replication registry","release reviewer","archival workbench","consortium administrator"],"behavior":f"reconcile research residue at {scale} ({mode})","value":"prevents unresolved, negative, contradicted, or omitted research findings from disappearing at release boundaries","input_schema":"ReconciliationIntegrityRequest4@1","output_schema":"ReconciliationIntegrityCard7@1","effects":["emit:residue-card","retain:negative-finding","block:unsafe-reconciliation"],"permissions":["read:local-residue"],"determinism":"byte_stable","autonomy_tier":"A1","boundary":BOUNDARY}
+def validate(o:Mapping[str,Any],*,feature_id:str|None=None)->None:
+ a=o.get("artifact",{});bad=o.get("schema_version")!=RESEARCH_CONTRACT_SCHEMA_VERSION or(feature_id is not None and o.get("feature_id")!=feature_id)or not o.get("request_id")or not o.get("purpose")or o.get("boundary")!=BOUNDARY or a.get("boundary")!=BOUNDARY or o.get("raw_data_local") is not True or o.get("aggregate_only") is not True or not _digest(o.get("replay_identity")) or not _digest(o.get("closure_digest")) or a.get("content_type")!=CONTENT_TYPE or a.get("content_hash")!=o.get("closure_digest")
+ if bad:raise ResearchContractError("reconciliation identity, locality, artifact, digest, or boundary is incomplete")
+ for k in("item_order","accepted_order","rejected_order","unknown_order","omitted_order","class_order","owner_order","source_order","negative_order","effect_receipts"):
+  if not _ordered(o.get(k,[])):raise ResearchContractError("reconciliation vectors are not canonical")
+ ids=set(o["item_order"]);states=set(o["accepted_order"])|set(o["rejected_order"])|set(o["unknown_order"])|set(o["omitted_order"])
+ if len(o["item_order"])!=len(ids)or states!=ids:raise ResearchContractError("residue states do not partition")
+def qualify(request:Mapping[str,Any],*,feature_id:str,contract_version:str,scale:str,mode:str)->dict[str,Any]:
+ if request.get("schema_version")!=RESEARCH_CONTRACT_SCHEMA_VERSION or not request.get("request_id","").strip() or not request.get("purpose","").strip() or not request.get("items") or not request.get("required_item_order") or not _ordered(request["required_item_order"]) or not _ordered(request.get("required_class_order",[])) or not _digest(request.get("replay_identity")) or request.get("boundary")!=BOUNDARY or request.get("raw_data_local") is not True or request.get("aggregate_only") is not True or not _ordered(request.get("adversarial_events",[])) or request.get("item_budget",0)<=0:raise ResearchContractError("reconciliation identity, ordering, digest, locality, boundary, or budget is invalid")
+ rows=sorted(request["items"],key=lambda a:a.get("residue_id",""));seen=set();accepted=set();rejected=set();unknown=set();omitted=set();classes=set();owners=set();sources=set();negative=set();evidence=set()
+ for i in rows:
+  rid=i.get("residue_id","")
+  if not rid.strip()or rid in seen or not i.get("class","").strip()or not i.get("evidence_state","").strip()or not i.get("owner","").strip()or not _digest(i.get("source_digest"))or i.get("local") is not True or i.get("aggregate_only") is not True:raise ResearchContractError("residue identity, class, owner, digest, evidence, or locality is invalid")
+  seen.add(rid);classes.add(f"{rid}:{i['class']}");owners.add(f"{rid}:{i['owner']}");sources.add(f"{rid}:{i['source_digest']}");evidence.add(i["source_digest"]);negative.add(f"{rid}:negative-result") if i.get("negative_result") else None
+  if i["evidence_state"]=="unknown"or i["source_digest"]==request["replay_identity"]:unknown.add(rid)
+  elif i["class"] in ("contradicted","unmeasured"):rejected.add(rid)
+  elif rid not in request["required_item_order"]:omitted.add(rid)
+  else:accepted.add(rid)
+ missing=[x for x in request["required_item_order"] if x not in seen];global_block=not all(request.get(k) is True for k in("policy_allowed","protected_closure","signed_manifest","raw_data_local","aggregate_only"))or bool(request.get("adversarial_events"))or len(rows)>request["item_budget"]
+ if global_block:omitted.update(seen);accepted.clear();rejected.clear();unknown.clear()
+ disposition="blocked" if global_block else "unknown" if missing or unknown else "partial" if rejected or omitted else "qualified";payload={"schema_version":RESEARCH_CONTRACT_SCHEMA_VERSION,"contract_version":contract_version,"feature_id":feature_id,"request_id":request["request_id"],"purpose":request["purpose"],"disposition":disposition,"item_order":sorted(seen),"accepted_order":sorted(accepted),"rejected_order":sorted(rejected),"unknown_order":sorted(unknown),"omitted_order":sorted(omitted),"class_order":sorted(classes),"owner_order":sorted(owners),"source_order":sorted(sources),"negative_order":sorted(negative),"replay_identity":request["replay_identity"],"raw_data_local":True,"aggregate_only":True,"boundary":BOUNDARY};d=_hash(payload);payload["closure_digest"]=d;payload["effect_receipts"]=[f"approve:residue:{request['request_id']}"] if disposition=="qualified" else ["block:unsafe-reconciliation"];payload["artifact"]={"artifact_id":f"residue-reconciliation:{request['request_id']}","content_type":CONTENT_TYPE,"content_hash":d,"semantic_loss":payload["omitted_order"],"evidence_digests":sorted(evidence),"boundary":BOUNDARY};validate(payload,feature_id=feature_id);return payload
+__all__=["BOUNDARY","CONTENT_TYPE","ResidueItem4","ReconciliationIntegrityRequest4","ReconciliationIntegrityCard7","ReconciliationIntegrityArtifact4","ReconciliationIntegrityError","manifest","qualify","validate"]

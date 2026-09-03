@@ -56,7 +56,8 @@ use bioprism_governance::{
     DeprecationError, DeprecationLedger, LifecyclePolicy, Replacement, Stage, Transition,
 };
 use bioprism_hub::Epoch;
-use serde::{Deserialize, Serialize};
+use serde::de::Error as DeError;
+use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::BTreeMap;
 use std::fmt;
 
@@ -163,10 +164,33 @@ impl Admission {
 }
 
 /// Every lifecycle fact a registry holds: per-version availability and per-name deprecation.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct PackLifecycle {
     availability: BTreeMap<String, Availability>,
     deprecation: DeprecationLedger,
+}
+
+#[derive(Debug, Deserialize)]
+struct PackLifecycleFields {
+    availability: BTreeMap<String, Availability>,
+    deprecation: DeprecationLedger,
+}
+
+impl<'de> Deserialize<'de> for PackLifecycle {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let fields = PackLifecycleFields::deserialize(deserializer)?;
+        let lifecycle = PackLifecycle {
+            availability: fields.availability,
+            deprecation: fields.deprecation,
+        };
+        lifecycle
+            .validate()
+            .map(|()| lifecycle)
+            .map_err(D::Error::custom)
+    }
 }
 
 impl PackLifecycle {
@@ -178,6 +202,46 @@ impl PackLifecycle {
         format!("{name}@{version}")
     }
 
+    /// Checks that serialized availability entries identify real subjects and carry the evidence
+    /// their state requires. The map key is part of the identity; accepting an arbitrary string
+    /// would let a lifecycle fact be silently applied to a different release during lookup.
+    pub fn validate(&self) -> Result<(), LifecycleError> {
+        for (subject, availability) in &self.availability {
+            let Some((name, version)) = subject.rsplit_once('@') else {
+                return Err(LifecycleError::InvalidState {
+                    detail: format!("availability key {subject:?} is not name@version"),
+                });
+            };
+            if PackName::parse(name).is_err() || Version::parse(version).is_err() {
+                return Err(LifecycleError::InvalidState {
+                    detail: format!("availability key {subject:?} is not a valid pack subject"),
+                });
+            }
+            match availability {
+                Availability::Available => {}
+                Availability::Yanked { reason, .. } if reason.trim().is_empty() => {
+                    return Err(LifecycleError::ReasonMissing {
+                        subject: subject.clone(),
+                        action: "yank",
+                    });
+                }
+                Availability::Withdrawn { reason, .. } if reason.trim().is_empty() => {
+                    return Err(LifecycleError::ReasonMissing {
+                        subject: subject.clone(),
+                        action: "withdraw",
+                    });
+                }
+                Availability::Withdrawn { advisory, .. } if advisory.trim().is_empty() => {
+                    return Err(LifecycleError::AdvisoryMissing {
+                        subject: subject.clone(),
+                    });
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
     /// Marks a version yanked. Existing dependents keep resolving it.
     pub fn yank(
         &mut self,
@@ -186,6 +250,7 @@ impl PackLifecycle {
         reason: impl Into<String>,
         epoch: Epoch,
     ) -> Result<(), LifecycleError> {
+        self.validate()?;
         let reason = reason.into();
         if reason.trim().is_empty() {
             return Err(LifecycleError::ReasonMissing {
@@ -204,6 +269,7 @@ impl PackLifecycle {
 
     /// Restores a yanked version. Refused for a withdrawal, which has no reverse.
     pub fn unyank(&mut self, name: &PackName, version: Version) -> Result<(), LifecycleError> {
+        self.validate()?;
         let key = PackLifecycle::key(name, &version);
         match self.availability.get(&key) {
             Some(Availability::Withdrawn { .. }) => {
@@ -225,6 +291,7 @@ impl PackLifecycle {
         advisory: impl Into<String>,
         epoch: Epoch,
     ) -> Result<(), LifecycleError> {
+        self.validate()?;
         let reason = reason.into();
         let advisory = advisory.into();
         let key = PackLifecycle::key(name, &version);
@@ -391,6 +458,9 @@ pub enum LifecycleError {
 
     #[error("{subject} is withdrawn; reversing that is a new publication, not a state change")]
     WithdrawalIsNotReversible { subject: String },
+
+    #[error("invalid lifecycle state: {detail}")]
+    InvalidState { detail: String },
 
     #[error(transparent)]
     Deprecation(#[from] DeprecationError),
@@ -650,5 +720,33 @@ mod tests {
             .expect("the sibling version is unaffected by the yank");
         assert!(!other.is_yanked());
         assert!(other.is_deprecated());
+    }
+
+    #[test]
+    fn lifecycle_deserialization_rejects_malformed_subjects_and_empty_advisories() {
+        let mut lifecycle = PackLifecycle::new();
+        lifecycle
+            .withdraw(
+                &name(),
+                v(1, 2, 0),
+                "unsafe artifact",
+                "BIOPRISM-2026-04",
+                Epoch(9),
+            )
+            .expect("withdraws");
+        let mut value = serde_json::to_value(&lifecycle).expect("serialises");
+        value["availability"]["bioprism/onco-tp53@1.2.0"]["advisory"] = serde_json::json!("");
+        assert!(serde_json::from_value::<PackLifecycle>(value).is_err());
+
+        let mut value = serde_json::to_value(&lifecycle).expect("serialises");
+        let availability = value
+            .get_mut("availability")
+            .and_then(serde_json::Value::as_object_mut)
+            .expect("availability object");
+        let entry = availability
+            .remove("bioprism/onco-tp53@1.2.0")
+            .expect("availability entry");
+        availability.insert("not-a-subject".into(), entry);
+        assert!(serde_json::from_value::<PackLifecycle>(value).is_err());
     }
 }

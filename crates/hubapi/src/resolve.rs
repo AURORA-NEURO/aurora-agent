@@ -47,7 +47,8 @@ use crate::mirror::{Freshness, FreshnessPolicy, MirrorError};
 use crate::name::{PackName, Version, VersionReq};
 use crate::registry::{AuthorityError, Federation, NameAuthority, RegistryId};
 use bioprism_hub::Epoch;
-use serde::{Deserialize, Serialize};
+use serde::de::Error as DeError;
+use serde::{Deserialize, Deserializer, Serialize};
 use std::fmt;
 
 /// Everything a caller has to say before a name can be resolved.
@@ -124,10 +125,33 @@ pub struct Provenance {
 }
 
 /// A name, resolved.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Resolution {
     subject: Resolved,
     provenance: Provenance,
+}
+
+#[derive(Debug, Deserialize)]
+struct ResolutionFields {
+    subject: Resolved,
+    provenance: Provenance,
+}
+
+impl<'de> Deserialize<'de> for Resolution {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let fields = ResolutionFields::deserialize(deserializer)?;
+        let resolution = Resolution {
+            subject: fields.subject,
+            provenance: fields.provenance,
+        };
+        resolution
+            .validate()
+            .map(|()| resolution)
+            .map_err(D::Error::custom)
+    }
 }
 
 impl Resolution {
@@ -164,6 +188,68 @@ impl Resolution {
     pub fn agrees_with(&self, other: &Resolution) -> bool {
         self.subject == other.subject
     }
+
+    pub(crate) fn validate(&self) -> Result<(), ResolutionInvariantError> {
+        if self.subject.digest.trim().is_empty() {
+            return Err(ResolutionInvariantError::Invalid(
+                "resolved subject has no digest".into(),
+            ));
+        }
+        self.provenance
+            .freshness
+            .validate()
+            .map_err(|error| ResolutionInvariantError::Invalid(error.to_string()))?;
+        match (&self.provenance.authority, &self.provenance.freshness) {
+            (NameAuthority::Authoritative { .. }, Freshness::Authoritative) => {}
+            (NameAuthority::Authoritative { .. }, _) => {
+                return Err(ResolutionInvariantError::Invalid(
+                    "an authoritative answer must carry authoritative freshness".into(),
+                ));
+            }
+            (NameAuthority::Carried { mirror, origin }, Freshness::Authoritative) => {
+                return Err(ResolutionInvariantError::Invalid(format!(
+                    "carrier {mirror} cannot carry authoritative freshness for {origin}"
+                )));
+            }
+            (NameAuthority::Carried { mirror, origin }, _) if mirror == origin => {
+                return Err(ResolutionInvariantError::Invalid(
+                    "a carrier cannot name itself as the origin".into(),
+                ));
+            }
+            (NameAuthority::Carried { .. }, _) => {}
+        }
+        match &self.provenance.freshness {
+            Freshness::WithinBound { lag, bound, .. } if lag > &bound.max_lag_epochs => {
+                return Err(ResolutionInvariantError::Invalid(
+                    "within-bound freshness exceeds the declared bound".into(),
+                ));
+            }
+            Freshness::BeyondBound { lag, bound, .. } if lag <= &bound.max_lag_epochs => {
+                return Err(ResolutionInvariantError::Invalid(
+                    "beyond-bound freshness does not exceed the declared bound".into(),
+                ));
+            }
+            Freshness::AheadOfReference {
+                synced_at,
+                reference,
+            } if synced_at <= reference => {
+                return Err(ResolutionInvariantError::Invalid(
+                    "ahead-of-reference freshness is not ahead of its reference".into(),
+                ));
+            }
+            _ => {}
+        }
+        self.provenance
+            .accepted_under
+            .check(&self.provenance.freshness)
+            .map_err(|error| ResolutionInvariantError::Invalid(error.to_string()))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub(crate) enum ResolutionInvariantError {
+    #[error("invalid resolution: {0}")]
+    Invalid(String),
 }
 
 impl fmt::Display for Resolution {
@@ -178,6 +264,12 @@ impl fmt::Display for Resolution {
 
 /// Resolves a name against one catalog.
 pub fn resolve(catalog: &Catalog, request: &Request) -> Result<Resolution, ResolveError> {
+    catalog
+        .validate()
+        .map_err(|error| ResolveError::CatalogInvalid {
+            registry: catalog.id().clone(),
+            detail: error.to_string(),
+        })?;
     let authority = catalog.standing_for(&request.name)?;
     let freshness = catalog.sync().freshness(request.as_of);
     request.freshness.check(&freshness)?;
@@ -211,9 +303,13 @@ pub fn resolve(catalog: &Catalog, request: &Request) -> Result<Resolution, Resol
             .admits(&request.name, *version, request.intent)
         {
             Ok(admission) => {
-                let release = catalog
-                    .release(&request.name, version)
-                    .expect("a version reported by the catalog is held by it");
+                let Some(release) = catalog.release(&request.name, version) else {
+                    return Err(ResolveError::CatalogInconsistent {
+                        registry: catalog.id().clone(),
+                        name: request.name.to_string(),
+                        version: version.to_string(),
+                    });
+                };
                 return Ok(Resolution {
                     subject: Resolved {
                         name: request.name.clone(),
@@ -292,10 +388,12 @@ pub fn resolve_in(
         }
     }
 
-    Err(failures
-        .into_iter()
-        .next()
-        .expect("a non-empty catalog list yields at least one failure"))
+    match failures.into_iter().next() {
+        Some(error) => Err(error),
+        None => Err(ResolveError::NoRegistryWithStanding {
+            name: request.name.to_string(),
+        }),
+    }
 }
 
 /// Confirms that every catalog holding the resolved version binds it to the same digest.
@@ -339,6 +437,19 @@ pub enum ResolveError {
         name: String,
         req: String,
         held: Vec<String>,
+    },
+
+    #[error("{registry} reported {name}@{version} but no matching release was present")]
+    CatalogInconsistent {
+        registry: RegistryId,
+        name: String,
+        version: String,
+    },
+
+    #[error("{registry} contains an invalid catalog: {detail}")]
+    CatalogInvalid {
+        registry: RegistryId,
+        detail: String,
     },
 
     #[error("{registry} holds {} version(s) of {name} matching {req}, and the lifecycle excludes every one", refusals.len())]

@@ -47,7 +47,8 @@
 
 use crate::registry::RegistryId;
 use bioprism_hub::Epoch;
-use serde::{Deserialize, Serialize};
+use serde::de::Error as DeError;
+use serde::{Deserialize, Deserializer, Serialize};
 use std::fmt;
 
 /// How far behind a mirror promises never to be, in operator epochs.
@@ -150,7 +151,7 @@ impl Replication {
 /// against a stale mirror carries [`Freshness::BeyondBound`] and one against a fresh mirror carries
 /// [`Freshness::WithinBound`]; they are different values, and every consumer that pattern-matches
 /// on freshness is forced to decide what it thinks about each.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "freshness", rename_all = "snake_case")]
 pub enum Freshness {
     /// The origin answered. Currency is not in question because there is nothing to lag behind.
@@ -179,7 +180,98 @@ pub enum Freshness {
     AheadOfReference { synced_at: Epoch, reference: Epoch },
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(tag = "freshness", rename_all = "snake_case")]
+enum FreshnessFields {
+    Authoritative,
+    WithinBound {
+        lag: u64,
+        bound: StalenessBound,
+        synced_at: Epoch,
+    },
+    BeyondBound {
+        lag: u64,
+        bound: StalenessBound,
+        synced_at: Epoch,
+    },
+    Undetermined {
+        synced_at: Epoch,
+        bound: StalenessBound,
+    },
+    AheadOfReference {
+        synced_at: Epoch,
+        reference: Epoch,
+    },
+}
+
+impl<'de> Deserialize<'de> for Freshness {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let fields = FreshnessFields::deserialize(deserializer)?;
+        let freshness = match fields {
+            FreshnessFields::Authoritative => Freshness::Authoritative,
+            FreshnessFields::WithinBound {
+                lag,
+                bound,
+                synced_at,
+            } => Freshness::WithinBound {
+                lag,
+                bound,
+                synced_at,
+            },
+            FreshnessFields::BeyondBound {
+                lag,
+                bound,
+                synced_at,
+            } => Freshness::BeyondBound {
+                lag,
+                bound,
+                synced_at,
+            },
+            FreshnessFields::Undetermined { synced_at, bound } => {
+                Freshness::Undetermined { synced_at, bound }
+            }
+            FreshnessFields::AheadOfReference {
+                synced_at,
+                reference,
+            } => Freshness::AheadOfReference {
+                synced_at,
+                reference,
+            },
+        };
+        freshness
+            .validate()
+            .map(|()| freshness)
+            .map_err(D::Error::custom)
+    }
+}
+
 impl Freshness {
+    /// Checks that the reported variant agrees with its numeric evidence.
+    pub fn validate(&self) -> Result<(), MirrorError> {
+        match self {
+            Freshness::WithinBound { lag, bound, .. } if *lag > bound.max_lag_epochs => {
+                Err(MirrorError::InvalidFreshness {
+                    detail: "within-bound lag exceeds the declared bound".into(),
+                })
+            }
+            Freshness::BeyondBound { lag, bound, .. } if *lag <= bound.max_lag_epochs => {
+                Err(MirrorError::InvalidFreshness {
+                    detail: "beyond-bound lag does not exceed the declared bound".into(),
+                })
+            }
+            Freshness::AheadOfReference {
+                synced_at,
+                reference,
+            } if synced_at <= reference => Err(MirrorError::InvalidFreshness {
+                detail: "ahead-of-reference sync is not later than its reference".into(),
+            }),
+            _ => Ok(()),
+        }
+    }
+
     /// True only when the origin answered.
     pub fn is_from_authority(&self) -> bool {
         matches!(self, Freshness::Authoritative)
@@ -271,6 +363,7 @@ impl FreshnessPolicy {
     };
 
     pub fn check(&self, freshness: &Freshness) -> Result<(), MirrorError> {
+        freshness.validate()?;
         if self.require_authority && !freshness.is_from_authority() {
             return Err(MirrorError::AuthorityRequired {
                 observed: freshness.to_string(),
@@ -315,6 +408,9 @@ impl FreshnessPolicy {
 /// Why an answer from a mirror was not acceptable, or was not an answer at all.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum MirrorError {
+    #[error("invalid freshness evidence: {detail}")]
+    InvalidFreshness { detail: String },
+
     #[error("the consumer requires an authoritative answer and this one is {observed}")]
     AuthorityRequired { observed: String },
 
@@ -467,5 +563,24 @@ mod tests {
         assert!(text.contains("beyond_bound"));
         let back: Freshness = serde_json::from_str(&text).expect("deserialises");
         assert_eq!(back, stale);
+    }
+
+    #[test]
+    fn freshness_deserialization_rejects_numeric_evidence_that_disagrees_with_its_variant() {
+        let freshness = Freshness::WithinBound {
+            lag: 0,
+            bound: StalenessBound::epochs(0),
+            synced_at: Epoch(9),
+        };
+        let mut value = serde_json::to_value(&freshness).expect("serialises");
+        value["lag"] = serde_json::json!(1);
+        assert!(serde_json::from_value::<Freshness>(value).is_err());
+
+        let value = serde_json::json!({
+            "freshness": "ahead_of_reference",
+            "synced_at": 9,
+            "reference": 9
+        });
+        assert!(serde_json::from_value::<Freshness>(value).is_err());
     }
 }

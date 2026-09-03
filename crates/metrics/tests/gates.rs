@@ -414,3 +414,63 @@ fn a_gate_report_carries_no_score_by_which_a_violation_could_be_averaged_away() 
     assert!(object.get("pass_fraction").is_none());
     assert_eq!(object["verdict"], "blocked");
 }
+
+#[test]
+fn malformed_thresholds_and_empty_predicates_fail_closed() {
+    let grid = grid_of(
+        "system-a",
+        recorded("system-a"),
+        vec![("verify.oracle", point_cell(0.9, 12))],
+    );
+    for predicate in [
+        GatePredicate::MinimumScore {
+            capability: cap("verify.oracle"),
+            floor: f64::NAN,
+        },
+        GatePredicate::MinimumCoverage { floor: -1.0 },
+        GatePredicate::MaximumIntervalWidth {
+            capability: cap("verify.oracle"),
+            ceiling: -1.0,
+        },
+        GatePredicate::NoUnmeasured {
+            capabilities: Vec::new(),
+        },
+    ] {
+        let report = ReleaseGate::new("malformed")
+            .requiring(predicate)
+            .evaluate(&grid);
+        assert_eq!(report.verdict, GateVerdict::Blocked);
+        assert_eq!(report.violations().len(), 1);
+    }
+}
+
+#[test]
+fn an_invalid_grid_is_unevaluable_and_cannot_pass_a_gate() {
+    let measured = point_cell(0.9, 1);
+    let invalid_cell = match measured {
+        GridCell::Measured { estimate, .. } => GridCell::Measured {
+            estimate,
+            effective_size: 0,
+        },
+        GridCell::Unmeasured { .. } => unreachable!("point_cell is measured"),
+    };
+    let grid = grid_of(
+        "system-a",
+        recorded("system-a"),
+        vec![("verify.oracle", invalid_cell)],
+    );
+    let report = ReleaseGate::new("invalid-grid")
+        .requiring(GatePredicate::MinimumScore {
+            capability: cap("verify.oracle"),
+            floor: 0.5,
+        })
+        .evaluate(&grid);
+
+    assert_eq!(report.verdict, GateVerdict::NotEvaluable);
+    assert!(matches!(
+        report.gaps()[0].outcome,
+        GateOutcome::Unevaluable {
+            gap: EvaluabilityGap::InvalidGrid { .. }
+        }
+    ));
+}

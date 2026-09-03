@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aurora-neuro.org/schemas/aurora-research-contract-v1/ingestion_gateway_receipt.schema.json",
+  "title": "AURORA prospective multimodal ingestion gateway receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "contract_version", "feature_id", "request_id", "study_id", "decision", "harmonized", "admitted_bundles", "omitted_bundles", "effect_receipts", "semantic_loss", "reasons", "artifact", "raw_data_local", "boundary"],
+  "properties": {
+    "schema_version": {"const": "aurora-research-contract/1.0"},
+    "contract_version": {"const": "1.0"},
+    "feature_id": {"const": "AFA-adapter-P06-F23"},
+    "request_id": {"type": "string", "minLength": 1},
+    "study_id": {"type": "string", "minLength": 1},
+    "decision": {"enum": ["admitted", "partial", "blocked"]},
+    "harmonized": {"type": "object", "required": ["schema_version", "study_id", "modality_order", "alignment", "boundary"], "properties": {"schema_version": {"const": "aurora-research-contract/1.0"}, "study_id": {"type": "string", "minLength": 1}, "modality_order": {"type": "array", "items": {"type": "string"}}, "alignment": {"type": "object"}, "boundary": {"const": "preclinical_research_only"}}, "additionalProperties": true},
+    "admitted_bundles": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+    "omitted_bundles": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+    "effect_receipts": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["effect_id", "bundle_id", "action", "authorized", "source_digest"], "properties": {"effect_id": {"type": "string", "minLength": 1}, "bundle_id": {"type": "string", "minLength": 1}, "action": {"const": "admit-local-harmonization"}, "authorized": {"const": true}, "source_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}}},
+    "semantic_loss": {"type": "array", "items": {"type": "object"}},
+    "reasons": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+    "artifact": {"type": "object", "required": ["content_hash"], "properties": {"content_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}, "additionalProperties": true},
+    "raw_data_local": {"const": true},
+    "boundary": {"const": "preclinical_research_only"}
+  }
+}

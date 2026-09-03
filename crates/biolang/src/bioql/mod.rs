@@ -63,8 +63,8 @@ pub mod types;
 
 pub use ast::{
     AggregateClause, Aggregation, BinaryOp, CollectionRef, CostClause, ExpansionClause,
-    ExpansionPolicy, Expr, LabelClause, Literal, Path, Projection, ProvenanceClause, ProvenanceMode,
-    Query, ScopeBinding, ScopeClause, ScopeLiteral, TimeClause, UnaryOp,
+    ExpansionPolicy, Expr, LabelClause, Literal, Path, Projection, ProvenanceClause,
+    ProvenanceMode, Query, ScopeBinding, ScopeClause, ScopeLiteral, TimeClause, UnaryOp,
 };
 pub use check::{check, compile, estimate_cost, TypedAggregation, TypedQuery, AGGREGATE_FUNCTIONS};
 pub use lexer::lex;

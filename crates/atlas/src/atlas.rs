@@ -134,7 +134,9 @@ impl Atlas {
         let mut failures_by_capability: BTreeMap<&CapabilityId, usize> = BTreeMap::new();
 
         for failure in &self.failures {
-            *failures_by_capability.entry(&failure.implicates).or_insert(0) += 1;
+            *failures_by_capability
+                .entry(&failure.implicates)
+                .or_insert(0) += 1;
             let measured = self
                 .cells
                 .get(&failure.implicates)

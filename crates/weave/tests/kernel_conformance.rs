@@ -37,7 +37,8 @@ fn kernel_with_two_participants() -> Kernel {
             abi_grade: 3,
         },
         Budget::new().with(Resource::ToolCalls, 100),
-    );
+    )
+    .expect("analyst identity is admitted once");
     kernel.admit(
         Participant {
             name: "reviewer".into(),
@@ -46,7 +47,8 @@ fn kernel_with_two_participants() -> Kernel {
             abi_grade: 2,
         },
         Budget::new().with(Resource::ToolCalls, 100),
-    );
+    )
+    .expect("reviewer identity is admitted once");
     kernel
 }
 
@@ -102,6 +104,17 @@ fn a_rejected_act_does_not_enter_the_ledger() {
         2,
         "both the orphan accept and the unknown participant are counted"
     );
+}
+
+#[test]
+fn an_act_cannot_be_delivered_to_an_unregistered_participant() {
+    let mut kernel = kernel_with_two_participants();
+    assert!(matches!(
+        kernel.submit(Act::new(ActKind::Ask, "analyst", "stranger", json!({}))),
+        Err(KernelError::UnknownParticipant(name)) if name == "stranger"
+    ));
+    assert_eq!(kernel.ledger().len(), 0);
+    assert_eq!(kernel.rejected_acts(), 1);
 }
 
 #[test]
@@ -225,7 +238,22 @@ fn budget_exhaustion_stops_a_participant() {
             abi_grade: 1,
         },
         Budget::new().with(Resource::ToolCalls, 5),
-    );
+    )
+    .expect("tight identity is admitted once");
+
+    // A second admission must not replace the original grant or budget.
+    let replacement = Participant {
+        name: "tight".into(),
+        role: "attacker".into(),
+        grant: kernel
+            .authority_mut()
+            .issue("tight", [Capability::ReadEvidence]),
+        abi_grade: 1,
+    };
+    assert!(matches!(
+        kernel.admit(replacement, Budget::new().with(Resource::ToolCalls, 100)),
+        Err(KernelError::DuplicateParticipant(name)) if name == "tight"
+    ));
 
     // Each claim costs 2.
     assert!(kernel.submit(Act::new(ActKind::Claim, "tight", "tight", json!({}))).is_ok());
@@ -235,6 +263,15 @@ fn budget_exhaustion_stops_a_participant() {
         kernel.submit(Act::new(ActKind::Claim, "tight", "tight", json!({}))),
         Err(KernelError::Budget(_))
     ));
+}
+
+#[test]
+fn budget_allowances_do_not_wrap_when_the_declared_sum_exceeds_u64() {
+    let budget = Budget::new()
+        .with(Resource::Tokens, u64::MAX)
+        .with(Resource::Tokens, 1);
+    assert_eq!(budget.remaining(Resource::Tokens), u64::MAX);
+    assert_eq!(budget.total_remaining(), u64::MAX);
 }
 
 #[test]

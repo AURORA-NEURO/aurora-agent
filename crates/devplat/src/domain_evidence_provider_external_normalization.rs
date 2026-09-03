@@ -86,6 +86,13 @@ pub enum DomainEvidenceProviderExternalPayloadNormalizationError {
         "materialized canonical JSON is {observed} bytes but receipt declares {expected} bytes"
     )]
     PayloadByteLengthMismatch { expected: u64, observed: u64 },
+    #[error(
+        "materialized request digest {observed:?} does not match receipt request digest {expected}"
+    )]
+    RequestDigestMismatch {
+        expected: String,
+        observed: Option<String>,
+    },
 }
 
 /// Verify a caller materialization against the receipt, then normalize it without external I/O.
@@ -119,6 +126,29 @@ pub fn normalize_domain_evidence_provider_external_payload(
                 observed: materialized_bytes.len() as u64,
             },
         );
+    }
+    let materialized_request_digest = request
+        .request
+        .as_ref()
+        .map(|value| {
+            ContentHash::of_value(value)
+                .map(|digest| digest.to_string())
+                .map_err(|error| {
+                    DomainEvidenceProviderExternalPayloadNormalizationError::Canonical(
+                        error.to_string(),
+                    )
+                })
+        })
+        .transpose()?;
+    if let Some(expected_request_digest) = receipt.request_digest.as_ref() {
+        if materialized_request_digest.as_deref() != Some(expected_request_digest.as_str()) {
+            return Err(
+                DomainEvidenceProviderExternalPayloadNormalizationError::RequestDigestMismatch {
+                    expected: expected_request_digest.clone(),
+                    observed: materialized_request_digest,
+                },
+            );
+        }
     }
 
     let mut parent_digests = request.parent_digests.clone();
@@ -214,6 +244,31 @@ mod tests {
             normalize_domain_evidence_provider_external_payload(&request),
             Err(
                 DomainEvidenceProviderExternalPayloadNormalizationError::PayloadDigestMismatch { .. }
+            )
+        ));
+    }
+
+    #[test]
+    fn bridge_binds_a_declared_receipt_request_digest_before_normalization() {
+        let mut request = request();
+        let materialized_request = json!({"query": "oncology"});
+        request.receipt.request_digest = Some(
+            ContentHash::of_value(&materialized_request)
+                .unwrap()
+                .to_string(),
+        );
+        request.request = Some(materialized_request);
+        let bridged = normalize_domain_evidence_provider_external_payload(&request).unwrap();
+        assert_eq!(
+            bridged.normalization.request_digest,
+            request.receipt.request_digest
+        );
+
+        request.request = Some(json!({"query": "different"}));
+        assert!(matches!(
+            normalize_domain_evidence_provider_external_payload(&request),
+            Err(
+                DomainEvidenceProviderExternalPayloadNormalizationError::RequestDigestMismatch { .. }
             )
         ));
     }

@@ -227,7 +227,9 @@ impl CaseInput {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Expectation {
     /// Compilation succeeds and publishes every named artifact.
-    ProducesArtifacts { artifacts: Vec<String> },
+    ProducesArtifacts {
+        artifacts: Vec<String>,
+    },
 
     /// Compilation refuses, with this typed failure kind, quoting every fragment in `naming`.
     ///
@@ -278,7 +280,10 @@ pub enum Expectation {
         len: usize,
     },
 
-    ArrayIsNonEmpty { artifact: String, pointer: String },
+    ArrayIsNonEmpty {
+        artifact: String,
+        pointer: String,
+    },
 
     /// Every member of the array at `subset` also appears in the array at `superset`.
     ArrayIsSubsetOf {
@@ -366,7 +371,10 @@ pub enum Expectation {
     },
 
     /// The canonical digest of the whole artifact equals a published constant.
-    DocumentDigestIs { artifact: String, sha256: String },
+    DocumentDigestIs {
+        artifact: String,
+        sha256: String,
+    },
 
     /// The digest recorded at `pointer` equals the canonical digest of `target_artifact` as
     /// actually delivered.
@@ -380,7 +388,10 @@ pub enum Expectation {
     },
 
     /// The artifact is canonically identical to a frozen golden fixture.
-    MatchesGoldenFixture { artifact: String, fixture: String },
+    MatchesGoldenFixture {
+        artifact: String,
+        fixture: String,
+    },
 
     /// Compiling the same inputs a second time yields byte-identical artifacts.
     ///

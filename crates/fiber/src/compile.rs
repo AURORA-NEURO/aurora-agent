@@ -317,6 +317,12 @@ pub fn compile_with_oracle<S: WorldSource + ?Sized>(
 ) -> Result<CompileOutput, FiberError> {
     let mut passes = Vec::new();
 
+    // Admission must precede every analytical pass.  In particular, a conflicting policy
+    // declaration is an authorization failure, not a malformed rate-distortion or acquisition
+    // request; resolving it first keeps the observable error deterministic and prevents any
+    // downstream pass from inspecting evidence the caller was never allowed to use.
+    let envelope = PolicyEnvelope::resolve(source, query)?;
+
     let decision_quotient = query
         .decision_contract
         .as_ref()
@@ -402,8 +408,6 @@ pub fn compile_with_oracle<S: WorldSource + ?Sized>(
             ),
         });
     }
-
-    let envelope = PolicyEnvelope::resolve(source, query)?;
 
     let protected = protected_closure(source, &query.protected_tags);
     passes.push(PassReceipt {

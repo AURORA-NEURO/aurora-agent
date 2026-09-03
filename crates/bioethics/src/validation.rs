@@ -237,10 +237,12 @@ impl ValidationDossier {
             });
         }
 
-        let reproduction = self
-            .evidence
-            .get(&EvidenceKind::IndependentReproduction)
-            .expect("missing() is empty, so every kind is present");
+        let Some(reproduction) = self.evidence.get(&EvidenceKind::IndependentReproduction) else {
+            return Err(BioethicsError::UnmetValidationEvidence {
+                subject: self.subject.clone(),
+                missing: EvidenceKind::IndependentReproduction.to_string(),
+            });
+        };
         if reproduction.attested_by == self.author {
             return Err(BioethicsError::ReproducerIsAuthor {
                 subject: self.subject.clone(),

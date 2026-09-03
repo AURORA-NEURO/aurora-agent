@@ -1,0 +1,7 @@
+//! Worldgen P12 AFA-worldgen-P12-F08 computational_execution contract model.
+use super::computational_execution_contract_support::{self,ExecutionContractRequest,ExecutionContractReceipt};
+pub const FEATURE_ID:&str="AFA-worldgen-P12-F08"; pub const CONTRACT_VERSION:&str="worldgen-federated_continual-computational_execution-contract/1.0";
+pub fn worldgen_federated_continual_computational_execution_contract_model_manifest()->serde_json::Value{computational_execution_contract_support::manifest(FEATURE_ID,CONTRACT_VERSION,"federated continual autonomous")}
+pub fn negotiate_worldgen_federated_continual_computational_execution_contract(request:&ExecutionContractRequest)->Result<ExecutionContractReceipt,computational_execution_contract_support::ExecutionContractError>{computational_execution_contract_support::negotiate(request,FEATURE_ID,CONTRACT_VERSION,"federated continual autonomous",true)}
+pub use computational_execution_contract_support::{ExecutionContractError,ExecutionContractReceipt as WorldgenFederatedContinualProtocolSimulationcontractmodelReceipt,ExecutionContractRequest as WorldgenFederatedContinualProtocolSimulationcontractmodelRequest};
+

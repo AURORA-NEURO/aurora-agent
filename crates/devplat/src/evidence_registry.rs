@@ -21,6 +21,7 @@ pub const EVIDENCE_REGISTRY_QUERY_SCHEMA_VERSION: &str =
 pub const MAX_EVIDENCE_REGISTRY_BUNDLES: usize = 256;
 pub const MAX_EVIDENCE_REGISTRY_BYTES: usize = 32 * 1024 * 1024;
 pub const MAX_EVIDENCE_REGISTRY_QUERY_ITEMS: usize = 256;
+const MAX_TEXT_BYTES: usize = 4_096;
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum EvidenceRegistryError {
@@ -30,6 +31,8 @@ pub enum EvidenceRegistryError {
     Verification(String),
     #[error("evidence registry has reached its {maximum}-bundle limit")]
     Full { maximum: usize },
+    #[error("evidence bundle digest collision for {digest}")]
+    DigestCollision { digest: String },
     #[error("evidence registry snapshot is invalid: {0}")]
     InvalidSnapshot(String),
     #[error("evidence registry snapshot is {actual} bytes, above the {maximum}-byte bound")]
@@ -87,15 +90,24 @@ impl EvidenceBundleRegistry {
                 .unwrap_or_else(|| "verification_failed".into());
             return Err(EvidenceRegistryError::Verification(failures));
         }
+        validate_indexable_bundle(bundle)?;
         let digest = verification
             .get("bundle_digest")
             .and_then(Value::as_str)
             .ok_or_else(|| EvidenceRegistryError::Verification("bundle digest is missing".into()))?
             .to_string();
-        let already_present = self
-            .bundles
-            .get(&digest)
-            .is_some_and(|existing| existing == bundle);
+        if !valid_digest(&digest) {
+            return Err(EvidenceRegistryError::Verification(
+                "bundle digest is not a canonical lowercase content hash".into(),
+            ));
+        }
+        let already_present = match self.bundles.get(&digest) {
+            None => false,
+            Some(existing) if existing == bundle => true,
+            Some(_) => {
+                return Err(EvidenceRegistryError::DigestCollision { digest });
+            }
+        };
         if !already_present && self.bundles.len() >= MAX_EVIDENCE_REGISTRY_BUNDLES {
             return Err(EvidenceRegistryError::Full {
                 maximum: MAX_EVIDENCE_REGISTRY_BUNDLES,
@@ -132,7 +144,9 @@ impl EvidenceBundleRegistry {
     }
 
     pub fn get(&self, digest: &str) -> Option<Value> {
-        self.bundles.get(digest).cloned()
+        valid_digest(digest)
+            .then(|| self.bundles.get(digest).cloned())
+            .flatten()
     }
 
     /// Query deterministic index rows without returning full bundle bodies by default.
@@ -148,6 +162,27 @@ impl EvidenceBundleRegistry {
             return Err(EvidenceRegistryError::InvalidSnapshot(format!(
                 "max_items must be between 1 and {MAX_EVIDENCE_REGISTRY_QUERY_ITEMS}"
             )));
+        }
+        if let Some(cursor) = after {
+            if !valid_digest(cursor) {
+                return Err(EvidenceRegistryError::InvalidSnapshot(
+                    "after must be a lowercase SHA-256 content hash".into(),
+                ));
+            }
+        }
+        if let Some(value) = mission_id {
+            if !valid_identifier(value) {
+                return Err(EvidenceRegistryError::InvalidSnapshot(
+                    "mission_id must be a bounded visible identifier".into(),
+                ));
+            }
+        }
+        if let Some(value) = domain {
+            if !valid_text(value) {
+                return Err(EvidenceRegistryError::InvalidSnapshot(
+                    "domain must be bounded visible text".into(),
+                ));
+            }
         }
         let mut rows = Vec::new();
         let mut has_more = false;
@@ -261,11 +296,18 @@ impl EvidenceBundleRegistry {
             .ok_or_else(|| {
                 EvidenceRegistryError::InvalidSnapshot("state_digest is missing".into())
             })?;
+        if !valid_digest(claimed_digest) {
+            return Err(EvidenceRegistryError::InvalidSnapshot(
+                "state_digest must be a canonical lowercase content hash".into(),
+            ));
+        }
         let mut unsigned = document.clone();
-        unsigned
-            .as_object_mut()
-            .expect("snapshot object was checked above")
-            .remove("state_digest");
+        let Some(unsigned_object) = unsigned.as_object_mut() else {
+            return Err(EvidenceRegistryError::InvalidSnapshot(
+                "snapshot is not an object after cloning".into(),
+            ));
+        };
+        unsigned_object.remove("state_digest");
         let recomputed = snapshot_digest(&unsigned)?;
         if claimed_digest != recomputed {
             return Err(EvidenceRegistryError::InvalidSnapshot(
@@ -278,6 +320,26 @@ impl EvidenceBundleRegistry {
             .ok_or_else(|| {
                 EvidenceRegistryError::InvalidSnapshot("generation is invalid".into())
             })?;
+        if object.get("execution").and_then(Value::as_str) != Some("not_started") {
+            return Err(EvidenceRegistryError::InvalidSnapshot(
+                "execution must remain not_started".into(),
+            ));
+        }
+        let retention = object
+            .get("retention")
+            .and_then(Value::as_object)
+            .ok_or_else(|| {
+                EvidenceRegistryError::InvalidSnapshot("retention must be an object".into())
+            })?;
+        if retention.get("max_bundles").and_then(Value::as_u64)
+            != Some(MAX_EVIDENCE_REGISTRY_BUNDLES as u64)
+            || retention.get("max_bytes").and_then(Value::as_u64)
+                != Some(MAX_EVIDENCE_REGISTRY_BYTES as u64)
+        {
+            return Err(EvidenceRegistryError::InvalidSnapshot(
+                "retention does not match the registry bounds".into(),
+            ));
+        }
         let rows = object
             .get("bundles")
             .and_then(Value::as_array)
@@ -288,6 +350,11 @@ impl EvidenceBundleRegistry {
             return Err(EvidenceRegistryError::Full {
                 maximum: MAX_EVIDENCE_REGISTRY_BUNDLES,
             });
+        }
+        if generation < rows.len() as u64 {
+            return Err(EvidenceRegistryError::InvalidSnapshot(
+                "generation cannot be below the retained bundle count".into(),
+            ));
         }
         let mut registry = Self {
             generation,
@@ -303,6 +370,11 @@ impl EvidenceBundleRegistry {
                 .ok_or_else(|| {
                     EvidenceRegistryError::InvalidSnapshot("bundle_digest is missing".into())
                 })?;
+            if !valid_digest(digest) {
+                return Err(EvidenceRegistryError::InvalidSnapshot(
+                    "bundle_digest must be a canonical lowercase content hash".into(),
+                ));
+            }
             let bundle = row_object.get("bundle").ok_or_else(|| {
                 EvidenceRegistryError::InvalidSnapshot("bundle body is missing".into())
             })?;
@@ -318,6 +390,11 @@ impl EvidenceBundleRegistry {
                     "bundle {digest} failed digest verification"
                 )));
             }
+            validate_indexable_bundle(bundle).map_err(|error| {
+                EvidenceRegistryError::InvalidSnapshot(format!(
+                    "bundle {digest} is not indexable: {error}"
+                ))
+            })?;
             if registry
                 .bundles
                 .insert(digest.to_string(), bundle.clone())
@@ -359,6 +436,48 @@ fn snapshot_digest(document: &Value) -> Result<String, EvidenceRegistryError> {
     ContentHash::of_value(document)
         .map(|digest| digest.to_string())
         .map_err(|error| EvidenceRegistryError::Canonicalisation(error.to_string()))
+}
+
+fn validate_indexable_bundle(bundle: &Value) -> Result<(), EvidenceRegistryError> {
+    let object = bundle.as_object().ok_or(EvidenceRegistryError::NotObject)?;
+    if object
+        .get("mission_id")
+        .and_then(Value::as_str)
+        .filter(|value| valid_identifier(value))
+        .is_none()
+    {
+        return Err(EvidenceRegistryError::Verification(
+            "mission_id must be a bounded visible identifier for registry indexing".into(),
+        ));
+    }
+    if let Some(execution) = object.get("execution") {
+        if execution.as_str() != Some("not_started") {
+            return Err(EvidenceRegistryError::Verification(
+                "execution must remain not_started when supplied".into(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn valid_text(value: &str) -> bool {
+    let trimmed = value.trim();
+    !trimmed.is_empty()
+        && value == trimmed
+        && value.len() <= MAX_TEXT_BYTES
+        && !value.chars().any(char::is_control)
+}
+
+fn valid_identifier(value: &str) -> bool {
+    valid_text(value) && value == value.trim()
+}
+
+fn valid_digest(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        && ContentHash::parse(value.to_owned()).is_ok()
 }
 
 fn index_row(digest: &str, bundle: &Value) -> Result<Value, EvidenceRegistryError> {
@@ -512,5 +631,142 @@ mod tests {
             EvidenceBundleRegistry::from_snapshot(&snapshot),
             Err(EvidenceRegistryError::InvalidSnapshot(_))
         ));
+    }
+
+    fn reseal_snapshot(mut document: Value) -> Value {
+        document
+            .as_object_mut()
+            .expect("snapshot fixture must be an object")
+            .remove("state_digest");
+        let digest = snapshot_digest(&document).unwrap();
+        document["state_digest"] = Value::String(digest);
+        document
+    }
+
+    #[test]
+    fn import_requires_indexable_non_executing_bundle_identity() {
+        let mut registry = EvidenceBundleRegistry::new();
+
+        let mut missing_mission = bundle("mission-one", "oncology");
+        missing_mission
+            .as_object_mut()
+            .unwrap()
+            .remove("mission_id");
+        missing_mission["bundle_digest"] = Value::String(
+            ContentHash::of_value(&without_bundle_digest(&missing_mission))
+                .unwrap()
+                .to_string(),
+        );
+        assert!(matches!(
+            registry.import(&missing_mission),
+            Err(EvidenceRegistryError::Verification(_))
+        ));
+
+        let mut executed = bundle("mission-two", "genomics");
+        executed["execution"] = Value::String("executed".into());
+        executed["bundle_digest"] = Value::String(
+            ContentHash::of_value(&without_bundle_digest(&executed))
+                .unwrap()
+                .to_string(),
+        );
+        assert!(matches!(
+            registry.import(&executed),
+            Err(EvidenceRegistryError::Verification(_))
+        ));
+    }
+
+    #[test]
+    fn digest_valid_snapshot_metadata_still_has_to_match_registry_contract() {
+        let mut registry = EvidenceBundleRegistry::new();
+        registry.import(&bundle("mission-one", "oncology")).unwrap();
+
+        let mut execution = registry.snapshot().unwrap();
+        execution["execution"] = json!("executed");
+        assert!(matches!(
+            EvidenceBundleRegistry::from_snapshot(&reseal_snapshot(execution)),
+            Err(EvidenceRegistryError::InvalidSnapshot(_))
+        ));
+
+        let mut retention = registry.snapshot().unwrap();
+        retention["retention"]["max_bundles"] = json!(1);
+        assert!(matches!(
+            EvidenceBundleRegistry::from_snapshot(&reseal_snapshot(retention)),
+            Err(EvidenceRegistryError::InvalidSnapshot(_))
+        ));
+
+        let mut generation = registry.snapshot().unwrap();
+        generation["generation"] = json!(0);
+        assert!(matches!(
+            EvidenceBundleRegistry::from_snapshot(&reseal_snapshot(generation)),
+            Err(EvidenceRegistryError::InvalidSnapshot(_))
+        ));
+    }
+
+    #[test]
+    fn query_rejects_an_untyped_cursor() {
+        let registry = EvidenceBundleRegistry::new();
+        assert!(matches!(
+            registry.query(None, None, Some("not-a-digest"), 1, false),
+            Err(EvidenceRegistryError::InvalidSnapshot(_))
+        ));
+    }
+
+    #[test]
+    fn registry_rejects_control_bearing_identity_and_noncanonical_cursors() {
+        let mut registry = EvidenceBundleRegistry::new();
+        let mut invalid = bundle("mission\u{0000}one", "oncology");
+        invalid["bundle_digest"] = Value::String(
+            ContentHash::of_value(&without_bundle_digest(&invalid))
+                .unwrap()
+                .to_string(),
+        );
+        let error = registry
+            .import(&invalid)
+            .expect_err("control-bearing mission id must be refused");
+        assert!(error.to_string().contains("mission_id"));
+
+        assert!(matches!(
+            registry.query(None, None, Some(&"A".repeat(64)), 1, false),
+            Err(EvidenceRegistryError::InvalidSnapshot(_))
+        ));
+
+        let imported = registry.import(&bundle("mission-two", "genomics")).unwrap();
+        let digest = imported["bundle_digest"].as_str().unwrap();
+        assert!(registry.get(&digest.to_uppercase()).is_none());
+        assert!(matches!(
+            registry.query(Some(" mission-two"), None, None, 1, false),
+            Err(EvidenceRegistryError::InvalidSnapshot(_))
+        ));
+        assert!(matches!(
+            registry.query(None, Some("genomics\u{0000}"), None, 1, false),
+            Err(EvidenceRegistryError::InvalidSnapshot(_))
+        ));
+    }
+
+    #[test]
+    fn import_rejects_a_digest_collision_instead_of_replacing_retained_bytes() {
+        let mut registry = EvidenceBundleRegistry::new();
+        let value = bundle("mission-collision", "oncology");
+        let digest = value["bundle_digest"].as_str().unwrap().to_string();
+        registry
+            .bundles
+            .insert(digest.clone(), json!({"different": "bytes"}));
+
+        assert!(matches!(
+            registry.import(&value),
+            Err(EvidenceRegistryError::DigestCollision { digest: received })
+                if received == digest
+        ));
+        assert_eq!(registry.bundles[&digest], json!({"different": "bytes"}));
+        assert_eq!(registry.generation(), 0);
+    }
+
+    fn without_bundle_digest(value: &Value) -> Value {
+        let mut without_digest = value.clone();
+        without_digest
+            .as_object_mut()
+            .expect("bundle fixture must be an object")
+            .remove("bundle_digest");
+        without_digest
     }
 }

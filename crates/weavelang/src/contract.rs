@@ -74,7 +74,9 @@ pub enum TypeError {
         held: ResumeGrade,
     },
 
-    #[error("participant `{participant}` holds ABI grade {held} but role `{role}` needs {required}")]
+    #[error(
+        "participant `{participant}` holds ABI grade {held} but role `{role}` needs {required}"
+    )]
     AbiGradeTooLow {
         participant: String,
         role: String,
@@ -89,11 +91,10 @@ pub enum TypeError {
         extra: Vec<String>,
     },
 
-    #[error("a {supplied} cannot satisfy a requirement for {required} without a verifier transition")]
-    UnverifiedValue {
-        supplied: String,
-        required: String,
-    },
+    #[error(
+        "a {supplied} cannot satisfy a requirement for {required} without a verifier transition"
+    )]
+    UnverifiedValue { supplied: String, required: String },
 
     #[error("`{sender}` labelled {sender_label} sends to `{recipient}` cleared only for {recipient_label} at {span}; no declassification is declared")]
     LabelEscalation {
@@ -160,10 +161,19 @@ pub enum CognitiveType {
     Proposal(String),
     /// 23.04's first-class uncertainty. `Unknown` is not `false`, and none of these four are each
     /// other.
-    Unknown { reason: String },
-    Conflicted { candidates: Vec<String> },
-    Partial { of: String, missing: Vec<String> },
-    Blocked { requirement: String },
+    Unknown {
+        reason: String,
+    },
+    Conflicted {
+        candidates: Vec<String>,
+    },
+    Partial {
+        of: String,
+        missing: Vec<String>,
+    },
+    Blocked {
+        requirement: String,
+    },
 }
 
 impl CognitiveType {
@@ -485,13 +495,7 @@ impl Checker<'_> {
         Ok(())
     }
 
-    fn check_act(
-        &mut self,
-        act: &str,
-        from: &str,
-        to: &str,
-        span: Span,
-    ) -> Result<(), TypeError> {
+    fn check_act(&mut self, act: &str, from: &str, to: &str, span: Span) -> Result<(), TypeError> {
         let Some(kind) = kernel_act(act) else {
             return Ok(());
         };

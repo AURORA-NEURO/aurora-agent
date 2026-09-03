@@ -130,7 +130,11 @@ impl MutationProgram {
     pub fn validate(&self) -> Result<(), MutationIrError> {
         let mutation = self.mutation_id.to_string();
 
-        if self.parent.as_ref().is_none_or(|parent| parent.trim().is_empty()) {
+        if self
+            .parent
+            .as_ref()
+            .is_none_or(|parent| parent.trim().is_empty())
+        {
             return Err(MutationIrError::LineageBroken { mutation });
         }
 

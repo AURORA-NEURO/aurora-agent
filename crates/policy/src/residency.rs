@@ -269,8 +269,12 @@ mod tests {
 
     #[test]
     fn a_policy_crossing_move_is_a_declared_transport_with_a_non_empty_loss_ledger() {
-        let from = ScopeKey::new().exact("cohort", "GLIOMA-EU").exact("residency", "eu");
-        let to = ScopeKey::new().exact("cohort", "POOLED").exact("residency", "eu");
+        let from = ScopeKey::new()
+            .exact("cohort", "GLIOMA-EU")
+            .exact("residency", "eu");
+        let to = ScopeKey::new()
+            .exact("cohort", "POOLED")
+            .exact("residency", "eu");
 
         let mapping = propose_transport(&eu_label(), &from, &to, "approved EU-internal pooling")
             .expect("an in-territory pooling is legal");
@@ -283,7 +287,9 @@ mod tests {
     #[test]
     fn narrowing_inside_one_jurisdiction_is_a_restriction_not_a_transport() {
         let from = ScopeKey::new().exact("residency", "eu");
-        let to = ScopeKey::new().exact("residency", "eu").exact("cohort", "GLIOMA-EU");
+        let to = ScopeKey::new()
+            .exact("residency", "eu")
+            .exact("cohort", "GLIOMA-EU");
 
         let mapping =
             propose_transport(&eu_label(), &from, &to, "narrow to one cohort").expect("legal");
@@ -296,7 +302,9 @@ mod tests {
     #[test]
     fn a_move_into_a_forbidden_jurisdiction_is_refused_rather_than_produced() {
         let from = ScopeKey::new().exact("residency", "eu");
-        let to = ScopeKey::new().exact("cohort", "POOLED").exact("residency", "us");
+        let to = ScopeKey::new()
+            .exact("cohort", "POOLED")
+            .exact("residency", "us");
 
         let refusal = propose_transport(&eu_label(), &from, &to, "central pooling")
             .expect_err("a US destination is outside the EU residency");
@@ -326,14 +334,20 @@ mod tests {
         let refusal = propose_transport(&eu_label(), &from, &to, "regional mirror")
             .expect_err("one impermissible member is enough to refuse");
 
-        assert!(matches!(refusal, Refusal::ResidencyViolation { site, .. } if site.as_str() == "us"));
+        assert!(
+            matches!(refusal, Refusal::ResidencyViolation { site, .. } if site.as_str() == "us")
+        );
     }
 
     #[test]
     fn a_no_export_label_cannot_be_transported_even_within_its_own_territory() {
         let label = eu_label().with_export(ExportPolicy::NoExport);
-        let from = ScopeKey::new().exact("cohort", "GLIOMA-EU").exact("residency", "eu");
-        let to = ScopeKey::new().exact("cohort", "POOLED").exact("residency", "eu");
+        let from = ScopeKey::new()
+            .exact("cohort", "GLIOMA-EU")
+            .exact("residency", "eu");
+        let to = ScopeKey::new()
+            .exact("cohort", "POOLED")
+            .exact("residency", "eu");
 
         let refusal = propose_transport(&label, &from, &to, "approved pooling")
             .expect_err("no-export forbids the move even inside the jurisdiction");
@@ -344,12 +358,17 @@ mod tests {
     #[test]
     fn a_transport_nobody_justified_is_refused_so_the_ledger_cannot_be_a_formality() {
         let from = ScopeKey::new().exact("residency", "eu");
-        let to = ScopeKey::new().exact("cohort", "POOLED").exact("residency", "eu");
+        let to = ScopeKey::new()
+            .exact("cohort", "POOLED")
+            .exact("residency", "eu");
 
         let refusal = propose_transport(&eu_label(), &from, &to, "   ")
             .expect_err("blank justification is not a justification");
 
-        assert!(matches!(refusal, Refusal::TransportWithoutJustification { .. }));
+        assert!(matches!(
+            refusal,
+            Refusal::TransportWithoutJustification { .. }
+        ));
     }
 
     #[test]

@@ -1,0 +1,137 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aurora-neuro.org/schemas/aurora-research-contract-v1/worldgen-resource-p05-f14.json",
+  "title": "AFA-worldgen-P05-F14 receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "contract_version",
+    "feature_id",
+    "workflow_id",
+    "disposition",
+    "stage_order",
+    "completed_stage_order",
+    "pending_stage_order",
+    "compensation_order",
+    "checkpoint_seq",
+    "budget_units",
+    "consumed_units",
+    "replay_identity",
+    "workflow_digest",
+    "copilot",
+    "effect_receipts",
+    "raw_data_local",
+    "aggregate_only",
+    "boundary",
+    "artifact"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string"
+    },
+    "contract_version": {
+      "const": "worldgen-multimodal-resource-workflow/1.0"
+    },
+    "feature_id": {
+      "const": "AFA-worldgen-P05-F14"
+    },
+    "raw_data_local": {
+      "const": true
+    },
+    "aggregate_only": {
+      "const": true
+    },
+    "boundary": {
+      "type": "string"
+    },
+    "workflow_id": {
+      "type": "string"
+    },
+    "disposition": {
+      "enum": [
+        "qualified",
+        "partial",
+        "blocked"
+      ]
+    },
+    "stage_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1
+    },
+    "completed_stage_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "pending_stage_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "compensation_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "checkpoint_seq": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "budget_units": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "consumed_units": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "replay_identity": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "workflow_digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "copilot": {
+      "type": "object"
+    },
+    "effect_receipts": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1
+    },
+    "artifact": {
+      "type": "object",
+      "required": [
+        "content_type",
+        "content_hash",
+        "boundary"
+      ],
+      "properties": {
+        "content_type": {
+          "const": "application/vnd.aurora.worldgen.resource-workflow-receipt+json"
+        },
+        "content_hash": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "boundary": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "x_aurora_boundary": "preclinical-research-only",
+  "x_aurora_feature_tier": "product-capability"
+}

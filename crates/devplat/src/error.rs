@@ -13,6 +13,8 @@ pub enum SurfaceError {
     /// A surface names the artifact it lives in. An unnamed artifact cannot be looked for.
     #[error("surface of kind `{kind}` has an empty artifact name")]
     UnnamedArtifact { kind: &'static str },
+    #[error("surface of kind `{kind}` has invalid artifact metadata")]
+    InvalidArtifact { kind: &'static str },
     /// The in-repository surface is a Rust crate, and this workspace's crates are `bioprism-*`.
     #[error(
         "`{artifact}` is not a crate of this workspace: an in-repository surface must name one"
@@ -25,6 +27,8 @@ pub enum SurfaceError {
 pub enum ClaimError {
     #[error("a claim must name an API")]
     UnnamedApi,
+    #[error("API name contains invalid padding, control characters, or exceeds the safety bound")]
+    InvalidApiName,
     /// The evidence says "I found it in the tree" about something that is not in the tree.
     #[error(
         "`{api}` lives on the {kind} surface `{artifact}`, which is not in this repository, so it \
@@ -47,6 +51,8 @@ pub enum ClaimError {
     /// A resolution has to say what was read.
     #[error("`{api}` is recorded as resolved without naming the file it was resolved against")]
     ResolvedWithoutFile { api: String },
+    #[error("`{api}` has invalid `{field}` evidence metadata")]
+    InvalidEvidenceMetadata { api: String, field: &'static str },
 }
 
 /// A walkthrough could not be sealed.
@@ -54,6 +60,12 @@ pub enum ClaimError {
 pub enum WalkthroughError {
     #[error("walkthrough id `{id}` is not of the form `section-slug` in kebab case")]
     MalformedId { id: String },
+    #[error(transparent)]
+    Surface(#[from] SurfaceError),
+    #[error(transparent)]
+    Claim(#[from] ClaimError),
+    #[error(transparent)]
+    Cookbook(#[from] bioprism_cookbook::CookbookError),
     #[error("walkthrough `{id}` has no goal")]
     NoGoal { id: String },
     #[error("walkthrough `{id}` has no steps")]
@@ -122,6 +134,8 @@ pub enum ExploitError {
     UnnamedCell { cell: String },
     #[error("security cell `{cell}` names no remediation for a finding that blocks release")]
     BlockingFindingWithoutRemediation { cell: String },
+    #[error("security cell `{cell}` has invalid `{field}` metadata")]
+    InvalidMetadata { cell: String, field: &'static str },
 }
 
 /// The self-citation audit could not run.

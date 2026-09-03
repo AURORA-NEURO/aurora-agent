@@ -360,6 +360,11 @@ impl Query {
             .get("targets")
             .and_then(Value::as_array)
             .ok_or(FiberError::MissingQueryField("targets"))?;
+        if targets_raw.is_empty() {
+            return Err(FiberError::InvalidIdentifier(
+                "targets must contain at least one variable".into(),
+            ));
+        }
         let targets = targets_raw
             .iter()
             .map(|item| {
@@ -387,11 +392,34 @@ impl Query {
             .get("budgets")
             .and_then(Value::as_object)
             .ok_or(FiberError::MissingQueryField("budgets"))?;
-        let max_facts = budgets_map
+        let max_facts_raw = budgets_map
             .get("max_facts")
             .and_then(Value::as_u64)
-            .ok_or(FiberError::MissingQueryField("budgets.max_facts"))?
-            as usize;
+            .ok_or(FiberError::MissingQueryField("budgets.max_facts"))?;
+        let max_facts = usize::try_from(max_facts_raw).map_err(|_| {
+            FiberError::InvalidBudget("budgets.max_facts exceeds the platform usize range".into())
+        })?;
+        if max_facts == 0 {
+            return Err(FiberError::InvalidBudget(
+                "budgets.max_facts must be at least 1".into(),
+            ));
+        }
+        let max_tokens = budgets_map
+            .get("max_tokens")
+            .and_then(Value::as_u64)
+            .map(|value| {
+                usize::try_from(value).map_err(|_| {
+                    FiberError::InvalidBudget(
+                        "budgets.max_tokens exceeds the platform usize range".into(),
+                    )
+                })
+            })
+            .transpose()?;
+        if max_tokens == Some(0) {
+            return Err(FiberError::InvalidBudget(
+                "budgets.max_tokens must be at least 1 when present".into(),
+            ));
+        }
 
         let decision_contract = if schema_version == QUERY_DECISION_SCHEMA_VERSION
             || schema_version == QUERY_RATE_DISTORTION_SCHEMA_VERSION
@@ -427,18 +455,21 @@ impl Query {
         Ok(Query {
             query_id,
             targets,
-            protected_tags: string_set(map.get("protected_tags")),
+            protected_tags: parse_top_level_strings(map, "protected_tags")?
+                .into_iter()
+                .collect(),
             decision_time,
             decision_time_raw,
             budgets: Budgets {
                 max_facts,
-                max_tokens: budgets_map
-                    .get("max_tokens")
-                    .and_then(Value::as_u64)
-                    .map(|v| v as usize),
+                max_tokens,
             },
             role: map.get("role").and_then(Value::as_str).map(str::to_string),
-            policy: string_set(map.get("policy")).into_iter().collect(),
+            policy: map
+                .get("policy")
+                .map(|value| parse_strings(value, "policy"))
+                .transpose()?
+                .unwrap_or_default(),
             distortion_tolerance,
             goal: map.get("goal").and_then(Value::as_str).map(str::to_string),
             decision_contract,
@@ -849,13 +880,18 @@ fn parse_adaptive_acquisition_contract(
         ));
     }
 
-    let max_steps =
+    let max_steps_raw =
         object
             .get("max_steps")
             .and_then(Value::as_u64)
             .ok_or(FiberError::MissingQueryField(
                 "adaptive_acquisition.max_steps",
-            ))? as usize;
+            ))?;
+    let max_steps = usize::try_from(max_steps_raw).map_err(|_| {
+        FiberError::InvalidAdaptiveAcquisitionContract(
+            "max_steps exceeds the platform usize range".into(),
+        )
+    })?;
     if max_steps > MAX_ADAPTIVE_STEPS {
         return Err(FiberError::InvalidAdaptiveAcquisitionContract(format!(
             "max_steps is {max_steps}; exact adaptive planning is capped at {MAX_ADAPTIVE_STEPS}"
@@ -1107,16 +1143,4 @@ fn rate_distortion_error(error: EpistemicError) -> FiberError {
 
 fn adaptive_acquisition_error(error: EpistemicError) -> FiberError {
     FiberError::InvalidAdaptiveAcquisitionContract(error.to_string())
-}
-
-fn string_set(value: Option<&Value>) -> BTreeSet<String> {
-    value
-        .and_then(Value::as_array)
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(|v| v.as_str().map(str::to_string))
-                .collect()
-        })
-        .unwrap_or_default()
 }

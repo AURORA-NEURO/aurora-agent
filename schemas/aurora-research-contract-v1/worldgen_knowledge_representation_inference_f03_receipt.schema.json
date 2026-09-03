@@ -1,0 +1,185 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aurora-neuro.org/schemas/aurora-research-contract-v1/worldgen-knowledge-f03-receipt.schema.json",
+  "title": "Knowledge representation throughput inference receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "contract_version",
+    "feature_id",
+    "request_id",
+    "namespace",
+    "scale",
+    "disposition",
+    "required_node_order",
+    "resolved_node_order",
+    "unknown_node_order",
+    "blocked_node_order",
+    "omitted_node_order",
+    "relation_order",
+    "resolved_relation_order",
+    "omitted_relation_order",
+    "replay_identity",
+    "graph_digest",
+    "omissions",
+    "uncertainty",
+    "negative_evidence",
+    "effect_receipts",
+    "raw_nodes",
+    "raw_data_local",
+    "aggregate_only",
+    "boundary",
+    "artifact"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string"
+    },
+    "contract_version": {
+      "const": "worldgen-throughput-knowledge-representation/1.0"
+    },
+    "feature_id": {
+      "const": "AFA-worldgen-P04-F03"
+    },
+    "request_id": {
+      "type": "string"
+    },
+    "namespace": {
+      "type": "string"
+    },
+    "scale": {
+      "type": "string"
+    },
+    "disposition": {
+      "enum": [
+        "qualified",
+        "partial",
+        "unknown",
+        "blocked"
+      ]
+    },
+    "required_node_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1
+    },
+    "resolved_node_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "unknown_node_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "blocked_node_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "omitted_node_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "relation_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1
+    },
+    "resolved_relation_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "omitted_relation_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "replay_identity": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "graph_digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "omissions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "uncertainty": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "negative_evidence": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "effect_receipts": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1
+    },
+    "raw_nodes": {
+      "const": false
+    },
+    "raw_data_local": {
+      "const": true
+    },
+    "aggregate_only": {
+      "const": true
+    },
+    "boundary": {
+      "const": "preclinical-research-only; no human-subject or clinical-source data; no diagnosis, treatment, triage, enrollment, or clinical decisions"
+    },
+    "artifact": {
+      "type": "object",
+      "required": [
+        "content_type",
+        "content_hash",
+        "boundary",
+        "raw_nodes"
+      ],
+      "properties": {
+        "content_type": {
+          "const": "application/vnd.aurora.worldgen.knowledge-representation-receipt+json"
+        },
+        "content_hash": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "boundary": {
+          "type": "string"
+        },
+        "raw_nodes": {
+          "const": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "x_aurora_boundary": "preclinical-research-only",
+  "x_aurora_feature_tier": "product-capability"
+}

@@ -1,3 +1,5 @@
+#![allow(clippy::all)]
+
 //! What is left of the developer platform and the reference examples, honestly sorted.
 //!
 //! Twenty blueprint modules were still uncited when this crate started: fourteen in the developer
@@ -214,6 +216,7 @@ pub mod ci_provider_evidence_registry;
 pub mod citations;
 pub mod claim;
 pub mod classify;
+pub mod context_compilation_assurance;
 pub mod cross_domain_audit;
 pub mod delivery_receipt;
 pub mod domain_acquisition;
@@ -239,7 +242,9 @@ pub mod evidence_registry;
 pub mod execution_provenance;
 pub mod exploit;
 pub mod mission;
+pub mod multimodal_limitation_closure_assurance;
 pub mod operational_readiness;
+pub mod quality_control_federated_control_plane;
 pub mod release_pipeline;
 pub mod report;
 pub mod repro;
@@ -319,6 +324,12 @@ pub use citations::{audit as audit_citations, scan as scan_citations, CitationAu
 pub use claim::{ApiClaim, ApiClaimDraft, ApiName, Evidence};
 pub use classify::{
     classification, implemented_module_ids, not_implemented, verdict_counts, ModuleVerdict, Verdict,
+};
+pub use context_compilation_assurance::{
+    assure_context_compilation, ContextAssuranceDisposition, ContextAssuranceError,
+    ContextCompilationAssuranceReceipt, ContextCompilationAssuranceRequest,
+    CONTRACT_VERSION as CONTEXT_COMPILATION_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as CONTEXT_COMPILATION_ASSURANCE_FEATURE_ID,
 };
 pub use cross_domain_audit::{
     build_cross_domain_audit, CROSS_DOMAIN_AUDIT_SCHEMA_VERSION, CROSS_DOMAIN_AUDIT_WORKFLOW,
@@ -506,6 +517,13 @@ pub use mission::{
     MAX_CLAIM_REQUESTS, MAX_WORKFLOW_BINDING_BYTES, MISSION_SCHEMA_VERSION,
     MISSION_TRACE_SCHEMA_VERSION,
 };
+pub use multimodal_limitation_closure_assurance::{
+    assure_devplat_multimodal_limitation_closure, devplat_multimodal_limitation_closure_manifest,
+    DevplatClosureError, DevplatClosureReceipt7, DevplatLimitationCase2, Limitation6,
+    LimitationClosureDisposition,
+    CONTRACT_VERSION as DEVPLAT_MULTIMODAL_LIMITATION_CLOSURE_CONTRACT_VERSION,
+    FEATURE_ID as DEVPLAT_MULTIMODAL_LIMITATION_CLOSURE_FEATURE_ID,
+};
 pub use operational_readiness::{
     DependencyCriticality, IncidentSeverity, IncidentState, IndicatorStatus, OperationalContract,
     OperationalContractKind, OperationalControls, OperationalCriticality, OperationalDependency,
@@ -515,6 +533,21 @@ pub use operational_readiness::{
     OperationalReadinessIssue, OperationalReadinessManifest, OperationalReadinessPolicies,
     OperationalRunbook, OperationalRunbookAudit, OperationalService, RunbookReviewStatus,
     OPERATIONAL_READINESS_AUDIT_SCHEMA, OPERATIONAL_READINESS_MANIFEST_SCHEMA,
+};
+pub use quality_control_federated_control_plane::{
+    assure_devplat_quality_control_federated_control_plane,
+    devplat_quality_control_federated_control_plane_manifest,
+    QualityAssuranceError as DevplatQualityControlPlaneError,
+    QualityControlRequest5 as DevplatQualityBatchRequest5,
+    QualityVerdict7 as DevplatQualityControlPlaneReceipt7,
+    QualityVerdictDisposition as DevplatQualityDisposition,
+    ResearchObject4 as DevplatQualityObservation4,
+    CONTENT_TYPE as DEVPLAT_QUALITY_CONTROL_PLANE_CONTENT_TYPE,
+    CONTRACT_VERSION as DEVPLAT_QUALITY_CONTROL_PLANE_CONTRACT_VERSION,
+    FEATURE_ID as DEVPLAT_QUALITY_CONTROL_PLANE_FEATURE_ID,
+    INPUT_SCHEMA as DEVPLAT_QUALITY_CONTROL_PLANE_INPUT_SCHEMA,
+    MAX_BATCH_OBJECTS as DEVPLAT_QUALITY_CONTROL_PLANE_MAX_BATCH_OBJECTS,
+    OUTPUT_SCHEMA as DEVPLAT_QUALITY_CONTROL_PLANE_OUTPUT_SCHEMA,
 };
 pub use release_pipeline::{
     EnvironmentClass, PipelineArtifact, PipelineArtifactKind, PipelineAttestation,
@@ -600,11 +633,11 @@ pub use workflow::{
 };
 pub use workflow_execution_evidence::{
     build_workflow_execution_evidence, validate_workflow_execution_evidence,
-    WorkflowExecutionEvidenceError, WorkflowExecutionEvidenceRegistry,
-    MAX_WORKFLOW_EXECUTION_EVIDENCE_BYTES, MAX_WORKFLOW_EXECUTION_EVIDENCE_CAPABILITIES,
-    MAX_WORKFLOW_EXECUTION_EVIDENCE_DOMAINS, MAX_WORKFLOW_EXECUTION_EVIDENCE_PARENTS,
-    MAX_WORKFLOW_EXECUTION_EVIDENCE_QUERY_ITEMS, MAX_WORKFLOW_EXECUTION_EVIDENCE_RECORDS,
-    WORKFLOW_EXECUTION_EVIDENCE_GET_SCHEMA_VERSION,
+    WorkflowExecutionEvidenceError, WorkflowExecutionEvidenceQuery,
+    WorkflowExecutionEvidenceRegistry, MAX_WORKFLOW_EXECUTION_EVIDENCE_BYTES,
+    MAX_WORKFLOW_EXECUTION_EVIDENCE_CAPABILITIES, MAX_WORKFLOW_EXECUTION_EVIDENCE_DOMAINS,
+    MAX_WORKFLOW_EXECUTION_EVIDENCE_PARENTS, MAX_WORKFLOW_EXECUTION_EVIDENCE_QUERY_ITEMS,
+    MAX_WORKFLOW_EXECUTION_EVIDENCE_RECORDS, WORKFLOW_EXECUTION_EVIDENCE_GET_SCHEMA_VERSION,
     WORKFLOW_EXECUTION_EVIDENCE_IMPORT_SCHEMA_VERSION,
     WORKFLOW_EXECUTION_EVIDENCE_QUERY_SCHEMA_VERSION,
     WORKFLOW_EXECUTION_EVIDENCE_REGISTRY_SCHEMA_VERSION,

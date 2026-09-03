@@ -1,0 +1,7 @@
+//! Worldgen P16 F10 statistical, causal, and ML research copilot.
+use super::publication_research_object_copilot_support::{self,ReleaseCopilotRequest,ReleaseCopilotReceipt};
+pub const FEATURE_ID:&str="AFA-worldgen-P16-F10"; pub const CONTRACT_VERSION:&str="worldgen-multimodal-publication-research-object-copilot/1.0";
+pub fn worldgen_multimodal_publication_research_object_research_copilot_manifest()->serde_json::Value{publication_research_object_copilot_support::manifest(FEATURE_ID,CONTRACT_VERSION,"multimodal multi-study")}
+pub fn run_worldgen_multimodal_publication_research_object_research_copilot(request:&ReleaseCopilotRequest)->Result<ReleaseCopilotReceipt,publication_research_object_copilot_support::ReleaseCopilotError>{publication_research_object_copilot_support::run(request,FEATURE_ID,CONTRACT_VERSION,"multimodal multi-study",true,false)}
+pub use publication_research_object_copilot_support::{ReleaseCopilotError,ReleaseCopilotRequest as WorldgenPublicationResearchObjectCopilotRequest,ReleaseCopilotReceipt as WorldgenPublicationResearchObjectCopilotReceipt};
+

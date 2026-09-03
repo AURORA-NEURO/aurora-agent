@@ -47,6 +47,7 @@ pub struct DomainEvidenceProviderExternalPayloadExecutionEvidenceRequest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct DomainEvidenceProviderExternalPayloadExecutionEvidence {
     pub schema: String,
     pub workflow: String,
@@ -108,12 +109,58 @@ fn canonical_digest(value: &serde_json::Value) -> Result<String, String> {
         .map_err(|error| error.to_string())
 }
 
+fn canonical_receipt(
+    receipt: DomainEvidenceProviderExternalPayloadReceipt,
+) -> Result<DomainEvidenceProviderExternalPayloadReceipt, String> {
+    let request = DomainEvidenceProviderExternalPayloadReceiptRequest {
+        group_id: receipt.group_id.clone(),
+        domains: receipt.domains.clone(),
+        subject_id: receipt.subject_id.clone(),
+        source_tool: receipt.source_tool.clone(),
+        provider: receipt.provider.clone(),
+        connector_kind: receipt.connector_kind.clone(),
+        handoff_digest: receipt.handoff_digest.clone(),
+        transfer_id: receipt.transfer_id.clone(),
+        payload_digest: receipt.payload_digest.clone(),
+        byte_length: receipt.byte_length,
+        storage_backend: receipt.storage_backend.clone(),
+        locator_kind: receipt.locator_kind.clone(),
+        locator: receipt.locator.clone(),
+        content_type: receipt.content_type.clone(),
+        content_encoding: receipt.content_encoding.clone(),
+        request_digest: receipt.request_digest.clone(),
+        parent_digests: receipt.parent_digests.clone(),
+        availability: receipt.availability.clone(),
+        retention: receipt.retention.clone(),
+        attempt_id: receipt.attempt_id.clone(),
+    };
+    let canonical =
+        crate::domain_evidence_provider_external::record_domain_evidence_provider_external_payload(
+            &request,
+        )
+        .map_err(|error| format!("receipt is invalid: {error}"))?;
+    if canonical != receipt {
+        return Err("receipt is not the canonical digest-bound receipt for its metadata".into());
+    }
+    Ok(canonical)
+}
+
 /// Compare caller-reported transfer observations with a retained external receipt.
 pub fn audit_domain_evidence_provider_external_payload_execution(
     receipt: DomainEvidenceProviderExternalPayloadReceipt,
     retained_receipt: Option<DomainEvidenceProviderExternalPayloadReceipt>,
     request: &DomainEvidenceProviderExternalPayloadExecutionEvidenceRequest,
 ) -> Result<DomainEvidenceProviderExternalPayloadExecutionEvidence, String> {
+    let receipt = canonical_receipt(receipt)?;
+    let requested_receipt =
+        crate::domain_evidence_provider_external::record_domain_evidence_provider_external_payload(
+            &request.receipt,
+        )
+        .map_err(|error| format!("request receipt is invalid: {error}"))?;
+    if requested_receipt != receipt {
+        return Err("request receipt does not match the canonical supplied receipt".into());
+    }
+    let retained_receipt = retained_receipt.map(canonical_receipt).transpose()?;
     let expected_receipt_digest =
         digest("expected_receipt_digest", &request.expected_receipt_digest)?;
     let execution_status = text("execution_status", &request.execution_status)?;
@@ -124,6 +171,9 @@ pub fn audit_domain_evidence_provider_external_payload_execution(
         ));
     }
     let executor_id = text("executor_id", &request.executor_id)?;
+    if executor_id != executor_id.trim() {
+        return Err("executor_id must not contain surrounding whitespace".into());
+    }
     let observed_payload_digest =
         optional_digest("observed_payload_digest", &request.observed_payload_digest)?;
     if let Some(byte_length) = request.observed_byte_length {
@@ -322,6 +372,14 @@ mod tests {
         )
         .unwrap();
         assert_eq!(matched.evidence_status, "matched");
+        let mut matched_value = serde_json::to_value(&matched).unwrap();
+        matched_value["unexpected"] = json!(true);
+        assert!(
+            serde_json::from_value::<DomainEvidenceProviderExternalPayloadExecutionEvidence>(
+                matched_value
+            )
+            .is_err()
+        );
         let mut partial_request = evidence(&receipt);
         partial_request.observed_byte_length = None;
         let partial = audit_domain_evidence_provider_external_payload_execution(
@@ -347,5 +405,41 @@ mod tests {
         )
         .unwrap();
         assert_eq!(orphaned.evidence_status, "orphaned");
+    }
+
+    #[test]
+    fn execution_evidence_rejects_forged_receipt_objects_and_identity_whitespace() {
+        let receipt = record_domain_evidence_provider_external_payload(&receipt_request()).unwrap();
+        let mut forged = receipt.clone();
+        forged.payload_digest = "d".repeat(64);
+        let error = audit_domain_evidence_provider_external_payload_execution(
+            forged,
+            Some(receipt.clone()),
+            &evidence(&receipt),
+        )
+        .expect_err("receipt metadata must be re-canonicalized before comparison");
+        assert!(error.contains("canonical digest-bound receipt"));
+
+        let mut invalid = evidence(&receipt);
+        invalid.executor_id = " transfer-worker".into();
+        let error = audit_domain_evidence_provider_external_payload_execution(
+            receipt.clone(),
+            Some(receipt),
+            &invalid,
+        )
+        .expect_err("executor identity whitespace must be rejected");
+        assert!(error.contains("executor_id"));
+    }
+
+    #[test]
+    fn execution_evidence_binds_flattened_request_receipt_to_supplied_receipt() {
+        let receipt = record_domain_evidence_provider_external_payload(&receipt_request()).unwrap();
+        let mut invalid = evidence(&receipt);
+        invalid.receipt.payload_digest = "d".repeat(64);
+
+        let error =
+            audit_domain_evidence_provider_external_payload_execution(receipt, None, &invalid)
+                .expect_err("request receipt fields must bind to the supplied receipt");
+        assert!(error.contains("does not match the canonical supplied receipt"));
     }
 }

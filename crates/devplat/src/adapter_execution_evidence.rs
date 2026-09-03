@@ -76,7 +76,7 @@ pub struct AdapterExecutionEvidenceRequest {
 }
 
 fn text(field: &str, value: &str, maximum: usize) -> Result<String, String> {
-    if value.trim().is_empty() {
+    if value.trim().is_empty() || value != value.trim() {
         return Err(format!("{field} must be non-empty"));
     }
     if value.len() > maximum {
@@ -88,7 +88,24 @@ fn text(field: &str, value: &str, maximum: usize) -> Result<String, String> {
     Ok(value.to_string())
 }
 
+fn identifier(field: &str, value: &str, maximum: usize) -> Result<String, String> {
+    let value = text(field, value, maximum)?;
+    if value != value.trim() {
+        return Err(format!("{field} must not contain surrounding whitespace"));
+    }
+    Ok(value)
+}
+
 fn digest(field: &str, value: &str) -> Result<String, String> {
+    if value.len() != 64
+        || !value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        return Err(format!(
+            "{field} must be a lowercase 64-character SHA-256 digest"
+        ));
+    }
     ContentHash::parse(value.to_string())
         .map(|digest| digest.to_string())
         .map_err(|_| format!("{field} must be a lowercase 64-character SHA-256 digest"))
@@ -143,8 +160,22 @@ fn validate_losses(losses: &[AdapterExecutionLoss]) -> Result<(), String> {
     Ok(())
 }
 
+fn canonical_losses(losses: &[AdapterExecutionLoss]) -> Vec<AdapterExecutionLoss> {
+    let mut canonical = losses.to_vec();
+    canonical.sort_by_key(|loss| {
+        (
+            loss.kind.clone(),
+            loss.severity.clone(),
+            loss.detail.clone(),
+            loss.source_path.clone(),
+            loss.target_path.clone(),
+        )
+    });
+    canonical
+}
+
 fn validate_request(request: &AdapterExecutionEvidenceRequest) -> Result<(), String> {
-    text(
+    identifier(
         "group_id",
         &request.group_id,
         MAX_ADAPTER_EXECUTION_EVIDENCE_TEXT_BYTES,
@@ -156,17 +187,21 @@ fn validate_request(request: &AdapterExecutionEvidenceRequest) -> Result<(), Str
             MAX_ADAPTER_EXECUTION_EVIDENCE_DOMAINS
         ));
     }
+    let mut domain_keys = BTreeSet::new();
     for domain in &request.domains {
-        text("domain", domain, MAX_ADAPTER_EXECUTION_EVIDENCE_TEXT_BYTES)?;
+        identifier("domain", domain, MAX_ADAPTER_EXECUTION_EVIDENCE_TEXT_BYTES)?;
+        if !domain_keys.insert(domain.to_ascii_lowercase()) {
+            return Err("domains must not contain duplicate or case-colliding values".into());
+        }
     }
-    text(
+    identifier(
         "subject_id",
         &request.subject_id,
         MAX_ADAPTER_EXECUTION_EVIDENCE_TEXT_BYTES,
     )?;
-    text("adapter_id", &request.adapter_id, 256)?;
+    identifier("adapter_id", &request.adapter_id, 256)?;
     text("adapter_version", &request.adapter_version, 128)?;
-    text(
+    identifier(
         "source_id",
         &request.source_id,
         MAX_ADAPTER_EXECUTION_EVIDENCE_TEXT_BYTES,
@@ -239,11 +274,15 @@ fn validate_request(request: &AdapterExecutionEvidenceRequest) -> Result<(), Str
             MAX_ADAPTER_EXECUTION_EVIDENCE_PARENTS
         ));
     }
+    let mut parent_keys = BTreeSet::new();
     for parent in &request.parent_digests {
         digest("parent_digest", parent)?;
+        if !parent_keys.insert(parent.to_ascii_lowercase()) {
+            return Err("parent_digests must not contain duplicate values".into());
+        }
     }
     if let Some(attempt_id) = &request.attempt_id {
-        text("attempt_id", attempt_id, 128)?;
+        identifier("attempt_id", attempt_id, 128)?;
     }
     Ok(())
 }
@@ -254,11 +293,16 @@ pub fn record_adapter_execution_evidence(
 ) -> Result<Value, String> {
     validate_request(&request)?;
     let output_digest = optional_digest("output_digest", &request.output_digest)?;
+    let mut domains = request.domains.clone();
+    domains.sort();
+    let mut parent_digests = request.parent_digests.clone();
+    parent_digests.sort();
+    let losses = canonical_losses(&request.losses);
     let evidence_without_digest = json!({
         "schema": ADAPTER_EXECUTION_EVIDENCE_SCHEMA,
         "workflow": ADAPTER_EXECUTION_EVIDENCE_WORKFLOW,
         "group_id": request.group_id,
-        "domains": request.domains,
+        "domains": domains,
         "subject_id": request.subject_id,
         "adapter_id": request.adapter_id,
         "adapter_version": request.adapter_version,
@@ -268,11 +312,11 @@ pub fn record_adapter_execution_evidence(
         "execution_status": request.execution_status,
         "conformance_status": request.conformance_status,
         "semantic_loss_status": request.semantic_loss_status,
-        "losses": request.losses,
+        "losses": losses,
         "item_count": request.item_count,
         "byte_length": request.byte_length,
         "error_code": request.error_code,
-        "parent_digests": request.parent_digests,
+        "parent_digests": parent_digests,
         "attempt_id": request.attempt_id,
         "attestation_posture": "caller_asserted",
     });
@@ -350,6 +394,83 @@ mod tests {
         request.semantic_loss_status = "unknown".into();
         request.execution_status = "refused".into();
         assert!(record_adapter_execution_evidence(request).is_err());
+    }
+
+    #[test]
+    fn evidence_rejects_noncanonical_digests_and_ambiguous_identity_lists() {
+        let mut uppercase_digest = request();
+        uppercase_digest.input_digest = "A".repeat(64);
+        let error = record_adapter_execution_evidence(uppercase_digest)
+            .expect_err("uppercase digests must not cross the evidence boundary");
+        assert!(error.contains("input_digest"));
+
+        let mut duplicate_domains = request();
+        duplicate_domains.domains = vec!["Genomics".into(), "genomics".into()];
+        let error = record_adapter_execution_evidence(duplicate_domains)
+            .expect_err("case-colliding domains must be rejected");
+        assert!(error.contains("duplicate or case-colliding"));
+
+        let mut duplicate_parents = request();
+        duplicate_parents.parent_digests = vec!["c".repeat(64), "c".repeat(64)];
+        let error = record_adapter_execution_evidence(duplicate_parents)
+            .expect_err("duplicate parent identities must be rejected");
+        assert!(error.contains("parent_digests"));
+    }
+
+    #[test]
+    fn evidence_rejects_surrounding_identity_whitespace() {
+        let mut whitespace_identity = request();
+        whitespace_identity.subject_id = " subject-1".into();
+        let error = record_adapter_execution_evidence(whitespace_identity)
+            .expect_err("identity whitespace must not create an alias");
+        assert!(error.contains("subject_id"));
+
+        let mut whitespace_version = request();
+        whitespace_version.adapter_version = " 0.1.0".into();
+        let error = record_adapter_execution_evidence(whitespace_version)
+            .expect_err("metadata whitespace must not create an alias");
+        assert!(error.contains("adapter_version"));
+    }
+
+    #[test]
+    fn evidence_digest_is_independent_of_set_like_input_order() {
+        let mut first = request();
+        first.domains = vec!["genomics".into(), "oncology".into()];
+        first.parent_digests = vec!["d".repeat(64), "c".repeat(64)];
+        first.semantic_loss_status = "lossy".into();
+        first.losses = vec![
+            AdapterExecutionLoss {
+                kind: "schema".into(),
+                severity: "warning".into(),
+                detail: "z".into(),
+                source_path: None,
+                target_path: Some("/z".into()),
+            },
+            AdapterExecutionLoss {
+                kind: "mapping".into(),
+                severity: "info".into(),
+                detail: "a".into(),
+                source_path: Some("/a".into()),
+                target_path: None,
+            },
+        ];
+        let mut second = first.clone();
+        second.domains.reverse();
+        second.parent_digests.reverse();
+        second.losses.reverse();
+
+        let first = record_adapter_execution_evidence(first).unwrap();
+        let second = record_adapter_execution_evidence(second).unwrap();
+        assert_eq!(first["evidence_digest"], second["evidence_digest"]);
+        assert_eq!(
+            first["evidence"]["domains"],
+            json!(["genomics", "oncology"])
+        );
+        assert_eq!(
+            first["evidence"]["parent_digests"],
+            json!(["c".repeat(64), "d".repeat(64)])
+        );
+        assert_eq!(first["evidence"]["losses"][0]["kind"], "mapping");
     }
 
     #[test]

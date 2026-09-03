@@ -1,10 +1,8 @@
 //! Evaluator independence and what disagreement means (26.01).
 
-use bioprism_bioevalx::error::MeshError;
-use bioprism_bioevalx::mesh::{
-    Disagreement, EvaluatorDecl, EvaluatorKind, EvaluatorVerdict, Mesh,
-};
 use bioprism_bioeval::{ConsensusPolicy, ConsensusState, PanelAggregate};
+use bioprism_bioevalx::error::MeshError;
+use bioprism_bioevalx::mesh::{Disagreement, EvaluatorDecl, EvaluatorKind, EvaluatorVerdict, Mesh};
 use bioprism_evalengine::{compose, Conclusion, ScoreTier, UnknownPolicy};
 
 fn mesh_over_one_report() -> Mesh {
@@ -27,13 +25,80 @@ fn an_oracle_built_from_the_system_it_grades_is_refused_at_admission() {
     );
 
     match outcome {
-        Err(MeshError::CircularOracle { evaluator, artifact }) => {
+        Err(MeshError::CircularOracle {
+            evaluator,
+            artifact,
+        }) => {
             assert_eq!(evaluator, "distilled-judge");
             assert_eq!(artifact, "system-weights");
         }
         other => panic!("expected a circularity refusal, got {other:?}"),
     }
-    assert!(mesh.evaluators().is_empty(), "a refused oracle is not admitted");
+    assert!(
+        mesh.evaluators().is_empty(),
+        "a refused oracle is not admitted"
+    );
+}
+
+#[test]
+fn malformed_evaluator_declarations_are_refused_at_admission() {
+    let mut mesh = Mesh::for_system(["system-weights".to_string()]);
+
+    let refusal = mesh
+        .admit(EvaluatorDecl::new(" ", EvaluatorKind::ExpertReview).reading("report-1"))
+        .expect_err("an evaluator id is an identity, not presentation text");
+
+    assert!(matches!(refusal, MeshError::InvalidEvaluator { .. }));
+}
+
+#[test]
+fn one_evaluator_cannot_submit_two_verdicts_to_multiply_a_disagreement() {
+    let mesh = mesh_over_one_report();
+
+    let refusal = mesh
+        .disagreements(&[
+            EvaluatorVerdict::called("reader-a", "progression"),
+            EvaluatorVerdict::called("reader-a", "treatment-effect"),
+        ])
+        .expect_err("one evaluator contributes one observation");
+
+    assert!(matches!(refusal, MeshError::DuplicateVerdict(id) if id == "reader-a"));
+}
+
+#[test]
+fn abstentions_cannot_smuggle_a_position_into_the_called_channel() {
+    let mesh = mesh_over_one_report();
+    let verdict = EvaluatorVerdict {
+        evaluator: "reader-a".to_string(),
+        position: "progression".to_string(),
+        abstained: true,
+    };
+
+    let refusal = mesh
+        .contributions(&[verdict], "progression")
+        .expect_err("an abstention has no called position");
+
+    assert!(matches!(refusal, MeshError::InvalidVerdict { .. }));
+}
+
+#[test]
+fn verdicts_are_canonicalized_by_evaluator_identity() {
+    let mesh = mesh_over_one_report();
+
+    let forward = mesh
+        .disagreements(&[
+            EvaluatorVerdict::called("reader-b", "treatment-effect"),
+            EvaluatorVerdict::called("reader-a", "progression"),
+        ])
+        .expect("valid verdicts");
+    let reverse = mesh
+        .disagreements(&[
+            EvaluatorVerdict::called("reader-a", "progression"),
+            EvaluatorVerdict::called("reader-b", "treatment-effect"),
+        ])
+        .expect("valid verdicts");
+
+    assert_eq!(forward, reverse);
 }
 
 #[test]
@@ -78,14 +143,21 @@ fn independence_classes_are_transitive_through_a_shared_middle_evaluator() {
 
     let classes = mesh.independence_classes();
 
-    assert_eq!(classes.len(), 1, "a and c are linked through b, got {classes:?}");
+    assert_eq!(
+        classes.len(),
+        1,
+        "a and c are linked through b, got {classes:?}"
+    );
 }
 
 #[test]
 fn an_evaluator_that_declared_no_inputs_has_unverified_rather_than_established_independence() {
     let mut mesh = Mesh::for_system([]);
-    mesh.admit(EvaluatorDecl::new("silent", EvaluatorKind::StatisticalReference))
-        .expect("distinct");
+    mesh.admit(EvaluatorDecl::new(
+        "silent",
+        EvaluatorKind::StatisticalReference,
+    ))
+    .expect("distinct");
 
     let census = mesh.census().expect("mesh is non-empty");
 
@@ -119,8 +191,10 @@ fn two_independent_lines_of_evidence_disagreeing_is_a_finding_with_a_witness() {
     let mut mesh = Mesh::for_system([]);
     mesh.admit(EvaluatorDecl::new("imaging", EvaluatorKind::ExpertReview).reading("mri-4"))
         .expect("distinct");
-    mesh.admit(EvaluatorDecl::new("molecular", EvaluatorKind::ExecutableAnalysis).reading("panel-9"))
-        .expect("distinct");
+    mesh.admit(
+        EvaluatorDecl::new("molecular", EvaluatorKind::ExecutableAnalysis).reading("panel-9"),
+    )
+    .expect("distinct");
 
     let found = mesh
         .disagreements(&[
@@ -248,8 +322,10 @@ fn independent_classes_each_contribute_one_rating_and_the_disagreement_survives(
     let mut mesh = Mesh::for_system([]);
     mesh.admit(EvaluatorDecl::new("imaging", EvaluatorKind::ExpertReview).reading("mri-4"))
         .expect("distinct");
-    mesh.admit(EvaluatorDecl::new("molecular", EvaluatorKind::ExecutableAnalysis).reading("panel-9"))
-        .expect("distinct");
+    mesh.admit(
+        EvaluatorDecl::new("molecular", EvaluatorKind::ExecutableAnalysis).reading("panel-9"),
+    )
+    .expect("distinct");
 
     let ratings = mesh
         .independent_ratings(&[

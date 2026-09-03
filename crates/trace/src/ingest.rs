@@ -76,7 +76,7 @@ impl Ingestion {
     /// A trace that dropped events is not: the segmenter would place boundaries in a sequence with
     /// holes in it, and the resulting cell would freeze a state the agent never occupied.
     pub fn is_compilable(&self) -> bool {
-        self.loss.dropped_events() == 0 && !self.trace.is_empty()
+        self.loss.dropped_events() == 0 && !self.trace.is_empty() && validate(&self.trace).is_ok()
     }
 }
 

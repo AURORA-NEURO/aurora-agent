@@ -185,8 +185,11 @@ impl BundleManifest {
     /// 34.14 requires every rendered score to resolve to immutable result objects, which needs
     /// exactly one certificate and one section per bundle rather than a best-effort first match.
     pub fn sole_entry_with_role(&self, role: &EntryRole) -> Result<&ManifestEntry, BundleError> {
-        let matches: Vec<&ManifestEntry> =
-            self.entries.iter().filter(|entry| &entry.role == role).collect();
+        let matches: Vec<&ManifestEntry> = self
+            .entries
+            .iter()
+            .filter(|entry| &entry.role == role)
+            .collect();
         match matches.as_slice() {
             [only] => Ok(only),
             other => Err(BundleError::RoleCardinality {
@@ -199,7 +202,11 @@ impl BundleManifest {
     /// The canonical bytes a tag is computed over. Uses `bioprism-ids`' canonical serializer, the
     /// workspace's only one, so bundle bytes and certificate bytes agree on float and key ordering.
     pub fn canonical_bytes(&self) -> Result<Vec<u8>, BundleError> {
-        let value = serde_json::to_value(self).expect("a manifest is serialisable");
+        let value =
+            serde_json::to_value(self).map_err(|error| BundleError::SerializationFailed {
+                context: "bundle manifest",
+                detail: error.to_string(),
+            })?;
         Ok(bioprism_ids::to_canonical_bytes(&value)?)
     }
 

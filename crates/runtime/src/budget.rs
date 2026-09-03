@@ -70,9 +70,16 @@ impl fmt::Display for RuntimeResource {
 /// exploring — *before* the hard limit turns the trial into a failure. Which of the two a trial hit
 /// is part of its evidence, so the distinction is kept rather than collapsed to "over budget".
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "LimitRepr", into = "LimitRepr")]
 pub struct Limit {
     pub soft: Option<u64>,
     pub hard: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+struct LimitRepr {
+    soft: Option<u64>,
+    hard: u64,
 }
 
 impl Limit {
@@ -84,6 +91,40 @@ impl Limit {
         Limit {
             soft: Some(soft),
             hard,
+        }
+    }
+
+    fn validate(self) -> Result<(), RuntimeError> {
+        if self.soft.is_some_and(|soft| soft > self.hard) {
+            return Err(RuntimeError::InvariantViolation {
+                detail: format!(
+                    "budget soft limit cannot exceed hard limit (soft {:?}, hard {})",
+                    self.soft, self.hard
+                ),
+            });
+        }
+        Ok(())
+    }
+}
+
+impl TryFrom<LimitRepr> for Limit {
+    type Error = String;
+
+    fn try_from(value: LimitRepr) -> Result<Self, Self::Error> {
+        let limit = Limit {
+            soft: value.soft,
+            hard: value.hard,
+        };
+        limit.validate().map_err(|error| error.to_string())?;
+        Ok(limit)
+    }
+}
+
+impl From<Limit> for LimitRepr {
+    fn from(value: Limit) -> Self {
+        LimitRepr {
+            soft: value.soft,
+            hard: value.hard,
         }
     }
 }
@@ -133,6 +174,17 @@ impl BudgetPlan {
 
     pub fn resources(&self) -> impl Iterator<Item = RuntimeResource> + '_ {
         self.limits.keys().copied()
+    }
+
+    pub fn validate(&self) -> Result<(), RuntimeError> {
+        for (resource, limit) in &self.limits {
+            limit
+                .validate()
+                .map_err(|error| RuntimeError::InvariantViolation {
+                    detail: format!("invalid {resource} budget limit: {error}"),
+                })?;
+        }
+        Ok(())
     }
 }
 
@@ -195,9 +247,18 @@ impl BudgetController {
         let Some(limit) = self.limits.get(&resource).copied() else {
             return Err(RuntimeError::UndeclaredResource { resource });
         };
+        limit.validate()?;
 
         let used = self.used(resource);
-        let proposed = used.saturating_add(amount);
+        let Some(proposed) = used.checked_add(amount) else {
+            self.aborted_on = Some(resource);
+            return Err(RuntimeError::BudgetExhausted {
+                resource,
+                hard: limit.hard,
+                used,
+                requested: amount,
+            });
+        };
         if proposed > limit.hard {
             self.aborted_on = Some(resource);
             return Err(RuntimeError::BudgetExhausted {
@@ -233,7 +294,14 @@ impl BudgetController {
     /// child allocation, so two children cannot both be handed the same headroom.
     pub fn derive_child(&mut self, plan: &BudgetPlan) -> Result<BudgetController, RuntimeError> {
         for resource in plan.resources() {
-            let requested = plan.limit(resource).expect("resource came from the plan").hard;
+            if let Some(limit) = plan.limit(resource) {
+                limit.validate()?;
+            }
+        }
+        for resource in plan.resources() {
+            let Some(requested) = plan.limit(resource).map(|limit| limit.hard) else {
+                return Err(RuntimeError::UndeclaredResource { resource });
+            };
             let available = self.remaining(resource);
             if !self.limits.contains_key(&resource) {
                 return Err(RuntimeError::UndeclaredResource { resource });
@@ -247,7 +315,9 @@ impl BudgetController {
             }
         }
         for resource in plan.resources() {
-            let requested = plan.limit(resource).expect("resource came from the plan").hard;
+            let Some(requested) = plan.limit(resource).map(|limit| limit.hard) else {
+                return Err(RuntimeError::UndeclaredResource { resource });
+            };
             self.charge(resource, requested)?;
         }
         Ok(BudgetController::from_plan(plan))

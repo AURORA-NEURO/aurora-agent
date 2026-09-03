@@ -139,6 +139,86 @@ fn a_rule_with_no_terms_is_rejected_at_construction() {
 }
 
 #[test]
+fn a_rule_with_duplicate_term_ids_is_rejected_instead_of_awarding_ambiguous_credit() {
+    let refusal = CreditRule::new(
+        "bioeval/duplicate-terms/1",
+        1,
+        vec![term("same", 1.0), term("same", 1.0)],
+    )
+    .expect_err("one evidence id must identify one rubric term");
+
+    assert!(matches!(refusal, CreditError::InvalidRule { .. }));
+}
+
+#[test]
+fn a_rule_with_an_invalid_identity_or_overflowed_weight_total_is_rejected() {
+    let invalid_id = CreditRule::new(" ", 1, vec![term("t", 1.0)])
+        .expect_err("a blank rule identity cannot anchor a reproducible award");
+    assert!(matches!(invalid_id, CreditError::InvalidRule { .. }));
+
+    let overflowed = CreditRule::new(
+        "bioeval/overflow/1",
+        1,
+        vec![term("a", f64::MAX), term("b", f64::MAX)],
+    )
+    .expect_err("the normalisation denominator must remain finite");
+    assert!(matches!(overflowed, CreditError::InvalidRule { .. }));
+}
+
+#[test]
+fn malformed_deserialised_rules_are_revalidated_before_awarding() {
+    let mut encoded = serde_json::to_value(rubric(1)).expect("rule serialises");
+    encoded["terms"][0]["term_id"] = serde_json::json!(" ");
+    let forged: CreditRule = serde_json::from_value(encoded).expect("shape still parses");
+
+    let refusal = forged
+        .award(&CreditEvidence::satisfying(["names_the_gene".to_string()]))
+        .expect_err("deserialisation must not bypass rubric validation");
+
+    assert!(matches!(refusal, CreditError::InvalidRule { .. }));
+}
+
+#[test]
+fn malformed_evidence_is_rejected_before_it_can_affect_the_award_digest() {
+    let evidence = CreditEvidence::satisfying([" ".to_string()]);
+
+    let refusal = rubric(1)
+        .award(&evidence)
+        .expect_err("empty term ids are not evidence for a rubric");
+
+    assert!(matches!(refusal, CreditError::InvalidEvidence { .. }));
+}
+
+#[test]
+fn duplicate_error_classes_are_not_counted_as_distinct_evidence() {
+    let evidence = CreditEvidence::satisfying(["names_the_gene".to_string()])
+        .with_error(BiologicalErrorClass::Units)
+        .with_error(BiologicalErrorClass::Units);
+
+    let refusal = rubric(1)
+        .award(&evidence)
+        .expect_err("an error class is a set-valued observation");
+
+    assert!(matches!(refusal, CreditError::InvalidEvidence { .. }));
+}
+
+#[test]
+fn error_class_order_does_not_change_the_replay_digest() {
+    let first = CreditEvidence::satisfying(["names_the_gene".to_string()])
+        .with_error(BiologicalErrorClass::Units)
+        .with_error(BiologicalErrorClass::ScopeViolation);
+    let second = CreditEvidence::satisfying(["names_the_gene".to_string()])
+        .with_error(BiologicalErrorClass::ScopeViolation)
+        .with_error(BiologicalErrorClass::Units);
+
+    let first_award = rubric(1).award(&first).expect("valid evidence");
+    let second_award = rubric(1).award(&second).expect("valid evidence");
+
+    assert_eq!(first_award.digest(), second_award.digest());
+    assert_eq!(first_award, second_award);
+}
+
+#[test]
 fn a_rule_with_a_non_positive_weight_is_rejected_at_construction() {
     let refusal = CreditRule::new("bioeval/bad-weight/1", 1, vec![term("t", 0.0)])
         .expect_err("a zero-weight term is a term that cannot be earned");

@@ -44,8 +44,11 @@ impl CellProposal {
         candidate: &Candidate,
         divergence: Option<&Divergence>,
     ) -> Result<Self, TraceError> {
+        crate::ingest::validate(trace)?;
         if trace.at(candidate.step).is_none() {
-            return Err(TraceError::StepNotInTrace { step: candidate.step });
+            return Err(TraceError::StepNotInTrace {
+                step: candidate.step,
+            });
         }
 
         let (passing, gap) = match divergence {

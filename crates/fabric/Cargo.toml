@@ -5,6 +5,7 @@ edition = "2021"
 description = "Interweave fabric above the microkernel: composition algebra, effect and information flow, contextual reputation, common ground, semantic lifecycle"
 
 [dependencies]
+bioprism-foundation = { workspace = true }
 bioprism-ids = { workspace = true }
 bioprism-weave = { workspace = true }
 bioprism-choreography = { workspace = true }
