@@ -485,19 +485,20 @@ use bioprism_research::{
     explore_mechanisms, generate_feature_catalog, glioma_program_catalog,
     harmonize_glioma_multimodal_batches, harmonize_multimodal_inputs, plan_decision_actions,
     plan_glioma_active_learning, plan_glioma_adaptive_information_campaign,
-    plan_glioma_closed_loop_campaign, plan_glioma_information_design,
-    plan_glioma_multi_fidelity_optimization, plan_glioma_robust_active_learning,
-    plan_glioma_robust_intervention_portfolio, plan_glioma_workflow, preflight_glioma_instrument,
-    prioritize_glioma_evidence, prioritize_knowledge_frontier, propagate_glioma_mechanism_graph,
-    qualify_evidence, select_glioma_actions, simulate_glioma_counterfactual,
-    simulate_glioma_counterfactual_ensemble, simulate_glioma_protocol, surveil_glioma_evidence,
-    validate_feature_catalog, ActionPortfolioExecutionRequest, ActiveLearningCampaignRequest,
-    ActiveLearningCandidate, ActiveLearningObservation, ActiveLearningRequest,
-    AdaptiveAllocationRequest, AdaptiveArmObservation, AdaptiveInformationCampaignRequest,
-    AdaptiveInformationObservation, AnalysisDataset, AnalysisRequest, CalibrationRequest,
-    CalibrationRun, CampaignAction, CampaignMechanism, CampaignObservation, CausalContrastRequest,
-    ClosedLoopCampaignRequest, CombinationObservation, CombinationSynergyRequest,
-    ComputationExecutionRequest, ConcordanceRequest, ConsensusRequest,
+    plan_glioma_closed_loop_campaign, plan_glioma_computation_portfolio,
+    plan_glioma_information_design, plan_glioma_multi_fidelity_optimization,
+    plan_glioma_robust_active_learning, plan_glioma_robust_intervention_portfolio,
+    plan_glioma_workflow, preflight_glioma_instrument, prioritize_glioma_evidence,
+    prioritize_knowledge_frontier, propagate_glioma_mechanism_graph, qualify_evidence,
+    select_glioma_actions, simulate_glioma_counterfactual, simulate_glioma_counterfactual_ensemble,
+    simulate_glioma_protocol, surveil_glioma_evidence, validate_feature_catalog,
+    ActionPortfolioExecutionRequest, ActiveLearningCampaignRequest, ActiveLearningCandidate,
+    ActiveLearningObservation, ActiveLearningRequest, AdaptiveAllocationRequest,
+    AdaptiveArmObservation, AdaptiveInformationCampaignRequest, AdaptiveInformationObservation,
+    AnalysisDataset, AnalysisRequest, CalibrationRequest, CalibrationRun, CampaignAction,
+    CampaignMechanism, CampaignObservation, CausalContrastRequest, ClosedLoopCampaignRequest,
+    CombinationObservation, CombinationSynergyRequest, ComputationCandidate,
+    ComputationExecutionRequest, ComputationPortfolioRequest, ConcordanceRequest, ConsensusRequest,
     CounterfactualEnsembleRequest, CounterfactualIntervention, CounterfactualModel,
     CounterfactualRequest, DecisionActionPlanRequest, DecisionContext, DecisionContextRequest,
     DesignAction, DesignMechanism, DoseResponseObservation, DoseResponseRequest,
@@ -1971,6 +1972,9 @@ impl Server {
             }
             "glioma_evidence_campaign_execute" => self.glioma_evidence_campaign_execute(&arguments),
             "glioma_computation_execute" => self.glioma_computation_execute(&arguments),
+            "glioma_computation_portfolio_plan" => {
+                self.glioma_computation_portfolio_plan(&arguments)
+            }
             "glioma_robustness_suite" => self.glioma_robustness_suite(&arguments),
             "glioma_trajectory_analyze" => self.glioma_trajectory_analyze(&arguments),
             "glioma_state_transition_analyze" => self.glioma_state_transition_analyze(&arguments),
@@ -3361,6 +3365,38 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma computation execution: {error}"))
+    }
+
+    /// Compile a resource-bounded, dependency-closed multimodal computation portfolio. The
+    /// planner only emits an execution-ready order; it never invokes external code or moves raw
+    /// data. Institution-local workers can pass the selected tasks to the computation executor.
+    fn glioma_computation_portfolio_plan(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ComputationPortfolioRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_computation_portfolio_plan requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma computation portfolio request: {error}"))?;
+        let candidates: Vec<ComputationCandidate> =
+            serde_json::from_value(arguments.get("candidates").cloned().ok_or_else(|| {
+                "glioma_computation_portfolio_plan requires candidates".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma computation portfolio candidates: {error}"))?;
+        let plan = plan_glioma_computation_portfolio(&request, &candidates)
+            .map_err(|error| format!("glioma computation portfolio refused: {error}"))?;
+        serde_json::to_value(json!({
+            "plan": plan,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "prerequisite closure and deterministic task order are explicit",
+                "budget, duration, task-count, modality, and deterministic-policy gates are fail-closed",
+                "missing dependencies, cycles, deferred work, and negative evidence remain visible",
+                "the route does not execute external code, move raw data, or make a clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma computation portfolio: {error}"))
     }
 
     /// Stress-test a local two-arm glioma analysis under deterministic batch and row omissions.
@@ -45076,6 +45112,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_research_autopilot_execute",
                 "glioma_evidence_campaign_execute",
                 "glioma_computation_execute",
+                "glioma_computation_portfolio_plan",
                 "glioma_robustness_suite",
                 "glioma_trajectory_analyze",
                 "glioma_state_transition_analyze",
@@ -52026,6 +52063,18 @@ pub fn tool_definitions() -> Vec<Value> {
                 "request": {"type": "object", "description": "ComputationExecutionRequest1@1 containing ComputationTask1@1 DAG nodes, replay identity, cache, and resource bounds."}
             },
             "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_computation_portfolio_plan",
+        "description": "Compile an execution-ready portfolio of multimodal preclinical glioma computation tasks under declared cost, time, task-count, modality, and determinism budgets. Closes prerequisites in stable topological order, preserves required work, and reports deferred, blocked, unresolved, contradictory, and insufficient-coverage states. The route plans only: it does not execute external code, move raw data, or make a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ComputationPortfolioRequest1@1 with objective, model system, bounded resources, utility weights, modality coverage, deterministic policy, and completed replay order."},
+                "candidates": {"type": "array", "items": {"type": "object"}, "description": "ComputationCandidate1@1 records wrapping typed ComputationTask1@1 DAG nodes with modality, information gain, uncertainty reduction, coverage debt, redundancy group, and required flag."}
+            },
+            "required": ["request", "candidates"]
         }
     }));
     definitions.push(json!({

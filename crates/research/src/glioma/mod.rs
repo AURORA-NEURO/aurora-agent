@@ -166,10 +166,13 @@ pub use programs::p08_instrument_robotics::{
     InstrumentPreflightError, InstrumentPreflightPlan, InstrumentPreflightRequest,
 };
 pub use programs::p09_reproducible_computation::{
-    assess_glioma_robustness, execute_glioma_computation, ComputationCacheEntry,
-    ComputationExecution, ComputationExecutionDisposition, ComputationExecutionError,
-    ComputationExecutionFailure, ComputationExecutionRequest, ComputationExecutionStopReason,
-    ComputationOperation, ComputationTask, ComputationTaskDisposition, ComputationTaskResult,
+    assess_glioma_robustness, execute_glioma_computation, plan_glioma_computation_portfolio,
+    ComputationCacheEntry, ComputationCandidate, ComputationCandidateDisposition,
+    ComputationCandidateScore, ComputationExecution, ComputationExecutionDisposition,
+    ComputationExecutionError, ComputationExecutionFailure, ComputationExecutionRequest,
+    ComputationExecutionStopReason, ComputationOperation, ComputationPortfolioDisposition,
+    ComputationPortfolioError, ComputationPortfolioPlan, ComputationPortfolioRequest,
+    ComputationTask, ComputationTaskDisposition, ComputationTaskResult,
     DryRunGliomaComputationExecutor, GliomaComputationExecutor, RobustnessCase, RobustnessCaseKind,
     RobustnessDisposition, RobustnessError, RobustnessRequest, RobustnessSuite,
 };

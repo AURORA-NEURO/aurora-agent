@@ -89,6 +89,8 @@ crates/research/src/glioma/
                                              P09 leave-one-batch/row-out robustness battery
     p09_reproducible_computation/execution.rs
                                              P09 replayable multimodal computation DAG execution
+    p09_reproducible_computation/planning.rs
+                                             P09 budgeted computation-portfolio planning with prerequisite closure
     p10_interpretation_replication/trajectory.rs
                                              P10 longitudinal per-unit trajectory analysis
     p10_interpretation_replication/transportability.rs
@@ -337,6 +339,14 @@ typed multimodal DAGs in stable topological order, reuses only replay-keyed loca
 enforces cost budgets, retries transient worker failures, and preserves negative, partial, failed,
 and skipped tasks. The dry-run worker emits synthetic artifacts; production containers, GPUs, and
 schedulers remain behind a caller-owned executor.
+P09 now also includes computation-portfolio planning (`glioma_computation_portfolio_plan`). It
+scores declared multimodal analyses by information gain, uncertainty reduction, coverage debt, and
+resource penalties; closes prerequisite DAGs in deterministic order; and hands the existing
+computation executor an execution-ready task order under cost, duration, task-count, modality, and
+determinism gates. Missing or cyclic dependencies, required work that cannot fit, deferred analyses,
+non-deterministic tasks, and unmet modality coverage remain explicit rather than being silently
+discarded. The planner never runs external code or moves raw data; institution-local workers own
+the actual computation effects.
 P05 now also includes counterfactual mechanism simulation (`simulate_glioma_counterfactual`). It
 compares baseline and signed node perturbation fixed points over activating/inhibiting networks,
 rank-orders downstream changes, and exposes low-confidence edges and non-convergence as unresolved.
