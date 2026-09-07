@@ -128,6 +128,8 @@ crates/research/src/glioma/
                                              P03 robust per-modality batch harmonization with explicit correction gates
   p03_multimodal_ingestion_qc/latent_factors.rs
                                              P03 robust complete-case multimodal latent-state factorization with convergence and reconstruction gates
+  p03_multimodal_ingestion_qc/graph_fusion.rs
+                                             P03 reliability-weighted multimodal sample graph fusion with dropout, contradiction, and bounded diffusion gates
   p03_multimodal_ingestion_qc/spatial_niche.rs
                                              P03 spatial neighbourhood graph, same-lineage niche components, and cross-lineage enrichment
   p03_multimodal_ingestion_qc/spatial_communication.rs
@@ -242,6 +244,11 @@ P03 now also includes spatial-state propagation (`analyze_glioma_spatial_state_p
 builds same-sample neighborhood edges and runs a bounded integer diffusion with self-retention,
 lineage-aware coupling, convergence checks, and hotspot ranking. It never diffuses across samples,
 imputes isolated cells, or presents a spatial simulation as biological proof.
+P03 now also includes multimodal graph fusion (`analyze_glioma_multimodal_graph_fusion`) that
+retains modality-specific sample neighbours, fuses them with reliability-weighted consensus, and
+runs bounded diffusion over observed edges. Modality dropout, sparse shared features, contradictory
+cross-modal scores, and the all-modalities release gate remain explicit negative evidence rather than
+being silently imputed or converted into a confident state.
 P02 now includes typed-knowledge compilation (`compile_typed_knowledge`) that coalesces scoped
 claims, ranks support against contradiction, preserves negative/unknown evidence, and exposes
 missing modality/model coverage for the next workflow action.

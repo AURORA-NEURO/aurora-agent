@@ -470,21 +470,22 @@ use bioprism_research::{
     allocate_glioma_assays, analyze_causal_sensitivity, analyze_federated_benchmark,
     analyze_glioma_causal_contrast, analyze_glioma_combination_synergy,
     analyze_glioma_dose_response, analyze_glioma_latent_factors, analyze_glioma_mediation,
-    analyze_glioma_spatial_communication, analyze_glioma_spatial_niches,
-    analyze_glioma_spatial_state_propagation, analyze_glioma_state_transitions,
-    analyze_glioma_trajectories, analyze_glioma_transportability, analyze_instrument_calibration,
-    analyze_multimodal_concordance, analyze_multimodal_consensus, analyze_preclinical_outcomes,
-    analyze_replication_meta_analysis, analyze_stratified_causal_adjustment,
-    assess_glioma_robustness, assess_replication, build_research_object_manifest,
-    compile_decision_context, compile_mechanism_action_plan, compile_typed_knowledge,
-    design_preclinical_experiment, discriminate_mechanisms, dry_run_glioma_research,
-    execute_glioma_action_portfolio, execute_glioma_active_learning_campaign,
-    execute_glioma_autonomous_campaign, execute_glioma_computation,
-    execute_glioma_computation_portfolio, execute_glioma_evidence_campaign,
-    execute_glioma_instrument_plan, execute_glioma_protocol, execute_glioma_research_autopilot,
-    execute_glioma_robust_active_learning_campaign, explore_mechanisms, generate_feature_catalog,
-    glioma_program_catalog, harmonize_glioma_multimodal_batches, harmonize_multimodal_inputs,
-    plan_decision_actions, plan_glioma_active_learning, plan_glioma_adaptive_information_campaign,
+    analyze_glioma_multimodal_graph_fusion, analyze_glioma_spatial_communication,
+    analyze_glioma_spatial_niches, analyze_glioma_spatial_state_propagation,
+    analyze_glioma_state_transitions, analyze_glioma_trajectories, analyze_glioma_transportability,
+    analyze_instrument_calibration, analyze_multimodal_concordance, analyze_multimodal_consensus,
+    analyze_preclinical_outcomes, analyze_replication_meta_analysis,
+    analyze_stratified_causal_adjustment, assess_glioma_robustness, assess_replication,
+    build_research_object_manifest, compile_decision_context, compile_mechanism_action_plan,
+    compile_typed_knowledge, design_preclinical_experiment, discriminate_mechanisms,
+    dry_run_glioma_research, execute_glioma_action_portfolio,
+    execute_glioma_active_learning_campaign, execute_glioma_autonomous_campaign,
+    execute_glioma_computation, execute_glioma_computation_portfolio,
+    execute_glioma_evidence_campaign, execute_glioma_instrument_plan, execute_glioma_protocol,
+    execute_glioma_research_autopilot, execute_glioma_robust_active_learning_campaign,
+    explore_mechanisms, generate_feature_catalog, glioma_program_catalog,
+    harmonize_glioma_multimodal_batches, harmonize_multimodal_inputs, plan_decision_actions,
+    plan_glioma_active_learning, plan_glioma_adaptive_information_campaign,
     plan_glioma_closed_loop_campaign, plan_glioma_computation_portfolio,
     plan_glioma_information_design, plan_glioma_multi_fidelity_optimization,
     plan_glioma_robust_active_learning, plan_glioma_robust_intervention_portfolio,
@@ -510,10 +511,10 @@ use bioprism_research::{
     FederatedBenchmarkRequest, FederatedBenchmarkSite, FidelityCandidate, FidelityObservation,
     GliomaActionCandidate, GliomaAutonomousCampaignRequest, GliomaEvidenceCampaignRequest,
     GliomaResearchAutopilotRequest, GliomaResearchIntent, GliomaWorkflowRequest,
-    HarmonizationRequest, HarmonizationVector, InformationDesignRequest,
-    InstrumentExecutionRequest, InstrumentPreflightRequest, KnowledgeFrontierRequest,
-    KnowledgeRequest, LatentFactorRequest, LatentFactorVector, LigandReceptorPair,
-    MechanismActionPlannerConfig, MechanismCandidate, MechanismDiscrimination,
+    GraphFusionRequest, GraphFusionVector, HarmonizationRequest, HarmonizationVector,
+    InformationDesignRequest, InstrumentExecutionRequest, InstrumentPreflightRequest,
+    KnowledgeFrontierRequest, KnowledgeRequest, LatentFactorRequest, LatentFactorVector,
+    LigandReceptorPair, MechanismActionPlannerConfig, MechanismCandidate, MechanismDiscrimination,
     MechanismDiscriminationRequest, MechanismDiscriminatorAction, MechanismFeatureObservation,
     MechanismGraphEdge, MechanismGraphNode, MechanismGraphRequest, MechanismHypothesis,
     MechanismRequest, MediationObservation, MediationRequest, MetaAnalysisRequest, ModalityVector,
@@ -1996,6 +1997,7 @@ impl Server {
             "glioma_multimodal_consensus" => self.glioma_multimodal_consensus(&arguments),
             "glioma_multimodal_harmonize" => self.glioma_multimodal_harmonize(&arguments),
             "glioma_multimodal_latent_factors" => self.glioma_multimodal_latent_factors(&arguments),
+            "glioma_multimodal_graph_fusion" => self.glioma_multimodal_graph_fusion(&arguments),
             "glioma_spatial_niches" => self.glioma_spatial_niches(&arguments),
             "glioma_spatial_communication" => self.glioma_spatial_communication(&arguments),
             "glioma_spatial_state_propagation" => self.glioma_spatial_state_propagation(&arguments),
@@ -3927,6 +3929,37 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma latent-factor analysis: {error}"))
+    }
+
+    /// Fuse modality-specific sample neighbourhoods into a bounded local graph. Dropout,
+    /// sparse overlap, reliability weighting, and cross-modal disagreement remain explicit.
+    fn glioma_multimodal_graph_fusion(&self, arguments: &Value) -> Result<Value, String> {
+        let request: GraphFusionRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_multimodal_graph_fusion requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma graph-fusion request: {error}"))?;
+        let vectors: Vec<GraphFusionVector> = serde_json::from_value(
+            arguments
+                .get("vectors")
+                .cloned()
+                .ok_or_else(|| "glioma_multimodal_graph_fusion requires vectors".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma graph-fusion vectors: {error}"))?;
+        let output = analyze_glioma_multimodal_graph_fusion(&request, &vectors)
+            .map_err(|error| format!("glioma multimodal graph fusion refused: {error}"))?;
+        serde_json::to_value(json!({
+            "analysis": output,
+            "dispatch": "not_started",
+            "guarantees": [
+                "modality-specific neighbours are fused only from observed local vectors",
+                "reliability weighting, missing modalities, sparse shared features, cross-modal disagreement, and diffusion limits remain explicit",
+                "the route does not move raw artifacts, dispatch instruments, or make a clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma multimodal graph fusion: {error}"))
     }
 
     /// Build spatially connected same-lineage niches and retain cross-lineage interaction
@@ -45160,6 +45193,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_multimodal_consensus",
                 "glioma_multimodal_harmonize",
                 "glioma_multimodal_latent_factors",
+                "glioma_multimodal_graph_fusion",
                 "glioma_spatial_niches",
                 "glioma_spatial_communication",
                 "glioma_spatial_state_propagation",
@@ -52332,6 +52366,18 @@ pub fn tool_definitions() -> Vec<Value> {
             "properties": {
                 "request": {"type": "object", "description": "LatentFactorRequest1@1 with modality/model bindings, complete-sample and feature floors, component/iteration bounds, and release gates."},
                 "vectors": {"type": "array", "items": {"type": "object"}, "description": "Local LatentFactorVector1@1 values with de-identified sample lineages, modalities, feature values, and artifact references."}
+            },
+            "required": ["request", "vectors"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_multimodal_graph_fusion",
+        "description": "Fuse modality-specific neighbourhoods into a deterministic local preclinical glioma graph using reliability-weighted consensus and bounded diffusion. Reports sample states, modality dropout, sparse shared-feature pairs, contradictory cross-modal evidence, neighbour scores, negative evidence, and uncertainty; it never imputes values, moves raw artifacts, dispatches an instrument, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "GraphFusionRequest1@1 with study/model binding, required modalities, sample and shared-feature floors, neighbourhood/diffusion bounds, reliability/disagreement gates, and an optional all-modalities release gate."},
+                "vectors": {"type": "array", "items": {"type": "object"}, "description": "Local GraphFusionVector1@1 values with de-identified sample lineages, modality-specific reliability, sorted feature values, and local artifact references."}
             },
             "required": ["request", "vectors"]
         }

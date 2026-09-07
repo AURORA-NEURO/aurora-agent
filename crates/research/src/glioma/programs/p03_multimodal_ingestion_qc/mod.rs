@@ -4,6 +4,7 @@ use crate::glioma::catalog::{glioma_program_catalog, GliomaProgramDescriptor, Gl
 
 pub mod concordance;
 pub mod consensus;
+pub mod graph_fusion;
 pub mod harmonization;
 pub mod latent_factors;
 pub mod spatial_communication;
@@ -18,6 +19,11 @@ pub use concordance::{
 pub use consensus::{
     analyze_multimodal_consensus, ConsensusAssignment, ConsensusCluster, ConsensusDisposition,
     ConsensusError, ConsensusRequest, MultimodalConsensus,
+};
+pub use graph_fusion::{
+    analyze_glioma_multimodal_graph_fusion, GraphFusionAnalysis, GraphFusionDisposition,
+    GraphFusionError, GraphFusionNeighbour, GraphFusionRequest, GraphFusionState,
+    GraphFusionVector,
 };
 pub use harmonization::{
     harmonize_glioma_multimodal_batches, BatchHarmonizationDiagnostic, HarmonizationDisposition,

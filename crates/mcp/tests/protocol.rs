@@ -314,7 +314,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 57;
-const TOOL_DEFINITION_COUNT: usize = 583;
+const TOOL_DEFINITION_COUNT: usize = 584;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -2389,6 +2389,46 @@ fn glioma_computation_portfolio_executor_runs_selected_dag() {
         execution["execution"]["execution"]["task_order"],
         json!(["normalize", "integrate"])
     );
+}
+
+#[test]
+fn glioma_multimodal_graph_fusion_replays_dropout_and_disagreement() {
+    let mut server = server();
+    let hash = "0".repeat(64);
+    let response = call(
+        &mut server,
+        "glioma_multimodal_graph_fusion",
+        json!({
+            "request": {
+                "study_id": "graph-study",
+                "model_system": "organoid",
+                "required_modalities": ["genomics", "transcriptomics"],
+                "min_samples": 3,
+                "min_modalities_per_sample": 2,
+                "min_shared_features": 2,
+                "neighbours": 2,
+                "diffusion_steps": 3,
+                "max_distance_milli": 1000,
+                "min_consensus_support_milli": 500,
+                "max_disagreement_milli": 200,
+                "require_all_modalities": false
+            },
+            "vectors": [
+                {"observation_id":"a-g","study_id":"graph-study","sample_lineage":"a","modality":"genomics","model_system":"organoid","artifact":{"artifact_id":"a-g","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"reliability_milli":900,"features":[{"feature_id":"x","value_milli":0},{"feature_id":"y","value_milli":0}]},
+                {"observation_id":"a-t","study_id":"graph-study","sample_lineage":"a","modality":"transcriptomics","model_system":"organoid","artifact":{"artifact_id":"a-t","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"reliability_milli":900,"features":[{"feature_id":"x","value_milli":1000},{"feature_id":"y","value_milli":1000}]},
+                {"observation_id":"b-g","study_id":"graph-study","sample_lineage":"b","modality":"genomics","model_system":"organoid","artifact":{"artifact_id":"b-g","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"reliability_milli":900,"features":[{"feature_id":"x","value_milli":0},{"feature_id":"y","value_milli":0}]},
+                {"observation_id":"b-t","study_id":"graph-study","sample_lineage":"b","modality":"transcriptomics","model_system":"organoid","artifact":{"artifact_id":"b-t","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"reliability_milli":900,"features":[{"feature_id":"x","value_milli":0},{"feature_id":"y","value_milli":0}]},
+                {"observation_id":"c-g","study_id":"graph-study","sample_lineage":"c","modality":"genomics","model_system":"organoid","artifact":{"artifact_id":"c-g","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"reliability_milli":900,"features":[{"feature_id":"x","value_milli":0},{"feature_id":"y","value_milli":0}]}
+            ]
+        }),
+    );
+    assert_eq!(response["dispatch"], json!("not_started"));
+    assert_eq!(response["analysis"]["disposition"], json!("partial"));
+    assert_eq!(response["analysis"]["missing_sample_order"], json!(["c"]));
+    assert!(!response["analysis"]["contradictory_pair_order"]
+        .as_array()
+        .unwrap()
+        .is_empty());
 }
 
 #[test]

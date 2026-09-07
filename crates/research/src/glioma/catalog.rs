@@ -318,6 +318,7 @@ pub fn implemented_feature_ids() -> Vec<&'static str> {
         crate::glioma::programs::p03_multimodal_ingestion_qc::consensus::FEATURE_ID,
         crate::glioma::programs::p03_multimodal_ingestion_qc::harmonization::FEATURE_ID,
         crate::glioma::programs::p03_multimodal_ingestion_qc::latent_factors::FEATURE_ID,
+        crate::glioma::programs::p03_multimodal_ingestion_qc::graph_fusion::FEATURE_ID,
         crate::glioma::programs::p03_multimodal_ingestion_qc::spatial_niche::FEATURE_ID,
         crate::glioma::programs::p03_multimodal_ingestion_qc::spatial_communication::FEATURE_ID,
         crate::glioma::programs::p03_multimodal_ingestion_qc::spatial_propagation::FEATURE_ID,

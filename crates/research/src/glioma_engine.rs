@@ -1838,6 +1838,11 @@ pub fn glioma_research_engine_manifest() -> CapabilityManifest {
                 required: false,
             },
             TypedPort {
+                name: "glioma_multimodal_graph_fusion".into(),
+                schema: "GliomaMultimodalGraphFusion1@1".into(),
+                required: false,
+            },
+            TypedPort {
                 name: "glioma_spatial_niches".into(),
                 schema: "GliomaSpatialNiche1@1".into(),
                 required: false,
