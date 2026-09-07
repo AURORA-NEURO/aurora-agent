@@ -314,7 +314,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 57;
-const TOOL_DEFINITION_COUNT: usize = 584;
+const TOOL_DEFINITION_COUNT: usize = 585;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -2429,6 +2429,45 @@ fn glioma_multimodal_graph_fusion_replays_dropout_and_disagreement() {
         .as_array()
         .unwrap()
         .is_empty());
+}
+
+#[test]
+fn glioma_pathway_activity_ranks_cross_modal_mechanism_state() {
+    let mut server = server();
+    let hash = "0".repeat(64);
+    let response = call(
+        &mut server,
+        "glioma_pathway_activity",
+        json!({
+            "request": {
+                "objective": "rank invasion pathways",
+                "study_id": "pathway-study",
+                "model_system": "organoid",
+                "min_pathway_nodes": 2,
+                "min_observed_nodes": 2,
+                "min_modalities": 2,
+                "min_confidence_milli": 700,
+                "max_pathways": 4,
+                "require_cross_modal": true
+            },
+            "definitions": [{
+                "pathway_id": "invasion",
+                "label": "invasion programme",
+                "nodes": [
+                    {"node_id":"egfr","label":"EGFR","modality":"genomics","expected_direction":1,"weight_milli":1000},
+                    {"node_id":"vim","label":"VIM","modality":"transcriptomics","expected_direction":1,"weight_milli":1000}
+                ],
+                "edges": [{"source_node_id":"egfr","target_node_id":"vim","relation":1,"confidence_milli":900}]
+            }],
+            "observations": [
+                {"observation_id":"g","study_id":"pathway-study","sample_lineage":"sample-1","modality":"genomics","model_system":"organoid","artifact":{"artifact_id":"g","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"feature_id":"egfr","value_milli":700,"reliability_milli":900},
+                {"observation_id":"t","study_id":"pathway-study","sample_lineage":"sample-1","modality":"transcriptomics","model_system":"organoid","artifact":{"artifact_id":"t","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"feature_id":"vim","value_milli":800,"reliability_milli":900}
+            ]
+        }),
+    );
+    assert_eq!(response["dispatch"], json!("not_started"));
+    assert_eq!(response["analysis"]["disposition"], json!("qualified"));
+    assert_eq!(response["analysis"]["pathways"][0]["direction"], json!("activated"));
 }
 
 #[test]

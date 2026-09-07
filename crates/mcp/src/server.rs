@@ -470,7 +470,8 @@ use bioprism_research::{
     allocate_glioma_assays, analyze_causal_sensitivity, analyze_federated_benchmark,
     analyze_glioma_causal_contrast, analyze_glioma_combination_synergy,
     analyze_glioma_dose_response, analyze_glioma_latent_factors, analyze_glioma_mediation,
-    analyze_glioma_multimodal_graph_fusion, analyze_glioma_spatial_communication,
+    analyze_glioma_multimodal_graph_fusion, analyze_glioma_pathway_activity,
+    analyze_glioma_spatial_communication,
     analyze_glioma_spatial_niches, analyze_glioma_spatial_state_propagation,
     analyze_glioma_state_transitions, analyze_glioma_trajectories, analyze_glioma_transportability,
     analyze_instrument_calibration, analyze_multimodal_concordance, analyze_multimodal_consensus,
@@ -512,6 +513,7 @@ use bioprism_research::{
     GliomaActionCandidate, GliomaAutonomousCampaignRequest, GliomaEvidenceCampaignRequest,
     GliomaResearchAutopilotRequest, GliomaResearchIntent, GliomaWorkflowRequest,
     GraphFusionRequest, GraphFusionVector, HarmonizationRequest, HarmonizationVector,
+    PathwayActivityDefinition, PathwayActivityObservation, PathwayActivityRequest,
     InformationDesignRequest, InstrumentExecutionRequest, InstrumentPreflightRequest,
     KnowledgeFrontierRequest, KnowledgeRequest, LatentFactorRequest, LatentFactorVector,
     LigandReceptorPair, MechanismActionPlannerConfig, MechanismCandidate, MechanismDiscrimination,
@@ -1998,6 +2000,7 @@ impl Server {
             "glioma_multimodal_harmonize" => self.glioma_multimodal_harmonize(&arguments),
             "glioma_multimodal_latent_factors" => self.glioma_multimodal_latent_factors(&arguments),
             "glioma_multimodal_graph_fusion" => self.glioma_multimodal_graph_fusion(&arguments),
+            "glioma_pathway_activity" => self.glioma_pathway_activity(&arguments),
             "glioma_spatial_niches" => self.glioma_spatial_niches(&arguments),
             "glioma_spatial_communication" => self.glioma_spatial_communication(&arguments),
             "glioma_spatial_state_propagation" => self.glioma_spatial_state_propagation(&arguments),
@@ -3960,6 +3963,44 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma multimodal graph fusion: {error}"))
+    }
+
+    /// Score signed pathway activity from local preclinical glioma observations. This emits
+    /// ranked mechanism priorities and bottlenecks; it does not infer a clinical state.
+    fn glioma_pathway_activity(&self, arguments: &Value) -> Result<Value, String> {
+        let request: PathwayActivityRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_pathway_activity requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma pathway-activity request: {error}"))?;
+        let definitions: Vec<PathwayActivityDefinition> = serde_json::from_value(
+            arguments
+                .get("definitions")
+                .cloned()
+                .ok_or_else(|| "glioma_pathway_activity requires definitions".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma pathway definitions: {error}"))?;
+        let observations: Vec<PathwayActivityObservation> = serde_json::from_value(
+            arguments
+                .get("observations")
+                .cloned()
+                .ok_or_else(|| "glioma_pathway_activity requires observations".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma pathway observations: {error}"))?;
+        let output = analyze_glioma_pathway_activity(&request, &definitions, &observations)
+            .map_err(|error| format!("glioma pathway activity refused: {error}"))?;
+        serde_json::to_value(json!({
+            "analysis": output,
+            "dispatch": "not_started",
+            "guarantees": [
+                "signed node activity is reliability- and weight-adjusted without imputing missing features",
+                "coverage, cross-modal agreement, confidence, and bottleneck nodes remain explicit",
+                "the route produces mechanism research priorities only and never makes a clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma pathway activity: {error}"))
     }
 
     /// Build spatially connected same-lineage niches and retain cross-lineage interaction
@@ -45212,6 +45253,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_mechanism_discriminate",
                 "glioma_mechanism_action_plan",
                 "glioma_mechanism_graph_propagate",
+                "glioma_pathway_activity",
                 "glioma_mechanism_counterfactual",
                 "glioma_mechanism_ensemble_counterfactual",
                 "glioma_robust_intervention_portfolio",
@@ -52594,6 +52636,19 @@ pub fn tool_definitions() -> Vec<Value> {
                 "config": {"type": "object", "description": "MechanismActionPlannerConfig1@1 with model_system, modality, and max_actions."}
             },
             "required": ["discrimination", "config"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_pathway_activity",
+        "description": "Infer signed activity for declared glioma molecular pathways from local preclinical observations. Reliability- and weight-adjusts node evidence, compares modality-specific activity, ranks mechanism priorities, and exposes missing nodes, bottlenecks, disagreement, confidence, and unresolved gates; it never imputes features, moves raw data, executes an assay, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "PathwayActivityRequest1@1 with study/model binding, observation/modality/confidence floors, and pathway budget."},
+                "definitions": {"type": "array", "items": {"type": "object"}, "description": "PathwayActivityDefinition1@1 declarations with canonical signed nodes and bounded edges."},
+                "observations": {"type": "array", "items": {"type": "object"}, "description": "Local PathwayActivityObservation1@1 value-only records with modality, reliability, and de-identified sample lineage."}
+            },
+            "required": ["request", "definitions", "observations"]
         }
     }));
     definitions.push(json!({

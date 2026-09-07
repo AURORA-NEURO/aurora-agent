@@ -75,7 +75,7 @@ fn main() {
                      glioma_multimodal_harmonize, glioma_multimodal_latent_factors, glioma_multimodal_graph_fusion, glioma_spatial_niches, glioma_spatial_communication, glioma_spatial_state_propagation, glioma_state_transition_analyze, glioma_transportability_analyze, glioma_protocol_execute, glioma_action_portfolio_execute, glioma_causal_sensitivity,\n\
                      glioma_mechanism_discriminate,\n\
                      glioma_mechanism_action_plan,\n\
-                     glioma_mechanism_graph_propagate,\n\
+                     glioma_mechanism_graph_propagate, glioma_pathway_activity,\n\
                      glioma_mechanism_counterfactual,\n\
                      glioma_mechanism_ensemble_counterfactual,\n\
                      glioma_robust_intervention_portfolio,\n\

@@ -7,6 +7,7 @@ pub mod counterfactual;
 pub mod discrimination;
 pub mod ensemble_counterfactual;
 pub mod graph_propagation;
+pub mod pathway_activity;
 pub mod robust_portfolio;
 
 pub use action_planner::{
@@ -33,6 +34,12 @@ pub use graph_propagation::{
     propagate_glioma_mechanism_graph, MechanismGraphDisposition, MechanismGraphEdge,
     MechanismGraphError, MechanismGraphNode, MechanismGraphPropagation, MechanismGraphRelation,
     MechanismGraphRequest, MechanismNodeScore,
+};
+pub use pathway_activity::{
+    analyze_glioma_pathway_activity, PathwayActivityAnalysis, PathwayActivityDefinition,
+    PathwayActivityDirection, PathwayActivityDisposition, PathwayActivityEdge,
+    PathwayActivityError, PathwayActivityNode, PathwayActivityObservation, PathwayActivityRecord,
+    PathwayActivityRequest,
 };
 pub use robust_portfolio::{
     plan_glioma_robust_intervention_portfolio, PortfolioDirection, RobustInterventionCandidate,

@@ -1674,6 +1674,7 @@ pub fn glioma_research_engine_manifest() -> CapabilityManifest {
             "glioma campaign experimentalist".into(),
             "mechanism counterfactual scientist".into(),
             "mechanism ensemble scientist".into(),
+            "glioma pathway activity analyst".into(),
             "robust intervention portfolio planner".into(),
             "information-design experimentalist".into(),
             "adaptive campaign executor".into(),
@@ -1865,6 +1866,11 @@ pub fn glioma_research_engine_manifest() -> CapabilityManifest {
             TypedPort {
                 name: "glioma_mechanism_graph_propagation".into(),
                 schema: "GliomaMechanismGraphPropagation1@1".into(),
+                required: false,
+            },
+            TypedPort {
+                name: "glioma_pathway_activity".into(),
+                schema: "GliomaPathwayActivity1@1".into(),
                 required: false,
             },
             TypedPort {

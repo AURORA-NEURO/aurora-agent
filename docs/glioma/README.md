@@ -136,6 +136,8 @@ crates/research/src/glioma/
                                              P03 spatial ligand-receptor communication enrichment against lineage-marginal null
   p03_multimodal_ingestion_qc/spatial_propagation.rs
                                              P03 lineage-aware integer spatial-state diffusion and hotspot prioritisation
+  p05_mechanism_exploration/pathway_activity.rs
+                                             P05 signed pathway activity inference with cross-modal confidence and bottleneck gates
 ```
 
 `docs/glioma/organization.json` is the machine-readable version of this map. The runtime
@@ -249,6 +251,11 @@ retains modality-specific sample neighbours, fuses them with reliability-weighte
 runs bounded diffusion over observed edges. Modality dropout, sparse shared features, contradictory
 cross-modal scores, and the all-modalities release gate remain explicit negative evidence rather than
 being silently imputed or converted into a confident state.
+P05 now also includes signed pathway activity inference (`analyze_glioma_pathway_activity`) that
+maps declared modality-specific molecular nodes to reliability-weighted pathway activity, compares
+cross-modal direction, and ranks mechanism priorities. Missing nodes, low-confidence bottlenecks,
+and modality disagreement remain explicit so downstream experiment selection receives actionable
+coverage gates rather than an invented pathway state.
 P02 now includes typed-knowledge compilation (`compile_typed_knowledge`) that coalesces scoped
 claims, ranks support against contradiction, preserves negative/unknown evidence, and exposes
 missing modality/model coverage for the next workflow action.

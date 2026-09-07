@@ -75,6 +75,7 @@ pub use programs::p04_decision_context::{
     DecisionContextRequest,
 };
 pub use programs::p05_mechanism_exploration::{
+    analyze_glioma_pathway_activity,
     compile_mechanism_action_plan, discriminate_mechanisms,
     plan_glioma_robust_intervention_portfolio, propagate_glioma_mechanism_graph,
     simulate_glioma_counterfactual, simulate_glioma_counterfactual_ensemble,
@@ -92,6 +93,10 @@ pub use programs::p05_mechanism_exploration::{
     MechanismPrediction, PortfolioDirection, RobustInterventionCandidate,
     RobustInterventionPortfolio, RobustInterventionRequest, RobustInterventionScore,
     RobustPortfolioDisposition, RobustPortfolioError,
+    PathwayActivityAnalysis, PathwayActivityDefinition, PathwayActivityDirection,
+    PathwayActivityDisposition, PathwayActivityEdge, PathwayActivityError,
+    PathwayActivityNode, PathwayActivityObservation, PathwayActivityRecord,
+    PathwayActivityRequest,
 };
 pub use programs::p06_experiment_design::{
     allocate_glioma_assays, analyze_glioma_combination_synergy, analyze_glioma_dose_response,
