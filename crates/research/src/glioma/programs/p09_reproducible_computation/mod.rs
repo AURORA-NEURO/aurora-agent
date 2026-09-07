@@ -4,6 +4,7 @@ use crate::glioma::catalog::{glioma_program_catalog, GliomaProgramDescriptor, Gl
 
 pub mod execution;
 pub mod planning;
+pub mod portfolio_execution;
 pub mod robustness;
 
 pub use robustness::{
@@ -23,6 +24,12 @@ pub use planning::{
     plan_glioma_computation_portfolio, ComputationCandidate, ComputationCandidateDisposition,
     ComputationCandidateScore, ComputationPortfolioDisposition, ComputationPortfolioError,
     ComputationPortfolioPlan, ComputationPortfolioRequest,
+};
+
+pub use portfolio_execution::{
+    execute_glioma_computation_portfolio, ComputationPortfolioExecution,
+    ComputationPortfolioExecutionDisposition, ComputationPortfolioExecutionError,
+    ComputationPortfolioExecutionRequest,
 };
 
 pub const PROGRAM_ID: GliomaProgramId = GliomaProgramId::ReproducibleComputation;

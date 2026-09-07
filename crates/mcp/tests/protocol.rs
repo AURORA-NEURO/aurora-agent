@@ -314,7 +314,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 57;
-const TOOL_DEFINITION_COUNT: usize = 582;
+const TOOL_DEFINITION_COUNT: usize = 583;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -2345,6 +2345,50 @@ fn glioma_computation_portfolio_planner_closes_dependencies() {
         json!(["normalize", "integrate"])
     );
     assert_eq!(plan["plan"]["disposition"], json!("qualified"));
+}
+
+#[test]
+fn glioma_computation_portfolio_executor_runs_selected_dag() {
+    let mut server = server();
+    let execution = call(
+        &mut server,
+        "glioma_computation_portfolio_execute",
+        json!({
+            "request": {
+                "portfolio": {
+                    "objective": "execute a reproducible organoid multimodal computation portfolio",
+                    "model_system": "organoid",
+                    "budget_units": 4,
+                    "duration_ticks": 2,
+                    "max_tasks": 2,
+                    "max_modalities": 2,
+                    "min_modalities": 2,
+                    "information_weight_milli": 5,
+                    "uncertainty_weight_milli": 3,
+                    "coverage_weight_milli": 2,
+                    "cost_penalty_milli": 1,
+                    "duration_penalty_milli": 1,
+                    "require_deterministic": true,
+                    "completed_order": []
+                },
+                "candidates": [
+                    {"candidate_id":"integrate","task":{"task_id":"integrate","operation":"integrate","model_system":"organoid","depends_on":["normalize"],"input_artifact_ids":["input:integrate"],"output_schema":"Integrate1@1","estimated_cost_units":2,"estimated_duration_ticks":1,"deterministic":true},"modality":"spatial","information_gain_milli":900,"uncertainty_reduction_milli":500,"coverage_debt_milli":400,"redundancy_group":"integration","required":false},
+                    {"candidate_id":"normalize","task":{"task_id":"normalize","operation":"normalize","model_system":"organoid","depends_on":[],"input_artifact_ids":["input:normalize"],"output_schema":"Normalize1@1","estimated_cost_units":2,"estimated_duration_ticks":1,"deterministic":true},"modality":"transcriptomics","information_gain_milli":400,"uncertainty_reduction_milli":500,"coverage_debt_milli":300,"redundancy_group":"normalization","required":false}
+                ],
+                "replay_identity": "0000000000000000000000000000000000000000000000000000000000000000",
+                "max_retries": 1,
+                "allow_cache": true,
+                "require_local_artifacts": true,
+                "cache": []
+            }
+        }),
+    );
+    assert_eq!(execution["dispatch"], json!("not_started"));
+    assert_eq!(execution["execution"]["disposition"], json!("completed"));
+    assert_eq!(
+        execution["execution"]["execution"]["task_order"],
+        json!(["normalize", "integrate"])
+    );
 }
 
 #[test]

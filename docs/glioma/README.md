@@ -91,6 +91,8 @@ crates/research/src/glioma/
                                              P09 replayable multimodal computation DAG execution
     p09_reproducible_computation/planning.rs
                                              P09 budgeted computation-portfolio planning with prerequisite closure
+    p09_reproducible_computation/portfolio_execution.rs
+                                             P09 autonomous portfolio-to-computation execution bridge
     p10_interpretation_replication/trajectory.rs
                                              P10 longitudinal per-unit trajectory analysis
     p10_interpretation_replication/transportability.rs
@@ -347,6 +349,12 @@ determinism gates. Missing or cyclic dependencies, required work that cannot fit
 non-deterministic tasks, and unmet modality coverage remain explicit rather than being silently
 discarded. The planner never runs external code or moves raw data; institution-local workers own
 the actual computation effects.
+P09 also exposes portfolio execution (`glioma_computation_portfolio_execute`), which passes the
+selected prerequisite-closed DAG directly into the existing computation worker under the same
+replay identity, retry/cache policy, local-artifact requirement, and resource budget. It is the
+autonomous computation loop: selection, closure, execution, and result classification stay bound
+together, while failed, partial, blocked, unresolved, deferred, and negative work cannot be
+silently promoted into a completed research conclusion.
 P05 now also includes counterfactual mechanism simulation (`simulate_glioma_counterfactual`). It
 compares baseline and signed node perturbation fixed points over activating/inhibiting networks,
 rank-orders downstream changes, and exposes low-confidence edges and non-convergence as unresolved.

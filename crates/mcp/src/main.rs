@@ -96,6 +96,7 @@ fn main() {
                      glioma_instrument_execute,\n\
                      glioma_computation_execute,\n\
                      glioma_computation_portfolio_plan,\n\
+                     glioma_computation_portfolio_execute,\n\
                      glioma_federated_benchmark_consensus,\n\
                      Resources: fiber-world, fiber-query, context-certificate schemas and the\n\
                      workspace capability catalog"

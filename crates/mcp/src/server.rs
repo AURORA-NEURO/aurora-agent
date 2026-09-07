@@ -480,11 +480,11 @@ use bioprism_research::{
     design_preclinical_experiment, discriminate_mechanisms, dry_run_glioma_research,
     execute_glioma_action_portfolio, execute_glioma_active_learning_campaign,
     execute_glioma_autonomous_campaign, execute_glioma_computation,
-    execute_glioma_evidence_campaign, execute_glioma_instrument_plan, execute_glioma_protocol,
-    execute_glioma_research_autopilot, execute_glioma_robust_active_learning_campaign,
-    explore_mechanisms, generate_feature_catalog, glioma_program_catalog,
-    harmonize_glioma_multimodal_batches, harmonize_multimodal_inputs, plan_decision_actions,
-    plan_glioma_active_learning, plan_glioma_adaptive_information_campaign,
+    execute_glioma_computation_portfolio, execute_glioma_evidence_campaign,
+    execute_glioma_instrument_plan, execute_glioma_protocol, execute_glioma_research_autopilot,
+    execute_glioma_robust_active_learning_campaign, explore_mechanisms, generate_feature_catalog,
+    glioma_program_catalog, harmonize_glioma_multimodal_batches, harmonize_multimodal_inputs,
+    plan_decision_actions, plan_glioma_active_learning, plan_glioma_adaptive_information_campaign,
     plan_glioma_closed_loop_campaign, plan_glioma_computation_portfolio,
     plan_glioma_information_design, plan_glioma_multi_fidelity_optimization,
     plan_glioma_robust_active_learning, plan_glioma_robust_intervention_portfolio,
@@ -498,10 +498,11 @@ use bioprism_research::{
     AnalysisDataset, AnalysisRequest, CalibrationRequest, CalibrationRun, CampaignAction,
     CampaignMechanism, CampaignObservation, CausalContrastRequest, ClosedLoopCampaignRequest,
     CombinationObservation, CombinationSynergyRequest, ComputationCandidate,
-    ComputationExecutionRequest, ComputationPortfolioRequest, ConcordanceRequest, ConsensusRequest,
-    CounterfactualEnsembleRequest, CounterfactualIntervention, CounterfactualModel,
-    CounterfactualRequest, DecisionActionPlanRequest, DecisionContext, DecisionContextRequest,
-    DesignAction, DesignMechanism, DoseResponseObservation, DoseResponseRequest,
+    ComputationExecutionRequest, ComputationPortfolioExecutionRequest, ComputationPortfolioRequest,
+    ConcordanceRequest, ConsensusRequest, CounterfactualEnsembleRequest,
+    CounterfactualIntervention, CounterfactualModel, CounterfactualRequest,
+    DecisionActionPlanRequest, DecisionContext, DecisionContextRequest, DesignAction,
+    DesignMechanism, DoseResponseObservation, DoseResponseRequest,
     DryRunActiveLearningCampaignExecutor, DryRunGliomaActionExecutor,
     DryRunGliomaComputationExecutor, DryRunGliomaProtocolExecutor, DryRunInstrumentExecutor,
     DryRunRobustActiveLearningCampaignExecutor, EvidencePriorityRequest, EvidenceRecord,
@@ -1975,6 +1976,9 @@ impl Server {
             "glioma_computation_portfolio_plan" => {
                 self.glioma_computation_portfolio_plan(&arguments)
             }
+            "glioma_computation_portfolio_execute" => {
+                self.glioma_computation_portfolio_execute(&arguments)
+            }
             "glioma_robustness_suite" => self.glioma_robustness_suite(&arguments),
             "glioma_trajectory_analyze" => self.glioma_trajectory_analyze(&arguments),
             "glioma_state_transition_analyze" => self.glioma_state_transition_analyze(&arguments),
@@ -3397,6 +3401,33 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma computation portfolio: {error}"))
+    }
+
+    /// Plan and execute a selected computation portfolio through the deterministic sandbox
+    /// worker. Institution-local callers can replace the worker through the Rust executor seam.
+    fn glioma_computation_portfolio_execute(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ComputationPortfolioExecutionRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_computation_portfolio_execute requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma computation portfolio execution request: {error}")
+            })?;
+        let mut executor = DryRunGliomaComputationExecutor;
+        let execution = execute_glioma_computation_portfolio(&request, &mut executor)
+            .map_err(|error| format!("glioma computation portfolio execution refused: {error}"))?;
+        serde_json::to_value(json!({
+            "execution": execution,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "portfolio selection and execution share one replayable objective and dependency closure",
+                "the selected DAG is passed only to the typed local computation executor",
+                "partial, failed, blocked, unresolved, deferred, and negative states remain explicit",
+                "the MCP route uses a synthetic worker and performs no external computation or data movement"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma computation portfolio execution: {error}"))
     }
 
     /// Stress-test a local two-arm glioma analysis under deterministic batch and row omissions.
@@ -45113,6 +45144,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_evidence_campaign_execute",
                 "glioma_computation_execute",
                 "glioma_computation_portfolio_plan",
+                "glioma_computation_portfolio_execute",
                 "glioma_robustness_suite",
                 "glioma_trajectory_analyze",
                 "glioma_state_transition_analyze",
@@ -52075,6 +52107,17 @@ pub fn tool_definitions() -> Vec<Value> {
                 "candidates": {"type": "array", "items": {"type": "object"}, "description": "ComputationCandidate1@1 records wrapping typed ComputationTask1@1 DAG nodes with modality, information gain, uncertainty reduction, coverage debt, redundancy group, and required flag."}
             },
             "required": ["request", "candidates"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_computation_portfolio_execute",
+        "description": "Plan and execute a selected multimodal preclinical glioma computation portfolio through the typed local computation worker. The bridge reuses the portfolio dependency closure and replay identity, enforces the same resource and determinism gates, and preserves partial, failed, blocked, unresolved, deferred, and negative results. MCP uses a synthetic worker; production containers, GPUs, schedulers, and raw-data access remain caller-owned.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ComputationPortfolioExecutionRequest1@1 containing a ComputationPortfolioRequest1@1, ComputationCandidate1@1 records, replay identity, retry/cache policy, and local-artifact requirement."}
+            },
+            "required": ["request"]
         }
     }));
     definitions.push(json!({
