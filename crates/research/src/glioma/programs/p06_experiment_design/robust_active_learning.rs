@@ -478,6 +478,8 @@ pub fn plan_glioma_robust_active_learning(
         {
             "direct observations contradict; lower-tail utility is withheld pending resolution"
                 .into()
+        } else if direct_count > 0 && direct_count < request.min_observations_per_candidate {
+            "replicate floor is incomplete; the candidate remains exploratory under ensemble uncertainty".into()
         } else if direct_count == 0 {
             "prior-weighted model ensemble exposes exploration value and conservative tail risk"
                 .into()
@@ -488,6 +490,15 @@ pub fn plan_glioma_robust_active_learning(
             uncertainty.insert(format!(
                 "{}:contradictory-spread-{}",
                 candidate.candidate_id, direct_spread
+            ));
+        }
+        if direct_mean.is_some_and(|mean| mean < 0)
+            && direct_count >= request.min_observations_per_candidate
+        {
+            negative.insert(format!(
+                "{}:negative-observed-{}",
+                candidate.candidate_id,
+                direct_mean.unwrap_or_default()
             ));
         }
         scores.push(RobustActiveLearningScore {

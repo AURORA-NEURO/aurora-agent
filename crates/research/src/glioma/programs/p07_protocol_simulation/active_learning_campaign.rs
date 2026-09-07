@@ -257,6 +257,20 @@ fn validate_request(
     Ok(())
 }
 
+fn all_replicate_ceilings_reached(
+    candidates: &[ActiveLearningCandidate],
+    observations: &[ActiveLearningObservation],
+) -> bool {
+    !candidates.is_empty()
+        && candidates.iter().all(|candidate| {
+            observations
+                .iter()
+                .filter(|observation| observation.candidate_id == candidate.candidate_id)
+                .count()
+                >= candidate.max_replicates
+        })
+}
+
 /// Execute a bounded adaptive campaign. Every replan is derived only from the observations that
 /// the executor returned; an executor failure or unresolved uncertainty cannot be silently
 /// promoted into a successful round.
@@ -289,7 +303,10 @@ pub fn execute_glioma_active_learning_campaign<E: ActiveLearningCampaignExecutor
         negative.extend(plan.negative_evidence.iter().cloned());
         let budget_before = budget;
         if plan.selected_order.is_empty() {
-            disposition = if plan.disposition == ActiveLearningDisposition::Unresolved
+            let replicate_complete = all_replicate_ceilings_reached(&candidates, &observations);
+            disposition = if replicate_complete {
+                ActiveLearningCampaignDisposition::Completed
+            } else if plan.disposition == ActiveLearningDisposition::Unresolved
                 || !plan.unresolved_order.is_empty()
             {
                 ActiveLearningCampaignDisposition::Unresolved
@@ -298,7 +315,9 @@ pub fn execute_glioma_active_learning_campaign<E: ActiveLearningCampaignExecutor
             } else {
                 ActiveLearningCampaignDisposition::Partial
             };
-            stop_reason = if !plan.unresolved_order.is_empty() {
+            stop_reason = if replicate_complete {
+                ActiveLearningCampaignStopReason::Completed
+            } else if !plan.unresolved_order.is_empty() {
                 ActiveLearningCampaignStopReason::Unresolved
             } else if plan.disposition == ActiveLearningDisposition::NoCandidates {
                 ActiveLearningCampaignStopReason::NoCandidates

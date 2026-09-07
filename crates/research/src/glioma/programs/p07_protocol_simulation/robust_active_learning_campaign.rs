@@ -253,6 +253,20 @@ fn validate_request(
     Ok(())
 }
 
+fn all_replicate_ceilings_reached(
+    candidates: &[RobustActiveLearningCandidate],
+    observations: &[RobustActiveLearningObservation],
+) -> bool {
+    !candidates.is_empty()
+        && candidates.iter().all(|candidate| {
+            observations
+                .iter()
+                .filter(|observation| observation.candidate_id == candidate.candidate_id)
+                .count()
+                >= candidate.max_replicates as usize
+        })
+}
+
 /// Execute robust ensemble-guided assay rounds with bounded retries and explicit holds.
 pub fn execute_glioma_robust_active_learning_campaign<E: RobustActiveLearningCampaignExecutor>(
     request: &RobustActiveLearningCampaignRequest,
@@ -283,14 +297,19 @@ pub fn execute_glioma_robust_active_learning_campaign<E: RobustActiveLearningCam
         negative.extend(plan.negative_evidence.iter().cloned());
         let budget_before = budget;
         if plan.selected_order.is_empty() {
-            disposition = if !plan.unresolved_order.is_empty() {
+            let replicate_complete = all_replicate_ceilings_reached(&candidates, &observations);
+            disposition = if replicate_complete {
+                RobustActiveLearningCampaignDisposition::Completed
+            } else if !plan.unresolved_order.is_empty() {
                 RobustActiveLearningCampaignDisposition::Unresolved
             } else if plan.disposition == RobustActiveLearningDisposition::NoCandidates {
                 RobustActiveLearningCampaignDisposition::Blocked
             } else {
                 RobustActiveLearningCampaignDisposition::Partial
             };
-            stop_reason = if !plan.unresolved_order.is_empty() {
+            stop_reason = if replicate_complete {
+                RobustActiveLearningCampaignStopReason::Completed
+            } else if !plan.unresolved_order.is_empty() {
                 RobustActiveLearningCampaignStopReason::Unresolved
             } else if plan.disposition == RobustActiveLearningDisposition::NoCandidates {
                 RobustActiveLearningCampaignStopReason::NoCandidates
