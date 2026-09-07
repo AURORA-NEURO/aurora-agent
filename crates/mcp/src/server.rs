@@ -472,18 +472,19 @@ use bioprism_research::{
     analyze_glioma_dose_response, analyze_glioma_latent_factors, analyze_glioma_mediation,
     analyze_glioma_spatial_communication, analyze_glioma_spatial_niches,
     analyze_glioma_spatial_state_propagation, analyze_glioma_state_transitions,
-    analyze_glioma_trajectories, analyze_instrument_calibration, analyze_multimodal_concordance,
-    analyze_multimodal_consensus, analyze_preclinical_outcomes, analyze_replication_meta_analysis,
-    analyze_stratified_causal_adjustment, assess_glioma_robustness, assess_replication,
-    build_research_object_manifest, compile_decision_context, compile_mechanism_action_plan,
-    compile_typed_knowledge, design_preclinical_experiment, discriminate_mechanisms,
-    dry_run_glioma_research, execute_glioma_action_portfolio,
-    execute_glioma_active_learning_campaign, execute_glioma_autonomous_campaign,
-    execute_glioma_computation, execute_glioma_evidence_campaign, execute_glioma_instrument_plan,
-    execute_glioma_protocol, execute_glioma_research_autopilot,
-    execute_glioma_robust_active_learning_campaign, explore_mechanisms, generate_feature_catalog,
-    glioma_program_catalog, harmonize_glioma_multimodal_batches, harmonize_multimodal_inputs,
-    plan_decision_actions, plan_glioma_active_learning, plan_glioma_adaptive_information_campaign,
+    analyze_glioma_trajectories, analyze_glioma_transportability, analyze_instrument_calibration,
+    analyze_multimodal_concordance, analyze_multimodal_consensus, analyze_preclinical_outcomes,
+    analyze_replication_meta_analysis, analyze_stratified_causal_adjustment,
+    assess_glioma_robustness, assess_replication, build_research_object_manifest,
+    compile_decision_context, compile_mechanism_action_plan, compile_typed_knowledge,
+    design_preclinical_experiment, discriminate_mechanisms, dry_run_glioma_research,
+    execute_glioma_action_portfolio, execute_glioma_active_learning_campaign,
+    execute_glioma_autonomous_campaign, execute_glioma_computation,
+    execute_glioma_evidence_campaign, execute_glioma_instrument_plan, execute_glioma_protocol,
+    execute_glioma_research_autopilot, execute_glioma_robust_active_learning_campaign,
+    explore_mechanisms, generate_feature_catalog, glioma_program_catalog,
+    harmonize_glioma_multimodal_batches, harmonize_multimodal_inputs, plan_decision_actions,
+    plan_glioma_active_learning, plan_glioma_adaptive_information_campaign,
     plan_glioma_closed_loop_campaign, plan_glioma_information_design,
     plan_glioma_multi_fidelity_optimization, plan_glioma_robust_active_learning,
     plan_glioma_robust_intervention_portfolio, plan_glioma_workflow, preflight_glioma_instrument,
@@ -522,7 +523,8 @@ use bioprism_research::{
     SpatialCell, SpatialCommunicationCell, SpatialCommunicationRequest, SpatialNicheRequest,
     SpatialPropagationRequest, StateTransitionObservation, StateTransitionRequest,
     StaticGliomaActionPlanner, StratifiedCausalRequest, StratifiedObservation,
-    TrajectoryObservation, TrajectoryRequest, TypedKnowledge,
+    TrajectoryObservation, TrajectoryRequest, TransportStudy, TransportabilityRequest,
+    TypedKnowledge,
 };
 use bioprism_routing::{
     lab::{run as run_routing_lab, LabSettings, Task},
@@ -1972,6 +1974,7 @@ impl Server {
             "glioma_robustness_suite" => self.glioma_robustness_suite(&arguments),
             "glioma_trajectory_analyze" => self.glioma_trajectory_analyze(&arguments),
             "glioma_state_transition_analyze" => self.glioma_state_transition_analyze(&arguments),
+            "glioma_transportability_analyze" => self.glioma_transportability_analyze(&arguments),
             "glioma_causal_contrast" => self.glioma_causal_contrast(&arguments),
             "glioma_causal_mediation" => self.glioma_causal_mediation(&arguments),
             "glioma_stratified_causal_adjustment" => {
@@ -3456,6 +3459,39 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma state-transition analysis: {error}"))
+    }
+
+    /// Estimate whether a preclinical glioma effect transports to a declared target model system.
+    /// Similarity, heterogeneity, and leave-one-study-out sensitivity stay visible; this route
+    /// never turns transportability into a clinical or treatment recommendation.
+    fn glioma_transportability_analyze(&self, arguments: &Value) -> Result<Value, String> {
+        let request: TransportabilityRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_transportability_analyze requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma transportability request: {error}"))?;
+        let studies: Vec<TransportStudy> = serde_json::from_value(
+            arguments
+                .get("studies")
+                .cloned()
+                .ok_or_else(|| "glioma_transportability_analyze requires studies".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma transportability studies: {error}"))?;
+        let analysis = analyze_glioma_transportability(&request, &studies)
+            .map_err(|error| format!("glioma transportability analysis refused: {error}"))?;
+        serde_json::to_value(json!({
+            "analysis": analysis,
+            "dispatch": "not_started",
+            "guarantees": [
+                "source effects are weighted by declared signature similarity, quality, replicates, and uncertainty",
+                "heterogeneity, target-model distance, excluded studies, and leave-one-out shifts remain explicit",
+                "insufficient, negative, distant, and unstable evidence cannot be promoted into portability",
+                "the route performs preclinical interpretation only and never makes a clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma transportability analysis: {error}"))
     }
 
     /// Estimate a pre/post treatment contrast for a preclinical glioma study. This is analysis
@@ -45043,6 +45079,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_robustness_suite",
                 "glioma_trajectory_analyze",
                 "glioma_state_transition_analyze",
+                "glioma_transportability_analyze",
                 "glioma_causal_contrast",
                 "glioma_causal_mediation",
                 "glioma_stratified_causal_adjustment",
@@ -52038,6 +52075,18 @@ pub fn tool_definitions() -> Vec<Value> {
                 "observations": {"type": "array", "items": {"type": "object"}, "description": "Local StateTransitionObservation1@1 records from de-identified preclinical units with state labels, scores, timepoints, and local artifact references."}
             },
             "required": ["request", "observations"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_transportability_analyze",
+        "description": "Estimate whether an effect observed across preclinical glioma studies transports to a declared target model system. Uses signature similarity, quality, replicate count, uncertainty-weighted pooling, heterogeneity, target-model distance, and leave-one-study-out stability. Distant, heterogeneous, negative, excluded, and insufficient evidence remain explicit; this route never makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "TransportabilityRequest1@1 with target model/signature and study, distance, heterogeneity, signal, and stability gates."},
+                "studies": {"type": "array", "items": {"type": "object"}, "description": "TransportStudy1@1 local preclinical study effects with model system, population signature, uncertainty, quality, replicates, and local artifact."}
+            },
+            "required": ["request", "studies"]
         }
     }));
     definitions.push(json!({

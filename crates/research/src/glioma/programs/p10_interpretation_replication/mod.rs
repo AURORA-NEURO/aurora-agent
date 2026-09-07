@@ -9,6 +9,7 @@ pub mod meta_analysis;
 pub mod sensitivity;
 pub mod state_transition;
 pub mod trajectory;
+pub mod transportability;
 
 pub use causal_adjustment::{
     analyze_stratified_causal_adjustment, CausalStratumSummary, StratifiedCausalActionKind,
@@ -44,6 +45,11 @@ pub use trajectory::{
     analyze_glioma_trajectories, TrajectoryAnalysis, TrajectoryArmSummary, TrajectoryDisposition,
     TrajectoryError, TrajectoryObservation, TrajectoryRequest, UnitTrajectory,
     UnitTrajectoryDisposition,
+};
+pub use transportability::{
+    analyze_glioma_transportability, TransportStudy, TransportStudyContribution,
+    TransportabilityAnalysis, TransportabilityDisposition, TransportabilityError,
+    TransportabilityRequest,
 };
 
 pub const PROGRAM_ID: GliomaProgramId = GliomaProgramId::InterpretationReplication;

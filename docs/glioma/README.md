@@ -91,6 +91,8 @@ crates/research/src/glioma/
                                              P09 replayable multimodal computation DAG execution
     p10_interpretation_replication/trajectory.rs
                                              P10 longitudinal per-unit trajectory analysis
+    p10_interpretation_replication/transportability.rs
+                                             P10 model-system transportability and portability-gap analysis
     p10_interpretation_replication/state_transition.rs
                                              P10 discrete-state transition matrices and treatment contrasts
   p10_interpretation_replication/causal_contrast.rs
@@ -381,6 +383,12 @@ planner through repeated local assay rounds. It re-evaluates model disagreement 
 observation, keeps lower-tail and contradiction holds visible, and stops on explicit budget,
 replicate, reliability, unresolved, retry, or executor-failure gates. The result is a resumable
 research campaign rather than a one-shot ranking.
+
+P10 adds `analyze_glioma_transportability` for the common preclinical question of whether an
+effect learned in one model system is portable to another. It combines declared population
+signatures, quality, replicate count, and measurement uncertainty; reports heterogeneity,
+transport gap, and leave-one-study-out shifts; and refuses to promote distant, unstable, negative,
+or insufficient evidence into a portability claim.
 
 The robust active-learning surface (`plan_glioma_robust_active_learning`) keeps competing
 mechanistic and spatial surrogates separate. It shrinks local observations toward reliability- and

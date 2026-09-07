@@ -314,7 +314,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 57;
-const TOOL_DEFINITION_COUNT: usize = 580;
+const TOOL_DEFINITION_COUNT: usize = 581;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -2270,6 +2270,44 @@ fn glioma_robust_active_learning_campaign_replans_in_sandbox() {
     assert!(campaign["campaign"]["completed_order"]
         .as_array()
         .is_some_and(|items| !items.is_empty()));
+}
+
+#[test]
+fn glioma_transportability_analysis_preserves_model_distance() {
+    let mut server = server();
+    let hash = "0".repeat(64);
+    let analysis = call(
+        &mut server,
+        "glioma_transportability_analyze",
+        json!({
+            "request": {
+                "objective": "transport an invasion effect to organoids",
+                "target_model_system": "organoid",
+                "target_signature": [100,100],
+                "min_studies": 2,
+                "min_replicates_per_study": 3,
+                "min_quality_milli": 700,
+                "distance_scale_milli": 200,
+                "max_transport_gap_milli": 700,
+                "max_heterogeneity_milli": 250,
+                "effect_threshold_milli": 100,
+                "min_signal_to_noise_milli": 500,
+                "max_leave_one_out_shift_milli": 500
+            },
+            "studies": [
+                {"study_id":"a","model_system":"organoid","population_signature":[100,100],"effect_milli":400,"uncertainty_milli":40,"replicates":4,"quality_milli":900,"artifact":{"artifact_id":"a","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"study_id":"b","model_system":"organoid","population_signature":[110,95],"effect_milli":420,"uncertainty_milli":40,"replicates":4,"quality_milli":900,"artifact":{"artifact_id":"b","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}}
+            ]
+        }),
+    );
+    assert_eq!(analysis["dispatch"], json!("not_started"));
+    assert_eq!(analysis["analysis"]["disposition"], json!("qualified"));
+    assert!(
+        analysis["analysis"]["transport_gap_milli"]
+            .as_u64()
+            .unwrap_or_default()
+            < 700
+    );
 }
 
 #[test]

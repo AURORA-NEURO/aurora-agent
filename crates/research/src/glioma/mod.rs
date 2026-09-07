@@ -175,7 +175,7 @@ pub use programs::p09_reproducible_computation::{
 };
 pub use programs::p10_interpretation_replication::{
     analyze_causal_sensitivity, analyze_glioma_causal_contrast, analyze_glioma_mediation,
-    analyze_glioma_state_transitions, analyze_glioma_trajectories,
+    analyze_glioma_state_transitions, analyze_glioma_trajectories, analyze_glioma_transportability,
     analyze_replication_meta_analysis, analyze_stratified_causal_adjustment,
     CausalContrastAnalysis, CausalContrastDisposition, CausalContrastError, CausalContrastRequest,
     CausalSensitivityAnalysis, CausalStratumSummary, MediationAnalysis, MediationDisposition,
@@ -188,8 +188,10 @@ pub use programs::p10_interpretation_replication::{
     StratifiedCausalAdjustment, StratifiedCausalDisposition, StratifiedCausalError,
     StratifiedCausalRequest, StratifiedObservation, TrajectoryAnalysis, TrajectoryArmSummary,
     TrajectoryDisposition, TrajectoryError, TrajectoryObservation, TrajectoryRequest,
-    TransitionCellDisposition, TransitionContrastDisposition, TransitionDirection, UnitContrast,
-    UnitTrajectory, UnitTrajectoryDisposition,
+    TransitionCellDisposition, TransitionContrastDisposition, TransitionDirection, TransportStudy,
+    TransportStudyContribution, TransportabilityAnalysis, TransportabilityDisposition,
+    TransportabilityError, TransportabilityRequest, UnitContrast, UnitTrajectory,
+    UnitTrajectoryDisposition,
 };
 pub use programs::p12_federated_benchmarking::{
     analyze_federated_benchmark, FederatedBenchmarkConsensus, FederatedBenchmarkContribution,
