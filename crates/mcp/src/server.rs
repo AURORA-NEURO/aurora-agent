@@ -482,6 +482,7 @@ use bioprism_research::{
     dry_run_glioma_research, execute_glioma_action_portfolio,
     execute_glioma_active_learning_campaign, execute_glioma_autonomous_campaign,
     execute_glioma_computation, execute_glioma_computation_portfolio,
+    execute_glioma_multimodal_mechanism_campaign,
     execute_glioma_evidence_campaign, execute_glioma_instrument_plan, execute_glioma_protocol,
     execute_glioma_research_autopilot, execute_glioma_robust_active_learning_campaign,
     explore_mechanisms, generate_feature_catalog, glioma_program_catalog,
@@ -514,6 +515,7 @@ use bioprism_research::{
     GliomaResearchAutopilotRequest, GliomaResearchIntent, GliomaWorkflowRequest,
     GraphFusionRequest, GraphFusionVector, HarmonizationRequest, HarmonizationVector,
     PathwayActivityDefinition, PathwayActivityObservation, PathwayActivityRequest,
+    MultimodalMechanismCampaignRequest,
     InformationDesignRequest, InstrumentExecutionRequest, InstrumentPreflightRequest,
     KnowledgeFrontierRequest, KnowledgeRequest, LatentFactorRequest, LatentFactorVector,
     LigandReceptorPair, MechanismActionPlannerConfig, MechanismCandidate, MechanismDiscrimination,
@@ -2001,6 +2003,9 @@ impl Server {
             "glioma_multimodal_latent_factors" => self.glioma_multimodal_latent_factors(&arguments),
             "glioma_multimodal_graph_fusion" => self.glioma_multimodal_graph_fusion(&arguments),
             "glioma_pathway_activity" => self.glioma_pathway_activity(&arguments),
+            "glioma_multimodal_mechanism_campaign" => {
+                self.glioma_multimodal_mechanism_campaign(&arguments)
+            }
             "glioma_spatial_niches" => self.glioma_spatial_niches(&arguments),
             "glioma_spatial_communication" => self.glioma_spatial_communication(&arguments),
             "glioma_spatial_state_propagation" => self.glioma_spatial_state_propagation(&arguments),
@@ -4001,6 +4006,64 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma pathway activity: {error}"))
+    }
+
+    /// Run the multimodal graph, pathway activity, and bounded action-selection vertical as one
+    /// autonomous research cycle. Actions remain plans until existing execution gates admit them.
+    fn glioma_multimodal_mechanism_campaign(&self, arguments: &Value) -> Result<Value, String> {
+        let request: MultimodalMechanismCampaignRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_multimodal_mechanism_campaign requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma mechanism campaign request: {error}"))?;
+        let graph_vectors: Vec<GraphFusionVector> = serde_json::from_value(
+            arguments
+                .get("graph_vectors")
+                .cloned()
+                .ok_or_else(|| "glioma_multimodal_mechanism_campaign requires graph_vectors".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma mechanism campaign graph vectors: {error}"))?;
+        let pathway_definitions: Vec<PathwayActivityDefinition> = serde_json::from_value(
+            arguments
+                .get("pathway_definitions")
+                .cloned()
+                .ok_or_else(|| "glioma_multimodal_mechanism_campaign requires pathway_definitions".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma mechanism campaign pathway definitions: {error}"))?;
+        let pathway_observations: Vec<PathwayActivityObservation> = serde_json::from_value(
+            arguments
+                .get("pathway_observations")
+                .cloned()
+                .ok_or_else(|| "glioma_multimodal_mechanism_campaign requires pathway_observations".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma mechanism campaign pathway observations: {error}"))?;
+        let candidates: Vec<GliomaActionCandidate> = serde_json::from_value(
+            arguments
+                .get("candidates")
+                .cloned()
+                .ok_or_else(|| "glioma_multimodal_mechanism_campaign requires candidates".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma mechanism campaign candidates: {error}"))?;
+        let output = execute_glioma_multimodal_mechanism_campaign(
+            &request,
+            &graph_vectors,
+            &pathway_definitions,
+            &pathway_observations,
+            &candidates,
+        )
+        .map_err(|error| format!("glioma multimodal mechanism campaign refused: {error}"))?;
+        serde_json::to_value(json!({
+            "campaign": output,
+            "dispatch": "not_started",
+            "guarantees": [
+                "graph and pathway evidence are evaluated before action selection",
+                "selected actions are dependency-safe plans and still require existing policy, approval, and execution gates",
+                "partial, unresolved, contradictory, and missing evidence remains visible; no clinical decision is made"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma multimodal mechanism campaign: {error}"))
     }
 
     /// Build spatially connected same-lineage niches and retain cross-lineage interaction
@@ -45254,6 +45317,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_mechanism_action_plan",
                 "glioma_mechanism_graph_propagate",
                 "glioma_pathway_activity",
+                "glioma_multimodal_mechanism_campaign",
                 "glioma_mechanism_counterfactual",
                 "glioma_mechanism_ensemble_counterfactual",
                 "glioma_robust_intervention_portfolio",
@@ -52649,6 +52713,21 @@ pub fn tool_definitions() -> Vec<Value> {
                 "observations": {"type": "array", "items": {"type": "object"}, "description": "Local PathwayActivityObservation1@1 value-only records with modality, reliability, and de-identified sample lineage."}
             },
             "required": ["request", "definitions", "observations"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_multimodal_mechanism_campaign",
+        "description": "Run one autonomous preclinical glioma mechanism cycle: fuse local multimodal sample graphs, infer signed pathway activity, and select a dependency-safe next action portfolio. The route preserves evidence gaps and only returns plans; policy, approval, instrument, and execution gates remain mandatory and no clinical decision is made.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "MultimodalMechanismCampaignRequest1@1 binding graph fusion, pathway activity, selection policy, objective, model system, and completed actions."},
+                "graph_vectors": {"type": "array", "items": {"type": "object"}, "description": "Local GraphFusionVector1@1 modality vectors."},
+                "pathway_definitions": {"type": "array", "items": {"type": "object"}, "description": "PathwayActivityDefinition1@1 signed pathway node and edge declarations."},
+                "pathway_observations": {"type": "array", "items": {"type": "object"}, "description": "Local PathwayActivityObservation1@1 feature values and reliability."},
+                "candidates": {"type": "array", "items": {"type": "object"}, "description": "Typed GliomaActionCandidate1@1 assay, analysis, simulation, or instrument plans."}
+            },
+            "required": ["request", "graph_vectors", "pathway_definitions", "pathway_observations", "candidates"]
         }
     }));
     definitions.push(json!({

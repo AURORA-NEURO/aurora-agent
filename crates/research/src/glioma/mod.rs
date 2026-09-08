@@ -133,6 +133,8 @@ pub use programs::p06_experiment_design::{
     RobustActiveLearningScore, EXECUTION_OUTPUT_SCHEMA,
 };
 pub use programs::p07_protocol_simulation::{
+    execute_glioma_multimodal_mechanism_campaign, MechanismCampaignDisposition,
+    MechanismCampaignError, MultimodalMechanismCampaign, MultimodalMechanismCampaignRequest,
     execute_glioma_action_portfolio, execute_glioma_active_learning_campaign,
     execute_glioma_autonomous_campaign, execute_glioma_evidence_campaign, execute_glioma_protocol,
     execute_glioma_research_autopilot, execute_glioma_robust_active_learning_campaign,

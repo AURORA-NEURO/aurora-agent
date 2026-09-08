@@ -314,7 +314,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 57;
-const TOOL_DEFINITION_COUNT: usize = 585;
+const TOOL_DEFINITION_COUNT: usize = 586;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -2468,6 +2468,67 @@ fn glioma_pathway_activity_ranks_cross_modal_mechanism_state() {
     assert_eq!(response["dispatch"], json!("not_started"));
     assert_eq!(response["analysis"]["disposition"], json!("qualified"));
     assert_eq!(response["analysis"]["pathways"][0]["direction"], json!("activated"));
+}
+
+#[test]
+fn glioma_multimodal_mechanism_campaign_closes_analysis_to_action() {
+    let mut server = server();
+    let hash = "0".repeat(64);
+    let response = call(
+        &mut server,
+        "glioma_multimodal_mechanism_campaign",
+        json!({
+            "request": {
+                "objective": "find an executable invasion follow-up",
+                "study_id": "campaign-study",
+                "model_system": "organoid",
+                "graph": {
+                    "study_id": "campaign-study",
+                    "model_system": "organoid",
+                    "required_modalities": ["genomics", "transcriptomics"],
+                    "min_samples": 3,
+                    "min_modalities_per_sample": 2,
+                    "min_shared_features": 2,
+                    "neighbours": 2,
+                    "diffusion_steps": 2,
+                    "max_distance_milli": 1000,
+                    "min_consensus_support_milli": 500,
+                    "max_disagreement_milli": 200,
+                    "require_all_modalities": false
+                },
+                "pathway": {
+                    "objective": "rank invasion pathways",
+                    "study_id": "campaign-study",
+                    "model_system": "organoid",
+                    "min_pathway_nodes": 2,
+                    "min_observed_nodes": 2,
+                    "min_modalities": 2,
+                    "min_confidence_milli": 700,
+                    "max_pathways": 4,
+                    "require_cross_modal": true
+                },
+                "selection": {"budget_units": 3, "max_actions": 1},
+                "completed_action_order": []
+            },
+            "graph_vectors": [
+                {"observation_id":"a-g","study_id":"campaign-study","sample_lineage":"a","modality":"genomics","model_system":"organoid","artifact":{"artifact_id":"a-g","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"reliability_milli":900,"features":[{"feature_id":"x","value_milli":700},{"feature_id":"y","value_milli":700}]},
+                {"observation_id":"a-t","study_id":"campaign-study","sample_lineage":"a","modality":"transcriptomics","model_system":"organoid","artifact":{"artifact_id":"a-t","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"reliability_milli":900,"features":[{"feature_id":"x","value_milli":700},{"feature_id":"y","value_milli":700}]},
+                {"observation_id":"b-g","study_id":"campaign-study","sample_lineage":"b","modality":"genomics","model_system":"organoid","artifact":{"artifact_id":"b-g","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"reliability_milli":900,"features":[{"feature_id":"x","value_milli":710},{"feature_id":"y","value_milli":690}]},
+                {"observation_id":"b-t","study_id":"campaign-study","sample_lineage":"b","modality":"transcriptomics","model_system":"organoid","artifact":{"artifact_id":"b-t","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"reliability_milli":900,"features":[{"feature_id":"x","value_milli":710},{"feature_id":"y","value_milli":690}]},
+                {"observation_id":"c-g","study_id":"campaign-study","sample_lineage":"c","modality":"genomics","model_system":"organoid","artifact":{"artifact_id":"c-g","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"reliability_milli":900,"features":[{"feature_id":"x","value_milli":680},{"feature_id":"y","value_milli":720}]},
+                {"observation_id":"c-t","study_id":"campaign-study","sample_lineage":"c","modality":"transcriptomics","model_system":"organoid","artifact":{"artifact_id":"c-t","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"reliability_milli":900,"features":[{"feature_id":"x","value_milli":680},{"feature_id":"y","value_milli":720}]}
+            ],
+            "pathway_definitions": [{"pathway_id":"invasion","label":"invasion","nodes":[{"node_id":"egfr","label":"EGFR","modality":"genomics","expected_direction":1,"weight_milli":1000},{"node_id":"vim","label":"VIM","modality":"transcriptomics","expected_direction":1,"weight_milli":1000}],"edges":[{"source_node_id":"egfr","target_node_id":"vim","relation":1,"confidence_milli":900}]}],
+            "pathway_observations": [
+                {"observation_id":"p-g","study_id":"campaign-study","sample_lineage":"a","modality":"genomics","model_system":"organoid","artifact":{"artifact_id":"p-g","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"feature_id":"egfr","value_milli":700,"reliability_milli":900},
+                {"observation_id":"p-t","study_id":"campaign-study","sample_lineage":"a","modality":"transcriptomics","model_system":"organoid","artifact":{"artifact_id":"p-t","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"feature_id":"vim","value_milli":800,"reliability_milli":900}
+            ],
+            "candidates": [{"action_id":"validate-invasion","stage_kind":"experiment_design","modality":"functional_perturbation","model_system":"organoid","depends_on":[],"cost_units":2,"information_gain_milli":900,"frontier_novelty_milli":700,"workflow_leverage_milli":900,"cross_stage_unlock_milli":800,"reproducibility_safety_milli":900,"federation_value_milli":500,"feasibility_milli":900,"autonomy_tier":"a1","effects":["read_local_data","execute_local_computation","write_local_artifact"]}]
+        }),
+    );
+    assert_eq!(response["dispatch"], json!("not_started"));
+    assert_eq!(response["campaign"]["disposition"], json!("ready_for_execution"));
+    assert_eq!(response["campaign"]["next_action_order"], json!(["validate-invasion"]));
 }
 
 #[test]

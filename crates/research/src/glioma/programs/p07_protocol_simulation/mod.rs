@@ -15,6 +15,7 @@ pub mod active_learning_campaign;
 pub mod autonomous_campaign;
 pub mod evidence_campaign;
 pub mod execution;
+pub mod mechanism_campaign;
 pub mod research_autopilot;
 pub mod robust_active_learning_campaign;
 pub mod simulator;
@@ -46,6 +47,11 @@ pub use execution::{
     ProtocolExecution, ProtocolExecutionDisposition, ProtocolExecutionError,
     ProtocolExecutionFailure, ProtocolExecutionRequest, ProtocolExecutionStopReason,
     ProtocolTaskDisposition, ProtocolTaskResult, OUTPUT_SCHEMA as PROTOCOL_EXECUTION_OUTPUT_SCHEMA,
+};
+
+pub use mechanism_campaign::{
+    execute_glioma_multimodal_mechanism_campaign, MechanismCampaignDisposition,
+    MechanismCampaignError, MultimodalMechanismCampaign, MultimodalMechanismCampaignRequest,
 };
 
 pub use research_autopilot::{
