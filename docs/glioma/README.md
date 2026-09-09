@@ -46,6 +46,8 @@ crates/research/src/glioma/
                                              P05 marker-aware preclinical clonal-evolution graph inference with explicit ambiguity
   programs/p06_experiment_design/clonal_panel.rs
                                              P06 clone-aware perturbation/readout panel selection under cost and branch-coverage gates
+  programs/p10_interpretation_replication/clone_outcomes.rs
+                                             P10 replicate-level clone-panel outcome adjudication with explicit null/contradictory evidence
   programs/p01_evidence_surveillance/surveillance.rs
                                              P01 snapshot delta surveillance and prioritized evidence review actions
   programs/p01_evidence_surveillance/priority.rs

@@ -314,7 +314,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 57;
-const TOOL_DEFINITION_COUNT: usize = 609;
+const TOOL_DEFINITION_COUNT: usize = 610;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -3459,6 +3459,83 @@ fn glioma_clone_perturbation_panel_covers_evolutionary_branches_under_budget() {
     assert_eq!(panel["panel"]["disposition"], json!("qualified"));
     assert_eq!(panel["panel"]["selected_order"].as_array().unwrap().len(), 2);
     assert!(panel["panel"]["uncovered_branch_order"].as_array().unwrap().is_empty());
+}
+
+#[test]
+fn glioma_clone_panel_outcomes_requires_replicates_before_qualification() {
+    let mut server = server();
+    let hash = "0".repeat(64);
+    let profile = |id: &str, clone_id: &str, timepoint: u32, markers: Vec<&str>| {
+        json!({
+            "profile_id": id,
+            "study_id": "outcome-protocol-study",
+            "sample_lineage": "lineage-a",
+            "clone_id": clone_id,
+            "timepoint": timepoint,
+            "model_system": "organoid",
+            "abundance_milli": if timepoint == 0 { 400 } else { 600 },
+            "artifact": {"artifact_id": id, "content_hash": hash, "content_type": "application/json", "local_only": true, "contains_human_data": false, "contains_direct_identifiers": false},
+            "markers": markers.into_iter().map(|marker_id| json!({"marker_id": marker_id, "state": "present", "confidence_milli": 900})).collect::<Vec<_>>()
+        })
+    };
+    let evolution = call(
+        &mut server,
+        "glioma_clonal_evolution",
+        json!({
+            "request": {"study_id": "outcome-protocol-study", "model_system": "organoid", "min_shared_markers": 1, "min_parent_score_milli": 500, "max_time_gap": 5, "min_abundance_milli": 1, "allow_parallel_branches": true, "max_parent_candidates": 2},
+            "profiles": [
+                profile("root", "clone-a", 0, vec!["egfr", "tp53"]),
+                profile("ec", "clone-b", 1, vec!["egfr", "tp53", "ecDNA"]),
+                profile("pt", "clone-c", 1, vec!["egfr", "tp53", "pten"])
+            ]
+        }),
+    );
+    let panel = call(
+        &mut server,
+        "glioma_clone_perturbation_panel",
+        json!({
+            "request": {"study_id": "outcome-protocol-study", "model_system": "organoid", "budget_milli": 10, "min_coverage_milli": 500, "max_selected": 2, "require_branch_coverage": true, "allow_uncertain_targets": true},
+            "graph": evolution["analysis"].clone(),
+            "candidates": [
+                {"candidate_id": "ec-panel", "kind": "inhibit", "target_marker_order": ["ecDNA"], "cost_milli": 5, "expected_effect_milli": 900, "purpose": "branch assay", "artifact": {"artifact_id": "ec-panel", "content_hash": hash, "content_type": "application/json", "local_only": true, "contains_human_data": false, "contains_direct_identifiers": false}},
+                {"candidate_id": "pt-panel", "kind": "inhibit", "target_marker_order": ["pten"], "cost_milli": 5, "expected_effect_milli": 900, "purpose": "branch assay", "artifact": {"artifact_id": "pt-panel", "content_hash": hash, "content_type": "application/json", "local_only": true, "contains_human_data": false, "contains_direct_identifiers": false}}
+            ]
+        }),
+    );
+    let mut observations = Vec::new();
+    let mut observation_index = 0_u32;
+    for branch in panel["panel"]["branch_coverage"].as_array().unwrap() {
+        for candidate in branch["selected_candidate_order"].as_array().unwrap() {
+            for replicate in 0..2 {
+                observations.push(json!({
+                    "observation_id": format!("obs{observation_index}"),
+                    "study_id": "outcome-protocol-study",
+                    "model_system": "organoid",
+                    "candidate_id": candidate.as_str().unwrap(),
+                    "branch_id": branch["branch_id"].as_str().unwrap(),
+                    "replicate_id": format!("r{replicate}"),
+                    "state": "measured",
+                    "effect_milli": -800,
+                    "uncertainty_milli": 100,
+                    "artifact": {"artifact_id": format!("artifact{observation_index}"), "content_hash": hash, "content_type": "application/json", "local_only": true, "contains_human_data": false, "contains_direct_identifiers": false}
+                }));
+                observation_index += 1;
+            }
+        }
+    }
+    let analysis = call(
+        &mut server,
+        "glioma_clone_panel_outcomes",
+        json!({
+            "request": {"study_id": "outcome-protocol-study", "model_system": "organoid", "min_replicates": 2, "effect_threshold_milli": 500, "max_uncertainty_milli": 200, "require_all_selected": true, "require_all_branches": true},
+            "panel": panel["panel"].clone(),
+            "observations": observations
+        }),
+    );
+    assert_eq!(analysis["dispatch"], json!("not_started"));
+    assert_eq!(analysis["simulation_only"], json!(true));
+    assert_eq!(analysis["analysis"]["disposition"], json!("qualified"));
+    assert!(analysis["analysis"]["next_action_order"].as_array().unwrap().is_empty());
 }
 
 #[test]

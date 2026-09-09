@@ -257,6 +257,10 @@ pub use programs::p09_reproducible_computation::{
 };
 pub use programs::p10_interpretation_replication::{
     plan_glioma_adaptive_research_frontier,
+    analyze_glioma_clone_panel_outcomes, ClonePanelBranchAnalysis, ClonePanelCandidateAnalysis,
+    ClonePanelCellAnalysis, ClonePanelCellDisposition, ClonePanelMeasurementState,
+    ClonePanelObservation, ClonePanelOutcomeAnalysis, ClonePanelOutcomeDisposition,
+    ClonePanelOutcomeError, ClonePanelOutcomeRequest,
     analyze_causal_sensitivity, analyze_glioma_causal_contrast, analyze_glioma_mediation,
     analyze_glioma_state_transitions, analyze_glioma_trajectories, analyze_glioma_transportability,
     analyze_replication_meta_analysis, analyze_stratified_causal_adjustment,

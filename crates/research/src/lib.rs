@@ -90,6 +90,10 @@ pub use findings::{
     sweep_findings, Finding, ObservationLevel,
 };
 pub use glioma::{
+    analyze_glioma_clone_panel_outcomes, ClonePanelBranchAnalysis, ClonePanelCandidateAnalysis,
+    ClonePanelCellAnalysis, ClonePanelCellDisposition, ClonePanelMeasurementState,
+    ClonePanelObservation, ClonePanelOutcomeAnalysis, ClonePanelOutcomeDisposition,
+    ClonePanelOutcomeError, ClonePanelOutcomeRequest,
     allocate_glioma_assays, analyze_causal_sensitivity, analyze_federated_benchmark,
     analyze_glioma_causal_contrast, analyze_glioma_combination_synergy,
     analyze_glioma_dose_response, analyze_glioma_latent_factors, analyze_glioma_mediation,

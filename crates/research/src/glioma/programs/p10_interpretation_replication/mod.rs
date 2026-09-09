@@ -5,6 +5,7 @@ use crate::glioma::catalog::{glioma_program_catalog, GliomaProgramDescriptor, Gl
 pub mod causal_adjustment;
 pub mod causal_contrast;
 pub mod campaign;
+pub mod clone_outcomes;
 pub mod adaptive_frontier;
 pub mod mediation;
 pub mod meta_analysis;
@@ -34,6 +35,12 @@ pub use campaign::{
     GliomaReplicationCampaignExecutor, GliomaReplicationCampaignObservation,
     GliomaReplicationCampaignRequest, GliomaReplicationCampaignRound,
     GliomaReplicationCampaignStopReason, GliomaReplicationExecutionFailure,
+};
+pub use clone_outcomes::{
+    analyze_glioma_clone_panel_outcomes, ClonePanelBranchAnalysis, ClonePanelCandidateAnalysis,
+    ClonePanelCellAnalysis, ClonePanelCellDisposition, ClonePanelMeasurementState,
+    ClonePanelObservation, ClonePanelOutcomeAnalysis, ClonePanelOutcomeDisposition,
+    ClonePanelOutcomeError, ClonePanelOutcomeRequest,
 };
 pub use mediation::{
     analyze_glioma_mediation, MediationAnalysis, MediationDisposition, MediationError,

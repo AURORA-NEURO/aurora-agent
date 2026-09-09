@@ -472,6 +472,7 @@ use bioprism_research::{
     analyze_glioma_dose_response, analyze_glioma_latent_factors, analyze_glioma_mediation,
     analyze_glioma_multimodal_graph_fusion, analyze_glioma_pathway_activity,
     analyze_glioma_clonal_evolution,
+    analyze_glioma_clone_panel_outcomes,
     analyze_glioma_spatial_communication, analyze_glioma_spatial_niches,
     analyze_glioma_spatial_state_propagation, analyze_glioma_state_transitions,
     analyze_glioma_temporal_multimodal_fusion,
@@ -555,6 +556,7 @@ use bioprism_research::{
     SpatialPropagationRequest, StateTransitionObservation, StateTransitionRequest,
     TemporalFusionRequest, TemporalObservation, ClonalEvolutionRequest, CloneProfile,
     ClonePerturbationPanelRequest, ClonePerturbationCandidate, ClonalEvolutionGraph,
+    ClonePerturbationPanel, ClonePanelOutcomeRequest, ClonePanelObservation,
     StaticGliomaActionPlanner, StaticGliomaComputationPlanner, StratifiedCausalRequest,
     StratifiedObservation, TrajectoryObservation, TrajectoryRequest, TransportStudy,
     TransportabilityRequest, TypedKnowledge, execute_glioma_research_director,
@@ -2043,6 +2045,7 @@ impl Server {
             "glioma_clone_perturbation_panel" => {
                 self.glioma_clone_perturbation_panel(&arguments)
             }
+            "glioma_clone_panel_outcomes" => self.glioma_clone_panel_outcomes(&arguments),
             "glioma_adaptive_research_frontier" => {
                 self.glioma_adaptive_research_frontier(&arguments)
             }
@@ -3842,6 +3845,48 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma clone perturbation panel: {error}"))
+    }
+
+    /// Reconcile local replicate outcomes against a selected clone-aware preclinical panel.
+    /// Missing and contradictory cells remain unresolved; this route produces interpretation
+    /// evidence and next-measurement priorities but never executes biology or makes a clinical
+    /// decision.
+    fn glioma_clone_panel_outcomes(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ClonePanelOutcomeRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_clone_panel_outcomes requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma clone panel outcome request: {error}"))?;
+        let panel: ClonePerturbationPanel = serde_json::from_value(
+            arguments
+                .get("panel")
+                .cloned()
+                .ok_or_else(|| "glioma_clone_panel_outcomes requires panel".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma clone panel: {error}"))?;
+        let observations: Vec<ClonePanelObservation> = serde_json::from_value(
+            arguments
+                .get("observations")
+                .cloned()
+                .ok_or_else(|| "glioma_clone_panel_outcomes requires observations".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma clone panel observations: {error}"))?;
+        let analysis = analyze_glioma_clone_panel_outcomes(&request, &panel, &observations)
+            .map_err(|error| format!("glioma clone panel outcome analysis refused: {error}"))?;
+        serde_json::to_value(json!({
+            "analysis": analysis,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "replicate floors, uncertainty bounds, null effects, contradictions, and missing cells remain explicit",
+                "a qualified design panel is never promoted to evidence without local observations",
+                "next actions are measurement or retest priorities, not treatment or resistance claims",
+                "MCP executes no assay, moves no raw data, and makes no clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma clone panel outcome analysis: {error}"))
     }
 
     /// Direct one bounded, dependency-closed glioma research batch from a high-level intent.
@@ -46142,6 +46187,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_temporal_multimodal_fusion",
                 "glioma_clonal_evolution",
                 "glioma_clone_perturbation_panel",
+                "glioma_clone_panel_outcomes",
                 "glioma_spatial_niches",
                 "glioma_spatial_communication",
                 "glioma_spatial_state_propagation",
@@ -53487,6 +53533,19 @@ pub fn tool_definitions() -> Vec<Value> {
                 "candidates": {"type": "array", "items": {"type": "object"}, "description": "Local ClonePerturbationCandidate1@1 records with perturbation kind, sorted target markers, cost, expected effect, purpose, and local artifact reference."}
             },
             "required": ["request", "graph", "candidates"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_clone_panel_outcomes",
+        "description": "Adjudicate replicate-level local preclinical outcomes against a selected clone-aware perturbation panel. The deterministic analyzer preserves supported, null, negative, contradictory, and unresolved candidate-by-branch cells, enforces replicate and uncertainty floors, reports negative evidence and next measurement priorities, and never executes an assay, moves raw data, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ClonePanelOutcomeRequest1@1 with study/model binding, replicate floor, effect threshold, uncertainty ceiling, and completeness policy."},
+                "panel": {"type": "object", "description": "Validated ClonePerturbationPanel1@1 produced by glioma_clone_perturbation_panel."},
+                "observations": {"type": "array", "items": {"type": "object"}, "description": "Local ClonePanelObservation1@1 records keyed by candidate, evolutionary branch, and replicate, with state, effect, uncertainty, and local artifact reference."}
+            },
+            "required": ["request", "panel", "observations"]
         }
     }));
     definitions.push(json!({
