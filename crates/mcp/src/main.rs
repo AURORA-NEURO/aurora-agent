@@ -111,6 +111,7 @@ fn main() {
                      glioma_computation_workflow_execute,\n\
                      glioma_research_director_execute,\n\
                      glioma_interpretation_synthesize,\n\
+                     glioma_adaptive_research_frontier,\n\
                      glioma_federated_benchmark_consensus,\n\
                      glioma_federated_benchmark_campaign_execute,\n\
                      glioma_replay_campaign_execute,\n\

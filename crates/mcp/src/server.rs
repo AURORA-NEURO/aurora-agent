@@ -553,7 +553,8 @@ use bioprism_research::{
     StaticGliomaActionPlanner, StaticGliomaComputationPlanner, StratifiedCausalRequest,
     StratifiedObservation, TrajectoryObservation, TrajectoryRequest, TransportStudy,
     TransportabilityRequest, TypedKnowledge, execute_glioma_research_director,
-    synthesize_glioma_interpretation,
+    plan_glioma_adaptive_research_frontier, synthesize_glioma_interpretation,
+    AdaptiveFrontierRequest,
 };
 use bioprism_routing::{
     lab::{run as run_routing_lab, LabSettings, Task},
@@ -2029,6 +2030,9 @@ impl Server {
             }
             "glioma_interpretation_synthesize" => {
                 self.glioma_interpretation_synthesize(&arguments)
+            }
+            "glioma_adaptive_research_frontier" => {
+                self.glioma_adaptive_research_frontier(&arguments)
             }
             "glioma_robustness_suite" => self.glioma_robustness_suite(&arguments),
             "glioma_trajectory_analyze" => self.glioma_trajectory_analyze(&arguments),
@@ -3743,6 +3747,33 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma research director run: {error}"))
+    }
+
+    /// Convert a typed cross-family interpretation into a bounded next-action frontier.  The
+    /// route performs no assay or instrument effect; an institution-local caller owns execution
+    /// after reviewing the selected actions and any unresolved holds.
+    fn glioma_adaptive_research_frontier(&self, arguments: &Value) -> Result<Value, String> {
+        let request: AdaptiveFrontierRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_adaptive_research_frontier requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma adaptive frontier request: {error}"))?;
+        let frontier = plan_glioma_adaptive_research_frontier(&request)
+            .map_err(|error| format!("glioma adaptive frontier refused: {error}"))?;
+        serde_json::to_value(json!({
+            "frontier": frontier,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "typed interpretation outcomes determine which uncertainty, contradiction, replication, and negative-result debts receive next-action capacity",
+                "candidate ranking reuses the bounded, deterministic glioma action selector with explicit budget and authority gates",
+                "unresolved and negative synthesis states remain holds or partial outcomes rather than being promoted",
+                "MCP executes no assay, moves no raw data, and makes no clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma adaptive frontier: {error}"))
     }
 
     /// Stress-test a local two-arm glioma analysis under deterministic batch and row omissions.
@@ -45967,6 +45998,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_computation_workflow_execute",
                 "glioma_research_director_execute",
                 "glioma_interpretation_synthesize",
+                "glioma_adaptive_research_frontier",
                 "glioma_robustness_suite",
                 "glioma_trajectory_analyze",
                 "glioma_state_transition_analyze",
@@ -53040,6 +53072,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "InterpretationSynthesisRequest1@1 with hypothesis, model system, evidence-family records, quality/floor thresholds, replication requirement, and replay identity."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_adaptive_research_frontier",
+        "description": "Turn a typed cross-family preclinical glioma interpretation into an adaptive next-action frontier. The planner scores contradiction, instability, replication gaps, missing evidence families, negative-result confirmation, model transfer, and mechanism discrimination, then applies the bounded action selector with explicit budget and authority gates. It does not promote a hypothesis, execute an assay, move raw data, or make a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "AdaptiveFrontierRequest1@1 containing a validated InterpretationSynthesis1@1, completed action ids, budget, authority switches, and GliomaSelectionWeights."}
             },
             "required": ["request"]
         }

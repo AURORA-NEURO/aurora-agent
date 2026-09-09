@@ -5,6 +5,7 @@ use crate::glioma::catalog::{glioma_program_catalog, GliomaProgramDescriptor, Gl
 pub mod causal_adjustment;
 pub mod causal_contrast;
 pub mod campaign;
+pub mod adaptive_frontier;
 pub mod mediation;
 pub mod meta_analysis;
 pub mod sensitivity;
@@ -17,6 +18,10 @@ pub use causal_adjustment::{
     analyze_stratified_causal_adjustment, CausalStratumSummary, StratifiedCausalActionKind,
     StratifiedCausalAdjustment, StratifiedCausalDisposition, StratifiedCausalError,
     StratifiedCausalRequest, StratifiedObservation,
+};
+pub use adaptive_frontier::{
+    plan_glioma_adaptive_research_frontier, AdaptiveFrontierCandidate, AdaptiveFrontierDisposition,
+    AdaptiveFrontierError, AdaptiveFrontierRequest, AdaptiveResearchFrontier, AdaptiveTarget,
 };
 pub use causal_contrast::{
     analyze_glioma_causal_contrast, CausalContrastAnalysis, CausalContrastDisposition,

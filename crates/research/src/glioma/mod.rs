@@ -246,6 +246,7 @@ pub use programs::p09_reproducible_computation::{
     StaticGliomaComputationPlanner,
 };
 pub use programs::p10_interpretation_replication::{
+    plan_glioma_adaptive_research_frontier,
     analyze_causal_sensitivity, analyze_glioma_causal_contrast, analyze_glioma_mediation,
     analyze_glioma_state_transitions, analyze_glioma_trajectories, analyze_glioma_transportability,
     analyze_replication_meta_analysis, analyze_stratified_causal_adjustment,
@@ -273,6 +274,8 @@ pub use programs::p10_interpretation_replication::{
     InterpretationEvidenceFamily, InterpretationFamilySummary, InterpretationSynthesis,
     InterpretationSynthesisDisposition, InterpretationSynthesisError,
     InterpretationSynthesisRequest,
+    AdaptiveFrontierCandidate, AdaptiveFrontierDisposition, AdaptiveFrontierError,
+    AdaptiveFrontierRequest, AdaptiveResearchFrontier, AdaptiveTarget,
 };
 pub use programs::p11_research_object_release::{
     execute_glioma_replay_campaign, DryRunReplayCampaignExecutor, ReplayCampaign,

@@ -116,6 +116,7 @@ pub use glioma::{
     execute_glioma_multimodal_mechanism_campaign_with_executor, execute_glioma_protocol,
     execute_glioma_replay_campaign, execute_glioma_replication_campaign,
     execute_glioma_research_autopilot, execute_glioma_research_director,
+    plan_glioma_adaptive_research_frontier,
     execute_glioma_robust_active_learning_campaign, plan_glioma_research_director,
     execute_glioma_workflow, explore_mechanisms, generate_feature_catalog, glioma_program_catalog,
     harmonize_glioma_multimodal_batches, harmonize_multimodal_inputs, implemented_feature_ids,
@@ -329,7 +330,9 @@ pub use glioma::{
     TransportabilityRequest, TypedKnowledge, UnitContrast, UnitTrajectory,
     InterpretationEvidence, InterpretationEvidenceDirection, InterpretationEvidenceFamily,
     InterpretationFamilySummary, InterpretationSynthesis, InterpretationSynthesisDisposition,
-    InterpretationSynthesisError, InterpretationSynthesisRequest,
+    InterpretationSynthesisError, InterpretationSynthesisRequest, AdaptiveFrontierCandidate,
+    AdaptiveFrontierDisposition, AdaptiveFrontierError, AdaptiveFrontierRequest,
+    AdaptiveResearchFrontier, AdaptiveTarget,
     UnitTrajectoryDisposition, WorkflowNodeDecision, EXECUTION_OUTPUT_SCHEMA,
     PROTOCOL_EXECUTION_OUTPUT_SCHEMA,
 };
