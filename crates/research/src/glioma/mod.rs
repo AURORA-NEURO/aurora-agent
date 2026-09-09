@@ -104,6 +104,7 @@ pub use programs::p04_decision_context::{
 };
 pub use programs::p05_mechanism_exploration::{
     analyze_glioma_clonal_evolution, analyze_glioma_pathway_activity, compile_mechanism_action_plan,
+    calibrate_glioma_mechanisms,
     discriminate_mechanisms,
     execute_glioma_adaptive_mechanism_campaign, execute_glioma_mechanism_discrimination_campaign,
     plan_glioma_adaptive_mechanism_policy, plan_glioma_robust_intervention_portfolio,
@@ -121,6 +122,9 @@ pub use programs::p05_mechanism_exploration::{
     EnsembleCounterfactualError, EnsembleDirection, EnsembleDisposition, EnsembleModelResult,
     EnsembleTargetSummary, GliomaMechanismActionPlanner, MechanismActionPlan,
     MechanismActionPlannerConfig, MechanismActionPlannerError, MechanismCounterfactual,
+    MechanismCalibration, MechanismCalibrationBin, MechanismCalibrationError,
+    MechanismCalibrationObservation, MechanismCalibrationRequest, MechanismCalibrationScore,
+    MechanismCalibrationScoreDisposition,
     MechanismCounterfactualEnsemble, MechanismDiscrimination, MechanismDiscriminationCampaign,
     MechanismDiscriminationCampaignDisposition, MechanismDiscriminationCampaignError,
     MechanismDiscriminationCampaignExecutionFailure, MechanismDiscriminationCampaignExecutor,

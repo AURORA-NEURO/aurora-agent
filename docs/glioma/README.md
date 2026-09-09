@@ -34,6 +34,8 @@ crates/research/src/glioma/
                                              P04 bounded question-to-action campaign with evidence-driven replanning
   programs/p05_mechanism_exploration/discrimination.rs
                                              P05 residual-likelihood mechanism discrimination and next-assay information gain
+  programs/p05_mechanism_exploration/calibration.rs
+                                             P05 prequential mechanism-probability calibration, reliability bins, and promotion gates
   programs/p05_mechanism_exploration/graph_propagation.rs
                                              P05 signed activation/inhibition mechanism-network propagation with convergence gates
   programs/p05_mechanism_exploration/counterfactual.rs
@@ -484,6 +486,13 @@ adapter, replaces or appends the returned feature, and recomputes residual fit a
 separation after every round. Missing features, diffuse mechanisms, negative evidence, retries,
 budget exhaustion, and no-progress are explicit; the dry-run route never represents a biological
 measurement.
+
+P05 now also exposes deterministic mechanism calibration
+(`calibrate_glioma_mechanisms`). It scores competing mechanism probabilities against typed local
+observations with fixed reliability bins, Brier loss, sharpness, and a final-round prequential
+holdout. Underpowered mechanisms, high-uncertainty observations, discordant negative evidence, and
+calibration/Brier gate failures remain explicit; calibration never refits a model or becomes a
+causal claim, and the MCP route never executes an assay or moves raw data.
 P12 now also exposes an autonomous federated benchmark campaign
 (`execute_federated_benchmark_campaign`). It ranks aggregate-only follow-up actions from the
 current pooled effect, heterogeneity, replicate floor, and leave-one-site-out influence, asks a

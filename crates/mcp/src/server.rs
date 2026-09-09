@@ -476,7 +476,7 @@ use bioprism_research::{
     analyze_glioma_clone_panel_outcomes,
     analyze_glioma_spatial_communication, analyze_glioma_spatial_niches,
     analyze_glioma_spatial_state_propagation, analyze_glioma_state_transitions,
-    analyze_glioma_temporal_multimodal_fusion,
+    analyze_glioma_temporal_multimodal_fusion, calibrate_glioma_mechanisms,
     analyze_glioma_trajectories, analyze_glioma_transportability, analyze_instrument_calibration,
     analyze_multimodal_concordance, analyze_multimodal_consensus, analyze_preclinical_outcomes,
     analyze_replication_meta_analysis, analyze_stratified_causal_adjustment,
@@ -548,7 +548,9 @@ use bioprism_research::{
     InstrumentPreflightRequest, KnowledgeFrontierRequest, KnowledgeRequest,
     KnowledgeResolutionCampaignRequest, KnowledgeCompositionRequest, KnowledgeRelation,
     LatentFactorRequest, LatentFactorVector,
-    LigandReceptorPair, MechanismActionPlannerConfig, MechanismCandidate, MechanismDiscrimination,
+    LigandReceptorPair, MechanismActionPlannerConfig, MechanismCalibration,
+    MechanismCalibrationObservation, MechanismCalibrationRequest, MechanismCandidate,
+    MechanismDiscrimination,
     MechanismDiscriminationCampaignRequest, MechanismDiscriminationRequest,
     MechanismDiscriminatorAction, MechanismFeatureObservation, MechanismGraphEdge,
     MechanismGraphNode, MechanismGraphRequest, MechanismHypothesis, MechanismRequest,
@@ -2107,6 +2109,7 @@ impl Server {
             "glioma_multimodal_qc" => self.glioma_multimodal_qc(&arguments),
             "glioma_mechanism_explore" => self.glioma_mechanism_explore(&arguments),
             "glioma_mechanism_discriminate" => self.glioma_mechanism_discriminate(&arguments),
+            "glioma_mechanism_calibrate" => self.glioma_mechanism_calibrate(&arguments),
             "glioma_mechanism_action_plan" => self.glioma_mechanism_action_plan(&arguments),
             "glioma_adaptive_mechanism_policy" => self.glioma_adaptive_mechanism_policy(&arguments),
             "glioma_adaptive_mechanism_campaign_execute" => {
@@ -5317,6 +5320,39 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma mechanism discrimination: {error}"))
+    }
+
+    /// Calibrate mechanism probabilities against future local observations using deterministic
+    /// reliability bins and a prequential holdout. This route evaluates value-only artifacts; it
+    /// never refits a model, executes an assay, or turns calibration into a causal claim.
+    fn glioma_mechanism_calibrate(&self, arguments: &Value) -> Result<Value, String> {
+        let request: MechanismCalibrationRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_mechanism_calibrate requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma mechanism calibration request: {error}"))?;
+        let observations: Vec<MechanismCalibrationObservation> = serde_json::from_value(
+            arguments
+                .get("observations")
+                .cloned()
+                .ok_or_else(|| "glioma_mechanism_calibrate requires observations".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma mechanism calibration observations: {error}"))?;
+        let calibration: MechanismCalibration = calibrate_glioma_mechanisms(&request, &observations)
+            .map_err(|error| format!("glioma mechanism calibration refused: {error}"))?;
+        serde_json::to_value(json!({
+            "calibration": calibration,
+            "dispatch": "not_started",
+            "guarantees": [
+                "scores are computed from typed local value-only observations with fixed reliability bins",
+                "the final observed round is reported as a prequential holdout and is never imputed",
+                "calibration error, Brier loss, negative discordance, and underpowered mechanisms remain explicit",
+                "the route does not refit a model, execute an assay, move raw data, or make a clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma mechanism calibration: {error}"))
     }
 
     /// Compile discriminator information gain into executable local action candidates for the
@@ -46454,6 +46490,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_multimodal_qc",
                 "glioma_mechanism_explore",
                 "glioma_mechanism_discriminate",
+                "glioma_mechanism_calibrate",
                 "glioma_mechanism_action_plan",
                 "glioma_adaptive_mechanism_policy",
                 "glioma_adaptive_mechanism_campaign_execute",
@@ -54050,6 +54087,18 @@ pub fn tool_definitions() -> Vec<Value> {
                 "actions": {"type": "array", "items": {"type": "object"}, "description": "MechanismDiscriminatorAction1@1 candidate assays with per-mechanism predictions, cost, feasibility, and uncertainty."}
             },
             "required": ["request", "hypotheses", "observations", "actions"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_mechanism_calibrate",
+        "description": "Calibrate competing preclinical glioma mechanism probabilities against typed local observations using fixed reliability bins, Brier loss, calibration error, sharpness, and a prequential final-round holdout. Preserves underpowered mechanisms, discordant negative evidence, and high-uncertainty observations; it never refits a model, executes an assay, moves raw data, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "MechanismCalibrationRequest1@1 with objective, model binding, observation/round bounds, and calibration/Brier gates."},
+                "observations": {"type": "array", "items": {"type": "object"}, "description": "MechanismCalibrationObservation1@1 typed local value-only records with round, feature, prediction, observation, uncertainty, and artifact reference."}
+            },
+            "required": ["request", "observations"]
         }
     }));
     definitions.push(json!({

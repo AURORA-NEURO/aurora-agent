@@ -314,7 +314,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 57;
-const TOOL_DEFINITION_COUNT: usize = 616;
+const TOOL_DEFINITION_COUNT: usize = 617;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -3116,6 +3116,37 @@ fn glioma_adaptive_mechanism_policy_selects_information_bearing_assay() {
         .unwrap()
         .iter()
         .any(|score| { score["information_gain_milli"].as_u64().unwrap_or_default() > 0 }));
+}
+
+#[test]
+fn glioma_mechanism_calibration_exposes_prequential_gates() {
+    let mut server = server();
+    let artifact_hash = ContentHash::of_value(&json!({"artifact": "calibration"})).unwrap();
+    let calibration = call(
+        &mut server,
+        "glioma_mechanism_calibrate",
+        json!({
+            "request": {
+                "objective": "calibrate invasion mechanism probabilities",
+                "model_system": "organoid",
+                "min_observations_per_mechanism": 2,
+                "max_mechanisms": 4,
+                "max_rounds": 8,
+                "max_calibration_error_milli": 200000,
+                "max_brier_loss_milli": 200000
+            },
+            "observations": [
+                {"round_index":0,"mechanism_id":"matrix","feature_id":"f1","predicted_milli":200000,"observed_milli":250000,"uncertainty_milli":10000,"artifact":{"artifact_id":"cal-a1","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-calibration+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"round_index":1,"mechanism_id":"matrix","feature_id":"f2","predicted_milli":300000,"observed_milli":350000,"uncertainty_milli":10000,"artifact":{"artifact_id":"cal-a2","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-calibration+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"round_index":0,"mechanism_id":"motility","feature_id":"f1","predicted_milli":800000,"observed_milli":750000,"uncertainty_milli":10000,"artifact":{"artifact_id":"cal-a3","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-calibration+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"round_index":1,"mechanism_id":"motility","feature_id":"f2","predicted_milli":700000,"observed_milli":650000,"uncertainty_milli":10000,"artifact":{"artifact_id":"cal-a4","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-calibration+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}}
+            ]
+        }),
+    );
+    assert_eq!(calibration["dispatch"], json!("not_started"));
+    assert_eq!(calibration["calibration"]["disposition"], json!("qualified"));
+    assert_eq!(calibration["calibration"]["prequential_holdout_round"], json!(1));
+    assert_eq!(calibration["calibration"]["scores"].as_array().unwrap().len(), 2);
 }
 
 #[test]

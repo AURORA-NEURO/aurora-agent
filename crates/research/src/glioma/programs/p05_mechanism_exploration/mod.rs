@@ -4,6 +4,7 @@ use crate::glioma::catalog::{glioma_program_catalog, GliomaProgramDescriptor, Gl
 
 pub mod action_planner;
 pub mod adaptive_policy;
+pub mod calibration;
 pub mod clonal_evolution;
 pub mod counterfactual;
 pub mod discrimination;
@@ -31,6 +32,11 @@ pub use clonal_evolution::{
     analyze_glioma_clonal_evolution, CloneMarker, CloneMarkerState, CloneProfile, ClonalEdge,
     ClonalEvolutionDisposition, ClonalEvolutionError, ClonalEvolutionGraph,
     ClonalEvolutionRequest, ClonalNode, ClonalRelation,
+};
+pub use calibration::{
+    calibrate_glioma_mechanisms, MechanismCalibration, MechanismCalibrationBin,
+    MechanismCalibrationError, MechanismCalibrationObservation, MechanismCalibrationRequest,
+    MechanismCalibrationScore, MechanismCalibrationScoreDisposition,
 };
 pub use counterfactual::{
     simulate_glioma_counterfactual, CounterfactualContrast, CounterfactualDirection,
