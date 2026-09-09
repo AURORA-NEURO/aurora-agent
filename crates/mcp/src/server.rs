@@ -468,99 +468,90 @@ use bioprism_repair::{
 };
 use bioprism_research::{
     allocate_glioma_assays, analyze_causal_sensitivity, analyze_federated_benchmark,
-    execute_federated_benchmark_campaign, execute_glioma_replay_campaign,
     analyze_glioma_causal_contrast, analyze_glioma_combination_synergy,
     analyze_glioma_dose_response, analyze_glioma_latent_factors, analyze_glioma_mediation,
     analyze_glioma_multimodal_graph_fusion, analyze_glioma_pathway_activity,
-    analyze_glioma_spatial_communication,
-    analyze_glioma_spatial_niches, analyze_glioma_spatial_state_propagation,
-    analyze_glioma_state_transitions, analyze_glioma_trajectories, analyze_glioma_transportability,
-    analyze_instrument_calibration, analyze_multimodal_concordance, analyze_multimodal_consensus,
-    analyze_preclinical_outcomes, analyze_replication_meta_analysis,
-    analyze_stratified_causal_adjustment, assess_glioma_robustness, assess_replication,
-    build_research_object_manifest, compile_decision_context, compile_mechanism_action_plan,
+    analyze_glioma_spatial_communication, analyze_glioma_spatial_niches,
+    analyze_glioma_spatial_state_propagation, analyze_glioma_state_transitions,
+    analyze_glioma_trajectories, analyze_glioma_transportability, analyze_instrument_calibration,
+    analyze_multimodal_concordance, analyze_multimodal_consensus, analyze_preclinical_outcomes,
+    analyze_replication_meta_analysis, analyze_stratified_causal_adjustment,
+    assess_glioma_robustness, assess_replication, build_research_object_manifest,
+    compile_decision_context, compile_glioma_computation_workflow, compile_mechanism_action_plan,
     compile_typed_knowledge, design_preclinical_experiment, discriminate_mechanisms,
-    dry_run_glioma_research, execute_glioma_action_portfolio,
-    execute_glioma_active_learning_campaign, execute_glioma_autonomous_campaign,
-    execute_glioma_computation, execute_glioma_computation_campaign,
-    execute_glioma_computation_portfolio,
-    execute_glioma_multimodal_mechanism_campaign,
-    execute_glioma_multimodal_mechanism_campaign_with_executor,
-    execute_glioma_evidence_campaign, execute_glioma_instrument_plan, execute_glioma_protocol,
-    execute_glioma_evidence_refresh_campaign,
-    execute_glioma_decision_context_campaign,
-    execute_glioma_knowledge_resolution_campaign,
-    execute_glioma_multimodal_ingestion_campaign,
-    execute_glioma_adaptive_allocation_campaign,
-    execute_glioma_instrument_campaign,
-    execute_glioma_replication_campaign,
-    execute_glioma_autonomous_research_mission,
-    execute_glioma_multi_fidelity_campaign,
-    execute_glioma_adaptive_mechanism_campaign,
-    execute_glioma_mechanism_discrimination_campaign, plan_glioma_adaptive_mechanism_policy,
+    dry_run_glioma_research, execute_federated_benchmark_campaign, execute_glioma_action_portfolio,
+    execute_glioma_active_learning_campaign, execute_glioma_adaptive_allocation_campaign,
+    execute_glioma_adaptive_mechanism_campaign, execute_glioma_autonomous_campaign,
+    execute_glioma_autonomous_research_mission, execute_glioma_computation,
+    execute_glioma_computation_campaign, execute_glioma_computation_portfolio,
+    execute_glioma_decision_context_campaign, execute_glioma_evidence_campaign,
+    execute_glioma_evidence_refresh_campaign, execute_glioma_instrument_campaign,
+    execute_glioma_instrument_plan, execute_glioma_knowledge_resolution_campaign,
+    execute_glioma_mechanism_discrimination_campaign, execute_glioma_multi_fidelity_campaign,
+    execute_glioma_multimodal_ingestion_campaign, execute_glioma_multimodal_mechanism_campaign,
+    execute_glioma_multimodal_mechanism_campaign_with_executor, execute_glioma_protocol,
+    execute_glioma_replay_campaign, execute_glioma_replication_campaign,
     execute_glioma_research_autopilot, execute_glioma_robust_active_learning_campaign,
     explore_mechanisms, generate_feature_catalog, glioma_program_catalog,
     harmonize_glioma_multimodal_batches, harmonize_multimodal_inputs, plan_decision_actions,
     plan_glioma_active_learning, plan_glioma_adaptive_information_campaign,
-    plan_glioma_closed_loop_campaign, plan_glioma_computation_portfolio,
-    plan_glioma_information_design, plan_glioma_multi_fidelity_optimization,
-    plan_glioma_robust_active_learning, plan_glioma_robust_intervention_portfolio,
-    plan_glioma_workflow, preflight_glioma_instrument, prioritize_glioma_evidence,
-    prioritize_knowledge_frontier, propagate_glioma_mechanism_graph, qualify_evidence,
-    select_glioma_actions, simulate_glioma_counterfactual, simulate_glioma_counterfactual_ensemble,
-    simulate_glioma_protocol, surveil_glioma_evidence, validate_feature_catalog,
-    ActionPortfolioExecutionRequest, ActiveLearningCampaignRequest, ActiveLearningCandidate,
-    ActiveLearningObservation, ActiveLearningRequest, AdaptiveAllocationCampaignRequest,
-    AdaptiveAllocationRequest, DryRunAdaptiveAllocationCampaignExecutor,
-    AdaptiveArmObservation, AdaptiveInformationCampaignRequest, AdaptiveInformationObservation,
-    AnalysisDataset, AnalysisRequest, CalibrationRequest, CalibrationRun, CampaignAction,
-    CampaignMechanism, CampaignObservation, CausalContrastRequest, ClosedLoopCampaignRequest,
-    CombinationObservation, CombinationSynergyRequest, ComputationCandidate,
-    ComputationExecutionRequest, ComputationPortfolioExecutionRequest, ComputationPortfolioRequest,
-    GliomaComputationCampaignRequest, StaticGliomaComputationPlanner,
-    ConcordanceRequest, ConsensusRequest, CounterfactualEnsembleRequest,
-    CounterfactualIntervention, CounterfactualModel, CounterfactualRequest,
-    DecisionActionPlanRequest, DecisionContext, DecisionContextRequest, DesignAction,
-    DesignMechanism, DoseResponseObservation, DoseResponseRequest,
-    DryRunActiveLearningCampaignExecutor, DryRunGliomaActionExecutor,
-    DryRunGliomaComputationExecutor, DryRunGliomaProtocolExecutor, DryRunInstrumentExecutor,
-    DryRunRobustActiveLearningCampaignExecutor, EvidencePriorityRequest, EvidenceRecord,
-    EvidenceRequest, EvidenceSurveillanceRequest, ExperimentArm, ExperimentRequest,
-    FederatedBenchmarkRequest, FederatedBenchmarkSite, FederatedBenchmarkCampaignRequest,
-    DryRunFederatedBenchmarkCampaignExecutor, FidelityCandidate, FidelityObservation,
-    DryRunReplayCampaignExecutor, ReplayCampaignRequest,
-    GliomaActionCandidate, GliomaAutonomousCampaignRequest, GliomaEvidenceCampaignRequest,
-    DryRunEvidenceRefreshCampaignExecutor, EvidenceRefreshCampaignRequest,
-    DryRunKnowledgeResolutionCampaignExecutor, KnowledgeResolutionCampaignRequest,
-    DecisionContextCampaignRequest, DryRunDecisionContextCampaignExecutor,
-    DryRunMultimodalIngestionCampaignExecutor, MultimodalIngestionCampaignRequest,
+    plan_glioma_adaptive_mechanism_policy, plan_glioma_closed_loop_campaign,
+    plan_glioma_computation_portfolio, plan_glioma_information_design,
+    plan_glioma_multi_fidelity_optimization, plan_glioma_robust_active_learning,
+    plan_glioma_robust_intervention_portfolio, plan_glioma_workflow, preflight_glioma_instrument,
+    prioritize_glioma_evidence, prioritize_knowledge_frontier, propagate_glioma_mechanism_graph,
+    qualify_evidence, select_glioma_actions, simulate_glioma_counterfactual,
+    simulate_glioma_counterfactual_ensemble, simulate_glioma_protocol, surveil_glioma_evidence,
+    validate_feature_catalog, ActionPortfolioExecutionRequest, ActiveLearningCampaignRequest,
+    ActiveLearningCandidate, ActiveLearningObservation, ActiveLearningRequest,
+    AdaptiveAllocationCampaignRequest, AdaptiveAllocationRequest, AdaptiveArmObservation,
+    AdaptiveInformationCampaignRequest, AdaptiveInformationObservation,
+    AdaptiveMechanismCampaignRequest, AdaptiveMechanismPolicyRequest, AnalysisDataset,
+    AnalysisRequest, CalibrationRequest, CalibrationRun, CampaignAction, CampaignMechanism,
+    CampaignObservation, CausalContrastRequest, ClosedLoopCampaignRequest, CombinationObservation,
+    CombinationSynergyRequest, ComputationCandidate, ComputationExecutionRequest,
+    ComputationPortfolioExecutionRequest, ComputationPortfolioRequest, ConcordanceRequest,
+    ConsensusRequest, CounterfactualEnsembleRequest, CounterfactualIntervention,
+    CounterfactualModel, CounterfactualRequest, DecisionActionPlanRequest, DecisionContext,
+    DecisionContextCampaignRequest, DecisionContextRequest, DesignAction, DesignMechanism,
+    DoseResponseObservation, DoseResponseRequest, DryRunActiveLearningCampaignExecutor,
+    DryRunAdaptiveAllocationCampaignExecutor, DryRunAdaptiveMechanismPolicyExecutor,
+    DryRunDecisionContextCampaignExecutor, DryRunEvidenceRefreshCampaignExecutor,
+    DryRunFederatedBenchmarkCampaignExecutor, DryRunGliomaActionExecutor,
+    DryRunGliomaComputationExecutor, DryRunGliomaProtocolExecutor,
+    DryRunGliomaReplicationCampaignExecutor, DryRunInstrumentExecutor,
+    DryRunKnowledgeResolutionCampaignExecutor, DryRunMechanismDiscriminationCampaignExecutor,
+    DryRunMultiFidelityCampaignExecutor, DryRunMultimodalIngestionCampaignExecutor,
+    DryRunReplayCampaignExecutor, DryRunRobustActiveLearningCampaignExecutor,
+    EvidencePriorityRequest, EvidenceRecord, EvidenceRefreshCampaignRequest, EvidenceRequest,
+    EvidenceSurveillanceRequest, ExperimentArm, ExperimentRequest,
+    FederatedBenchmarkCampaignRequest, FederatedBenchmarkRequest, FederatedBenchmarkSite,
+    FidelityCandidate, FidelityObservation, GliomaActionCandidate, GliomaAutonomousCampaignRequest,
+    GliomaComputationCampaignRequest, GliomaComputationWorkflowRequest,
+    GliomaEvidenceCampaignRequest, GliomaMissionRequest, GliomaReplicationCampaignRequest,
     GliomaResearchAutopilotRequest, GliomaResearchIntent, GliomaWorkflowRequest,
-    GliomaMissionRequest,
-    InstrumentCampaignRequest,
-    DryRunMultiFidelityCampaignExecutor, MultiFidelityCampaignRequest,
-    AdaptiveMechanismCampaignRequest, AdaptiveMechanismPolicyRequest,
-    DryRunAdaptiveMechanismPolicyExecutor,
-    DryRunGliomaReplicationCampaignExecutor, GliomaReplicationCampaignRequest,
     GraphFusionRequest, GraphFusionVector, HarmonizationRequest, HarmonizationVector,
-    PathwayActivityDefinition, PathwayActivityObservation, PathwayActivityRequest,
-    MultimodalMechanismCampaignRequest,
-    InformationDesignRequest, InstrumentExecutionRequest, InstrumentPreflightRequest,
-    KnowledgeFrontierRequest, KnowledgeRequest, LatentFactorRequest, LatentFactorVector,
+    InformationDesignRequest, InstrumentCampaignRequest, InstrumentExecutionRequest,
+    InstrumentPreflightRequest, KnowledgeFrontierRequest, KnowledgeRequest,
+    KnowledgeResolutionCampaignRequest, LatentFactorRequest, LatentFactorVector,
     LigandReceptorPair, MechanismActionPlannerConfig, MechanismCandidate, MechanismDiscrimination,
-    MechanismDiscriminationRequest, MechanismDiscriminatorAction, MechanismFeatureObservation,
-    MechanismDiscriminationCampaignRequest, DryRunMechanismDiscriminationCampaignExecutor,
-    MechanismGraphEdge, MechanismGraphNode, MechanismGraphRequest, MechanismHypothesis,
-    MechanismRequest, MediationObservation, MediationRequest, MetaAnalysisRequest, ModalityVector,
-    MultiFidelityOptimizationRequest, MultimodalObservation, MultimodalRequest,
-    ProtocolExecutionRequest, ProtocolSimulationRequest, ReplicationRequest, ReplicationStudy,
-    ResearchObjectRequest, RobustActiveLearningCampaignRequest, RobustActiveLearningCandidate,
+    MechanismDiscriminationCampaignRequest, MechanismDiscriminationRequest,
+    MechanismDiscriminatorAction, MechanismFeatureObservation, MechanismGraphEdge,
+    MechanismGraphNode, MechanismGraphRequest, MechanismHypothesis, MechanismRequest,
+    MediationObservation, MediationRequest, MetaAnalysisRequest, ModalityVector,
+    MultiFidelityCampaignRequest, MultiFidelityOptimizationRequest,
+    MultimodalIngestionCampaignRequest, MultimodalMechanismCampaignRequest, MultimodalObservation,
+    MultimodalRequest, PathwayActivityDefinition, PathwayActivityObservation,
+    PathwayActivityRequest, ProtocolExecutionRequest, ProtocolSimulationRequest,
+    ReplayCampaignRequest, ReplicationRequest, ReplicationStudy, ResearchObjectRequest,
+    RobustActiveLearningCampaignRequest, RobustActiveLearningCandidate,
     RobustActiveLearningObservation, RobustActiveLearningRequest, RobustInterventionCandidate,
     RobustInterventionRequest, RobustnessRequest, SensitivityObservation, SensitivityRequest,
     SpatialCell, SpatialCommunicationCell, SpatialCommunicationRequest, SpatialNicheRequest,
     SpatialPropagationRequest, StateTransitionObservation, StateTransitionRequest,
-    StaticGliomaActionPlanner, StratifiedCausalRequest, StratifiedObservation,
-    TrajectoryObservation, TrajectoryRequest, TransportStudy, TransportabilityRequest,
-    TypedKnowledge,
+    StaticGliomaActionPlanner, StaticGliomaComputationPlanner, StratifiedCausalRequest,
+    StratifiedObservation, TrajectoryObservation, TrajectoryRequest, TransportStudy,
+    TransportabilityRequest, TypedKnowledge,
 };
 use bioprism_routing::{
     lab::{run as run_routing_lab, LabSettings, Task},
@@ -2028,6 +2019,9 @@ impl Server {
             "glioma_computation_campaign_execute" => {
                 self.glioma_computation_campaign_execute(&arguments)
             }
+            "glioma_computation_workflow_execute" => {
+                self.glioma_computation_workflow_execute(&arguments)
+            }
             "glioma_robustness_suite" => self.glioma_robustness_suite(&arguments),
             "glioma_trajectory_analyze" => self.glioma_trajectory_analyze(&arguments),
             "glioma_state_transition_analyze" => self.glioma_state_transition_analyze(&arguments),
@@ -3430,15 +3424,13 @@ impl Server {
     /// Refresh P01 evidence deltas through a bounded, institution-local executor and replan
     /// surveillance after each round. The MCP adapter remains a synthetic sandbox worker.
     fn glioma_evidence_refresh_campaign_execute(&self, arguments: &Value) -> Result<Value, String> {
-        let request: EvidenceRefreshCampaignRequest = serde_json::from_value(
-            arguments
-                .get("request")
-                .cloned()
-                .ok_or_else(|| {
-                    "glioma_evidence_refresh_campaign_execute requires request".to_string()
-                })?,
-        )
-        .map_err(|error| format!("invalid glioma evidence refresh campaign request: {error}"))?;
+        let request: EvidenceRefreshCampaignRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_evidence_refresh_campaign_execute requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma evidence refresh campaign request: {error}")
+            })?;
         let mut executor = DryRunEvidenceRefreshCampaignExecutor;
         let campaign = execute_glioma_evidence_refresh_campaign(&request, &mut executor)
             .map_err(|error| format!("glioma evidence refresh campaign refused: {error}"))?;
@@ -3463,15 +3455,13 @@ impl Server {
         &self,
         arguments: &Value,
     ) -> Result<Value, String> {
-        let request: KnowledgeResolutionCampaignRequest = serde_json::from_value(
-            arguments
-                .get("request")
-                .cloned()
-                .ok_or_else(|| {
-                    "glioma_knowledge_resolution_campaign_execute requires request".to_string()
-                })?,
-        )
-        .map_err(|error| format!("invalid glioma knowledge resolution campaign request: {error}"))?;
+        let request: KnowledgeResolutionCampaignRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_knowledge_resolution_campaign_execute requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma knowledge resolution campaign request: {error}")
+            })?;
         let mut executor = DryRunKnowledgeResolutionCampaignExecutor;
         let campaign = execute_glioma_knowledge_resolution_campaign(&request, &mut executor)
             .map_err(|error| format!("glioma knowledge resolution campaign refused: {error}"))?;
@@ -3494,15 +3484,13 @@ impl Server {
         &self,
         arguments: &Value,
     ) -> Result<Value, String> {
-        let request: MultimodalIngestionCampaignRequest = serde_json::from_value(
-            arguments
-                .get("request")
-                .cloned()
-                .ok_or_else(|| {
-                    "glioma_multimodal_ingestion_campaign_execute requires request".to_string()
-                })?,
-        )
-        .map_err(|error| format!("invalid glioma multimodal ingestion campaign request: {error}"))?;
+        let request: MultimodalIngestionCampaignRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_multimodal_ingestion_campaign_execute requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma multimodal ingestion campaign request: {error}")
+            })?;
         let mut executor = DryRunMultimodalIngestionCampaignExecutor;
         let campaign = execute_glioma_multimodal_ingestion_campaign(&request, &mut executor)
             .map_err(|error| format!("glioma multimodal ingestion campaign refused: {error}"))?;
@@ -3521,19 +3509,14 @@ impl Server {
     }
 
     /// Compile and dispatch a bounded P04 question-to-action campaign through a local adapter.
-    fn glioma_decision_context_campaign_execute(
-        &self,
-        arguments: &Value,
-    ) -> Result<Value, String> {
-        let request: DecisionContextCampaignRequest = serde_json::from_value(
-            arguments
-                .get("request")
-                .cloned()
-                .ok_or_else(|| {
-                    "glioma_decision_context_campaign_execute requires request".to_string()
-                })?,
-        )
-        .map_err(|error| format!("invalid glioma decision-context campaign request: {error}"))?;
+    fn glioma_decision_context_campaign_execute(&self, arguments: &Value) -> Result<Value, String> {
+        let request: DecisionContextCampaignRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_decision_context_campaign_execute requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma decision-context campaign request: {error}")
+            })?;
         let mut executor = DryRunDecisionContextCampaignExecutor;
         let campaign = execute_glioma_decision_context_campaign(&request, &mut executor)
             .map_err(|error| format!("glioma decision-context campaign refused: {error}"))?;
@@ -3640,13 +3623,11 @@ impl Server {
     /// Run a bounded multi-round glioma computation campaign with a deterministic dry-run
     /// planner/worker. Institution-local hosts replace both seams for adaptive analyses.
     fn glioma_computation_campaign_execute(&self, arguments: &Value) -> Result<Value, String> {
-        let request: GliomaComputationCampaignRequest = serde_json::from_value(
-            arguments
-                .get("request")
-                .cloned()
-                .ok_or_else(|| "glioma_computation_campaign_execute requires request".to_string())?,
-        )
-        .map_err(|error| format!("invalid glioma computation campaign request: {error}"))?;
+        let request: GliomaComputationCampaignRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_computation_campaign_execute requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma computation campaign request: {error}"))?;
         let mut planner = StaticGliomaComputationPlanner;
         let mut executor = DryRunGliomaComputationExecutor;
         let campaign = execute_glioma_computation_campaign(&request, &mut planner, &mut executor)
@@ -3663,6 +3644,42 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma computation campaign: {error}"))
+    }
+
+    /// Compile a high-level glioma computation intent into a closed DAG and run it through the
+    /// existing bounded campaign controller. Institution-local callers replace the dry-run
+    /// planner/worker while retaining the same compiler and safety gates.
+    fn glioma_computation_workflow_execute(&self, arguments: &Value) -> Result<Value, String> {
+        let request: GliomaComputationWorkflowRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_computation_workflow_execute requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma computation workflow request: {error}"))?;
+        let workflow = compile_glioma_computation_workflow(&request)
+            .map_err(|error| format!("glioma computation workflow refused: {error}"))?;
+        let campaign_request = workflow
+            .campaign_request(&request)
+            .map_err(|error| format!("glioma computation workflow campaign refused: {error}"))?;
+        let mut planner = StaticGliomaComputationPlanner;
+        let mut executor = DryRunGliomaComputationExecutor;
+        let campaign =
+            execute_glioma_computation_campaign(&campaign_request, &mut planner, &mut executor)
+                .map_err(|error| {
+                    format!("glioma computation workflow execution refused: {error}")
+                })?;
+        serde_json::to_value(json!({
+            "workflow": workflow,
+            "campaign": campaign,
+            "dispatch": "dry_run",
+            "simulation_only": true,
+            "guarantees": [
+                "researcher intent expands into a deterministic modality-aware dependency-closed DAG",
+                "resource estimates and declared shortfalls remain visible before campaign execution",
+                "the compiled DAG reuses P09 cost, duration, deterministic-task, retry, cache, artifact, and negative-result gates",
+                "MCP uses a synthetic worker and performs no external computation, raw-data movement, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma computation workflow: {error}"))
     }
 
     /// Stress-test a local two-arm glioma analysis under deterministic batch and row omissions.
@@ -4236,41 +4253,35 @@ impl Server {
     /// Run the multimodal graph, pathway activity, and bounded action-selection vertical as one
     /// autonomous research cycle. Actions remain plans until existing execution gates admit them.
     fn glioma_multimodal_mechanism_campaign(&self, arguments: &Value) -> Result<Value, String> {
-        let request: MultimodalMechanismCampaignRequest = serde_json::from_value(
-            arguments
-                .get("request")
-                .cloned()
-                .ok_or_else(|| "glioma_multimodal_mechanism_campaign requires request".to_string())?,
-        )
-        .map_err(|error| format!("invalid glioma mechanism campaign request: {error}"))?;
-        let graph_vectors: Vec<GraphFusionVector> = serde_json::from_value(
-            arguments
-                .get("graph_vectors")
-                .cloned()
-                .ok_or_else(|| "glioma_multimodal_mechanism_campaign requires graph_vectors".to_string())?,
-        )
-        .map_err(|error| format!("invalid glioma mechanism campaign graph vectors: {error}"))?;
-        let pathway_definitions: Vec<PathwayActivityDefinition> = serde_json::from_value(
-            arguments
-                .get("pathway_definitions")
-                .cloned()
-                .ok_or_else(|| "glioma_multimodal_mechanism_campaign requires pathway_definitions".to_string())?,
-        )
-        .map_err(|error| format!("invalid glioma mechanism campaign pathway definitions: {error}"))?;
-        let pathway_observations: Vec<PathwayActivityObservation> = serde_json::from_value(
-            arguments
-                .get("pathway_observations")
-                .cloned()
-                .ok_or_else(|| "glioma_multimodal_mechanism_campaign requires pathway_observations".to_string())?,
-        )
-        .map_err(|error| format!("invalid glioma mechanism campaign pathway observations: {error}"))?;
-        let candidates: Vec<GliomaActionCandidate> = serde_json::from_value(
-            arguments
-                .get("candidates")
-                .cloned()
-                .ok_or_else(|| "glioma_multimodal_mechanism_campaign requires candidates".to_string())?,
-        )
-        .map_err(|error| format!("invalid glioma mechanism campaign candidates: {error}"))?;
+        let request: MultimodalMechanismCampaignRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_multimodal_mechanism_campaign requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma mechanism campaign request: {error}"))?;
+        let graph_vectors: Vec<GraphFusionVector> =
+            serde_json::from_value(arguments.get("graph_vectors").cloned().ok_or_else(|| {
+                "glioma_multimodal_mechanism_campaign requires graph_vectors".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma mechanism campaign graph vectors: {error}"))?;
+        let pathway_definitions: Vec<PathwayActivityDefinition> =
+            serde_json::from_value(arguments.get("pathway_definitions").cloned().ok_or_else(
+                || "glioma_multimodal_mechanism_campaign requires pathway_definitions".to_string(),
+            )?)
+            .map_err(|error| {
+                format!("invalid glioma mechanism campaign pathway definitions: {error}")
+            })?;
+        let pathway_observations: Vec<PathwayActivityObservation> =
+            serde_json::from_value(arguments.get("pathway_observations").cloned().ok_or_else(
+                || "glioma_multimodal_mechanism_campaign requires pathway_observations".to_string(),
+            )?)
+            .map_err(|error| {
+                format!("invalid glioma mechanism campaign pathway observations: {error}")
+            })?;
+        let candidates: Vec<GliomaActionCandidate> =
+            serde_json::from_value(arguments.get("candidates").cloned().ok_or_else(|| {
+                "glioma_multimodal_mechanism_campaign requires candidates".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma mechanism campaign candidates: {error}"))?;
         let output = execute_glioma_multimodal_mechanism_campaign(
             &request,
             &graph_vectors,
@@ -4297,41 +4308,47 @@ impl Server {
         &self,
         arguments: &Value,
     ) -> Result<Value, String> {
-        let request: MultimodalMechanismCampaignRequest = serde_json::from_value(
-            arguments
-                .get("request")
-                .cloned()
-                .ok_or_else(|| "glioma_multimodal_mechanism_campaign_execute requires request".to_string())?,
-        )
-        .map_err(|error| format!("invalid glioma mechanism campaign execution request: {error}"))?;
-        let graph_vectors: Vec<GraphFusionVector> = serde_json::from_value(
-            arguments
-                .get("graph_vectors")
-                .cloned()
-                .ok_or_else(|| "glioma_multimodal_mechanism_campaign_execute requires graph_vectors".to_string())?,
-        )
-        .map_err(|error| format!("invalid glioma mechanism campaign execution graph vectors: {error}"))?;
-        let pathway_definitions: Vec<PathwayActivityDefinition> = serde_json::from_value(
-            arguments
-                .get("pathway_definitions")
-                .cloned()
-                .ok_or_else(|| "glioma_multimodal_mechanism_campaign_execute requires pathway_definitions".to_string())?,
-        )
-        .map_err(|error| format!("invalid glioma mechanism campaign execution pathway definitions: {error}"))?;
-        let pathway_observations: Vec<PathwayActivityObservation> = serde_json::from_value(
-            arguments
-                .get("pathway_observations")
-                .cloned()
-                .ok_or_else(|| "glioma_multimodal_mechanism_campaign_execute requires pathway_observations".to_string())?,
-        )
-        .map_err(|error| format!("invalid glioma mechanism campaign execution pathway observations: {error}"))?;
-        let candidates: Vec<GliomaActionCandidate> = serde_json::from_value(
-            arguments
-                .get("candidates")
-                .cloned()
-                .ok_or_else(|| "glioma_multimodal_mechanism_campaign_execute requires candidates".to_string())?,
-        )
-        .map_err(|error| format!("invalid glioma mechanism campaign execution candidates: {error}"))?;
+        let request: MultimodalMechanismCampaignRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_multimodal_mechanism_campaign_execute requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma mechanism campaign execution request: {error}")
+            })?;
+        let graph_vectors: Vec<GraphFusionVector> =
+            serde_json::from_value(arguments.get("graph_vectors").cloned().ok_or_else(|| {
+                "glioma_multimodal_mechanism_campaign_execute requires graph_vectors".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma mechanism campaign execution graph vectors: {error}")
+            })?;
+        let pathway_definitions: Vec<PathwayActivityDefinition> =
+            serde_json::from_value(arguments.get("pathway_definitions").cloned().ok_or_else(
+                || {
+                    "glioma_multimodal_mechanism_campaign_execute requires pathway_definitions"
+                        .to_string()
+                },
+            )?)
+            .map_err(|error| {
+                format!("invalid glioma mechanism campaign execution pathway definitions: {error}")
+            })?;
+        let pathway_observations: Vec<PathwayActivityObservation> =
+            serde_json::from_value(arguments.get("pathway_observations").cloned().ok_or_else(
+                || {
+                    "glioma_multimodal_mechanism_campaign_execute requires pathway_observations"
+                        .to_string()
+                },
+            )?)
+            .map_err(|error| {
+                format!("invalid glioma mechanism campaign execution pathway observations: {error}")
+            })?;
+        let candidates: Vec<GliomaActionCandidate> =
+            serde_json::from_value(arguments.get("candidates").cloned().ok_or_else(|| {
+                "glioma_multimodal_mechanism_campaign_execute requires candidates".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma mechanism campaign execution candidates: {error}")
+            })?;
         let max_retries = arguments
             .get("max_retries")
             .and_then(Value::as_u64)
@@ -4352,7 +4369,9 @@ impl Server {
             require_artifacts,
             &mut executor,
         )
-        .map_err(|error| format!("glioma multimodal mechanism campaign execution refused: {error}"))?;
+        .map_err(|error| {
+            format!("glioma multimodal mechanism campaign execution refused: {error}")
+        })?;
         serde_json::to_value(json!({
             "execution": output,
             "dispatch": "dry_run",
@@ -4923,15 +4942,13 @@ impl Server {
         &self,
         arguments: &Value,
     ) -> Result<Value, String> {
-        let request: AdaptiveMechanismCampaignRequest = serde_json::from_value(
-            arguments
-                .get("request")
-                .cloned()
-                .ok_or_else(|| {
-                    "glioma_adaptive_mechanism_campaign_execute requires request".to_string()
-                })?,
-        )
-        .map_err(|error| format!("invalid glioma adaptive mechanism campaign request: {error}"))?;
+        let request: AdaptiveMechanismCampaignRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_adaptive_mechanism_campaign_execute requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma adaptive mechanism campaign request: {error}")
+            })?;
         let mut executor = DryRunAdaptiveMechanismPolicyExecutor;
         let campaign = execute_glioma_adaptive_mechanism_campaign(&request, &mut executor)
             .map_err(|error| format!("glioma adaptive mechanism campaign refused: {error}"))?;
@@ -4954,20 +4971,18 @@ impl Server {
         &self,
         arguments: &Value,
     ) -> Result<Value, String> {
-        let request: MechanismDiscriminationCampaignRequest = serde_json::from_value(
-            arguments
-                .get("request")
-                .cloned()
-                .ok_or_else(|| {
-                    "glioma_mechanism_discrimination_campaign_execute requires request".to_string()
-                })?,
-        )
-        .map_err(|error| {
-            format!("invalid glioma mechanism discrimination campaign request: {error}")
-        })?;
+        let request: MechanismDiscriminationCampaignRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_mechanism_discrimination_campaign_execute requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma mechanism discrimination campaign request: {error}")
+            })?;
         let mut executor = DryRunMechanismDiscriminationCampaignExecutor;
         let campaign = execute_glioma_mechanism_discrimination_campaign(&request, &mut executor)
-            .map_err(|error| format!("glioma mechanism discrimination campaign refused: {error}"))?;
+            .map_err(|error| {
+                format!("glioma mechanism discrimination campaign refused: {error}")
+            })?;
         serde_json::to_value(json!({
             "campaign": campaign,
             "dispatch": "dry_run",
@@ -5230,17 +5245,13 @@ impl Server {
         &self,
         arguments: &Value,
     ) -> Result<Value, String> {
-        let request: AdaptiveAllocationCampaignRequest = serde_json::from_value(
-            arguments
-                .get("request")
-                .cloned()
-                .ok_or_else(|| {
-                    "glioma_adaptive_allocation_campaign_execute requires request".to_string()
-                })?,
-        )
-        .map_err(|error| {
-            format!("invalid glioma adaptive-allocation campaign request: {error}")
-        })?;
+        let request: AdaptiveAllocationCampaignRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_adaptive_allocation_campaign_execute requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma adaptive-allocation campaign request: {error}")
+            })?;
         let mut executor = DryRunAdaptiveAllocationCampaignExecutor;
         let campaign = execute_glioma_adaptive_allocation_campaign(&request, &mut executor)
             .map_err(|error| format!("glioma adaptive-allocation campaign refused: {error}"))?;
@@ -5524,13 +5535,11 @@ impl Server {
     /// Execute a bounded sequence of admitted instrument runs through the deterministic local
     /// gateway. Any partial, unresolved, blocked, or failed run halts the remaining queue.
     fn glioma_instrument_campaign_execute(&self, arguments: &Value) -> Result<Value, String> {
-        let request: InstrumentCampaignRequest = serde_json::from_value(
-            arguments
-                .get("request")
-                .cloned()
-                .ok_or_else(|| "glioma_instrument_campaign_execute requires request".to_string())?,
-        )
-        .map_err(|error| format!("invalid glioma instrument campaign request: {error}"))?;
+        let request: InstrumentCampaignRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_instrument_campaign_execute requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma instrument campaign request: {error}"))?;
         let interlocks = request
             .runs
             .first()
@@ -5657,13 +5666,11 @@ impl Server {
     /// executor. Institution hosts can call the same Rust contract with a real local executor;
     /// this MCP route never moves raw data or promotes synthetic observations into evidence.
     fn glioma_replication_campaign_execute(&self, arguments: &Value) -> Result<Value, String> {
-        let request: GliomaReplicationCampaignRequest = serde_json::from_value(
-            arguments
-                .get("request")
-                .cloned()
-                .ok_or_else(|| "glioma_replication_campaign_execute requires request".to_string())?,
-        )
-        .map_err(|error| format!("invalid glioma replication campaign request: {error}"))?;
+        let request: GliomaReplicationCampaignRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_replication_campaign_execute requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma replication campaign request: {error}"))?;
         let mut executor = DryRunGliomaReplicationCampaignExecutor::default();
         let campaign = execute_glioma_replication_campaign(&request, &mut executor)
             .map_err(|error| format!("glioma replication campaign refused: {error}"))?;
@@ -5690,15 +5697,11 @@ impl Server {
         &self,
         arguments: &Value,
     ) -> Result<Value, String> {
-        let request: GliomaMissionRequest = serde_json::from_value(
-            arguments
-                .get("request")
-                .cloned()
-                .ok_or_else(|| {
-                    "glioma_autonomous_research_mission_execute requires request".to_string()
-                })?,
-        )
-        .map_err(|error| format!("invalid glioma autonomous mission request: {error}"))?;
+        let request: GliomaMissionRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_autonomous_research_mission_execute requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma autonomous mission request: {error}"))?;
         let mut executor = DryRunGliomaActionExecutor;
         let mission = execute_glioma_autonomous_research_mission(&request, &mut executor)
             .map_err(|error| format!("glioma autonomous mission refused: {error}"))?;
@@ -5720,19 +5723,12 @@ impl Server {
     /// Run the P06 closed-loop multi-fidelity optimizer with a deterministic local worker. The
     /// MCP adapter is rehearsal-only; institutions provide the production assay or analysis
     /// executor through the research crate's explicit trait.
-    fn glioma_multi_fidelity_campaign_execute(
-        &self,
-        arguments: &Value,
-    ) -> Result<Value, String> {
-        let request: MultiFidelityCampaignRequest = serde_json::from_value(
-            arguments
-                .get("request")
-                .cloned()
-                .ok_or_else(|| {
-                    "glioma_multi_fidelity_campaign_execute requires request".to_string()
-                })?,
-        )
-        .map_err(|error| format!("invalid glioma multi-fidelity campaign request: {error}"))?;
+    fn glioma_multi_fidelity_campaign_execute(&self, arguments: &Value) -> Result<Value, String> {
+        let request: MultiFidelityCampaignRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_multi_fidelity_campaign_execute requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma multi-fidelity campaign request: {error}"))?;
         let mut executor = DryRunMultiFidelityCampaignExecutor;
         let campaign = execute_glioma_multi_fidelity_campaign(&request, &mut executor)
             .map_err(|error| format!("glioma multi-fidelity campaign refused: {error}"))?;
@@ -5786,12 +5782,13 @@ impl Server {
         &self,
         arguments: &Value,
     ) -> Result<Value, String> {
-        let request: FederatedBenchmarkCampaignRequest = serde_json::from_value(
-            arguments.get("request").cloned().ok_or_else(|| {
+        let request: FederatedBenchmarkCampaignRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
                 "glioma_federated_benchmark_campaign_execute requires request".to_string()
-            })?,
-        )
-        .map_err(|error| format!("invalid glioma federated benchmark campaign request: {error}"))?;
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma federated benchmark campaign request: {error}")
+            })?;
         let mut executor = DryRunFederatedBenchmarkCampaignExecutor;
         let campaign = execute_federated_benchmark_campaign(&request, &mut executor)
             .map_err(|error| format!("glioma federated benchmark campaign refused: {error}"))?;
@@ -45904,6 +45901,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_computation_portfolio_plan",
                 "glioma_computation_portfolio_execute",
                 "glioma_computation_campaign_execute",
+                "glioma_computation_workflow_execute",
                 "glioma_robustness_suite",
                 "glioma_trajectory_analyze",
                 "glioma_state_transition_analyze",
@@ -52944,6 +52942,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "GliomaComputationCampaignRequest1@1 with typed seed candidates, model binding, budget/time bounds, utility weights, modality coverage, replay identity, retry/cache policy, and local-artifact requirement."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_computation_workflow_execute",
+        "description": "Compile a high-level preclinical glioma computation intent into a modality-aware dependency-closed DAG and run it through the bounded P09 campaign controller. The compiler expands requested analyses into ingest, normalization, registration, segmentation, quantification, integration, modeling, validation, and export prerequisites, while preserving resource shortfalls and negative/partial outcomes. MCP uses a synthetic worker; production schedulers, containers, GPUs, and raw-data access remain caller-owned.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "GliomaComputationWorkflowRequest1@1 with study/model identity, modalities, terminal ComputationOperation values, local artifact identifiers, resource/policy bounds, cache policy, and replay identity."}
             },
             "required": ["request"]
         }

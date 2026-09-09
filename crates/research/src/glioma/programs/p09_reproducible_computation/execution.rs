@@ -20,7 +20,7 @@ pub const MAX_RETRIES: u8 = 8;
 pub const MAX_COST_UNITS: u64 = 1_000_000;
 pub const MAX_DURATION_TICKS: u64 = 10_000_000_000;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ComputationOperation {
     Ingest,

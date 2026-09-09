@@ -7,6 +7,7 @@ pub mod campaign;
 pub mod planning;
 pub mod portfolio_execution;
 pub mod robustness;
+pub mod workflow;
 
 pub use robustness::{
     assess_glioma_robustness, RobustnessCase, RobustnessCaseKind, RobustnessDisposition,
@@ -40,6 +41,11 @@ pub use portfolio_execution::{
     execute_glioma_computation_portfolio, ComputationPortfolioExecution,
     ComputationPortfolioExecutionDisposition, ComputationPortfolioExecutionError,
     ComputationPortfolioExecutionRequest,
+};
+
+pub use workflow::{
+    compile_glioma_computation_workflow, GliomaComputationWorkflow,
+    GliomaComputationWorkflowError, GliomaComputationWorkflowRequest,
 };
 
 pub const PROGRAM_ID: GliomaProgramId = GliomaProgramId::ReproducibleComputation;

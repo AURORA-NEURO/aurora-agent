@@ -112,6 +112,8 @@ crates/research/src/glioma/
                                              P09 autonomous portfolio-to-computation execution bridge
     p09_reproducible_computation/campaign.rs
                                              P09 bounded multi-round computation campaign with typed replanning
+    p09_reproducible_computation/workflow.rs
+                                             P09 intent-to-DAG compiler for modality-aware autonomous computation
     p10_interpretation_replication/trajectory.rs
                                              P10 longitudinal per-unit trajectory analysis
     p10_interpretation_replication/transportability.rs
@@ -192,7 +194,7 @@ portfolio plan and executable code; it does not promote a planned slot to implem
 | P06 Power-aware experiment design | experimentalist | experiment design | falsifiable allocation, power, blocking, dose-response, adaptive replicate allocation, mechanism-aware closed-loop campaign rounds, combination-synergy fitting, and null-result plan |
 | P07 Protocol simulation | lab operations lead | protocol simulation, adaptive workflow planning | critical-path scheduling, evidence-priority execution cycles, context-to-action execution, multimodal mechanism campaigns, utilization, deterministic next batches, and repair/abstain routing before physical effects |
 | P08 Instrument and robotics preflight | instrument operator | instrument preflight | robust control calibration, drift detection, signed interlocked planning, guarded execution, and fail-closed multi-run campaigns |
-| P09 Reproducible computation | computational scientist | computational execution | checkpointed/replayable computation plus omission-stress robustness suite |
+| P09 Reproducible computation | computational scientist | computational execution | checkpointed/replayable computation, intent-to-DAG compilation, budgeted portfolio execution, and omission-stress robustness suite |
 | P10 Causal interpretation and replication | methods reviewer | statistical interpretation, replication/robustness | uncertainty-aware endpoint, longitudinal, stratified causal, causal-contrast, meta-analytic, and cross-site verdicts |
 | P11 Research-object release | reproducibility steward | research-object release | portable manifest with limitations and negative evidence |
 | P12 Federated benchmarking | consortium administrator | federation benchmarking | aggregate-only cross-site benchmark consensus with robust pooling, heterogeneity, and site-influence analysis |
@@ -480,6 +482,13 @@ preserving replay identity, deterministic-task policy, dependency closure, cache
 negative results, and failed or skipped work. The MCP route uses a static dry-run planner and
 worker; institution-local deployments can replace both seams to drive high-throughput multi-omics
 and imaging analysis without moving raw data into the research crate.
+P09 now also exposes the intent-to-workflow compiler
+(`glioma_computation_workflow_execute`). A researcher declares a preclinical model, local input
+artifact identifiers, modalities, and terminal analyses; the compiler expands every prerequisite
+from ingest through integration, model fitting, validation, and export into a deterministic DAG.
+It reports estimated cost/time shortfalls before execution and then reuses the same autonomous
+campaign gates, so a high-level glioma question can become an executable local computation plan
+without hand-authoring task plumbing or fabricating evidence.
 P05 now also includes counterfactual mechanism simulation (`simulate_glioma_counterfactual`). It
 compares baseline and signed node perturbation fixed points over activating/inhibiting networks,
 rank-orders downstream changes, and exposes low-confidence edges and non-convergence as unresolved.
