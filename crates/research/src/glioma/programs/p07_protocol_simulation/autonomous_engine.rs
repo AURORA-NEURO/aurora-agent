@@ -453,6 +453,11 @@ pub fn execute_glioma_autonomous_research_engine<E: GliomaActionExecutor>(
         .iter()
         .map(|checkpoint| checkpoint.stage_kind.stage_id().to_string())
         .collect::<Vec<_>>();
+    let completed_stage_set = completed_stage_order
+        .iter()
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    pending.retain(|stage| !completed_stage_set.contains(stage));
     completed_stage_order.sort();
     let next_step = match stop_reason {
         GliomaAutonomousResearchEngineStopReason::Qualified => {
