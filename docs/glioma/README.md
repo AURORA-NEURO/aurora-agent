@@ -119,6 +119,8 @@ crates/research/src/glioma/
                                              P10 inverse-uncertainty replication meta-analysis and influence bounds
     p12_federated_benchmarking/consensus.rs
                                              P12 aggregate-only multi-site benchmark consensus with robust pooling and influence bounds
+    p12_federated_benchmarking/campaign.rs
+                                             P12 autonomous aggregate-only benchmark follow-up campaign with deterministic replanning
     p06_experiment_design/dose_response.rs   P06 monotone dose-response curve analysis
     p06_experiment_design/synergy.rs         P06 Bliss combination-response analysis
     p06_experiment_design/campaign.rs       P06 mechanism-aware closed-loop assay campaign controller and executor seam
@@ -394,6 +396,12 @@ information gain plus lower-tail effect robustness, and beam-selects a finite-ho
 sequence under feasibility, risk, redundancy, and budget gates. Each campaign round replans from
 the typed observation that actually returned; posterior concentration is never treated as causal
 identification, and the MCP worker is synthetic-only.
+P12 now also exposes an autonomous federated benchmark campaign
+(`execute_federated_benchmark_campaign`). It ranks aggregate-only follow-up actions from the
+current pooled effect, heterogeneity, replicate floor, and leave-one-site-out influence, asks a
+local executor for new site aggregates, and recomputes consensus after each bounded round. Site
+raw traces stay local; duplicate identities, unbound results, budget exhaustion, negative evidence,
+and unresolved heterogeneity remain explicit campaign outcomes.
 P08 now also includes deterministic instrument preflight (`preflight_glioma_instrument`). It combines
 qualified calibration, live interlock telemetry, typed operation parameters, operator authorization,
 serialized scheduling, and risk/duration budgets into a dispatch-permitted or fail-closed plan. The

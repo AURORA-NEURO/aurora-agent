@@ -468,6 +468,7 @@ use bioprism_repair::{
 };
 use bioprism_research::{
     allocate_glioma_assays, analyze_causal_sensitivity, analyze_federated_benchmark,
+    execute_federated_benchmark_campaign,
     analyze_glioma_causal_contrast, analyze_glioma_combination_synergy,
     analyze_glioma_dose_response, analyze_glioma_latent_factors, analyze_glioma_mediation,
     analyze_glioma_multimodal_graph_fusion, analyze_glioma_pathway_activity,
@@ -517,7 +518,8 @@ use bioprism_research::{
     DryRunGliomaComputationExecutor, DryRunGliomaProtocolExecutor, DryRunInstrumentExecutor,
     DryRunRobustActiveLearningCampaignExecutor, EvidencePriorityRequest, EvidenceRecord,
     EvidenceRequest, EvidenceSurveillanceRequest, ExperimentArm, ExperimentRequest,
-    FederatedBenchmarkRequest, FederatedBenchmarkSite, FidelityCandidate, FidelityObservation,
+    FederatedBenchmarkRequest, FederatedBenchmarkSite, FederatedBenchmarkCampaignRequest,
+    DryRunFederatedBenchmarkCampaignExecutor, FidelityCandidate, FidelityObservation,
     GliomaActionCandidate, GliomaAutonomousCampaignRequest, GliomaEvidenceCampaignRequest,
     GliomaResearchAutopilotRequest, GliomaResearchIntent, GliomaWorkflowRequest,
     GliomaMissionRequest,
@@ -2084,6 +2086,9 @@ impl Server {
             }
             "glioma_federated_benchmark_consensus" => {
                 self.glioma_federated_benchmark_consensus(&arguments)
+            }
+            "glioma_federated_benchmark_campaign_execute" => {
+                self.glioma_federated_benchmark_campaign_execute(&arguments)
             }
             "glioma_research_object_prepare" => self.glioma_research_object_prepare(&arguments),
             "domain_evidence_harmonization_coverage" => {
@@ -5509,6 +5514,36 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma federated benchmark consensus: {error}"))
+    }
+
+    /// Run a bounded autonomous federated benchmark campaign. Only typed aggregate sites are
+    /// returned by the synthetic worker; institutions retain raw traces and execution authority.
+    fn glioma_federated_benchmark_campaign_execute(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: FederatedBenchmarkCampaignRequest = serde_json::from_value(
+            arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_federated_benchmark_campaign_execute requires request".to_string()
+            })?,
+        )
+        .map_err(|error| format!("invalid glioma federated benchmark campaign request: {error}"))?;
+        let mut executor = DryRunFederatedBenchmarkCampaignExecutor;
+        let campaign = execute_federated_benchmark_campaign(&request, &mut executor)
+            .map_err(|error| format!("glioma federated benchmark campaign refused: {error}"))?;
+        serde_json::to_value(json!({
+            "campaign": campaign,
+            "dispatch": "dry_run",
+            "simulation_only": true,
+            "guarantees": [
+                "the controller replans from deterministic aggregate consensus after each returned site",
+                "only local artifact references, scores, uncertainty, and replicate counts cross the federation boundary",
+                "heterogeneous, negative, underpowered, budget-blocked, failed, and unresolved states remain explicit",
+                "duplicate identities, unbound benchmark results, retries, and no-progress stops are rejected",
+                "the MCP route performs no raw-data movement, clinical decision, or instrument execution"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma federated benchmark campaign: {error}"))
     }
 
     fn glioma_research_object_prepare(&self, arguments: &Value) -> Result<Value, String> {
@@ -45633,6 +45668,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_autonomous_research_mission_execute",
                 "glioma_multi_fidelity_campaign_execute",
                 "glioma_federated_benchmark_consensus",
+                "glioma_federated_benchmark_campaign_execute",
                 "glioma_research_object_prepare"
             ],
             "cli_entrypoints": [],
@@ -53343,6 +53379,17 @@ pub fn tool_definitions() -> Vec<Value> {
                 "sites": {"type": "array", "items": {"type": "object"}, "description": "FederatedBenchmarkSite1@1 aggregate-only site scores with local artifact references; raw observations remain local."}
             },
             "required": ["request", "sites"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_federated_benchmark_campaign_execute",
+        "description": "Run a bounded autonomous federated glioma benchmark campaign. Replans deterministic follow-up actions from aggregate-only consensus pressure, executes institution-local synthetic aggregates in MCP, and preserves qualified, heterogeneous, negative, underpowered, failed, budget-blocked, and unresolved outcomes. Raw traces, clinical decisions, and instrument effects remain out of scope.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "FederatedBenchmarkCampaignRequest1@1 with benchmark binding, initial aggregate sites, typed follow-up actions, budget, round/retry bounds, and stop policy."}
+            },
+            "required": ["request"]
         }
     }));
     definitions.push(json!({

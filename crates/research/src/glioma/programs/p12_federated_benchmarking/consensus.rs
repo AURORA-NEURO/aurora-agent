@@ -296,7 +296,6 @@ pub fn analyze_federated_benchmark(
         || request.min_signal_to_noise_milli == 0
         || sites.is_empty()
         || sites.len() > MAX_SITES
-        || request.minimum_sites > sites.len()
     {
         return Err(FederatedBenchmarkError::InvalidRequest(
             "objective, benchmark identity, site/replicate floors, thresholds, and bounded sites are required".into(),

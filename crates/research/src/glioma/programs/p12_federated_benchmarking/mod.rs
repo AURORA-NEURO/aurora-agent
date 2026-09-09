@@ -2,7 +2,17 @@
 
 use crate::glioma::catalog::{glioma_program_catalog, GliomaProgramDescriptor, GliomaProgramId};
 
+pub mod campaign;
 pub mod consensus;
+
+pub use campaign::{
+    execute_federated_benchmark_campaign, DryRunFederatedBenchmarkCampaignExecutor,
+    FederatedBenchmarkAction, FederatedBenchmarkActionKind, FederatedBenchmarkCampaign,
+    FederatedBenchmarkCampaignDisposition, FederatedBenchmarkCampaignError,
+    FederatedBenchmarkCampaignExecutor, FederatedBenchmarkCampaignRequest,
+    FederatedBenchmarkCampaignRound, FederatedBenchmarkCampaignStopReason,
+    FederatedBenchmarkExecutionFailure,
+};
 
 pub use consensus::{
     analyze_federated_benchmark, FederatedBenchmarkConsensus, FederatedBenchmarkContribution,
