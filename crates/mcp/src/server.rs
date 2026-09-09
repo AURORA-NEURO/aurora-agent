@@ -487,6 +487,7 @@ use bioprism_research::{
     execute_glioma_multimodal_mechanism_campaign_with_executor,
     execute_glioma_evidence_campaign, execute_glioma_instrument_plan, execute_glioma_protocol,
     execute_glioma_replication_campaign,
+    execute_glioma_autonomous_research_mission,
     execute_glioma_research_autopilot, execute_glioma_robust_active_learning_campaign,
     explore_mechanisms, generate_feature_catalog, glioma_program_catalog,
     harmonize_glioma_multimodal_batches, harmonize_multimodal_inputs, plan_decision_actions,
@@ -517,6 +518,7 @@ use bioprism_research::{
     FederatedBenchmarkRequest, FederatedBenchmarkSite, FidelityCandidate, FidelityObservation,
     GliomaActionCandidate, GliomaAutonomousCampaignRequest, GliomaEvidenceCampaignRequest,
     GliomaResearchAutopilotRequest, GliomaResearchIntent, GliomaWorkflowRequest,
+    GliomaMissionRequest,
     DryRunGliomaReplicationCampaignExecutor, GliomaReplicationCampaignRequest,
     GraphFusionRequest, GraphFusionVector, HarmonizationRequest, HarmonizationVector,
     PathwayActivityDefinition, PathwayActivityObservation, PathwayActivityRequest,
@@ -2064,6 +2066,9 @@ impl Server {
             "glioma_replication_meta_analyze" => self.glioma_replication_meta_analyze(&arguments),
             "glioma_replication_campaign_execute" => {
                 self.glioma_replication_campaign_execute(&arguments)
+            }
+            "glioma_autonomous_research_mission_execute" => {
+                self.glioma_autonomous_research_mission_execute(&arguments)
             }
             "glioma_federated_benchmark_consensus" => {
                 self.glioma_federated_benchmark_consensus(&arguments)
@@ -5336,6 +5341,41 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma replication campaign: {error}"))
+    }
+
+    /// Run the science-aware cross-program glioma mission with the deterministic local executor.
+    /// Real institutions can call the same research-crate function with an approved local
+    /// executor; this MCP route never touches instruments, moves raw data, or promotes synthetic
+    /// outcomes into biological evidence.
+    fn glioma_autonomous_research_mission_execute(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: GliomaMissionRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| {
+                    "glioma_autonomous_research_mission_execute requires request".to_string()
+                })?,
+        )
+        .map_err(|error| format!("invalid glioma autonomous mission request: {error}"))?;
+        let mut executor = DryRunGliomaActionExecutor;
+        let mission = execute_glioma_autonomous_research_mission(&request, &mut executor)
+            .map_err(|error| format!("glioma autonomous mission refused: {error}"))?;
+        serde_json::to_value(json!({
+            "mission": mission,
+            "dispatch": "dry_run",
+            "simulation_only": true,
+            "guarantees": [
+                "stage, model-system, modality, information-gain, and uncertainty gates are explicit",
+                "each round is replanned only from typed local action outcomes",
+                "negative results remain first-class and do not satisfy positive qualification gates",
+                "failed, partial, blocked, budget, and no-progress states stop the mission honestly",
+                "the MCP route performs no instrument execution, clinical decision, or raw-data movement"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma autonomous research mission: {error}"))
     }
 
     /// Compare aggregate benchmark outcomes from independent preclinical sites. Raw traces stay
@@ -45484,6 +45524,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_replication_assess",
                 "glioma_replication_meta_analyze",
                 "glioma_replication_campaign_execute",
+                "glioma_autonomous_research_mission_execute",
                 "glioma_federated_benchmark_consensus",
                 "glioma_research_object_prepare"
             ],
@@ -53137,6 +53178,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "GliomaReplicationCampaignRequest1@1 with bounded study/transport inputs, thresholds, action budget, rounds, and replay identity."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_autonomous_research_mission_execute",
+        "description": "Run a bounded, science-aware autonomous preclinical glioma mission across evidence, mechanism, experiment, computation, and replication actions. The controller adapts priorities using uncovered stage coverage, model/modality diversity, contradiction pressure, information gain, and uncertainty, then replans only from typed local outcomes. It requires explicit qualification gates and preserves negative, failed, partial, blocked, budget, and no-progress states. MCP uses a synthetic worker; production executors and all raw-data access remain institution-local.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "GliomaMissionRequest1@1 with mission objective, bounded typed action candidates, completed actions, selection policy, stage/model/modality/information/uncertainty gates, retry and round limits, and local-artifact policy."}
             },
             "required": ["request"]
         }

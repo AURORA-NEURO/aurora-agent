@@ -85,6 +85,8 @@ crates/research/src/glioma/
                                              P07 bounded autonomous assay execution and observation-driven replanning
     p07_protocol_simulation/robust_active_learning_campaign.rs
                                              P07 ensemble-guided autonomous rounds with lower-tail safety gates
+    p07_protocol_simulation/mission.rs
+                                             P07 science-aware cross-program mission control with stage/model/modality frontier adaptation
     p08_instrument_robotics/preflight.rs   P08 typed instrument/robotics interlock planning
     p08_instrument_robotics/execution.rs   P08 guarded execution with live rechecks and emergency stop
     p09_reproducible_computation/robustness.rs
@@ -364,6 +366,15 @@ The companion execution bridge
 through the existing action-portfolio executor. It preserves dependency ordering, bounded retries,
 local-artifact requirements, negative outcomes, and partial/blocked states; the MCP surface uses a
 deterministic dry-run worker while institution-local deployments provide the production executor.
+The science-aware mission controller (`execute_glioma_autonomous_research_mission`) sits above
+these individual campaigns. It maintains a deterministic frontier state across evidence,
+mechanism, assay, computation, and replication candidates; rewards uncovered stages and
+model/modality diversity; increases priority for actions that resolve negative dependencies; and
+replans only after typed local results arrive. Qualification requires explicit stage coverage,
+information-gain, model/modality, and uncertainty gates. Negative results remain first-class
+findings, while failed or partial effects terminate the mission. This is the cross-program
+autonomous engine loop a researcher can run locally without turning a score or dry-run into a
+biological conclusion.
 P08 now also includes deterministic instrument preflight (`preflight_glioma_instrument`). It combines
 qualified calibration, live interlock telemetry, typed operation parameters, operator authorization,
 serialized scheduling, and risk/duration budgets into a dispatch-permitted or fail-closed plan. The

@@ -16,6 +16,7 @@ pub mod autonomous_campaign;
 pub mod evidence_campaign;
 pub mod execution;
 pub mod mechanism_campaign;
+pub mod mission;
 pub mod research_autopilot;
 pub mod robust_active_learning_campaign;
 pub mod simulator;
@@ -55,6 +56,12 @@ pub use mechanism_campaign::{
     MechanismCampaignDisposition, MechanismCampaignError,
     MechanismCampaignExecutionDisposition, MultimodalMechanismCampaign,
     MultimodalMechanismCampaignExecution, MultimodalMechanismCampaignRequest,
+};
+
+pub use mission::{
+    execute_glioma_autonomous_research_mission, GliomaAutonomousResearchMission,
+    GliomaMissionError, GliomaMissionGates, GliomaMissionDisposition, GliomaMissionRequest,
+    GliomaMissionRound, GliomaMissionStopReason,
 };
 
 pub use research_autopilot::{
