@@ -56,11 +56,17 @@ pub use programs::p02_evidence_knowledge::{
     KnowledgeFrontierScore, KnowledgeFrontierWeights, KnowledgeRequest, TypedKnowledge,
 };
 pub use programs::p03_multimodal_ingestion_qc::{
+    execute_glioma_multimodal_ingestion_campaign, DryRunMultimodalIngestionCampaignExecutor,
     analyze_glioma_latent_factors, analyze_glioma_multimodal_graph_fusion,
     analyze_glioma_spatial_communication, analyze_glioma_spatial_niches,
     analyze_glioma_spatial_state_propagation, analyze_multimodal_concordance,
     analyze_multimodal_consensus, harmonize_glioma_multimodal_batches,
     BatchHarmonizationDiagnostic, ConcordanceDisposition, ConcordanceError, ConcordanceRequest,
+    IngestionQcAction, IngestionQcActionKind, MultimodalIngestionCampaign,
+    MultimodalIngestionCampaignDisposition, MultimodalIngestionCampaignError,
+    MultimodalIngestionCampaignExecutor, MultimodalIngestionCampaignRequest,
+    MultimodalIngestionCampaignRound, MultimodalIngestionCampaignStopReason,
+    MultimodalIngestionExecutionFailure,
     ConsensusAssignment, ConsensusCluster, ConsensusDisposition, ConsensusError, ConsensusRequest,
     FeatureValue, GraphFusionAnalysis, GraphFusionDisposition, GraphFusionError,
     GraphFusionNeighbour, GraphFusionRequest, GraphFusionState, GraphFusionVector,

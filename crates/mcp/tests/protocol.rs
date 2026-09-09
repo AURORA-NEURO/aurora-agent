@@ -314,7 +314,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 57;
-const TOOL_DEFINITION_COUNT: usize = 597;
+const TOOL_DEFINITION_COUNT: usize = 598;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -2462,6 +2462,52 @@ fn glioma_knowledge_resolution_campaign_recompiles_frontier_in_sandbox() {
     assert_eq!(campaign["simulation_only"], json!(true));
     assert_eq!(campaign["campaign"]["disposition"], json!("qualified"));
     assert_eq!(campaign["campaign"]["final_knowledge"]["disposition"], json!("qualified"));
+    assert_eq!(campaign["campaign"]["rounds"].as_array().unwrap().len(), 1);
+}
+
+#[test]
+fn glioma_multimodal_ingestion_campaign_replans_missing_modality_in_sandbox() {
+    let mut server = server();
+    let hash = "0".repeat(64);
+    let campaign = call(
+        &mut server,
+        "glioma_multimodal_ingestion_campaign_execute",
+        json!({
+            "request": {
+                "request": {
+                    "study_id": "study-mcp-ingestion",
+                    "required_modalities": ["genomics", "imaging"],
+                    "required_model_systems": ["organoid"],
+                    "expected_coordinate_system": "pixel",
+                    "expected_unit_system": "count",
+                    "max_missing_fraction_milli": 100
+                },
+                "observations": [{
+                    "observation_id": "seed-genomics",
+                    "study_id": "study-mcp-ingestion",
+                    "sample_lineage": "sample-seed",
+                    "modality": "genomics",
+                    "model_system": "organoid",
+                    "batch_id": "batch-1",
+                    "coordinate_system": "pixel",
+                    "unit_system": "count",
+                    "missing_fraction_milli": 0,
+                    "feature_count": 10,
+                    "artifact": {"artifact_id":"ingestion-artifact","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}
+                }],
+                "max_actions_per_round": 4,
+                "budget_units": 2,
+                "cost_per_action_units": 1,
+                "max_rounds": 3,
+                "max_retries": 1,
+                "stop_on_qualified": true
+            }
+        }),
+    );
+    assert_eq!(campaign["dispatch"], json!("dry_run"));
+    assert_eq!(campaign["simulation_only"], json!(true));
+    assert_eq!(campaign["campaign"]["disposition"], json!("qualified"));
+    assert_eq!(campaign["campaign"]["final_report"]["disposition"], json!("qualified"));
     assert_eq!(campaign["campaign"]["rounds"].as_array().unwrap().len(), 1);
 }
 

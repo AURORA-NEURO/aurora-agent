@@ -2,6 +2,7 @@
 
 use crate::glioma::catalog::{glioma_program_catalog, GliomaProgramDescriptor, GliomaProgramId};
 
+pub mod campaign;
 pub mod concordance;
 pub mod consensus;
 pub mod graph_fusion;
@@ -11,6 +12,14 @@ pub mod spatial_communication;
 pub mod spatial_niche;
 pub mod spatial_propagation;
 
+pub use campaign::{
+    execute_glioma_multimodal_ingestion_campaign, DryRunMultimodalIngestionCampaignExecutor,
+    IngestionQcAction, IngestionQcActionKind, MultimodalIngestionCampaign,
+    MultimodalIngestionCampaignDisposition, MultimodalIngestionCampaignError,
+    MultimodalIngestionCampaignExecutor, MultimodalIngestionCampaignRequest,
+    MultimodalIngestionCampaignRound, MultimodalIngestionCampaignStopReason,
+    MultimodalIngestionExecutionFailure,
+};
 pub use concordance::{
     analyze_multimodal_concordance, ConcordanceDisposition, ConcordanceError, ConcordanceRequest,
     FeatureValue, ModalityConcordance, ModalityVector, MultimodalConcordance,

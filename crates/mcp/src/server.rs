@@ -489,6 +489,7 @@ use bioprism_research::{
     execute_glioma_evidence_campaign, execute_glioma_instrument_plan, execute_glioma_protocol,
     execute_glioma_evidence_refresh_campaign,
     execute_glioma_knowledge_resolution_campaign,
+    execute_glioma_multimodal_ingestion_campaign,
     execute_glioma_replication_campaign,
     execute_glioma_autonomous_research_mission,
     execute_glioma_multi_fidelity_campaign,
@@ -526,6 +527,7 @@ use bioprism_research::{
     GliomaActionCandidate, GliomaAutonomousCampaignRequest, GliomaEvidenceCampaignRequest,
     DryRunEvidenceRefreshCampaignExecutor, EvidenceRefreshCampaignRequest,
     DryRunKnowledgeResolutionCampaignExecutor, KnowledgeResolutionCampaignRequest,
+    DryRunMultimodalIngestionCampaignExecutor, MultimodalIngestionCampaignRequest,
     GliomaResearchAutopilotRequest, GliomaResearchIntent, GliomaWorkflowRequest,
     GliomaMissionRequest,
     DryRunMultiFidelityCampaignExecutor, MultiFidelityCampaignRequest,
@@ -2002,6 +2004,9 @@ impl Server {
             "glioma_knowledge_resolution_campaign_execute" => {
                 self.glioma_knowledge_resolution_campaign_execute(&arguments)
             }
+            "glioma_multimodal_ingestion_campaign_execute" => {
+                self.glioma_multimodal_ingestion_campaign_execute(&arguments)
+            }
             "glioma_computation_execute" => self.glioma_computation_execute(&arguments),
             "glioma_computation_portfolio_plan" => {
                 self.glioma_computation_portfolio_plan(&arguments)
@@ -3462,6 +3467,37 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma knowledge resolution campaign: {error}"))
+    }
+
+    /// Execute bounded metadata-only multimodal ingestion/QC rounds through a local adapter.
+    fn glioma_multimodal_ingestion_campaign_execute(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: MultimodalIngestionCampaignRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| {
+                    "glioma_multimodal_ingestion_campaign_execute requires request".to_string()
+                })?,
+        )
+        .map_err(|error| format!("invalid glioma multimodal ingestion campaign request: {error}"))?;
+        let mut executor = DryRunMultimodalIngestionCampaignExecutor;
+        let campaign = execute_glioma_multimodal_ingestion_campaign(&request, &mut executor)
+            .map_err(|error| format!("glioma multimodal ingestion campaign refused: {error}"))?;
+        serde_json::to_value(json!({
+            "campaign": campaign,
+            "dispatch": "dry_run",
+            "simulation_only": true,
+            "guarantees": [
+                "QC is recomputed from every returned observation after each bounded round",
+                "missing modalities, model coverage, excluded observations, defects, retries, budget, and no-progress remain explicit",
+                "raw payloads remain institution-local and only de-identified metadata crosses the MCP boundary",
+                "the route performs no clinical decision or external instrument effect"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma multimodal ingestion campaign: {error}"))
     }
 
     /// Execute a typed multimodal computation DAG through the deterministic synthetic worker.
@@ -45708,6 +45744,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_evidence_campaign_execute",
                 "glioma_evidence_refresh_campaign_execute",
                 "glioma_knowledge_resolution_campaign_execute",
+                "glioma_multimodal_ingestion_campaign_execute",
                 "glioma_computation_execute",
                 "glioma_computation_portfolio_plan",
                 "glioma_computation_portfolio_execute",
@@ -52682,6 +52719,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "KnowledgeResolutionCampaignRequest1@1 containing KnowledgeRequest1@1, KnowledgeFrontierRequest1@1, typed EvidenceRecord1@1 rows, and bounded budget/round/retry limits."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_multimodal_ingestion_campaign_execute",
+        "description": "Run a bounded autonomous P03 multimodal-ingestion and QC campaign for preclinical glioma research. It turns missing modality/model coverage, excluded observations, coordinate/unit defects, and missingness into typed local ingestion actions, recomputes QC after each returned observation, and preserves unresolved, retry, budget, and no-progress states. MCP is a deterministic dry run with no raw-data movement, instrument effect, or clinical decision; production adapters remain institution-local.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "MultimodalIngestionCampaignRequest1@1 containing MultimodalRequest1@1, metadata-only observations, and bounded budget/round/retry limits."}
             },
             "required": ["request"]
         }

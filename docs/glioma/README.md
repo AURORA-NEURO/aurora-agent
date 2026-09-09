@@ -46,6 +46,8 @@ crates/research/src/glioma/
                                              P01 bounded autonomous evidence refresh and round-by-round surveillance replanning
   programs/p02_evidence_knowledge/campaign.rs
                                              P02 bounded claim-resolution campaign with frontier actions and knowledge recompilation
+  programs/p03_multimodal_ingestion_qc/campaign.rs
+                                             P03 bounded metadata-only ingestion/QC campaign with defect-aware replanning
   programs/p08_instrument_robotics/calibration.rs
                                              P08 robust control calibration and Theil-Sen instrument drift detection
   programs/p06_experiment_design/adaptive_allocation.rs
