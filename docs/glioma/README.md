@@ -146,8 +146,10 @@ crates/research/src/glioma/
                                              P03 spatial ligand-receptor communication enrichment against lineage-marginal null
   p03_multimodal_ingestion_qc/spatial_propagation.rs
                                              P03 lineage-aware integer spatial-state diffusion and hotspot prioritisation
-  p05_mechanism_exploration/pathway_activity.rs
+    p05_mechanism_exploration/pathway_activity.rs
                                              P05 signed pathway activity inference with cross-modal confidence and bottleneck gates
+    p05_mechanism_exploration/adaptive_policy.rs
+                                             P05 finite-horizon model-uncertainty policy with Gini information gain and local execution loop
 ```
 
 `docs/glioma/organization.json` is the machine-readable version of this map. The runtime
@@ -385,6 +387,13 @@ transfer, neighbourhood, and observed estimates distinct. Higher-fidelity candid
 blocked until their declared lower-fidelity support is qualified; retries, duplicate replicate
 keys, missing artifacts, budget exhaustion, and worker failure remain explicit instead of being
 converted into a validation claim.
+P05 now also exposes the adaptive mechanism policy and campaign
+(`plan_glioma_adaptive_mechanism_policy`, `execute_glioma_adaptive_mechanism_campaign`). It updates
+an integer model posterior from returned local observations, computes outcome-bucket Gini
+information gain plus lower-tail effect robustness, and beam-selects a finite-horizon assay
+sequence under feasibility, risk, redundancy, and budget gates. Each campaign round replans from
+the typed observation that actually returned; posterior concentration is never treated as causal
+identification, and the MCP worker is synthetic-only.
 P08 now also includes deterministic instrument preflight (`preflight_glioma_instrument`). It combines
 qualified calibration, live interlock telemetry, typed operation parameters, operator authorization,
 serialized scheduling, and risk/duration budgets into a dispatch-permitted or fail-closed plan. The

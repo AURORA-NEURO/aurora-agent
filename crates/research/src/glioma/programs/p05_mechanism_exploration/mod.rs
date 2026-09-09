@@ -3,6 +3,7 @@
 use crate::glioma::catalog::{glioma_program_catalog, GliomaProgramDescriptor, GliomaProgramId};
 
 pub mod action_planner;
+pub mod adaptive_policy;
 pub mod counterfactual;
 pub mod discrimination;
 pub mod ensemble_counterfactual;
@@ -13,6 +14,16 @@ pub mod robust_portfolio;
 pub use action_planner::{
     compile_mechanism_action_plan, GliomaMechanismActionPlanner, MechanismActionPlan,
     MechanismActionPlannerConfig, MechanismActionPlannerError,
+};
+pub use adaptive_policy::{
+    execute_glioma_adaptive_mechanism_campaign, plan_glioma_adaptive_mechanism_policy,
+    AdaptiveMechanismAction, AdaptiveMechanismActionScore, AdaptiveMechanismCampaign,
+    AdaptiveMechanismCampaignRequest, AdaptiveMechanismCampaignRound,
+    AdaptiveMechanismCampaignStopReason, AdaptiveMechanismExecutionFailure, AdaptiveMechanismModel,
+    AdaptiveMechanismObservation, AdaptiveMechanismPolicy, AdaptiveMechanismPolicyDisposition,
+    AdaptiveMechanismPolicyError, AdaptiveMechanismPolicyExecutor,
+    AdaptiveMechanismPolicyPosterior, AdaptiveMechanismPolicyRequest, AdaptiveMechanismPolicyStep,
+    AdaptiveMechanismPrediction, DryRunAdaptiveMechanismPolicyExecutor,
 };
 pub use counterfactual::{
     simulate_glioma_counterfactual, CounterfactualContrast, CounterfactualDirection,

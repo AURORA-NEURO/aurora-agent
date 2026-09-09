@@ -314,7 +314,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 57;
-const TOOL_DEFINITION_COUNT: usize = 591;
+const TOOL_DEFINITION_COUNT: usize = 593;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -2505,6 +2505,100 @@ fn glioma_multi_fidelity_campaign_replans_screening_batches_in_sandbox() {
     assert_eq!(campaign["campaign"]["disposition"], json!("qualified"));
     assert!(campaign["campaign"]["rounds"].as_array().unwrap().len() >= 2);
     assert!(campaign["campaign"]["observations"].as_array().unwrap().len() >= 2);
+}
+
+#[test]
+fn glioma_adaptive_mechanism_policy_selects_information_bearing_assay() {
+    let mut server = server();
+    let policy = call(
+        &mut server,
+        "glioma_adaptive_mechanism_policy",
+        json!({
+            "request": {
+                "objective": "discriminate invasion mechanisms in organoids",
+                "model_system": "organoid",
+                "horizon": 2,
+                "budget_units": 2,
+                "max_actions": 4,
+                "outcome_bucket_width_milli": 10,
+                "information_weight_milli": 700,
+                "effect_weight_milli": 100,
+                "robustness_weight_milli": 200,
+                "risk_penalty_milli": 1,
+                "cost_penalty_milli": 1,
+                "redundancy_penalty_milli": 20,
+                "min_feasibility_milli": 500,
+                "stop_entropy_milli": 50,
+                "models": [
+                    {"model_id":"m1","label":"invasion-led","prior_milli":500},
+                    {"model_id":"m2","label":"matrix-led","prior_milli":500}
+                ],
+                "actions": [
+                    {"action_id":"assay-a","label":"measure invasion","target_node_id":"node-a","modality":"functional_perturbation","redundancy_group":"pathway","cost_units":1,"risk_milli":50,"feasibility_milli":950,"predictions":[{"model_id":"m1","outcome_milli":100,"effect_milli":100,"uncertainty_milli":20},{"model_id":"m2","outcome_milli":900,"effect_milli":900,"uncertainty_milli":20}]},
+                    {"action_id":"assay-b","label":"measure matrix","target_node_id":"node-b","modality":"spatial","redundancy_group":"spatial","cost_units":1,"risk_milli":50,"feasibility_milli":950,"predictions":[{"model_id":"m1","outcome_milli":200,"effect_milli":200,"uncertainty_milli":20},{"model_id":"m2","outcome_milli":220,"effect_milli":220,"uncertainty_milli":20}]}
+                ],
+                "observations": []
+            }
+        }),
+    );
+    assert_eq!(policy["dispatch"], json!("not_started"));
+    assert_eq!(policy["simulation_only"], json!(true));
+    assert_eq!(policy["policy"]["selected_action_order"][0], json!("assay-a"));
+    assert!(policy["policy"]["scores"].as_array().unwrap().iter().any(|score| {
+        score["information_gain_milli"].as_u64().unwrap_or_default() > 0
+    }));
+}
+
+#[test]
+fn glioma_adaptive_mechanism_campaign_replans_from_sandbox_observation() {
+    let mut server = server();
+    let campaign = call(
+        &mut server,
+        "glioma_adaptive_mechanism_campaign_execute",
+        json!({
+            "request": {
+                "policy": {
+                    "objective": "discriminate invasion mechanisms in organoids",
+                    "model_system": "organoid",
+                    "horizon": 2,
+                    "budget_units": 2,
+                    "max_actions": 4,
+                    "outcome_bucket_width_milli": 10,
+                    "information_weight_milli": 700,
+                    "effect_weight_milli": 100,
+                    "robustness_weight_milli": 200,
+                    "risk_penalty_milli": 1,
+                    "cost_penalty_milli": 1,
+                    "redundancy_penalty_milli": 20,
+                    "min_feasibility_milli": 500,
+                    "stop_entropy_milli": 50,
+                    "models": [
+                        {"model_id":"m1","label":"invasion-led","prior_milli":500},
+                        {"model_id":"m2","label":"matrix-led","prior_milli":500}
+                    ],
+                    "actions": [
+                        {"action_id":"assay-a","label":"measure invasion","target_node_id":"node-a","modality":"functional_perturbation","redundancy_group":"pathway","cost_units":1,"risk_milli":50,"feasibility_milli":950,"predictions":[{"model_id":"m1","outcome_milli":100,"effect_milli":100,"uncertainty_milli":20},{"model_id":"m2","outcome_milli":900,"effect_milli":900,"uncertainty_milli":20}]},
+                        {"action_id":"assay-b","label":"measure matrix","target_node_id":"node-b","modality":"spatial","redundancy_group":"spatial","cost_units":1,"risk_milli":50,"feasibility_milli":950,"predictions":[{"model_id":"m1","outcome_milli":200,"effect_milli":200,"uncertainty_milli":20},{"model_id":"m2","outcome_milli":220,"effect_milli":220,"uncertainty_milli":20}]}
+                    ],
+                    "observations": []
+                },
+                "max_rounds": 2,
+                "max_retries": 1,
+                "require_artifacts": true,
+                "stop_on_converged": true
+            }
+        }),
+    );
+    assert_eq!(campaign["dispatch"], json!("dry_run"));
+    assert_eq!(campaign["simulation_only"], json!(true));
+    assert!(!campaign["campaign"]["rounds"].as_array().unwrap().is_empty());
+    assert!(!campaign["campaign"]["observations"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+    assert!(campaign["campaign"]["completed_action_order"]
+        .as_array()
+        .is_some_and(|items| !items.is_empty()));
 }
 
 #[test]

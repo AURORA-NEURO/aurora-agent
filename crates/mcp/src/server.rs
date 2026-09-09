@@ -489,6 +489,7 @@ use bioprism_research::{
     execute_glioma_replication_campaign,
     execute_glioma_autonomous_research_mission,
     execute_glioma_multi_fidelity_campaign,
+    execute_glioma_adaptive_mechanism_campaign, plan_glioma_adaptive_mechanism_policy,
     execute_glioma_research_autopilot, execute_glioma_robust_active_learning_campaign,
     explore_mechanisms, generate_feature_catalog, glioma_program_catalog,
     harmonize_glioma_multimodal_batches, harmonize_multimodal_inputs, plan_decision_actions,
@@ -521,6 +522,8 @@ use bioprism_research::{
     GliomaResearchAutopilotRequest, GliomaResearchIntent, GliomaWorkflowRequest,
     GliomaMissionRequest,
     DryRunMultiFidelityCampaignExecutor, MultiFidelityCampaignRequest,
+    AdaptiveMechanismCampaignRequest, AdaptiveMechanismPolicyRequest,
+    DryRunAdaptiveMechanismPolicyExecutor,
     DryRunGliomaReplicationCampaignExecutor, GliomaReplicationCampaignRequest,
     GraphFusionRequest, GraphFusionVector, HarmonizationRequest, HarmonizationVector,
     PathwayActivityDefinition, PathwayActivityObservation, PathwayActivityRequest,
@@ -2038,6 +2041,10 @@ impl Server {
             "glioma_mechanism_explore" => self.glioma_mechanism_explore(&arguments),
             "glioma_mechanism_discriminate" => self.glioma_mechanism_discriminate(&arguments),
             "glioma_mechanism_action_plan" => self.glioma_mechanism_action_plan(&arguments),
+            "glioma_adaptive_mechanism_policy" => self.glioma_adaptive_mechanism_policy(&arguments),
+            "glioma_adaptive_mechanism_campaign_execute" => {
+                self.glioma_adaptive_mechanism_campaign_execute(&arguments)
+            }
             "glioma_mechanism_graph_propagate" => self.glioma_mechanism_graph_propagate(&arguments),
             "glioma_mechanism_counterfactual" => self.glioma_mechanism_counterfactual(&arguments),
             "glioma_mechanism_ensemble_counterfactual" => {
@@ -4716,6 +4723,64 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma mechanism action plan: {error}"))
+    }
+
+    /// Compile a finite-horizon, model-uncertainty-aware mechanism policy. This is a planner;
+    /// it does not treat posterior mass as causal truth or dispatch an assay.
+    fn glioma_adaptive_mechanism_policy(&self, arguments: &Value) -> Result<Value, String> {
+        let request: AdaptiveMechanismPolicyRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_adaptive_mechanism_policy requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma adaptive mechanism policy request: {error}"))?;
+        let policy = plan_glioma_adaptive_mechanism_policy(&request)
+            .map_err(|error| format!("glioma adaptive mechanism policy refused: {error}"))?;
+        serde_json::to_value(json!({
+            "policy": policy,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "posterior updates use bounded integer likelihoods from returned local observations",
+                "action scores combine Gini information gain, expected effect, lower-tail robustness, feasibility, risk, cost, and redundancy",
+                "beam selection is finite-horizon and budget bounded; no inferred estimate is emitted as an observation",
+                "the route plans preclinical assays only and never makes a causal, clinical, or treatment decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma adaptive mechanism policy: {error}"))
+    }
+
+    /// Execute the adaptive mechanism policy through a deterministic sandbox worker. Production
+    /// institutions call the research-crate executor seam with their own local assay gateway.
+    fn glioma_adaptive_mechanism_campaign_execute(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: AdaptiveMechanismCampaignRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| {
+                    "glioma_adaptive_mechanism_campaign_execute requires request".to_string()
+                })?,
+        )
+        .map_err(|error| format!("invalid glioma adaptive mechanism campaign request: {error}"))?;
+        let mut executor = DryRunAdaptiveMechanismPolicyExecutor;
+        let campaign = execute_glioma_adaptive_mechanism_campaign(&request, &mut executor)
+            .map_err(|error| format!("glioma adaptive mechanism campaign refused: {error}"))?;
+        serde_json::to_value(json!({
+            "campaign": campaign,
+            "dispatch": "dry_run",
+            "simulation_only": true,
+            "guarantees": [
+                "each round replans from the returned typed observation and never promotes synthetic output to biological evidence",
+                "finite-horizon posterior, information, robustness, feasibility, retry, budget, and convergence gates remain explicit",
+                "duplicate action observations, invalid artifacts, worker failure, and no-progress states fail closed",
+                "the MCP route performs no instrument execution, clinical decision, or raw-data movement"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma adaptive mechanism campaign: {error}"))
     }
 
     /// Propagate signed mechanistic support over a local preclinical glioma evidence graph. This
@@ -45541,6 +45606,8 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_mechanism_explore",
                 "glioma_mechanism_discriminate",
                 "glioma_mechanism_action_plan",
+                "glioma_adaptive_mechanism_policy",
+                "glioma_adaptive_mechanism_campaign_execute",
                 "glioma_mechanism_graph_propagate",
                 "glioma_pathway_activity",
                 "glioma_multimodal_mechanism_campaign",
@@ -52941,6 +53008,28 @@ pub fn tool_definitions() -> Vec<Value> {
                 "config": {"type": "object", "description": "MechanismActionPlannerConfig1@1 with model_system, modality, and max_actions."}
             },
             "required": ["discrimination", "config"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_adaptive_mechanism_policy",
+        "description": "Compile a finite-horizon autonomous preclinical glioma mechanism policy from competing model predictions and local observations. It updates an integer posterior, computes Gini information gain over outcome buckets, lower-tail effect robustness, and a budget/feasibility/risk-aware beam-selected assay sequence; posterior scores are not causal claims and this route never executes biology.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "AdaptiveMechanismPolicyRequest1@1 with model priors, action predictions, local observations, horizon, bucket width, utility weights, and hard gates."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_adaptive_mechanism_campaign_execute",
+        "description": "Execute a bounded observation-driven glioma mechanism campaign. Replans the finite-horizon policy after every typed local assay result, preserving posterior uncertainty, information gain, lower-tail robustness, retry/budget/convergence gates, and explicit failure or no-progress states. MCP uses a synthetic worker; production executors remain institution-local and no clinical decision is produced.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "AdaptiveMechanismCampaignRequest1@1 with policy registry, prior observations, round/retry bounds, artifact requirement, and convergence stop policy."}
+            },
+            "required": ["request"]
         }
     }));
     definitions.push(json!({
