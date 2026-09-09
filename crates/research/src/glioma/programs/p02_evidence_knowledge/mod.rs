@@ -2,6 +2,7 @@
 
 pub mod campaign;
 pub mod claim_frontier;
+pub mod composition;
 pub mod knowledge_graph;
 
 pub use campaign::{
@@ -16,6 +17,12 @@ pub use claim_frontier::{
     prioritize_knowledge_frontier, FrontierActionKind, KnowledgeFrontier,
     KnowledgeFrontierDisposition, KnowledgeFrontierError, KnowledgeFrontierRequest,
     KnowledgeFrontierScore, KnowledgeFrontierWeights,
+};
+pub use composition::{
+    compose_knowledge_graph, KnowledgeComponentDisposition, KnowledgeComposition,
+    KnowledgeCompositionComponent, KnowledgeCompositionDisposition, KnowledgeCompositionError,
+    KnowledgeCompositionPath, KnowledgeCompositionRequest, KnowledgePathDisposition,
+    KnowledgeRelation, KnowledgeRelationKind,
 };
 pub use knowledge_graph::{
     compile_typed_knowledge, KnowledgeClaim, KnowledgeClaimDisposition, KnowledgeDisposition,

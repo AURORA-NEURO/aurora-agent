@@ -54,6 +54,10 @@ pub use programs::p02_evidence_knowledge::{
     KnowledgeResolutionCampaignError, KnowledgeResolutionCampaignExecutor,
     KnowledgeResolutionCampaignRequest, KnowledgeResolutionCampaignRound,
     KnowledgeResolutionCampaignStopReason, KnowledgeResolutionExecutionFailure, TypedKnowledge,
+    compose_knowledge_graph, KnowledgeComponentDisposition, KnowledgeComposition,
+    KnowledgeCompositionComponent, KnowledgeCompositionDisposition, KnowledgeCompositionError,
+    KnowledgeCompositionPath, KnowledgeCompositionRequest, KnowledgePathDisposition,
+    KnowledgeRelation, KnowledgeRelationKind,
 };
 pub use programs::p03_multimodal_ingestion_qc::{
     analyze_glioma_latent_factors, analyze_glioma_multimodal_graph_fusion,

@@ -314,7 +314,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 57;
-const TOOL_DEFINITION_COUNT: usize = 614;
+const TOOL_DEFINITION_COUNT: usize = 615;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -3404,6 +3404,45 @@ fn glioma_autonomous_research_engine_replans_the_full_stage_graph() {
         .unwrap()
         .iter()
         .any(|item| item.as_str().unwrap().contains("synthetic-dry-run")));
+}
+
+#[test]
+fn glioma_knowledge_composition_exposes_supported_paths_and_bottlenecks() {
+    let mut server = server();
+    let hash = "0".repeat(64);
+    let compiled = call(
+        &mut server,
+        "glioma_knowledge_compile",
+        json!({
+            "request": {
+                "objective": "compose invasion mechanism evidence",
+                "required_modalities": [],
+                "required_model_systems": [],
+                "min_support_milli": 700,
+                "min_sources_per_claim": 1,
+                "max_claims": 8
+            },
+            "records": [
+                {"evidence_id":"e1","source_artifact":{"artifact_id":"e1","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"source_kind":"dataset","claim":"EGFR signaling increases invasion","scope":"preclinical glioma","modality":"genomics","model_system":"organoid","state":"supported","relevance_milli":900,"quality_milli":900,"reproducibility_milli":900,"release_epoch":1},
+                {"evidence_id":"e2","source_artifact":{"artifact_id":"e2","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"source_kind":"dataset","claim":"invasion increases dissemination","scope":"preclinical glioma","modality":"genomics","model_system":"organoid","state":"supported","relevance_milli":900,"quality_milli":900,"reproducibility_milli":900,"release_epoch":1}
+            ]
+        }),
+    );
+    let knowledge = compiled["knowledge"].clone();
+    let claims = knowledge["claim_order"].as_array().unwrap();
+    let composed = call(
+        &mut server,
+        "glioma_knowledge_compose",
+        json!({
+            "request": {"objective":"compose invasion mechanism evidence","min_path_length":2,"max_paths":8,"min_strength_milli":500,"max_contradiction_milli":500,"require_supported_root":true},
+            "knowledge": knowledge,
+            "relations": [{"relation_id":"r1","from_claim_id":claims[0],"to_claim_id":claims[1],"kind":"supports","strength_milli":900}]
+        }),
+    );
+    assert_eq!(composed["dispatch"], json!("not_started"));
+    assert_eq!(composed["composition"]["disposition"], json!("qualified"));
+    assert_eq!(composed["composition"]["selected_path_order"].as_array().unwrap().len(), 1);
+    assert_eq!(composed["composition"]["bottleneck_claim_order"].as_array().unwrap().len(), 1);
 }
 
 #[test]

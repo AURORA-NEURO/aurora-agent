@@ -20,6 +20,8 @@ crates/research/src/glioma/
   evidence.rs                              P01 evidence qualification
   programs/p02_evidence_knowledge/knowledge_graph.rs
                                              P02 scoped claim graph and support/contradiction synthesis
+  programs/p02_evidence_knowledge/composition.rs
+                                             P02 explicit relation graph composition with path bottlenecks and contradiction gates
   programs/p02_evidence_knowledge/claim_frontier.rs
                                              P02 uncertainty/coverage/contradiction frontier prioritization
   programs/p04_decision_context/context_compiler.rs
@@ -319,6 +321,11 @@ missing modality/model coverage for the next workflow action.
 The claim frontier (`prioritize_knowledge_frontier`) then scores coverage debt, contradiction,
 unresolved evidence, support, and workflow leverage to choose which claims should drive the next
 P04/P07 cycle; it returns explicit action modes and never upgrades a claim's evidence state.
+Knowledge composition (`compose_knowledge_graph`) adds the missing network layer: it traverses
+only caller-declared supports and prerequisites, computes weakest-link path strength, detects
+contradiction edges, identifies connected claim components and bottleneck claims, and returns
+replay-stable paths for P04/P05. It is an evidence-network planning capability, not causal
+identification or clinical guidance.
 P04 now includes decision-context compilation (`compile_decision_context`) that converts those
 gaps into typed A1 candidates for coverage closure, contradiction replication, negative-result
 falsification, evidence resolution, or mechanism validation; the existing action selector then

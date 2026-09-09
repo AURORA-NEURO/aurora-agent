@@ -482,7 +482,8 @@ use bioprism_research::{
     analyze_replication_meta_analysis, analyze_stratified_causal_adjustment,
     assess_glioma_robustness, assess_replication, build_research_object_manifest,
     compile_decision_context, compile_glioma_computation_workflow, compile_mechanism_action_plan,
-    compile_typed_knowledge, design_preclinical_experiment, discriminate_mechanisms,
+    compile_typed_knowledge, compose_knowledge_graph, design_preclinical_experiment,
+    discriminate_mechanisms,
     dry_run_glioma_research, execute_federated_benchmark_campaign, execute_glioma_action_portfolio,
     execute_glioma_active_learning_campaign, execute_glioma_adaptive_allocation_campaign,
     execute_glioma_autonomous_research_engine,
@@ -543,7 +544,8 @@ use bioprism_research::{
     GraphFusionRequest, GraphFusionVector, HarmonizationRequest, HarmonizationVector,
     InformationDesignRequest, InstrumentCampaignRequest, InstrumentExecutionRequest,
     InstrumentPreflightRequest, KnowledgeFrontierRequest, KnowledgeRequest,
-    KnowledgeResolutionCampaignRequest, LatentFactorRequest, LatentFactorVector,
+    KnowledgeResolutionCampaignRequest, KnowledgeCompositionRequest, KnowledgeRelation,
+    LatentFactorRequest, LatentFactorVector,
     LigandReceptorPair, MechanismActionPlannerConfig, MechanismCandidate, MechanismDiscrimination,
     MechanismDiscriminationCampaignRequest, MechanismDiscriminationRequest,
     MechanismDiscriminatorAction, MechanismFeatureObservation, MechanismGraphEdge,
@@ -2095,6 +2097,7 @@ impl Server {
             "glioma_evidence_surveillance" => self.glioma_evidence_surveillance(&arguments),
             "glioma_evidence_priority" => self.glioma_evidence_priority(&arguments),
             "glioma_knowledge_compile" => self.glioma_knowledge_compile(&arguments),
+            "glioma_knowledge_compose" => self.glioma_knowledge_compose(&arguments),
             "glioma_knowledge_frontier" => self.glioma_knowledge_frontier(&arguments),
             "glioma_decision_context" => self.glioma_decision_context(&arguments),
             "glioma_decision_action_plan" => self.glioma_decision_action_plan(&arguments),
@@ -5046,6 +5049,46 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma typed knowledge: {error}"))
+    }
+
+    /// Compose explicit typed-knowledge relations into auditable preclinical evidence paths.
+    /// Relation direction is caller-declared; MCP never infers causality or promotes a path into
+    /// a clinical or therapeutic conclusion.
+    fn glioma_knowledge_compose(&self, arguments: &Value) -> Result<Value, String> {
+        let request: KnowledgeCompositionRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_knowledge_compose requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma knowledge-composition request: {error}"))?;
+        let knowledge: TypedKnowledge = serde_json::from_value(
+            arguments
+                .get("knowledge")
+                .cloned()
+                .ok_or_else(|| "glioma_knowledge_compose requires knowledge".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma typed knowledge: {error}"))?;
+        let relations: Vec<KnowledgeRelation> = serde_json::from_value(
+            arguments
+                .get("relations")
+                .cloned()
+                .ok_or_else(|| "glioma_knowledge_compose requires relations".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma knowledge relations: {error}"))?;
+        let composition = compose_knowledge_graph(&request, &knowledge, &relations)
+            .map_err(|error| format!("glioma knowledge composition refused: {error}"))?;
+        serde_json::to_value(json!({
+            "composition": composition,
+            "dispatch": "not_started",
+            "guarantees": [
+                "only caller-declared supports, prerequisites, and contradictions are traversed",
+                "path strength is bounded by claim confidence and the weakest relation",
+                "contradiction, unresolved dependencies, negative evidence, and bottleneck claims remain explicit",
+                "the result is an evidence-network planning artifact, not causal identification, treatment advice, or a clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma knowledge composition: {error}"))
     }
 
     /// Rank the claims that should drive the next autonomous glioma research cycle. This is a
@@ -46360,6 +46403,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_evidence_surveillance",
                 "glioma_evidence_priority",
                 "glioma_knowledge_compile",
+                "glioma_knowledge_compose",
                 "glioma_knowledge_frontier",
                 "glioma_decision_context",
                 "glioma_decision_action_plan",
@@ -53862,6 +53906,19 @@ pub fn tool_definitions() -> Vec<Value> {
                 "records": {"type": "array", "items": {"type": "object"}, "description": "Local EvidenceRecord1@1 values."}
             },
             "required": ["request", "records"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_knowledge_compose",
+        "description": "Compose explicit typed preclinical glioma knowledge relations into deterministic mechanistic evidence paths and connected-component gates. Traverses only caller-declared support and prerequisite edges, detects contradiction edges, reports weakest bottleneck claims and unresolved coverage, and never infers causality, treatment efficacy, or a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "KnowledgeCompositionRequest1@1 with path length/count bounds, strength threshold, contradiction tolerance, and supported-root policy."},
+                "knowledge": {"type": "object", "description": "TypedKnowledge1@1 from glioma_knowledge_compile."},
+                "relations": {"type": "array", "items": {"type": "object"}, "description": "KnowledgeRelation1@1 records with explicit supports, requires, or contradicts direction between claim ids."}
+            },
+            "required": ["request", "knowledge", "relations"]
         }
     }));
     definitions.push(json!({
