@@ -101,6 +101,8 @@ crates/research/src/glioma/
                                              P10 longitudinal per-unit trajectory analysis
     p10_interpretation_replication/transportability.rs
                                              P10 model-system transportability and portability-gap analysis
+    p10_interpretation_replication/campaign.rs
+                                             P10 autonomous replication/interpretation campaign and next-action executor
     p10_interpretation_replication/state_transition.rs
                                              P10 discrete-state transition matrices and treatment contrasts
   p10_interpretation_replication/causal_contrast.rs
@@ -298,6 +300,12 @@ P10 also includes fixed-point replication meta-analysis (`analyze_replication_me
 fixed and random-effects inverse-uncertainty pooling, estimated between-study variance,
 Cochran/I² heterogeneity, leave-one-study-out influence, and explicit negative or unresolved
 outcomes for contradiction, underpowered sites, weak signal, and unstable pools.
+P10 now also includes the autonomous replication campaign (`execute_glioma_replication_campaign`).
+It composes site-level replication, fixed/random-effects pooling, and model-system transportability;
+scores missing coverage, heterogeneity, influential studies, and transport gaps; dispatches only
+typed bounded local actions; and incorporates returned study artifacts into the next analysis round.
+Simulation observations are never promoted into biological evidence, and qualification, negative,
+partial, failed, budget, transport, and no-progress stops remain explicit.
 P06 now includes combination-response analysis (`analyze_glioma_combination_synergy`) with
 vehicle/single-agent control requirements, integer Bliss expectations, residual noise, synergy,
 antagonism, and explicit unresolved cells for missing controls or replicates.

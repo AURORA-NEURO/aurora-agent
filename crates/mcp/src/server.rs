@@ -486,6 +486,7 @@ use bioprism_research::{
     execute_glioma_multimodal_mechanism_campaign,
     execute_glioma_multimodal_mechanism_campaign_with_executor,
     execute_glioma_evidence_campaign, execute_glioma_instrument_plan, execute_glioma_protocol,
+    execute_glioma_replication_campaign,
     execute_glioma_research_autopilot, execute_glioma_robust_active_learning_campaign,
     explore_mechanisms, generate_feature_catalog, glioma_program_catalog,
     harmonize_glioma_multimodal_batches, harmonize_multimodal_inputs, plan_decision_actions,
@@ -516,6 +517,7 @@ use bioprism_research::{
     FederatedBenchmarkRequest, FederatedBenchmarkSite, FidelityCandidate, FidelityObservation,
     GliomaActionCandidate, GliomaAutonomousCampaignRequest, GliomaEvidenceCampaignRequest,
     GliomaResearchAutopilotRequest, GliomaResearchIntent, GliomaWorkflowRequest,
+    DryRunGliomaReplicationCampaignExecutor, GliomaReplicationCampaignRequest,
     GraphFusionRequest, GraphFusionVector, HarmonizationRequest, HarmonizationVector,
     PathwayActivityDefinition, PathwayActivityObservation, PathwayActivityRequest,
     MultimodalMechanismCampaignRequest,
@@ -2060,6 +2062,9 @@ impl Server {
             "glioma_analysis_run" => self.glioma_analysis_run(&arguments),
             "glioma_replication_assess" => self.glioma_replication_assess(&arguments),
             "glioma_replication_meta_analyze" => self.glioma_replication_meta_analyze(&arguments),
+            "glioma_replication_campaign_execute" => {
+                self.glioma_replication_campaign_execute(&arguments)
+            }
             "glioma_federated_benchmark_consensus" => {
                 self.glioma_federated_benchmark_consensus(&arguments)
             }
@@ -5302,6 +5307,35 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma replication meta-analysis: {error}"))
+    }
+
+    /// Run the bounded P10 replication/interpretation loop with the simulation-only local
+    /// executor. Institution hosts can call the same Rust contract with a real local executor;
+    /// this MCP route never moves raw data or promotes synthetic observations into evidence.
+    fn glioma_replication_campaign_execute(&self, arguments: &Value) -> Result<Value, String> {
+        let request: GliomaReplicationCampaignRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_replication_campaign_execute requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma replication campaign request: {error}"))?;
+        let mut executor = DryRunGliomaReplicationCampaignExecutor::default();
+        let campaign = execute_glioma_replication_campaign(&request, &mut executor)
+            .map_err(|error| format!("glioma replication campaign refused: {error}"))?;
+        serde_json::to_value(json!({
+            "campaign": campaign,
+            "dispatch": "dry_run",
+            "simulation_only": true,
+            "guarantees": [
+                "replication, meta-analysis, and transportability are recomputed from typed local study objects each round",
+                "heterogeneity, influential studies, missing coverage, model distance, negative evidence, and unresolved states remain explicit",
+                "hard action, retry, budget, target-model, and no-progress gates remain active",
+                "simulation observations are never admitted as biological evidence",
+                "the MCP route performs no external computation, clinical decision, or raw-data movement"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma replication campaign: {error}"))
     }
 
     /// Compare aggregate benchmark outcomes from independent preclinical sites. Raw traces stay
@@ -45449,6 +45483,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_analysis_run",
                 "glioma_replication_assess",
                 "glioma_replication_meta_analyze",
+                "glioma_replication_campaign_execute",
                 "glioma_federated_benchmark_consensus",
                 "glioma_research_object_prepare"
             ],
@@ -53093,6 +53128,17 @@ pub fn tool_definitions() -> Vec<Value> {
                 "studies": {"type": "array", "items": {"type": "object"}, "description": "Local ReplicationStudy1@1 values with declared effect and uncertainty."}
             },
             "required": ["request", "studies"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_replication_campaign_execute",
+        "description": "Run the bounded autonomous preclinical glioma replication/interpretation loop. It recomputes site-level replication, fixed/random-effects pooling, influence, heterogeneity, and model-system transportability; ranks missing coverage, heterogeneity, influential-study, target-model, and negative-result actions; and uses a simulation-only local executor in MCP. No synthetic observation is promoted to biological evidence and no raw data leaves the institution.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "GliomaReplicationCampaignRequest1@1 with bounded study/transport inputs, thresholds, action budget, rounds, and replay identity."}
+            },
+            "required": ["request"]
         }
     }));
     definitions.push(json!({

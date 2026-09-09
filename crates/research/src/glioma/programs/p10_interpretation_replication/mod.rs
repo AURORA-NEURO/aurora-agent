@@ -4,6 +4,7 @@ use crate::glioma::catalog::{glioma_program_catalog, GliomaProgramDescriptor, Gl
 
 pub mod causal_adjustment;
 pub mod causal_contrast;
+pub mod campaign;
 pub mod mediation;
 pub mod meta_analysis;
 pub mod sensitivity;
@@ -19,6 +20,14 @@ pub use causal_adjustment::{
 pub use causal_contrast::{
     analyze_glioma_causal_contrast, CausalContrastAnalysis, CausalContrastDisposition,
     CausalContrastError, CausalContrastRequest, UnitContrast,
+};
+pub use campaign::{
+    execute_glioma_replication_campaign, DryRunGliomaReplicationCampaignExecutor,
+    GliomaReplicationAction, GliomaReplicationActionKind, GliomaReplicationCampaign,
+    GliomaReplicationCampaignDisposition, GliomaReplicationCampaignError,
+    GliomaReplicationCampaignExecutor, GliomaReplicationCampaignObservation,
+    GliomaReplicationCampaignRequest, GliomaReplicationCampaignRound,
+    GliomaReplicationCampaignStopReason, GliomaReplicationExecutionFailure,
 };
 pub use mediation::{
     analyze_glioma_mediation, MediationAnalysis, MediationDisposition, MediationError,

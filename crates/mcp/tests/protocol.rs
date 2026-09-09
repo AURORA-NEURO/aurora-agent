@@ -314,7 +314,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 57;
-const TOOL_DEFINITION_COUNT: usize = 588;
+const TOOL_DEFINITION_COUNT: usize = 589;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -2389,6 +2389,50 @@ fn glioma_computation_portfolio_executor_runs_selected_dag() {
         execution["execution"]["execution"]["task_order"],
         json!(["normalize", "integrate"])
     );
+}
+
+#[test]
+fn glioma_replication_campaign_routes_heterogeneity_to_bounded_action() {
+    let mut server = server();
+    let hash = "0".repeat(64);
+    let campaign = call(
+        &mut server,
+        "glioma_replication_campaign_execute",
+        json!({
+            "request": {
+                "objective": "replicate a preclinical glioma invasion effect",
+                "model_system": "organoid",
+                "target_model_system": "organoid",
+                "target_signature": [1, 2],
+                "min_sites": 3,
+                "min_replicates_per_site": 2,
+                "min_studies": 3,
+                "min_replicates_per_study": 2,
+                "effect_threshold_milli": 10,
+                "max_heterogeneity_milli": 500,
+                "max_i2_milli": 500,
+                "min_signal_to_noise_milli": 10,
+                "max_leave_one_out_shift_milli": 1000,
+                "min_quality_milli": 500,
+                "distance_scale_milli": 1000,
+                "max_transport_gap_milli": 500,
+                "max_transport_heterogeneity_milli": 500,
+                "budget_units": 16,
+                "max_rounds": 2,
+                "max_actions_per_round": 1,
+                "max_retries": 1,
+                "initial_studies": [
+                    {"study_id":"s1","site_id":"site-1","model_system":"organoid","effect_milli":250,"uncertainty_milli":100,"replicate_count":3,"artifact":{"artifact_id":"a1","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}}
+                ],
+                "initial_transport_studies": [],
+                "replay_identity": hash
+            }
+        }),
+    );
+    assert_eq!(campaign["dispatch"], json!("dry_run"));
+    assert_eq!(campaign["simulation_only"], json!(true));
+    assert_eq!(campaign["campaign"]["rounds"][0]["candidate_actions"][0]["kind"], json!("replicate_study"));
+    assert_eq!(campaign["campaign"]["disposition"], json!("partial"));
 }
 
 #[test]
