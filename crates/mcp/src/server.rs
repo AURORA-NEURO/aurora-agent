@@ -487,6 +487,7 @@ use bioprism_research::{
     execute_glioma_multimodal_mechanism_campaign,
     execute_glioma_multimodal_mechanism_campaign_with_executor,
     execute_glioma_evidence_campaign, execute_glioma_instrument_plan, execute_glioma_protocol,
+    execute_glioma_evidence_refresh_campaign,
     execute_glioma_replication_campaign,
     execute_glioma_autonomous_research_mission,
     execute_glioma_multi_fidelity_campaign,
@@ -522,6 +523,7 @@ use bioprism_research::{
     DryRunFederatedBenchmarkCampaignExecutor, FidelityCandidate, FidelityObservation,
     DryRunReplayCampaignExecutor, ReplayCampaignRequest,
     GliomaActionCandidate, GliomaAutonomousCampaignRequest, GliomaEvidenceCampaignRequest,
+    DryRunEvidenceRefreshCampaignExecutor, EvidenceRefreshCampaignRequest,
     GliomaResearchAutopilotRequest, GliomaResearchIntent, GliomaWorkflowRequest,
     GliomaMissionRequest,
     DryRunMultiFidelityCampaignExecutor, MultiFidelityCampaignRequest,
@@ -1992,6 +1994,9 @@ impl Server {
                 self.glioma_research_autopilot_execute(&arguments)
             }
             "glioma_evidence_campaign_execute" => self.glioma_evidence_campaign_execute(&arguments),
+            "glioma_evidence_refresh_campaign_execute" => {
+                self.glioma_evidence_refresh_campaign_execute(&arguments)
+            }
             "glioma_computation_execute" => self.glioma_computation_execute(&arguments),
             "glioma_computation_portfolio_plan" => {
                 self.glioma_computation_portfolio_plan(&arguments)
@@ -3390,6 +3395,36 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma evidence campaign: {error}"))
+    }
+
+    /// Refresh P01 evidence deltas through a bounded, institution-local executor and replan
+    /// surveillance after each round. The MCP adapter remains a synthetic sandbox worker.
+    fn glioma_evidence_refresh_campaign_execute(&self, arguments: &Value) -> Result<Value, String> {
+        let request: EvidenceRefreshCampaignRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| {
+                    "glioma_evidence_refresh_campaign_execute requires request".to_string()
+                })?,
+        )
+        .map_err(|error| format!("invalid glioma evidence refresh campaign request: {error}"))?;
+        let mut executor = DryRunEvidenceRefreshCampaignExecutor;
+        let campaign = execute_glioma_evidence_refresh_campaign(&request, &mut executor)
+            .map_err(|error| format!("glioma evidence refresh campaign refused: {error}"))?;
+        serde_json::to_value(json!({
+            "campaign": campaign,
+            "dispatch": "dry_run",
+            "simulation_only": true,
+            "guarantees": [
+                "surveillance deltas are recomputed after every returned local evidence record",
+                "only typed de-identified local evidence metadata crosses the MCP boundary",
+                "stale, unknown, contradictory, negative, and missing coverage remain explicit",
+                "retry, budget, no-progress, executor failure, and malformed-record stops remain explicit",
+                "the route performs no internet fetch, raw data movement, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma evidence refresh campaign: {error}"))
     }
 
     /// Execute a typed multimodal computation DAG through the deterministic synthetic worker.
@@ -45634,6 +45669,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_autonomous_campaign_execute",
                 "glioma_research_autopilot_execute",
                 "glioma_evidence_campaign_execute",
+                "glioma_evidence_refresh_campaign_execute",
                 "glioma_computation_execute",
                 "glioma_computation_portfolio_plan",
                 "glioma_computation_portfolio_execute",
@@ -52586,6 +52622,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "GliomaEvidenceCampaignRequest1@1 containing EvidencePriorityPlan1@1, typed action adapters, completed queue ids, selection policy, retry bound, and artifact requirement."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_evidence_refresh_campaign_execute",
+        "description": "Run a bounded autonomous P01 evidence-refresh campaign for preclinical glioma research. It consumes typed surveillance deltas, dispatches stale, unknown, contradictory, negative, and coverage actions through a local executor, replans after every round, and preserves explicit budget, retry, failure, and unresolved states. MCP is a deterministic dry run with no source fetch, raw data movement, or clinical decision; production adapters remain institution-local.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "EvidenceRefreshCampaignRequest1@1 containing previous/current typed EvidenceRecord1@1 snapshots, EvidenceSurveillanceRequest1@1, bounded budget/round/retry limits, and stop policy."}
             },
             "required": ["request"]
         }

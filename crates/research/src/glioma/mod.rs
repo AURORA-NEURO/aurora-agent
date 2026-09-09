@@ -34,7 +34,11 @@ pub use multimodal::{
     harmonize_multimodal_inputs, MultimodalObservation, MultimodalQcReport, MultimodalRequest,
 };
 pub use programs::p01_evidence_surveillance::{
+    execute_glioma_evidence_refresh_campaign, DryRunEvidenceRefreshCampaignExecutor,
     prioritize_glioma_evidence, surveil_glioma_evidence, EvidenceChange, EvidenceChangeKind,
+    EvidenceRefreshCampaign, EvidenceRefreshCampaignDisposition, EvidenceRefreshCampaignError,
+    EvidenceRefreshCampaignExecutor, EvidenceRefreshCampaignRequest, EvidenceRefreshCampaignRound,
+    EvidenceRefreshCampaignStopReason, EvidenceRefreshExecutionFailure,
     EvidencePriorityAction, EvidencePriorityActionKind, EvidencePriorityDisposition,
     EvidencePriorityError, EvidencePriorityPlan, EvidencePriorityRequest, EvidencePriorityWeights,
     EvidenceSurveillance, EvidenceSurveillanceAction, EvidenceSurveillanceActionKind,
