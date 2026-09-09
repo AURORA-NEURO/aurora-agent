@@ -9,6 +9,7 @@ pub mod mediation;
 pub mod meta_analysis;
 pub mod sensitivity;
 pub mod state_transition;
+pub mod synthesis;
 pub mod trajectory;
 pub mod transportability;
 
@@ -48,6 +49,13 @@ pub use state_transition::{
     StateTransitionContrast, StateTransitionDisposition, StateTransitionError,
     StateTransitionObservation, StateTransitionRequest, TransitionCellDisposition,
     TransitionContrastDisposition, TransitionDirection,
+};
+
+pub use synthesis::{
+    synthesize_glioma_interpretation, InterpretationEvidence, InterpretationEvidenceDirection,
+    InterpretationEvidenceFamily, InterpretationFamilySummary, InterpretationSynthesis,
+    InterpretationSynthesisDisposition, InterpretationSynthesisError,
+    InterpretationSynthesisRequest,
 };
 
 pub use trajectory::{

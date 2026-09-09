@@ -126,6 +126,7 @@ pub use glioma::{
     prioritize_glioma_evidence, prioritize_knowledge_frontier, propagate_glioma_mechanism_graph,
     protocol_request_from_experiment_design, qualify_evidence, simulate_glioma_counterfactual,
     simulate_glioma_counterfactual_ensemble, simulate_glioma_protocol, surveil_glioma_evidence,
+    synthesize_glioma_interpretation,
     validate_feature_catalog, ActionExecutionDisposition, ActionExecutionFailure,
     ActionExecutionResult, ActionPortfolioExecution, ActionPortfolioExecutionDisposition,
     ActionPortfolioExecutionError, ActionPortfolioExecutionRequest, ActionPortfolioStopReason,
@@ -323,6 +324,9 @@ pub use glioma::{
     TransitionContrastDisposition, TransitionDirection, TransportStudy, TransportStudyContribution,
     TransportabilityAnalysis, TransportabilityDisposition, TransportabilityError,
     TransportabilityRequest, TypedKnowledge, UnitContrast, UnitTrajectory,
+    InterpretationEvidence, InterpretationEvidenceDirection, InterpretationEvidenceFamily,
+    InterpretationFamilySummary, InterpretationSynthesis, InterpretationSynthesisDisposition,
+    InterpretationSynthesisError, InterpretationSynthesisRequest,
     UnitTrajectoryDisposition, WorkflowNodeDecision, EXECUTION_OUTPUT_SCHEMA,
     PROTOCOL_EXECUTION_OUTPUT_SCHEMA,
 };

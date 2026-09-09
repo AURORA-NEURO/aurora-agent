@@ -530,6 +530,7 @@ use bioprism_research::{
     GliomaComputationCampaignRequest, GliomaComputationWorkflowRequest,
     GliomaEvidenceCampaignRequest, GliomaMissionRequest, GliomaReplicationCampaignRequest,
     GliomaResearchAutopilotRequest, GliomaResearchIntent, GliomaWorkflowRequest,
+    InterpretationSynthesisRequest,
     GraphFusionRequest, GraphFusionVector, HarmonizationRequest, HarmonizationVector,
     InformationDesignRequest, InstrumentCampaignRequest, InstrumentExecutionRequest,
     InstrumentPreflightRequest, KnowledgeFrontierRequest, KnowledgeRequest,
@@ -551,7 +552,7 @@ use bioprism_research::{
     SpatialPropagationRequest, StateTransitionObservation, StateTransitionRequest,
     StaticGliomaActionPlanner, StaticGliomaComputationPlanner, StratifiedCausalRequest,
     StratifiedObservation, TrajectoryObservation, TrajectoryRequest, TransportStudy,
-    TransportabilityRequest, TypedKnowledge,
+    TransportabilityRequest, TypedKnowledge, synthesize_glioma_interpretation,
 };
 use bioprism_routing::{
     lab::{run as run_routing_lab, LabSettings, Task},
@@ -2021,6 +2022,9 @@ impl Server {
             }
             "glioma_computation_workflow_execute" => {
                 self.glioma_computation_workflow_execute(&arguments)
+            }
+            "glioma_interpretation_synthesize" => {
+                self.glioma_interpretation_synthesize(&arguments)
             }
             "glioma_robustness_suite" => self.glioma_robustness_suite(&arguments),
             "glioma_trajectory_analyze" => self.glioma_trajectory_analyze(&arguments),
@@ -3680,6 +3684,33 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma computation workflow: {error}"))
+    }
+
+    /// Synthesize independent preclinical interpretation families into a bounded research
+    /// conclusion. The gate exposes disagreement, negative evidence, missing replication, and
+    /// leave-one-family-out instability instead of silently collapsing them into confidence.
+    fn glioma_interpretation_synthesize(&self, arguments: &Value) -> Result<Value, String> {
+        let request: InterpretationSynthesisRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_interpretation_synthesize requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma interpretation synthesis request: {error}"))?;
+        let synthesis = synthesize_glioma_interpretation(&request)
+            .map_err(|error| format!("glioma interpretation synthesis refused: {error}"))?;
+        serde_json::to_value(json!({
+            "synthesis": synthesis,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "cross-family effects are aggregated only from typed local preclinical summaries",
+                "contradictory, missing, unresolved, low-quality, and negative evidence remains visible",
+                "leave-one-family-out stability and declared replication/family floors gate qualification",
+                "MCP executes no assays, moves no raw data, and makes no clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma interpretation synthesis: {error}"))
     }
 
     /// Stress-test a local two-arm glioma analysis under deterministic batch and row omissions.
@@ -45902,6 +45933,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_computation_portfolio_execute",
                 "glioma_computation_campaign_execute",
                 "glioma_computation_workflow_execute",
+                "glioma_interpretation_synthesize",
                 "glioma_robustness_suite",
                 "glioma_trajectory_analyze",
                 "glioma_state_transition_analyze",
@@ -52953,6 +52985,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "GliomaComputationWorkflowRequest1@1 with study/model identity, modalities, terminal ComputationOperation values, local artifact identifiers, resource/policy bounds, cache policy, and replay identity."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_interpretation_synthesize",
+        "description": "Synthesize independent causal, mediation, trajectory, sensitivity, meta-analysis, transportability, and replication summaries for a preclinical glioma hypothesis. The gate uses typed local artifacts, quality and evidence floors, cross-family contradiction, negative evidence, and leave-one-family-out stability; it returns qualified, partial, negative, or unresolved without executing assays, moving raw data, or making a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "InterpretationSynthesisRequest1@1 with hypothesis, model system, evidence-family records, quality/floor thresholds, replication requirement, and replay identity."}
             },
             "required": ["request"]
         }

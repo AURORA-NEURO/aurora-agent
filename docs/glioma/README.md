@@ -130,8 +130,10 @@ crates/research/src/glioma/
                                              P10 stratified overlap-adjusted effect and leave-one-stratum influence
   p10_interpretation_replication/sensitivity.rs
                                              P10 hidden-confounding sensitivity sweep and causal tipping-point bounds
-  p10_interpretation_replication/meta_analysis.rs
+    p10_interpretation_replication/meta_analysis.rs
                                              P10 inverse-uncertainty replication meta-analysis and influence bounds
+    p10_interpretation_replication/synthesis.rs
+                                             P10 cross-family interpretation gate with contradiction and leave-one-family-out stability
     p12_federated_benchmarking/consensus.rs
                                              P12 aggregate-only multi-site benchmark consensus with robust pooling and influence bounds
     p12_federated_benchmarking/campaign.rs
@@ -335,6 +337,12 @@ scores missing coverage, heterogeneity, influential studies, and transport gaps;
 typed bounded local actions; and incorporates returned study artifacts into the next analysis round.
 Simulation observations are never promoted into biological evidence, and qualification, negative,
 partial, failed, budget, transport, and no-progress stops remain explicit.
+The cross-family interpretation gate (`synthesize_glioma_interpretation`) then combines typed
+causal, trajectory, sensitivity, meta-analytic, transportability, and replication summaries. It
+weights only quality-qualified local artifacts, preserves negative and unresolved evidence, exposes
+cross-family contradiction, and requires leave-one-family-out stability plus declared replication
+floors before returning a qualified interpretation. It is an autonomous research conclusion gate,
+not a clinical decision or an assay dispatcher.
 P06 now includes combination-response analysis (`analyze_glioma_combination_synergy`) with
 vehicle/single-agent control requirements, integer Bliss expectations, residual noise, synergy,
 antagonism, and explicit unresolved cells for missing controls or replicates.

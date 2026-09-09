@@ -265,6 +265,10 @@ pub use programs::p10_interpretation_replication::{
     TransitionContrastDisposition, TransitionDirection, TransportStudy, TransportStudyContribution,
     TransportabilityAnalysis, TransportabilityDisposition, TransportabilityError,
     TransportabilityRequest, UnitContrast, UnitTrajectory, UnitTrajectoryDisposition,
+    synthesize_glioma_interpretation, InterpretationEvidence, InterpretationEvidenceDirection,
+    InterpretationEvidenceFamily, InterpretationFamilySummary, InterpretationSynthesis,
+    InterpretationSynthesisDisposition, InterpretationSynthesisError,
+    InterpretationSynthesisRequest,
 };
 pub use programs::p11_research_object_release::{
     execute_glioma_replay_campaign, DryRunReplayCampaignExecutor, ReplayCampaign,

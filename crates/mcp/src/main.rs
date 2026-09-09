@@ -109,6 +109,7 @@ fn main() {
                      glioma_computation_portfolio_execute,\n\
                      glioma_computation_campaign_execute,\n\
                      glioma_computation_workflow_execute,\n\
+                     glioma_interpretation_synthesize,\n\
                      glioma_federated_benchmark_consensus,\n\
                      glioma_federated_benchmark_campaign_execute,\n\
                      glioma_replay_campaign_execute,\n\
