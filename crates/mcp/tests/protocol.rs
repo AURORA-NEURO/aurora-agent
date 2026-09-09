@@ -314,7 +314,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 57;
-const TOOL_DEFINITION_COUNT: usize = 606;
+const TOOL_DEFINITION_COUNT: usize = 607;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -3318,6 +3318,54 @@ fn glioma_adaptive_frontier_turns_interpretation_debt_into_next_actions() {
         .unwrap()
         .iter()
         .any(|item| item.as_str().unwrap().contains("replication-family-required")));
+}
+
+#[test]
+fn glioma_temporal_multimodal_fusion_replays_longitudinal_state_transitions() {
+    let mut server = server();
+    let hash = "0".repeat(64);
+    let observation = |id: &str, timepoint: u32, modality: &str, x: i64, y: i64| {
+        json!({
+            "observation_id": id,
+            "study_id": "temporal-protocol-study",
+            "sample_id": "sample-a",
+            "timepoint": timepoint,
+            "modality": modality,
+            "model_system": "organoid",
+            "artifact": {"artifact_id": id, "content_hash": hash, "content_type": "application/json", "local_only": true, "contains_human_data": false, "contains_direct_identifiers": false},
+            "features": [
+                {"feature_id": "state_x", "value_milli": x},
+                {"feature_id": "state_y", "value_milli": y}
+            ]
+        })
+    };
+    let response = call(
+        &mut server,
+        "glioma_temporal_multimodal_fusion",
+        json!({
+            "request": {
+                "study_id": "temporal-protocol-study",
+                "model_system": "organoid",
+                "required_modalities": ["transcriptomics", "imaging"],
+                "min_timepoints_per_sample": 2,
+                "min_modalities_per_timepoint": 2,
+                "min_shared_features": 2,
+                "min_transition_support_milli": 800,
+                "max_state_change_milli": 50,
+                "require_complete_time_grid": true
+            },
+            "observations": [
+                observation("a-t0-rna", 0, "transcriptomics", 100, 100),
+                observation("a-t0-img", 0, "imaging", 110, 90),
+                observation("a-t1-rna", 1, "transcriptomics", 300, 100),
+                observation("a-t1-img", 1, "imaging", 290, 110)
+            ]
+        }),
+    );
+    assert_eq!(response["dispatch"], json!("not_started"));
+    assert_eq!(response["simulation_only"], json!(true));
+    assert_eq!(response["analysis"]["disposition"], json!("qualified"));
+    assert_eq!(response["analysis"]["emerging_transition_order"].as_array().unwrap().len(), 1);
 }
 
 #[test]

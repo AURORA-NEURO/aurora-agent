@@ -82,6 +82,9 @@ pub use programs::p03_multimodal_ingestion_qc::{
     SpatialNicheInteraction, SpatialNicheRequest, SpatialPropagationAnalysis,
     SpatialPropagationDisposition, SpatialPropagationEdge, SpatialPropagationError,
     SpatialPropagationRequest, SpatialPropagationTrajectory,
+    TemporalFusionAnalysis, TemporalFusionDisposition, TemporalFusionError, TemporalFusionRequest,
+    TemporalObservation, TemporalState, TemporalStateFeature, TemporalTransition,
+    TemporalTransitionDirection, analyze_glioma_temporal_multimodal_fusion,
 };
 pub use programs::p04_decision_context::{
     compile_decision_context, execute_glioma_decision_context_campaign, plan_decision_actions,

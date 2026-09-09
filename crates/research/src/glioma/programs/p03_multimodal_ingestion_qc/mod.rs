@@ -11,6 +11,7 @@ pub mod latent_factors;
 pub mod spatial_communication;
 pub mod spatial_niche;
 pub mod spatial_propagation;
+pub mod temporal_fusion;
 
 pub use campaign::{
     execute_glioma_multimodal_ingestion_campaign, DryRunMultimodalIngestionCampaignExecutor,
@@ -57,6 +58,11 @@ pub use spatial_propagation::{
     analyze_glioma_spatial_state_propagation, SpatialPropagationAnalysis,
     SpatialPropagationDisposition, SpatialPropagationEdge, SpatialPropagationError,
     SpatialPropagationRequest, SpatialPropagationTrajectory,
+};
+pub use temporal_fusion::{
+    analyze_glioma_temporal_multimodal_fusion, TemporalFusionAnalysis, TemporalFusionDisposition,
+    TemporalFusionError, TemporalFusionRequest, TemporalObservation, TemporalState,
+    TemporalStateFeature, TemporalTransition, TemporalTransitionDirection,
 };
 
 pub const PROGRAM_ID: GliomaProgramId = GliomaProgramId::MultimodalIngestionQc;

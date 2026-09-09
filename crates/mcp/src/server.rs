@@ -473,6 +473,7 @@ use bioprism_research::{
     analyze_glioma_multimodal_graph_fusion, analyze_glioma_pathway_activity,
     analyze_glioma_spatial_communication, analyze_glioma_spatial_niches,
     analyze_glioma_spatial_state_propagation, analyze_glioma_state_transitions,
+    analyze_glioma_temporal_multimodal_fusion,
     analyze_glioma_trajectories, analyze_glioma_transportability, analyze_instrument_calibration,
     analyze_multimodal_concordance, analyze_multimodal_consensus, analyze_preclinical_outcomes,
     analyze_replication_meta_analysis, analyze_stratified_causal_adjustment,
@@ -550,6 +551,7 @@ use bioprism_research::{
     RobustInterventionRequest, RobustnessRequest, SensitivityObservation, SensitivityRequest,
     SpatialCell, SpatialCommunicationCell, SpatialCommunicationRequest, SpatialNicheRequest,
     SpatialPropagationRequest, StateTransitionObservation, StateTransitionRequest,
+    TemporalFusionRequest, TemporalObservation,
     StaticGliomaActionPlanner, StaticGliomaComputationPlanner, StratifiedCausalRequest,
     StratifiedObservation, TrajectoryObservation, TrajectoryRequest, TransportStudy,
     TransportabilityRequest, TypedKnowledge, execute_glioma_research_director,
@@ -2030,6 +2032,9 @@ impl Server {
             }
             "glioma_interpretation_synthesize" => {
                 self.glioma_interpretation_synthesize(&arguments)
+            }
+            "glioma_temporal_multimodal_fusion" => {
+                self.glioma_temporal_multimodal_fusion(&arguments)
             }
             "glioma_adaptive_research_frontier" => {
                 self.glioma_adaptive_research_frontier(&arguments)
@@ -3719,6 +3724,42 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma interpretation synthesis: {error}"))
+    }
+
+    /// Infer longitudinal multimodal state transitions from caller-supplied local preclinical
+    /// summaries. Missing timepoints, modalities, and non-comparable features remain explicit;
+    /// this route does not fetch data, execute an assay, or make a clinical decision.
+    fn glioma_temporal_multimodal_fusion(&self, arguments: &Value) -> Result<Value, String> {
+        let request: TemporalFusionRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_temporal_multimodal_fusion requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma temporal fusion request: {error}"))?;
+        let observations: Vec<TemporalObservation> = serde_json::from_value(
+            arguments
+                .get("observations")
+                .cloned()
+                .ok_or_else(|| {
+                    "glioma_temporal_multimodal_fusion requires observations".to_string()
+                })?,
+        )
+        .map_err(|error| format!("invalid glioma temporal fusion observations: {error}"))?;
+        let analysis = analyze_glioma_temporal_multimodal_fusion(&request, &observations)
+            .map_err(|error| format!("glioma temporal fusion refused: {error}"))?;
+        serde_json::to_value(json!({
+            "analysis": analysis,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "longitudinal states are joined only by declared sample, timepoint, modality, and local artifact identity",
+                "transition priority is based on comparable-feature distance and support, not an unbounded confidence score",
+                "missing timepoints, modalities, and non-comparable transitions remain partial or unresolved",
+                "stable transitions are published as negative evidence; MCP executes no assay and makes no clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma temporal fusion: {error}"))
     }
 
     /// Direct one bounded, dependency-closed glioma research batch from a high-level intent.
@@ -46016,6 +46057,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_multimodal_harmonize",
                 "glioma_multimodal_latent_factors",
                 "glioma_multimodal_graph_fusion",
+                "glioma_temporal_multimodal_fusion",
                 "glioma_spatial_niches",
                 "glioma_spatial_communication",
                 "glioma_spatial_state_propagation",
@@ -53324,6 +53366,18 @@ pub fn tool_definitions() -> Vec<Value> {
                 "vectors": {"type": "array", "items": {"type": "object"}, "description": "Local GraphFusionVector1@1 values with de-identified sample lineages, modality-specific reliability, sorted feature values, and local artifact references."}
             },
             "required": ["request", "vectors"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_temporal_multimodal_fusion",
+        "description": "Infer longitudinal multimodal state transitions from local preclinical glioma summaries joined by sample and timepoint. The bounded algorithm aggregates modality-qualified states, computes comparable-feature distances and emerging/contracting/stable/mixed transitions, ranks follow-up priorities, and preserves missing timepoints, modality dropout, and non-comparable transitions. It never imputes observations, executes assays, moves raw data, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "TemporalFusionRequest1@1 with study/model binding, required modalities, timepoint/modality/feature floors, support and state-change thresholds, and complete-grid policy."},
+                "observations": {"type": "array", "items": {"type": "object"}, "description": "Local TemporalObservation1@1 records with sample/timepoint/modality identity, bounded FeatureValue1@1 values, and local artifact references."}
+            },
+            "required": ["request", "observations"]
         }
     }));
     definitions.push(json!({

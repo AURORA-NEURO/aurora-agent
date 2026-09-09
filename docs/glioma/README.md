@@ -172,6 +172,8 @@ crates/research/src/glioma/
                                              P03 spatial ligand-receptor communication enrichment against lineage-marginal null
   p03_multimodal_ingestion_qc/spatial_propagation.rs
                                              P03 lineage-aware integer spatial-state diffusion and hotspot prioritisation
+  p03_multimodal_ingestion_qc/temporal_fusion.rs
+                                             P03 longitudinal multimodal state-transition inference with explicit missing-timepoint and modality gates
     p05_mechanism_exploration/pathway_activity.rs
                                              P05 signed pathway activity inference with cross-modal confidence and bottleneck gates
     p05_mechanism_exploration/adaptive_policy.rs
