@@ -493,7 +493,8 @@ use bioprism_research::{
     execute_glioma_autonomous_research_mission, execute_glioma_computation,
     execute_glioma_computation_campaign, execute_glioma_computation_portfolio,
     execute_glioma_decision_context_campaign, execute_glioma_evidence_campaign,
-    execute_glioma_evidence_refresh_campaign, execute_glioma_instrument_campaign,
+    adjudicate_glioma_assay_evidence, execute_glioma_evidence_refresh_campaign,
+    execute_glioma_instrument_campaign,
     execute_glioma_instrument_plan, execute_glioma_knowledge_resolution_campaign,
     execute_glioma_mechanism_discrimination_campaign, execute_glioma_multi_fidelity_campaign,
     execute_glioma_multimodal_ingestion_campaign, execute_glioma_multimodal_mechanism_campaign,
@@ -546,7 +547,9 @@ use bioprism_research::{
     GliomaAutonomousResearchEngineRequest,
     InterpretationSynthesisRequest, GliomaResearchDirectorRequest,
     GraphFusionRequest, GraphFusionVector, HarmonizationRequest, HarmonizationVector,
-    InformationDesignRequest, InstrumentCampaignRequest, InstrumentExecutionRequest,
+    AssayEvidenceObservation, AssayEvidenceRequest, InformationDesignRequest,
+    InstrumentCampaignRequest, InstrumentExecutionRequest,
+    InstrumentExecutionRun,
     InstrumentPreflightRequest, KnowledgeFrontierRequest, KnowledgeRequest,
     KnowledgeResolutionCampaignRequest, KnowledgeCompositionRequest, KnowledgeRelation,
     LatentFactorRequest, LatentFactorVector,
@@ -2149,6 +2152,9 @@ impl Server {
             "glioma_instrument_execute" => self.glioma_instrument_execute(&arguments),
             "glioma_instrument_campaign_execute" => {
                 self.glioma_instrument_campaign_execute(&arguments)
+            }
+            "glioma_instrument_assay_adjudicate" => {
+                self.glioma_instrument_assay_adjudicate(&arguments)
             }
             "glioma_experiment_design" => self.glioma_experiment_design(&arguments),
             "glioma_contrast_panel_design" => self.glioma_contrast_panel_design(&arguments),
@@ -6042,6 +6048,53 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma instrument campaign: {error}"))
+    }
+
+    /// Adjudicate typed local assay summaries after an instrument run. Hardware completion is
+    /// intentionally insufficient: QC, uncertainty, replicate, effect, and negative-control
+    /// gates must clear before any result becomes eligible for downstream science.
+    fn glioma_instrument_assay_adjudicate(&self, arguments: &Value) -> Result<Value, String> {
+        let request: AssayEvidenceRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| {
+                    "glioma_instrument_assay_adjudicate requires request".to_string()
+                })?,
+        )
+        .map_err(|error| format!("invalid glioma assay evidence request: {error}"))?;
+        let execution: InstrumentExecutionRun = serde_json::from_value(
+            arguments
+                .get("execution")
+                .cloned()
+                .ok_or_else(|| {
+                    "glioma_instrument_assay_adjudicate requires execution".to_string()
+                })?,
+        )
+        .map_err(|error| format!("invalid glioma instrument execution: {error}"))?;
+        let observations: Vec<AssayEvidenceObservation> = serde_json::from_value(
+            arguments
+                .get("observations")
+                .cloned()
+                .ok_or_else(|| {
+                    "glioma_instrument_assay_adjudicate requires observations".to_string()
+                })?,
+        )
+        .map_err(|error| format!("invalid glioma assay observations: {error}"))?;
+        let assessment = adjudicate_glioma_assay_evidence(&request, &execution, &observations)
+            .map_err(|error| format!("glioma assay adjudication refused: {error}"))?;
+        serde_json::to_value(json!({
+            "assessment": assessment,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "hardware completion never becomes biological evidence without typed assay and QC adjudication",
+                "QC, uncertainty, replicate, effect, and negative-control gates remain explicit",
+                "missing, negative, partial, and unresolved results produce observable next actions",
+                "the route never executes hardware, moves raw data, or makes a clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma assay evidence assessment: {error}"))
     }
 
     fn glioma_experiment_design(&self, arguments: &Value) -> Result<Value, String> {
@@ -46542,6 +46595,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_instrument_preflight",
                 "glioma_instrument_execute",
                 "glioma_instrument_campaign_execute",
+                "glioma_instrument_assay_adjudicate",
                 "glioma_experiment_design",
                 "glioma_contrast_panel_design",
                 "glioma_analysis_run",
@@ -54405,6 +54459,19 @@ pub fn tool_definitions() -> Vec<Value> {
                 "request": {"type": "object", "description": "InstrumentCampaignRequest1@1 containing an objective, bounded run list of run_id plus InstrumentExecutionRequest1@1, and negative-stop policy."}
             },
             "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_instrument_assay_adjudicate",
+        "description": "Adjudicate typed, value-only local assay summaries against a guarded preclinical glioma instrument execution. Separates operation completion from biological evidence, applies explicit QC, uncertainty, replicate, effect, and negative-control gates, partitions qualified, negative, and unresolved actions, and emits next actions for missing or failed evidence. It never executes hardware, moves raw data, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "AssayEvidenceRequest1@1 with instrument/modality binding, QC/effect/uncertainty/replicate floors, and negative-control policy."},
+                "execution": {"type": "object", "description": "InstrumentExecution1@1 validated run whose hardware completion is not treated as scientific evidence by itself."},
+                "observations": {"type": "array", "items": {"type": "object"}, "description": "AssayEvidenceObservation1@1 local, de-identified, value-only assay summaries keyed by execution action_id."}
+            },
+            "required": ["request", "execution", "observations"]
         }
     }));
     definitions.push(json!({

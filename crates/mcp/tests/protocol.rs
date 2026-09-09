@@ -349,7 +349,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 57;
-const TOOL_DEFINITION_COUNT: usize = 618;
+const TOOL_DEFINITION_COUNT: usize = 619;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -1774,6 +1774,34 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
         instrument_execution["execution"]["completed_order"],
         json!(["acquire", "wash"])
     );
+
+    let instrument_assay = call(
+        &mut server,
+        "glioma_instrument_assay_adjudicate",
+        json!({
+            "request": {
+                "objective": "qualify organoid imaging assay",
+                "instrument_id": "imager-1",
+                "modality": "imaging",
+                "min_qc_milli": 900,
+                "min_effect_milli": 500,
+                "max_uncertainty_milli": 100,
+                "min_replicates": 2,
+                "require_negative_control": true,
+                "max_negative_control_milli": 100
+            },
+            "execution": instrument_execution["execution"].clone(),
+            "observations": [
+                {"action_id":"acquire","artifact":{"artifact_id":"assay-acquire","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma.assay+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"signal_milli":900,"baseline_milli":100,"uncertainty_milli":10,"qc_milli":950,"replicate_count":3,"negative_control_milli":0},
+                {"action_id":"wash","artifact":{"artifact_id":"assay-wash","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma.assay+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"signal_milli":850,"baseline_milli":100,"uncertainty_milli":10,"qc_milli":950,"replicate_count":3,"negative_control_milli":0}
+            ]
+        }),
+    );
+    assert_eq!(instrument_assay["dispatch"], json!("not_started"));
+    assert_eq!(instrument_assay["simulation_only"], json!(true));
+    assert_eq!(instrument_assay["assessment"]["disposition"], json!("qualified"));
+    assert_eq!(instrument_assay["assessment"]["evidence_eligible"], json!(true));
+    assert_eq!(instrument_assay["assessment"]["qualified_order"], json!(["acquire", "wash"]));
 
     let instrument_campaign = call(
         &mut server,

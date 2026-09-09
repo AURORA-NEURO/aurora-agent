@@ -126,6 +126,8 @@ crates/research/src/glioma/
     p08_instrument_robotics/preflight.rs   P08 typed instrument/robotics interlock planning
     p08_instrument_robotics/execution.rs   P08 guarded execution with live rechecks and emergency stop
     p08_instrument_robotics/campaign.rs   P08 ordered multi-run instrument campaign with fail-closed safety halts
+    p08_instrument_robotics/assay_adjudication.rs
+                                             P08 typed assay/QC adjudication that separates hardware completion from biological evidence
     p09_reproducible_computation/robustness.rs
                                              P09 leave-one-batch/row-out robustness battery
     p09_reproducible_computation/execution.rs
@@ -528,6 +530,13 @@ composes admitted execution requests into a durable run-level queue, preserves e
 preflight/interlock/authorization digest, and partitions completed, negative, partial, failed,
 blocked, and unresolved runs. Any unsafe or unresolved effect halts the remaining queue, while
 the MCP adapter remains a deterministic synthetic gateway.
+P08 now also exposes assay adjudication (`adjudicate_glioma_assay_evidence`), the scientific bridge
+after execution: each local, de-identified assay summary is checked against the run action,
+quality floor, uncertainty ceiling, replicate floor, effect threshold, and optional negative-control
+gate. Hardware completion never qualifies biology by itself; qualified, negative, and unresolved
+actions remain partitioned with explicit next actions for missing observations, repeat work, or
+instrument recalibration. The MCP route only consumes value summaries and never moves raw data,
+executes hardware, or makes a clinical decision.
 P09 now also includes replayable computation execution (`execute_glioma_computation`). It schedules
 typed multimodal DAGs in stable topological order, reuses only replay-keyed local cache artifacts,
 enforces cost budgets, retries transient worker failures, and preserves negative, partial, failed,

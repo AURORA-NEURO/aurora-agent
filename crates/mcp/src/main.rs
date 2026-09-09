@@ -104,6 +104,7 @@ fn main() {
                      glioma_instrument_preflight,\n\
                      glioma_instrument_execute,\n\
                      glioma_instrument_campaign_execute,\n\
+                     glioma_instrument_assay_adjudicate,\n\
                      glioma_computation_execute,\n\
                      glioma_computation_portfolio_plan,\n\
                      glioma_computation_portfolio_execute,\n\

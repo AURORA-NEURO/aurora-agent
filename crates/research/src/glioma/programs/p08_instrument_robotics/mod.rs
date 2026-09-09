@@ -2,10 +2,17 @@
 
 use crate::glioma::catalog::{glioma_program_catalog, GliomaProgramDescriptor, GliomaProgramId};
 
+pub mod assay_adjudication;
 pub mod calibration;
 pub mod campaign;
 pub mod execution;
 pub mod preflight;
+
+pub use assay_adjudication::{
+    adjudicate_glioma_assay_evidence, AssayEvidenceDisposition, AssayEvidenceError,
+    AssayEvidenceObservation, AssayEvidenceRecord, AssayEvidenceRequest,
+    InstrumentAssayEvidenceAssessment,
+};
 
 pub use calibration::{
     analyze_instrument_calibration, CalibrationDisposition, CalibrationError, CalibrationPoint,
