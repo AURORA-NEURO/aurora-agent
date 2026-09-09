@@ -52,6 +52,8 @@ crates/research/src/glioma/
                                              P05 marker-aware preclinical clonal-evolution graph inference with explicit ambiguity
   programs/p06_experiment_design/clonal_panel.rs
                                              P06 clone-aware perturbation/readout panel selection under cost and branch-coverage gates
+  programs/p06_experiment_design/contrast_design.rs
+                                             P06 balanced factorial contrast-panel compiler with interaction and budget gates
   programs/p10_interpretation_replication/clone_outcomes.rs
                                              P10 replicate-level clone-panel outcome adjudication with explicit null/contradictory evidence
   programs/p01_evidence_surveillance/surveillance.rs
@@ -493,6 +495,13 @@ observations with fixed reliability bins, Brier loss, sharpness, and a final-rou
 holdout. Underpowered mechanisms, high-uncertainty observations, discordant negative evidence, and
 calibration/Brier gate failures remain explicit; calibration never refits a model or becomes a
 causal claim, and the MCP route never executes an assay or moves raw data.
+
+P06 now also exposes a multi-factor contrast-panel compiler
+(`design_glioma_contrast_panel`). It expands declared preclinical factors into balanced factorial
+conditions, names each main-effect estimand, checks required interaction coverage, and reports
+replicate/adequacy/budget gates. Its adequacy score is deliberately a bounded design proxy rather
+than formal power; variance, batch, and site calibration remain downstream obligations. The MCP
+route only compiles the panel and never randomizes material or executes an assay.
 P12 now also exposes an autonomous federated benchmark campaign
 (`execute_federated_benchmark_campaign`). It ranks aggregate-only follow-up actions from the
 current pooled effect, heterogeneity, replicate floor, and leave-one-site-out influence, asks a

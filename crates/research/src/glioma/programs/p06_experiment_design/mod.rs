@@ -8,6 +8,7 @@ pub mod adaptive_allocation_campaign;
 pub mod adaptive_information_campaign;
 pub mod campaign;
 pub mod clonal_panel;
+pub mod contrast_design;
 pub mod dose_response;
 pub mod information_design;
 pub mod multi_fidelity;
@@ -53,6 +54,10 @@ pub use clonal_panel::{
     plan_glioma_clone_perturbation_panel, CloneBranchCoverage, ClonePerturbationCandidate,
     ClonePerturbationDecision, ClonePerturbationKind, ClonePerturbationPanel,
     ClonePerturbationPanelDisposition, ClonePerturbationPanelError, ClonePerturbationPanelRequest,
+};
+pub use contrast_design::{
+    design_glioma_contrast_panel, ContrastCondition, ContrastDesign, ContrastDesignDisposition,
+    ContrastDesignError, ContrastDesignRequest, ContrastFactor, EstimandContrast,
 };
 pub use dose_response::{
     analyze_glioma_dose_response, DoseDirection, DoseResponseAnalysis, DoseResponseDisposition,

@@ -483,7 +483,8 @@ use bioprism_research::{
     assess_glioma_robustness, assess_replication, build_research_object_manifest,
     compile_decision_action_graph, compile_decision_context,
     compile_glioma_computation_workflow, compile_mechanism_action_plan,
-    compile_typed_knowledge, compose_knowledge_graph, design_preclinical_experiment,
+    compile_typed_knowledge, compose_knowledge_graph, design_glioma_contrast_panel,
+    design_preclinical_experiment,
     discriminate_mechanisms,
     dry_run_glioma_research, execute_federated_benchmark_campaign, execute_glioma_action_portfolio,
     execute_glioma_active_learning_campaign, execute_glioma_adaptive_allocation_campaign,
@@ -521,7 +522,8 @@ use bioprism_research::{
     CombinationSynergyRequest, ComputationCandidate, ComputationExecutionRequest,
     ComputationPortfolioExecutionRequest, ComputationPortfolioRequest, ConcordanceRequest,
     ConsensusRequest, CounterfactualEnsembleRequest, CounterfactualIntervention,
-    CounterfactualModel, CounterfactualRequest, DecisionActionPlanRequest, DecisionContext,
+    ContrastDesignRequest, CounterfactualModel, CounterfactualRequest, DecisionActionPlanRequest,
+    DecisionContext,
     DecisionContextCampaignRequest, DecisionContextRequest, DecisionActionGraphRequest,
     DesignAction, DesignMechanism,
     DoseResponseObservation, DoseResponseRequest, DryRunActiveLearningCampaignExecutor,
@@ -2149,6 +2151,7 @@ impl Server {
                 self.glioma_instrument_campaign_execute(&arguments)
             }
             "glioma_experiment_design" => self.glioma_experiment_design(&arguments),
+            "glioma_contrast_panel_design" => self.glioma_contrast_panel_design(&arguments),
             "glioma_analysis_run" => self.glioma_analysis_run(&arguments),
             "glioma_replication_assess" => self.glioma_replication_assess(&arguments),
             "glioma_replication_meta_analyze" => self.glioma_replication_meta_analyze(&arguments),
@@ -6060,6 +6063,32 @@ impl Server {
             .map_err(|error| format!("glioma experiment design refused: {error}"))?;
         serde_json::to_value(output)
             .map_err(|error| format!("cannot encode glioma experiment design: {error}"))
+    }
+
+    /// Compile a balanced, multi-factor preclinical glioma contrast panel. This is a design-only
+    /// route: it never randomizes live material, executes an assay, or reports formal power.
+    fn glioma_contrast_panel_design(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ContrastDesignRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_contrast_panel_design requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma contrast design request: {error}"))?;
+        let design = design_glioma_contrast_panel(&request)
+            .map_err(|error| format!("glioma contrast panel design refused: {error}"))?;
+        serde_json::to_value(json!({
+            "design": design,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "factorial conditions and main-effect estimands are deterministic and balanced when admitted",
+                "required interaction coverage, replicate floors, budget blocks, and design limitations remain explicit",
+                "design adequacy is a bounded balance/replicate proxy and is not a formal power calculation",
+                "the route does not randomize material, execute an assay, move raw data, or make a clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma contrast panel design: {error}"))
     }
 
     fn glioma_analysis_run(&self, arguments: &Value) -> Result<Value, String> {
@@ -46514,6 +46543,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_instrument_execute",
                 "glioma_instrument_campaign_execute",
                 "glioma_experiment_design",
+                "glioma_contrast_panel_design",
                 "glioma_analysis_run",
                 "glioma_replication_assess",
                 "glioma_replication_meta_analyze",
@@ -54387,6 +54417,17 @@ pub fn tool_definitions() -> Vec<Value> {
                 "arms": {"type": "array", "items": {"type": "object"}, "description": "ExperimentArm1@1 values."}
             },
             "required": ["request", "arms"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_contrast_panel_design",
+        "description": "Compile a deterministic balanced factorial preclinical glioma contrast panel from declared perturbation factors. Emits typed conditions, main-effect estimands, interaction coverage, replicate/budget gates, and an explicit limitation that design adequacy is not formal power; it never randomizes material, executes assays, moves raw data, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ContrastDesignRequest1@1 with model system, modality, factor levels/baselines, replicate floor, budget, adequacy gate, and required interactions."}
+            },
+            "required": ["request"]
         }
     }));
     definitions.push(json!({

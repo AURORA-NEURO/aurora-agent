@@ -160,6 +160,41 @@ fn repo_root() -> PathBuf {
     [env!("CARGO_MANIFEST_DIR"), "..", ".."].iter().collect()
 }
 
+#[test]
+fn glioma_contrast_panel_design_exposes_factorial_estimands_and_gates() {
+    let mut server = server();
+    let design = call(
+        &mut server,
+        "glioma_contrast_panel_design",
+        json!({
+            "request": {
+                "objective": "design invasion perturbation contrasts",
+                "model_system": "organoid",
+                "modality": "functional_perturbation",
+                "factors": [
+                    {"factor_id":"drug","label":"drug perturbation","level_order":["control","inhibitor"],"baseline_level":"control","perturbation_kind":"small_molecule"},
+                    {"factor_id":"matrix","label":"matrix context","level_order":["control","stiff"],"baseline_level":"control","perturbation_kind":"microenvironment"}
+                ],
+                "replicates_per_condition": 3,
+                "max_conditions": 16,
+                "max_total_units": 32,
+                "min_design_adequacy_milli": 700,
+                "required_interaction_order": ["drug×matrix"]
+            }
+        }),
+    );
+    assert_eq!(design["dispatch"], json!("not_started"));
+    assert_eq!(design["simulation_only"], json!(true));
+    assert_eq!(design["design"]["disposition"], json!("qualified"));
+    assert_eq!(design["design"]["conditions"].as_array().unwrap().len(), 4);
+    assert_eq!(design["design"]["contrasts"].as_array().unwrap().len(), 2);
+    assert!(design["design"]["limitations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| item.as_str().unwrap().contains("not a formal power")));
+}
+
 fn server() -> Server {
     Server::new(repo_root())
 }
@@ -314,7 +349,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 57;
-const TOOL_DEFINITION_COUNT: usize = 617;
+const TOOL_DEFINITION_COUNT: usize = 618;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(

@@ -123,6 +123,7 @@ fn main() {
                      glioma_federated_benchmark_campaign_execute,\n\
                      glioma_replay_campaign_execute,\n\
                      glioma_research_object_release_gate,\n\
+                     glioma_contrast_panel_design,\n\
                      Resources: fiber-world, fiber-query, context-certificate schemas and the\n\
                      workspace capability catalog"
                 );
