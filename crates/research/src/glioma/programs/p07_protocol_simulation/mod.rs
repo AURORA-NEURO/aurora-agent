@@ -16,6 +16,7 @@ pub mod autonomous_engine;
 pub mod autonomous_campaign;
 pub mod clone_continuation;
 pub mod director;
+pub mod evidence_gate;
 pub mod evidence_campaign;
 pub mod execution;
 pub mod mechanism_campaign;
@@ -63,6 +64,12 @@ pub use director::{
     execute_glioma_research_director, plan_glioma_research_director, GliomaDirectorAction,
     GliomaDirectorCheckpoint, GliomaDirectorDisposition, GliomaDirectorFocus,
     GliomaResearchDirectorError, GliomaResearchDirectorRequest, GliomaResearchDirectorRun,
+};
+
+pub use evidence_gate::{
+    execute_glioma_evidence_gated_research, EvidenceGatedResearchDisposition,
+    GliomaEvidenceGatedResearchError, GliomaEvidenceGatedResearchRequest,
+    GliomaEvidenceGatedResearchRun,
 };
 
 pub use execution::{

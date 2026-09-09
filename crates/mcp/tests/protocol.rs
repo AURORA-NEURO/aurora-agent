@@ -349,7 +349,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 57;
-const TOOL_DEFINITION_COUNT: usize = 620;
+const TOOL_DEFINITION_COUNT: usize = 621;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -3518,6 +3518,77 @@ fn glioma_research_director_compiles_and_executes_a_focus_aware_batch() {
         .unwrap()
         .iter()
         .any(|item| item.as_str().unwrap().contains("synthetic-dry-run")));
+}
+
+#[test]
+fn glioma_evidence_gate_holds_uncertain_claims_and_admits_qualified_work() {
+    let mut server = server();
+    let hash = "0".repeat(64);
+    let director = json!({
+        "intent": {
+            "research_id": "gated-research",
+            "study_id": "gated-study",
+            "objective": "identify reproducible invasion mechanisms in organoids",
+            "output_uses": ["cohort_analysis"],
+            "model_systems": ["organoid"],
+            "modalities": ["transcriptomics"],
+            "input_artifacts": [{"artifact_id":"input","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}],
+            "requested_autonomy": "a1",
+            "approval_reference": null,
+            "budget_units": 80,
+            "max_retries": 1,
+            "allow_instrument_execution": false,
+            "allow_federation": false,
+            "raw_data_local": true,
+            "aggregate_only": true,
+            "replay_identity": hash,
+            "boundary": PRECLINICAL_BOUNDARY
+        },
+        "focus": "mechanism_first",
+        "completed_checkpoints": [],
+        "budget_units": 80,
+        "max_actions": 2,
+        "approval_granted": false,
+        "allow_instrument_execution": false,
+        "allow_federation": false,
+        "selection_weights": {"information_gain":25,"frontier_novelty":20,"workflow_leverage":15,"cross_stage_unlock":15,"reproducibility_safety":10,"federation_value":10,"feasibility":5},
+        "max_retries": 1,
+        "require_artifacts": true
+    });
+    let triangulated = call(
+        &mut server,
+        "glioma_evidence_triangulate",
+        json!({
+            "request": {"objective":"triangulate invasion evidence","min_source_kinds":3,"min_independent_artifacts":3,"min_support_milli":600,"max_contradiction_milli":200,"min_diversity_milli":1000,"max_leave_one_artifact_shift_milli":100,"max_claims":8},
+            "records": [
+                {"evidence_id":"gate-e1","source_artifact":{"artifact_id":"gate-a1","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"source_kind":"literature","claim":"EGFR signaling increases organoid invasion","scope":"organoid:invasion","modality":"functional_perturbation","model_system":"organoid","state":"supported","relevance_milli":900,"quality_milli":900,"reproducibility_milli":900,"release_epoch":1},
+                {"evidence_id":"gate-e2","source_artifact":{"artifact_id":"gate-a2","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"source_kind":"assay","claim":"EGFR signaling increases organoid invasion","scope":"organoid:invasion","modality":"functional_perturbation","model_system":"organoid","state":"supported","relevance_milli":900,"quality_milli":900,"reproducibility_milli":900,"release_epoch":1},
+                {"evidence_id":"gate-e3","source_artifact":{"artifact_id":"gate-a3","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"source_kind":"replication","claim":"EGFR signaling increases organoid invasion","scope":"organoid:invasion","modality":"functional_perturbation","model_system":"organoid","state":"supported","relevance_milli":900,"quality_milli":900,"reproducibility_milli":900,"release_epoch":1}
+            ]
+        }),
+    );
+    let admitted = call(
+        &mut server,
+        "glioma_evidence_gated_research_execute",
+        json!({"request":{"director":director,"triangulation":triangulated["triangulation"].clone(),"min_qualified_claims":1,"require_global_qualification":true}}),
+    );
+    assert_eq!(admitted["simulation_only"], json!(true));
+    assert!(admitted["gated_research"]["director"].is_object());
+    assert!(matches!(
+        admitted["gated_research"]["disposition"].as_str(),
+        Some("research_executed") | Some("research_planned") | Some("research_blocked")
+    ));
+
+    let mut uncertain = triangulated["triangulation"].clone();
+    uncertain["disposition"] = json!("partial");
+    // The digest is deliberately left unchanged: the gate must reject a tampered or stale
+    // triangulation rather than executing from an unverified verdict.
+    let held = call(
+        &mut server,
+        "glioma_evidence_gated_research_execute",
+        json!({"request":{"director":director,"triangulation":uncertain,"min_qualified_claims":1,"require_global_qualification":true}}),
+    );
+    assert!(held["error"].is_string());
 }
 
 #[test]

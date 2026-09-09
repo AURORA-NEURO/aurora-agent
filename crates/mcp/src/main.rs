@@ -112,6 +112,7 @@ fn main() {
                      glioma_computation_campaign_execute,\n\
                      glioma_computation_workflow_execute,\n\
                      glioma_research_director_execute,\n\
+                     glioma_evidence_gated_research_execute,\n\
                      glioma_autonomous_research_engine_execute,\n\
                      glioma_interpretation_synthesize,\n\
                      glioma_adaptive_research_frontier,\n\

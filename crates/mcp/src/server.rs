@@ -501,7 +501,8 @@ use bioprism_research::{
     execute_glioma_multimodal_mechanism_campaign_with_executor, execute_glioma_protocol,
     execute_glioma_replay_campaign, execute_glioma_replication_campaign,
     evaluate_glioma_release_gate,
-    execute_glioma_research_autopilot, execute_glioma_robust_active_learning_campaign,
+    execute_glioma_evidence_gated_research, execute_glioma_research_autopilot,
+    execute_glioma_robust_active_learning_campaign,
     explore_mechanisms, generate_feature_catalog, glioma_program_catalog,
     harmonize_glioma_multimodal_batches, harmonize_multimodal_inputs, plan_decision_actions,
     plan_glioma_active_learning, plan_glioma_adaptive_information_campaign,
@@ -543,7 +544,8 @@ use bioprism_research::{
     FederatedMechanismSite, FederatedMechanismTransportRequest,
     FidelityCandidate, FidelityObservation, GliomaActionCandidate, GliomaAutonomousCampaignRequest,
     GliomaComputationCampaignRequest, GliomaComputationWorkflowRequest,
-    GliomaEvidenceCampaignRequest, GliomaMissionRequest, GliomaReplicationCampaignRequest,
+    GliomaEvidenceCampaignRequest, GliomaEvidenceGatedResearchRequest, GliomaMissionRequest,
+    GliomaReplicationCampaignRequest,
     GliomaResearchAutopilotRequest, GliomaResearchIntent, GliomaWorkflowRequest,
     GliomaAutonomousResearchEngineRequest,
     InterpretationSynthesisRequest, GliomaResearchDirectorRequest,
@@ -2053,6 +2055,9 @@ impl Server {
             }
             "glioma_research_director_execute" => {
                 self.glioma_research_director_execute(&arguments)
+            }
+            "glioma_evidence_gated_research_execute" => {
+                self.glioma_evidence_gated_research_execute(&arguments)
             }
             "glioma_autonomous_research_engine_execute" => {
                 self.glioma_autonomous_research_engine_execute(&arguments)
@@ -3993,6 +3998,44 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma research director run: {error}"))
+    }
+
+    /// Admit the director only after local P01 evidence triangulation clears the caller's gate.
+    /// MCP uses the same deterministic dry-run action worker as the director route; no biological
+    /// effect or clinical decision is performed here.
+    fn glioma_evidence_gated_research_execute(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: GliomaEvidenceGatedResearchRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| {
+                    "glioma_evidence_gated_research_execute requires request".to_string()
+                })?,
+        )
+        .map_err(|error| format!("invalid glioma evidence-gated research request: {error}"))?;
+        let mut executor = DryRunGliomaActionExecutor;
+        let run = execute_glioma_evidence_gated_research(&request, &mut executor)
+            .map_err(|error| format!("glioma evidence-gated research refused: {error}"))?;
+        let dispatch = if run.execution_started {
+            "dry_run"
+        } else {
+            "not_started"
+        };
+        serde_json::to_value(json!({
+            "gated_research": run,
+            "dispatch": dispatch,
+            "simulation_only": true,
+            "guarantees": [
+                "partial, negative, contradictory, incomplete, and source-dominant evidence holds the workflow before director execution",
+                "only independently triangulated qualified claims can admit the bounded director",
+                "director dependency, budget, approval, locality, instrument, and federation gates remain active",
+                "the route performs no real assay, instrument effect, raw-data movement, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma evidence-gated research run: {error}"))
     }
 
     /// Run the end-to-end autonomous glioma engine. The MCP adapter uses a deterministic local
@@ -46564,6 +46607,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_computation_campaign_execute",
                 "glioma_computation_workflow_execute",
                 "glioma_research_director_execute",
+                "glioma_evidence_gated_research_execute",
                 "glioma_autonomous_research_engine_execute",
                 "glioma_interpretation_synthesize",
                 "glioma_adaptive_research_frontier",
@@ -53653,6 +53697,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "GliomaAutonomousResearchEngineRequest1@1 with high-level GliomaResearchIntent, focus, typed starting checkpoints, cycle/action/budget bounds, authority switches, selection weights, retry bound, and local-artifact policy."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_evidence_gated_research_execute",
+        "description": "Gate one bounded autonomous preclinical glioma director cycle on P01 cross-family evidence triangulation. Partial, negative, contradictory, incomplete, and source-dominant claims hold before execution with explicit next evidence actions; independently qualified claims admit the existing dependency-safe director. MCP uses a deterministic synthetic worker and never performs a real assay, moves raw data, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "GliomaEvidenceGatedResearchRequest1@1 containing a GliomaResearchDirectorRequest1@1, validated EvidenceTriangulation1@1, minimum qualified claim floor, and global qualification policy."}
             },
             "required": ["request"]
         }
