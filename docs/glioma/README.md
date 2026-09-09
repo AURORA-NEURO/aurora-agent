@@ -99,6 +99,8 @@ crates/research/src/glioma/
                                              P07 ensemble-guided autonomous rounds with lower-tail safety gates
     p07_protocol_simulation/mission.rs
                                              P07 science-aware cross-program mission control with stage/model/modality frontier adaptation
+    p07_protocol_simulation/director.rs
+                                             P07 high-level focus-aware research director compiling intent into dependency-closed executable batches
     p08_instrument_robotics/preflight.rs   P08 typed instrument/robotics interlock planning
     p08_instrument_robotics/execution.rs   P08 guarded execution with live rechecks and emergency stop
     p08_instrument_robotics/campaign.rs   P08 ordered multi-run instrument campaign with fail-closed safety halts
@@ -416,6 +418,13 @@ information-gain, model/modality, and uncertainty gates. Negative results remain
 findings, while failed or partial effects terminate the mission. This is the cross-program
 autonomous engine loop a researcher can run locally without turning a score or dry-run into a
 biological conclusion.
+The research director (`execute_glioma_research_director`) is the high-level entry point above
+that loop. It compiles a bounded `GliomaResearchIntent` into the closed fourteen-stage graph,
+binds typed local checkpoint artifacts, computes a focus-aware utility profile (evidence, mechanism,
+experiment, computation, or replication), closes dependencies to a runnable frontier, and executes
+one beam-selected batch through the existing action worker. Missing inputs, policy holds, synthetic
+dry-run outcomes, negative evidence, and the exact next checkpoint are returned for the next cycle;
+the director never skips an upstream gate or calls a clinical workflow.
 P06 also exposes the closed-loop multi-fidelity campaign
 (`execute_glioma_multi_fidelity_campaign`). It repeatedly executes the optimizer's selected
 screening, mechanistic, or validation conditions through a caller-owned local worker, recalibrates

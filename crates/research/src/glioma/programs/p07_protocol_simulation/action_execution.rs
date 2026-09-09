@@ -348,7 +348,7 @@ fn provider_result(
 }
 
 /// Execute the selected local action portfolio in dependency order.
-pub fn execute_glioma_action_portfolio<E: GliomaActionExecutor>(
+pub fn execute_glioma_action_portfolio<E: GliomaActionExecutor + ?Sized>(
     request: &ActionPortfolioExecutionRequest,
     executor: &mut E,
 ) -> Result<ActionPortfolioExecution, ActionPortfolioExecutionError> {

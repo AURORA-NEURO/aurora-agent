@@ -530,7 +530,7 @@ use bioprism_research::{
     GliomaComputationCampaignRequest, GliomaComputationWorkflowRequest,
     GliomaEvidenceCampaignRequest, GliomaMissionRequest, GliomaReplicationCampaignRequest,
     GliomaResearchAutopilotRequest, GliomaResearchIntent, GliomaWorkflowRequest,
-    InterpretationSynthesisRequest,
+    InterpretationSynthesisRequest, GliomaResearchDirectorRequest,
     GraphFusionRequest, GraphFusionVector, HarmonizationRequest, HarmonizationVector,
     InformationDesignRequest, InstrumentCampaignRequest, InstrumentExecutionRequest,
     InstrumentPreflightRequest, KnowledgeFrontierRequest, KnowledgeRequest,
@@ -552,7 +552,8 @@ use bioprism_research::{
     SpatialPropagationRequest, StateTransitionObservation, StateTransitionRequest,
     StaticGliomaActionPlanner, StaticGliomaComputationPlanner, StratifiedCausalRequest,
     StratifiedObservation, TrajectoryObservation, TrajectoryRequest, TransportStudy,
-    TransportabilityRequest, TypedKnowledge, synthesize_glioma_interpretation,
+    TransportabilityRequest, TypedKnowledge, execute_glioma_research_director,
+    synthesize_glioma_interpretation,
 };
 use bioprism_routing::{
     lab::{run as run_routing_lab, LabSettings, Task},
@@ -2022,6 +2023,9 @@ impl Server {
             }
             "glioma_computation_workflow_execute" => {
                 self.glioma_computation_workflow_execute(&arguments)
+            }
+            "glioma_research_director_execute" => {
+                self.glioma_research_director_execute(&arguments)
             }
             "glioma_interpretation_synthesize" => {
                 self.glioma_interpretation_synthesize(&arguments)
@@ -3711,6 +3715,34 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma interpretation synthesis: {error}"))
+    }
+
+    /// Direct one bounded, dependency-closed glioma research batch from a high-level intent.
+    /// MCP supplies only a deterministic synthetic action worker; institution-local callers
+    /// replace that worker with their approved analysis, simulator, or gateway adapter.
+    fn glioma_research_director_execute(&self, arguments: &Value) -> Result<Value, String> {
+        let request: GliomaResearchDirectorRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_research_director_execute requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma research director request: {error}"))?;
+        let mut executor = DryRunGliomaActionExecutor;
+        let run = execute_glioma_research_director(&request, &mut executor)
+            .map_err(|error| format!("glioma research director refused: {error}"))?;
+        serde_json::to_value(json!({
+            "director": run,
+            "dispatch": "dry_run",
+            "simulation_only": true,
+            "guarantees": [
+                "the director compiles the closed glioma stage graph before selecting any action",
+                "dependency closure, bounded beam selection, checkpoint locality, approval, instrument, and federation gates remain active",
+                "dry-run artifacts are synthetic and never count as biological evidence",
+                "production execution remains caller-owned and no clinical decision is produced"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma research director run: {error}"))
     }
 
     /// Stress-test a local two-arm glioma analysis under deterministic batch and row omissions.
@@ -45933,6 +45965,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_computation_portfolio_execute",
                 "glioma_computation_campaign_execute",
                 "glioma_computation_workflow_execute",
+                "glioma_research_director_execute",
                 "glioma_interpretation_synthesize",
                 "glioma_robustness_suite",
                 "glioma_trajectory_analyze",
@@ -52985,6 +53018,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "GliomaComputationWorkflowRequest1@1 with study/model identity, modalities, terminal ComputationOperation values, local artifact identifiers, resource/policy bounds, cache policy, and replay identity."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_research_director_execute",
+        "description": "Compile a high-level preclinical glioma intent into a dependency-closed local action portfolio and execute one bounded director batch through a deterministic synthetic worker. Focus-aware multi-objective ranking, typed checkpoint locality, missing-input, approval, instrument, federation, retry, artifact, and dependency gates remain explicit. The route never treats synthetic output as biological evidence or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "GliomaResearchDirectorRequest1@1 with GliomaResearchIntent, focus, local typed checkpoints, budget, policy switches, selection weights, retry bound, and artifact requirement."}
             },
             "required": ["request"]
         }

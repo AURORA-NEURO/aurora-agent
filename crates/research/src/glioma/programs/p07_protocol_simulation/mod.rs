@@ -13,6 +13,7 @@ pub use crate::glioma::workflow::{
 pub mod action_execution;
 pub mod active_learning_campaign;
 pub mod autonomous_campaign;
+pub mod director;
 pub mod evidence_campaign;
 pub mod execution;
 pub mod mechanism_campaign;
@@ -41,6 +42,12 @@ pub use autonomous_campaign::{
     GliomaAutonomousCampaignRequest, GliomaAutonomousCampaignRound,
     GliomaAutonomousCampaignStopReason, GliomaAutonomousPlannerContext, GliomaPlannerFailure,
     StaticGliomaActionPlanner,
+};
+
+pub use director::{
+    execute_glioma_research_director, plan_glioma_research_director, GliomaDirectorAction,
+    GliomaDirectorCheckpoint, GliomaDirectorDisposition, GliomaDirectorFocus,
+    GliomaResearchDirectorError, GliomaResearchDirectorRequest, GliomaResearchDirectorRun,
 };
 
 pub use execution::{

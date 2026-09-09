@@ -314,7 +314,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 57;
-const TOOL_DEFINITION_COUNT: usize = 604;
+const TOOL_DEFINITION_COUNT: usize = 605;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -3205,6 +3205,61 @@ fn glioma_interpretation_synthesis_exposes_cross_family_stability() {
     assert_eq!(response["synthesis"]["disposition"], json!("qualified"));
     assert!(response["synthesis"]["stability_milli"].as_u64().unwrap() > 0);
     assert_eq!(response["synthesis"]["family_order"].as_array().unwrap().len(), 3);
+}
+
+#[test]
+fn glioma_research_director_compiles_and_executes_a_focus_aware_batch() {
+    let mut server = server();
+    let hash = "0".repeat(64);
+    let response = call(
+        &mut server,
+        "glioma_research_director_execute",
+        json!({
+            "request": {
+                "intent": {
+                    "research_id": "director-research",
+                    "study_id": "director-study",
+                    "objective": "identify reproducible invasion mechanisms in organoids",
+                    "output_uses": ["cohort_analysis"],
+                    "model_systems": ["organoid"],
+                    "modalities": ["transcriptomics", "imaging", "spatial"],
+                    "input_artifacts": [{"artifact_id":"input","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}],
+                    "requested_autonomy": "a1",
+                    "approval_reference": null,
+                    "budget_units": 160,
+                    "max_retries": 1,
+                    "allow_instrument_execution": false,
+                    "allow_federation": false,
+                    "raw_data_local": true,
+                    "aggregate_only": true,
+                    "replay_identity": hash,
+                    "boundary": PRECLINICAL_BOUNDARY
+                },
+                "focus": "mechanism_first",
+                "completed_checkpoints": [],
+                "budget_units": 80,
+                "max_actions": 5,
+                "approval_granted": false,
+                "allow_instrument_execution": false,
+                "allow_federation": false,
+                "selection_weights": {"information_gain":25,"frontier_novelty":20,"workflow_leverage":15,"cross_stage_unlock":15,"reproducibility_safety":10,"federation_value":10,"feasibility":5},
+                "max_retries": 1,
+                "require_artifacts": true
+            }
+        }),
+    );
+    assert_eq!(response["dispatch"], json!("dry_run"));
+    assert_eq!(response["simulation_only"], json!(true));
+    assert_eq!(response["director"]["disposition"], json!("partial"));
+    assert!(!response["director"]["next_stage_order"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+    assert!(response["director"]["negative_evidence"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| item.as_str().unwrap().contains("synthetic-dry-run")));
 }
 
 #[test]
