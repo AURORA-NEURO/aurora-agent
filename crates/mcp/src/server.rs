@@ -499,6 +499,7 @@ use bioprism_research::{
     plan_glioma_active_learning, plan_glioma_adaptive_information_campaign,
     plan_glioma_adaptive_mechanism_policy, plan_glioma_closed_loop_campaign,
     plan_glioma_computation_portfolio, plan_glioma_information_design,
+    plan_glioma_clone_perturbation_panel,
     plan_glioma_multi_fidelity_optimization, plan_glioma_robust_active_learning,
     plan_glioma_robust_intervention_portfolio, plan_glioma_workflow, preflight_glioma_instrument,
     prioritize_glioma_evidence, prioritize_knowledge_frontier, propagate_glioma_mechanism_graph,
@@ -553,6 +554,7 @@ use bioprism_research::{
     SpatialCell, SpatialCommunicationCell, SpatialCommunicationRequest, SpatialNicheRequest,
     SpatialPropagationRequest, StateTransitionObservation, StateTransitionRequest,
     TemporalFusionRequest, TemporalObservation, ClonalEvolutionRequest, CloneProfile,
+    ClonePerturbationPanelRequest, ClonePerturbationCandidate, ClonalEvolutionGraph,
     StaticGliomaActionPlanner, StaticGliomaComputationPlanner, StratifiedCausalRequest,
     StratifiedObservation, TrajectoryObservation, TrajectoryRequest, TransportStudy,
     TransportabilityRequest, TypedKnowledge, execute_glioma_research_director,
@@ -2038,6 +2040,9 @@ impl Server {
                 self.glioma_temporal_multimodal_fusion(&arguments)
             }
             "glioma_clonal_evolution" => self.glioma_clonal_evolution(&arguments),
+            "glioma_clone_perturbation_panel" => {
+                self.glioma_clone_perturbation_panel(&arguments)
+            }
             "glioma_adaptive_research_frontier" => {
                 self.glioma_adaptive_research_frontier(&arguments)
             }
@@ -3796,6 +3801,47 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma clonal evolution: {error}"))
+    }
+
+    /// Compile a bounded, clone-aware preclinical perturbation/readout panel from a local
+    /// clonal-evolution graph. Selection is deterministic set cover per declared cost; no live
+    /// perturbation, specimen edit, raw-data movement, or clinical decision occurs here.
+    fn glioma_clone_perturbation_panel(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ClonePerturbationPanelRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_clone_perturbation_panel requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma clone panel request: {error}"))?;
+        let graph: ClonalEvolutionGraph = serde_json::from_value(
+            arguments
+                .get("graph")
+                .cloned()
+                .ok_or_else(|| "glioma_clone_perturbation_panel requires graph".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma clone panel graph: {error}"))?;
+        let candidates: Vec<ClonePerturbationCandidate> = serde_json::from_value(
+            arguments
+                .get("candidates")
+                .cloned()
+                .ok_or_else(|| "glioma_clone_perturbation_panel requires candidates".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma clone panel candidates: {error}"))?;
+        let panel = plan_glioma_clone_perturbation_panel(&request, &graph, &candidates)
+            .map_err(|error| format!("glioma clone perturbation panel refused: {error}"))?;
+        serde_json::to_value(json!({
+            "panel": panel,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "selection is bounded by declared budget, candidate count, and branch-coverage policy",
+                "unmeasured targets, uncovered branches, budget shortfalls, and negative evidence remain explicit",
+                "the output is a preclinical design artifact and not treatment, resistance, diagnosis, or clinical advice",
+                "MCP executes no perturbation, moves no raw data, and makes no clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma clone perturbation panel: {error}"))
     }
 
     /// Direct one bounded, dependency-closed glioma research batch from a high-level intent.
@@ -46095,6 +46141,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_multimodal_graph_fusion",
                 "glioma_temporal_multimodal_fusion",
                 "glioma_clonal_evolution",
+                "glioma_clone_perturbation_panel",
                 "glioma_spatial_niches",
                 "glioma_spatial_communication",
                 "glioma_spatial_state_propagation",
@@ -53427,6 +53474,19 @@ pub fn tool_definitions() -> Vec<Value> {
                 "profiles": {"type": "array", "items": {"type": "object"}, "description": "Local CloneProfile1@1 records with sample-lineage/timepoint identity, marker states, abundance, and local artifact references."}
             },
             "required": ["request", "profiles"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_clone_perturbation_panel",
+        "description": "Compile a deterministic, clone-aware preclinical perturbation/readout panel from a local GliomaClonalEvolutionGraph1@1. The bounded set-cover planner ranks typed candidate perturbations by marginal evolutionary-branch coverage per declared cost, retains unmeasured targets, uncovered branches, budget shortfalls, and negative evidence, and never executes a perturbation, moves raw data, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ClonePerturbationPanelRequest1@1 with preclinical model binding, budget, coverage floor, selection bound, and uncertainty policy."},
+                "graph": {"type": "object", "description": "Validated GliomaClonalEvolutionGraph1@1 produced by glioma_clonal_evolution."},
+                "candidates": {"type": "array", "items": {"type": "object"}, "description": "Local ClonePerturbationCandidate1@1 records with perturbation kind, sorted target markers, cost, expected effect, purpose, and local artifact reference."}
+            },
+            "required": ["request", "graph", "candidates"]
         }
     }));
     definitions.push(json!({

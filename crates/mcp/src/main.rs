@@ -114,6 +114,7 @@ fn main() {
                      glioma_adaptive_research_frontier,\n\
                      glioma_temporal_multimodal_fusion,\n\
                      glioma_clonal_evolution,\n\
+                     glioma_clone_perturbation_panel,\n\
                      glioma_federated_benchmark_consensus,\n\
                      glioma_federated_benchmark_campaign_execute,\n\
                      glioma_replay_campaign_execute,\n\

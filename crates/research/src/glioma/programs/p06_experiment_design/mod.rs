@@ -7,6 +7,7 @@ pub mod adaptive_allocation;
 pub mod adaptive_allocation_campaign;
 pub mod adaptive_information_campaign;
 pub mod campaign;
+pub mod clonal_panel;
 pub mod dose_response;
 pub mod information_design;
 pub mod multi_fidelity;
@@ -47,6 +48,11 @@ pub use campaign::{
     ClosedLoopCampaign, ClosedLoopCampaignDisposition, ClosedLoopCampaignError,
     ClosedLoopCampaignExecution, ClosedLoopCampaignRequest, GliomaCampaignExecutor,
     EXECUTION_OUTPUT_SCHEMA,
+};
+pub use clonal_panel::{
+    plan_glioma_clone_perturbation_panel, CloneBranchCoverage, ClonePerturbationCandidate,
+    ClonePerturbationDecision, ClonePerturbationKind, ClonePerturbationPanel,
+    ClonePerturbationPanelDisposition, ClonePerturbationPanelError, ClonePerturbationPanelRequest,
 };
 pub use dose_response::{
     analyze_glioma_dose_response, DoseDirection, DoseResponseAnalysis, DoseResponseDisposition,

@@ -44,6 +44,8 @@ crates/research/src/glioma/
                                              P05 bounded mechanism-discrimination campaign with measurement-driven replanning
   programs/p05_mechanism_exploration/clonal_evolution.rs
                                              P05 marker-aware preclinical clonal-evolution graph inference with explicit ambiguity
+  programs/p06_experiment_design/clonal_panel.rs
+                                             P06 clone-aware perturbation/readout panel selection under cost and branch-coverage gates
   programs/p01_evidence_surveillance/surveillance.rs
                                              P01 snapshot delta surveillance and prioritized evidence review actions
   programs/p01_evidence_surveillance/priority.rs
