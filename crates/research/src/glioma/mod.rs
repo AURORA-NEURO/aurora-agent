@@ -94,6 +94,7 @@ pub use programs::p04_decision_context::{
     DecisionContextCampaignStopReason, DryRunDecisionContextCampaignExecutor,
 };
 pub use programs::p05_mechanism_exploration::{
+    execute_glioma_mechanism_discrimination_campaign,
     execute_glioma_adaptive_mechanism_campaign,
     analyze_glioma_pathway_activity,
     compile_mechanism_action_plan, discriminate_mechanisms,
@@ -115,6 +116,11 @@ pub use programs::p05_mechanism_exploration::{
     MechanismCounterfactual, MechanismCounterfactualEnsemble, MechanismDiscrimination,
     MechanismDiscriminationDisposition, MechanismDiscriminationError,
     MechanismDiscriminationRanking, MechanismDiscriminationRequest, MechanismDiscriminatorAction,
+    DryRunMechanismDiscriminationCampaignExecutor, MechanismDiscriminationCampaign,
+    MechanismDiscriminationCampaignDisposition, MechanismDiscriminationCampaignError,
+    MechanismDiscriminationCampaignExecutionFailure, MechanismDiscriminationCampaignExecutor,
+    MechanismDiscriminationCampaignRequest, MechanismDiscriminationCampaignRound,
+    MechanismDiscriminationCampaignStopReason,
     MechanismFeatureObservation, MechanismGraphDisposition, MechanismGraphEdge,
     MechanismGraphError, MechanismGraphNode, MechanismGraphPropagation, MechanismGraphRelation,
     MechanismGraphRequest, MechanismHypothesis, MechanismInformationGain, MechanismNodeScore,

@@ -494,7 +494,8 @@ use bioprism_research::{
     execute_glioma_replication_campaign,
     execute_glioma_autonomous_research_mission,
     execute_glioma_multi_fidelity_campaign,
-    execute_glioma_adaptive_mechanism_campaign, plan_glioma_adaptive_mechanism_policy,
+    execute_glioma_adaptive_mechanism_campaign,
+    execute_glioma_mechanism_discrimination_campaign, plan_glioma_adaptive_mechanism_policy,
     execute_glioma_research_autopilot, execute_glioma_robust_active_learning_campaign,
     explore_mechanisms, generate_feature_catalog, glioma_program_catalog,
     harmonize_glioma_multimodal_batches, harmonize_multimodal_inputs, plan_decision_actions,
@@ -543,6 +544,7 @@ use bioprism_research::{
     KnowledgeFrontierRequest, KnowledgeRequest, LatentFactorRequest, LatentFactorVector,
     LigandReceptorPair, MechanismActionPlannerConfig, MechanismCandidate, MechanismDiscrimination,
     MechanismDiscriminationRequest, MechanismDiscriminatorAction, MechanismFeatureObservation,
+    MechanismDiscriminationCampaignRequest, DryRunMechanismDiscriminationCampaignExecutor,
     MechanismGraphEdge, MechanismGraphNode, MechanismGraphRequest, MechanismHypothesis,
     MechanismRequest, MediationObservation, MediationRequest, MetaAnalysisRequest, ModalityVector,
     MultiFidelityOptimizationRequest, MultimodalObservation, MultimodalRequest,
@@ -2067,6 +2069,9 @@ impl Server {
             "glioma_adaptive_mechanism_policy" => self.glioma_adaptive_mechanism_policy(&arguments),
             "glioma_adaptive_mechanism_campaign_execute" => {
                 self.glioma_adaptive_mechanism_campaign_execute(&arguments)
+            }
+            "glioma_mechanism_discrimination_campaign_execute" => {
+                self.glioma_mechanism_discrimination_campaign_execute(&arguments)
             }
             "glioma_mechanism_graph_propagate" => self.glioma_mechanism_graph_propagate(&arguments),
             "glioma_mechanism_counterfactual" => self.glioma_mechanism_counterfactual(&arguments),
@@ -4932,6 +4937,39 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma adaptive mechanism campaign: {error}"))
+    }
+
+    /// Execute a bounded mechanism-discrimination loop through a local feature-measurement adapter.
+    fn glioma_mechanism_discrimination_campaign_execute(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: MechanismDiscriminationCampaignRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| {
+                    "glioma_mechanism_discrimination_campaign_execute requires request".to_string()
+                })?,
+        )
+        .map_err(|error| {
+            format!("invalid glioma mechanism discrimination campaign request: {error}")
+        })?;
+        let mut executor = DryRunMechanismDiscriminationCampaignExecutor;
+        let campaign = execute_glioma_mechanism_discrimination_campaign(&request, &mut executor)
+            .map_err(|error| format!("glioma mechanism discrimination campaign refused: {error}"))?;
+        serde_json::to_value(json!({
+            "campaign": campaign,
+            "dispatch": "dry_run",
+            "simulation_only": true,
+            "guarantees": [
+                "the next feature is selected from posterior-weighted information gain and recomputed after every returned observation",
+                "feature observations are claim-scoped, local-only, artifact-validated, and never synthesized into clinical or causal conclusions",
+                "diffuse mechanisms, missing features, negative evidence, retries, budget, no-progress, and executor failure remain explicit",
+                "the route performs no instrument effect or raw-data movement; production adapters remain institution-local"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma mechanism discrimination campaign: {error}"))
     }
 
     /// Propagate signed mechanistic support over a local preclinical glioma evidence graph. This
@@ -45821,6 +45859,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_mechanism_action_plan",
                 "glioma_adaptive_mechanism_policy",
                 "glioma_adaptive_mechanism_campaign_execute",
+                "glioma_mechanism_discrimination_campaign_execute",
                 "glioma_mechanism_graph_propagate",
                 "glioma_pathway_activity",
                 "glioma_multimodal_mechanism_campaign",
@@ -53287,6 +53326,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "AdaptiveMechanismCampaignRequest1@1 with policy registry, prior observations, round/retry bounds, artifact requirement, and convergence stop policy."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_mechanism_discrimination_campaign_execute",
+        "description": "Run a bounded autonomous P05 mechanism-discrimination campaign for preclinical glioma research. It ranks competing mechanism fits, selects the highest-information discriminator, dispatches one typed local feature measurement, replaces/appends the observation, and recomputes the ranking after every round while preserving diffuse, missing, negative, retry, budget, and no-progress states. MCP is a deterministic dry run with no raw-data movement, instrument effect, or clinical decision; production adapters remain institution-local.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "MechanismDiscriminationCampaignRequest1@1 containing MechanismDiscriminationRequest1@1, hypotheses, discriminator actions, typed local observations, and bounded budget/round/retry limits."}
             },
             "required": ["request"]
         }

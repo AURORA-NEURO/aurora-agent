@@ -330,6 +330,7 @@ pub fn implemented_feature_ids() -> Vec<&'static str> {
         crate::glioma::programs::p04_decision_context::action_bridge::FEATURE_ID,
         crate::glioma::programs::p04_decision_context::campaign::FEATURE_ID,
         crate::glioma::programs::p05_mechanism_exploration::discrimination::FEATURE_ID,
+        crate::glioma::programs::p05_mechanism_exploration::discrimination_campaign::FEATURE_ID,
         crate::glioma::programs::p05_mechanism_exploration::graph_propagation::FEATURE_ID,
         crate::glioma::programs::p05_mechanism_exploration::counterfactual::FEATURE_ID,
         crate::glioma::programs::p05_mechanism_exploration::ensemble_counterfactual::FEATURE_ID,

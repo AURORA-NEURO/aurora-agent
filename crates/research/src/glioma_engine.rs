@@ -1681,6 +1681,7 @@ pub fn glioma_research_engine_manifest() -> CapabilityManifest {
             "glioma action portfolio executor".into(),
             "glioma autonomous campaign controller".into(),
             "mechanism action planner".into(),
+            "mechanism discrimination campaign controller".into(),
             "adaptive mechanism policy scientist".into(),
             "causal mediation scientist".into(),
             "multi-fidelity experiment scheduler".into(),
@@ -1740,6 +1741,11 @@ pub fn glioma_research_engine_manifest() -> CapabilityManifest {
             TypedPort {
                 name: "glioma_mechanism_action_plan".into(),
                 schema: "GliomaMechanismActionPlan1@1".into(),
+                required: false,
+            },
+            TypedPort {
+                name: "glioma_mechanism_discrimination_campaign".into(),
+                schema: "GliomaMechanismDiscriminationCampaign1@1".into(),
                 required: false,
             },
             TypedPort {

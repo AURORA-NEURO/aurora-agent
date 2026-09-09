@@ -40,6 +40,8 @@ crates/research/src/glioma/
                                              P05 lower-tail robust intervention portfolio optimizer across model ensembles
   programs/p05_mechanism_exploration/action_planner.rs
                                              P05 compiler from discriminator information gain to executable assay actions
+  programs/p05_mechanism_exploration/discrimination_campaign.rs
+                                             P05 bounded mechanism-discrimination campaign with measurement-driven replanning
   programs/p01_evidence_surveillance/surveillance.rs
                                              P01 snapshot delta surveillance and prioritized evidence review actions
   programs/p01_evidence_surveillance/priority.rs
@@ -409,6 +411,13 @@ information gain plus lower-tail effect robustness, and beam-selects a finite-ho
 sequence under feasibility, risk, redundancy, and budget gates. Each campaign round replans from
 the typed observation that actually returned; posterior concentration is never treated as causal
 identification, and the MCP worker is synthetic-only.
+P05 also exposes a direct mechanism-discrimination campaign
+(`execute_glioma_mechanism_discrimination_campaign`). It ranks competing hypotheses against local
+feature observations, dispatches the highest-information discriminator through a caller-owned
+adapter, replaces or appends the returned feature, and recomputes residual fit and posterior
+separation after every round. Missing features, diffuse mechanisms, negative evidence, retries,
+budget exhaustion, and no-progress are explicit; the dry-run route never represents a biological
+measurement.
 P12 now also exposes an autonomous federated benchmark campaign
 (`execute_federated_benchmark_campaign`). It ranks aggregate-only follow-up actions from the
 current pooled effect, heterogeneity, replicate floor, and leave-one-site-out influence, asks a

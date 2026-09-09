@@ -6,6 +6,7 @@ pub mod action_planner;
 pub mod adaptive_policy;
 pub mod counterfactual;
 pub mod discrimination;
+pub mod discrimination_campaign;
 pub mod ensemble_counterfactual;
 pub mod graph_propagation;
 pub mod pathway_activity;
@@ -35,6 +36,13 @@ pub use discrimination::{
     MechanismDiscriminationError, MechanismDiscriminationRanking, MechanismDiscriminationRequest,
     MechanismDiscriminatorAction, MechanismFeatureObservation, MechanismHypothesis,
     MechanismInformationGain, MechanismPrediction,
+};
+pub use discrimination_campaign::{
+    execute_glioma_mechanism_discrimination_campaign, DryRunMechanismDiscriminationCampaignExecutor,
+    MechanismDiscriminationCampaign, MechanismDiscriminationCampaignDisposition,
+    MechanismDiscriminationCampaignError, MechanismDiscriminationCampaignExecutionFailure,
+    MechanismDiscriminationCampaignExecutor, MechanismDiscriminationCampaignRequest,
+    MechanismDiscriminationCampaignRound, MechanismDiscriminationCampaignStopReason,
 };
 pub use ensemble_counterfactual::{
     simulate_glioma_counterfactual_ensemble, CounterfactualEnsembleRequest, CounterfactualModel,
