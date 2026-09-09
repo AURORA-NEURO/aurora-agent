@@ -252,6 +252,12 @@ pub use programs::p12_federated_benchmarking::{
     FederatedBenchmarkExecutionFailure,
 };
 pub use release::{build_research_object_manifest, ResearchObjectManifest, ResearchObjectRequest};
+pub use programs::p11_research_object_release::{
+    execute_glioma_replay_campaign, DryRunReplayCampaignExecutor, ReplayCampaign,
+    ReplayCampaignDisposition, ReplayCampaignError, ReplayCampaignExecutor,
+    ReplayCampaignRequest, ReplayCampaignRound, ReplayCampaignStopReason,
+    ReplayExecutionFailure, ReplayObservation, ReplayObservationStatus, ReplayTask,
+};
 pub use replication::{
     assess_replication, ReplicationAssessment, ReplicationRequest, ReplicationStudy,
 };

@@ -121,6 +121,8 @@ crates/research/src/glioma/
                                              P12 aggregate-only multi-site benchmark consensus with robust pooling and influence bounds
     p12_federated_benchmarking/campaign.rs
                                              P12 autonomous aggregate-only benchmark follow-up campaign with deterministic replanning
+    p11_research_object_release/replay.rs
+                                             P11 dependency-aware reproducibility replay campaign and release-readiness gate
     p06_experiment_design/dose_response.rs   P06 monotone dose-response curve analysis
     p06_experiment_design/synergy.rs         P06 Bliss combination-response analysis
     p06_experiment_design/campaign.rs       P06 mechanism-aware closed-loop assay campaign controller and executor seam
@@ -402,6 +404,11 @@ current pooled effect, heterogeneity, replicate floor, and leave-one-site-out in
 local executor for new site aggregates, and recomputes consensus after each bounded round. Site
 raw traces stay local; duplicate identities, unbound results, budget exhaustion, negative evidence,
 and unresolved heterogeneity remain explicit campaign outcomes.
+P11 now adds a dependency-aware reproducibility replay campaign
+(`execute_glioma_replay_campaign`). It schedules declared program replays, compares exact artifact
+hashes, blocks downstream tasks after mismatch or unavailable outputs, and only emits a
+reproducible release-readiness state when the manifest, required coverage, and replay gates all
+clear. Non-deterministic tasks remain unavailable rather than being fabricated as successful.
 P08 now also includes deterministic instrument preflight (`preflight_glioma_instrument`). It combines
 qualified calibration, live interlock telemetry, typed operation parameters, operator authorization,
 serialized scheduling, and risk/duration budgets into a dispatch-permitted or fail-closed plan. The

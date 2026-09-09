@@ -468,7 +468,7 @@ use bioprism_repair::{
 };
 use bioprism_research::{
     allocate_glioma_assays, analyze_causal_sensitivity, analyze_federated_benchmark,
-    execute_federated_benchmark_campaign,
+    execute_federated_benchmark_campaign, execute_glioma_replay_campaign,
     analyze_glioma_causal_contrast, analyze_glioma_combination_synergy,
     analyze_glioma_dose_response, analyze_glioma_latent_factors, analyze_glioma_mediation,
     analyze_glioma_multimodal_graph_fusion, analyze_glioma_pathway_activity,
@@ -520,6 +520,7 @@ use bioprism_research::{
     EvidenceRequest, EvidenceSurveillanceRequest, ExperimentArm, ExperimentRequest,
     FederatedBenchmarkRequest, FederatedBenchmarkSite, FederatedBenchmarkCampaignRequest,
     DryRunFederatedBenchmarkCampaignExecutor, FidelityCandidate, FidelityObservation,
+    DryRunReplayCampaignExecutor, ReplayCampaignRequest,
     GliomaActionCandidate, GliomaAutonomousCampaignRequest, GliomaEvidenceCampaignRequest,
     GliomaResearchAutopilotRequest, GliomaResearchIntent, GliomaWorkflowRequest,
     GliomaMissionRequest,
@@ -2090,6 +2091,7 @@ impl Server {
             "glioma_federated_benchmark_campaign_execute" => {
                 self.glioma_federated_benchmark_campaign_execute(&arguments)
             }
+            "glioma_replay_campaign_execute" => self.glioma_replay_campaign_execute(&arguments),
             "glioma_research_object_prepare" => self.glioma_research_object_prepare(&arguments),
             "domain_evidence_harmonization_coverage" => {
                 self.domain_evidence_harmonization_coverage(&arguments)
@@ -5544,6 +5546,34 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma federated benchmark campaign: {error}"))
+    }
+
+    /// Execute a local reproducibility replay campaign for a preclinical glioma release
+    /// candidate. The MCP worker is synthetic; production hosts provide the replay executor.
+    fn glioma_replay_campaign_execute(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ReplayCampaignRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_replay_campaign_execute requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma replay campaign request: {error}"))?;
+        let mut executor = DryRunReplayCampaignExecutor;
+        let campaign = execute_glioma_replay_campaign(&request, &mut executor)
+            .map_err(|error| format!("glioma replay campaign refused: {error}"))?;
+        serde_json::to_value(json!({
+            "campaign": campaign,
+            "dispatch": "dry_run",
+            "simulation_only": true,
+            "guarantees": [
+                "replay tasks execute only after declared dependencies match",
+                "content-hash mismatches, unavailable tasks, budget stops, and blocked dependants remain explicit",
+                "non-deterministic tasks are never fabricated as reproducible by the synthetic worker",
+                "raw experimental data and production compute credentials remain institution-local",
+                "the output is release-readiness evidence, not an unsigned publication or clinical conclusion"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma replay campaign: {error}"))
     }
 
     fn glioma_research_object_prepare(&self, arguments: &Value) -> Result<Value, String> {
@@ -45669,6 +45699,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_multi_fidelity_campaign_execute",
                 "glioma_federated_benchmark_consensus",
                 "glioma_federated_benchmark_campaign_execute",
+                "glioma_replay_campaign_execute",
                 "glioma_research_object_prepare"
             ],
             "cli_entrypoints": [],
@@ -53388,6 +53419,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "FederatedBenchmarkCampaignRequest1@1 with benchmark binding, initial aggregate sites, typed follow-up actions, budget, round/retry bounds, and stop policy."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_replay_campaign_execute",
+        "description": "Run a bounded dependency-aware reproducibility replay campaign for a preclinical glioma research object. Replays declared program tasks through a local executor seam, compares exact content hashes, blocks dependants after mismatches or unavailable outputs, and preserves reproducible, partial, non-reproducible, blocked, and unresolved release-readiness states. MCP uses a synthetic worker; no raw data or clinical decision is produced.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ReplayCampaignRequest1@1 with ResearchObjectRequest1@1, acyclic replay tasks, exact expected artifact hashes, dependency/cost declarations, coverage gate, budget, and retry bounds."}
             },
             "required": ["request"]
         }

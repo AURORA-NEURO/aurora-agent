@@ -103,6 +103,7 @@ fn main() {
                      glioma_computation_campaign_execute,\n\
                      glioma_federated_benchmark_consensus,\n\
                      glioma_federated_benchmark_campaign_execute,\n\
+                     glioma_replay_campaign_execute,\n\
                      Resources: fiber-world, fiber-query, context-certificate schemas and the\n\
                      workspace capability catalog"
                 );

@@ -314,7 +314,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 57;
-const TOOL_DEFINITION_COUNT: usize = 594;
+const TOOL_DEFINITION_COUNT: usize = 595;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -2566,6 +2566,53 @@ fn glioma_federated_benchmark_campaign_replans_aggregate_sites_in_sandbox() {
     assert_eq!(campaign["simulation_only"], json!(true));
     assert_eq!(campaign["campaign"]["rounds"].as_array().unwrap().len(), 1);
     assert_eq!(campaign["campaign"]["sites"].as_array().unwrap().len(), 2);
+}
+
+#[test]
+fn glioma_replay_campaign_executes_dependency_aware_release_check_in_sandbox() {
+    let mut server = server();
+    let hash = "0000000000000000000000000000000000000000000000000000000000000000";
+    let campaign = call(
+        &mut server,
+        "glioma_replay_campaign_execute",
+        json!({
+            "request": {
+                "release": {
+                    "research_id": "mcp-replay",
+                    "study_id": "mcp-study",
+                    "objective": "replay a glioma mechanism result",
+                    "plan_digest": hash,
+                    "execution_digest": hash,
+                    "replay_identity": hash,
+                    "program_order": ["p05-mechanism"],
+                    "artifacts": [{"artifact_id": "artifact-main", "content_hash": hash, "content_type": "application/json", "local_only": true, "contains_human_data": false, "contains_direct_identifiers": false}],
+                    "negative_evidence": ["null-result-preserved"],
+                    "limitations": ["single-model-system"],
+                    "raw_data_local": true,
+                    "aggregate_only": true
+                },
+                "tasks": [{
+                    "task_id": "mechanism-replay",
+                    "program_id": "p05-mechanism",
+                    "artifact_id": "artifact-main",
+                    "expected_content_hash": hash,
+                    "cost_units": 1,
+                    "required": true,
+                    "deterministic": true,
+                    "depends_on": []
+                }],
+                "budget_units": 1,
+                "max_rounds": 2,
+                "max_retries": 1,
+                "min_coverage_milli": 1000,
+                "require_exact_hash": true
+            }
+        }),
+    );
+    assert_eq!(campaign["dispatch"], json!("dry_run"));
+    assert_eq!(campaign["simulation_only"], json!(true));
+    assert_eq!(campaign["campaign"]["disposition"], json!("reproducible"));
+    assert_eq!(campaign["campaign"]["exact_match"], json!(true));
 }
 
 #[test]
