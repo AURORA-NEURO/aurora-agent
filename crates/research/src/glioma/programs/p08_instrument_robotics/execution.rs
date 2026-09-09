@@ -97,6 +97,10 @@ pub trait InstrumentExecutor {
     ) -> Result<InstrumentExecutionResult, InstrumentExecutionFailure>;
 
     fn emergency_stop(&mut self) -> Result<(), InstrumentExecutionFailure>;
+
+    fn simulation_only(&self) -> bool {
+        false
+    }
 }
 
 /// A deterministic executor for sandbox and protocol tests. It emits local synthetic artifacts
@@ -166,6 +170,10 @@ impl InstrumentExecutor for DryRunInstrumentExecutor {
     fn emergency_stop(&mut self) -> Result<(), InstrumentExecutionFailure> {
         self.emergency_stop_called = true;
         Ok(())
+    }
+
+    fn simulation_only(&self) -> bool {
+        true
     }
 }
 

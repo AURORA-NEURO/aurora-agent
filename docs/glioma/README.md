@@ -101,6 +101,7 @@ crates/research/src/glioma/
                                              P07 science-aware cross-program mission control with stage/model/modality frontier adaptation
     p08_instrument_robotics/preflight.rs   P08 typed instrument/robotics interlock planning
     p08_instrument_robotics/execution.rs   P08 guarded execution with live rechecks and emergency stop
+    p08_instrument_robotics/campaign.rs   P08 ordered multi-run instrument campaign with fail-closed safety halts
     p09_reproducible_computation/robustness.rs
                                              P09 leave-one-batch/row-out robustness battery
     p09_reproducible_computation/execution.rs
@@ -190,7 +191,7 @@ portfolio plan and executable code; it does not promote a planned slot to implem
 | P05 Mechanism exploration | mechanism scientist | molecular landscape, mechanism exploration | residual-fit competing mechanisms, posterior-weighted next-assay information gain, signed mechanism-network propagation, model-averaged counterfactuals, robust lower-tail intervention portfolios, and discriminating actions |
 | P06 Power-aware experiment design | experimentalist | experiment design | falsifiable allocation, power, blocking, dose-response, adaptive replicate allocation, mechanism-aware closed-loop campaign rounds, combination-synergy fitting, and null-result plan |
 | P07 Protocol simulation | lab operations lead | protocol simulation, adaptive workflow planning | critical-path scheduling, evidence-priority execution cycles, context-to-action execution, multimodal mechanism campaigns, utilization, deterministic next batches, and repair/abstain routing before physical effects |
-| P08 Instrument and robotics preflight | instrument operator | instrument preflight | robust control calibration, drift detection, signed interlocked planning, and guarded execution |
+| P08 Instrument and robotics preflight | instrument operator | instrument preflight | robust control calibration, drift detection, signed interlocked planning, guarded execution, and fail-closed multi-run campaigns |
 | P09 Reproducible computation | computational scientist | computational execution | checkpointed/replayable computation plus omission-stress robustness suite |
 | P10 Causal interpretation and replication | methods reviewer | statistical interpretation, replication/robustness | uncertainty-aware endpoint, longitudinal, stratified causal, causal-contrast, meta-analytic, and cross-site verdicts |
 | P11 Research-object release | reproducibility steward | research-object release | portable manifest with limitations and negative evidence |
@@ -448,6 +449,11 @@ gateway is rechecked for authorization and live interlocks before every operatio
 failures are bounded by retries, partial effects and negative outcomes halt the plan, and an
 emergency stop is requested before remaining operations are skipped. The MCP adapter is synthetic
 only; no hardware or biological effect occurs without an institution-owned `InstrumentExecutor`.
+P08 now also exposes an ordered instrument campaign (`execute_glioma_instrument_campaign`). It
+composes admitted execution requests into a durable run-level queue, preserves each run's
+preflight/interlock/authorization digest, and partitions completed, negative, partial, failed,
+blocked, and unresolved runs. Any unsafe or unresolved effect halts the remaining queue, while
+the MCP adapter remains a deterministic synthetic gateway.
 P09 now also includes replayable computation execution (`execute_glioma_computation`). It schedules
 typed multimodal DAGs in stable topological order, reuses only replay-keyed local cache artifacts,
 enforces cost budgets, retries transient worker failures, and preserves negative, partial, failed,

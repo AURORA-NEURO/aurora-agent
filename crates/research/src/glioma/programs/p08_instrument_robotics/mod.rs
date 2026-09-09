@@ -3,6 +3,7 @@
 use crate::glioma::catalog::{glioma_program_catalog, GliomaProgramDescriptor, GliomaProgramId};
 
 pub mod calibration;
+pub mod campaign;
 pub mod execution;
 pub mod preflight;
 
@@ -23,6 +24,12 @@ pub use execution::{
     InstrumentExecutionError, InstrumentExecutionFailure, InstrumentExecutionRequest,
     InstrumentExecutionResult, InstrumentExecutionRun, InstrumentExecutionStopReason,
     InstrumentExecutor,
+};
+
+pub use campaign::{
+    execute_glioma_instrument_campaign, InstrumentCampaign, InstrumentCampaignDisposition,
+    InstrumentCampaignError, InstrumentCampaignFailure, InstrumentCampaignRequest,
+    InstrumentCampaignRunRequest, InstrumentCampaignRunResult, InstrumentCampaignStopReason,
 };
 
 pub const PROGRAM_ID: GliomaProgramId = GliomaProgramId::InstrumentRobotics;

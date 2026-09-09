@@ -492,6 +492,7 @@ use bioprism_research::{
     execute_glioma_knowledge_resolution_campaign,
     execute_glioma_multimodal_ingestion_campaign,
     execute_glioma_adaptive_allocation_campaign,
+    execute_glioma_instrument_campaign,
     execute_glioma_replication_campaign,
     execute_glioma_autonomous_research_mission,
     execute_glioma_multi_fidelity_campaign,
@@ -535,6 +536,7 @@ use bioprism_research::{
     DryRunMultimodalIngestionCampaignExecutor, MultimodalIngestionCampaignRequest,
     GliomaResearchAutopilotRequest, GliomaResearchIntent, GliomaWorkflowRequest,
     GliomaMissionRequest,
+    InstrumentCampaignRequest,
     DryRunMultiFidelityCampaignExecutor, MultiFidelityCampaignRequest,
     AdaptiveMechanismCampaignRequest, AdaptiveMechanismPolicyRequest,
     DryRunAdaptiveMechanismPolicyExecutor,
@@ -2102,6 +2104,9 @@ impl Server {
             "glioma_instrument_calibration" => self.glioma_instrument_calibration(&arguments),
             "glioma_instrument_preflight" => self.glioma_instrument_preflight(&arguments),
             "glioma_instrument_execute" => self.glioma_instrument_execute(&arguments),
+            "glioma_instrument_campaign_execute" => {
+                self.glioma_instrument_campaign_execute(&arguments)
+            }
             "glioma_experiment_design" => self.glioma_experiment_design(&arguments),
             "glioma_analysis_run" => self.glioma_analysis_run(&arguments),
             "glioma_replication_assess" => self.glioma_replication_assess(&arguments),
@@ -5514,6 +5519,41 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma instrument execution: {error}"))
+    }
+
+    /// Execute a bounded sequence of admitted instrument runs through the deterministic local
+    /// gateway. Any partial, unresolved, blocked, or failed run halts the remaining queue.
+    fn glioma_instrument_campaign_execute(&self, arguments: &Value) -> Result<Value, String> {
+        let request: InstrumentCampaignRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_instrument_campaign_execute requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma instrument campaign request: {error}"))?;
+        let interlocks = request
+            .runs
+            .first()
+            .map(|run| run.execution.live_interlocks.clone())
+            .ok_or_else(|| "glioma instrument campaign requires at least one run".to_string())?;
+        let mut executor = DryRunInstrumentExecutor {
+            interlocks,
+            emergency_stop_called: false,
+        };
+        let campaign = execute_glioma_instrument_campaign(&request, &mut executor)
+            .map_err(|error| format!("glioma instrument campaign refused: {error}"))?;
+        serde_json::to_value(json!({
+            "campaign": campaign,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "admitted plans execute only in declared order through the guarded P08 executor",
+                "partial, unresolved, blocked, failed, negative, retry, and emergency-stop states halt or partition the remaining queue explicitly",
+                "each run preserves its preflight digest, authorization, live interlock checks, local artifacts, and replay digest",
+                "MCP emits no hardware effect, raw-data movement, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma instrument campaign: {error}"))
     }
 
     fn glioma_experiment_design(&self, arguments: &Value) -> Result<Value, String> {
@@ -45918,6 +45958,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_instrument_calibration",
                 "glioma_instrument_preflight",
                 "glioma_instrument_execute",
+                "glioma_instrument_campaign_execute",
                 "glioma_experiment_design",
                 "glioma_analysis_run",
                 "glioma_replication_assess",
@@ -53609,6 +53650,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "InstrumentExecutionRequest1@1 containing an admitted InstrumentPreflightPlan1@1, matching InstrumentAction1@1 records, authorization, live interlocks, tick/budget bounds, retry bound, and artifact policy."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_instrument_campaign_execute",
+        "description": "Run a bounded multi-stage preclinical glioma instrument campaign through the guarded local execution seam. It executes admitted plans in declared order, preserves each run's preflight and interlock evidence, and halts the remaining queue after partial, unresolved, blocked, failed, or optionally negative outcomes. MCP uses a deterministic dry-run gateway and creates no hardware or biological effect.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "InstrumentCampaignRequest1@1 containing an objective, bounded run list of run_id plus InstrumentExecutionRequest1@1, and negative-stop policy."}
             },
             "required": ["request"]
         }

@@ -1693,6 +1693,7 @@ pub fn glioma_research_engine_manifest() -> CapabilityManifest {
             "decision-context campaign controller".into(),
             "multimodal ingestion campaign controller".into(),
             "institution-local instrument execution gateway".into(),
+            "instrument safety campaign controller".into(),
             "active-learning assay scheduler".into(),
             "active-learning campaign executor".into(),
             "robust active-learning scientist".into(),
@@ -2022,6 +2023,11 @@ pub fn glioma_research_engine_manifest() -> CapabilityManifest {
             TypedPort {
                 name: "glioma_instrument_execution".into(),
                 schema: "GliomaInstrumentExecution1@1".into(),
+                required: false,
+            },
+            TypedPort {
+                name: "glioma_instrument_campaign".into(),
+                schema: "GliomaInstrumentCampaign1@1".into(),
                 required: false,
             },
             TypedPort {

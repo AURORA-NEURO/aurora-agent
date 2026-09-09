@@ -215,7 +215,8 @@ pub use programs::p07_protocol_simulation::{
     StaticGliomaActionPlanner, PROTOCOL_EXECUTION_OUTPUT_SCHEMA,
 };
 pub use programs::p08_instrument_robotics::{
-    analyze_instrument_calibration, execute_glioma_instrument_plan, preflight_glioma_instrument,
+    analyze_instrument_calibration, execute_glioma_instrument_campaign,
+    execute_glioma_instrument_plan, preflight_glioma_instrument,
     CalibrationDisposition, CalibrationError, CalibrationPoint, CalibrationRequest, CalibrationRun,
     DryRunInstrumentExecutor, InstrumentAction, InstrumentActionDecision,
     InstrumentActionDisposition, InstrumentAuthorization, InstrumentCalibration,
@@ -224,6 +225,9 @@ pub use programs::p08_instrument_robotics::{
     InstrumentExecutionStopReason, InstrumentExecutor, InstrumentInterlockSnapshot,
     InstrumentOperation, InstrumentParameter, InstrumentPreflightDisposition,
     InstrumentPreflightError, InstrumentPreflightPlan, InstrumentPreflightRequest,
+    InstrumentCampaign, InstrumentCampaignDisposition, InstrumentCampaignError,
+    InstrumentCampaignFailure, InstrumentCampaignRequest, InstrumentCampaignRunRequest,
+    InstrumentCampaignRunResult, InstrumentCampaignStopReason,
 };
 pub use programs::p09_reproducible_computation::{
     assess_glioma_robustness, execute_glioma_computation, execute_glioma_computation_portfolio,
