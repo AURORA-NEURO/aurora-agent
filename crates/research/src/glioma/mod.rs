@@ -183,6 +183,7 @@ pub use programs::p06_experiment_design::{
 pub use programs::p07_protocol_simulation::{
     execute_glioma_action_portfolio, execute_glioma_active_learning_campaign,
     execute_glioma_autonomous_campaign, execute_glioma_autonomous_research_mission,
+    plan_glioma_clone_continuation,
     execute_glioma_evidence_campaign, execute_glioma_multimodal_mechanism_campaign,
     execute_glioma_multimodal_mechanism_campaign_with_executor, execute_glioma_protocol,
     execute_glioma_research_autopilot, execute_glioma_research_director,
@@ -206,6 +207,9 @@ pub use programs::p07_protocol_simulation::{
     GliomaMissionRound, GliomaMissionStopReason, GliomaPlannerFailure, GliomaProtocolExecutor,
     GliomaResearchAutopilotDisposition, GliomaResearchAutopilotError,
     GliomaResearchAutopilotRequest, GliomaResearchAutopilotRun, MechanismCampaignDisposition,
+    CloneContinuationActionKind, CloneContinuationActionStatus, CloneContinuationCandidate,
+    CloneContinuationDecision, CloneContinuationDisposition, CloneContinuationError,
+    CloneContinuationPlan, CloneContinuationRequest,
     GliomaDirectorAction, GliomaDirectorCheckpoint, GliomaDirectorDisposition, GliomaDirectorFocus,
     GliomaResearchDirectorError, GliomaResearchDirectorRequest, GliomaResearchDirectorRun,
     MechanismCampaignError, MechanismCampaignExecutionDisposition, MultimodalMechanismCampaign,

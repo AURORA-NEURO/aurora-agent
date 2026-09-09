@@ -314,7 +314,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 57;
-const TOOL_DEFINITION_COUNT: usize = 610;
+const TOOL_DEFINITION_COUNT: usize = 611;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -3536,6 +3536,39 @@ fn glioma_clone_panel_outcomes_requires_replicates_before_qualification() {
     assert_eq!(analysis["simulation_only"], json!(true));
     assert_eq!(analysis["analysis"]["disposition"], json!("qualified"));
     assert!(analysis["analysis"]["next_action_order"].as_array().unwrap().is_empty());
+
+    // A missing replicate/cell reopens the loop and is compiled into a bounded continuation
+    // plan. The MCP route must remain planning-only and preserve the unresolved target.
+    let mut incomplete_observations = observations;
+    incomplete_observations.pop();
+    let incomplete = call(
+        &mut server,
+        "glioma_clone_panel_outcomes",
+        json!({
+            "request": {"study_id": "outcome-protocol-study", "model_system": "organoid", "min_replicates": 2, "effect_threshold_milli": 500, "max_uncertainty_milli": 200, "require_all_selected": true, "require_all_branches": true},
+            "panel": panel["panel"].clone(),
+            "observations": incomplete_observations
+        }),
+    );
+    let target = incomplete["analysis"]["next_action_order"][0]
+        .as_str()
+        .unwrap();
+    let continuation = call(
+        &mut server,
+        "glioma_clone_continuation",
+        json!({
+            "request": {"study_id": "outcome-protocol-study", "model_system": "organoid", "budget_milli": 10, "max_selected": 3, "max_risk_tier": 2, "require_approval": true, "allow_instrument_actions": false, "allow_federation": false},
+            "outcome": incomplete["analysis"].clone(),
+            "candidates": [
+                {"action_id": "measure-prereq", "target_id": target, "kind": "measure", "cost_milli": 2, "information_gain_milli": 900, "risk_tier": 1, "dependencies": [], "requires_instrument": false, "requires_federation": false, "description": "measure the unresolved clone-panel cell", "artifact": {"artifact_id": "measure-prereq", "content_hash": hash, "content_type": "application/json", "local_only": true, "contains_human_data": false, "contains_direct_identifiers": false}},
+                {"action_id": "replicate-followup", "target_id": target, "kind": "replicate", "cost_milli": 3, "information_gain_milli": 800, "risk_tier": 1, "dependencies": ["measure-prereq"], "requires_instrument": false, "requires_federation": false, "description": "replicate the unresolved clone-panel cell", "artifact": {"artifact_id": "replicate-followup", "content_hash": hash, "content_type": "application/json", "local_only": true, "contains_human_data": false, "contains_direct_identifiers": false}}
+            ]
+        }),
+    );
+    assert_eq!(continuation["dispatch"], json!("not_started"));
+    assert_eq!(continuation["simulation_only"], json!(true));
+    assert_eq!(continuation["plan"]["disposition"], json!("approval_required"));
+    assert_eq!(continuation["plan"]["pending_approval_order"].as_array().unwrap().len(), 2);
 }
 
 #[test]

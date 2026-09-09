@@ -13,6 +13,7 @@ pub use crate::glioma::workflow::{
 pub mod action_execution;
 pub mod active_learning_campaign;
 pub mod autonomous_campaign;
+pub mod clone_continuation;
 pub mod director;
 pub mod evidence_campaign;
 pub mod execution;
@@ -42,6 +43,12 @@ pub use autonomous_campaign::{
     GliomaAutonomousCampaignRequest, GliomaAutonomousCampaignRound,
     GliomaAutonomousCampaignStopReason, GliomaAutonomousPlannerContext, GliomaPlannerFailure,
     StaticGliomaActionPlanner,
+};
+
+pub use clone_continuation::{
+    plan_glioma_clone_continuation, CloneContinuationActionKind, CloneContinuationActionStatus,
+    CloneContinuationCandidate, CloneContinuationDecision, CloneContinuationDisposition,
+    CloneContinuationError, CloneContinuationPlan, CloneContinuationRequest,
 };
 
 pub use director::{

@@ -471,7 +471,7 @@ use bioprism_research::{
     analyze_glioma_causal_contrast, analyze_glioma_combination_synergy,
     analyze_glioma_dose_response, analyze_glioma_latent_factors, analyze_glioma_mediation,
     analyze_glioma_multimodal_graph_fusion, analyze_glioma_pathway_activity,
-    analyze_glioma_clonal_evolution,
+    analyze_glioma_clonal_evolution, plan_glioma_clone_continuation,
     analyze_glioma_clone_panel_outcomes,
     analyze_glioma_spatial_communication, analyze_glioma_spatial_niches,
     analyze_glioma_spatial_state_propagation, analyze_glioma_state_transitions,
@@ -557,6 +557,7 @@ use bioprism_research::{
     TemporalFusionRequest, TemporalObservation, ClonalEvolutionRequest, CloneProfile,
     ClonePerturbationPanelRequest, ClonePerturbationCandidate, ClonalEvolutionGraph,
     ClonePerturbationPanel, ClonePanelOutcomeRequest, ClonePanelObservation,
+    CloneContinuationCandidate, CloneContinuationRequest, ClonePanelOutcomeAnalysis,
     StaticGliomaActionPlanner, StaticGliomaComputationPlanner, StratifiedCausalRequest,
     StratifiedObservation, TrajectoryObservation, TrajectoryRequest, TransportStudy,
     TransportabilityRequest, TypedKnowledge, execute_glioma_research_director,
@@ -2046,6 +2047,7 @@ impl Server {
                 self.glioma_clone_perturbation_panel(&arguments)
             }
             "glioma_clone_panel_outcomes" => self.glioma_clone_panel_outcomes(&arguments),
+            "glioma_clone_continuation" => self.glioma_clone_continuation(&arguments),
             "glioma_adaptive_research_frontier" => {
                 self.glioma_adaptive_research_frontier(&arguments)
             }
@@ -3887,6 +3889,47 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma clone panel outcome analysis: {error}"))
+    }
+
+    /// Compile a dependency-closed next-action frontier from unresolved or contradictory clone
+    /// outcomes. The route plans only; institution-local executors own approvals, instruments,
+    /// and any permitted federation effects.
+    fn glioma_clone_continuation(&self, arguments: &Value) -> Result<Value, String> {
+        let request: CloneContinuationRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_clone_continuation requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma clone continuation request: {error}"))?;
+        let outcome: ClonePanelOutcomeAnalysis = serde_json::from_value(
+            arguments
+                .get("outcome")
+                .cloned()
+                .ok_or_else(|| "glioma_clone_continuation requires outcome".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma clone panel outcome: {error}"))?;
+        let candidates: Vec<CloneContinuationCandidate> = serde_json::from_value(
+            arguments
+                .get("candidates")
+                .cloned()
+                .ok_or_else(|| "glioma_clone_continuation requires candidates".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma clone continuation candidates: {error}"))?;
+        let plan = plan_glioma_clone_continuation(&request, &outcome, &candidates)
+            .map_err(|error| format!("glioma clone continuation refused: {error}"))?;
+        serde_json::to_value(json!({
+            "plan": plan,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "dependency closure, budget, risk, instrument, federation, and approval gates are explicit",
+                "unresolved targets, deferred actions, blocked actions, uncertainty, and negative evidence remain visible",
+                "the plan is a preclinical research continuation artifact and not treatment, resistance, diagnosis, or clinical advice",
+                "MCP executes no assay, moves no raw data, and makes no clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma clone continuation plan: {error}"))
     }
 
     /// Direct one bounded, dependency-closed glioma research batch from a high-level intent.
@@ -46188,6 +46231,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_clonal_evolution",
                 "glioma_clone_perturbation_panel",
                 "glioma_clone_panel_outcomes",
+                "glioma_clone_continuation",
                 "glioma_spatial_niches",
                 "glioma_spatial_communication",
                 "glioma_spatial_state_propagation",
@@ -53546,6 +53590,19 @@ pub fn tool_definitions() -> Vec<Value> {
                 "observations": {"type": "array", "items": {"type": "object"}, "description": "Local ClonePanelObservation1@1 records keyed by candidate, evolutionary branch, and replicate, with state, effect, uncertainty, and local artifact reference."}
             },
             "required": ["request", "panel", "observations"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_clone_continuation",
+        "description": "Compile a deterministic, dependency-closed continuation plan from unresolved or contradictory local preclinical glioma clone-panel outcomes. The planner ranks typed measurement, retest, replication, simulation, federation-review, and evidence-release actions by information gain per cost, closes dependencies, enforces budget, selection, risk, instrument, federation, and approval gates, and preserves omissions and negative evidence. It never executes biology, moves raw data, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "CloneContinuationRequest1@1 with study/model binding, budget, selection and risk bounds, approval policy, and instrument/federation permissions."},
+                "outcome": {"type": "object", "description": "Validated ClonePanelOutcomeAnalysis1@1 produced by glioma_clone_panel_outcomes."},
+                "candidates": {"type": "array", "items": {"type": "object"}, "description": "Local CloneContinuationCandidate1@1 records with typed action, target, cost, information gain, dependencies, effects, and artifact provenance."}
+            },
+            "required": ["request", "outcome", "candidates"]
         }
     }));
     definitions.push(json!({

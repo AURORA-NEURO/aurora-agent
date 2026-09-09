@@ -107,6 +107,8 @@ crates/research/src/glioma/
                                              P07 science-aware cross-program mission control with stage/model/modality frontier adaptation
     p07_protocol_simulation/director.rs
                                              P07 high-level focus-aware research director compiling intent into dependency-closed executable batches
+    p07_protocol_simulation/clone_continuation.rs
+                                             P07 clone-outcome-driven continuation planning with dependency closure and policy gates
     p08_instrument_robotics/preflight.rs   P08 typed instrument/robotics interlock planning
     p08_instrument_robotics/execution.rs   P08 guarded execution with live rechecks and emergency stop
     p08_instrument_robotics/campaign.rs   P08 ordered multi-run instrument campaign with fail-closed safety halts
