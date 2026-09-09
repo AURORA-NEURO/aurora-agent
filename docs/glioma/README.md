@@ -349,6 +349,11 @@ observed multimodal evidence to a bounded next assay/analysis portfolio in one r
 Unresolved graph coverage, pathway bottlenecks, contradictory modalities, and empty safe portfolios
 remain explicit holds; the returned actions are plans until the existing policy and execution gates
 admit them.
+The companion execution bridge
+(`execute_glioma_multimodal_mechanism_campaign_with_executor`) now passes a qualified selection
+through the existing action-portfolio executor. It preserves dependency ordering, bounded retries,
+local-artifact requirements, negative outcomes, and partial/blocked states; the MCP surface uses a
+deterministic dry-run worker while institution-local deployments provide the production executor.
 P08 now also includes deterministic instrument preflight (`preflight_glioma_instrument`). It combines
 qualified calibration, live interlock telemetry, typed operation parameters, operator authorization,
 serialized scheduling, and risk/duration budgets into a dispatch-permitted or fail-closed plan. The

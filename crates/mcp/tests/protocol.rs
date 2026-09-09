@@ -314,7 +314,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 57;
-const TOOL_DEFINITION_COUNT: usize = 586;
+const TOOL_DEFINITION_COUNT: usize = 587;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -2474,10 +2474,7 @@ fn glioma_pathway_activity_ranks_cross_modal_mechanism_state() {
 fn glioma_multimodal_mechanism_campaign_closes_analysis_to_action() {
     let mut server = server();
     let hash = "0".repeat(64);
-    let response = call(
-        &mut server,
-        "glioma_multimodal_mechanism_campaign",
-        json!({
+    let campaign_input = json!({
             "request": {
                 "objective": "find an executable invasion follow-up",
                 "study_id": "campaign-study",
@@ -2524,11 +2521,32 @@ fn glioma_multimodal_mechanism_campaign_closes_analysis_to_action() {
                 {"observation_id":"p-t","study_id":"campaign-study","sample_lineage":"a","modality":"transcriptomics","model_system":"organoid","artifact":{"artifact_id":"p-t","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"feature_id":"vim","value_milli":800,"reliability_milli":900}
             ],
             "candidates": [{"action_id":"validate-invasion","stage_kind":"experiment_design","modality":"functional_perturbation","model_system":"organoid","depends_on":[],"cost_units":2,"information_gain_milli":900,"frontier_novelty_milli":700,"workflow_leverage_milli":900,"cross_stage_unlock_milli":800,"reproducibility_safety_milli":900,"federation_value_milli":500,"feasibility_milli":900,"autonomy_tier":"a1","effects":["read_local_data","execute_local_computation","write_local_artifact"]}]
-        }),
+        });
+    let response = call(
+        &mut server,
+        "glioma_multimodal_mechanism_campaign",
+        campaign_input.clone(),
     );
     assert_eq!(response["dispatch"], json!("not_started"));
     assert_eq!(response["campaign"]["disposition"], json!("ready_for_execution"));
     assert_eq!(response["campaign"]["next_action_order"], json!(["validate-invasion"]));
+
+    let mut execution_input = campaign_input;
+    execution_input["max_retries"] = json!(1);
+    execution_input["require_artifacts"] = json!(true);
+    let execution = call(
+        &mut server,
+        "glioma_multimodal_mechanism_campaign_execute",
+        execution_input,
+    );
+    assert_eq!(execution["dispatch"], json!("dry_run"));
+    assert_eq!(execution["simulation_only"], json!(true));
+    assert_eq!(execution["execution"]["disposition"], json!("completed"));
+    assert_eq!(execution["execution"]["executed_order"], json!(["validate-invasion"]));
+    assert_eq!(
+        execution["execution"]["execution"]["completed_order"],
+        json!(["validate-invasion"])
+    );
 }
 
 #[test]

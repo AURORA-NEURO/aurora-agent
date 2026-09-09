@@ -483,6 +483,7 @@ use bioprism_research::{
     execute_glioma_active_learning_campaign, execute_glioma_autonomous_campaign,
     execute_glioma_computation, execute_glioma_computation_portfolio,
     execute_glioma_multimodal_mechanism_campaign,
+    execute_glioma_multimodal_mechanism_campaign_with_executor,
     execute_glioma_evidence_campaign, execute_glioma_instrument_plan, execute_glioma_protocol,
     execute_glioma_research_autopilot, execute_glioma_robust_active_learning_campaign,
     explore_mechanisms, generate_feature_catalog, glioma_program_catalog,
@@ -2005,6 +2006,9 @@ impl Server {
             "glioma_pathway_activity" => self.glioma_pathway_activity(&arguments),
             "glioma_multimodal_mechanism_campaign" => {
                 self.glioma_multimodal_mechanism_campaign(&arguments)
+            }
+            "glioma_multimodal_mechanism_campaign_execute" => {
+                self.glioma_multimodal_mechanism_campaign_execute(&arguments)
             }
             "glioma_spatial_niches" => self.glioma_spatial_niches(&arguments),
             "glioma_spatial_communication" => self.glioma_spatial_communication(&arguments),
@@ -4064,6 +4068,81 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma multimodal mechanism campaign: {error}"))
+    }
+
+    /// Execute the selected mechanism portfolio through the deterministic dry-run worker.
+    /// Institution-local deployments provide the production executor through the Rust API.
+    fn glioma_multimodal_mechanism_campaign_execute(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: MultimodalMechanismCampaignRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_multimodal_mechanism_campaign_execute requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma mechanism campaign execution request: {error}"))?;
+        let graph_vectors: Vec<GraphFusionVector> = serde_json::from_value(
+            arguments
+                .get("graph_vectors")
+                .cloned()
+                .ok_or_else(|| "glioma_multimodal_mechanism_campaign_execute requires graph_vectors".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma mechanism campaign execution graph vectors: {error}"))?;
+        let pathway_definitions: Vec<PathwayActivityDefinition> = serde_json::from_value(
+            arguments
+                .get("pathway_definitions")
+                .cloned()
+                .ok_or_else(|| "glioma_multimodal_mechanism_campaign_execute requires pathway_definitions".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma mechanism campaign execution pathway definitions: {error}"))?;
+        let pathway_observations: Vec<PathwayActivityObservation> = serde_json::from_value(
+            arguments
+                .get("pathway_observations")
+                .cloned()
+                .ok_or_else(|| "glioma_multimodal_mechanism_campaign_execute requires pathway_observations".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma mechanism campaign execution pathway observations: {error}"))?;
+        let candidates: Vec<GliomaActionCandidate> = serde_json::from_value(
+            arguments
+                .get("candidates")
+                .cloned()
+                .ok_or_else(|| "glioma_multimodal_mechanism_campaign_execute requires candidates".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma mechanism campaign execution candidates: {error}"))?;
+        let max_retries = arguments
+            .get("max_retries")
+            .and_then(Value::as_u64)
+            .unwrap_or(1)
+            .min(8) as u8;
+        let require_artifacts = arguments
+            .get("require_artifacts")
+            .and_then(Value::as_bool)
+            .unwrap_or(true);
+        let mut executor = DryRunGliomaActionExecutor;
+        let output = execute_glioma_multimodal_mechanism_campaign_with_executor(
+            &request,
+            &graph_vectors,
+            &pathway_definitions,
+            &pathway_observations,
+            &candidates,
+            max_retries,
+            require_artifacts,
+            &mut executor,
+        )
+        .map_err(|error| format!("glioma multimodal mechanism campaign execution refused: {error}"))?;
+        serde_json::to_value(json!({
+            "execution": output,
+            "dispatch": "dry_run",
+            "simulation_only": true,
+            "guarantees": [
+                "unresolved graph or pathway evidence blocks dispatch",
+                "selected actions execute only through dependency, retry, local-artifact, and policy gates",
+                "this MCP worker creates synthetic local artifacts and never touches instruments, biology, or clinical decisions"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma multimodal mechanism campaign execution: {error}"))
     }
 
     /// Build spatially connected same-lineage niches and retain cross-lineage interaction
@@ -45318,6 +45397,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_mechanism_graph_propagate",
                 "glioma_pathway_activity",
                 "glioma_multimodal_mechanism_campaign",
+                "glioma_multimodal_mechanism_campaign_execute",
                 "glioma_mechanism_counterfactual",
                 "glioma_mechanism_ensemble_counterfactual",
                 "glioma_robust_intervention_portfolio",
@@ -52726,6 +52806,23 @@ pub fn tool_definitions() -> Vec<Value> {
                 "pathway_definitions": {"type": "array", "items": {"type": "object"}, "description": "PathwayActivityDefinition1@1 signed pathway node and edge declarations."},
                 "pathway_observations": {"type": "array", "items": {"type": "object"}, "description": "Local PathwayActivityObservation1@1 feature values and reliability."},
                 "candidates": {"type": "array", "items": {"type": "object"}, "description": "Typed GliomaActionCandidate1@1 assay, analysis, simulation, or instrument plans."}
+            },
+            "required": ["request", "graph_vectors", "pathway_definitions", "pathway_observations", "candidates"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_multimodal_mechanism_campaign_execute",
+        "description": "Execute one selected preclinical glioma mechanism portfolio through dependency, retry, local-artifact, policy, and approval gates. The built-in MCP worker is deterministic dry-run only; institution-local callers supply the production executor, and unresolved evidence remains blocked rather than becoming a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "MultimodalMechanismCampaignRequest1@1 binding graph, pathway, selection, objective, model system, and completed actions."},
+                "graph_vectors": {"type": "array", "items": {"type": "object"}, "description": "Local GraphFusionVector1@1 modality vectors."},
+                "pathway_definitions": {"type": "array", "items": {"type": "object"}, "description": "PathwayActivityDefinition1@1 signed pathway node and edge declarations."},
+                "pathway_observations": {"type": "array", "items": {"type": "object"}, "description": "Local PathwayActivityObservation1@1 feature values and reliability."},
+                "candidates": {"type": "array", "items": {"type": "object"}, "description": "Typed GliomaActionCandidate1@1 assay, analysis, simulation, or instrument plans."},
+                "max_retries": {"type": "integer", "minimum": 0, "maximum": 8, "description": "Bounded retries per selected action; defaults to 1."},
+                "require_artifacts": {"type": "boolean", "description": "Require every selected action to return a local artifact; defaults to true."}
             },
             "required": ["request", "graph_vectors", "pathway_definitions", "pathway_observations", "candidates"]
         }

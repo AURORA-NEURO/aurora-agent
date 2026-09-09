@@ -50,8 +50,11 @@ pub use execution::{
 };
 
 pub use mechanism_campaign::{
-    execute_glioma_multimodal_mechanism_campaign, MechanismCampaignDisposition,
-    MechanismCampaignError, MultimodalMechanismCampaign, MultimodalMechanismCampaignRequest,
+    execute_glioma_multimodal_mechanism_campaign,
+    execute_glioma_multimodal_mechanism_campaign_with_executor,
+    MechanismCampaignDisposition, MechanismCampaignError,
+    MechanismCampaignExecutionDisposition, MultimodalMechanismCampaign,
+    MultimodalMechanismCampaignExecution, MultimodalMechanismCampaignRequest,
 };
 
 pub use research_autopilot::{

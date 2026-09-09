@@ -134,7 +134,9 @@ pub use programs::p06_experiment_design::{
 };
 pub use programs::p07_protocol_simulation::{
     execute_glioma_multimodal_mechanism_campaign, MechanismCampaignDisposition,
-    MechanismCampaignError, MultimodalMechanismCampaign, MultimodalMechanismCampaignRequest,
+    execute_glioma_multimodal_mechanism_campaign_with_executor, MechanismCampaignError,
+    MechanismCampaignExecutionDisposition, MultimodalMechanismCampaign,
+    MultimodalMechanismCampaignExecution, MultimodalMechanismCampaignRequest,
     execute_glioma_action_portfolio, execute_glioma_active_learning_campaign,
     execute_glioma_autonomous_campaign, execute_glioma_evidence_campaign, execute_glioma_protocol,
     execute_glioma_research_autopilot, execute_glioma_robust_active_learning_campaign,

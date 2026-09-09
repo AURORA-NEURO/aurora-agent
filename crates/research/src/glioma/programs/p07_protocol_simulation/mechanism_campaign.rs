@@ -13,6 +13,10 @@ use super::super::p05_mechanism_exploration::{
     analyze_glioma_pathway_activity, PathwayActivityAnalysis, PathwayActivityDefinition,
     PathwayActivityDisposition, PathwayActivityObservation, PathwayActivityRequest,
 };
+use super::action_execution::{
+    execute_glioma_action_portfolio, ActionPortfolioExecution, ActionPortfolioExecutionDisposition,
+    ActionPortfolioExecutionRequest, GliomaActionExecutor,
+};
 use crate::glioma_engine::{
     select_glioma_actions, GliomaActionCandidate, GliomaActionSelection, GliomaEngineError,
     GliomaModelSystem, GliomaSelectionConfig,
@@ -24,6 +28,8 @@ use thiserror::Error;
 
 pub const FEATURE_ID: &str = "GAF-GLIOMA-P07-F29";
 pub const OUTPUT_SCHEMA: &str = "GliomaMultimodalMechanismCampaign1@1";
+pub const EXECUTION_FEATURE_ID: &str = "GAF-GLIOMA-P07-F30";
+pub const EXECUTION_OUTPUT_SCHEMA: &str = "GliomaMultimodalMechanismCampaignExecution1@1";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MultimodalMechanismCampaignRequest {
@@ -42,6 +48,27 @@ pub enum MechanismCampaignDisposition {
     ReadyForExecution,
     PartialNeedsEvidence,
     Unresolved,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MechanismCampaignExecutionDisposition {
+    Completed,
+    Partial,
+    Blocked,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MultimodalMechanismCampaignExecution {
+    pub feature_id: String,
+    pub output_schema: String,
+    pub campaign: MultimodalMechanismCampaign,
+    pub execution: Option<ActionPortfolioExecution>,
+    pub executed_order: Vec<String>,
+    pub negative_evidence: Vec<String>,
+    pub uncertainty: Vec<String>,
+    pub disposition: MechanismCampaignExecutionDisposition,
+    pub digest: ContentHash,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -71,6 +98,8 @@ pub enum MechanismCampaignError {
     Pathway(String),
     #[error("mechanism campaign action selection failed: {0}")]
     Selection(String),
+    #[error("mechanism campaign execution failed: {0}")]
+    Execution(String),
     #[error("mechanism campaign output is invalid: {0}")]
     InvalidOutput(String),
     #[error("mechanism campaign digest failed: {0}")]
@@ -98,6 +127,19 @@ fn digest_input(output: &MultimodalMechanismCampaign) -> serde_json::Value {
     })
 }
 
+fn execution_digest_input(output: &MultimodalMechanismCampaignExecution) -> serde_json::Value {
+    serde_json::json!({
+        "feature_id": output.feature_id,
+        "output_schema": output.output_schema,
+        "campaign": output.campaign,
+        "execution": output.execution,
+        "executed_order": output.executed_order,
+        "negative_evidence": output.negative_evidence,
+        "uncertainty": output.uncertainty,
+        "disposition": output.disposition,
+    })
+}
+
 impl MultimodalMechanismCampaign {
     pub fn validate(&self) -> Result<(), MechanismCampaignError> {
         if self.feature_id != FEATURE_ID
@@ -119,6 +161,40 @@ impl MultimodalMechanismCampaign {
         if expected != self.digest {
             return Err(MechanismCampaignError::InvalidOutput(
                 "digest is not bound to mechanism campaign".into(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+impl MultimodalMechanismCampaignExecution {
+    pub fn validate(&self) -> Result<(), MechanismCampaignError> {
+        if self.feature_id != EXECUTION_FEATURE_ID
+            || self.output_schema != EXECUTION_OUTPUT_SCHEMA
+            || self
+                .executed_order
+                .windows(2)
+                .any(|pair| pair[0] >= pair[1])
+            || self
+                .negative_evidence
+                .windows(2)
+                .any(|pair| pair[0] >= pair[1])
+            || self.uncertainty.windows(2).any(|pair| pair[0] >= pair[1])
+            || self
+                .execution
+                .as_ref()
+                .is_some_and(|execution| self.executed_order != execution.completed_order)
+        {
+            return Err(MechanismCampaignError::InvalidOutput(
+                "execution identity, ordering, or completed partition is invalid".into(),
+            ));
+        }
+        self.campaign.validate()?;
+        let expected = ContentHash::of_value(&execution_digest_input(self))
+            .map_err(|e| MechanismCampaignError::Digest(e.to_string()))?;
+        if expected != self.digest {
+            return Err(MechanismCampaignError::InvalidOutput(
+                "digest is not bound to mechanism campaign execution".into(),
             ));
         }
         Ok(())
@@ -220,6 +296,101 @@ pub fn execute_glioma_multimodal_mechanism_campaign(
             .map_err(|e| MechanismCampaignError::Digest(e.to_string()))?,
     };
     output.digest = ContentHash::of_value(&digest_input(&output))
+        .map_err(|e| MechanismCampaignError::Digest(e.to_string()))?;
+    output.validate()?;
+    Ok(output)
+}
+
+/// Execute the selected multimodal mechanism portfolio through the caller-owned action worker.
+/// Unresolved evidence never dispatches an action; successful execution still inherits the
+/// portfolio executor's dependency, retry, artifact, and policy gates.
+pub fn execute_glioma_multimodal_mechanism_campaign_with_executor<E: GliomaActionExecutor>(
+    request: &MultimodalMechanismCampaignRequest,
+    graph_vectors: &[GraphFusionVector],
+    pathway_definitions: &[PathwayActivityDefinition],
+    pathway_observations: &[PathwayActivityObservation],
+    candidates: &[GliomaActionCandidate],
+    max_retries: u8,
+    require_artifacts: bool,
+    executor: &mut E,
+) -> Result<MultimodalMechanismCampaignExecution, MechanismCampaignError> {
+    let campaign = execute_glioma_multimodal_mechanism_campaign(
+        request,
+        graph_vectors,
+        pathway_definitions,
+        pathway_observations,
+        candidates,
+    )?;
+    let mut negative = campaign
+        .negative_evidence
+        .iter()
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    let mut uncertainty = campaign
+        .uncertainty
+        .iter()
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    if campaign.disposition == MechanismCampaignDisposition::Unresolved {
+        negative.insert("campaign evidence or action safety gates blocked execution".into());
+        let mut output = MultimodalMechanismCampaignExecution {
+            feature_id: EXECUTION_FEATURE_ID.into(),
+            output_schema: EXECUTION_OUTPUT_SCHEMA.into(),
+            executed_order: Vec::new(),
+            campaign,
+            execution: None,
+            negative_evidence: negative.into_iter().collect(),
+            uncertainty: uncertainty.into_iter().collect(),
+            disposition: MechanismCampaignExecutionDisposition::Blocked,
+            digest: ContentHash::of_value(&serde_json::json!({}))
+                .map_err(|e| MechanismCampaignError::Digest(e.to_string()))?,
+        };
+        output.digest = ContentHash::of_value(&execution_digest_input(&output))
+            .map_err(|e| MechanismCampaignError::Digest(e.to_string()))?;
+        output.validate()?;
+        return Ok(output);
+    }
+    let completed_actions = request
+        .completed_action_order
+        .iter()
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    let execution = execute_glioma_action_portfolio(
+        &ActionPortfolioExecutionRequest {
+            candidates: candidates.to_vec(),
+            completed_actions,
+            selection: request.selection.clone(),
+            max_retries,
+            require_artifacts,
+        },
+        executor,
+    )
+    .map_err(|e| MechanismCampaignError::Execution(e.to_string()))?;
+    negative.extend(execution.negative_evidence.iter().cloned());
+    uncertainty.extend(execution.uncertainty.iter().cloned());
+    let disposition = match execution.disposition {
+        ActionPortfolioExecutionDisposition::Completed => {
+            MechanismCampaignExecutionDisposition::Completed
+        }
+        ActionPortfolioExecutionDisposition::Partial
+        | ActionPortfolioExecutionDisposition::Failed
+        | ActionPortfolioExecutionDisposition::Blocked => {
+            MechanismCampaignExecutionDisposition::Partial
+        }
+    };
+    let mut output = MultimodalMechanismCampaignExecution {
+        feature_id: EXECUTION_FEATURE_ID.into(),
+        output_schema: EXECUTION_OUTPUT_SCHEMA.into(),
+        executed_order: execution.completed_order.clone(),
+        campaign,
+        execution: Some(execution),
+        negative_evidence: negative.into_iter().collect(),
+        uncertainty: uncertainty.into_iter().collect(),
+        disposition,
+        digest: ContentHash::of_value(&serde_json::json!({}))
+            .map_err(|e| MechanismCampaignError::Digest(e.to_string()))?,
+    };
+    output.digest = ContentHash::of_value(&execution_digest_input(&output))
         .map_err(|e| MechanismCampaignError::Digest(e.to_string()))?;
     output.validate()?;
     Ok(output)
