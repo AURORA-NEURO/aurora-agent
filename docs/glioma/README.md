@@ -111,6 +111,8 @@ crates/research/src/glioma/
                                              P07 science-aware cross-program mission control with stage/model/modality frontier adaptation
     p07_protocol_simulation/director.rs
                                              P07 high-level focus-aware research director compiling intent into dependency-closed executable batches
+    p07_protocol_simulation/autonomous_engine.rs
+                                             P07 end-to-end multi-cycle autonomous research engine with artifact-driven replanning
     p07_protocol_simulation/clone_continuation.rs
                                              P07 clone-outcome-driven continuation planning with dependency closure and policy gates
     p08_instrument_robotics/preflight.rs   P08 typed instrument/robotics interlock planning
@@ -441,6 +443,12 @@ experiment, computation, or replication), closes dependencies to a runnable fron
 one beam-selected batch through the existing action worker. Missing inputs, policy holds, synthetic
 dry-run outcomes, negative evidence, and the exact next checkpoint are returned for the next cycle;
 the director never skips an upstream gate or calls a clinical workflow.
+The end-to-end engine (`execute_glioma_autonomous_research_engine`) closes that loop across the
+full preclinical graph. It repeatedly compiles the intent, executes a bounded local batch, promotes
+only returned typed artifacts into stage checkpoints, and replans downstream evidence, mechanism,
+experiment, computation, replication, release, and federation work. Budget exhaustion, negative or
+partial outcomes, policy holds, executor failures, and no-progress states stop honestly; the MCP
+surface is a deterministic dry-run rehearsal while institution-local executors own real effects.
 P06 also exposes the closed-loop multi-fidelity campaign
 (`execute_glioma_multi_fidelity_campaign`). It repeatedly executes the optimizer's selected
 screening, mechanistic, or validation conditions through a caller-owned local worker, recalibrates

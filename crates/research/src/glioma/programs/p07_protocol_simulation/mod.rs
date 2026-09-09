@@ -12,6 +12,7 @@ pub use crate::glioma::workflow::{
 };
 pub mod action_execution;
 pub mod active_learning_campaign;
+pub mod autonomous_engine;
 pub mod autonomous_campaign;
 pub mod clone_continuation;
 pub mod director;
@@ -35,6 +36,13 @@ pub use active_learning_campaign::{
     ActiveLearningCampaignDisposition, ActiveLearningCampaignError, ActiveLearningCampaignExecutor,
     ActiveLearningCampaignRequest, ActiveLearningCampaignRound, ActiveLearningCampaignStopReason,
     ActiveLearningExecutionFailure, DryRunActiveLearningCampaignExecutor,
+};
+
+pub use autonomous_engine::{
+    execute_glioma_autonomous_research_engine, GliomaAutonomousResearchEngineCycle,
+    GliomaAutonomousResearchEngineDisposition, GliomaAutonomousResearchEngineError,
+    GliomaAutonomousResearchEngineRequest, GliomaAutonomousResearchEngineRun,
+    GliomaAutonomousResearchEngineStopReason,
 };
 
 pub use autonomous_campaign::{

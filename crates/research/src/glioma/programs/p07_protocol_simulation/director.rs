@@ -290,7 +290,7 @@ fn validate_request(
         || request.intent.replay_identity.as_str().len() != 64
         || !checkpoint_order(&request.completed_checkpoints)
         || request.completed_checkpoints.windows(2).any(|pair| {
-            pair[0].stage_kind == pair[1].stage_kind || pair[0].artifact_id >= pair[1].artifact_id
+            pair[0].stage_kind == pair[1].stage_kind || pair[0].artifact_id == pair[1].artifact_id
         })
         || request.max_retries > 8
     {

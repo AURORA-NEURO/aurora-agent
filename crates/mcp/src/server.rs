@@ -485,6 +485,7 @@ use bioprism_research::{
     compile_typed_knowledge, design_preclinical_experiment, discriminate_mechanisms,
     dry_run_glioma_research, execute_federated_benchmark_campaign, execute_glioma_action_portfolio,
     execute_glioma_active_learning_campaign, execute_glioma_adaptive_allocation_campaign,
+    execute_glioma_autonomous_research_engine,
     execute_glioma_adaptive_mechanism_campaign, execute_glioma_autonomous_campaign,
     execute_glioma_autonomous_research_mission, execute_glioma_computation,
     execute_glioma_computation_campaign, execute_glioma_computation_portfolio,
@@ -537,6 +538,7 @@ use bioprism_research::{
     GliomaComputationCampaignRequest, GliomaComputationWorkflowRequest,
     GliomaEvidenceCampaignRequest, GliomaMissionRequest, GliomaReplicationCampaignRequest,
     GliomaResearchAutopilotRequest, GliomaResearchIntent, GliomaWorkflowRequest,
+    GliomaAutonomousResearchEngineRequest,
     InterpretationSynthesisRequest, GliomaResearchDirectorRequest,
     GraphFusionRequest, GraphFusionVector, HarmonizationRequest, HarmonizationVector,
     InformationDesignRequest, InstrumentCampaignRequest, InstrumentExecutionRequest,
@@ -2039,6 +2041,9 @@ impl Server {
             }
             "glioma_research_director_execute" => {
                 self.glioma_research_director_execute(&arguments)
+            }
+            "glioma_autonomous_research_engine_execute" => {
+                self.glioma_autonomous_research_engine_execute(&arguments)
             }
             "glioma_interpretation_synthesize" => {
                 self.glioma_interpretation_synthesize(&arguments)
@@ -3968,6 +3973,40 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma research director run: {error}"))
+    }
+
+    /// Run the end-to-end autonomous glioma engine. The MCP adapter uses a deterministic local
+    /// worker for rehearsal; an institution-owned caller can provide an approved executor to the
+    /// same research-crate function for real preclinical computation or instrument gateways.
+    fn glioma_autonomous_research_engine_execute(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: GliomaAutonomousResearchEngineRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| {
+                    "glioma_autonomous_research_engine_execute requires request".to_string()
+                })?,
+        )
+        .map_err(|error| format!("invalid glioma autonomous research engine request: {error}"))?;
+        let mut executor = DryRunGliomaActionExecutor;
+        let engine = execute_glioma_autonomous_research_engine(&request, &mut executor)
+            .map_err(|error| format!("glioma autonomous research engine refused: {error}"))?;
+        serde_json::to_value(json!({
+            "engine": engine,
+            "dispatch": "dry_run",
+            "simulation_only": true,
+            "guarantees": [
+                "the engine compiles the high-level glioma intent into the closed dependency graph before each cycle",
+                "only returned typed local artifacts become downstream checkpoints; stale or missing artifacts cannot unlock work",
+                "each cycle preserves selected actions, execution outcomes, negative evidence, uncertainty, budget, and policy holds",
+                "bounded retries, instrument and federation permissions, and preclinical data-locality constraints remain active",
+                "the MCP route performs no real assay, instrument effect, clinical decision, or raw-data movement"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma autonomous research engine run: {error}"))
     }
 
     /// Convert a typed cross-family interpretation into a bounded next-action frontier.  The
@@ -46286,6 +46325,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_computation_campaign_execute",
                 "glioma_computation_workflow_execute",
                 "glioma_research_director_execute",
+                "glioma_autonomous_research_engine_execute",
                 "glioma_interpretation_synthesize",
                 "glioma_adaptive_research_frontier",
                 "glioma_robustness_suite",
@@ -53357,6 +53397,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "GliomaResearchDirectorRequest1@1 with GliomaResearchIntent, focus, local typed checkpoints, budget, policy switches, selection weights, retry bound, and artifact requirement."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_autonomous_research_engine_execute",
+        "description": "Run the end-to-end autonomous preclinical glioma research engine. It compiles a high-level intent into the closed stage graph, executes bounded local cycles, promotes only returned typed artifacts into downstream checkpoints, and replans evidence, multimodal, mechanism, experiment, computation, replication, release, and federation work. Negative, partial, blocked, budget, policy, and no-progress states remain first-class; MCP uses a deterministic synthetic worker and never performs real assays, instrument effects, clinical decisions, or raw-data movement.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "GliomaAutonomousResearchEngineRequest1@1 with high-level GliomaResearchIntent, focus, typed starting checkpoints, cycle/action/budget bounds, authority switches, selection weights, retry bound, and local-artifact policy."}
             },
             "required": ["request"]
         }
