@@ -4,6 +4,7 @@ use crate::glioma::catalog::{glioma_program_catalog, GliomaProgramDescriptor, Gl
 
 pub mod action_planner;
 pub mod adaptive_policy;
+pub mod clonal_evolution;
 pub mod counterfactual;
 pub mod discrimination;
 pub mod discrimination_campaign;
@@ -25,6 +26,11 @@ pub use adaptive_policy::{
     AdaptiveMechanismPolicyError, AdaptiveMechanismPolicyExecutor,
     AdaptiveMechanismPolicyPosterior, AdaptiveMechanismPolicyRequest, AdaptiveMechanismPolicyStep,
     AdaptiveMechanismPrediction, DryRunAdaptiveMechanismPolicyExecutor,
+};
+pub use clonal_evolution::{
+    analyze_glioma_clonal_evolution, CloneMarker, CloneMarkerState, CloneProfile, ClonalEdge,
+    ClonalEvolutionDisposition, ClonalEvolutionError, ClonalEvolutionGraph,
+    ClonalEvolutionRequest, ClonalNode, ClonalRelation,
 };
 pub use counterfactual::{
     simulate_glioma_counterfactual, CounterfactualContrast, CounterfactualDirection,

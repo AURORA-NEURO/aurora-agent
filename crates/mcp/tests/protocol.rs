@@ -314,7 +314,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 57;
-const TOOL_DEFINITION_COUNT: usize = 607;
+const TOOL_DEFINITION_COUNT: usize = 608;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -3366,6 +3366,50 @@ fn glioma_temporal_multimodal_fusion_replays_longitudinal_state_transitions() {
     assert_eq!(response["simulation_only"], json!(true));
     assert_eq!(response["analysis"]["disposition"], json!("qualified"));
     assert_eq!(response["analysis"]["emerging_transition_order"].as_array().unwrap().len(), 1);
+}
+
+#[test]
+fn glioma_clonal_evolution_reconstructs_preclinical_marker_branch() {
+    let mut server = server();
+    let hash = "0".repeat(64);
+    let profile = |id: &str, clone_id: &str, timepoint: u32, markers: Vec<(&str, &str)>| {
+        json!({
+            "profile_id": id,
+            "study_id": "clonal-protocol-study",
+            "sample_lineage": "lineage-a",
+            "clone_id": clone_id,
+            "timepoint": timepoint,
+            "model_system": "organoid",
+            "abundance_milli": if timepoint == 0 { 400 } else { 700 },
+            "artifact": {"artifact_id": id, "content_hash": hash, "content_type": "application/json", "local_only": true, "contains_human_data": false, "contains_direct_identifiers": false},
+            "markers": markers.into_iter().map(|(marker_id, state)| json!({"marker_id": marker_id, "state": state, "confidence_milli": 900})).collect::<Vec<_>>()
+        })
+    };
+    let response = call(
+        &mut server,
+        "glioma_clonal_evolution",
+        json!({
+            "request": {
+                "study_id": "clonal-protocol-study",
+                "model_system": "organoid",
+                "min_shared_markers": 2,
+                "min_parent_score_milli": 600,
+                "max_time_gap": 5,
+                "min_abundance_milli": 1,
+                "allow_parallel_branches": true,
+                "max_parent_candidates": 2
+            },
+            "profiles": [
+                profile("root", "clone-a", 0, vec![("egfr", "present"), ("tp53", "present")]),
+                profile("child", "clone-b", 1, vec![("egfr", "present"), ("tp53", "present"), ("ecDNA", "present")])
+            ]
+        }),
+    );
+    assert_eq!(response["dispatch"], json!("not_started"));
+    assert_eq!(response["simulation_only"], json!(true));
+    assert_eq!(response["analysis"]["disposition"], json!("qualified"));
+    assert_eq!(response["analysis"]["branch_order"].as_array().unwrap().len(), 1);
+    assert_eq!(response["analysis"]["gained_marker_order"], json!(["ecDNA"]));
 }
 
 #[test]

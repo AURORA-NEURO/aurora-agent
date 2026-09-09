@@ -97,7 +97,8 @@ pub use programs::p04_decision_context::{
     DecisionContextRequest, DryRunDecisionContextCampaignExecutor,
 };
 pub use programs::p05_mechanism_exploration::{
-    analyze_glioma_pathway_activity, compile_mechanism_action_plan, discriminate_mechanisms,
+    analyze_glioma_clonal_evolution, analyze_glioma_pathway_activity, compile_mechanism_action_plan,
+    discriminate_mechanisms,
     execute_glioma_adaptive_mechanism_campaign, execute_glioma_mechanism_discrimination_campaign,
     plan_glioma_adaptive_mechanism_policy, plan_glioma_robust_intervention_portfolio,
     propagate_glioma_mechanism_graph, simulate_glioma_counterfactual,
@@ -128,7 +129,9 @@ pub use programs::p05_mechanism_exploration::{
     PathwayActivityError, PathwayActivityNode, PathwayActivityObservation, PathwayActivityRecord,
     PathwayActivityRequest, PortfolioDirection, RobustInterventionCandidate,
     RobustInterventionPortfolio, RobustInterventionRequest, RobustInterventionScore,
-    RobustPortfolioDisposition, RobustPortfolioError,
+    RobustPortfolioDisposition, RobustPortfolioError, CloneMarker, CloneMarkerState, CloneProfile,
+    ClonalEdge, ClonalEvolutionDisposition, ClonalEvolutionError, ClonalEvolutionGraph,
+    ClonalEvolutionRequest, ClonalNode, ClonalRelation,
 };
 pub use programs::p06_experiment_design::{
     allocate_glioma_assays, analyze_glioma_combination_synergy, analyze_glioma_dose_response,

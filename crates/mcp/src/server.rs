@@ -471,6 +471,7 @@ use bioprism_research::{
     analyze_glioma_causal_contrast, analyze_glioma_combination_synergy,
     analyze_glioma_dose_response, analyze_glioma_latent_factors, analyze_glioma_mediation,
     analyze_glioma_multimodal_graph_fusion, analyze_glioma_pathway_activity,
+    analyze_glioma_clonal_evolution,
     analyze_glioma_spatial_communication, analyze_glioma_spatial_niches,
     analyze_glioma_spatial_state_propagation, analyze_glioma_state_transitions,
     analyze_glioma_temporal_multimodal_fusion,
@@ -551,7 +552,7 @@ use bioprism_research::{
     RobustInterventionRequest, RobustnessRequest, SensitivityObservation, SensitivityRequest,
     SpatialCell, SpatialCommunicationCell, SpatialCommunicationRequest, SpatialNicheRequest,
     SpatialPropagationRequest, StateTransitionObservation, StateTransitionRequest,
-    TemporalFusionRequest, TemporalObservation,
+    TemporalFusionRequest, TemporalObservation, ClonalEvolutionRequest, CloneProfile,
     StaticGliomaActionPlanner, StaticGliomaComputationPlanner, StratifiedCausalRequest,
     StratifiedObservation, TrajectoryObservation, TrajectoryRequest, TransportStudy,
     TransportabilityRequest, TypedKnowledge, execute_glioma_research_director,
@@ -2036,6 +2037,7 @@ impl Server {
             "glioma_temporal_multimodal_fusion" => {
                 self.glioma_temporal_multimodal_fusion(&arguments)
             }
+            "glioma_clonal_evolution" => self.glioma_clonal_evolution(&arguments),
             "glioma_adaptive_research_frontier" => {
                 self.glioma_adaptive_research_frontier(&arguments)
             }
@@ -3760,6 +3762,40 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma temporal fusion: {error}"))
+    }
+
+    /// Infer a bounded marker-aware clonal-evolution graph from caller-supplied local
+    /// preclinical profiles. Parentage is a reproducible proposal with explicit ambiguity;
+    /// this route never claims a clinical phylogeny or executes a biological intervention.
+    fn glioma_clonal_evolution(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ClonalEvolutionRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_clonal_evolution requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma clonal evolution request: {error}"))?;
+        let profiles: Vec<CloneProfile> = serde_json::from_value(
+            arguments
+                .get("profiles")
+                .cloned()
+                .ok_or_else(|| "glioma_clonal_evolution requires profiles".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma clonal evolution profiles: {error}"))?;
+        let analysis = analyze_glioma_clonal_evolution(&request, &profiles)
+            .map_err(|error| format!("glioma clonal evolution refused: {error}"))?;
+        serde_json::to_value(json!({
+            "analysis": analysis,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "parent-child edges are bounded to the declared preclinical sample lineage and time window",
+                "marker gains, losses, unmeasured states, weak support, parallel branches, and unparented nodes remain explicit",
+                "the output is a mechanism-discovery graph proposal and not a clinical phylogeny or diagnosis",
+                "MCP executes no assay, moves no raw data, and makes no clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma clonal evolution: {error}"))
     }
 
     /// Direct one bounded, dependency-closed glioma research batch from a high-level intent.
@@ -46058,6 +46094,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_multimodal_latent_factors",
                 "glioma_multimodal_graph_fusion",
                 "glioma_temporal_multimodal_fusion",
+                "glioma_clonal_evolution",
                 "glioma_spatial_niches",
                 "glioma_spatial_communication",
                 "glioma_spatial_state_propagation",
@@ -53378,6 +53415,18 @@ pub fn tool_definitions() -> Vec<Value> {
                 "observations": {"type": "array", "items": {"type": "object"}, "description": "Local TemporalObservation1@1 records with sample/timepoint/modality identity, bounded FeatureValue1@1 values, and local artifact references."}
             },
             "required": ["request", "observations"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_clonal_evolution",
+        "description": "Infer a deterministic, marker-aware clonal-evolution graph from local preclinical glioma clone profiles. The bounded algorithm proposes parent-child edges within a declared sample lineage and time window, scores marker overlap and temporal proximity, retains gains, losses, parallel branches, unparented nodes, weak support, and unmeasured markers, and emits stable negative evidence. It is a mechanism-discovery graph proposal only: it never claims a clinical phylogeny, moves raw data, executes an assay, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ClonalEvolutionRequest1@1 with preclinical model binding, marker overlap/support floors, time-gap and abundance bounds, and parallel-branch policy."},
+                "profiles": {"type": "array", "items": {"type": "object"}, "description": "Local CloneProfile1@1 records with sample-lineage/timepoint identity, marker states, abundance, and local artifact references."}
+            },
+            "required": ["request", "profiles"]
         }
     }));
     definitions.push(json!({
