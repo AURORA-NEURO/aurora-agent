@@ -296,10 +296,12 @@ pub use programs::p10_interpretation_replication::{
     AdaptiveFrontierRequest, AdaptiveResearchFrontier, AdaptiveTarget,
 };
 pub use programs::p11_research_object_release::{
+    evaluate_glioma_release_gate,
     execute_glioma_replay_campaign, DryRunReplayCampaignExecutor, ReplayCampaign,
     ReplayCampaignDisposition, ReplayCampaignError, ReplayCampaignExecutor, ReplayCampaignRequest,
     ReplayCampaignRound, ReplayCampaignStopReason, ReplayExecutionFailure, ReplayObservation,
-    ReplayObservationStatus, ReplayTask,
+    ReplayObservationStatus, ReplayTask, ReleaseGateError, ReleaseGateEvaluation,
+    ReleaseGateRequest, ReleaseGateStatus, ReleaseReviewAttestation, ReleaseReviewDecision,
 };
 pub use programs::p12_federated_benchmarking::{
     analyze_federated_benchmark, execute_federated_benchmark_campaign,

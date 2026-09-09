@@ -314,7 +314,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 57;
-const TOOL_DEFINITION_COUNT: usize = 611;
+const TOOL_DEFINITION_COUNT: usize = 612;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -2979,6 +2979,60 @@ fn glioma_replay_campaign_executes_dependency_aware_release_check_in_sandbox() {
     assert_eq!(campaign["simulation_only"], json!(true));
     assert_eq!(campaign["campaign"]["disposition"], json!("reproducible"));
     assert_eq!(campaign["campaign"]["exact_match"], json!(true));
+}
+
+#[test]
+fn glioma_research_object_release_gate_requires_replay_and_independent_review() {
+    let mut server = server();
+    let hash = "0000000000000000000000000000000000000000000000000000000000000000";
+    let campaign = call(
+        &mut server,
+        "glioma_replay_campaign_execute",
+        json!({
+            "request": {
+                "release": {
+                    "research_id": "gate-mcp-research",
+                    "study_id": "gate-mcp-study",
+                    "objective": "release a reproducible preclinical glioma result",
+                    "plan_digest": hash,
+                    "execution_digest": hash,
+                    "replay_identity": hash,
+                    "program_order": ["p05-mechanism"],
+                    "artifacts": [{"artifact_id": "gate-artifact", "content_hash": hash, "content_type": "application/json", "local_only": true, "contains_human_data": false, "contains_direct_identifiers": false}],
+                    "negative_evidence": ["null-result-preserved"],
+                    "limitations": ["single-model-system"],
+                    "raw_data_local": true,
+                    "aggregate_only": true
+                },
+                "tasks": [{"task_id": "gate-task", "program_id": "p05-mechanism", "artifact_id": "gate-artifact", "expected_content_hash": hash, "cost_units": 1, "required": true, "deterministic": true, "depends_on": []}],
+                "budget_units": 1,
+                "max_rounds": 2,
+                "max_retries": 1,
+                "min_coverage_milli": 1000,
+                "require_exact_hash": true
+            }
+        }),
+    );
+    let gate = call(
+        &mut server,
+        "glioma_research_object_release_gate",
+        json!({
+            "request": {
+                "required_coverage_milli": 1000,
+                "require_exact_hash": true,
+                "require_reproducible": true,
+                "require_accountable_review": true,
+                "min_independent_approvals": 1,
+                "max_uncertainty_items": 8,
+                "reviews": [{"reviewer_id": "reviewer-a", "role": "independent-reproducibility-reviewer", "decision": "approve", "evidence_digest": hash, "independent": true}]
+            },
+            "campaign": campaign["campaign"].clone()
+        }),
+    );
+    assert_eq!(gate["dispatch"], json!("not_started"));
+    assert_eq!(gate["simulation_only"], json!(true));
+    assert_eq!(gate["gate"]["status"], json!("publishable"));
+    assert!(gate["gate"]["blocking_order"].as_array().unwrap().is_empty());
 }
 
 #[test]

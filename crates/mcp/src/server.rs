@@ -494,6 +494,7 @@ use bioprism_research::{
     execute_glioma_multimodal_ingestion_campaign, execute_glioma_multimodal_mechanism_campaign,
     execute_glioma_multimodal_mechanism_campaign_with_executor, execute_glioma_protocol,
     execute_glioma_replay_campaign, execute_glioma_replication_campaign,
+    evaluate_glioma_release_gate,
     execute_glioma_research_autopilot, execute_glioma_robust_active_learning_campaign,
     explore_mechanisms, generate_feature_catalog, glioma_program_catalog,
     harmonize_glioma_multimodal_batches, harmonize_multimodal_inputs, plan_decision_actions,
@@ -548,7 +549,8 @@ use bioprism_research::{
     MultimodalIngestionCampaignRequest, MultimodalMechanismCampaignRequest, MultimodalObservation,
     MultimodalRequest, PathwayActivityDefinition, PathwayActivityObservation,
     PathwayActivityRequest, ProtocolExecutionRequest, ProtocolSimulationRequest,
-    ReplayCampaignRequest, ReplicationRequest, ReplicationStudy, ResearchObjectRequest,
+    ReplayCampaign, ReplayCampaignRequest, ReleaseGateRequest, ReplicationRequest,
+    ReplicationStudy, ResearchObjectRequest,
     RobustActiveLearningCampaignRequest, RobustActiveLearningCandidate,
     RobustActiveLearningObservation, RobustActiveLearningRequest, RobustInterventionCandidate,
     RobustInterventionRequest, RobustnessRequest, SensitivityObservation, SensitivityRequest,
@@ -2150,6 +2152,9 @@ impl Server {
                 self.glioma_federated_benchmark_campaign_execute(&arguments)
             }
             "glioma_replay_campaign_execute" => self.glioma_replay_campaign_execute(&arguments),
+            "glioma_research_object_release_gate" => {
+                self.glioma_research_object_release_gate(&arguments)
+            }
             "glioma_research_object_prepare" => self.glioma_research_object_prepare(&arguments),
             "domain_evidence_harmonization_coverage" => {
                 self.domain_evidence_harmonization_coverage(&arguments)
@@ -6152,6 +6157,40 @@ impl Server {
             .map_err(|error| format!("glioma research-object preparation refused: {error}"))?;
         serde_json::to_value(output)
             .map_err(|error| format!("cannot encode glioma research-object manifest: {error}"))
+    }
+
+    /// Evaluate replay and review evidence before a preclinical research object enters signing.
+    /// The route emits a deterministic gate only; it never signs, publishes, moves raw data, or
+    /// makes a clinical decision.
+    fn glioma_research_object_release_gate(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ReleaseGateRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_research_object_release_gate requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma release-gate request: {error}"))?;
+        let campaign: ReplayCampaign = serde_json::from_value(
+            arguments
+                .get("campaign")
+                .cloned()
+                .ok_or_else(|| "glioma_research_object_release_gate requires campaign".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma replay campaign: {error}"))?;
+        let gate = evaluate_glioma_release_gate(&request, &campaign)
+            .map_err(|error| format!("glioma research-object release gate refused: {error}"))?;
+        serde_json::to_value(json!({
+            "gate": gate,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "replay coverage, exact hashes, manifest status, uncertainty, and review independence remain explicit",
+                "negative evidence is preserved as evidence and never converted into a publication pass",
+                "publishable means ready for accountable signing review, not signed or publicly released",
+                "MCP moves no raw data, creates no signature, and makes no clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma research-object release gate: {error}"))
     }
 
     fn compiled(
@@ -46280,6 +46319,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_federated_benchmark_consensus",
                 "glioma_federated_benchmark_campaign_execute",
                 "glioma_replay_campaign_execute",
+                "glioma_research_object_release_gate",
                 "glioma_research_object_prepare"
             ],
             "cli_entrypoints": [],
@@ -54196,6 +54236,18 @@ pub fn tool_definitions() -> Vec<Value> {
                 "request": {"type": "object", "description": "ReplayCampaignRequest1@1 with ResearchObjectRequest1@1, acyclic replay tasks, exact expected artifact hashes, dependency/cost declarations, coverage gate, budget, and retry bounds."}
             },
             "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_research_object_release_gate",
+        "description": "Evaluate whether a preclinical glioma research-object replay campaign satisfies the declared release predicates for accountable signing review. Checks exact coverage, hash agreement, manifest status, uncertainty, negative evidence, and independent review attestations while preserving every blocker and remediation. Publishable means ready for human signing review only; MCP never signs, publishes, moves raw data, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ReleaseGateRequest1@1 with coverage/hash/reproducibility thresholds, uncertainty bound, approval quorum, and review attestations."},
+                "campaign": {"type": "object", "description": "Validated GliomaResearchObjectReplayCampaign1@1 produced by glioma_replay_campaign_execute."}
+            },
+            "required": ["request", "campaign"]
         }
     }));
     definitions.push(json!({

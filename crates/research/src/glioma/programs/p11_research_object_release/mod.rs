@@ -3,12 +3,18 @@
 use crate::glioma::catalog::{glioma_program_catalog, GliomaProgramDescriptor, GliomaProgramId};
 
 pub mod replay;
+pub mod release_gate;
 
 pub use replay::{
     execute_glioma_replay_campaign, DryRunReplayCampaignExecutor, ReplayCampaign,
     ReplayCampaignDisposition, ReplayCampaignError, ReplayCampaignExecutor, ReplayCampaignRequest,
     ReplayCampaignRound, ReplayCampaignStopReason, ReplayExecutionFailure, ReplayObservation,
     ReplayObservationStatus, ReplayTask,
+};
+
+pub use release_gate::{
+    evaluate_glioma_release_gate, ReleaseGateError, ReleaseGateEvaluation, ReleaseGateRequest,
+    ReleaseGateStatus, ReleaseReviewAttestation, ReleaseReviewDecision,
 };
 
 pub const PROGRAM_ID: GliomaProgramId = GliomaProgramId::ResearchObjectRelease;

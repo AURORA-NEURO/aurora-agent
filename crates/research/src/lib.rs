@@ -311,6 +311,8 @@ pub use glioma::{
     ProtocolExecutionRequest, ProtocolExecutionStopReason, ProtocolResource, ProtocolResourceKind,
     ProtocolSimulation, ProtocolSimulationError, ProtocolSimulationRequest, ProtocolTask,
     ProtocolTaskDisposition, ProtocolTaskResult, ReplayCampaign, ReplayCampaignDisposition,
+    evaluate_glioma_release_gate, ReleaseGateError, ReleaseGateEvaluation, ReleaseGateRequest,
+    ReleaseGateStatus, ReleaseReviewAttestation, ReleaseReviewDecision,
     ReplayCampaignError, ReplayCampaignExecutor, ReplayCampaignRequest, ReplayCampaignRound,
     ReplayCampaignStopReason, ReplayExecutionFailure, ReplayObservation, ReplayObservationStatus,
     ReplayTask, ReplicationAssessment, ReplicationMetaAnalysis, ReplicationRequest,
