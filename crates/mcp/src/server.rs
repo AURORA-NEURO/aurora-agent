@@ -491,6 +491,7 @@ use bioprism_research::{
     execute_glioma_decision_context_campaign,
     execute_glioma_knowledge_resolution_campaign,
     execute_glioma_multimodal_ingestion_campaign,
+    execute_glioma_adaptive_allocation_campaign,
     execute_glioma_replication_campaign,
     execute_glioma_autonomous_research_mission,
     execute_glioma_multi_fidelity_campaign,
@@ -508,7 +509,8 @@ use bioprism_research::{
     select_glioma_actions, simulate_glioma_counterfactual, simulate_glioma_counterfactual_ensemble,
     simulate_glioma_protocol, surveil_glioma_evidence, validate_feature_catalog,
     ActionPortfolioExecutionRequest, ActiveLearningCampaignRequest, ActiveLearningCandidate,
-    ActiveLearningObservation, ActiveLearningRequest, AdaptiveAllocationRequest,
+    ActiveLearningObservation, ActiveLearningRequest, AdaptiveAllocationCampaignRequest,
+    AdaptiveAllocationRequest, DryRunAdaptiveAllocationCampaignExecutor,
     AdaptiveArmObservation, AdaptiveInformationCampaignRequest, AdaptiveInformationObservation,
     AnalysisDataset, AnalysisRequest, CalibrationRequest, CalibrationRun, CampaignAction,
     CampaignMechanism, CampaignObservation, CausalContrastRequest, ClosedLoopCampaignRequest,
@@ -2084,6 +2086,9 @@ impl Server {
             "glioma_information_design" => self.glioma_information_design(&arguments),
             "glioma_adaptive_information_campaign" => {
                 self.glioma_adaptive_information_campaign(&arguments)
+            }
+            "glioma_adaptive_allocation_campaign_execute" => {
+                self.glioma_adaptive_allocation_campaign_execute(&arguments)
             }
             "glioma_active_learning" => self.glioma_active_learning(&arguments),
             "glioma_active_learning_campaign_execute" => {
@@ -5211,6 +5216,41 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma adaptive information campaign: {error}"))
+    }
+
+    /// Execute a bounded adaptive replicate-allocation campaign through the deterministic local
+    /// sandbox. Each accepted aggregate batch updates the Beta posterior before the next arm is
+    /// selected; MCP never contacts hardware or makes a clinical decision.
+    fn glioma_adaptive_allocation_campaign_execute(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: AdaptiveAllocationCampaignRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| {
+                    "glioma_adaptive_allocation_campaign_execute requires request".to_string()
+                })?,
+        )
+        .map_err(|error| {
+            format!("invalid glioma adaptive-allocation campaign request: {error}")
+        })?;
+        let mut executor = DryRunAdaptiveAllocationCampaignExecutor;
+        let campaign = execute_glioma_adaptive_allocation_campaign(&request, &mut executor)
+            .map_err(|error| format!("glioma adaptive-allocation campaign refused: {error}"))?;
+        serde_json::to_value(json!({
+            "campaign": campaign,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "each arm batch is selected from the posterior-aware allocator and replanned after the returned successes/failures",
+                "aggregate observations are arm-bound, local-only, artifact-validated, and require exact replicate accounting",
+                "underpowered, negative, risk-blocked, budget, retry, no-progress, and executor-failure states remain explicit",
+                "MCP never contacts hardware, moves raw biology, or makes a clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma adaptive-allocation campaign: {error}"))
     }
 
     /// Select the next local preclinical glioma assay with an uncertainty-aware kernel surrogate.
@@ -45833,6 +45873,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_stratified_causal_adjustment",
                 "glioma_dose_response",
                 "glioma_adaptive_allocation",
+                "glioma_adaptive_allocation_campaign_execute",
                 "glioma_closed_loop_campaign",
                 "glioma_combination_synergy",
                 "glioma_multimodal_concordance",
@@ -52992,6 +53033,17 @@ pub fn tool_definitions() -> Vec<Value> {
                 "arms": {"type": "array", "items": {"type": "object"}, "description": "Local AdaptiveArmObservation1@1 values containing de-identified binary assay counts and artifact references."}
             },
             "required": ["request", "arms"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_adaptive_allocation_campaign_execute",
+        "description": "Run a bounded autonomous preclinical glioma replicate-allocation campaign in the local deterministic sandbox. It selects one arm from Beta-posterior allocation, executes an exact aggregate replicate batch through a caller-owned adapter, validates the local artifact, merges successes/failures, and replans until negative, budget, no-allocation, retry, executor-failure, or round limits stop progress. The route never contacts hardware, moves raw biology, chooses a clinical dose, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "AdaptiveAllocationCampaignRequest1@1 containing AdaptiveAllocationRequest1@1, local AdaptiveArmObservation1@1 arms, round/retry bounds, and negative-stop policy."}
+            },
+            "required": ["request"]
         }
     }));
     definitions.push(json!({

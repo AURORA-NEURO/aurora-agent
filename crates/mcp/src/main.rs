@@ -96,6 +96,7 @@ fn main() {
                      glioma_multi_fidelity_optimize,\n\
                      glioma_stratified_causal_adjustment,\n\
                      glioma_adaptive_allocation,\n\
+                     glioma_adaptive_allocation_campaign_execute,\n\
                      glioma_closed_loop_campaign,\n\
                      glioma_evidence_surveillance,\n\
                      glioma_evidence_priority,\n\

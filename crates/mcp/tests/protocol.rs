@@ -314,7 +314,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 57;
-const TOOL_DEFINITION_COUNT: usize = 600;
+const TOOL_DEFINITION_COUNT: usize = 601;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -1599,6 +1599,46 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
         adaptive_information_campaign["campaign"]["next_action_order"],
         json!(["separating"])
     );
+
+    let adaptive_allocation_campaign = call(
+        &mut server,
+        "glioma_adaptive_allocation_campaign_execute",
+        json!({
+            "request": {
+                "allocation": {
+                    "objective": "allocate organoid invasion replicates",
+                    "model_system": "organoid",
+                    "control_arm_id": "control",
+                    "target_effect_milli": 100,
+                    "min_replicates_per_arm": 3,
+                    "min_probability_milli": 700,
+                    "max_posterior_uncertainty_milli": 200,
+                    "exploration_weight_milli": 300,
+                    "max_selected_arms": 1,
+                    "max_new_replicates": 1,
+                    "budget_units": 2,
+                    "risk_ceiling_milli": 700
+                },
+                "arms": [
+                    {"arm_id":"control","label":"vehicle control","model_system":"organoid","successes":1,"failures":1,"prior_alpha":1,"prior_beta":1,"risk_milli":100,"cost_units":1,"artifact":{"artifact_id":"control-seed","content_hash":"0000000000000000000000000000000000000000000000000000000000000000","content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                    {"arm_id":"egfr","label":"EGFR perturbation","model_system":"organoid","successes":1,"failures":1,"prior_alpha":1,"prior_beta":1,"risk_milli":100,"cost_units":1,"artifact":{"artifact_id":"egfr-seed","content_hash":"0000000000000000000000000000000000000000000000000000000000000000","content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}}
+                ],
+                "max_rounds": 3,
+                "max_retries": 1,
+                "stop_on_negative": false
+            }
+        }),
+    );
+    assert_eq!(adaptive_allocation_campaign["dispatch"], json!("not_started"));
+    assert_eq!(adaptive_allocation_campaign["simulation_only"], json!(true));
+    assert!(!adaptive_allocation_campaign["campaign"]["rounds"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+    assert!(!adaptive_allocation_campaign["campaign"]["batches"]
+        .as_array()
+        .unwrap()
+        .is_empty());
 
     let instrument_calibration = call(
         &mut server,

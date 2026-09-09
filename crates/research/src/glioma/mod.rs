@@ -134,6 +134,7 @@ pub use programs::p05_mechanism_exploration::{
 };
 pub use programs::p06_experiment_design::{
     allocate_glioma_assays, analyze_glioma_combination_synergy, analyze_glioma_dose_response,
+    execute_glioma_adaptive_allocation_campaign,
     execute_glioma_adaptive_information_campaign, execute_glioma_closed_loop_campaign,
     plan_glioma_active_learning, plan_glioma_adaptive_information_campaign,
     plan_glioma_closed_loop_campaign, plan_glioma_information_design,
@@ -144,6 +145,11 @@ pub use programs::p06_experiment_design::{
     ActiveLearningRequest, ActiveLearningScore, AdaptiveAllocation, AdaptiveAllocationActionKind,
     AdaptiveAllocationDisposition, AdaptiveAllocationError, AdaptiveAllocationRequest,
     AdaptiveArmObservation, AdaptiveArmPosterior, AdaptiveInformationCampaignDisposition,
+    AdaptiveAllocationBatchObservation, AdaptiveAllocationCampaign,
+    AdaptiveAllocationCampaignDisposition, AdaptiveAllocationCampaignError,
+    AdaptiveAllocationCampaignExecutionFailure, AdaptiveAllocationCampaignExecutor,
+    AdaptiveAllocationCampaignRequest, AdaptiveAllocationCampaignRound,
+    AdaptiveAllocationCampaignStopReason, DryRunAdaptiveAllocationCampaignExecutor,
     AdaptiveInformationCampaignError, AdaptiveInformationCampaignExecution,
     AdaptiveInformationCampaignPlan, AdaptiveInformationCampaignRequest,
     AdaptiveInformationCampaignRound, AdaptiveInformationCampaignTermination,

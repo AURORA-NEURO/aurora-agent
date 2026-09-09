@@ -1685,6 +1685,7 @@ pub fn glioma_research_engine_manifest() -> CapabilityManifest {
             "adaptive mechanism policy scientist".into(),
             "causal mediation scientist".into(),
             "multi-fidelity experiment scheduler".into(),
+            "adaptive allocation campaign controller".into(),
             "continuous evidence operations scheduler".into(),
             "evidence-priority campaign executor".into(),
             "evidence-refresh campaign controller".into(),
@@ -1851,6 +1852,11 @@ pub fn glioma_research_engine_manifest() -> CapabilityManifest {
             TypedPort {
                 name: "glioma_adaptive_allocation".into(),
                 schema: "GliomaAdaptiveAllocation1@1".into(),
+                required: false,
+            },
+            TypedPort {
+                name: "glioma_adaptive_allocation_campaign".into(),
+                schema: "GliomaAdaptiveAllocationCampaign1@1".into(),
                 required: false,
             },
             TypedPort {

@@ -55,6 +55,8 @@ crates/research/src/glioma/
   programs/p08_instrument_robotics/calibration.rs
                                              P08 robust control calibration and Theil-Sen instrument drift detection
   programs/p06_experiment_design/adaptive_allocation.rs
+  programs/p06_experiment_design/adaptive_allocation_campaign.rs
+                                             P06 bounded posterior-aware replicate-allocation campaign with local batch execution and replanning
   programs/p06_experiment_design/information_design.rs
   programs/p06_experiment_design/adaptive_information_campaign.rs
                                              P06 conservative Beta-posterior sequential assay allocation and budgeted exploration
@@ -138,6 +140,7 @@ crates/research/src/glioma/
     p06_experiment_design/campaign.rs       P06 mechanism-aware closed-loop assay campaign controller and executor seam
     p06_experiment_design/information_design.rs P06 integer Bayesian assay selection by expected mechanism-information reduction
     p06_experiment_design/adaptive_information_campaign.rs P06 closed-loop posterior updating and re-planning through a caller-owned assay executor
+    p06_experiment_design/adaptive_allocation_campaign.rs P06 autonomous Beta-posterior replicate allocation with aggregate batch validation and posterior replanning
     p06_experiment_design/multi_fidelity.rs P06 cost-aware multi-fidelity surrogate optimization across screening, mechanistic, and validation models
     p06_experiment_design/active_learning.rs P06 uncertainty-aware kernel active learning for next-assay selection
     p06_experiment_design/robust_active_learning.rs
@@ -335,6 +338,12 @@ antagonism, and explicit unresolved cells for missing controls or replicates.
 P06 also includes sequential assay allocation (`allocate_glioma_assays`) using Beta posteriors,
 conservative Cantelli target-effect bounds, uncertainty exploration, replicate floors, risk
 ceilings, and a hard next-batch budget.
+P06 now also exposes `execute_glioma_adaptive_allocation_campaign`: a bounded controller that
+selects one arm, requests an exact aggregate replicate batch from a caller-owned local adapter,
+validates the returned artifact and success/failure count, updates the posterior, and replans. It
+keeps underpowered, negative, risk-blocked, budget, retry, no-progress, and executor-failure
+states explicit; the bundled MCP executor is simulation-only and never represents biological
+evidence.
 The engine-level action selector (`select_glioma_actions`) now uses a bounded deterministic beam
 search over executable action portfolios. It preserves multiple partial plans, discounts repeated
 modality/model pairs, and can select a prerequisite-plus-downstream bundle that has greater total
