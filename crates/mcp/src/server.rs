@@ -488,6 +488,7 @@ use bioprism_research::{
     execute_glioma_evidence_campaign, execute_glioma_instrument_plan, execute_glioma_protocol,
     execute_glioma_replication_campaign,
     execute_glioma_autonomous_research_mission,
+    execute_glioma_multi_fidelity_campaign,
     execute_glioma_research_autopilot, execute_glioma_robust_active_learning_campaign,
     explore_mechanisms, generate_feature_catalog, glioma_program_catalog,
     harmonize_glioma_multimodal_batches, harmonize_multimodal_inputs, plan_decision_actions,
@@ -519,6 +520,7 @@ use bioprism_research::{
     GliomaActionCandidate, GliomaAutonomousCampaignRequest, GliomaEvidenceCampaignRequest,
     GliomaResearchAutopilotRequest, GliomaResearchIntent, GliomaWorkflowRequest,
     GliomaMissionRequest,
+    DryRunMultiFidelityCampaignExecutor, MultiFidelityCampaignRequest,
     DryRunGliomaReplicationCampaignExecutor, GliomaReplicationCampaignRequest,
     GraphFusionRequest, GraphFusionVector, HarmonizationRequest, HarmonizationVector,
     PathwayActivityDefinition, PathwayActivityObservation, PathwayActivityRequest,
@@ -2069,6 +2071,9 @@ impl Server {
             }
             "glioma_autonomous_research_mission_execute" => {
                 self.glioma_autonomous_research_mission_execute(&arguments)
+            }
+            "glioma_multi_fidelity_campaign_execute" => {
+                self.glioma_multi_fidelity_campaign_execute(&arguments)
             }
             "glioma_federated_benchmark_consensus" => {
                 self.glioma_federated_benchmark_consensus(&arguments)
@@ -5376,6 +5381,40 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma autonomous research mission: {error}"))
+    }
+
+    /// Run the P06 closed-loop multi-fidelity optimizer with a deterministic local worker. The
+    /// MCP adapter is rehearsal-only; institutions provide the production assay or analysis
+    /// executor through the research crate's explicit trait.
+    fn glioma_multi_fidelity_campaign_execute(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: MultiFidelityCampaignRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| {
+                    "glioma_multi_fidelity_campaign_execute requires request".to_string()
+                })?,
+        )
+        .map_err(|error| format!("invalid glioma multi-fidelity campaign request: {error}"))?;
+        let mut executor = DryRunMultiFidelityCampaignExecutor;
+        let campaign = execute_glioma_multi_fidelity_campaign(&request, &mut executor)
+            .map_err(|error| format!("glioma multi-fidelity campaign refused: {error}"))?;
+        serde_json::to_value(json!({
+            "campaign": campaign,
+            "dispatch": "dry_run",
+            "simulation_only": true,
+            "guarantees": [
+                "screening, mechanistic, and validation candidates retain explicit fidelity and parent-support gates",
+                "transfer, neighbourhood, prior, and observed estimates are never conflated",
+                "each round replans only from returned typed local observations",
+                "duplicate replicate keys, missing artifacts, retries, worker failures, and budget stops remain explicit",
+                "the MCP route performs no instrument execution, clinical decision, or raw-data movement"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma multi-fidelity campaign: {error}"))
     }
 
     /// Compare aggregate benchmark outcomes from independent preclinical sites. Raw traces stay
@@ -45525,6 +45564,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_replication_meta_analyze",
                 "glioma_replication_campaign_execute",
                 "glioma_autonomous_research_mission_execute",
+                "glioma_multi_fidelity_campaign_execute",
                 "glioma_federated_benchmark_consensus",
                 "glioma_research_object_prepare"
             ],
@@ -53189,6 +53229,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "GliomaMissionRequest1@1 with mission objective, bounded typed action candidates, completed actions, selection policy, stage/model/modality/information/uncertainty gates, retry and round limits, and local-artifact policy."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_multi_fidelity_campaign_execute",
+        "description": "Run a bounded closed-loop preclinical glioma campaign across screening, mechanistic, and validation fidelity levels. Recalibrates paired-fidelity bias and reliability from returned typed observations, keeps prior/transfer/neighbourhood estimates distinct from measured results, and admits higher-fidelity candidates only after lower-fidelity support gates. MCP uses a synthetic worker; production assay or analysis executors and raw-data access remain institution-local.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "MultiFidelityCampaignRequest1@1 with optimization policy, FidelityCandidate1@1 registry, prior local observations, round/retry bounds, and artifact policy."}
             },
             "required": ["request"]
         }

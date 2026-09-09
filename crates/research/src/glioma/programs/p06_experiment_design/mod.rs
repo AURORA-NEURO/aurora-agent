@@ -9,6 +9,7 @@ pub mod campaign;
 pub mod dose_response;
 pub mod information_design;
 pub mod multi_fidelity;
+pub mod multi_fidelity_campaign;
 pub mod robust_active_learning;
 pub mod synergy;
 
@@ -52,6 +53,12 @@ pub use multi_fidelity::{
     FidelityCandidate, FidelityEstimate, FidelityLevel, FidelityObservation,
     MultiFidelityDisposition, MultiFidelityOptimizationError, MultiFidelityOptimizationPlan,
     MultiFidelityOptimizationRequest, OptimizationDirection,
+};
+pub use multi_fidelity_campaign::{
+    execute_glioma_multi_fidelity_campaign, DryRunMultiFidelityCampaignExecutor,
+    MultiFidelityCampaign, MultiFidelityCampaignDisposition, MultiFidelityCampaignError,
+    MultiFidelityCampaignExecutor, MultiFidelityCampaignRequest, MultiFidelityCampaignRound,
+    MultiFidelityCampaignStopReason, MultiFidelityExecutionFailure,
 };
 
 pub use robust_active_learning::{

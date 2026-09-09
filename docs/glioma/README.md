@@ -128,6 +128,8 @@ crates/research/src/glioma/
     p06_experiment_design/active_learning.rs P06 uncertainty-aware kernel active learning for next-assay selection
     p06_experiment_design/robust_active_learning.rs
                                              P06 model-ensemble lower-tail active learning under disagreement
+    p06_experiment_design/multi_fidelity_campaign.rs
+                                             P06 closed-loop screening-to-mechanistic/validation campaign with transfer calibration gates
     p03_multimodal_ingestion_qc/concordance.rs
                                              P03 feature-level modality concordance analysis
   p03_multimodal_ingestion_qc/consensus.rs
@@ -375,6 +377,14 @@ information-gain, model/modality, and uncertainty gates. Negative results remain
 findings, while failed or partial effects terminate the mission. This is the cross-program
 autonomous engine loop a researcher can run locally without turning a score or dry-run into a
 biological conclusion.
+P06 also exposes the closed-loop multi-fidelity campaign
+(`execute_glioma_multi_fidelity_campaign`). It repeatedly executes the optimizer's selected
+screening, mechanistic, or validation conditions through a caller-owned local worker, recalibrates
+paired-fidelity bias and reliability from the observations that actually return, and keeps prior,
+transfer, neighbourhood, and observed estimates distinct. Higher-fidelity candidates remain
+blocked until their declared lower-fidelity support is qualified; retries, duplicate replicate
+keys, missing artifacts, budget exhaustion, and worker failure remain explicit instead of being
+converted into a validation claim.
 P08 now also includes deterministic instrument preflight (`preflight_glioma_instrument`). It combines
 qualified calibration, live interlock telemetry, typed operation parameters, operator authorization,
 serialized scheduling, and risk/duration budgets into a dispatch-permitted or fail-closed plan. The

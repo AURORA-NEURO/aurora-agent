@@ -69,6 +69,7 @@ fn main() {
                      glioma_decision_action_plan, glioma_knowledge_frontier,\n\
                      glioma_multimodal_consensus, glioma_replication_meta_analyze, glioma_replication_campaign_execute,\n\
                      glioma_autonomous_research_mission_execute,\n\
+                     glioma_multi_fidelity_campaign_execute,\n\
                      glioma_autonomous_campaign_execute,\n\
                      glioma_research_autopilot_execute,\n\
                      glioma_evidence_campaign_execute,\n\

@@ -314,7 +314,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 57;
-const TOOL_DEFINITION_COUNT: usize = 590;
+const TOOL_DEFINITION_COUNT: usize = 591;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -2463,6 +2463,48 @@ fn glioma_autonomous_research_mission_adapts_frontier_in_sandbox() {
     assert_eq!(mission["simulation_only"], json!(true));
     assert_eq!(mission["mission"]["disposition"], json!("qualified"));
     assert_eq!(mission["mission"]["rounds"].as_array().unwrap().len(), 1);
+}
+
+#[test]
+fn glioma_multi_fidelity_campaign_replans_screening_batches_in_sandbox() {
+    let mut server = server();
+    let campaign = call(
+        &mut server,
+        "glioma_multi_fidelity_campaign_execute",
+        json!({
+            "request": {
+                "optimization": {
+                    "objective": "maximize preclinical glioma invasion suppression",
+                    "direction": "maximize",
+                    "budget_units": 6,
+                    "max_selections": 1,
+                    "min_replicates_per_candidate": 1,
+                    "exploration_weight_milli": 500,
+                    "exploitation_weight_milli": 300,
+                    "transfer_weight_milli": 200,
+                    "risk_penalty_milli": 1,
+                    "cost_penalty_milli": 1,
+                    "max_risk_milli": 800,
+                    "min_transfer_reliability_milli": 250,
+                    "baseline_milli": 0
+                },
+                "candidates": [
+                    {"candidate_id":"screen-egfr","design_id":"egfr","fidelity":"screening","model_system":"organoid","dose_milli":100,"combination_milli":0,"cost_units":2,"risk_milli":100,"parent_candidate_id":null,"max_replicates":2},
+                    {"candidate_id":"screen-matrix","design_id":"matrix","fidelity":"screening","model_system":"organoid","dose_milli":120,"combination_milli":0,"cost_units":2,"risk_milli":100,"parent_candidate_id":null,"max_replicates":2}
+                ],
+                "observations": [],
+                "max_rounds": 4,
+                "max_retries": 1,
+                "require_artifacts": true,
+                "stop_on_qualified": true
+            }
+        }),
+    );
+    assert_eq!(campaign["dispatch"], json!("dry_run"));
+    assert_eq!(campaign["simulation_only"], json!(true));
+    assert_eq!(campaign["campaign"]["disposition"], json!("qualified"));
+    assert!(campaign["campaign"]["rounds"].as_array().unwrap().len() >= 2);
+    assert!(campaign["campaign"]["observations"].as_array().unwrap().len() >= 2);
 }
 
 #[test]
