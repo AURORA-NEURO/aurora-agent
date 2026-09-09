@@ -5,6 +5,13 @@ use crate::glioma::catalog::{glioma_program_catalog, GliomaProgramDescriptor, Gl
 pub mod campaign;
 pub mod priority;
 pub mod surveillance;
+pub mod triangulation;
+
+pub use triangulation::{
+    triangulate_glioma_evidence, EvidenceTriangulation, EvidenceTriangulationDisposition,
+    EvidenceTriangulationError, EvidenceTriangulationRequest, TriangulatedClaim,
+    TriangulatedClaimVerdict,
+};
 
 pub use campaign::{
     execute_glioma_evidence_refresh_campaign, DryRunEvidenceRefreshCampaignExecutor,

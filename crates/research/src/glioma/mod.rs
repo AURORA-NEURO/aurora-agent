@@ -34,6 +34,9 @@ pub use multimodal::{
     harmonize_multimodal_inputs, MultimodalObservation, MultimodalQcReport, MultimodalRequest,
 };
 pub use programs::p01_evidence_surveillance::{
+    triangulate_glioma_evidence, EvidenceTriangulation, EvidenceTriangulationDisposition,
+    EvidenceTriangulationError, EvidenceTriangulationRequest, TriangulatedClaim,
+    TriangulatedClaimVerdict,
     execute_glioma_evidence_refresh_campaign, prioritize_glioma_evidence, surveil_glioma_evidence,
     DryRunEvidenceRefreshCampaignExecutor, EvidenceChange, EvidenceChangeKind,
     EvidencePriorityAction, EvidencePriorityActionKind, EvidencePriorityDisposition,

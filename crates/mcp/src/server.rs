@@ -513,6 +513,7 @@ use bioprism_research::{
     prioritize_glioma_evidence, prioritize_knowledge_frontier, propagate_glioma_mechanism_graph,
     qualify_evidence, select_glioma_actions, simulate_glioma_counterfactual,
     simulate_glioma_counterfactual_ensemble, simulate_glioma_protocol, surveil_glioma_evidence,
+    triangulate_glioma_evidence,
     validate_feature_catalog, ActionPortfolioExecutionRequest, ActiveLearningCampaignRequest,
     ActiveLearningCandidate, ActiveLearningObservation, ActiveLearningRequest,
     AdaptiveAllocationCampaignRequest, AdaptiveAllocationRequest, AdaptiveArmObservation,
@@ -537,7 +538,7 @@ use bioprism_research::{
     DryRunMultiFidelityCampaignExecutor, DryRunMultimodalIngestionCampaignExecutor,
     DryRunReplayCampaignExecutor, DryRunRobustActiveLearningCampaignExecutor,
     EvidencePriorityRequest, EvidenceRecord, EvidenceRefreshCampaignRequest, EvidenceRequest,
-    EvidenceSurveillanceRequest, ExperimentArm, ExperimentRequest,
+    EvidenceSurveillanceRequest, EvidenceTriangulationRequest, ExperimentArm, ExperimentRequest,
     FederatedBenchmarkCampaignRequest, FederatedBenchmarkRequest, FederatedBenchmarkSite,
     FederatedMechanismSite, FederatedMechanismTransportRequest,
     FidelityCandidate, FidelityObservation, GliomaActionCandidate, GliomaAutonomousCampaignRequest,
@@ -2105,6 +2106,7 @@ impl Server {
             "glioma_evidence_qualify" => self.glioma_evidence_qualify(&arguments),
             "glioma_evidence_surveillance" => self.glioma_evidence_surveillance(&arguments),
             "glioma_evidence_priority" => self.glioma_evidence_priority(&arguments),
+            "glioma_evidence_triangulate" => self.glioma_evidence_triangulate(&arguments),
             "glioma_knowledge_compile" => self.glioma_knowledge_compile(&arguments),
             "glioma_knowledge_compose" => self.glioma_knowledge_compose(&arguments),
             "glioma_knowledge_frontier" => self.glioma_knowledge_frontier(&arguments),
@@ -5032,6 +5034,39 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma evidence priority: {error}"))
+    }
+
+    /// Triangulate scoped glioma claims across independent source families and local artifacts.
+    /// This is a scientific synthesis route: it exposes contradiction, incomplete states, source
+    /// dominance, and next evidence actions without fetching literature or making a clinical claim.
+    fn glioma_evidence_triangulate(&self, arguments: &Value) -> Result<Value, String> {
+        let request: EvidenceTriangulationRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_evidence_triangulate requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma evidence triangulation request: {error}"))?;
+        let records: Vec<EvidenceRecord> = serde_json::from_value(
+            arguments
+                .get("records")
+                .cloned()
+                .ok_or_else(|| "glioma_evidence_triangulate requires records".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma evidence triangulation records: {error}"))?;
+        let output = triangulate_glioma_evidence(&request, &records)
+            .map_err(|error| format!("glioma evidence triangulation refused: {error}"))?;
+        serde_json::to_value(json!({
+            "triangulation": output,
+            "dispatch": "not_started",
+            "guarantees": [
+                "claim support must survive independent source-family and artifact floors",
+                "contradiction, negative, stale, unknown, and unmeasured records remain explicit",
+                "leave-one-artifact sensitivity exposes source-dominant claims before promotion",
+                "the route does not fetch literature, move raw data, infer causality, or make a clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma evidence triangulation: {error}"))
     }
 
     /// Compile caller-supplied local evidence into scoped, ranked preclinical glioma knowledge.
@@ -46563,6 +46598,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_evidence_qualify",
                 "glioma_evidence_surveillance",
                 "glioma_evidence_priority",
+                "glioma_evidence_triangulate",
                 "glioma_knowledge_compile",
                 "glioma_knowledge_compose",
                 "glioma_knowledge_frontier",
@@ -54057,6 +54093,18 @@ pub fn tool_definitions() -> Vec<Value> {
             "properties": {
                 "request": {"type": "object", "description": "EvidencePriorityRequest1@1 with objective, current epoch, recency half-life, required modality/model coverage, action bound, minimum priority, and weights summing to 1,000 milli-units."},
                 "records": {"type": "array", "items": {"type": "object"}, "description": "Current local EvidenceRecord1@1 snapshot; negative, stale, contradictory, unknown, and unmeasured records are valid inputs."}
+            },
+            "required": ["request", "records"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_evidence_triangulate",
+        "description": "Triangulate scoped preclinical glioma claims across independent evidence families and local artifacts. Computes support, negative and contradiction pressure, source-family diversity, independent-artifact count, leave-one-artifact sensitivity, and explicit qualified, partial, negative, or unresolved verdicts with next evidence actions. It never fetches literature, moves raw data, infers causality, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "EvidenceTriangulationRequest1@1 with source-family/artifact floors, support and contradiction gates, diversity, source-dominance, and claim bounds."},
+                "records": {"type": "array", "items": {"type": "object"}, "description": "Local EvidenceRecord1@1 values grouped by exact claim and scope; stale, negative, contradictory, unknown, and unmeasured records are retained."}
             },
             "required": ["request", "records"]
         }

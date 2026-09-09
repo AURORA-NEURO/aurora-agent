@@ -31,6 +31,7 @@
     "knowledge_frontier": "crates/research/src/glioma/programs/p02_evidence_knowledge/claim_frontier.rs",
     "evidence_priority": "crates/research/src/glioma/programs/p01_evidence_surveillance/priority.rs",
     "evidence_refresh_campaign": "crates/research/src/glioma/programs/p01_evidence_surveillance/campaign.rs",
+    "evidence_triangulation": "crates/research/src/glioma/programs/p01_evidence_surveillance/triangulation.rs",
     "knowledge_resolution_campaign": "crates/research/src/glioma/programs/p02_evidence_knowledge/campaign.rs",
     "multimodal_ingestion_campaign": "crates/research/src/glioma/programs/p03_multimodal_ingestion_qc/campaign.rs",
     "decision_context_campaign": "crates/research/src/glioma/programs/p04_decision_context/campaign.rs",
@@ -96,7 +97,7 @@
     "mcp": "crates/mcp/src/server.rs"
   },
   "programs": [
-    {"id": "P01", "slug": "evidence-surveillance", "folder": "p01_evidence_surveillance", "stage_kinds": ["evidence_surveillance"], "surfaces": ["surveil_glioma_evidence", "prioritize_glioma_evidence", "execute_glioma_evidence_refresh_campaign"]},
+    {"id": "P01", "slug": "evidence-surveillance", "folder": "p01_evidence_surveillance", "stage_kinds": ["evidence_surveillance"], "surfaces": ["surveil_glioma_evidence", "prioritize_glioma_evidence", "triangulate_glioma_evidence", "execute_glioma_evidence_refresh_campaign"]},
     {"id": "P02", "slug": "evidence-knowledge", "folder": "p02_evidence_knowledge", "stage_kinds": ["evidence_compilation"], "surfaces": ["compile_typed_knowledge", "compose_knowledge_graph", "prioritize_knowledge_frontier", "execute_glioma_knowledge_resolution_campaign"]},
     {"id": "P03", "slug": "multimodal-ingestion-qc", "folder": "p03_multimodal_ingestion_qc", "stage_kinds": ["multimodal_ingestion_qc"], "surfaces": ["harmonize_glioma_multimodal_batches", "analyze_multimodal_concordance", "analyze_multimodal_consensus", "analyze_glioma_latent_factors", "analyze_glioma_multimodal_graph_fusion", "analyze_glioma_temporal_multimodal_fusion", "analyze_glioma_spatial_niches", "analyze_glioma_spatial_communication", "analyze_glioma_spatial_state_propagation", "execute_glioma_multimodal_ingestion_campaign"]},
     {"id": "P04", "slug": "decision-context", "folder": "p04_decision_context", "stage_kinds": ["intent_normalization", "evidence_compilation"], "surfaces": ["compile_decision_context", "compile_decision_action_graph", "plan_decision_actions", "execute_glioma_decision_context_campaign"]},

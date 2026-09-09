@@ -349,7 +349,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 57;
-const TOOL_DEFINITION_COUNT: usize = 619;
+const TOOL_DEFINITION_COUNT: usize = 620;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -1925,6 +1925,80 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
     assert_eq!(
         evidence_surveillance["surveillance"]["actions"][0]["kind"],
         json!("investigate_contradiction")
+    );
+
+    let evidence_triangulation = call(
+        &mut server,
+        "glioma_evidence_triangulate",
+        json!({
+            "request": {
+                "objective": "triangulate EGFR invasion evidence",
+                "min_source_kinds": 3,
+                "min_independent_artifacts": 3,
+                "min_support_milli": 600,
+                "max_contradiction_milli": 200,
+                "min_diversity_milli": 1000,
+                "max_leave_one_artifact_shift_milli": 100,
+                "max_claims": 8
+            },
+            "records": [
+                {
+                    "evidence_id": "mcp-triangulation-1",
+                    "source_artifact": {"artifact_id":"mcp-triangulation-artifact-1","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-evidence+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},
+                    "source_kind": "literature",
+                    "claim": "EGFR signaling increases organoid invasion",
+                    "scope": "organoid:invasion",
+                    "modality": "functional_perturbation",
+                    "model_system": "organoid",
+                    "state": "supported",
+                    "relevance_milli": 900,
+                    "quality_milli": 900,
+                    "reproducibility_milli": 900,
+                    "release_epoch": 1
+                },
+                {
+                    "evidence_id": "mcp-triangulation-2",
+                    "source_artifact": {"artifact_id":"mcp-triangulation-artifact-2","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-evidence+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},
+                    "source_kind": "assay",
+                    "claim": "EGFR signaling increases organoid invasion",
+                    "scope": "organoid:invasion",
+                    "modality": "functional_perturbation",
+                    "model_system": "organoid",
+                    "state": "supported",
+                    "relevance_milli": 900,
+                    "quality_milli": 900,
+                    "reproducibility_milli": 900,
+                    "release_epoch": 1
+                },
+                {
+                    "evidence_id": "mcp-triangulation-3",
+                    "source_artifact": {"artifact_id":"mcp-triangulation-artifact-3","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-evidence+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},
+                    "source_kind": "replication",
+                    "claim": "EGFR signaling increases organoid invasion",
+                    "scope": "organoid:invasion",
+                    "modality": "functional_perturbation",
+                    "model_system": "organoid",
+                    "state": "supported",
+                    "relevance_milli": 900,
+                    "quality_milli": 900,
+                    "reproducibility_milli": 900,
+                    "release_epoch": 1
+                }
+            ]
+        }),
+    );
+    assert_eq!(evidence_triangulation["dispatch"], json!("not_started"));
+    assert_eq!(
+        evidence_triangulation["triangulation"]["disposition"],
+        json!("qualified")
+    );
+    assert_eq!(
+        evidence_triangulation["triangulation"]["qualified_order"].as_array().unwrap().len(),
+        1
+    );
+    assert_eq!(
+        evidence_triangulation["triangulation"]["claims"][0]["independent_artifact_count"],
+        json!(3)
     );
 
     let evidence_priority = call(
