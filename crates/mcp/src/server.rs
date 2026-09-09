@@ -471,7 +471,8 @@ use bioprism_research::{
     analyze_glioma_causal_contrast, analyze_glioma_combination_synergy,
     analyze_glioma_dose_response, analyze_glioma_latent_factors, analyze_glioma_mediation,
     analyze_glioma_multimodal_graph_fusion, analyze_glioma_pathway_activity,
-    analyze_glioma_clonal_evolution, plan_glioma_clone_continuation,
+    analyze_federated_mechanism_transport, analyze_glioma_clonal_evolution,
+    plan_glioma_clone_continuation,
     analyze_glioma_clone_panel_outcomes,
     analyze_glioma_spatial_communication, analyze_glioma_spatial_niches,
     analyze_glioma_spatial_state_propagation, analyze_glioma_state_transitions,
@@ -531,6 +532,7 @@ use bioprism_research::{
     EvidencePriorityRequest, EvidenceRecord, EvidenceRefreshCampaignRequest, EvidenceRequest,
     EvidenceSurveillanceRequest, ExperimentArm, ExperimentRequest,
     FederatedBenchmarkCampaignRequest, FederatedBenchmarkRequest, FederatedBenchmarkSite,
+    FederatedMechanismSite, FederatedMechanismTransportRequest,
     FidelityCandidate, FidelityObservation, GliomaActionCandidate, GliomaAutonomousCampaignRequest,
     GliomaComputationCampaignRequest, GliomaComputationWorkflowRequest,
     GliomaEvidenceCampaignRequest, GliomaMissionRequest, GliomaReplicationCampaignRequest,
@@ -2147,6 +2149,9 @@ impl Server {
             }
             "glioma_federated_benchmark_consensus" => {
                 self.glioma_federated_benchmark_consensus(&arguments)
+            }
+            "glioma_federated_mechanism_transport" => {
+                self.glioma_federated_mechanism_transport(&arguments)
             }
             "glioma_federated_benchmark_campaign_execute" => {
                 self.glioma_federated_benchmark_campaign_execute(&arguments)
@@ -6084,6 +6089,40 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma federated benchmark consensus: {error}"))
+    }
+
+    /// Analyze aggregate mechanism effects across federated preclinical model systems. This is a
+    /// value-only scientific transport analysis; no raw observation, assay, or clinical action is
+    /// dispatched by MCP.
+    fn glioma_federated_mechanism_transport(&self, arguments: &Value) -> Result<Value, String> {
+        let request: FederatedMechanismTransportRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_federated_mechanism_transport requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma federated mechanism transport request: {error}"))?;
+        let sites: Vec<FederatedMechanismSite> = serde_json::from_value(
+            arguments
+                .get("sites")
+                .cloned()
+                .ok_or_else(|| "glioma_federated_mechanism_transport requires sites".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma federated mechanism transport sites: {error}"))?;
+        let analysis = analyze_federated_mechanism_transport(&request, &sites)
+            .map_err(|error| format!("glioma federated mechanism transport refused: {error}"))?;
+        serde_json::to_value(json!({
+            "analysis": analysis,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "only aggregate mechanism effects, quality, replicate counts, signatures, and local artifact references cross the federation boundary",
+                "model-system coverage, similarity weighting, direction conflict, heterogeneity, and leave-one-site-out fragility remain explicit",
+                "underpowered, distant, low-quality, negative, partial, and unresolved sites are never imputed or silently excluded",
+                "the output is a preclinical transport analysis, not a clinical recommendation, treatment claim, or instrument command"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma federated mechanism transport: {error}"))
     }
 
     /// Run a bounded autonomous federated benchmark campaign. Only typed aggregate sites are
@@ -46317,6 +46356,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_autonomous_research_mission_execute",
                 "glioma_multi_fidelity_campaign_execute",
                 "glioma_federated_benchmark_consensus",
+                "glioma_federated_mechanism_transport",
                 "glioma_federated_benchmark_campaign_execute",
                 "glioma_replay_campaign_execute",
                 "glioma_research_object_release_gate",
@@ -54212,6 +54252,18 @@ pub fn tool_definitions() -> Vec<Value> {
             "properties": {
                 "request": {"type": "object", "description": "FederatedBenchmarkRequest1@1 with capability/world/metric binding, model and site/replicate floors, effect/signal thresholds, heterogeneity, spread, and influence bounds."},
                 "sites": {"type": "array", "items": {"type": "object"}, "description": "FederatedBenchmarkSite1@1 aggregate-only site scores with local artifact references; raw observations remain local."}
+            },
+            "required": ["request", "sites"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_federated_mechanism_transport",
+        "description": "Analyze aggregate preclinical glioma mechanism effects across federated model systems without moving raw observations. The deterministic transport analyzer weights site effects by bounded population similarity, quality, replicates, and uncertainty; reports model-system coverage, direction conflict, heterogeneity, site spread, and leave-one-site-out fragility; and preserves underpowered, distant, low-quality, negative, partial, and unresolved outcomes. It never executes an assay, makes a clinical decision, or exports raw data.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "FederatedMechanismTransportRequest1@1 with mechanism/model binding, target signature, replicate/quality floors, similarity scale, effect and transportability gates."},
+                "sites": {"type": "array", "items": {"type": "object"}, "description": "FederatedMechanismSite1@1 aggregate-only mechanism effects with bounded population signatures and local artifact references."}
             },
             "required": ["request", "sites"]
         }

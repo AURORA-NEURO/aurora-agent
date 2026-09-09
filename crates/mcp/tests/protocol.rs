@@ -314,7 +314,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 57;
-const TOOL_DEFINITION_COUNT: usize = 612;
+const TOOL_DEFINITION_COUNT: usize = 613;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -2932,6 +2932,42 @@ fn glioma_federated_benchmark_campaign_replans_aggregate_sites_in_sandbox() {
     assert_eq!(campaign["simulation_only"], json!(true));
     assert_eq!(campaign["campaign"]["rounds"].as_array().unwrap().len(), 1);
     assert_eq!(campaign["campaign"]["sites"].as_array().unwrap().len(), 2);
+}
+
+#[test]
+fn glioma_federated_mechanism_transport_preserves_model_and_direction_gates() {
+    let mut server = server();
+    let hash = "0000000000000000000000000000000000000000000000000000000000000000";
+    let analysis = call(
+        &mut server,
+        "glioma_federated_mechanism_transport",
+        json!({
+            "request": {
+                "objective": "transport invasion mechanism across preclinical models",
+                "mechanism_id": "invasion-mechanism",
+                "target_model_system": "organoid",
+                "target_signature": [0, 0, 0],
+                "min_sites": 2,
+                "min_replicates_per_site": 2,
+                "min_quality_milli": 700,
+                "similarity_scale_milli": 1000,
+                "effect_threshold_milli": 500,
+                "min_signal_to_noise_milli": 500,
+                "max_heterogeneity_milli": 250,
+                "max_site_spread_milli": 1000,
+                "max_leave_one_out_shift_milli": 500,
+                "require_target_model": true
+            },
+            "sites": [
+                {"site_id": "organoid-a", "study_id": "study-a", "mechanism_id": "invasion-mechanism", "model_system": "organoid", "effect_milli": 900, "uncertainty_milli": 100, "quality_milli": 900, "replicate_count": 3, "population_signature": [0, 0, 0], "artifact": {"artifact_id": "artifact-a", "content_hash": hash, "content_type": "application/json", "local_only": true, "contains_human_data": false, "contains_direct_identifiers": false}},
+                {"site_id": "mouse-b", "study_id": "study-b", "mechanism_id": "invasion-mechanism", "model_system": "mouse_model", "effect_milli": 850, "uncertainty_milli": 100, "quality_milli": 900, "replicate_count": 3, "population_signature": [1, 0, 0], "artifact": {"artifact_id": "artifact-b", "content_hash": hash, "content_type": "application/json", "local_only": true, "contains_human_data": false, "contains_direct_identifiers": false}}
+            ]
+        }),
+    );
+    assert_eq!(analysis["dispatch"], json!("not_started"));
+    assert_eq!(analysis["analysis"]["disposition"], json!("qualified"));
+    assert_eq!(analysis["analysis"]["included_order"].as_array().unwrap().len(), 2);
+    assert!(analysis["analysis"]["model_coverage"].as_array().unwrap().len() >= 2);
 }
 
 #[test]

@@ -88,6 +88,8 @@ crates/research/src/glioma/
     p11_research_object_release/release_gate.rs
                                              P11 replay-, provenance-, and review-aware release gate for accountable signing
     p12_federated_benchmarking/
+    p12_federated_benchmarking/mechanism_transport.rs
+                                             P12 aggregate-only cross-model mechanism transport and fragility analysis
   workflow.rs                               P07 adaptive campaign planner and guarded execution
     p07_protocol_simulation/simulator.rs    P07 deterministic resource-constrained scheduling
     p07_protocol_simulation/execution.rs   P07 guarded local protocol execution with retries

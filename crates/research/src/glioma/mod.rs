@@ -304,7 +304,8 @@ pub use programs::p11_research_object_release::{
     ReleaseGateRequest, ReleaseGateStatus, ReleaseReviewAttestation, ReleaseReviewDecision,
 };
 pub use programs::p12_federated_benchmarking::{
-    analyze_federated_benchmark, execute_federated_benchmark_campaign,
+    analyze_federated_benchmark, analyze_federated_mechanism_transport,
+    execute_federated_benchmark_campaign,
     DryRunFederatedBenchmarkCampaignExecutor, FederatedBenchmarkAction,
     FederatedBenchmarkActionKind, FederatedBenchmarkCampaign,
     FederatedBenchmarkCampaignDisposition, FederatedBenchmarkCampaignError,
@@ -313,6 +314,9 @@ pub use programs::p12_federated_benchmarking::{
     FederatedBenchmarkConsensus, FederatedBenchmarkContribution, FederatedBenchmarkDisposition,
     FederatedBenchmarkError, FederatedBenchmarkExecutionFailure, FederatedBenchmarkRequest,
     FederatedBenchmarkSite, FederatedBenchmarkSiteDisposition,
+    FederatedMechanismContribution, FederatedMechanismSite,
+    FederatedMechanismTransportAnalysis, FederatedMechanismTransportDisposition,
+    FederatedMechanismTransportError, FederatedMechanismTransportRequest, FederatedModelCoverage,
 };
 pub use release::{build_research_object_manifest, ResearchObjectManifest, ResearchObjectRequest};
 pub use replication::{
