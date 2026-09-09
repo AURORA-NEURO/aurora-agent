@@ -26,6 +26,8 @@ crates/research/src/glioma/
                                              P04 evidence-gap to typed next-action compilation
   programs/p04_decision_context/action_bridge.rs
                                              P04 compiler-to-executable action portfolio bridge
+  programs/p04_decision_context/campaign.rs
+                                             P04 bounded question-to-action campaign with evidence-driven replanning
   programs/p05_mechanism_exploration/discrimination.rs
                                              P05 residual-likelihood mechanism discrimination and next-assay information gain
   programs/p05_mechanism_exploration/graph_propagation.rs
@@ -221,7 +223,10 @@ It is a product capability route, not a hypothesis or a to-do item. Stable ids u
 
 The first tranche is implemented in P01, P02, P03, P05, P06, P08, P10, P11, and P12. P04 now also
 bridges compiled evidence gaps into the dependency-aware action selector, so a researcher can hand
-the returned `selected_order` directly to the local portfolio executor. P07 now also has an
+the returned `selected_order` directly to the local portfolio executor. P04 also includes a bounded
+question-to-action campaign that dispatches claim-scoped local actions, recompiles typed knowledge
+and decision context from returned evidence, and retains negative, contradictory, unresolved,
+omission, retry, and budget outcomes. P07 now also has an
 adaptive campaign planner (`plan_glioma_workflow`) and a guarded full-program executor that
 chooses deterministic next batches, closes over dependencies, and routes unresolved evidence,
 QC defects, contradictory mechanisms, underpowered designs, budget exhaustion, and approval gaps

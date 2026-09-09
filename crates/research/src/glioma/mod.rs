@@ -84,10 +84,14 @@ pub use programs::p03_multimodal_ingestion_qc::{
     SpatialPropagationRequest, SpatialPropagationTrajectory,
 };
 pub use programs::p04_decision_context::{
+    execute_glioma_decision_context_campaign,
     compile_decision_context, plan_decision_actions, DecisionAction, DecisionActionKind,
     DecisionActionPlan, DecisionActionPlanDisposition, DecisionActionPlanError,
     DecisionActionPlanRequest, DecisionContext, DecisionContextDisposition, DecisionContextError,
-    DecisionContextRequest,
+    DecisionContextRequest, DecisionContextCampaign, DecisionContextCampaignDisposition,
+    DecisionContextCampaignError, DecisionContextCampaignExecutionFailure,
+    DecisionContextCampaignExecutor, DecisionContextCampaignRequest, DecisionContextCampaignRound,
+    DecisionContextCampaignStopReason, DryRunDecisionContextCampaignExecutor,
 };
 pub use programs::p05_mechanism_exploration::{
     execute_glioma_adaptive_mechanism_campaign,

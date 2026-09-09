@@ -314,7 +314,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 57;
-const TOOL_DEFINITION_COUNT: usize = 598;
+const TOOL_DEFINITION_COUNT: usize = 599;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -2462,6 +2462,76 @@ fn glioma_knowledge_resolution_campaign_recompiles_frontier_in_sandbox() {
     assert_eq!(campaign["simulation_only"], json!(true));
     assert_eq!(campaign["campaign"]["disposition"], json!("qualified"));
     assert_eq!(campaign["campaign"]["final_knowledge"]["disposition"], json!("qualified"));
+    assert_eq!(campaign["campaign"]["rounds"].as_array().unwrap().len(), 1);
+}
+
+#[test]
+fn glioma_decision_context_campaign_dispatches_claim_scoped_action_in_sandbox() {
+    let mut server = server();
+    let hash = "0".repeat(64);
+    let campaign = call(
+        &mut server,
+        "glioma_decision_context_campaign_execute",
+        json!({
+            "request": {
+                "knowledge": {
+                    "objective": "rank glioma invasion actions",
+                    "required_modalities": ["genomics"],
+                    "required_model_systems": ["organoid"],
+                    "min_support_milli": 700,
+                    "min_sources_per_claim": 1,
+                    "max_claims": 8
+                },
+                "context": {
+                    "objective": "rank glioma invasion actions",
+                    "max_actions": 8,
+                    "default_cost_units": 2
+                },
+                "action_plan": {
+                    "objective": "rank glioma invasion actions",
+                    "completed_action_order": [],
+                    "selection": {
+                        "budget_units": 2,
+                        "max_actions": 1,
+                        "approval_granted": true,
+                        "allow_instrument_execution": false,
+                        "allow_federation": false,
+                        "weights": {
+                            "information_gain": 20,
+                            "frontier_novelty": 15,
+                            "workflow_leverage": 15,
+                            "cross_stage_unlock": 15,
+                            "reproducibility_safety": 15,
+                            "federation_value": 10,
+                            "feasibility": 10
+                        }
+                    }
+                },
+                "records": [{
+                    "evidence_id": "decision-campaign-seed",
+                    "source_artifact": {"artifact_id":"decision-campaign-artifact","content_hash":hash,"content_type":"application/vnd.aurora.glioma-evidence+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},
+                    "source_kind": "dataset",
+                    "claim": "EGFR signaling increases invasion",
+                    "scope": "preclinical glioma",
+                    "modality": "genomics",
+                    "model_system": "organoid",
+                    "state": "supported",
+                    "relevance_milli": 900,
+                    "quality_milli": 900,
+                    "reproducibility_milli": 900,
+                    "release_epoch": 1
+                }],
+                "budget_units": 2,
+                "max_rounds": 2,
+                "max_retries": 1,
+                "stop_on_qualified": true
+            }
+        }),
+    );
+    assert_eq!(campaign["dispatch"], json!("dry_run"));
+    assert_eq!(campaign["simulation_only"], json!(true));
+    assert_eq!(campaign["campaign"]["disposition"], json!("qualified"));
+    assert_eq!(campaign["campaign"]["final_action_plan"]["disposition"], json!("no_runnable_actions"));
     assert_eq!(campaign["campaign"]["rounds"].as_array().unwrap().len(), 1);
 }
 

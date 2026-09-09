@@ -488,6 +488,7 @@ use bioprism_research::{
     execute_glioma_multimodal_mechanism_campaign_with_executor,
     execute_glioma_evidence_campaign, execute_glioma_instrument_plan, execute_glioma_protocol,
     execute_glioma_evidence_refresh_campaign,
+    execute_glioma_decision_context_campaign,
     execute_glioma_knowledge_resolution_campaign,
     execute_glioma_multimodal_ingestion_campaign,
     execute_glioma_replication_campaign,
@@ -527,6 +528,7 @@ use bioprism_research::{
     GliomaActionCandidate, GliomaAutonomousCampaignRequest, GliomaEvidenceCampaignRequest,
     DryRunEvidenceRefreshCampaignExecutor, EvidenceRefreshCampaignRequest,
     DryRunKnowledgeResolutionCampaignExecutor, KnowledgeResolutionCampaignRequest,
+    DecisionContextCampaignRequest, DryRunDecisionContextCampaignExecutor,
     DryRunMultimodalIngestionCampaignExecutor, MultimodalIngestionCampaignRequest,
     GliomaResearchAutopilotRequest, GliomaResearchIntent, GliomaWorkflowRequest,
     GliomaMissionRequest,
@@ -2003,6 +2005,9 @@ impl Server {
             }
             "glioma_knowledge_resolution_campaign_execute" => {
                 self.glioma_knowledge_resolution_campaign_execute(&arguments)
+            }
+            "glioma_decision_context_campaign_execute" => {
+                self.glioma_decision_context_campaign_execute(&arguments)
             }
             "glioma_multimodal_ingestion_campaign_execute" => {
                 self.glioma_multimodal_ingestion_campaign_execute(&arguments)
@@ -3498,6 +3503,37 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma multimodal ingestion campaign: {error}"))
+    }
+
+    /// Compile and dispatch a bounded P04 question-to-action campaign through a local adapter.
+    fn glioma_decision_context_campaign_execute(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: DecisionContextCampaignRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| {
+                    "glioma_decision_context_campaign_execute requires request".to_string()
+                })?,
+        )
+        .map_err(|error| format!("invalid glioma decision-context campaign request: {error}"))?;
+        let mut executor = DryRunDecisionContextCampaignExecutor;
+        let campaign = execute_glioma_decision_context_campaign(&request, &mut executor)
+            .map_err(|error| format!("glioma decision-context campaign refused: {error}"))?;
+        serde_json::to_value(json!({
+            "campaign": campaign,
+            "dispatch": "dry_run",
+            "simulation_only": true,
+            "guarantees": [
+                "typed knowledge, decision context, and selected action portfolio are recomputed after every returned evidence row",
+                "the action executor receives only a typed claim-scoped contract and cannot promote a plan into evidence",
+                "negative, contradictory, unresolved, omission, retry, budget, and no-progress states remain explicit",
+                "raw payloads remain institution-local and the route performs no clinical decision or external instrument effect"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma decision-context campaign: {error}"))
     }
 
     /// Execute a typed multimodal computation DAG through the deterministic synthetic worker.
@@ -45744,6 +45780,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_evidence_campaign_execute",
                 "glioma_evidence_refresh_campaign_execute",
                 "glioma_knowledge_resolution_campaign_execute",
+                "glioma_decision_context_campaign_execute",
                 "glioma_multimodal_ingestion_campaign_execute",
                 "glioma_computation_execute",
                 "glioma_computation_portfolio_plan",
@@ -52730,6 +52767,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "MultimodalIngestionCampaignRequest1@1 containing MultimodalRequest1@1, metadata-only observations, and bounded budget/round/retry limits."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_decision_context_campaign_execute",
+        "description": "Run a bounded autonomous P04 question-to-action campaign for preclinical glioma research. It compiles typed knowledge into a decision context, selects a dependency-safe local action portfolio, dispatches claim-scoped actions through a local executor, recompiles from returned evidence after each round, and preserves unresolved, negative, contradictory, omission, retry, budget, and no-progress states. MCP is a deterministic dry run with no raw-data movement, instrument effect, or clinical decision; production adapters remain institution-local.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "DecisionContextCampaignRequest1@1 containing KnowledgeRequest1@1, DecisionContextRequest1@1, DecisionActionPlanRequest1@1, typed EvidenceRecord1@1 rows, and bounded budget/round/retry limits."}
             },
             "required": ["request"]
         }
