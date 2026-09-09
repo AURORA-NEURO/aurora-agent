@@ -1,12 +1,17 @@
 //! Question-to-decision context program ownership.
 
 pub mod action_bridge;
+pub mod action_graph;
 pub mod campaign;
 pub mod context_compiler;
 
 pub use action_bridge::{
     plan_decision_actions, DecisionActionPlan, DecisionActionPlanDisposition,
     DecisionActionPlanError, DecisionActionPlanRequest,
+};
+pub use action_graph::{
+    compile_decision_action_graph, DecisionActionGraph, DecisionActionGraphDisposition,
+    DecisionActionGraphError, DecisionActionGraphRequest, DecisionGraphNode,
 };
 pub use campaign::{
     execute_glioma_decision_context_campaign, DecisionContextCampaign,

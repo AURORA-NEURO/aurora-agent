@@ -314,7 +314,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 57;
-const TOOL_DEFINITION_COUNT: usize = 615;
+const TOOL_DEFINITION_COUNT: usize = 616;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -3435,7 +3435,7 @@ fn glioma_knowledge_composition_exposes_supported_paths_and_bottlenecks() {
         "glioma_knowledge_compose",
         json!({
             "request": {"objective":"compose invasion mechanism evidence","min_path_length":2,"max_paths":8,"min_strength_milli":500,"max_contradiction_milli":500,"require_supported_root":true},
-            "knowledge": knowledge,
+            "knowledge": knowledge.clone(),
             "relations": [{"relation_id":"r1","from_claim_id":claims[0],"to_claim_id":claims[1],"kind":"supports","strength_milli":900}]
         }),
     );
@@ -3443,6 +3443,26 @@ fn glioma_knowledge_composition_exposes_supported_paths_and_bottlenecks() {
     assert_eq!(composed["composition"]["disposition"], json!("qualified"));
     assert_eq!(composed["composition"]["selected_path_order"].as_array().unwrap().len(), 1);
     assert_eq!(composed["composition"]["bottleneck_claim_order"].as_array().unwrap().len(), 1);
+    let context = call(
+        &mut server,
+        "glioma_decision_context",
+        json!({
+            "request": {"objective":"compose invasion mechanism evidence","max_actions":8,"default_cost_units":4},
+            "knowledge": knowledge
+        }),
+    );
+    let graph = call(
+        &mut server,
+        "glioma_decision_action_graph",
+        json!({
+            "request": {"objective":"compose invasion mechanism evidence","max_nodes":8,"max_waves":8,"budget_units":100,"require_qualified_composition":true},
+            "context": context["context"].clone(),
+            "composition": composed["composition"].clone()
+        }),
+    );
+    assert_eq!(graph["dispatch"], json!("not_started"));
+    assert_eq!(graph["graph"]["disposition"], json!("qualified"));
+    assert_eq!(graph["graph"]["parallel_waves"].as_array().unwrap().len(), 2);
 }
 
 #[test]

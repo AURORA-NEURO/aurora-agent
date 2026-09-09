@@ -481,7 +481,8 @@ use bioprism_research::{
     analyze_multimodal_concordance, analyze_multimodal_consensus, analyze_preclinical_outcomes,
     analyze_replication_meta_analysis, analyze_stratified_causal_adjustment,
     assess_glioma_robustness, assess_replication, build_research_object_manifest,
-    compile_decision_context, compile_glioma_computation_workflow, compile_mechanism_action_plan,
+    compile_decision_action_graph, compile_decision_context,
+    compile_glioma_computation_workflow, compile_mechanism_action_plan,
     compile_typed_knowledge, compose_knowledge_graph, design_preclinical_experiment,
     discriminate_mechanisms,
     dry_run_glioma_research, execute_federated_benchmark_campaign, execute_glioma_action_portfolio,
@@ -521,7 +522,8 @@ use bioprism_research::{
     ComputationPortfolioExecutionRequest, ComputationPortfolioRequest, ConcordanceRequest,
     ConsensusRequest, CounterfactualEnsembleRequest, CounterfactualIntervention,
     CounterfactualModel, CounterfactualRequest, DecisionActionPlanRequest, DecisionContext,
-    DecisionContextCampaignRequest, DecisionContextRequest, DesignAction, DesignMechanism,
+    DecisionContextCampaignRequest, DecisionContextRequest, DecisionActionGraphRequest,
+    DesignAction, DesignMechanism,
     DoseResponseObservation, DoseResponseRequest, DryRunActiveLearningCampaignExecutor,
     DryRunAdaptiveAllocationCampaignExecutor, DryRunAdaptiveMechanismPolicyExecutor,
     DryRunDecisionContextCampaignExecutor, DryRunEvidenceRefreshCampaignExecutor,
@@ -2100,6 +2102,7 @@ impl Server {
             "glioma_knowledge_compose" => self.glioma_knowledge_compose(&arguments),
             "glioma_knowledge_frontier" => self.glioma_knowledge_frontier(&arguments),
             "glioma_decision_context" => self.glioma_decision_context(&arguments),
+            "glioma_decision_action_graph" => self.glioma_decision_action_graph(&arguments),
             "glioma_decision_action_plan" => self.glioma_decision_action_plan(&arguments),
             "glioma_multimodal_qc" => self.glioma_multimodal_qc(&arguments),
             "glioma_mechanism_explore" => self.glioma_mechanism_explore(&arguments),
@@ -5154,6 +5157,46 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma decision context: {error}"))
+    }
+
+    /// Compile composed knowledge paths into dependency-closed, parallelizable decision actions.
+    /// This remains a planning surface; the downstream selector and local executor retain policy
+    /// authority for every effect.
+    fn glioma_decision_action_graph(&self, arguments: &Value) -> Result<Value, String> {
+        let request: DecisionActionGraphRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_decision_action_graph requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma decision-action graph request: {error}"))?;
+        let context: DecisionContext = serde_json::from_value(
+            arguments
+                .get("context")
+                .cloned()
+                .ok_or_else(|| "glioma_decision_action_graph requires context".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma decision context: {error}"))?;
+        let composition: bioprism_research::KnowledgeComposition = serde_json::from_value(
+            arguments
+                .get("composition")
+                .cloned()
+                .ok_or_else(|| "glioma_decision_action_graph requires composition".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma knowledge composition: {error}"))?;
+        let graph = compile_decision_action_graph(&request, &context, &composition)
+            .map_err(|error| format!("glioma decision-action graph refused: {error}"))?;
+        serde_json::to_value(json!({
+            "graph": graph,
+            "dispatch": "not_started",
+            "guarantees": [
+                "explicit claim paths become dependency-closed action candidates with deterministic topological order",
+                "independent branches are grouped into bounded parallel waves and critical-path cost is reported",
+                "missing claims, unresolved paths, negative evidence, and budget blocks remain visible",
+                "the route performs no assay, instrument effect, federation export, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma decision-action graph: {error}"))
     }
 
     /// Select the next executable portfolio from a compiled glioma decision context. This keeps
@@ -46406,6 +46449,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_knowledge_compose",
                 "glioma_knowledge_frontier",
                 "glioma_decision_context",
+                "glioma_decision_action_graph",
                 "glioma_decision_action_plan",
                 "glioma_multimodal_qc",
                 "glioma_mechanism_explore",
@@ -53943,6 +53987,19 @@ pub fn tool_definitions() -> Vec<Value> {
                 "knowledge": {"type": "object", "description": "TypedKnowledge1@1 from glioma_knowledge_compile."}
             },
             "required": ["request", "knowledge"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_decision_action_graph",
+        "description": "Compile composed preclinical glioma knowledge paths and a typed decision context into a dependency-closed action DAG. Adds claim-path prerequisites to action candidates, computes deterministic topological order, parallel execution waves, critical-path cost, bottleneck actions, unresolved paths, and budget blocks; it never executes assays or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "DecisionActionGraphRequest1@1 with objective, node/wave bounds, budget, and qualified-composition policy."},
+                "context": {"type": "object", "description": "DecisionContext1@1 from glioma_decision_context."},
+                "composition": {"type": "object", "description": "KnowledgeComposition1@1 from glioma_knowledge_compose."}
+            },
+            "required": ["request", "context", "composition"]
         }
     }));
     definitions.push(json!({

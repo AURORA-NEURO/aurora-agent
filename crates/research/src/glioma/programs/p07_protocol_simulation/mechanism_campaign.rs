@@ -304,6 +304,7 @@ pub fn execute_glioma_multimodal_mechanism_campaign(
 /// Execute the selected multimodal mechanism portfolio through the caller-owned action worker.
 /// Unresolved evidence never dispatches an action; successful execution still inherits the
 /// portfolio executor's dependency, retry, artifact, and policy gates.
+#[allow(clippy::too_many_arguments)]
 pub fn execute_glioma_multimodal_mechanism_campaign_with_executor<E: GliomaActionExecutor>(
     request: &MultimodalMechanismCampaignRequest,
     graph_vectors: &[GraphFusionVector],

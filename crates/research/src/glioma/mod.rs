@@ -99,6 +99,8 @@ pub use programs::p04_decision_context::{
     DecisionContextCampaignRequest, DecisionContextCampaignRound,
     DecisionContextCampaignStopReason, DecisionContextDisposition, DecisionContextError,
     DecisionContextRequest, DryRunDecisionContextCampaignExecutor,
+    compile_decision_action_graph, DecisionActionGraph, DecisionActionGraphDisposition,
+    DecisionActionGraphError, DecisionActionGraphRequest, DecisionGraphNode,
 };
 pub use programs::p05_mechanism_exploration::{
     analyze_glioma_clonal_evolution, analyze_glioma_pathway_activity, compile_mechanism_action_plan,

@@ -402,6 +402,7 @@ fn analyze_current(
     Ok((assessment, meta_analysis, transportability))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn action(
     kind: GliomaReplicationActionKind,
     target_id: impl Into<String>,

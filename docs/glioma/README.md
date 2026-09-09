@@ -26,6 +26,8 @@ crates/research/src/glioma/
                                              P02 uncertainty/coverage/contradiction frontier prioritization
   programs/p04_decision_context/context_compiler.rs
                                              P04 evidence-gap to typed next-action compilation
+  programs/p04_decision_context/action_graph.rs
+                                             P04 claim-path to dependency-closed action DAG and parallel waves
   programs/p04_decision_context/action_bridge.rs
                                              P04 compiler-to-executable action portfolio bridge
   programs/p04_decision_context/campaign.rs
@@ -330,6 +332,10 @@ P04 now includes decision-context compilation (`compile_decision_context`) that 
 gaps into typed A1 candidates for coverage closure, contradiction replication, negative-result
 falsification, evidence resolution, or mechanism validation; the existing action selector then
 applies budget and policy gates before any provider dispatch.
+The decision-action graph (`compile_decision_action_graph`) joins that context with P02 composed
+claim paths. It adds explicit prerequisite edges, computes deterministic topological order and
+parallel waves, reports critical-path and total cost, and keeps missing claims, unresolved paths,
+negative evidence, and budget blocks visible for the autonomous engine.
 P05 now also includes signed mechanism-network propagation (`propagate_glioma_mechanism_graph`)
 that combines direct support/contradiction with activating or inhibiting evidence edges using
 bounded damped fixed-point diffusion. Low-confidence edges, disconnected nodes, contradiction,
