@@ -117,6 +117,10 @@ impl ComputationPortfolioExecution {
                             .planned_task_order
                             .iter()
                             .any(|planned| planned == task_id)
+                            && !execution
+                                .cached_order
+                                .iter()
+                                .any(|cached| cached == task_id)
                     })
                 {
                     return Err(ComputationPortfolioExecutionError::InvalidOutput(
@@ -195,15 +199,53 @@ pub fn execute_glioma_computation_portfolio<E: GliomaComputationExecutor>(
         .iter()
         .map(|candidate| (candidate.candidate_id.clone(), candidate))
         .collect::<BTreeMap<_, _>>();
-    let mut tasks = Vec::with_capacity(plan.dependency_order.len());
-    for task_id in &plan.dependency_order {
-        let candidate = candidate_map.get(task_id).ok_or_else(|| {
+    let completed = request
+        .portfolio
+        .completed_order
+        .iter()
+        .cloned()
+        .collect::<std::collections::BTreeSet<_>>();
+    let mut required_context = std::collections::BTreeSet::new();
+    let mut pending = plan.dependency_order.clone();
+    while let Some(task_id) = pending.pop() {
+        let candidate = candidate_map.get(&task_id).ok_or_else(|| {
             ComputationPortfolioExecutionError::InvalidOutput(format!(
                 "planned task {task_id} is missing from the candidate map"
             ))
         })?;
-        tasks.push(candidate.task.clone());
+        for dependency in &candidate.task.depends_on {
+            if completed.contains(dependency) && required_context.insert(dependency.clone()) {
+                pending.push(dependency.clone());
+            }
+        }
     }
+    let mut task_ids = required_context;
+    for context_id in task_ids.iter() {
+        if !request
+            .cache
+            .iter()
+            .any(|entry| entry.task_id == *context_id)
+        {
+            return Err(ComputationPortfolioExecutionError::InvalidOutput(format!(
+                "completed dependency {context_id} requires a replay-keyed cache artifact"
+            )));
+        }
+    }
+    task_ids.extend(plan.dependency_order.iter().cloned());
+    let mut tasks = task_ids
+        .iter()
+        .map(|task_id| {
+            candidate_map
+                .get(task_id)
+                .map(|candidate| candidate.task.clone())
+                .ok_or_else(|| {
+                    ComputationPortfolioExecutionError::InvalidOutput(format!(
+                        "context task {task_id} is missing from the candidate map"
+                    ))
+                })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    tasks.sort_by(|left, right| left.task_id.cmp(&right.task_id));
     let execution = if tasks.is_empty() {
         None
     } else {

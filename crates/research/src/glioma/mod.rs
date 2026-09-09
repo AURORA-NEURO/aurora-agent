@@ -179,7 +179,8 @@ pub use programs::p08_instrument_robotics::{
 };
 pub use programs::p09_reproducible_computation::{
     assess_glioma_robustness, execute_glioma_computation, execute_glioma_computation_portfolio,
-    plan_glioma_computation_portfolio, ComputationCacheEntry, ComputationCandidate,
+    execute_glioma_computation_campaign, plan_glioma_computation_portfolio, ComputationCacheEntry,
+    ComputationCandidate,
     ComputationCandidateDisposition, ComputationCandidateScore, ComputationExecution,
     ComputationExecutionDisposition, ComputationExecutionError, ComputationExecutionFailure,
     ComputationExecutionRequest, ComputationExecutionStopReason, ComputationOperation,
@@ -187,8 +188,14 @@ pub use programs::p09_reproducible_computation::{
     ComputationPortfolioExecutionDisposition, ComputationPortfolioExecutionError,
     ComputationPortfolioExecutionRequest, ComputationPortfolioPlan, ComputationPortfolioRequest,
     ComputationTask, ComputationTaskDisposition, ComputationTaskResult,
-    DryRunGliomaComputationExecutor, GliomaComputationExecutor, RobustnessCase, RobustnessCaseKind,
+    DryRunGliomaComputationExecutor, GliomaComputationCampaign,
+    GliomaComputationCampaignDisposition, GliomaComputationCampaignError,
+    GliomaComputationCampaignRequest, GliomaComputationCampaignRound,
+    GliomaComputationCampaignStopReason, GliomaComputationExecutor, GliomaComputationPlanner,
+    GliomaComputationPlannerContext, GliomaComputationPlannerFailure, RobustnessCase,
+    RobustnessCaseKind,
     RobustnessDisposition, RobustnessError, RobustnessRequest, RobustnessSuite,
+    StaticGliomaComputationPlanner,
 };
 pub use programs::p10_interpretation_replication::{
     analyze_causal_sensitivity, analyze_glioma_causal_contrast, analyze_glioma_mediation,

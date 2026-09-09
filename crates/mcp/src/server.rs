@@ -481,7 +481,8 @@ use bioprism_research::{
     compile_typed_knowledge, design_preclinical_experiment, discriminate_mechanisms,
     dry_run_glioma_research, execute_glioma_action_portfolio,
     execute_glioma_active_learning_campaign, execute_glioma_autonomous_campaign,
-    execute_glioma_computation, execute_glioma_computation_portfolio,
+    execute_glioma_computation, execute_glioma_computation_campaign,
+    execute_glioma_computation_portfolio,
     execute_glioma_multimodal_mechanism_campaign,
     execute_glioma_multimodal_mechanism_campaign_with_executor,
     execute_glioma_evidence_campaign, execute_glioma_instrument_plan, execute_glioma_protocol,
@@ -503,6 +504,7 @@ use bioprism_research::{
     CampaignMechanism, CampaignObservation, CausalContrastRequest, ClosedLoopCampaignRequest,
     CombinationObservation, CombinationSynergyRequest, ComputationCandidate,
     ComputationExecutionRequest, ComputationPortfolioExecutionRequest, ComputationPortfolioRequest,
+    GliomaComputationCampaignRequest, StaticGliomaComputationPlanner,
     ConcordanceRequest, ConsensusRequest, CounterfactualEnsembleRequest,
     CounterfactualIntervention, CounterfactualModel, CounterfactualRequest,
     DecisionActionPlanRequest, DecisionContext, DecisionContextRequest, DesignAction,
@@ -1985,6 +1987,9 @@ impl Server {
             "glioma_computation_portfolio_execute" => {
                 self.glioma_computation_portfolio_execute(&arguments)
             }
+            "glioma_computation_campaign_execute" => {
+                self.glioma_computation_campaign_execute(&arguments)
+            }
             "glioma_robustness_suite" => self.glioma_robustness_suite(&arguments),
             "glioma_trajectory_analyze" => self.glioma_trajectory_analyze(&arguments),
             "glioma_state_transition_analyze" => self.glioma_state_transition_analyze(&arguments),
@@ -3442,6 +3447,34 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma computation portfolio execution: {error}"))
+    }
+
+    /// Run a bounded multi-round glioma computation campaign with a deterministic dry-run
+    /// planner/worker. Institution-local hosts replace both seams for adaptive analyses.
+    fn glioma_computation_campaign_execute(&self, arguments: &Value) -> Result<Value, String> {
+        let request: GliomaComputationCampaignRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_computation_campaign_execute requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma computation campaign request: {error}"))?;
+        let mut planner = StaticGliomaComputationPlanner;
+        let mut executor = DryRunGliomaComputationExecutor;
+        let campaign = execute_glioma_computation_campaign(&request, &mut planner, &mut executor)
+            .map_err(|error| format!("glioma computation campaign refused: {error}"))?;
+        serde_json::to_value(json!({
+            "campaign": campaign,
+            "dispatch": "dry_run",
+            "simulation_only": true,
+            "guarantees": [
+                "each round replans only from typed local computation outcomes",
+                "hard cost, duration, deterministic-task, dependency, retry, cache, and artifact gates remain active",
+                "negative, partial, failed, skipped, blocked, and unresolved work is never promoted to completion",
+                "the MCP route performs no external computation or raw-data movement"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma computation campaign: {error}"))
     }
 
     /// Stress-test a local two-arm glioma analysis under deterministic batch and row omissions.
@@ -45361,6 +45394,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_computation_execute",
                 "glioma_computation_portfolio_plan",
                 "glioma_computation_portfolio_execute",
+                "glioma_computation_campaign_execute",
                 "glioma_robustness_suite",
                 "glioma_trajectory_analyze",
                 "glioma_state_transition_analyze",
@@ -52336,6 +52370,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "ComputationPortfolioExecutionRequest1@1 containing a ComputationPortfolioRequest1@1, ComputationCandidate1@1 records, replay identity, retry/cache policy, and local-artifact requirement."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_computation_campaign_execute",
+        "description": "Run a bounded multi-round autonomous preclinical glioma computation campaign. Each round may replan from typed local task outcomes, while hard cost/time, dependency, deterministic-task, retry, cache, and artifact gates remain active. MCP uses a synthetic planner and worker; production planners, containers, GPUs, schedulers, and raw-data access remain caller-owned.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "GliomaComputationCampaignRequest1@1 with typed seed candidates, model binding, budget/time bounds, utility weights, modality coverage, replay identity, retry/cache policy, and local-artifact requirement."}
             },
             "required": ["request"]
         }

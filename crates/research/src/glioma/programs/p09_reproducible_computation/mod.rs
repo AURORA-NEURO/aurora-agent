@@ -3,6 +3,7 @@
 use crate::glioma::catalog::{glioma_program_catalog, GliomaProgramDescriptor, GliomaProgramId};
 
 pub mod execution;
+pub mod campaign;
 pub mod planning;
 pub mod portfolio_execution;
 pub mod robustness;
@@ -18,6 +19,15 @@ pub use execution::{
     ComputationExecutionRequest, ComputationExecutionStopReason, ComputationOperation,
     ComputationTask, ComputationTaskDisposition, ComputationTaskResult,
     DryRunGliomaComputationExecutor, GliomaComputationExecutor,
+};
+
+pub use campaign::{
+    execute_glioma_computation_campaign, GliomaComputationCampaign,
+    GliomaComputationCampaignDisposition, GliomaComputationCampaignError,
+    GliomaComputationCampaignRequest, GliomaComputationCampaignRound,
+    GliomaComputationCampaignStopReason, GliomaComputationPlanner,
+    GliomaComputationPlannerContext, GliomaComputationPlannerFailure,
+    StaticGliomaComputationPlanner,
 };
 
 pub use planning::{

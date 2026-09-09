@@ -608,9 +608,6 @@ pub fn execute_glioma_computation<E: GliomaComputationExecutor>(
                 cache_hit_count = cache_hit_count.saturating_add(1);
                 by_task.insert(task.task_id.clone(), result.clone());
                 task_results.push(result);
-                budget_used_units = budget_used_units.saturating_add(task.estimated_cost_units);
-                duration_used_ticks =
-                    duration_used_ticks.saturating_add(task.estimated_duration_ticks);
                 continue;
             }
         }
@@ -890,6 +887,8 @@ mod tests {
         assert!(second_executor.calls.is_empty());
         assert_eq!(second.cached_order, vec!["fit", "normalize"]);
         assert_eq!(second.cache_hit_count, 2);
+        assert_eq!(second.budget_used_units, 0);
+        assert_eq!(second.duration_used_ticks, 0);
         assert_eq!(
             first.task_results[0].artifact,
             second.task_results[0].artifact

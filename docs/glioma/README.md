@@ -95,6 +95,8 @@ crates/research/src/glioma/
                                              P09 budgeted computation-portfolio planning with prerequisite closure
     p09_reproducible_computation/portfolio_execution.rs
                                              P09 autonomous portfolio-to-computation execution bridge
+    p09_reproducible_computation/campaign.rs
+                                             P09 bounded multi-round computation campaign with typed replanning
     p10_interpretation_replication/trajectory.rs
                                              P10 longitudinal per-unit trajectory analysis
     p10_interpretation_replication/transportability.rs
@@ -383,6 +385,13 @@ replay identity, retry/cache policy, local-artifact requirement, and resource bu
 autonomous computation loop: selection, closure, execution, and result classification stay bound
 together, while failed, partial, blocked, unresolved, deferred, and negative work cannot be
 silently promoted into a completed research conclusion.
+P09 now also includes the computation campaign controller
+(`execute_glioma_computation_campaign`). It keeps a typed candidate registry across rounds,
+re-plans only from returned task results, and consumes hard cost and duration budgets while
+preserving replay identity, deterministic-task policy, dependency closure, cache/artifact gates,
+negative results, and failed or skipped work. The MCP route uses a static dry-run planner and
+worker; institution-local deployments can replace both seams to drive high-throughput multi-omics
+and imaging analysis without moving raw data into the research crate.
 P05 now also includes counterfactual mechanism simulation (`simulate_glioma_counterfactual`). It
 compares baseline and signed node perturbation fixed points over activating/inhibiting networks,
 rank-orders downstream changes, and exposes low-confidence edges and non-convergence as unresolved.
