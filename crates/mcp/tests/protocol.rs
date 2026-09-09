@@ -314,7 +314,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 57;
-const TOOL_DEFINITION_COUNT: usize = 596;
+const TOOL_DEFINITION_COUNT: usize = 597;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -2404,6 +2404,64 @@ fn glioma_evidence_refresh_campaign_replans_stale_evidence_in_sandbox() {
     assert_eq!(campaign["simulation_only"], json!(true));
     assert_eq!(campaign["campaign"]["disposition"], json!("qualified"));
     assert_eq!(campaign["campaign"]["current_records"][0]["state"], json!("supported"));
+    assert_eq!(campaign["campaign"]["rounds"].as_array().unwrap().len(), 1);
+}
+
+#[test]
+fn glioma_knowledge_resolution_campaign_recompiles_frontier_in_sandbox() {
+    let mut server = server();
+    let hash = "0".repeat(64);
+    let campaign = call(
+        &mut server,
+        "glioma_knowledge_resolution_campaign_execute",
+        json!({
+            "request": {
+                "knowledge": {
+                    "objective": "resolve preclinical glioma invasion claims",
+                    "required_modalities": ["genomics"],
+                    "required_model_systems": ["organoid"],
+                    "min_support_milli": 700,
+                    "min_sources_per_claim": 1,
+                    "max_claims": 8
+                },
+                "frontier": {
+                    "objective": "resolve preclinical glioma invasion claims",
+                    "max_selected_claims": 1,
+                    "min_priority_milli": 0,
+                    "weights": {
+                        "coverage_debt_milli": 250,
+                        "contradiction_milli": 250,
+                        "uncertainty_milli": 200,
+                        "support_milli": 150,
+                        "workflow_leverage_milli": 150
+                    }
+                },
+                "records": [{
+                    "evidence_id": "knowledge-campaign-seed",
+                    "source_artifact": {"artifact_id":"knowledge-campaign-artifact","content_hash":hash,"content_type":"application/vnd.aurora.glioma-evidence+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},
+                    "source_kind": "dataset",
+                    "claim": "EGFR signaling increases invasion",
+                    "scope": "preclinical glioma invasion",
+                    "modality": "genomics",
+                    "model_system": "organoid",
+                    "state": "supported",
+                    "relevance_milli": 900,
+                    "quality_milli": 900,
+                    "reproducibility_milli": 900,
+                    "release_epoch": 1
+                }],
+                "budget_units": 1,
+                "cost_per_action_units": 1,
+                "max_rounds": 2,
+                "max_retries": 1,
+                "stop_on_qualified": true
+            }
+        }),
+    );
+    assert_eq!(campaign["dispatch"], json!("dry_run"));
+    assert_eq!(campaign["simulation_only"], json!(true));
+    assert_eq!(campaign["campaign"]["disposition"], json!("qualified"));
+    assert_eq!(campaign["campaign"]["final_knowledge"]["disposition"], json!("qualified"));
     assert_eq!(campaign["campaign"]["rounds"].as_array().unwrap().len(), 1);
 }
 

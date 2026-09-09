@@ -1,7 +1,16 @@
 //! Evidence-to-typed-knowledge program ownership.
 
+pub mod campaign;
 pub mod claim_frontier;
 pub mod knowledge_graph;
+
+pub use campaign::{
+    execute_glioma_knowledge_resolution_campaign, DryRunKnowledgeResolutionCampaignExecutor,
+    KnowledgeResolutionCampaign, KnowledgeResolutionCampaignDisposition,
+    KnowledgeResolutionCampaignError, KnowledgeResolutionCampaignExecutor,
+    KnowledgeResolutionCampaignRequest, KnowledgeResolutionCampaignRound,
+    KnowledgeResolutionCampaignStopReason, KnowledgeResolutionExecutionFailure,
+};
 
 pub use claim_frontier::{
     prioritize_knowledge_frontier, FrontierActionKind, KnowledgeFrontier,

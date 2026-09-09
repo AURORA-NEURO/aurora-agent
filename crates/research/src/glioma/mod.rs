@@ -45,7 +45,12 @@ pub use programs::p01_evidence_surveillance::{
     EvidenceSurveillanceDisposition, EvidenceSurveillanceError, EvidenceSurveillanceRequest,
 };
 pub use programs::p02_evidence_knowledge::{
+    execute_glioma_knowledge_resolution_campaign, DryRunKnowledgeResolutionCampaignExecutor,
     compile_typed_knowledge, prioritize_knowledge_frontier, FrontierActionKind, KnowledgeClaim,
+    KnowledgeResolutionCampaign, KnowledgeResolutionCampaignDisposition,
+    KnowledgeResolutionCampaignError, KnowledgeResolutionCampaignExecutor,
+    KnowledgeResolutionCampaignRequest, KnowledgeResolutionCampaignRound,
+    KnowledgeResolutionCampaignStopReason, KnowledgeResolutionExecutionFailure,
     KnowledgeClaimDisposition, KnowledgeDisposition, KnowledgeError, KnowledgeFrontier,
     KnowledgeFrontierDisposition, KnowledgeFrontierError, KnowledgeFrontierRequest,
     KnowledgeFrontierScore, KnowledgeFrontierWeights, KnowledgeRequest, TypedKnowledge,
