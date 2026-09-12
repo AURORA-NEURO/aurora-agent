@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 679;
+const TOOL_DEFINITION_COUNT: usize = 680;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -2830,6 +2830,71 @@ fn glioma_transportability_analysis_preserves_model_distance() {
             .unwrap_or_default()
             < 700
     );
+}
+
+#[test]
+fn glioma_dynamic_policy_evaluation_ranks_supported_workflow_frontier() {
+    let mut server = server();
+    let hash = "0".repeat(64);
+    let evaluation = call(
+        &mut server,
+        "glioma_dynamic_policy_evaluate",
+        json!({
+            "request": {
+                "objective": "rank organoid invasion experiment policies",
+                "model_system": "organoid",
+                "horizon": 3,
+                "reference_policy_id": "reference",
+                "maximize_effect": true,
+                "min_trajectories": 2,
+                "min_coverage_milli": 500,
+                "min_propensity_milli": 100,
+                "max_weight_milli": 20000,
+                "min_effect_milli": 20,
+                "max_leave_one_out_shift_milli": 500
+            },
+            "policies": [
+                {"policy_id":"candidate","label":"candidate","risk_milli":200,"cost_units":2,"rules":[
+                    {"time_step":0,"state_key":"baseline","action_id":"candidate"},
+                    {"time_step":1,"state_key":"baseline","action_id":"candidate"},
+                    {"time_step":2,"state_key":"baseline","action_id":"candidate"}
+                ]},
+                {"policy_id":"reference","label":"reference","risk_milli":100,"cost_units":1,"rules":[
+                    {"time_step":0,"state_key":"baseline","action_id":"reference"},
+                    {"time_step":1,"state_key":"baseline","action_id":"reference"},
+                    {"time_step":2,"state_key":"baseline","action_id":"reference"}
+                ]}
+            ],
+            "trajectories": [
+                {"trajectory_id":"t-0","unit_id":"u-0","model_system":"organoid","artifact":{"artifact_id":"a-0","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"observations":[
+                    {"observation_id":"t-0-0","time_step":0,"state_key":"baseline","action_id":"reference","outcome_milli":10,"propensity_milli":500},
+                    {"observation_id":"t-0-1","time_step":1,"state_key":"baseline","action_id":"reference","outcome_milli":10,"propensity_milli":500},
+                    {"observation_id":"t-0-2","time_step":2,"state_key":"baseline","action_id":"reference","outcome_milli":10,"propensity_milli":500}
+                ]},
+                {"trajectory_id":"t-1","unit_id":"u-1","model_system":"organoid","artifact":{"artifact_id":"a-1","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"observations":[
+                    {"observation_id":"t-1-0","time_step":0,"state_key":"baseline","action_id":"reference","outcome_milli":10,"propensity_milli":500},
+                    {"observation_id":"t-1-1","time_step":1,"state_key":"baseline","action_id":"reference","outcome_milli":10,"propensity_milli":500},
+                    {"observation_id":"t-1-2","time_step":2,"state_key":"baseline","action_id":"reference","outcome_milli":10,"propensity_milli":500}
+                ]},
+                {"trajectory_id":"t-2","unit_id":"u-2","model_system":"organoid","artifact":{"artifact_id":"a-2","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"observations":[
+                    {"observation_id":"t-2-0","time_step":0,"state_key":"baseline","action_id":"candidate","outcome_milli":80,"propensity_milli":500},
+                    {"observation_id":"t-2-1","time_step":1,"state_key":"baseline","action_id":"candidate","outcome_milli":80,"propensity_milli":500},
+                    {"observation_id":"t-2-2","time_step":2,"state_key":"baseline","action_id":"candidate","outcome_milli":80,"propensity_milli":500}
+                ]},
+                {"trajectory_id":"t-3","unit_id":"u-3","model_system":"organoid","artifact":{"artifact_id":"a-3","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"observations":[
+                    {"observation_id":"t-3-0","time_step":0,"state_key":"baseline","action_id":"candidate","outcome_milli":80,"propensity_milli":500},
+                    {"observation_id":"t-3-1","time_step":1,"state_key":"baseline","action_id":"candidate","outcome_milli":80,"propensity_milli":500},
+                    {"observation_id":"t-3-2","time_step":2,"state_key":"baseline","action_id":"candidate","outcome_milli":80,"propensity_milli":500}
+                ]}
+            ]
+        }),
+    );
+    assert_eq!(evaluation["dispatch"], json!("not_started"));
+    assert_eq!(
+        evaluation["evaluation"]["selected_policy_id"],
+        json!("candidate")
+    );
+    assert_eq!(evaluation["evaluation"]["disposition"], json!("qualified"));
 }
 
 #[test]

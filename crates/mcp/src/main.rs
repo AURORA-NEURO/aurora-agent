@@ -95,7 +95,7 @@ fn main() {
                      glioma_robust_active_learning,\n\
                      glioma_robust_active_learning_campaign_execute,\n\
                      glioma_multi_fidelity_optimize,\n\
-                     glioma_stratified_causal_adjustment,\n\
+                     glioma_stratified_causal_adjustment, glioma_dynamic_policy_evaluate,\n\
                      glioma_adaptive_allocation,\n\
                      glioma_adaptive_allocation_campaign_execute,\n\
                      glioma_sequential_design,\n\

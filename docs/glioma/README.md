@@ -66,6 +66,8 @@ crates/research/src/glioma/
                                              P06 autonomous sequential campaign execution with local aggregate batches and posterior replanning
   programs/p10_interpretation_replication/clone_outcomes.rs
                                              P10 replicate-level clone-panel outcome adjudication with explicit null/contradictory evidence
+  programs/p10_interpretation_replication/dynamic_policy.rs
+                                             P10 longitudinal off-policy evaluation for competing preclinical experiment workflows
   programs/p01_evidence_surveillance/surveillance.rs
                                              P01 snapshot delta surveillance and prioritized evidence review actions
   programs/p01_evidence_surveillance/priority.rs
@@ -249,7 +251,7 @@ portfolio plan and executable code; it does not promote a planned slot to implem
 | P07 Protocol simulation | lab operations lead | protocol simulation, adaptive workflow planning | critical-path scheduling, outcome-aware dependency scheduling, evidence-gated director admission, evidence-priority execution cycles, context-to-action execution, multimodal mechanism campaigns, utilization, deterministic next batches, and repair/abstain routing before physical effects |
 | P08 Instrument and robotics preflight | instrument operator | instrument preflight | robust control calibration, drift detection, signed interlocked planning, guarded execution, and fail-closed multi-run campaigns |
 | P09 Reproducible computation | computational scientist | computational execution | checkpointed/replayable computation, intent-to-DAG compilation, budgeted portfolio execution, and omission-stress robustness suite |
-| P10 Causal interpretation and replication | methods reviewer | statistical interpretation, replication/robustness | uncertainty-aware endpoint, longitudinal, stratified causal, causal-contrast, meta-analytic, and cross-site verdicts |
+| P10 Causal interpretation and replication | methods reviewer | statistical interpretation, replication/robustness | uncertainty-aware endpoint, longitudinal, stratified causal, dynamic-policy, causal-contrast, meta-analytic, and cross-site verdicts |
 | P11 Research-object release | reproducibility steward | research-object release | portable manifest with limitations and negative evidence |
 | P12 Federated benchmarking | consortium administrator | federation benchmarking | aggregate-only cross-site benchmark consensus, influence-aware site portfolio planning, robust pooling, heterogeneity, and site-influence analysis |
 

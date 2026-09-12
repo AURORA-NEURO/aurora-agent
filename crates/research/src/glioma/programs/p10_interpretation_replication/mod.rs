@@ -7,6 +7,7 @@ pub mod campaign;
 pub mod causal_adjustment;
 pub mod causal_contrast;
 pub mod clone_outcomes;
+pub mod dynamic_policy;
 pub mod mediation;
 pub mod meta_analysis;
 pub mod sensitivity;
@@ -41,6 +42,12 @@ pub use clone_outcomes::{
     ClonePanelCellAnalysis, ClonePanelCellDisposition, ClonePanelMeasurementState,
     ClonePanelObservation, ClonePanelOutcomeAnalysis, ClonePanelOutcomeDisposition,
     ClonePanelOutcomeError, ClonePanelOutcomeRequest,
+};
+pub use dynamic_policy::{
+    evaluate_glioma_dynamic_policies, DynamicPolicyCandidate, DynamicPolicyContribution,
+    DynamicPolicyDisposition, DynamicPolicyError, DynamicPolicyEvaluation,
+    DynamicPolicyObservation, DynamicPolicyRequest, DynamicPolicyRule, DynamicPolicyScore,
+    DynamicPolicyScoreDisposition, DynamicPolicyTrajectory,
 };
 pub use mediation::{
     analyze_glioma_mediation, MediationAnalysis, MediationDisposition, MediationError,

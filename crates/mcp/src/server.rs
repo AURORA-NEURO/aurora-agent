@@ -507,18 +507,18 @@ use bioprism_research::{
     compile_decision_context, compile_glioma_computation_workflow, compile_mechanism_action_plan,
     compile_typed_knowledge, compose_knowledge_graph, design_glioma_contrast_panel,
     design_preclinical_experiment, discriminate_mechanisms, dry_run_glioma_research,
-    evaluate_glioma_release_gate, execute_federated_benchmark_campaign,
-    execute_glioma_action_portfolio, execute_glioma_active_learning_campaign,
-    execute_glioma_adaptive_allocation_campaign, execute_glioma_adaptive_mechanism_campaign,
-    execute_glioma_autonomous_campaign, execute_glioma_autonomous_research_engine,
-    execute_glioma_autonomous_research_mission, execute_glioma_computation,
-    execute_glioma_computation_campaign, execute_glioma_computation_portfolio,
-    execute_glioma_decision_context_campaign, execute_glioma_evidence_campaign,
-    execute_glioma_evidence_gated_research, execute_glioma_evidence_refresh_campaign,
-    execute_glioma_instrument_campaign, execute_glioma_instrument_plan,
-    execute_glioma_knowledge_resolution_campaign, execute_glioma_mechanism_discrimination_campaign,
-    execute_glioma_multi_fidelity_campaign, execute_glioma_multimodal_ingestion_campaign,
-    execute_glioma_multimodal_mechanism_campaign,
+    evaluate_glioma_dynamic_policies, evaluate_glioma_release_gate,
+    execute_federated_benchmark_campaign, execute_glioma_action_portfolio,
+    execute_glioma_active_learning_campaign, execute_glioma_adaptive_allocation_campaign,
+    execute_glioma_adaptive_mechanism_campaign, execute_glioma_autonomous_campaign,
+    execute_glioma_autonomous_research_engine, execute_glioma_autonomous_research_mission,
+    execute_glioma_computation, execute_glioma_computation_campaign,
+    execute_glioma_computation_portfolio, execute_glioma_decision_context_campaign,
+    execute_glioma_evidence_campaign, execute_glioma_evidence_gated_research,
+    execute_glioma_evidence_refresh_campaign, execute_glioma_instrument_campaign,
+    execute_glioma_instrument_plan, execute_glioma_knowledge_resolution_campaign,
+    execute_glioma_mechanism_discrimination_campaign, execute_glioma_multi_fidelity_campaign,
+    execute_glioma_multimodal_ingestion_campaign, execute_glioma_multimodal_mechanism_campaign,
     execute_glioma_multimodal_mechanism_campaign_with_executor, execute_glioma_protocol,
     execute_glioma_replay_campaign, execute_glioma_replication_campaign,
     execute_glioma_research_autopilot, execute_glioma_research_director,
@@ -565,7 +565,8 @@ use bioprism_research::{
     DryRunKnowledgeResolutionCampaignExecutor, DryRunMechanismDiscriminationCampaignExecutor,
     DryRunMultiFidelityCampaignExecutor, DryRunMultimodalIngestionCampaignExecutor,
     DryRunReplayCampaignExecutor, DryRunRobustActiveLearningCampaignExecutor,
-    DryRunSequentialCampaignExecutor, EvidenceCalibrationObservation, EvidenceCalibrationRequest,
+    DryRunSequentialCampaignExecutor, DynamicPolicyCandidate, DynamicPolicyRequest,
+    DynamicPolicyTrajectory, EvidenceCalibrationObservation, EvidenceCalibrationRequest,
     EvidencePriorityRequest, EvidenceRecord, EvidenceRefreshCampaignRequest, EvidenceRequest,
     EvidenceSurveillanceRequest, EvidenceTriangulationRequest, ExperimentArm, ExperimentRequest,
     FederatedBenchmarkCampaignRequest, FederatedBenchmarkRequest, FederatedBenchmarkSite,
@@ -2209,6 +2210,7 @@ impl Server {
             "glioma_stratified_causal_adjustment" => {
                 self.glioma_stratified_causal_adjustment(&arguments)
             }
+            "glioma_dynamic_policy_evaluate" => self.glioma_dynamic_policy_evaluate(&arguments),
             "glioma_dose_response" => self.glioma_dose_response(&arguments),
             "glioma_adaptive_allocation" => self.glioma_adaptive_allocation(&arguments),
             "glioma_sequential_design" => self.glioma_sequential_design(&arguments),
@@ -6796,6 +6798,45 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma stratified causal adjustment: {error}"))
+    }
+
+    /// Evaluate competing finite-horizon preclinical glioma experiment policies from local
+    /// longitudinal trajectories. This ranks workflow policies only; it never dispatches an
+    /// assay, recommends a treatment, or treats an off-policy estimate as clinical evidence.
+    fn glioma_dynamic_policy_evaluate(&self, arguments: &Value) -> Result<Value, String> {
+        let request: DynamicPolicyRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_dynamic_policy_evaluate requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma dynamic-policy request: {error}"))?;
+        let policies: Vec<DynamicPolicyCandidate> = serde_json::from_value(
+            arguments
+                .get("policies")
+                .cloned()
+                .ok_or_else(|| "glioma_dynamic_policy_evaluate requires policies".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma dynamic-policy policies: {error}"))?;
+        let trajectories: Vec<DynamicPolicyTrajectory> =
+            serde_json::from_value(arguments.get("trajectories").cloned().ok_or_else(|| {
+                "glioma_dynamic_policy_evaluate requires trajectories".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma dynamic-policy trajectories: {error}"))?;
+        let evaluation = evaluate_glioma_dynamic_policies(&request, &policies, &trajectories)
+            .map_err(|error| format!("glioma dynamic-policy evaluation refused: {error}"))?;
+        serde_json::to_value(json!({
+            "evaluation": evaluation,
+            "dispatch": "not_started",
+            "policy_frontier": "preclinical_workflow_only",
+            "guarantees": [
+                "finite-horizon policies are evaluated with self-normalized inverse-propensity weighting",
+                "positivity violations, support coverage, weight clipping, effective sample size, and leave-one-trajectory-out instability remain explicit",
+                "selected policy is a bounded workflow frontier and not an observed efficacy or clinical treatment recommendation",
+                "raw trajectories remain institution-local and the route performs no external effect"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma dynamic-policy evaluation: {error}"))
     }
 
     /// Fit a bounded monotone preclinical glioma dose-response curve. This is analysis only: it
@@ -49356,6 +49397,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_causal_contrast",
                 "glioma_causal_mediation",
                 "glioma_stratified_causal_adjustment",
+                "glioma_dynamic_policy_evaluate",
                 "glioma_dose_response",
                 "glioma_adaptive_allocation",
                 "glioma_adaptive_allocation_campaign_execute",
@@ -58484,6 +58526,19 @@ pub fn tool_definitions() -> Vec<Value> {
                 "observations": {"type": "array", "items": {"type": "object"}, "description": "Local StratifiedObservation1@1 values with de-identified units, confounder strata, outcomes, and artifact references."}
             },
             "required": ["request", "observations"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_dynamic_policy_evaluate",
+        "description": "Evaluate competing finite-horizon preclinical glioma experiment policies from local longitudinal trajectories with self-normalized inverse-propensity weighting. Reports support coverage, positivity violations, clipped importance weights, effective sample size, uncertainty, leave-one-trajectory-out instability, and a bounded workflow frontier; it never dispatches an assay, recommends a treatment, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "DynamicPolicyRequest1@1 with horizon, reference policy, optimization direction, overlap floors, weight cap, effect threshold, and stability gate."},
+                "policies": {"type": "array", "items": {"type": "object"}, "description": "DynamicPolicyCandidate1@1 finite-horizon state/time rules for preclinical assay or computation workflows."},
+                "trajectories": {"type": "array", "items": {"type": "object"}, "description": "DynamicPolicyTrajectory1@1 institution-local longitudinal preclinical observations with behavior propensities and local artifacts."}
+            },
+            "required": ["request", "policies", "trajectories"]
         }
     }));
     definitions.push(json!({
