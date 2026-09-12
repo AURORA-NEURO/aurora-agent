@@ -40,6 +40,10 @@ pub struct EvidenceAcquisitionExecutionFailure {
 /// Institution-local literature, dataset, assay, simulation, or replication adapters implement
 /// this seam. The controller only supplies typed metadata and receives a local result envelope.
 pub trait EvidenceAcquisitionExecutor {
+    fn simulation_only(&self) -> bool {
+        false
+    }
+
     fn acquire(
         &mut self,
         candidate: &EvidenceAcquisitionCandidate,
@@ -53,6 +57,10 @@ pub trait EvidenceAcquisitionExecutor {
 pub struct DryRunEvidenceAcquisitionExecutor;
 
 impl EvidenceAcquisitionExecutor for DryRunEvidenceAcquisitionExecutor {
+    fn simulation_only(&self) -> bool {
+        true
+    }
+
     fn acquire(
         &mut self,
         candidate: &EvidenceAcquisitionCandidate,
@@ -505,7 +513,7 @@ pub fn execute_glioma_evidence_acquisition_campaign<E: EvidenceAcquisitionExecut
         remaining_budget_units: request.budget_units,
         uncertainty: Vec::new(),
         negative_evidence: request.plan.negative_evidence.clone(),
-        simulation_only: false,
+        simulation_only: executor.simulation_only(),
         disposition: EvidenceAcquisitionCampaignDisposition::Unresolved,
         stop_reason: EvidenceAcquisitionCampaignStopReason::EmptySelection,
         digest: ContentHash::of_bytes(b"unsealed-glioma-evidence-acquisition-campaign"),
@@ -777,6 +785,7 @@ mod tests {
             output.disposition,
             EvidenceAcquisitionCampaignDisposition::Partial
         );
+        assert!(output.simulation_only);
         output.validate().unwrap();
     }
 
