@@ -127,6 +127,8 @@ crates/research/src/glioma/
                                              P07 high-level focus-aware research director compiling intent into dependency-closed executable batches
     p07_protocol_simulation/autonomous_engine.rs
                                              P07 end-to-end multi-cycle autonomous research engine with artifact-driven replanning
+    p07_protocol_simulation/adaptive_scheduler.rs
+                                             P07 outcome-aware dependency scheduler with beam search, risk budgets, and preserved negative evidence
     p07_protocol_simulation/evidence_gate.rs
                                              P07 evidence-gated director admission from P01 cross-family triangulation
     p07_protocol_simulation/clone_continuation.rs
@@ -234,7 +236,7 @@ portfolio plan and executable code; it does not promote a planned slot to implem
 | P04 Question-to-decision context | principal investigator | intent normalization, context compilation | bounded decision context, selected executable action batches, and unresolved omissions |
 | P05 Mechanism exploration | mechanism scientist | molecular landscape, mechanism exploration | residual-fit competing mechanisms, posterior-weighted next-assay information gain, signed mechanism-network propagation, model-averaged counterfactuals, robust lower-tail intervention portfolios, and discriminating actions |
 | P06 Power-aware experiment design | experimentalist | experiment design | falsifiable allocation, power, blocking, dose-response, adaptive replicate allocation, uncertainty-aware dose-surface acquisition, mechanism-aware closed-loop campaign rounds, combination-synergy fitting, and null-result plan |
-| P07 Protocol simulation | lab operations lead | protocol simulation, adaptive workflow planning | critical-path scheduling, evidence-gated director admission, evidence-priority execution cycles, context-to-action execution, multimodal mechanism campaigns, utilization, deterministic next batches, and repair/abstain routing before physical effects |
+| P07 Protocol simulation | lab operations lead | protocol simulation, adaptive workflow planning | critical-path scheduling, outcome-aware dependency scheduling, evidence-gated director admission, evidence-priority execution cycles, context-to-action execution, multimodal mechanism campaigns, utilization, deterministic next batches, and repair/abstain routing before physical effects |
 | P08 Instrument and robotics preflight | instrument operator | instrument preflight | robust control calibration, drift detection, signed interlocked planning, guarded execution, and fail-closed multi-run campaigns |
 | P09 Reproducible computation | computational scientist | computational execution | checkpointed/replayable computation, intent-to-DAG compilation, budgeted portfolio execution, and omission-stress robustness suite |
 | P10 Causal interpretation and replication | methods reviewer | statistical interpretation, replication/robustness | uncertainty-aware endpoint, longitudinal, stratified causal, causal-contrast, meta-analytic, and cross-site verdicts |
@@ -490,6 +492,13 @@ only returned typed artifacts into stage checkpoints, and replans downstream evi
 experiment, computation, replication, release, and federation work. Budget exhaustion, negative or
 partial outcomes, policy holds, executor failures, and no-progress states stop honestly; the MCP
 surface is a deterministic dry-run rehearsal while institution-local executors own real effects.
+The adaptive workflow scheduler (`plan_glioma_adaptive_workflow`) adds a science-aware scheduling
+layer for long-running programs. It updates conservative action utility from qualified, negative,
+inconclusive, failed, and blocked observations; uses deterministic beam search to choose
+dependency-closed portfolios; and enforces cost, risk, authority, instrument, federation, and
+action-count budgets. Negative results remain in the plan as information, while blocked and
+deferred actions carry explicit reasons so a later engine cycle can replan without inventing
+evidence or silently escalating autonomy.
 The evidence-gated director (`execute_glioma_evidence_gated_research`) adds the scientific
 admission boundary before that execution loop: it consumes P01's independent source-family and
 artifact triangulation, holds partial/negative/contradictory/incomplete/source-dominant claims with

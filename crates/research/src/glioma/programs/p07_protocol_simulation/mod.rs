@@ -11,6 +11,7 @@ pub use crate::glioma::workflow::{
     GliomaWorkflowRequest, WorkflowNodeDecision,
 };
 pub mod action_execution;
+pub mod adaptive_scheduler;
 pub mod active_learning_campaign;
 pub mod autonomous_engine;
 pub mod autonomous_campaign;
@@ -30,6 +31,13 @@ pub use action_execution::{
     ActionExecutionResult, ActionPortfolioExecution, ActionPortfolioExecutionDisposition,
     ActionPortfolioExecutionError, ActionPortfolioExecutionRequest, ActionPortfolioStopReason,
     DryRunGliomaActionExecutor, GliomaActionExecutor,
+};
+
+pub use adaptive_scheduler::{
+    plan_glioma_adaptive_workflow, GliomaAdaptiveWorkflowSchedulerDisposition,
+    GliomaAdaptiveWorkflowSchedulerError, GliomaAdaptiveWorkflowSchedulerPlan,
+    GliomaAdaptiveWorkflowSchedulerRequest, SchedulerDecision, SchedulerObservation,
+    SchedulerOutcome,
 };
 
 pub use active_learning_campaign::{

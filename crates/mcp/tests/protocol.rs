@@ -349,7 +349,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 57;
-const TOOL_DEFINITION_COUNT: usize = 624;
+const TOOL_DEFINITION_COUNT: usize = 625;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -3763,6 +3763,42 @@ fn glioma_autonomous_research_engine_replans_the_full_stage_graph() {
         .unwrap()
         .iter()
         .any(|item| item.as_str().unwrap().contains("synthetic-dry-run")));
+}
+
+#[test]
+fn glioma_adaptive_workflow_plans_dependency_closed_batch() {
+    let mut server = server();
+    let response = call(
+        &mut server,
+        "glioma_adaptive_workflow",
+        json!({
+            "request": {
+                "mission_id": "adaptive-scheduler-protocol",
+                "objective": "identify reproducible invasion mechanisms in organoids",
+                "candidates": [
+                    {"action_id":"pre","stage_kind":"multimodal_ingestion_qc","modality":"spatial","model_system":"organoid","depends_on":[],"cost_units":2,"information_gain_milli":500,"frontier_novelty_milli":500,"workflow_leverage_milli":500,"cross_stage_unlock_milli":500,"reproducibility_safety_milli":900,"federation_value_milli":300,"feasibility_milli":800,"autonomy_tier":"a1","effects":["read_local_data","execute_local_computation"]},
+                    {"action_id":"child","stage_kind":"mechanism_exploration","modality":"computational","model_system":"organoid","depends_on":["pre"],"cost_units":2,"information_gain_milli":950,"frontier_novelty_milli":950,"workflow_leverage_milli":950,"cross_stage_unlock_milli":950,"reproducibility_safety_milli":900,"federation_value_milli":300,"feasibility_milli":800,"autonomy_tier":"a1","effects":["read_local_data","execute_local_computation"]}
+                ],
+                "completed_action_order": [],
+                "observations": [{"action_id":"pre","outcome":"qualified","information_gain_milli":500,"uncertainty_milli":200,"round":1}],
+                "budget_units": 4,
+                "max_actions": 2,
+                "beam_width": 16,
+                "risk_budget_milli": 2000,
+                "approval_granted": false,
+                "allow_instrument_execution": false,
+                "allow_federation": false,
+                "selection_weights": {"information_gain":25,"frontier_novelty":20,"workflow_leverage":15,"cross_stage_unlock":15,"reproducibility_safety":10,"federation_value":10,"feasibility":5}
+            }
+        }),
+    );
+    assert_eq!(response["dispatch"], json!("not_started"));
+    assert_eq!(response["simulation_only"], json!(true));
+    assert_eq!(
+        response["plan"]["selected_order"],
+        json!(["pre", "child"])
+    );
+    assert!(response["plan"]["negative_evidence"].is_array());
 }
 
 #[test]

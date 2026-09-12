@@ -513,7 +513,8 @@ use bioprism_research::{
     plan_glioma_computation_portfolio, plan_glioma_information_design,
     plan_glioma_clone_perturbation_panel,
     plan_glioma_multi_fidelity_optimization, plan_glioma_robust_active_learning,
-    plan_glioma_robust_intervention_portfolio, plan_glioma_workflow, preflight_glioma_instrument,
+    plan_glioma_robust_intervention_portfolio, plan_glioma_adaptive_workflow,
+    plan_glioma_workflow, preflight_glioma_instrument,
     prioritize_glioma_evidence, prioritize_knowledge_frontier, propagate_glioma_mechanism_graph,
     qualify_evidence, select_glioma_actions, simulate_glioma_counterfactual,
     simulate_glioma_counterfactual_ensemble, simulate_glioma_protocol, surveil_glioma_evidence,
@@ -553,6 +554,7 @@ use bioprism_research::{
     GliomaReplicationCampaignRequest,
     GliomaResearchAutopilotRequest, GliomaResearchIntent, GliomaWorkflowRequest,
     GliomaAutonomousResearchEngineRequest,
+    GliomaAdaptiveWorkflowSchedulerRequest,
     InterpretationSynthesisRequest, GliomaResearchDirectorRequest,
     GraphFusionRequest, GraphFusionVector, HarmonizationRequest, HarmonizationVector,
     AssayEvidenceObservation, AssayEvidenceRequest, InformationDesignRequest,
@@ -2067,6 +2069,7 @@ impl Server {
             "glioma_autonomous_research_engine_execute" => {
                 self.glioma_autonomous_research_engine_execute(&arguments)
             }
+            "glioma_adaptive_workflow" => self.glioma_adaptive_workflow(&arguments),
             "glioma_interpretation_synthesize" => {
                 self.glioma_interpretation_synthesize(&arguments)
             }
@@ -4080,6 +4083,33 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma autonomous research engine run: {error}"))
+    }
+
+    /// Plan the next bounded autonomous glioma workflow batch from typed prior outcomes. The
+    /// scheduler is planning-only: production callers own execution through the existing action
+    /// executor and instrument/computation gates.
+    fn glioma_adaptive_workflow(&self, arguments: &Value) -> Result<Value, String> {
+        let request: GliomaAdaptiveWorkflowSchedulerRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_adaptive_workflow requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma adaptive workflow request: {error}"))?;
+        let plan = plan_glioma_adaptive_workflow(&request)
+            .map_err(|error| format!("glioma adaptive workflow refused: {error}"))?;
+        serde_json::to_value(json!({
+            "plan": plan,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "qualified, negative, inconclusive, failed, and blocked observations update utility without erasing negative evidence",
+                "selected actions are dependency-closed in executable order under cost, risk, authority, instrument, federation, and action-count budgets",
+                "blocked and deferred actions carry explicit reasons for later replanning",
+                "the route performs no assay, instrument effect, raw-data movement, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma adaptive workflow plan: {error}"))
     }
 
     /// Convert a typed cross-family interpretation into a bounded next-action frontier.  The
@@ -46703,6 +46733,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_research_director_execute",
                 "glioma_evidence_gated_research_execute",
                 "glioma_autonomous_research_engine_execute",
+                "glioma_adaptive_workflow",
                 "glioma_interpretation_synthesize",
                 "glioma_adaptive_research_frontier",
                 "glioma_robustness_suite",
@@ -53794,6 +53825,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "GliomaAutonomousResearchEngineRequest1@1 with high-level GliomaResearchIntent, focus, typed starting checkpoints, cycle/action/budget bounds, authority switches, selection weights, retry bound, and local-artifact policy."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_adaptive_workflow",
+        "description": "Plan the next bounded autonomous preclinical glioma workflow batch from typed prior outcomes. An outcome-aware posterior utility model preserves qualified, negative, inconclusive, failed, and blocked observations; deterministic beam search closes prerequisites and enforces cost, risk, authority, instrument, federation, and action-count budgets. The route plans only and never executes an assay, moves raw data, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "GliomaAdaptiveWorkflowSchedulerRequest1@1 with typed GliomaActionCandidate1@1 records, completed actions, SchedulerObservation1@1 outcomes, budget/risk/beam bounds, authority switches, and GliomaSelectionWeights."}
             },
             "required": ["request"]
         }
