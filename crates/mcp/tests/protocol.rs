@@ -995,7 +995,10 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
         json!("ready_for_validation")
     );
     assert_eq!(
-        adaptive_dose_surface["plan"]["selected_order"].as_array().unwrap().len(),
+        adaptive_dose_surface["plan"]["selected_order"]
+            .as_array()
+            .unwrap()
+            .len(),
         2
     );
 
@@ -1429,7 +1432,10 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
         json!("ready_to_validate")
     );
     assert_eq!(
-        federated_site_plan["site_plan"]["selected_order"].as_array().unwrap().len(),
+        federated_site_plan["site_plan"]["selected_order"]
+            .as_array()
+            .unwrap()
+            .len(),
         1
     );
 
@@ -1920,9 +1926,18 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
     );
     assert_eq!(instrument_assay["dispatch"], json!("not_started"));
     assert_eq!(instrument_assay["simulation_only"], json!(true));
-    assert_eq!(instrument_assay["assessment"]["disposition"], json!("qualified"));
-    assert_eq!(instrument_assay["assessment"]["evidence_eligible"], json!(true));
-    assert_eq!(instrument_assay["assessment"]["qualified_order"], json!(["acquire", "wash"]));
+    assert_eq!(
+        instrument_assay["assessment"]["disposition"],
+        json!("qualified")
+    );
+    assert_eq!(
+        instrument_assay["assessment"]["evidence_eligible"],
+        json!(true)
+    );
+    assert_eq!(
+        instrument_assay["assessment"]["qualified_order"],
+        json!(["acquire", "wash"])
+    );
 
     let instrument_campaign = call(
         &mut server,
@@ -2114,7 +2129,10 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
         json!("qualified")
     );
     assert_eq!(
-        evidence_triangulation["triangulation"]["qualified_order"].as_array().unwrap().len(),
+        evidence_triangulation["triangulation"]["qualified_order"]
+            .as_array()
+            .unwrap()
+            .len(),
         1
     );
     assert_eq!(
@@ -3224,8 +3242,20 @@ fn glioma_federated_mechanism_transport_preserves_model_and_direction_gates() {
     );
     assert_eq!(analysis["dispatch"], json!("not_started"));
     assert_eq!(analysis["analysis"]["disposition"], json!("qualified"));
-    assert_eq!(analysis["analysis"]["included_order"].as_array().unwrap().len(), 2);
-    assert!(analysis["analysis"]["model_coverage"].as_array().unwrap().len() >= 2);
+    assert_eq!(
+        analysis["analysis"]["included_order"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+    assert!(
+        analysis["analysis"]["model_coverage"]
+            .as_array()
+            .unwrap()
+            .len()
+            >= 2
+    );
 }
 
 #[test]
@@ -3326,7 +3356,10 @@ fn glioma_research_object_release_gate_requires_replay_and_independent_review() 
     assert_eq!(gate["dispatch"], json!("not_started"));
     assert_eq!(gate["simulation_only"], json!(true));
     assert_eq!(gate["gate"]["status"], json!("publishable"));
-    assert!(gate["gate"]["blocking_order"].as_array().unwrap().is_empty());
+    assert!(gate["gate"]["blocking_order"]
+        .as_array()
+        .unwrap()
+        .is_empty());
 }
 
 #[test]
@@ -3402,9 +3435,21 @@ fn glioma_mechanism_calibration_exposes_prequential_gates() {
         }),
     );
     assert_eq!(calibration["dispatch"], json!("not_started"));
-    assert_eq!(calibration["calibration"]["disposition"], json!("qualified"));
-    assert_eq!(calibration["calibration"]["prequential_holdout_round"], json!(1));
-    assert_eq!(calibration["calibration"]["scores"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        calibration["calibration"]["disposition"],
+        json!("qualified")
+    );
+    assert_eq!(
+        calibration["calibration"]["prequential_holdout_round"],
+        json!(1)
+    );
+    assert_eq!(
+        calibration["calibration"]["scores"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
 }
 
 #[test]
@@ -3543,9 +3588,21 @@ fn glioma_computation_workflow_compiles_intent_and_executes_closed_dag() {
     );
     assert_eq!(workflow["dispatch"], json!("dry_run"));
     assert_eq!(workflow["simulation_only"], json!(true));
-    assert_eq!(workflow["workflow"]["within_declared_resources"], json!(true));
-    assert_eq!(workflow["workflow"]["requested_terminal_order"].as_array().unwrap().len(), 2);
-    assert_eq!(workflow["workflow"]["candidates"].as_array().unwrap().len(), 14);
+    assert_eq!(
+        workflow["workflow"]["within_declared_resources"],
+        json!(true)
+    );
+    assert_eq!(
+        workflow["workflow"]["requested_terminal_order"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+    assert_eq!(
+        workflow["workflow"]["candidates"].as_array().unwrap().len(),
+        14
+    );
     assert_eq!(workflow["campaign"]["disposition"], json!("completed"));
     assert_eq!(workflow["campaign"]["stop_reason"], json!("completed"));
 }
@@ -3583,7 +3640,13 @@ fn glioma_interpretation_synthesis_exposes_cross_family_stability() {
     assert_eq!(response["simulation_only"], json!(true));
     assert_eq!(response["synthesis"]["disposition"], json!("qualified"));
     assert!(response["synthesis"]["stability_milli"].as_u64().unwrap() > 0);
-    assert_eq!(response["synthesis"]["family_order"].as_array().unwrap().len(), 3);
+    assert_eq!(
+        response["synthesis"]["family_order"]
+            .as_array()
+            .unwrap()
+            .len(),
+        3
+    );
 }
 
 #[test]
@@ -3758,7 +3821,10 @@ fn glioma_autonomous_research_engine_replans_the_full_stage_graph() {
     assert_eq!(response["dispatch"], json!("dry_run"));
     assert_eq!(response["simulation_only"], json!(true));
     assert!(response["engine"]["cycles"].as_array().unwrap().len() > 1);
-    assert!(!response["engine"]["completed_checkpoints"].as_array().unwrap().is_empty());
+    assert!(!response["engine"]["completed_checkpoints"]
+        .as_array()
+        .unwrap()
+        .is_empty());
     assert!(response["engine"]["negative_evidence"]
         .as_array()
         .unwrap()
@@ -3795,10 +3861,7 @@ fn glioma_adaptive_workflow_plans_dependency_closed_batch() {
     );
     assert_eq!(response["dispatch"], json!("not_started"));
     assert_eq!(response["simulation_only"], json!(true));
-    assert_eq!(
-        response["plan"]["selected_order"],
-        json!(["pre", "child"])
-    );
+    assert_eq!(response["plan"]["selected_order"], json!(["pre", "child"]));
     assert!(response["plan"]["negative_evidence"].is_array());
 }
 
@@ -3837,8 +3900,20 @@ fn glioma_knowledge_composition_exposes_supported_paths_and_bottlenecks() {
     );
     assert_eq!(composed["dispatch"], json!("not_started"));
     assert_eq!(composed["composition"]["disposition"], json!("qualified"));
-    assert_eq!(composed["composition"]["selected_path_order"].as_array().unwrap().len(), 1);
-    assert_eq!(composed["composition"]["bottleneck_claim_order"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        composed["composition"]["selected_path_order"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        composed["composition"]["bottleneck_claim_order"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
     let revision = call(
         &mut server,
         "glioma_belief_revision",
@@ -3850,8 +3925,20 @@ fn glioma_knowledge_composition_exposes_supported_paths_and_bottlenecks() {
     );
     assert_eq!(revision["dispatch"], json!("not_started"));
     assert_eq!(revision["simulation_only"], json!(true));
-    assert_eq!(revision["revision"]["retained_claim_order"].as_array().unwrap().len(), 1);
-    assert_eq!(revision["revision"]["rival_claim_order"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        revision["revision"]["retained_claim_order"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        revision["revision"]["rival_claim_order"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
     let context = call(
         &mut server,
         "glioma_decision_context",
@@ -3871,7 +3958,10 @@ fn glioma_knowledge_composition_exposes_supported_paths_and_bottlenecks() {
     );
     assert_eq!(graph["dispatch"], json!("not_started"));
     assert_eq!(graph["graph"]["disposition"], json!("qualified"));
-    assert_eq!(graph["graph"]["parallel_waves"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        graph["graph"]["parallel_waves"].as_array().unwrap().len(),
+        2
+    );
 }
 
 #[test]
@@ -3929,7 +4019,10 @@ fn glioma_adaptive_frontier_turns_interpretation_debt_into_next_actions() {
         .as_array()
         .unwrap()
         .iter()
-        .any(|item| item.as_str().unwrap().contains("replication-family-required")));
+        .any(|item| item
+            .as_str()
+            .unwrap()
+            .contains("replication-family-required")));
 }
 
 #[test]
@@ -3977,7 +4070,13 @@ fn glioma_temporal_multimodal_fusion_replays_longitudinal_state_transitions() {
     assert_eq!(response["dispatch"], json!("not_started"));
     assert_eq!(response["simulation_only"], json!(true));
     assert_eq!(response["analysis"]["disposition"], json!("qualified"));
-    assert_eq!(response["analysis"]["emerging_transition_order"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        response["analysis"]["emerging_transition_order"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
 }
 
 #[test]
@@ -4020,8 +4119,17 @@ fn glioma_clonal_evolution_reconstructs_preclinical_marker_branch() {
     assert_eq!(response["dispatch"], json!("not_started"));
     assert_eq!(response["simulation_only"], json!(true));
     assert_eq!(response["analysis"]["disposition"], json!("qualified"));
-    assert_eq!(response["analysis"]["branch_order"].as_array().unwrap().len(), 1);
-    assert_eq!(response["analysis"]["gained_marker_order"], json!(["ecDNA"]));
+    assert_eq!(
+        response["analysis"]["branch_order"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        response["analysis"]["gained_marker_order"],
+        json!(["ecDNA"])
+    );
 }
 
 #[test]
@@ -4069,8 +4177,14 @@ fn glioma_clone_perturbation_panel_covers_evolutionary_branches_under_budget() {
     assert_eq!(panel["dispatch"], json!("not_started"));
     assert_eq!(panel["simulation_only"], json!(true));
     assert_eq!(panel["panel"]["disposition"], json!("qualified"));
-    assert_eq!(panel["panel"]["selected_order"].as_array().unwrap().len(), 2);
-    assert!(panel["panel"]["uncovered_branch_order"].as_array().unwrap().is_empty());
+    assert_eq!(
+        panel["panel"]["selected_order"].as_array().unwrap().len(),
+        2
+    );
+    assert!(panel["panel"]["uncovered_branch_order"]
+        .as_array()
+        .unwrap()
+        .is_empty());
 }
 
 #[test]
@@ -4147,7 +4261,10 @@ fn glioma_clone_panel_outcomes_requires_replicates_before_qualification() {
     assert_eq!(analysis["dispatch"], json!("not_started"));
     assert_eq!(analysis["simulation_only"], json!(true));
     assert_eq!(analysis["analysis"]["disposition"], json!("qualified"));
-    assert!(analysis["analysis"]["next_action_order"].as_array().unwrap().is_empty());
+    assert!(analysis["analysis"]["next_action_order"]
+        .as_array()
+        .unwrap()
+        .is_empty());
 
     // A missing replicate/cell reopens the loop and is compiled into a bounded continuation
     // plan. The MCP route must remain planning-only and preserve the unresolved target.
@@ -4179,8 +4296,17 @@ fn glioma_clone_panel_outcomes_requires_replicates_before_qualification() {
     );
     assert_eq!(continuation["dispatch"], json!("not_started"));
     assert_eq!(continuation["simulation_only"], json!(true));
-    assert_eq!(continuation["plan"]["disposition"], json!("approval_required"));
-    assert_eq!(continuation["plan"]["pending_approval_order"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        continuation["plan"]["disposition"],
+        json!("approval_required")
+    );
+    assert_eq!(
+        continuation["plan"]["pending_approval_order"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
 }
 
 #[test]
@@ -4506,7 +4632,10 @@ fn glioma_evidence_calibration_preserves_negative_and_unknown_outcomes() {
         .iter()
         .any(|value| value == "cal-unknown"));
     assert_eq!(
-        response["calibration"]["families"].as_array().unwrap().len(),
+        response["calibration"]["families"]
+            .as_array()
+            .unwrap()
+            .len(),
         2
     );
 }

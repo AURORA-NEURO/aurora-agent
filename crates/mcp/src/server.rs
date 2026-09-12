@@ -490,74 +490,70 @@ use bioprism_repair::{
     DeclaredItem as RepairDeclaredItem, PlanOptions as RepairPlanOptions, RepairPlan,
 };
 use bioprism_research::{
-    allocate_glioma_assays, analyze_causal_sensitivity, analyze_federated_benchmark,
-    calibrate_glioma_evidence,
-    plan_federated_benchmark_sites,
-    analyze_glioma_causal_contrast, analyze_glioma_combination_synergy,
+    adjudicate_glioma_assay_evidence, allocate_glioma_assays, analyze_causal_sensitivity,
+    analyze_federated_benchmark, analyze_federated_mechanism_transport,
+    analyze_glioma_causal_contrast, analyze_glioma_clonal_evolution,
+    analyze_glioma_clone_panel_outcomes, analyze_glioma_combination_synergy,
     analyze_glioma_dose_response, analyze_glioma_latent_factors, analyze_glioma_mediation,
     analyze_glioma_multimodal_graph_fusion, analyze_glioma_pathway_activity,
-    analyze_federated_mechanism_transport, analyze_glioma_clonal_evolution,
-    plan_glioma_clone_continuation,
-    analyze_glioma_clone_panel_outcomes,
     analyze_glioma_spatial_communication, analyze_glioma_spatial_niches,
     analyze_glioma_spatial_state_propagation, analyze_glioma_state_transitions,
-    register_glioma_spatial_samples,
-    analyze_glioma_temporal_multimodal_fusion, calibrate_glioma_mechanisms,
-    analyze_glioma_trajectories, analyze_glioma_transportability, analyze_instrument_calibration,
+    analyze_glioma_temporal_multimodal_fusion, analyze_glioma_trajectories,
+    analyze_glioma_transportability, analyze_instrument_calibration,
     analyze_multimodal_concordance, analyze_multimodal_consensus, analyze_preclinical_outcomes,
     analyze_replication_meta_analysis, analyze_stratified_causal_adjustment,
     assess_glioma_robustness, assess_replication, build_research_object_manifest,
-    compile_decision_action_graph, compile_decision_context,
-    compile_glioma_computation_workflow, compile_mechanism_action_plan,
+    calibrate_glioma_evidence, calibrate_glioma_mechanisms, compile_decision_action_graph,
+    compile_decision_context, compile_glioma_computation_workflow, compile_mechanism_action_plan,
     compile_typed_knowledge, compose_knowledge_graph, design_glioma_contrast_panel,
-    plan_adaptive_glioma_dose_surface,
-    design_preclinical_experiment,
-    discriminate_mechanisms,
-    dry_run_glioma_research, execute_federated_benchmark_campaign, execute_glioma_action_portfolio,
-    execute_glioma_active_learning_campaign, execute_glioma_adaptive_allocation_campaign,
-    execute_glioma_autonomous_research_engine,
-    execute_glioma_adaptive_mechanism_campaign, execute_glioma_autonomous_campaign,
+    design_preclinical_experiment, discriminate_mechanisms, dry_run_glioma_research,
+    evaluate_glioma_release_gate, execute_federated_benchmark_campaign,
+    execute_glioma_action_portfolio, execute_glioma_active_learning_campaign,
+    execute_glioma_adaptive_allocation_campaign, execute_glioma_adaptive_mechanism_campaign,
+    execute_glioma_autonomous_campaign, execute_glioma_autonomous_research_engine,
     execute_glioma_autonomous_research_mission, execute_glioma_computation,
     execute_glioma_computation_campaign, execute_glioma_computation_portfolio,
     execute_glioma_decision_context_campaign, execute_glioma_evidence_campaign,
-    adjudicate_glioma_assay_evidence, execute_glioma_evidence_refresh_campaign,
-    execute_glioma_instrument_campaign,
-    execute_glioma_instrument_plan, execute_glioma_knowledge_resolution_campaign,
-    execute_glioma_mechanism_discrimination_campaign, execute_glioma_multi_fidelity_campaign,
-    execute_glioma_multimodal_ingestion_campaign, execute_glioma_multimodal_mechanism_campaign,
+    execute_glioma_evidence_gated_research, execute_glioma_evidence_refresh_campaign,
+    execute_glioma_instrument_campaign, execute_glioma_instrument_plan,
+    execute_glioma_knowledge_resolution_campaign, execute_glioma_mechanism_discrimination_campaign,
+    execute_glioma_multi_fidelity_campaign, execute_glioma_multimodal_ingestion_campaign,
+    execute_glioma_multimodal_mechanism_campaign,
     execute_glioma_multimodal_mechanism_campaign_with_executor, execute_glioma_protocol,
     execute_glioma_replay_campaign, execute_glioma_replication_campaign,
-    evaluate_glioma_release_gate,
-    execute_glioma_evidence_gated_research, execute_glioma_research_autopilot,
-    execute_glioma_robust_active_learning_campaign,
-    explore_mechanisms, generate_feature_catalog, glioma_program_catalog,
-    harmonize_glioma_multimodal_batches, harmonize_multimodal_inputs, plan_decision_actions,
+    execute_glioma_research_autopilot, execute_glioma_research_director,
+    execute_glioma_robust_active_learning_campaign, explore_mechanisms, generate_feature_catalog,
+    glioma_program_catalog, harmonize_glioma_multimodal_batches, harmonize_multimodal_inputs,
+    plan_adaptive_glioma_dose_surface, plan_decision_actions, plan_federated_benchmark_sites,
     plan_glioma_active_learning, plan_glioma_adaptive_information_campaign,
-    plan_glioma_adaptive_mechanism_policy, plan_glioma_closed_loop_campaign,
+    plan_glioma_adaptive_mechanism_policy, plan_glioma_adaptive_research_frontier,
+    plan_glioma_adaptive_workflow, plan_glioma_clone_continuation,
+    plan_glioma_clone_perturbation_panel, plan_glioma_closed_loop_campaign,
     plan_glioma_computation_portfolio, plan_glioma_information_design,
-    plan_glioma_clone_perturbation_panel,
     plan_glioma_multi_fidelity_optimization, plan_glioma_robust_active_learning,
-    plan_glioma_robust_intervention_portfolio, plan_glioma_adaptive_workflow,
-    plan_glioma_workflow, preflight_glioma_instrument,
+    plan_glioma_robust_intervention_portfolio, plan_glioma_workflow, preflight_glioma_instrument,
     prioritize_glioma_evidence, prioritize_knowledge_frontier, propagate_glioma_mechanism_graph,
-    qualify_evidence, revise_glioma_beliefs, select_glioma_actions, simulate_glioma_counterfactual,
-    simulate_glioma_counterfactual_ensemble, simulate_glioma_protocol, surveil_glioma_evidence,
-    triangulate_glioma_evidence,
-    validate_feature_catalog, ActionPortfolioExecutionRequest, ActiveLearningCampaignRequest,
-    ActiveLearningCandidate, ActiveLearningObservation, ActiveLearningRequest,
-    AdaptiveAllocationCampaignRequest, AdaptiveAllocationRequest, AdaptiveArmObservation,
-    AdaptiveDoseSurfaceRequest,
+    qualify_evidence, register_glioma_spatial_samples, revise_glioma_beliefs,
+    select_glioma_actions, simulate_glioma_counterfactual, simulate_glioma_counterfactual_ensemble,
+    simulate_glioma_protocol, surveil_glioma_evidence, synthesize_glioma_interpretation,
+    triangulate_glioma_evidence, validate_feature_catalog, ActionPortfolioExecutionRequest,
+    ActiveLearningCampaignRequest, ActiveLearningCandidate, ActiveLearningObservation,
+    ActiveLearningRequest, AdaptiveAllocationCampaignRequest, AdaptiveAllocationRequest,
+    AdaptiveArmObservation, AdaptiveDoseSurfaceRequest, AdaptiveFrontierRequest,
     AdaptiveInformationCampaignRequest, AdaptiveInformationObservation,
     AdaptiveMechanismCampaignRequest, AdaptiveMechanismPolicyRequest, AnalysisDataset,
-    AnalysisRequest, CalibrationRequest, CalibrationRun, CampaignAction, CampaignMechanism,
-    CampaignObservation, CausalContrastRequest, ClosedLoopCampaignRequest, CombinationObservation,
-    CombinationSynergyRequest, ComputationCandidate, ComputationExecutionRequest,
-    ComputationPortfolioExecutionRequest, ComputationPortfolioRequest, ConcordanceRequest,
-    ConsensusRequest, CounterfactualEnsembleRequest, CounterfactualIntervention,
-    ContrastDesignRequest, CounterfactualModel, CounterfactualRequest, DecisionActionPlanRequest,
-    DecisionContext,
-    DecisionContextCampaignRequest, DecisionContextRequest, DecisionActionGraphRequest,
-    DesignAction, DesignMechanism,
+    AnalysisRequest, AssayEvidenceObservation, AssayEvidenceRequest, BeliefConflict,
+    BeliefRevisionRequest, CalibrationRequest, CalibrationRun, CampaignAction, CampaignMechanism,
+    CampaignObservation, CausalContrastRequest, ClonalEvolutionGraph, ClonalEvolutionRequest,
+    CloneContinuationCandidate, CloneContinuationRequest, ClonePanelObservation,
+    ClonePanelOutcomeAnalysis, ClonePanelOutcomeRequest, ClonePerturbationCandidate,
+    ClonePerturbationPanel, ClonePerturbationPanelRequest, CloneProfile, ClosedLoopCampaignRequest,
+    CombinationObservation, CombinationSynergyRequest, ComputationCandidate,
+    ComputationExecutionRequest, ComputationPortfolioExecutionRequest, ComputationPortfolioRequest,
+    ConcordanceRequest, ConsensusRequest, ContrastDesignRequest, CounterfactualEnsembleRequest,
+    CounterfactualIntervention, CounterfactualModel, CounterfactualRequest,
+    DecisionActionGraphRequest, DecisionActionPlanRequest, DecisionContext,
+    DecisionContextCampaignRequest, DecisionContextRequest, DesignAction, DesignMechanism,
     DoseResponseObservation, DoseResponseRequest, DryRunActiveLearningCampaignExecutor,
     DryRunAdaptiveAllocationCampaignExecutor, DryRunAdaptiveMechanismPolicyExecutor,
     DryRunDecisionContextCampaignExecutor, DryRunEvidenceRefreshCampaignExecutor,
@@ -567,55 +563,43 @@ use bioprism_research::{
     DryRunKnowledgeResolutionCampaignExecutor, DryRunMechanismDiscriminationCampaignExecutor,
     DryRunMultiFidelityCampaignExecutor, DryRunMultimodalIngestionCampaignExecutor,
     DryRunReplayCampaignExecutor, DryRunRobustActiveLearningCampaignExecutor,
-    EvidencePriorityRequest, EvidenceRecord, EvidenceRefreshCampaignRequest, EvidenceRequest,
-    EvidenceSurveillanceRequest, EvidenceTriangulationRequest, ExperimentArm, ExperimentRequest,
+    EvidenceCalibrationObservation, EvidenceCalibrationRequest, EvidencePriorityRequest,
+    EvidenceRecord, EvidenceRefreshCampaignRequest, EvidenceRequest, EvidenceSurveillanceRequest,
+    EvidenceTriangulationRequest, ExperimentArm, ExperimentRequest,
     FederatedBenchmarkCampaignRequest, FederatedBenchmarkRequest, FederatedBenchmarkSite,
-    FederatedBenchmarkSitePlannerRequest, SpatialRegistrationCell, SpatialRegistrationRequest,
-    FederatedMechanismSite, FederatedMechanismTransportRequest,
-    FidelityCandidate, FidelityObservation, GliomaActionCandidate, GliomaAutonomousCampaignRequest,
-    GliomaComputationCampaignRequest, GliomaComputationWorkflowRequest,
-    GliomaEvidenceCampaignRequest, GliomaEvidenceGatedResearchRequest, GliomaMissionRequest,
-    GliomaReplicationCampaignRequest,
-    GliomaResearchAutopilotRequest, GliomaResearchIntent, GliomaWorkflowRequest,
-    GliomaAutonomousResearchEngineRequest,
-    GliomaAdaptiveWorkflowSchedulerRequest,
-    InterpretationSynthesisRequest, GliomaResearchDirectorRequest,
-    GraphFusionRequest, GraphFusionVector, HarmonizationRequest, HarmonizationVector,
-    AssayEvidenceObservation, AssayEvidenceRequest, InformationDesignRequest,
-    EvidenceCalibrationObservation, EvidenceCalibrationRequest,
-    InstrumentCampaignRequest, InstrumentExecutionRequest,
-    InstrumentExecutionRun,
-    InstrumentPreflightRequest, KnowledgeFrontierRequest, KnowledgeRequest,
-    BeliefConflict, BeliefRevisionRequest,
-    KnowledgeResolutionCampaignRequest, KnowledgeCompositionRequest, KnowledgeRelation,
-    LatentFactorRequest, LatentFactorVector,
-    LigandReceptorPair, MechanismActionPlannerConfig, MechanismCalibration,
+    FederatedBenchmarkSitePlannerRequest, FederatedMechanismSite,
+    FederatedMechanismTransportRequest, FidelityCandidate, FidelityObservation,
+    GliomaActionCandidate, GliomaAdaptiveWorkflowSchedulerRequest, GliomaAutonomousCampaignRequest,
+    GliomaAutonomousResearchEngineRequest, GliomaComputationCampaignRequest,
+    GliomaComputationWorkflowRequest, GliomaEvidenceCampaignRequest,
+    GliomaEvidenceGatedResearchRequest, GliomaMissionRequest, GliomaReplicationCampaignRequest,
+    GliomaResearchAutopilotRequest, GliomaResearchDirectorRequest, GliomaResearchIntent,
+    GliomaWorkflowRequest, GraphFusionRequest, GraphFusionVector, HarmonizationRequest,
+    HarmonizationVector, InformationDesignRequest, InstrumentCampaignRequest,
+    InstrumentExecutionRequest, InstrumentExecutionRun, InstrumentPreflightRequest,
+    InterpretationSynthesisRequest, KnowledgeCompositionRequest, KnowledgeFrontierRequest,
+    KnowledgeRelation, KnowledgeRequest, KnowledgeResolutionCampaignRequest, LatentFactorRequest,
+    LatentFactorVector, LigandReceptorPair, MechanismActionPlannerConfig, MechanismCalibration,
     MechanismCalibrationObservation, MechanismCalibrationRequest, MechanismCandidate,
-    MechanismDiscrimination,
-    MechanismDiscriminationCampaignRequest, MechanismDiscriminationRequest,
-    MechanismDiscriminatorAction, MechanismFeatureObservation, MechanismGraphEdge,
-    MechanismGraphNode, MechanismGraphRequest, MechanismHypothesis, MechanismRequest,
-    MediationObservation, MediationRequest, MetaAnalysisRequest, ModalityVector,
+    MechanismDiscrimination, MechanismDiscriminationCampaignRequest,
+    MechanismDiscriminationRequest, MechanismDiscriminatorAction, MechanismFeatureObservation,
+    MechanismGraphEdge, MechanismGraphNode, MechanismGraphRequest, MechanismHypothesis,
+    MechanismRequest, MediationObservation, MediationRequest, MetaAnalysisRequest, ModalityVector,
     MultiFidelityCampaignRequest, MultiFidelityOptimizationRequest,
     MultimodalIngestionCampaignRequest, MultimodalMechanismCampaignRequest, MultimodalObservation,
     MultimodalRequest, PathwayActivityDefinition, PathwayActivityObservation,
     PathwayActivityRequest, ProtocolExecutionRequest, ProtocolSimulationRequest,
-    ReplayCampaign, ReplayCampaignRequest, ReleaseGateRequest, ReplicationRequest,
-    ReplicationStudy, ResearchObjectRequest,
-    RobustActiveLearningCampaignRequest, RobustActiveLearningCandidate,
-    RobustActiveLearningObservation, RobustActiveLearningRequest, RobustInterventionCandidate,
-    RobustInterventionRequest, RobustnessRequest, SensitivityObservation, SensitivityRequest,
-    SpatialCell, SpatialCommunicationCell, SpatialCommunicationRequest, SpatialNicheRequest,
-    SpatialPropagationRequest, StateTransitionObservation, StateTransitionRequest,
-    TemporalFusionRequest, TemporalObservation, ClonalEvolutionRequest, CloneProfile,
-    ClonePerturbationPanelRequest, ClonePerturbationCandidate, ClonalEvolutionGraph,
-    ClonePerturbationPanel, ClonePanelOutcomeRequest, ClonePanelObservation,
-    CloneContinuationCandidate, CloneContinuationRequest, ClonePanelOutcomeAnalysis,
-    StaticGliomaActionPlanner, StaticGliomaComputationPlanner, StratifiedCausalRequest,
-    StratifiedObservation, TrajectoryObservation, TrajectoryRequest, TransportStudy,
-    TransportabilityRequest, TypedKnowledge, execute_glioma_research_director,
-    plan_glioma_adaptive_research_frontier, synthesize_glioma_interpretation,
-    AdaptiveFrontierRequest,
+    ReleaseGateRequest, ReplayCampaign, ReplayCampaignRequest, ReplicationRequest,
+    ReplicationStudy, ResearchObjectRequest, RobustActiveLearningCampaignRequest,
+    RobustActiveLearningCandidate, RobustActiveLearningObservation, RobustActiveLearningRequest,
+    RobustInterventionCandidate, RobustInterventionRequest, RobustnessRequest,
+    SensitivityObservation, SensitivityRequest, SpatialCell, SpatialCommunicationCell,
+    SpatialCommunicationRequest, SpatialNicheRequest, SpatialPropagationRequest,
+    SpatialRegistrationCell, SpatialRegistrationRequest, StateTransitionObservation,
+    StateTransitionRequest, StaticGliomaActionPlanner, StaticGliomaComputationPlanner,
+    StratifiedCausalRequest, StratifiedObservation, TemporalFusionRequest, TemporalObservation,
+    TrajectoryObservation, TrajectoryRequest, TransportStudy, TransportabilityRequest,
+    TypedKnowledge,
 };
 use bioprism_routing::{
     lab::{run as run_routing_lab, LabSettings, Task},
@@ -2193,9 +2177,7 @@ impl Server {
             "glioma_computation_workflow_execute" => {
                 self.glioma_computation_workflow_execute(&arguments)
             }
-            "glioma_research_director_execute" => {
-                self.glioma_research_director_execute(&arguments)
-            }
+            "glioma_research_director_execute" => self.glioma_research_director_execute(&arguments),
             "glioma_evidence_gated_research_execute" => {
                 self.glioma_evidence_gated_research_execute(&arguments)
             }
@@ -2203,16 +2185,12 @@ impl Server {
                 self.glioma_autonomous_research_engine_execute(&arguments)
             }
             "glioma_adaptive_workflow" => self.glioma_adaptive_workflow(&arguments),
-            "glioma_interpretation_synthesize" => {
-                self.glioma_interpretation_synthesize(&arguments)
-            }
+            "glioma_interpretation_synthesize" => self.glioma_interpretation_synthesize(&arguments),
             "glioma_temporal_multimodal_fusion" => {
                 self.glioma_temporal_multimodal_fusion(&arguments)
             }
             "glioma_clonal_evolution" => self.glioma_clonal_evolution(&arguments),
-            "glioma_clone_perturbation_panel" => {
-                self.glioma_clone_perturbation_panel(&arguments)
-            }
+            "glioma_clone_perturbation_panel" => self.glioma_clone_perturbation_panel(&arguments),
             "glioma_clone_panel_outcomes" => self.glioma_clone_panel_outcomes(&arguments),
             "glioma_clone_continuation" => self.glioma_clone_continuation(&arguments),
             "glioma_adaptive_research_frontier" => {
@@ -6266,15 +6244,11 @@ impl Server {
                 .ok_or_else(|| "glioma_temporal_multimodal_fusion requires request".to_string())?,
         )
         .map_err(|error| format!("invalid glioma temporal fusion request: {error}"))?;
-        let observations: Vec<TemporalObservation> = serde_json::from_value(
-            arguments
-                .get("observations")
-                .cloned()
-                .ok_or_else(|| {
-                    "glioma_temporal_multimodal_fusion requires observations".to_string()
-                })?,
-        )
-        .map_err(|error| format!("invalid glioma temporal fusion observations: {error}"))?;
+        let observations: Vec<TemporalObservation> =
+            serde_json::from_value(arguments.get("observations").cloned().ok_or_else(|| {
+                "glioma_temporal_multimodal_fusion requires observations".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma temporal fusion observations: {error}"))?;
         let analysis = analyze_glioma_temporal_multimodal_fusion(&request, &observations)
             .map_err(|error| format!("glioma temporal fusion refused: {error}"))?;
         serde_json::to_value(json!({
@@ -6343,13 +6317,11 @@ impl Server {
                 .ok_or_else(|| "glioma_clone_perturbation_panel requires graph".to_string())?,
         )
         .map_err(|error| format!("invalid glioma clone panel graph: {error}"))?;
-        let candidates: Vec<ClonePerturbationCandidate> = serde_json::from_value(
-            arguments
-                .get("candidates")
-                .cloned()
-                .ok_or_else(|| "glioma_clone_perturbation_panel requires candidates".to_string())?,
-        )
-        .map_err(|error| format!("invalid glioma clone panel candidates: {error}"))?;
+        let candidates: Vec<ClonePerturbationCandidate> =
+            serde_json::from_value(arguments.get("candidates").cloned().ok_or_else(|| {
+                "glioma_clone_perturbation_panel requires candidates".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma clone panel candidates: {error}"))?;
         let panel = plan_glioma_clone_perturbation_panel(&request, &graph, &candidates)
             .map_err(|error| format!("glioma clone perturbation panel refused: {error}"))?;
         serde_json::to_value(json!({
@@ -6480,19 +6452,12 @@ impl Server {
     /// Admit the director only after local P01 evidence triangulation clears the caller's gate.
     /// MCP uses the same deterministic dry-run action worker as the director route; no biological
     /// effect or clinical decision is performed here.
-    fn glioma_evidence_gated_research_execute(
-        &self,
-        arguments: &Value,
-    ) -> Result<Value, String> {
-        let request: GliomaEvidenceGatedResearchRequest = serde_json::from_value(
-            arguments
-                .get("request")
-                .cloned()
-                .ok_or_else(|| {
-                    "glioma_evidence_gated_research_execute requires request".to_string()
-                })?,
-        )
-        .map_err(|error| format!("invalid glioma evidence-gated research request: {error}"))?;
+    fn glioma_evidence_gated_research_execute(&self, arguments: &Value) -> Result<Value, String> {
+        let request: GliomaEvidenceGatedResearchRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_evidence_gated_research_execute requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma evidence-gated research request: {error}"))?;
         let mut executor = DryRunGliomaActionExecutor;
         let run = execute_glioma_evidence_gated_research(&request, &mut executor)
             .map_err(|error| format!("glioma evidence-gated research refused: {error}"))?;
@@ -6522,15 +6487,13 @@ impl Server {
         &self,
         arguments: &Value,
     ) -> Result<Value, String> {
-        let request: GliomaAutonomousResearchEngineRequest = serde_json::from_value(
-            arguments
-                .get("request")
-                .cloned()
-                .ok_or_else(|| {
-                    "glioma_autonomous_research_engine_execute requires request".to_string()
-                })?,
-        )
-        .map_err(|error| format!("invalid glioma autonomous research engine request: {error}"))?;
+        let request: GliomaAutonomousResearchEngineRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_autonomous_research_engine_execute requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma autonomous research engine request: {error}")
+            })?;
         let mut executor = DryRunGliomaActionExecutor;
         let engine = execute_glioma_autonomous_research_engine(&request, &mut executor)
             .map_err(|error| format!("glioma autonomous research engine refused: {error}"))?;
@@ -8064,8 +8027,9 @@ impl Server {
                 .ok_or_else(|| "glioma_mechanism_calibrate requires observations".to_string())?,
         )
         .map_err(|error| format!("invalid glioma mechanism calibration observations: {error}"))?;
-        let calibration: MechanismCalibration = calibrate_glioma_mechanisms(&request, &observations)
-            .map_err(|error| format!("glioma mechanism calibration refused: {error}"))?;
+        let calibration: MechanismCalibration =
+            calibrate_glioma_mechanisms(&request, &observations)
+                .map_err(|error| format!("glioma mechanism calibration refused: {error}"))?;
         serde_json::to_value(json!({
             "calibration": calibration,
             "dispatch": "not_started",
@@ -8769,33 +8733,21 @@ impl Server {
     /// intentionally insufficient: QC, uncertainty, replicate, effect, and negative-control
     /// gates must clear before any result becomes eligible for downstream science.
     fn glioma_instrument_assay_adjudicate(&self, arguments: &Value) -> Result<Value, String> {
-        let request: AssayEvidenceRequest = serde_json::from_value(
-            arguments
-                .get("request")
-                .cloned()
-                .ok_or_else(|| {
-                    "glioma_instrument_assay_adjudicate requires request".to_string()
-                })?,
-        )
-        .map_err(|error| format!("invalid glioma assay evidence request: {error}"))?;
-        let execution: InstrumentExecutionRun = serde_json::from_value(
-            arguments
-                .get("execution")
-                .cloned()
-                .ok_or_else(|| {
-                    "glioma_instrument_assay_adjudicate requires execution".to_string()
-                })?,
-        )
-        .map_err(|error| format!("invalid glioma instrument execution: {error}"))?;
-        let observations: Vec<AssayEvidenceObservation> = serde_json::from_value(
-            arguments
-                .get("observations")
-                .cloned()
-                .ok_or_else(|| {
-                    "glioma_instrument_assay_adjudicate requires observations".to_string()
-                })?,
-        )
-        .map_err(|error| format!("invalid glioma assay observations: {error}"))?;
+        let request: AssayEvidenceRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_instrument_assay_adjudicate requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma assay evidence request: {error}"))?;
+        let execution: InstrumentExecutionRun =
+            serde_json::from_value(arguments.get("execution").cloned().ok_or_else(|| {
+                "glioma_instrument_assay_adjudicate requires execution".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma instrument execution: {error}"))?;
+        let observations: Vec<AssayEvidenceObservation> =
+            serde_json::from_value(arguments.get("observations").cloned().ok_or_else(|| {
+                "glioma_instrument_assay_adjudicate requires observations".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma assay observations: {error}"))?;
         let assessment = adjudicate_glioma_assay_evidence(&request, &execution, &observations)
             .map_err(|error| format!("glioma assay adjudication refused: {error}"))?;
         serde_json::to_value(json!({
@@ -9051,13 +9003,13 @@ impl Server {
 
     /// Plan an aggregate-only consortium expansion without dispatching a site or moving raw data.
     fn glioma_federated_benchmark_site_plan(&self, arguments: &Value) -> Result<Value, String> {
-        let request: FederatedBenchmarkSitePlannerRequest = serde_json::from_value(
-            arguments
-                .get("request")
-                .cloned()
-                .ok_or_else(|| "glioma_federated_benchmark_site_plan requires request".to_string())?,
-        )
-        .map_err(|error| format!("invalid glioma federated benchmark site-plan request: {error}"))?;
+        let request: FederatedBenchmarkSitePlannerRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_federated_benchmark_site_plan requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma federated benchmark site-plan request: {error}")
+            })?;
         let plan = plan_federated_benchmark_sites(&request)
             .map_err(|error| format!("glioma federated benchmark site plan refused: {error}"))?;
         serde_json::to_value(json!({
@@ -9078,20 +9030,20 @@ impl Server {
     /// value-only scientific transport analysis; no raw observation, assay, or clinical action is
     /// dispatched by MCP.
     fn glioma_federated_mechanism_transport(&self, arguments: &Value) -> Result<Value, String> {
-        let request: FederatedMechanismTransportRequest = serde_json::from_value(
-            arguments
-                .get("request")
-                .cloned()
-                .ok_or_else(|| "glioma_federated_mechanism_transport requires request".to_string())?,
-        )
-        .map_err(|error| format!("invalid glioma federated mechanism transport request: {error}"))?;
-        let sites: Vec<FederatedMechanismSite> = serde_json::from_value(
-            arguments
-                .get("sites")
-                .cloned()
-                .ok_or_else(|| "glioma_federated_mechanism_transport requires sites".to_string())?,
-        )
-        .map_err(|error| format!("invalid glioma federated mechanism transport sites: {error}"))?;
+        let request: FederatedMechanismTransportRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_federated_mechanism_transport requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma federated mechanism transport request: {error}")
+            })?;
+        let sites: Vec<FederatedMechanismSite> =
+            serde_json::from_value(arguments.get("sites").cloned().ok_or_else(|| {
+                "glioma_federated_mechanism_transport requires sites".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma federated mechanism transport sites: {error}")
+            })?;
         let analysis = analyze_federated_mechanism_transport(&request, &sites)
             .map_err(|error| format!("glioma federated mechanism transport refused: {error}"))?;
         serde_json::to_value(json!({
@@ -9185,20 +9137,16 @@ impl Server {
     /// The route emits a deterministic gate only; it never signs, publishes, moves raw data, or
     /// makes a clinical decision.
     fn glioma_research_object_release_gate(&self, arguments: &Value) -> Result<Value, String> {
-        let request: ReleaseGateRequest = serde_json::from_value(
-            arguments
-                .get("request")
-                .cloned()
-                .ok_or_else(|| "glioma_research_object_release_gate requires request".to_string())?,
-        )
-        .map_err(|error| format!("invalid glioma release-gate request: {error}"))?;
-        let campaign: ReplayCampaign = serde_json::from_value(
-            arguments
-                .get("campaign")
-                .cloned()
-                .ok_or_else(|| "glioma_research_object_release_gate requires campaign".to_string())?,
-        )
-        .map_err(|error| format!("invalid glioma replay campaign: {error}"))?;
+        let request: ReleaseGateRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_research_object_release_gate requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma release-gate request: {error}"))?;
+        let campaign: ReplayCampaign =
+            serde_json::from_value(arguments.get("campaign").cloned().ok_or_else(|| {
+                "glioma_research_object_release_gate requires campaign".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma replay campaign: {error}"))?;
         let gate = evaluate_glioma_release_gate(&request, &campaign)
             .map_err(|error| format!("glioma research-object release gate refused: {error}"))?;
         serde_json::to_value(json!({

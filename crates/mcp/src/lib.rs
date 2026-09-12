@@ -7,7 +7,7 @@
 //! only as far into the evidence as it needs, and verify a certificate — without linking the
 //! engine or learning a new SDK.
 
-//! 
+//!
 //! # Not implemented, deliberately
 //!
 //! * **One transport.** [`serve`] speaks newline-delimited JSON-RPC over a reader and a writer,
@@ -30,12 +30,12 @@
 #![recursion_limit = "1024"]
 
 mod brain_control;
-mod research_campaign;
 pub mod evolution_assurance;
 pub mod federated_quality_control_assurance;
 pub mod knowledge_representation_contract_model;
 pub mod multimodal_ingestion_assurance;
 pub mod replication_negative_results_assurance;
+mod research_campaign;
 pub mod research_contracts;
 pub mod resource_discovery_contract;
 pub mod rpc;
