@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 676;
+const TOOL_DEFINITION_COUNT: usize = 677;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -2482,6 +2482,52 @@ fn glioma_active_learning_selects_an_uncertain_safe_assay() {
     assert_eq!(plan["plan"]["selected_order"], json!(["matrix", "egfr"]));
     assert_eq!(plan["plan"]["blocked_order"], json!(["unsafe"]));
     assert_eq!(plan["plan"]["disposition"], json!("partial"));
+}
+
+#[test]
+fn glioma_sequential_design_exposes_stopping_and_negative_evidence() {
+    let mut server = server();
+    let artifact_hash = "0".repeat(64);
+    let plan = call(
+        &mut server,
+        "glioma_sequential_design",
+        json!({
+            "request": {
+                "objective": "select the next invasion assay batch",
+                "model_system": "organoid",
+                "endpoint": "invasion_fraction",
+                "control_arm_id": "control",
+                "target_effect_milli": 150,
+                "success_probability_milli": 750,
+                "futility_probability_milli": 700,
+                "min_replicates_per_arm": 3,
+                "max_new_replicates_per_round": 3,
+                "max_rounds": 4,
+                "max_selected_arms": 2,
+                "budget_units": 20,
+                "risk_ceiling_milli": 800,
+                "exploration_weight_milli": 400
+            },
+            "observations": [
+                {"arm_id":"control","label":"vehicle control","artifact":{"artifact_id":"seq-control","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-sequential+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"model_system":"organoid","successes":3,"failures":7,"prior_alpha":1,"prior_beta":1,"risk_milli":200,"cost_units":2},
+                {"arm_id":"strong","label":"strong perturbation","artifact":{"artifact_id":"seq-strong","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-sequential+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"model_system":"organoid","successes":10,"failures":0,"prior_alpha":1,"prior_beta":1,"risk_milli":200,"cost_units":2},
+                {"arm_id":"weak","label":"weak perturbation","artifact":{"artifact_id":"seq-weak","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-sequential+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"model_system":"organoid","successes":0,"failures":10,"prior_alpha":1,"prior_beta":1,"risk_milli":200,"cost_units":2}
+            ]
+        }),
+    );
+    assert_eq!(plan["dispatch"], json!("not_started"));
+    assert_eq!(plan["simulation_only"], json!(true));
+    assert!(plan["plan"]["success_stop_order"]
+        .as_array()
+        .is_some_and(|arms| arms.iter().any(|arm| arm == "strong")));
+    assert!(plan["plan"]["futility_stop_order"]
+        .as_array()
+        .is_some_and(|arms| arms.iter().any(|arm| arm == "weak")));
+    assert!(plan["plan"]["negative_evidence"]
+        .as_array()
+        .is_some_and(|evidence| evidence
+            .iter()
+            .any(|item| item.as_str().is_some_and(|item| item.contains("weak")))));
 }
 
 #[test]

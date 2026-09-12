@@ -159,7 +159,7 @@ pub use programs::p06_experiment_design::{
     plan_glioma_active_learning, plan_glioma_adaptive_information_campaign,
     plan_glioma_clone_perturbation_panel, plan_glioma_closed_loop_campaign,
     plan_glioma_information_design, plan_glioma_multi_fidelity_optimization,
-    plan_glioma_robust_active_learning, ActiveLearningCandidate,
+    plan_glioma_robust_active_learning, plan_glioma_sequential_design, ActiveLearningCandidate,
     ActiveLearningCandidateDisposition, ActiveLearningDirection, ActiveLearningDisposition,
     ActiveLearningError, ActiveLearningObservation, ActiveLearningPlan, ActiveLearningRequest,
     ActiveLearningScore, AdaptiveAllocation, AdaptiveAllocationActionKind,
@@ -201,7 +201,9 @@ pub use programs::p06_experiment_design::{
     RobustActiveLearningCandidateDisposition, RobustActiveLearningDisposition,
     RobustActiveLearningError, RobustActiveLearningModel, RobustActiveLearningObservation,
     RobustActiveLearningPlan, RobustActiveLearningRequest, RobustActiveLearningScore,
-    EXECUTION_OUTPUT_SCHEMA,
+    SequentialArmDecision, SequentialArmObservation, SequentialDecisionKind,
+    SequentialDesignDisposition, SequentialDesignError, SequentialDesignPlan,
+    SequentialDesignRequest, SequentialDesignRound, EXECUTION_OUTPUT_SCHEMA,
 };
 pub use programs::p07_protocol_simulation::{
     execute_glioma_action_portfolio, execute_glioma_active_learning_campaign,

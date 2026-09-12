@@ -531,16 +531,16 @@ use bioprism_research::{
     plan_glioma_clone_perturbation_panel, plan_glioma_closed_loop_campaign,
     plan_glioma_computation_portfolio, plan_glioma_information_design,
     plan_glioma_multi_fidelity_optimization, plan_glioma_robust_active_learning,
-    plan_glioma_robust_intervention_portfolio, plan_glioma_workflow, preflight_glioma_instrument,
-    prioritize_glioma_evidence, prioritize_knowledge_frontier, propagate_glioma_mechanism_graph,
-    qualify_evidence, register_glioma_spatial_samples, revise_glioma_beliefs,
-    select_glioma_actions, simulate_glioma_counterfactual, simulate_glioma_counterfactual_ensemble,
-    simulate_glioma_protocol, surveil_glioma_evidence, synthesize_glioma_interpretation,
-    triangulate_glioma_evidence, validate_feature_catalog, ActionPortfolioExecutionRequest,
-    ActiveLearningCampaignRequest, ActiveLearningCandidate, ActiveLearningObservation,
-    ActiveLearningRequest, AdaptiveAllocationCampaignRequest, AdaptiveAllocationRequest,
-    AdaptiveArmObservation, AdaptiveDoseSurfaceRequest, AdaptiveFrontierRequest,
-    AdaptiveInformationCampaignRequest, AdaptiveInformationObservation,
+    plan_glioma_robust_intervention_portfolio, plan_glioma_sequential_design, plan_glioma_workflow,
+    preflight_glioma_instrument, prioritize_glioma_evidence, prioritize_knowledge_frontier,
+    propagate_glioma_mechanism_graph, qualify_evidence, register_glioma_spatial_samples,
+    revise_glioma_beliefs, select_glioma_actions, simulate_glioma_counterfactual,
+    simulate_glioma_counterfactual_ensemble, simulate_glioma_protocol, surveil_glioma_evidence,
+    synthesize_glioma_interpretation, triangulate_glioma_evidence, validate_feature_catalog,
+    ActionPortfolioExecutionRequest, ActiveLearningCampaignRequest, ActiveLearningCandidate,
+    ActiveLearningObservation, ActiveLearningRequest, AdaptiveAllocationCampaignRequest,
+    AdaptiveAllocationRequest, AdaptiveArmObservation, AdaptiveDoseSurfaceRequest,
+    AdaptiveFrontierRequest, AdaptiveInformationCampaignRequest, AdaptiveInformationObservation,
     AdaptiveMechanismCampaignRequest, AdaptiveMechanismPolicyRequest, AnalysisDataset,
     AnalysisRequest, AssayEvidenceObservation, AssayEvidenceRequest, BeliefConflict,
     BeliefRevisionRequest, CalibrationRequest, CalibrationRun, CampaignAction, CampaignMechanism,
@@ -593,13 +593,13 @@ use bioprism_research::{
     ReplicationStudy, ResearchObjectRequest, RobustActiveLearningCampaignRequest,
     RobustActiveLearningCandidate, RobustActiveLearningObservation, RobustActiveLearningRequest,
     RobustInterventionCandidate, RobustInterventionRequest, RobustnessRequest,
-    SensitivityObservation, SensitivityRequest, SpatialCell, SpatialCommunicationCell,
-    SpatialCommunicationRequest, SpatialNicheRequest, SpatialPropagationRequest,
-    SpatialRegistrationCell, SpatialRegistrationRequest, StateTransitionObservation,
-    StateTransitionRequest, StaticGliomaActionPlanner, StaticGliomaComputationPlanner,
-    StratifiedCausalRequest, StratifiedObservation, TemporalFusionRequest, TemporalObservation,
-    TrajectoryObservation, TrajectoryRequest, TransportStudy, TransportabilityRequest,
-    TypedKnowledge,
+    SensitivityObservation, SensitivityRequest, SequentialArmObservation, SequentialDesignRequest,
+    SpatialCell, SpatialCommunicationCell, SpatialCommunicationRequest, SpatialNicheRequest,
+    SpatialPropagationRequest, SpatialRegistrationCell, SpatialRegistrationRequest,
+    StateTransitionObservation, StateTransitionRequest, StaticGliomaActionPlanner,
+    StaticGliomaComputationPlanner, StratifiedCausalRequest, StratifiedObservation,
+    TemporalFusionRequest, TemporalObservation, TrajectoryObservation, TrajectoryRequest,
+    TransportStudy, TransportabilityRequest, TypedKnowledge,
 };
 use bioprism_routing::{
     lab::{run as run_routing_lab, LabSettings, Task},
@@ -2207,6 +2207,7 @@ impl Server {
             }
             "glioma_dose_response" => self.glioma_dose_response(&arguments),
             "glioma_adaptive_allocation" => self.glioma_adaptive_allocation(&arguments),
+            "glioma_sequential_design" => self.glioma_sequential_design(&arguments),
             "glioma_closed_loop_campaign" => self.glioma_closed_loop_campaign(&arguments),
             "glioma_combination_synergy" => self.glioma_combination_synergy(&arguments),
             "glioma_adaptive_dose_surface" => self.glioma_adaptive_dose_surface(&arguments),
@@ -6852,6 +6853,41 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma adaptive allocation: {error}"))
+    }
+
+    /// Make a bounded sequential interim decision for a local preclinical glioma campaign.
+    /// This is the stopping/allocation layer: it can stop for a declared success or futility
+    /// gate, hold underpowered arms, or compile one next replicate round. It never dispatches
+    /// an assay, chooses a clinical dose, or turns a posterior into a clinical decision.
+    fn glioma_sequential_design(&self, arguments: &Value) -> Result<Value, String> {
+        let request: SequentialDesignRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_sequential_design requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma sequential-design request: {error}"))?;
+        let observations: Vec<SequentialArmObservation> = serde_json::from_value(
+            arguments
+                .get("observations")
+                .cloned()
+                .ok_or_else(|| "glioma_sequential_design requires observations".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma sequential-design observations: {error}"))?;
+        let plan = plan_glioma_sequential_design(&request, &observations)
+            .map_err(|error| format!("glioma sequential design refused: {error}"))?;
+        serde_json::to_value(json!({
+            "plan": plan,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "Beta posteriors and integer Cantelli-style gates are deterministic",
+                "replicate floors prevent premature success or futility promotion",
+                "risk, budget, negative evidence, and uncertainty remain explicit",
+                "the route compiles a local next round only and never dispatches assays or makes clinical decisions"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma sequential-design plan: {error}"))
     }
 
     /// Rank and batch mechanism-discriminating preclinical assays for a closed-loop campaign.
@@ -49240,6 +49276,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_dose_response",
                 "glioma_adaptive_allocation",
                 "glioma_adaptive_allocation_campaign_execute",
+                "glioma_sequential_design",
                 "glioma_closed_loop_campaign",
                 "glioma_combination_synergy",
                 "glioma_adaptive_dose_surface",
@@ -58404,6 +58441,18 @@ pub fn tool_definitions() -> Vec<Value> {
                 "request": {"type": "object", "description": "AdaptiveAllocationCampaignRequest1@1 containing AdaptiveAllocationRequest1@1, local AdaptiveArmObservation1@1 arms, round/retry bounds, and negative-stop policy."}
             },
             "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_sequential_design",
+        "description": "Plan deterministic sequential interim decisions for a local preclinical glioma campaign. Maintains Beta posteriors per arm, compares candidates with a local control, applies replicate-floor success and futility gates, and selects a bounded next replicate round using uncertainty, risk, cost, and budget. Returns explicit success, futility, hold, risk-blocked, budget-blocked, negative-evidence, and unresolved states; it never dispatches an assay, chooses a clinical dose, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "SequentialDesignRequest1@1 with model system, endpoint, control arm, target-effect probability gates, replicate/round bounds, risk ceiling, exploration weight, and budget."},
+                "observations": {"type": "array", "items": {"type": "object"}, "description": "Local SequentialArmObservation1@1 values containing de-identified binary endpoint counts, priors, model-system binding, risk, cost, and local artifact references."}
+            },
+            "required": ["request", "observations"]
         }
     }));
     definitions.push(json!({

@@ -15,6 +15,7 @@ pub mod information_design;
 pub mod multi_fidelity;
 pub mod multi_fidelity_campaign;
 pub mod robust_active_learning;
+pub mod sequential_design;
 pub mod synergy;
 
 pub use active_learning::{
@@ -92,6 +93,11 @@ pub use robust_active_learning::{
     RobustActiveLearningCandidateDisposition, RobustActiveLearningDisposition,
     RobustActiveLearningError, RobustActiveLearningModel, RobustActiveLearningObservation,
     RobustActiveLearningPlan, RobustActiveLearningRequest, RobustActiveLearningScore,
+};
+pub use sequential_design::{
+    plan_glioma_sequential_design, SequentialArmDecision, SequentialArmObservation,
+    SequentialDecisionKind, SequentialDesignDisposition, SequentialDesignError,
+    SequentialDesignPlan, SequentialDesignRequest, SequentialDesignRound,
 };
 pub use synergy::{
     analyze_glioma_combination_synergy, CombinationCell, CombinationCellDisposition,
