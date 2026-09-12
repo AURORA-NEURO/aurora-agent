@@ -514,12 +514,12 @@ use bioprism_research::{
     execute_glioma_autonomous_research_engine, execute_glioma_autonomous_research_mission,
     execute_glioma_computation, execute_glioma_computation_campaign,
     execute_glioma_computation_portfolio, execute_glioma_decision_context_campaign,
-    execute_glioma_evidence_campaign, execute_glioma_evidence_gated_research,
-    execute_glioma_evidence_refresh_campaign, execute_glioma_instrument_campaign,
-    execute_glioma_instrument_fleet, execute_glioma_instrument_plan,
-    execute_glioma_knowledge_resolution_campaign, execute_glioma_mechanism_discrimination_campaign,
-    execute_glioma_multi_fidelity_campaign, execute_glioma_multimodal_ingestion_campaign,
-    execute_glioma_multimodal_mechanism_campaign,
+    execute_glioma_evidence_acquisition_campaign, execute_glioma_evidence_campaign,
+    execute_glioma_evidence_gated_research, execute_glioma_evidence_refresh_campaign,
+    execute_glioma_instrument_campaign, execute_glioma_instrument_fleet,
+    execute_glioma_instrument_plan, execute_glioma_knowledge_resolution_campaign,
+    execute_glioma_mechanism_discrimination_campaign, execute_glioma_multi_fidelity_campaign,
+    execute_glioma_multimodal_ingestion_campaign, execute_glioma_multimodal_mechanism_campaign,
     execute_glioma_multimodal_mechanism_campaign_with_executor, execute_glioma_protocol,
     execute_glioma_replay_campaign, execute_glioma_replication_campaign,
     execute_glioma_research_autopilot, execute_glioma_research_director,
@@ -561,18 +561,18 @@ use bioprism_research::{
     DecisionContextRequest, DesignAction, DesignMechanism, DoseResponseObservation,
     DoseResponseRequest, DryRunActiveLearningCampaignExecutor,
     DryRunAdaptiveAllocationCampaignExecutor, DryRunAdaptiveMechanismPolicyExecutor,
-    DryRunDecisionContextCampaignExecutor, DryRunEvidenceRefreshCampaignExecutor,
-    DryRunFederatedBenchmarkCampaignExecutor, DryRunGliomaActionExecutor,
-    DryRunGliomaComputationExecutor, DryRunGliomaProtocolExecutor,
+    DryRunDecisionContextCampaignExecutor, DryRunEvidenceAcquisitionExecutor,
+    DryRunEvidenceRefreshCampaignExecutor, DryRunFederatedBenchmarkCampaignExecutor,
+    DryRunGliomaActionExecutor, DryRunGliomaComputationExecutor, DryRunGliomaProtocolExecutor,
     DryRunGliomaReplicationCampaignExecutor, DryRunInstrumentExecutor,
     DryRunKnowledgeResolutionCampaignExecutor, DryRunMechanismDiscriminationCampaignExecutor,
     DryRunMultiFidelityCampaignExecutor, DryRunMultimodalIngestionCampaignExecutor,
     DryRunReplayCampaignExecutor, DryRunRobustActiveLearningCampaignExecutor,
     DryRunSequentialCampaignExecutor, DynamicPolicyCandidate, DynamicPolicyRequest,
-    DynamicPolicyTrajectory, EvidenceAcquisitionCandidate, EvidenceAcquisitionRequest,
-    EvidenceCalibrationObservation, EvidenceCalibrationRequest, EvidencePriorityRequest,
-    EvidenceRecord, EvidenceRefreshCampaignRequest, EvidenceRequest, EvidenceSurveillanceRequest,
-    EvidenceTriangulationRequest, ExperimentArm, ExperimentRequest,
+    DynamicPolicyTrajectory, EvidenceAcquisitionCampaignRequest, EvidenceAcquisitionCandidate,
+    EvidenceAcquisitionRequest, EvidenceCalibrationObservation, EvidenceCalibrationRequest,
+    EvidencePriorityRequest, EvidenceRecord, EvidenceRefreshCampaignRequest, EvidenceRequest,
+    EvidenceSurveillanceRequest, EvidenceTriangulationRequest, ExperimentArm, ExperimentRequest,
     FederatedBenchmarkCampaignRequest, FederatedBenchmarkRequest, FederatedBenchmarkSite,
     FederatedBenchmarkSitePlannerRequest, FederatedMechanismSite,
     FederatedMechanismTransportRequest, FidelityCandidate, FidelityObservation,
@@ -2246,6 +2246,9 @@ impl Server {
             "glioma_evidence_surveillance" => self.glioma_evidence_surveillance(&arguments),
             "glioma_evidence_priority" => self.glioma_evidence_priority(&arguments),
             "glioma_evidence_acquisition_plan" => self.glioma_evidence_acquisition_plan(&arguments),
+            "glioma_evidence_acquisition_campaign_execute" => {
+                self.glioma_evidence_acquisition_campaign_execute(&arguments)
+            }
             "glioma_evidence_calibrate" => self.glioma_evidence_calibrate(&arguments),
             "glioma_evidence_triangulate" => self.glioma_evidence_triangulate(&arguments),
             "glioma_knowledge_compile" => self.glioma_knowledge_compile(&arguments),
@@ -7785,6 +7788,36 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma evidence-acquisition plan: {error}"))
+    }
+
+    /// Execute a selected P01 acquisition portfolio through the synthetic local adapter exposed
+    /// by MCP. Institution-local Rust callers can provide a production executor instead.
+    fn glioma_evidence_acquisition_campaign_execute(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: EvidenceAcquisitionCampaignRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_evidence_acquisition_campaign_execute requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma evidence-acquisition campaign request: {error}")
+            })?;
+        let mut executor = DryRunEvidenceAcquisitionExecutor;
+        let campaign = execute_glioma_evidence_acquisition_campaign(&request, &mut executor)
+            .map_err(|error| format!("glioma evidence-acquisition campaign refused: {error}"))?;
+        serde_json::to_value(json!({
+            "campaign": campaign,
+            "dispatch": "dry_run",
+            "simulation_only": true,
+            "guarantees": [
+                "the content-addressed acquisition plan is executed only in dependency order",
+                "retryable adapter failures, budget exhaustion, negative results, partial/unknown outcomes, and blocked dependants remain explicit",
+                "dry-run artifacts are local metadata and are never promoted to biological evidence",
+                "production retrieval, assay, simulation, and replication effects require a caller-owned institution-local executor"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma evidence-acquisition campaign: {error}"))
     }
 
     /// Calibrate source-family support scores against resolved local preclinical outcomes. The
@@ -49605,6 +49638,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_evidence_surveillance",
                 "glioma_evidence_priority",
                 "glioma_evidence_acquisition_plan",
+                "glioma_evidence_acquisition_campaign_execute",
                 "glioma_evidence_calibrate",
                 "glioma_evidence_triangulate",
                 "glioma_knowledge_compile",
@@ -59111,6 +59145,17 @@ pub fn tool_definitions() -> Vec<Value> {
                 "candidates": {"type": "array", "items": {"type": "object"}, "description": "EvidenceAcquisitionCandidate1@1 records with typed source kind, modality/model scope, dependencies, costs, expected scientific value, failure risk, and local-only policy metadata."}
             },
             "required": ["request", "candidates"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_evidence_acquisition_campaign_execute",
+        "description": "Execute a content-addressed local preclinical glioma evidence-acquisition portfolio in dependency order through the MCP dry-run adapter. Preserves retries, budget exhaustion, negative/partial/unknown results, and blocked dependants; no source retrieval, protected-data movement, biological effect, or clinical decision occurs. Production adapters remain institution-local Rust executors.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "EvidenceAcquisitionCampaignRequest1@1 containing the validated acquisition plan, matching candidate records, budget, retry policy, negative-result policy, and artifact requirement."}
+            },
+            "required": ["request"]
         }
     }));
     definitions.push(json!({

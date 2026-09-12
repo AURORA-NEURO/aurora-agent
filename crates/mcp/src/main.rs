@@ -104,6 +104,7 @@ fn main() {
                      glioma_evidence_surveillance,\n\
                      glioma_evidence_priority,\n\
                      glioma_evidence_acquisition_plan,\n\
+                     glioma_evidence_acquisition_campaign_execute,\n\
                      glioma_evidence_calibrate,\n\
                      glioma_evidence_triangulate,\n\
                      glioma_instrument_calibration,\n\

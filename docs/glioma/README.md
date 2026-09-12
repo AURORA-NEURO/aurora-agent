@@ -76,6 +76,8 @@ crates/research/src/glioma/
                                              P01 recency/state/coverage action queue for the next autonomous cycle
   programs/p01_evidence_surveillance/acquisition.rs
                                              P01 dependency-closed, source-diverse evidence-acquisition portfolio optimizer
+  programs/p01_evidence_surveillance/acquisition_campaign.rs
+                                             P01 dependency-safe acquisition execution with retries, budget, and honest outcomes
   programs/p01_evidence_surveillance/campaign.rs
                                              P01 bounded autonomous evidence refresh and round-by-round surveillance replanning
   programs/p01_evidence_surveillance/calibration.rs
@@ -333,6 +335,11 @@ independence overuse are blocked before dispatch; deferred work, missing coverag
 evidence, and the candidate frontier remain explicit. The planner is intentionally acquisition
 agnostic: a separate approved adapter must perform retrieval, assay setup, or replication, and no
 successful acquisition is claimed by the planning route.
+The execution bridge (`execute_glioma_evidence_acquisition_campaign`) consumes only that
+content-addressed plan, orders prerequisites before dependants, retries transient adapter faults,
+and records completed, negative, partial, unknown, failed, budget-blocked, and dependency-blocked
+work. MCP uses an explicit synthetic adapter; institution-local executors are the only path to
+real retrieval, assay, simulation, or replication effects.
 P09 now includes a bounded robustness suite (`assess_glioma_robustness`) that
 recomputes the declared effect under leave-one-batch-out and optional leave-one-row-out omissions;
 unresolved subsets, fragile effects, and null results remain explicit. Provider-specific execution

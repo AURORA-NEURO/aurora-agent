@@ -3,6 +3,7 @@
 use crate::glioma::catalog::{glioma_program_catalog, GliomaProgramDescriptor, GliomaProgramId};
 
 pub mod acquisition;
+pub mod acquisition_campaign;
 pub mod calibration;
 pub mod campaign;
 pub mod priority;
@@ -32,6 +33,13 @@ pub use acquisition::{
     plan_glioma_evidence_acquisition, EvidenceAcquisitionCandidate, EvidenceAcquisitionDisposition,
     EvidenceAcquisitionError, EvidenceAcquisitionPlan, EvidenceAcquisitionRequest,
     EvidenceAcquisitionSelection, EvidenceAcquisitionSourceKind, EvidenceAcquisitionWeights,
+};
+pub use acquisition_campaign::{
+    execute_glioma_evidence_acquisition_campaign, DryRunEvidenceAcquisitionExecutor,
+    EvidenceAcquisitionCampaign, EvidenceAcquisitionCampaignDisposition,
+    EvidenceAcquisitionCampaignError, EvidenceAcquisitionCampaignRequest,
+    EvidenceAcquisitionCampaignStopReason, EvidenceAcquisitionExecutionFailure,
+    EvidenceAcquisitionExecutor, EvidenceAcquisitionResult, EvidenceAcquisitionResultDisposition,
 };
 pub use priority::{
     prioritize_glioma_evidence, EvidencePriorityAction, EvidencePriorityActionKind,

@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 685;
+const TOOL_DEFINITION_COUNT: usize = 686;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -2228,6 +2228,35 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
         .unwrap()
         .iter()
         .any(|id| id == "literature-a"));
+
+    let evidence_acquisition_campaign = call(
+        &mut server,
+        "glioma_evidence_acquisition_campaign_execute",
+        json!({
+            "request": {
+                "objective": "close invasion evidence debt",
+                "plan": evidence_acquisition["acquisition"].clone(),
+                "candidates": [
+                    {"candidate_id":"literature-a","target_claim":"EGFR signaling increases invasion","source_family":"pubmed","source_kind":"literature","modality":"genomics","model_system":"organoid","independence_group":"pubmed","depends_on":[],"cost_units":2,"expected_support_milli":800,"expected_uncertainty_reduction_milli":700,"contradiction_resolution_milli":600,"freshness_milli":600,"workflow_leverage_milli":700,"reproducibility_milli":800,"failure_probability_milli":100,"privacy_risk_milli":50,"local_only":true,"contains_human_data":false},
+                    {"candidate_id":"dataset-b","target_claim":"EGFR signaling increases invasion","source_family":"atlas","source_kind":"dataset","modality":"imaging","model_system":"organoid","independence_group":"atlas","depends_on":["literature-a"],"cost_units":2,"expected_support_milli":800,"expected_uncertainty_reduction_milli":700,"contradiction_resolution_milli":600,"freshness_milli":600,"workflow_leverage_milli":700,"reproducibility_milli":800,"failure_probability_milli":100,"privacy_risk_milli":50,"local_only":true,"contains_human_data":false},
+                    {"candidate_id":"replicate-c","target_claim":"EGFR signaling increases invasion","source_family":"consortium","source_kind":"replication","modality":"imaging","model_system":"organoid","independence_group":"consortium","depends_on":[],"cost_units":2,"expected_support_milli":800,"expected_uncertainty_reduction_milli":700,"contradiction_resolution_milli":600,"freshness_milli":600,"workflow_leverage_milli":700,"reproducibility_milli":800,"failure_probability_milli":100,"privacy_risk_milli":50,"local_only":true,"contains_human_data":false}
+                ],
+                "budget_units": 6,
+                "max_retries": 2,
+                "stop_on_negative": true,
+                "require_artifacts": true
+            }
+        }),
+    );
+    assert_eq!(evidence_acquisition_campaign["dispatch"], json!("dry_run"));
+    assert_eq!(
+        evidence_acquisition_campaign["simulation_only"],
+        json!(true)
+    );
+    assert!(!evidence_acquisition_campaign["campaign"]["unknown_order"]
+        .as_array()
+        .unwrap()
+        .is_empty());
 
     let priority_action_id = evidence_priority["priority"]["selected_order"][0]
         .as_str()
