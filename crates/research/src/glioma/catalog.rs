@@ -328,6 +328,7 @@ pub fn implemented_feature_ids() -> Vec<&'static str> {
         crate::glioma::programs::p03_multimodal_ingestion_qc::spatial_niche::FEATURE_ID,
         crate::glioma::programs::p03_multimodal_ingestion_qc::spatial_communication::FEATURE_ID,
         crate::glioma::programs::p03_multimodal_ingestion_qc::spatial_propagation::FEATURE_ID,
+        crate::glioma::programs::p03_multimodal_ingestion_qc::spatial_registration::FEATURE_ID,
         crate::glioma::programs::p03_multimodal_ingestion_qc::temporal_fusion::FEATURE_ID,
         crate::glioma::programs::p04_decision_context::context_compiler::FEATURE_ID,
         crate::glioma::programs::p04_decision_context::action_bridge::FEATURE_ID,

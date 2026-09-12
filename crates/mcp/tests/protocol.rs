@@ -349,7 +349,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 57;
-const TOOL_DEFINITION_COUNT: usize = 623;
+const TOOL_DEFINITION_COUNT: usize = 624;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -1214,6 +1214,43 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
             .unwrap()
             .len(),
         1
+    );
+
+    let spatial_registration = call(
+        &mut server,
+        "glioma_spatial_registration",
+        json!({
+            "request": {
+                "study_id": "mcp-registration-study",
+                "model_system": "organoid",
+                "reference_sample_id": "registration-reference",
+                "min_cells_per_landmark": 1,
+                "min_shared_lineages": 2,
+                "max_residual_milli": 20,
+                "max_landmark_spread_milli": 20
+            },
+            "cells": [
+                {"cell_id":"reg-r-a","sample_id":"registration-reference","lineage":"tumour","x_milli":0,"y_milli":0,"state_milli":500,"artifact":{"artifact_id":"reg-artifact-r-a","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-spatial-registration+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"cell_id":"reg-r-b","sample_id":"registration-reference","lineage":"myeloid","x_milli":1000,"y_milli":0,"state_milli":500,"artifact":{"artifact_id":"reg-artifact-r-b","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-spatial-registration+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"cell_id":"reg-r-c","sample_id":"registration-reference","lineage":"astro","x_milli":0,"y_milli":1000,"state_milli":500,"artifact":{"artifact_id":"reg-artifact-r-c","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-spatial-registration+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"cell_id":"reg-s-a","sample_id":"registration-shifted","lineage":"tumour","x_milli":100,"y_milli":200,"state_milli":500,"artifact":{"artifact_id":"reg-artifact-s-a","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-spatial-registration+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"cell_id":"reg-s-b","sample_id":"registration-shifted","lineage":"myeloid","x_milli":1100,"y_milli":200,"state_milli":500,"artifact":{"artifact_id":"reg-artifact-s-b","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-spatial-registration+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"cell_id":"reg-s-c","sample_id":"registration-shifted","lineage":"astro","x_milli":100,"y_milli":1200,"state_milli":500,"artifact":{"artifact_id":"reg-artifact-s-c","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-spatial-registration+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}}
+            ]
+        }),
+    );
+    assert_eq!(spatial_registration["dispatch"], json!("not_started"));
+    assert_eq!(spatial_registration["simulation_only"], json!(true));
+    assert_eq!(
+        spatial_registration["analysis"]["disposition"],
+        json!("qualified")
+    );
+    assert_eq!(
+        spatial_registration["analysis"]["registered_cell_order"]
+            .as_array()
+            .unwrap()
+            .len(),
+        6
     );
 
     let sensitivity = call(

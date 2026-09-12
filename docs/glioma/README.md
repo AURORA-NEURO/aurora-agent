@@ -204,6 +204,8 @@ crates/research/src/glioma/
                                              P03 spatial ligand-receptor communication enrichment against lineage-marginal null
   p03_multimodal_ingestion_qc/spatial_propagation.rs
                                              P03 lineage-aware integer spatial-state diffusion and hotspot prioritisation
+  p03_multimodal_ingestion_qc/spatial_registration.rs
+                                             P03 robust cross-sample lineage-landmark registration with residual and coverage gates
   p03_multimodal_ingestion_qc/temporal_fusion.rs
                                              P03 longitudinal multimodal state-transition inference with explicit missing-timepoint and modality gates
     p05_mechanism_exploration/pathway_activity.rs
@@ -228,7 +230,7 @@ portfolio plan and executable code; it does not promote a planned slot to implem
 | --- | --- | --- | --- |
 | P01 Evidence surveillance | evidence curator | evidence surveillance | snapshot deltas, recency/state/coverage action queues, cross-family claim triangulation, review/revalidation actions, and stale/unknown/contradictory coverage |
 | P02 Evidence-to-typed-knowledge | knowledge engineer | evidence compilation | scoped claims, ranked uncertainty frontiers, and competing explanations bound to source artifacts |
-| P03 Multimodal ingestion and QC | data steward | multimodal ingestion/QC | comparable cells, robust batch harmonization, feature-level concordance, consensus clusters, spatial niches, ligand-receptor communication, spatial-state diffusion, and explicit defects |
+| P03 Multimodal ingestion and QC | data steward | multimodal ingestion/QC | comparable cells, robust batch harmonization, feature-level concordance, consensus clusters, spatial niches, ligand-receptor communication, cross-sample registration, spatial-state diffusion, and explicit defects |
 | P04 Question-to-decision context | principal investigator | intent normalization, context compilation | bounded decision context, selected executable action batches, and unresolved omissions |
 | P05 Mechanism exploration | mechanism scientist | molecular landscape, mechanism exploration | residual-fit competing mechanisms, posterior-weighted next-assay information gain, signed mechanism-network propagation, model-averaged counterfactuals, robust lower-tail intervention portfolios, and discriminating actions |
 | P06 Power-aware experiment design | experimentalist | experiment design | falsifiable allocation, power, blocking, dose-response, adaptive replicate allocation, uncertainty-aware dose-surface acquisition, mechanism-aware closed-loop campaign rounds, combination-synergy fitting, and null-result plan |
@@ -327,6 +329,12 @@ P03 now also includes spatial-state propagation (`analyze_glioma_spatial_state_p
 builds same-sample neighborhood edges and runs a bounded integer diffusion with self-retention,
 lineage-aware coupling, convergence checks, and hotspot ranking. It never diffuses across samples,
 imputes isolated cells, or presents a spatial simulation as biological proof.
+P03 now also includes cross-sample spatial registration (`register_glioma_spatial_samples`). It
+estimates a robust translation/isotropic-scale transform from repeated lineage landmarks, emits
+aligned local cell coordinates and landmark residuals, and gates samples on shared-lineage coverage,
+residual spread, and missing landmarks. Rotation/shear not modeled, unresolved samples, and
+unregistered cells remain explicit, so downstream spatial niches can compare only the registered
+subset rather than silently mixing coordinate frames.
 P03 now also includes multimodal graph fusion (`analyze_glioma_multimodal_graph_fusion`) that
 retains modality-specific sample neighbours, fuses them with reliability-weighted consensus, and
 runs bounded diffusion over observed edges. Modality dropout, sparse shared features, contradictory

@@ -477,6 +477,7 @@ use bioprism_research::{
     analyze_glioma_clone_panel_outcomes,
     analyze_glioma_spatial_communication, analyze_glioma_spatial_niches,
     analyze_glioma_spatial_state_propagation, analyze_glioma_state_transitions,
+    register_glioma_spatial_samples,
     analyze_glioma_temporal_multimodal_fusion, calibrate_glioma_mechanisms,
     analyze_glioma_trajectories, analyze_glioma_transportability, analyze_instrument_calibration,
     analyze_multimodal_concordance, analyze_multimodal_consensus, analyze_preclinical_outcomes,
@@ -544,7 +545,7 @@ use bioprism_research::{
     EvidencePriorityRequest, EvidenceRecord, EvidenceRefreshCampaignRequest, EvidenceRequest,
     EvidenceSurveillanceRequest, EvidenceTriangulationRequest, ExperimentArm, ExperimentRequest,
     FederatedBenchmarkCampaignRequest, FederatedBenchmarkRequest, FederatedBenchmarkSite,
-    FederatedBenchmarkSitePlannerRequest,
+    FederatedBenchmarkSitePlannerRequest, SpatialRegistrationCell, SpatialRegistrationRequest,
     FederatedMechanismSite, FederatedMechanismTransportRequest,
     FidelityCandidate, FidelityObservation, GliomaActionCandidate, GliomaAutonomousCampaignRequest,
     GliomaComputationCampaignRequest, GliomaComputationWorkflowRequest,
@@ -2110,6 +2111,7 @@ impl Server {
             "glioma_spatial_niches" => self.glioma_spatial_niches(&arguments),
             "glioma_spatial_communication" => self.glioma_spatial_communication(&arguments),
             "glioma_spatial_state_propagation" => self.glioma_spatial_state_propagation(&arguments),
+            "glioma_spatial_registration" => self.glioma_spatial_registration(&arguments),
             "glioma_causal_sensitivity" => self.glioma_causal_sensitivity(&arguments),
             "glioma_research_select_actions" => self.glioma_research_select_actions(&arguments),
             "glioma_program_catalog" => self.glioma_program_catalog(&arguments),
@@ -4940,6 +4942,39 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma spatial-state propagation: {error}"))
+    }
+
+    /// Register institution-local glioma spatial samples into a declared reference frame using
+    /// lineage landmarks; no raw image payload or clinical interpretation leaves the process.
+    fn glioma_spatial_registration(&self, arguments: &Value) -> Result<Value, String> {
+        let request: SpatialRegistrationRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_spatial_registration requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma spatial-registration request: {error}"))?;
+        let cells: Vec<SpatialRegistrationCell> = serde_json::from_value(
+            arguments
+                .get("cells")
+                .cloned()
+                .ok_or_else(|| "glioma_spatial_registration requires cells".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma spatial-registration cells: {error}"))?;
+        let output = register_glioma_spatial_samples(&request, &cells)
+            .map_err(|error| format!("glioma spatial registration refused: {error}"))?;
+        serde_json::to_value(json!({
+            "analysis": output,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "transforms are estimated only from repeated typed lineage landmarks in local preclinical samples",
+                "shared-lineage coverage, residuals, missing landmarks, and unregistered cells remain explicit",
+                "rotation and shear are not silently inferred; downstream consumers receive the declared uncertainty",
+                "the route aligns coordinates for research analysis only and never makes a clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma spatial-registration analysis: {error}"))
     }
 
     /// Quantify the declared hidden-confounding budget at which a local preclinical effect tips.
@@ -46696,6 +46731,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_spatial_niches",
                 "glioma_spatial_communication",
                 "glioma_spatial_state_propagation",
+                "glioma_spatial_registration",
                 "glioma_causal_sensitivity",
                 "glioma_research_select_actions",
                 "glioma_program_catalog",
@@ -54141,6 +54177,18 @@ pub fn tool_definitions() -> Vec<Value> {
             "properties": {
                 "request": {"type": "object", "description": "SpatialPropagationRequest1@1 with study/model binding, radius, step, retention, lineage-coupling, convergence, and hotspot bounds."},
                 "cells": {"type": "array", "items": {"type": "object"}, "description": "Local SpatialCell1@1 records with de-identified coordinates, lineage/state values, and artifact references."}
+            },
+            "required": ["request", "cells"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_spatial_registration",
+        "description": "Register local preclinical glioma spatial samples into a declared reference frame using repeated lineage landmarks. Estimates a robust translation/isotropic-scale transform, emits aligned cells and landmark residuals, and preserves missing-lineage, residual-spread, rotation/shear, and unregistered-cell uncertainty; it never moves raw images or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "SpatialRegistrationRequest1@1 with study/model binding, reference sample, landmark floors, residual, and spread gates."},
+                "cells": {"type": "array", "items": {"type": "object"}, "description": "Local SpatialRegistrationCell1@1 records with de-identified coordinates, lineage/state values, and local artifact references."}
             },
             "required": ["request", "cells"]
         }

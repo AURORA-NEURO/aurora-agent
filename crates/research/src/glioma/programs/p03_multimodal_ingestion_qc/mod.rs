@@ -11,6 +11,7 @@ pub mod latent_factors;
 pub mod spatial_communication;
 pub mod spatial_niche;
 pub mod spatial_propagation;
+pub mod spatial_registration;
 pub mod temporal_fusion;
 
 pub use campaign::{
@@ -58,6 +59,12 @@ pub use spatial_propagation::{
     analyze_glioma_spatial_state_propagation, SpatialPropagationAnalysis,
     SpatialPropagationDisposition, SpatialPropagationEdge, SpatialPropagationError,
     SpatialPropagationRequest, SpatialPropagationTrajectory,
+};
+pub use spatial_registration::{
+    register_glioma_spatial_samples, RegisteredSpatialCell, RegistrationLandmark,
+    SampleRegistration, SampleRegistrationDisposition, SpatialRegistrationAnalysis,
+    SpatialRegistrationCell, SpatialRegistrationDisposition, SpatialRegistrationError,
+    SpatialRegistrationRequest,
 };
 pub use temporal_fusion::{
     analyze_glioma_temporal_multimodal_fusion, TemporalFusionAnalysis, TemporalFusionDisposition,
