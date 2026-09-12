@@ -330,3 +330,181 @@ def test_evidence_runtime_persists_pending_evaluator_revision_and_accepts_after_
     assert not accepted.missing_requirement_ids
     assert len(restored_journal.records()) == 2
     assert acquirer.calls == 1
+
+
+def test_evidence_runtime_replay_preserves_missing_output_partial_status() -> None:
+    workflow = next(item for item in builtin_autonomous_workflow_strategies() if item.domain == "science")
+    baseline = build_autonomous_evidence_plan((workflow,))
+    plan = build_autonomous_evidence_plan(
+        (workflow,),
+        available_evidence=tuple(item.requirement_id for item in baseline.requirements[1:]),
+    )
+    requirement = plan.requirements[0]
+    request = _request(requirement)
+    value = {"fixture": "unprojected-value", "requirement": requirement.requirement_id}
+    journal = InMemoryAutonomousEvidenceRuntimeJournal()
+    acquisition_calls = 0
+
+    def acquire(_context):
+        nonlocal acquisition_calls
+        acquisition_calls += 1
+        return value
+
+    fresh = AutonomousEvidenceRuntime(plan, journal=journal).execute([request], acquirer=acquire)
+    assert fresh.status == "partial"
+    assert fresh.receipts[0].evidence_status == "missing_required_outputs"
+    assert not fresh.receipts[0].observed_requirement_ids
+    assert not fresh.pending_evaluation_requirement_ids
+    assert fresh.missing_requirement_ids == (requirement.requirement_id,)
+
+    restored_journal = InMemoryAutonomousEvidenceRuntimeJournal()
+    restored_journal.restore(journal.snapshot(plan.plan_digest), plan.plan_digest)
+    replay_runtime = AutonomousEvidenceRuntime(plan, journal=restored_journal)
+    assert replay_runtime.rehydrate()["restored"] == 1
+    replayed = replay_runtime.execute(
+        [request],
+        acquirer=lambda _context: (_ for _ in ()).throw(RuntimeError("replay must not reacquire")),
+        rehydrate_value=lambda _receipt: value,
+    )
+
+    assert replayed.receipts[0].replay == "replayed"
+    assert replayed.status == fresh.status
+    assert replayed.pending_evaluation_requirement_ids == fresh.pending_evaluation_requirement_ids
+    assert replayed.missing_requirement_ids == fresh.missing_requirement_ids
+    assert acquisition_calls == 1
+
+
+def test_evidence_runtime_replay_preserves_observed_unevaluated_status() -> None:
+    workflow = next(item for item in builtin_autonomous_workflow_strategies() if item.domain == "science")
+    baseline = build_autonomous_evidence_plan((workflow,))
+    plan = build_autonomous_evidence_plan(
+        (workflow,),
+        available_evidence=tuple(item.requirement_id for item in baseline.requirements[1:]),
+    )
+    requirement = plan.requirements[0]
+    request = _request(requirement)
+    value = {"fixture": "observed-value", "requirement": requirement.requirement_id}
+    journal = InMemoryAutonomousEvidenceRuntimeJournal()
+    projection_calls = 0
+
+    def project(_value, context):
+        nonlocal projection_calls
+        projection_calls += 1
+        return [{"label": context["requirement"].label, "status": "observed"}]
+
+    fresh = AutonomousEvidenceRuntime(plan, journal=journal).execute(
+        [request],
+        acquirer=lambda _context: value,
+        projector=project,
+    )
+    assert fresh.status == "awaiting_evaluation"
+    assert fresh.receipts[0].evidence_status == "declared_for_evaluator"
+    assert fresh.pending_evaluation_requirement_ids == (requirement.requirement_id,)
+    assert not fresh.missing_requirement_ids
+
+    restored_journal = InMemoryAutonomousEvidenceRuntimeJournal()
+    restored_journal.restore(journal.snapshot(plan.plan_digest), plan.plan_digest)
+    replay_runtime = AutonomousEvidenceRuntime(plan, journal=restored_journal)
+    assert replay_runtime.rehydrate()["restored"] == 1
+    replayed = replay_runtime.execute(
+        [request],
+        acquirer=lambda _context: (_ for _ in ()).throw(RuntimeError("replay must not reacquire")),
+        projector=lambda _value, _context: (_ for _ in ()).throw(RuntimeError("replay must not reproject")),
+        rehydrate_value=lambda _receipt: value,
+    )
+
+    assert replayed.receipts[0].replay == "replayed"
+    assert replayed.status == fresh.status
+    assert replayed.pending_evaluation_requirement_ids == fresh.pending_evaluation_requirement_ids
+    assert replayed.missing_requirement_ids == fresh.missing_requirement_ids
+    assert projection_calls == 1
+
+
+def test_evidence_runtime_replay_preserves_rejected_assessment_as_pending() -> None:
+    workflow = next(item for item in builtin_autonomous_workflow_strategies() if item.domain == "science")
+    baseline = build_autonomous_evidence_plan((workflow,))
+    plan = build_autonomous_evidence_plan(
+        (workflow,),
+        available_evidence=tuple(item.requirement_id for item in baseline.requirements[1:]),
+    )
+    requirement = plan.requirements[0]
+    request = _request(requirement)
+    value = {"fixture": "rejected-value", "requirement": requirement.requirement_id}
+    journal = InMemoryAutonomousEvidenceRuntimeJournal()
+
+    class _RejectingEvaluator:
+        evaluator_id = "rejection-evaluator"
+        evaluator_version = "1"
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def evaluate(self, _input_value):
+            self.calls += 1
+            return {
+                "evaluator_id": self.evaluator_id,
+                "evaluator_version": self.evaluator_version,
+                "verdict": "rejected",
+                "score": 0,
+            }
+
+    evaluator = _RejectingEvaluator()
+    fresh = AutonomousEvidenceRuntime(plan, journal=journal).execute(
+        [request],
+        acquirer=lambda _context: value,
+        projector=lambda _value, context: [{"label": context["requirement"].label, "status": "observed"}],
+        evaluator=evaluator,
+    )
+    assert fresh.status == "awaiting_evaluation"
+    assert fresh.assessments[0].verdict == "rejected"
+    assert fresh.pending_evaluation_requirement_ids == (requirement.requirement_id,)
+
+    restored_journal = InMemoryAutonomousEvidenceRuntimeJournal()
+    restored_journal.restore(journal.snapshot(plan.plan_digest), plan.plan_digest)
+    replay_runtime = AutonomousEvidenceRuntime(plan, journal=restored_journal)
+    assert replay_runtime.rehydrate()["restored"] == 1
+    replayed = replay_runtime.execute(
+        [request],
+        acquirer=lambda _context: (_ for _ in ()).throw(RuntimeError("replay must not reacquire")),
+        rehydrate_value=lambda _receipt: value,
+    )
+
+    assert replayed.receipts[0].replay == "replayed"
+    assert replayed.assessments[0].verdict == "rejected"
+    assert replayed.status == fresh.status
+    assert replayed.completed_requirement_ids == fresh.completed_requirement_ids
+    assert replayed.pending_evaluation_requirement_ids == fresh.pending_evaluation_requirement_ids
+    assert replayed.missing_requirement_ids == fresh.missing_requirement_ids
+    assert evaluator.calls == 1
+
+    class _AcceptingEvaluator:
+        evaluator_id = "rejection-evaluator"
+        evaluator_version = "2"
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def evaluate(self, _input_value):
+            self.calls += 1
+            return {
+                "evaluator_id": self.evaluator_id,
+                "evaluator_version": self.evaluator_version,
+                "verdict": "accepted",
+                "score": 1,
+            }
+
+    accepting_evaluator = _AcceptingEvaluator()
+    revised = replay_runtime.execute(
+        [request],
+        acquirer=lambda _context: (_ for _ in ()).throw(RuntimeError("revision must not reacquire")),
+        evaluator=accepting_evaluator,
+        rehydrate_value=lambda _receipt: value,
+        reevaluate_pending=True,
+    )
+
+    assert revised.status == "awaiting_evaluation", "pre-available requirements still lack evaluator decisions"
+    assert revised.receipts[0].evaluator_status == "accepted"
+    assert revised.assessments[0].verdict == "accepted"
+    assert revised.completed_requirement_ids == (requirement.requirement_id,)
+    assert not revised.pending_evaluation_requirement_ids
+    assert accepting_evaluator.calls == 1

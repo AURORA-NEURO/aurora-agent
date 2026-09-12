@@ -1,5 +1,73 @@
 # Remaining backlog
 
+The provider-free real-data neurosurgical plane is now the default research path for the glioma
+lane: checked-in ClinicalTrials.gov, NCI GDC, cBioPortal, NCI PDQ, and PubMed snapshots are
+validated, digest-bound, queryable, freshness-auditable, and refreshable only through explicit
+allow-listed public endpoints. The local-model bridge accepts only caller-registered in-memory or
+loopback providers, never requires an OpenAI key, and fails closed instead of synthesizing missing
+evidence. The six-specialty PubMed plane (glioma, cranial base, craniosynostosis, encephalocele,
+spina bifida, and Chiari malformation) has the same review-only posture. Remaining work below is
+about deployment-owned retrieval, persistence, evaluator, and coordination—not substituting
+synthetic data for the real evidence path.
+The repeatable PowerShell mission runner now defaults to the checked-in extended TCGA-GBM +
+TCGA-LGG population and broad glioma molecular PubMed lane; the compact GBM-only snapshot remains
+an explicit opt-in for replay compatibility.
+
+The real-data plane now includes a deterministic cohort-landscape projection across the extended
+TCGA-GBM and TCGA-LGG GDC metadata. Rust, MCP, Python, and TypeScript expose the same bounded
+aggregate case-inventory and file/data-type availability contract, and the local-model tool loop
+can request it with exact `genomic_project` citations. Newly generated evidence packets, reasoning
+contexts, autonomous workflows, and glioma missions now carry this landscape automatically, so a
+worker cannot omit comparative project context merely by skipping an optional tool turn. It remains
+a planning/citation surface, and the autonomous review wave emits an explicit
+`inspect_cohort_landscape` context action for each returned project set:
+project rows are source-linked, missingness and truncation stay explicit, and no files, samples,
+molecular values, cohort merges, or clinical conclusions are produced.
+
+When a caller supplies an explicit freshness clock, the autonomous workflow distinguishes stale
+from future-dated sources: stale sources emit a `refresh_source_snapshot` action pointing the
+worker to the allow-listed refresh adapter while preserving candidate validation and human
+promotion review; future-dated sources remain `verify_source_metadata` holds. The core never
+fetches or replaces a snapshot itself.
+
+The same workflow now emits an `expand_evidence_projection` completeness action whenever the
+packet's record query, graph, trial/intervention inventory, molecular profile/study inventory, or
+cohort project view is truncated. It also keeps the workflow in `needs_snapshot_expansion` when
+the action queue itself is capped and omits actions, so a small `max_actions` cannot hide a
+context obligation or the human-signoff gate. This prevents a bounded handoff from being
+mistaken for a complete corpus while keeping omitted rows/actions explicit and caller-owned.
+
+The selected-lane neurosurgical intake portfolio now preserves a caller-owned case-asset review
+ledger end to end. Rust, MCP, Python, TypeScript, the CLI, and the PowerShell worker validate the
+ledger against the exact manifest projection and carry its digest/counts into the nested mission
+audit; all-specialty portfolios reject ambiguous single-lane asset provenance. The CLI exposes
+`--intake-case-asset-review-disposition` and the worker exposes `-CaseAssetReviewDispositionPath`.
+
+The first generic Rust research-campaign kernel and path-only offline MCP runner are also present.
+They provide canonical fixed-DAG identity, native receipt verification, linear authorization behind
+an atomic checkpoint/head coordinator, hash-linked replay, explicit unknown-completion
+reconciliation, no-write preview, append-only local output, and metadata-only Python/TypeScript
+facades. That campaign kernel remains intentionally separate from the real-data neurosurgical
+evidence planes: it must not be described as literature coverage or independent scientific truth.
+Python and TypeScript now expose the reviewed live retrieval adapter for the fixed 1--6-lane
+PubMed catalogue. Its deterministic preflight is network-free and digest-binds the exact query set,
+parser surface, and transport; approved execution performs exactly one ESearch, one ESummary, and
+one EFetch request per lane. The adapters enforce the resulting three-request-per-lane ceiling plus
+per-response, aggregate-byte, tree, record, and bundle bounds. They strip only the allow-listed NLM
+external DTD declaration before the EFetch XML reaches the parser or bundle projection, while
+entity declarations, internal subsets, alternate declarations, and malformed XML fail closed.
+An optional paired NCBI tool/developer-email identity is applied to every request and digest-bound
+without copying the raw contact values into review artifacts, receipts, or source URIs; deployments
+still have to register that identity with NCBI themselves. The one-lane Python and TypeScript
+registration helpers bind a reviewed plan to the existing autonomous evidence runtime's
+acquire/project callbacks and validate its transient bundle and receipt without widening the source
+boundary. This remains one biomedical source rather
+than a general retrieval plane. Remaining work toward full autonomous external research is broader
+reviewed source/provider coverage, authenticated shared journal and coordinator implementations,
+status-based reconciliation for uncertain calls, independent source-quality and claim-integrity
+enforcement over retrieved evidence, evaluator/human-review settlement, scheduling, and production
+retention/authorization policy.
+
 The authorization rollout now covers the complete execution substrate rather than only provider
 and effect calls. Planning, provider invocation, evidence acquisition, connector dispatch, tool
 execution, effect dispatch, evaluator callbacks, bandit writes, episodic memory reads/writes,
@@ -692,10 +760,14 @@ evidence execution controller.
 The TypeScript evidence path now also has a job-level
 `AutonomousEvidenceExecutionResumableController`. It persists approval, dispatch-pending,
 evaluator-wait, partial/failure, reconciliation, and completion checkpoints as bounded metadata,
-requires an explicit resolution after an uncertain restart, and reuses caller-rehydrated runtime
-journals to replay completed source work without a second dispatch. JSON, transactional CAS, and
-browser storage adapters reject stale writers and tampered digests; source values, requests,
-credentials, and provider payloads remain caller-owned.
+requires authority-bound per-request resolution after an uncertain restart, and reuses
+caller-rehydrated, hash-chain-validated runtime journals to replay completed source work without a
+second dispatch. Checkpoints now bind complete requirement coverage, execution callback/policy
+identity, a monotonic predecessor chain, and the reconciliation trust root. Approved dispatch
+requires transactional CAS persistence, a caller-owned journal, and a reserved value-rehydrator
+identity. The journal identity is also policy-bound, so swapping to an empty history cannot silently
+authorize reacquisition; stale workers, policy drift, impossible completion counts, and ABA replay fail before a
+source call. Source values, requests, credentials, and provider payloads remain caller-owned.
 `AutonomousAgent.executeReviewedEvidenceResumable()` exposes this lifecycle without forcing
 applications to construct the lower-level controller themselves.
 
@@ -754,27 +826,64 @@ values become `reconciliation_required` rather than silently reacquiring a sourc
 tests cover refusal, replay, redaction, and provider-backed execution across all twelve domain
 plans, bringing the Python and TypeScript source-to-brain contracts into parity.
 
-Python evidence-backed execution now also has the restart boundary that previously existed only
-in the TypeScript façade. `run_resumable_evidence_backed(...)` and
-`AutonomousEvidenceBackedController` persist a digest-bound checkpoint immediately before the
-provider boundary, retain only plan/request/policy/result digests, and require the caller-owned
-evidence journal for replay. `InMemoryAutonomousEvidenceBackedCheckpointStore`, canonical JSON
-persistence, and transactional compare-and-swap persistence are available for local, browser,
-and service adapters. A restored provider result must pass the exact checkpoint digest through
-`rehydrate_provider_run`; otherwise the run remains `provider_reconciliation_required` until the
-caller explicitly opts into `resume_provider=True`. All twelve domain plans are exercised
-credentiallessly, including source replay, provider-pending recovery, tamper rejection, and the
-no-duplicate-dispatch invariant.
+Python evidence-backed execution now also has a restart boundary. `run_resumable_evidence_backed(...)`
+and `AutonomousEvidenceBackedController` retain metadata-only plan/request/policy, operation,
+dispatch-head, and result digests and require the caller-owned evidence journal for source replay. A known pre-attempt
+`provider_pending` checkpoint may dispatch only with both a fresh provider approval and an explicit
+`resume_provider=True` decision, and every provider-capable dispatch first requires a successful
+atomic dispatch transaction that stores an operation-bound private receipt and its
+`provider_in_flight` checkpoint successor. Each actual transport retry or fan-out request advances
+the receipt head/count; the exact key is retained only in the caller-owned private receipt. Restored
+in-flight, reconciliation, and completed states never
+blindly redispatch; a matching `rehydrate_provider_run` result can settle an observed outcome, and
+otherwise the run remains `provider_reconciliation_required`. Legacy ambiguous checkpoints are
+rejected. All twelve domain plans are exercised credentiallessly, including source replay,
+provider-pending recovery, tamper rejection, and the no-duplicate-dispatch invariant.
 
-The evidence-backed brain operation now has a restart-safe controller and checkpoint boundary.
+The TypeScript evidence-backed brain operation has the same fenced checkpoint lifecycle.
 `runAutonomousEvidenceBackedResumable()` and `AutonomousEvidenceBackedController` bind the task,
-request set, run policy, evidence plan, prompt projection, and provider result to a bounded
-metadata-only checkpoint. The shared execution controller hydrates append-only evidence journals
-before dispatch, replaying completed source work without reacquisition while requiring caller-owned
-value rehydration. Provider results are never replayed implicitly: a completed result must match a
-caller rehydration digest, and a pending provider boundary requires an explicit resume decision.
-In-memory, JSON, and CAS-fenced stores plus all-domain restart tests are included; production
-applications still own durable storage, transient values, and provider outcome reconciliation.
+request set, run policy, evidence plan, prompt projection, provider operation, and provider result
+to a bounded metadata-only chain. The shared execution controller hydrates append-only evidence
+journals before dispatch, replaying completed source work without reacquisition while requiring
+caller-owned value rehydration. Fresh provider work requires an atomic per-transport
+`provider_in_flight` transition and uses an exact provider/model/request-derived idempotency key at
+the actual provider request boundary.
+Attempted work is reconciliation-only after restart; a boolean resume cannot duplicate it.
+In-memory, JSON, and CAS-fenced stores plus all-domain restart tests are included. Production
+applications still own a trusted checkpoint/receipt head, a dispatch transaction, durable private
+receipt storage, transient values, provider idempotency support, and provider-outcome
+reconciliation.
+
+The provider checkpoint now fences the actual transport call rather than only the pre-approval
+pause. Both SDKs use a caller-owned atomic dispatch transaction immediately before every transport
+attempt. The transaction must durably retain a private receipt containing the exact usable key
+while advancing the public checkpoint's receipt head/count, and transport is permitted only after
+that commit succeeds; raw keys never enter checkpoint/result serialization. TypeScript
+scopes keys and receipts across planning, failovers, transport retries, tool turns, cross-domain
+children, and synthesis. Python currently fails closed on unsupported multi-request aliases except
+for explicitly scoped direct-provider cross-domain fan-out, and requires one model candidate.
+Broader Python tool/mission/planning support remains backlog work until each downstream request is
+covered by the same receipt/reconciliation contract.
+Both implementations now require a caller-supplied `provider_policy` identity with a non-null
+configuration digest, bind all supported provider-shaping inputs, and execute from canonical
+snapshots where values can safely be copied. Opaque callbacks, credential-account selection,
+registries, and runtime state remain bound by that caller-owned trust root; authenticated identity
+and immutable deployment configuration remain production responsibilities rather than properties
+invented by the checkpoint digest. Strict resumable mode also rejects custom/subclassed core
+agent, brain/runtime, and effect-boundary implementations that could bypass the transport hook.
+The request, wire-shaping inputs, credential binding, selected provider configuration, HTTP
+endpoint/fetch dependency or local handler, and authoritative outcome are captured before awaited
+caller callbacks. Observers receive detached request/outcome projections, resumable rehydrators
+receive detached value-only checkpoint projections, and their returned values cannot rewrite the
+authoritative receipt inputs. The final private fence additionally rechecks the credential's
+binding and expiry and attests the selected provider/transport graph after awaited observers, after
+the durable dispatch commit, and before terminal settlement. Composite Python observers receive a
+metadata-only response projection; exact transport material remains confined to the SDK-owned
+private fence. These checks close same-process mutation and swap-and-restore races at the reviewed
+boundary; they do not make caller-owned callbacks, receipt stores, or provider transports trusted.
+Registered transports must honor the supplied key; one receipt authorizes one handler invocation,
+not an arbitrary number of downstream effects inside caller-owned handler code. The deployment must
+also reconcile receipts with provider status; this is not an exactly-once execution claim.
 
 The TypeScript autonomous agent now also has an opt-in `structuredDomainResponse` contract for every
 built-in domain. It derives a digest-bound JSON Schema and prompt contract from the reviewed workflow,

@@ -12,6 +12,7 @@ import {
   AutonomousInformationAcquisitionCandidate,
   AutonomousInformationAcquisitionObservation,
   InMemoryAutonomousEvidenceExecutionCheckpointStore,
+  InMemoryAutonomousEvidenceRuntimeJournal,
   LLMRuntime,
   builtinAutonomousDomainProfiles,
   digestJsonSync,
@@ -116,6 +117,13 @@ function executionOptions() {
       }),
     },
     sleep: async () => {},
+    executionPolicyIdentity: {
+      projector: { id: "facade-integrity-projector", version: "1.0.0" },
+      evaluator: { id: "facade-integrity-evaluator", version: "1.0.0" },
+      journal: { id: "facade-integrity-journal", version: "1.0.0" },
+      value_rehydrator: { id: "facade-integrity-rehydrator", version: "1.0.0" },
+      sleeper: { id: "facade-integrity-no-delay-sleeper", version: "1.0.0" },
+    },
   };
 }
 
@@ -228,27 +236,30 @@ test("brain facade composes information planning, claim integrity, and resumable
   assert.doesNotMatch(JSON.stringify(executed.toJSON()), /transient_source_value|facade-integrity-acquisition/);
 
   const checkpointStore = new InMemoryAutonomousEvidenceExecutionCheckpointStore();
+  const journal = new InMemoryAutonomousEvidenceRuntimeJournal();
   const first = await brain.executeClaimIntegrityAcquisitionResumableWithLaunchAdmission(bridge, registry, requests, admission, {
-    jobId: "facade-integrity-resume",
-    checkpointStore,
+     jobId: "facade-integrity-resume",
+     checkpointStore,
+     reconciliationAuthority: { id: "source-audit", version: "1" },
     prepare: {
       readinessPolicy: new AutonomousEvidenceReadinessPolicy({ requireHealth: false }),
       allowDegradedDispatch: true,
     },
     availableEvidence,
-    execute: executionOptions(),
+     execute: { ...executionOptions(), journal },
   });
   assert.equal(first.status, "approval_required");
   assert.equal(calls.count, AUTONOMOUS_DOMAIN_NAMES.length);
   const resumed = await brain.executeClaimIntegrityAcquisitionResumableWithLaunchAdmission(bridge, registry, requests, admission, {
-    jobId: "facade-integrity-resume",
-    checkpointStore,
+     jobId: "facade-integrity-resume",
+     checkpointStore,
+     reconciliationAuthority: { id: "source-audit", version: "1" },
     prepare: {
       readinessPolicy: new AutonomousEvidenceReadinessPolicy({ requireHealth: false }),
       allowDegradedDispatch: true,
     },
     availableEvidence,
-    execute: { ...executionOptions(), approveSourceDispatch: true },
+     execute: { ...executionOptions(), journal, approveSourceDispatch: true },
   });
   assert.equal(resumed.status, "awaiting_evaluation");
   assert.equal(resumed.checkpoint.completed_request_count, AUTONOMOUS_DOMAIN_NAMES.length);

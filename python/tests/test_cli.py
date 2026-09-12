@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import hashlib
 from pathlib import Path
 import sys
 from unittest.mock import patch
@@ -25,7 +26,10 @@ from prism_sdk import (
 )
 from prism_sdk.authoring import content_digest
 from prism_sdk.autonomy import _batch_digest
-from prism_sdk.cli import main
+from prism_sdk.cli import _parse_mcp_command, _parser, _write_json, main
+from prism_sdk.public_literature_refresh import PublicLiteratureRefreshReport
+from prism_sdk.real_data_refresh import RealDataRefreshReport
+from prism_sdk.models import ToolResult
 
 
 def _invoke(*args: str, environ: dict[str, str] | None = None, reader=None, client_factory=None):
@@ -40,6 +44,103 @@ def _invoke(*args: str, environ: dict[str, str] | None = None, reader=None, clie
         **({} if client_factory is None else {"client_factory": client_factory}),
     )
     return code, json.loads(output.getvalue()) if output.getvalue() else None, errors.getvalue()
+
+
+def test_mcp_command_parser_preserves_native_windows_paths() -> None:
+    command = _parse_mcp_command(r'"C:\aurora\target\debug\bioprism-mcp.exe" --root .')
+    if sys.platform == "win32":
+        assert command == (r"C:\aurora\target\debug\bioprism-mcp.exe", "--root", ".")
+    else:
+        assert command[1:] == ("--root", ".")
+
+
+def test_cli_json_boundary_is_safe_for_non_utf8_consoles() -> None:
+    output = io.StringIO()
+    _write_json(output, {"source_title": "Glioma β metadata"})
+    assert "\\u03b2" in output.getvalue()
+
+
+def test_grounded_commands_default_to_extended_real_snapshot_and_ollama() -> None:
+    for command in ("grounded-portfolio", "grounded-autopilot"):
+        parsed = _parser().parse_args((command, "--mcp-command", "fake-mcp", "--question", "review glioma"))
+        assert parsed.provider == "ollama"
+        assert parsed.real_data_file.endswith("data/neurosurgery/glioma_extended_snapshot.json")
+
+
+def test_refresh_public_literature_requires_explicit_network_and_has_no_key_surface(tmp_path):
+    output = tmp_path / "literature.json"
+    report = PublicLiteratureRefreshReport(
+        schema_version="bioprism-neurosurgery-public-literature/0.1",
+        bundle_digest="a" * 64,
+        generated_at="2026-08-30T06:02:51Z",
+        source_count=6,
+        record_count=6,
+        abstract_count=6,
+        specialty_counts={"glioma": 1},
+        output_path=str(output),
+    )
+    with patch("prism_sdk.cli.atomic_refresh_neurosurgical_public_literature", return_value=report) as refresh:
+        code, payload, errors = _invoke("refresh-public-literature", "--output", str(output))
+        assert code == 2
+        assert payload is None
+        assert "ValueError" in errors
+        refresh.assert_not_called()
+
+        code, payload, errors = _invoke(
+            "refresh-public-literature",
+            "--output",
+            str(output),
+            "--approve-network",
+            "--per-specialty-limit",
+            "1",
+        )
+    assert code == 0
+    assert errors == ""
+    assert payload["command"] == "refresh-public-literature"
+    assert payload["authorization"]["credentials_required"] is False
+    refresh.assert_called_once_with(str(output), per_specialty_limit=1, timeout=30.0)
+
+
+def test_refresh_real_glioma_requires_explicit_network_and_has_no_key_surface(tmp_path):
+    output = tmp_path / "glioma.json"
+    report = RealDataRefreshReport(
+        schema_version="bioprism-neurosurgery-real/0.1",
+        bundle_digest="b" * 64,
+        generated_at="2026-08-30T06:02:51Z",
+        source_count=5,
+        record_count=6,
+        clinical_trial_count=1,
+        genomic_project_count=1,
+        portal_study_count=1,
+        molecular_profile_count=1,
+        reference_count=1,
+        literature_count=1,
+        output_path=str(output),
+    )
+    with patch("prism_sdk.cli.atomic_refresh_real_glioma_data", return_value=report) as refresh:
+        code, payload, errors = _invoke("refresh-real-glioma", "--output", str(output))
+        assert code == 2
+        assert payload is None
+        assert "ValueError" in errors
+        refresh.assert_not_called()
+
+        code, payload, errors = _invoke(
+            "refresh-real-glioma",
+            "--output", str(output),
+            "--gdc-project-id", "TCGA-GBM",
+            "--portal-study-id", "gbm_test",
+            "--portal-study-limit", "1",
+            "--pubmed-limit", "1",
+            "--approve-network",
+        )
+        assert code == 0
+        assert errors == ""
+        assert payload["command"] == "refresh-real-glioma"
+        assert payload["refresh"]["reference_count"] == 1
+        assert payload["authorization"]["patient_data_access"] is False
+        refresh.assert_called_once()
+        assert refresh.call_args.kwargs["gdc_project_ids"] == ("TCGA-GBM",)
+        assert refresh.call_args.kwargs["portal_study_ids"] == ("gbm_test",)
 
 
 def test_catalogue_and_evidence_plan_cover_every_autonomous_domain_without_credentials() -> None:
@@ -192,6 +293,17 @@ def test_explicit_local_provider_is_ready_without_a_credential_or_network() -> N
     assert errors == ""
     assert onboarded["provider"]["ready"] is True
     assert onboarded["session"]["providers"] == []
+
+
+def test_ollama_provider_status_is_ready_without_collecting_a_key() -> None:
+    code, payload, errors = _invoke("provider-status", "--provider", "ollama")
+    assert code == 0
+    assert errors == ""
+    assert payload["status"]["ready"] is True
+    assert payload["status"]["requires_credential"] is False
+    assert payload["instructions"]["next_action"] == "ready"
+    assert payload["provider"]["base_url"] == "http://127.0.0.1:11434/v1"
+    assert payload["provider"]["transport"] == "http"
 
 
 def test_local_provider_discovery_is_explicitly_approved_but_keyless() -> None:
@@ -1541,7 +1653,7 @@ def test_keyless_subprocess_tool_loop_discovers_and_executes_a_live_mcp_tool() -
         "--approve-provider-call",
         "--approve-mission-dispatch",
     )
-    assert code == 0
+    assert code == 0, errors
     assert errors == ""
     assert payload["result"]["status"] == "completed_provider_tool_loop"
     loop = payload["result"]["provider_loop"]
@@ -2121,3 +2233,691 @@ def test_run_can_rehydrate_persisted_catalogue_without_provider_rediscovery(tmp_
     assert payload["model_inventory"]["mode"] == "persisted_catalogue"
     assert payload["model_inventory"]["candidates"][0]["model"] == "persisted-model"
     assert secret not in output.getvalue()
+
+
+def test_grounded_portfolio_runs_keyless_real_and_literature_planes_and_resumes_digest_store(tmp_path: Path) -> None:
+    real_path = tmp_path / "real.json"
+    literature_path = tmp_path / "literature.json"
+    query_path = tmp_path / "query.json"
+    literature_query_path = tmp_path / "literature-query.json"
+    output_path = tmp_path / "portfolio.json"
+    real_path.write_text(
+        json.dumps({"schema_version": "bioprism-neurosurgery-real/0.1", "synthetic_data": False}),
+        encoding="utf-8",
+    )
+    literature_path.write_text(
+        json.dumps({
+            "schema_version": "bioprism-neurosurgery-public-literature/0.1",
+            "synthetic_data": False,
+        }),
+        encoding="utf-8",
+    )
+    query_path.write_text(
+        json.dumps({
+            "record_kind": "genomic_project",
+            "genomic_data_type": "Annotated Somatic Mutation",
+            "limit": 1,
+        }),
+        encoding="utf-8",
+    )
+    literature_query_path.write_text(
+        json.dumps({"publication_type": "Review", "mesh_term": "Glioma", "from_date": "2020-01-01", "limit": 1}),
+        encoding="utf-8",
+    )
+    response = {
+        "answer": "The bounded source packet is ready for reviewer inspection.",
+        "unknowns": [],
+        "claims": [{
+            "claim_id": "source-observation",
+            "kind": "source_observation",
+            "scope": "public_record_metadata",
+            "text": "The packet contains source-linked records.",
+            "citations": [{"record_kind": "genomic_project", "record_id": "TCGA-GBM"}],
+        }],
+    }
+    calls: list[str] = []
+
+    class FakeClient:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def call_tool(self, name: str, arguments=None):
+            calls.append(name)
+            args = dict(arguments or {})
+            if name.endswith("reasoning_context"):
+                is_public = name.startswith("neurosurgery_public_")
+                payload = {
+                    "context_digest": ("e" if is_public else "c") * 64,
+                    "bundle_digest": ("f" if is_public else "b") * 64,
+                    "context_text": "SOURCE CONTEXT",
+                    "citations": ([{
+                        "pmid": "12345678",
+                    }] if is_public else [{
+                        "record_kind": "genomic_project",
+                        "record_id": "TCGA-GBM",
+                    }]),
+                    "synthetic_data": False,
+                    "network": False,
+                    "provenance_bound": True,
+                    "human_review_required": True,
+                    "provider": "none",
+                    "effect": "read_only",
+                }
+            else:
+                is_public = name.startswith("neurosurgery_public_")
+                payload = {
+                    "draft_digest": ("d" if is_public else "a") * 64,
+                    "bundle_digest": ("f" if is_public else "b") * 64,
+                    "status": "grounded_for_human_review",
+                    "claim_count": len(args.get("claims", [])),
+                    "grounded_claim_count": len(args.get("claims", [])),
+                    "blocked_claim_count": 0,
+                    "provenance_bound": True,
+                    "synthetic_data": False,
+                    "human_review_required": True,
+                    "provider": "none",
+                    "network": False,
+                    "effect": "read_only",
+                }
+            return ToolResult(name, {"content": [{"type": "text", "text": json.dumps(payload)}]})
+
+    args = (
+        "grounded-portfolio",
+        "--provider", "local",
+        "--model", "local-model",
+        "--mcp-command", "fake-mcp",
+        "--question", "Which source-linked glioma records are available?",
+        "--real-data-file", str(real_path),
+        "--public-literature-file", str(literature_path),
+        "--real-data-query-file", str(query_path),
+        "--public-literature-query-file", str(literature_query_path),
+        "--portfolio-output", str(output_path),
+        "--max-passes", "1",
+        "--max-follow-ups-per-pass", "0",
+        "--tool-loop", "--max-tool-turns", "2", "--max-tool-calls", "3",
+        "--local-response-sequence-json", json.dumps([
+            response,
+            {
+                **response,
+                "claims": [{
+                    **response["claims"][0],
+                    "scope": "citation_metadata",
+                    "citations": [{"record_kind": "literature_article", "record_id": "12345678"}],
+                }],
+            },
+        ]),
+        "--approve-provider-call",
+    )
+    code, payload, errors = _invoke(*args, client_factory=lambda *_args, **_kwargs: FakeClient())
+    assert code == 0
+    assert errors == ""
+    assert payload["command"] == "grounded-portfolio"
+    assert payload["portfolio"]["source_planes"] == ["real_glioma_population", "public_literature"]
+    assert payload["portfolio"]["human_review_required"] is True
+    assert payload["portfolio"]["real_data_loop"]["tool_loop_enabled"] is True
+    assert payload["portfolio"]["real_data_loop"]["max_tool_turns"] == 2
+    assert payload["portfolio"]["real_data_loop"]["max_tool_calls"] == 3
+    assert payload["portfolio"]["real_data_query"] == {
+        "record_kind": "genomic_project",
+        "genomic_data_type": "Annotated Somatic Mutation",
+        "limit": 1,
+        "text": "Which source-linked glioma records are available?",
+    }
+    assert payload["portfolio"]["public_literature_query"] == {
+        "publication_type": "Review",
+        "mesh_term": "Glioma",
+        "from_date": "2020-01-01",
+        "limit": 1,
+        "text": "Which source-linked glioma records are available?",
+        "specialty": "glioma",
+    }
+    assert output_path.exists()
+    assert calls == [
+        "neurosurgery_real_data_reasoning_context",
+        "neurosurgery_real_data_draft_audit",
+        "neurosurgery_public_literature_reasoning_context",
+        "neurosurgery_public_literature_draft_audit",
+        "neurosurgery_literature_link_audit",
+    ]
+
+    code, resumed, errors = _invoke(
+        *args, "--resume", client_factory=lambda *_args, **_kwargs: FakeClient()
+    )
+    assert code == 0
+    assert errors == ""
+    assert resumed["persistence"]["resumed"] is True
+    assert resumed["portfolio"]["portfolio_digest"] == payload["portfolio"]["portfolio_digest"]
+
+    tampered = json.loads(output_path.read_text(encoding="utf-8"))
+    tampered["portfolio"]["claim_count"] = 99
+    output_path.write_text(json.dumps(tampered), encoding="utf-8")
+    code, payload, errors = _invoke(*args, "--resume", client_factory=lambda *_args, **_kwargs: FakeClient())
+    assert code == 2
+    assert payload is None
+    assert "command failed" in errors
+
+
+def test_grounded_portfolio_cli_attaches_case_asset_manifest_without_opening_bytes(tmp_path: Path) -> None:
+    real_path = tmp_path / "real.json"
+    manifest_path = tmp_path / "case.json"
+    query_path = tmp_path / "case-query.json"
+    output_path = tmp_path / "portfolio.json"
+    real_path.write_text(
+        json.dumps({"schema_version": "bioprism-neurosurgery-real/0.1", "synthetic_data": False}),
+        encoding="utf-8",
+    )
+    manifest_path.write_text(
+        json.dumps({
+            "schema_version": "bioprism-neurosurgery-case-asset-manifest/0.1",
+            "specialty": "glioma",
+            "synthetic_data": False,
+            "assets": [],
+        }),
+        encoding="utf-8",
+    )
+    query_path.write_text(
+        json.dumps({"requested_kinds": ["imaging_series"], "max_review_items": 16}),
+        encoding="utf-8",
+    )
+    calls: list[str] = []
+
+    class FakeClient:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def call_tool(self, name: str, arguments=None):
+            calls.append(name)
+            args = dict(arguments or {})
+            if name == "neurosurgery_case_asset_manifest":
+                payload = {
+                    "report_digest": "d" * 64,
+                    "synthetic_data": False,
+                    "deidentified": True,
+                    "raw_values_retained": False,
+                    "provenance_bound": True,
+                    "human_review_required": True,
+                    "provider": "none",
+                    "network": False,
+                    "effect": "read_only",
+                }
+            elif name.endswith("reasoning_context"):
+                public = name.startswith("neurosurgery_public_")
+                payload = {
+                    "context_digest": "c" * 64,
+                    "bundle_digest": "f" * 64 if public else "b" * 64,
+                    "context_text": "SOURCE CONTEXT",
+                    "citations": [{"pmid": "12345678"}] if public else [{"record_kind": "genomic_project", "record_id": "TCGA-GBM"}],
+                    "synthetic_data": False,
+                    "network": False,
+                    "provenance_bound": True,
+                    "human_review_required": True,
+                    "provider": "none",
+                    "effect": "read_only",
+                }
+            else:
+                public = name.startswith("neurosurgery_public_")
+                payload = {
+                    "draft_digest": "d" * 64,
+                    "bundle_digest": "f" * 64 if public else "b" * 64,
+                    "status": "grounded_for_human_review",
+                    "claim_count": len(args.get("claims", [])),
+                    "grounded_claim_count": len(args.get("claims", [])),
+                    "blocked_claim_count": 0,
+                    "provenance_bound": True,
+                    "synthetic_data": False,
+                    "human_review_required": True,
+                    "provider": "none",
+                    "network": False,
+                    "effect": "read_only",
+                }
+            return ToolResult(name, {"content": [{"type": "text", "text": json.dumps(payload)}]})
+
+    code, payload, errors = _invoke(
+        "grounded-portfolio",
+        "--provider", "local",
+        "--model", "local-model",
+        "--mcp-command", "fake-mcp",
+        "--question", "Summarize the real glioma inventory and attached case assets.",
+        "--real-data-file", str(real_path),
+        "--without-public-literature",
+        "--case-asset-manifest", str(manifest_path),
+        "--case-asset-manifest-query", str(query_path),
+        "--portfolio-output", str(output_path),
+        "--max-passes", "1",
+        "--max-follow-ups-per-pass", "0",
+        "--local-response-json", json.dumps({
+            "answer": "review",
+            "unknowns": [],
+            "claims": [{
+                "claim_id": "case-asset-cli-claim",
+                "kind": "source_observation",
+                "scope": "population_aggregate",
+                "text": "The real snapshot is available for reviewer inspection.",
+                "citations": [{"record_kind": "genomic_project", "record_id": "TCGA-GBM"}],
+            }],
+        }),
+        "--approve-provider-call",
+        client_factory=lambda *_args, **_kwargs: FakeClient(),
+    )
+    assert code == 0, errors
+    assert errors == ""
+    assert payload["portfolio"]["case_asset_manifest"]["report_digest"] == "d" * 64
+    assert payload["portfolio"]["case_asset_manifest_query"] == {
+        "requested_kinds": ["imaging_series"],
+        "max_review_items": 16,
+    }
+    assert "neurosurgery_case_asset_manifest" in calls
+
+
+def test_grounded_autopilot_routes_and_gates_a_non_glioma_question_without_a_key(tmp_path: Path) -> None:
+    literature_path = tmp_path / "literature.json"
+    literature_path.write_text(
+        json.dumps({
+            "schema_version": "bioprism-neurosurgery-public-literature/0.1",
+            "synthetic_data": False,
+        }),
+        encoding="utf-8",
+    )
+    response = {
+        "answer": "The bounded Chiari literature lane is ready for reviewer inspection.",
+        "unknowns": [],
+        "claims": [{
+            "claim_id": "chiari-cli-claim",
+            "kind": "source_observation",
+            "scope": "citation_metadata",
+            "text": "The lane contains source-linked citation metadata.",
+            "citations": [{"record_kind": "literature_article", "record_id": "12345678"}],
+        }],
+    }
+    calls: list[str] = []
+
+    class FakeClient:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def call_tool(self, name: str, arguments=None):
+            calls.append(name)
+            args = dict(arguments or {})
+            if name == "neurosurgery_intake_plan":
+                payload = {
+                    "schema_version": "bioprism-neurosurgery-intake-plan/0.1",
+                    "plan_digest": "1" * 64,
+                    "question_digest": hashlib.sha256(
+                        "What source-linked Chiari literature is available?".encode("utf-8")
+                    ).hexdigest(),
+                    "candidates": [{"specialty": "chiari_malformation", "score_bps": 1000, "matched_terms": ["chiari"]}],
+                    "selected_specialty": "chiari_malformation",
+                    "confidence_bps": 1000,
+                    "abstained": False,
+                    "reason": "selected",
+                    "route": ["safety_gate", "public_literature", "human_review_hold"],
+                    "evidence_sources": ["pubmed_snapshot"],
+                    "reviewer_roles": ["neurosurgery"],
+                    "next_actions": [],
+                    "human_review_required": True,
+                    "provider": "none",
+                    "network": False,
+                    "effect": "read_only",
+                    "limitations": [],
+                }
+            elif name == "neurosurgery_public_literature_reasoning_context":
+                payload = {
+                    "schema_version": "bioprism-neurosurgery-public-literature-reasoning-context/0.1",
+                    "context_digest": "c" * 64,
+                    "packet_digest": "p" * 64,
+                    "bundle_digest": "f" * 64,
+                    "context_text": "SOURCE CONTEXT",
+                    "citations": [{"pmid": "12345678"}],
+                    "included_citation_count": 1,
+                    "omitted_citation_count": 0,
+                    "context_char_count": 13,
+                    "truncated": False,
+                    "provenance_bound": True,
+                    "synthetic_data": False,
+                    "human_review_required": True,
+                    "provider": "none",
+                    "network": False,
+                    "effect": "read_only",
+                    "limitations": [],
+                }
+            else:
+                payload = {
+                    "schema_version": "bioprism-neurosurgery-public-literature-draft-audit/0.1",
+                    "draft_digest": "d" * 64,
+                    "packet_digest": "p" * 64,
+                    "bundle_digest": "f" * 64,
+                    "status": "grounded_for_human_review",
+                    "claim_count": len(args.get("claims", [])),
+                    "grounded_claim_count": len(args.get("claims", [])),
+                    "blocked_claim_count": 0,
+                    "provenance_bound": True,
+                    "synthetic_data": False,
+                    "human_review_required": True,
+                    "provider": "none",
+                    "network": False,
+                    "effect": "read_only",
+                    "limitations": [],
+                }
+            return ToolResult(name, {"content": [{"type": "text", "text": json.dumps(payload)}]})
+
+    code, payload, errors = _invoke(
+        "grounded-autopilot",
+        "--provider", "local",
+        "--model", "local-model",
+        "--mcp-command", "fake-mcp",
+        "--question", "What source-linked Chiari literature is available?",
+        "--specialty", "chiari_malformation",
+        "--without-real-data",
+        "--public-literature-file", str(literature_path),
+        "--intake-output", str(tmp_path / "intake.json"),
+        "--max-passes", "1",
+        "--max-follow-ups-per-pass", "0",
+        "--local-response-json", json.dumps(response),
+        "--approve-provider-call",
+        client_factory=lambda *_args, **_kwargs: FakeClient(),
+    )
+    assert code == 0, errors
+    assert errors == ""
+    assert payload["command"] == "grounded-autopilot"
+    assert payload["intake"]["status"] == "grounded_for_human_review"
+    assert payload["intake"]["routed_specialty"] == "chiari_malformation"
+    assert payload["intake"]["source_planes"] == ["public_literature"]
+    assert calls == [
+        "neurosurgery_intake_plan",
+        "neurosurgery_public_literature_reasoning_context",
+        "neurosurgery_public_literature_draft_audit",
+    ]
+
+
+def test_grounded_portfolio_refreshes_public_sources_only_with_explicit_network_approval(tmp_path: Path) -> None:
+    real_path = tmp_path / "real.json"
+    literature_path = tmp_path / "literature.json"
+    real_path.write_text(
+        json.dumps({"schema_version": "bioprism-neurosurgery-real/0.1", "synthetic_data": False}),
+        encoding="utf-8",
+    )
+    literature_path.write_text(
+        json.dumps({
+            "schema_version": "bioprism-neurosurgery-public-literature/0.1",
+            "synthetic_data": False,
+        }),
+        encoding="utf-8",
+    )
+
+    class FakeClient:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def call_tool(self, name: str, arguments=None):
+            args = dict(arguments or {})
+            if name.endswith("reasoning_context"):
+                is_public = name.startswith("neurosurgery_public_")
+                payload = {
+                    "context_digest": ("e" if is_public else "c") * 64,
+                    "bundle_digest": ("f" if is_public else "b") * 64,
+                    "context_text": "SOURCE CONTEXT",
+                    "citations": ([{
+                        "pmid": "12345678",
+                    }] if is_public else [{
+                        "record_kind": "genomic_project",
+                        "record_id": "TCGA-GBM",
+                    }]),
+                    "synthetic_data": False,
+                    "network": False,
+                    "provenance_bound": True,
+                    "human_review_required": True,
+                    "provider": "none",
+                    "effect": "read_only",
+                }
+            else:
+                is_public = name.startswith("neurosurgery_public_")
+                payload = {
+                    "draft_digest": ("d" if is_public else "a") * 64,
+                    "bundle_digest": ("f" if is_public else "b") * 64,
+                    "status": "grounded_for_human_review",
+                    "claim_count": len(args.get("claims", [])),
+                    "grounded_claim_count": len(args.get("claims", [])),
+                    "blocked_claim_count": 0,
+                    "provenance_bound": True,
+                    "synthetic_data": False,
+                    "human_review_required": True,
+                    "network": False,
+                    "provider": "none",
+                    "effect": "read_only",
+                }
+            return ToolResult(name, {"content": [{"type": "text", "text": json.dumps(payload)}]})
+
+    response = {
+        "answer": "The refreshed source planes are ready for review.",
+        "unknowns": [],
+        "claims": [{
+            "claim_id": "refresh-claim",
+            "kind": "source_observation",
+            "scope": "public_record_metadata",
+            "text": "The source planes remain bounded public metadata.",
+            "citations": [{"record_kind": "genomic_project", "record_id": "TCGA-GBM"}],
+        }],
+    }
+    args = (
+        "grounded-portfolio",
+        "--provider", "local",
+        "--model", "local-model",
+        "--mcp-command", "fake-mcp",
+        "--question", "Summarize refreshed glioma evidence.",
+        "--real-data-file", str(real_path),
+        "--public-literature-file", str(literature_path),
+        "--portfolio-output", str(tmp_path / "portfolio.json"),
+        "--max-passes", "1",
+        "--max-follow-ups-per-pass", "0",
+            "--local-response-sequence-json", json.dumps([
+                response,
+                {
+                    **response,
+                    "claims": [{
+                        **response["claims"][0],
+                        "scope": "citation_metadata",
+                        "citations": [{"record_kind": "literature_article", "record_id": "12345678"}],
+                    }],
+                },
+            ]),
+        "--approve-provider-call",
+        "--refresh-real-data",
+        "--refresh-public-literature",
+        "--approve-network",
+    )
+    real_report = RealDataRefreshReport(
+        schema_version="bioprism-neurosurgery-real/0.1",
+        bundle_digest="r" * 64,
+        generated_at="2026-08-31T00:00:00Z",
+        source_count=5,
+        record_count=1,
+        clinical_trial_count=0,
+        genomic_project_count=1,
+        portal_study_count=0,
+        molecular_profile_count=0,
+        reference_count=0,
+        literature_count=0,
+        output_path=str(real_path),
+    )
+    literature_report = PublicLiteratureRefreshReport(
+        schema_version="bioprism-neurosurgery-public-literature/0.1",
+        bundle_digest="l" * 64,
+        generated_at="2026-08-31T00:00:00Z",
+        source_count=6,
+        record_count=1,
+        abstract_count=0,
+        specialty_counts={"glioma": 1},
+        output_path=str(literature_path),
+    )
+    with (
+        patch("prism_sdk.cli.atomic_refresh_real_glioma_data", return_value=real_report) as refresh_real,
+        patch("prism_sdk.cli.atomic_refresh_neurosurgical_public_literature", return_value=literature_report) as refresh_public,
+    ):
+        code, payload, errors = _invoke(
+            *args,
+            client_factory=lambda *_args, **_kwargs: FakeClient(),
+        )
+    assert code == 0, errors
+    assert errors == ""
+    assert payload["source_refresh"]["network_approved"] is True
+    assert set(payload["source_refresh"]["performed"]) == {
+        "real_glioma_population",
+        "public_literature",
+    }
+    persisted = json.loads((tmp_path / "portfolio.json").read_text(encoding="utf-8"))
+    assert persisted["source_refresh"] == payload["source_refresh"]
+    refresh_real.assert_called_once_with(real_path, timeout=30.0)
+    refresh_public.assert_called_once_with(literature_path, timeout=30.0)
+
+    resume_args = tuple(
+        value
+        for value in args
+        if value not in {"--refresh-real-data", "--refresh-public-literature", "--approve-network"}
+    )
+    code, resumed, errors = _invoke(
+        *resume_args,
+        "--resume",
+        client_factory=lambda *_args, **_kwargs: FakeClient(),
+    )
+    assert code == 0, errors
+    assert errors == ""
+    assert resumed["source_refresh"] == payload["source_refresh"]
+
+    no_approval_args = tuple(value for value in args if value != "--approve-network")
+    with (
+        patch("prism_sdk.cli.atomic_refresh_real_glioma_data") as refresh_real,
+        patch("prism_sdk.cli.atomic_refresh_neurosurgical_public_literature") as refresh_public,
+    ):
+        code, payload, errors = _invoke(
+            *no_approval_args,
+            client_factory=lambda *_args, **_kwargs: FakeClient(),
+        )
+    assert code == 2
+    assert payload is None
+    assert "ValueError" in errors
+    refresh_real.assert_not_called()
+    refresh_public.assert_not_called()
+
+    tampered = json.loads((tmp_path / "portfolio.json").read_text(encoding="utf-8"))
+    tampered["source_refresh"]["synthetic_data"] = True
+    unsigned = dict(tampered)
+    unsigned.pop("store_digest", None)
+    tampered["store_digest"] = content_digest(unsigned)
+    (tmp_path / "portfolio.json").write_text(
+        json.dumps(tampered), encoding="utf-8"
+    )
+    code, payload, errors = _invoke(
+        *resume_args,
+        "--resume",
+        client_factory=lambda *_args, **_kwargs: FakeClient(),
+    )
+    assert code == 2
+    assert payload is None
+    assert "ValueError" in errors
+
+
+def test_grounded_autopilot_checkpoint_resume_rejects_tamper_and_source_drift(tmp_path: Path) -> None:
+    output_path = tmp_path / "intake.json"
+    literature_path = tmp_path / "literature.json"
+    literature_path.write_text(
+        json.dumps({
+            "schema_version": "bioprism-neurosurgery-public-literature/0.1",
+            "synthetic_data": False,
+        }),
+        encoding="utf-8",
+    )
+    question = "Review glioma population evidence"
+    question_digest = hashlib.sha256(question.encode("utf-8")).hexdigest()
+    calls: list[str] = []
+
+    class FakeClient:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def call_tool(self, name: str, arguments=None):
+            calls.append(name)
+            assert name == "neurosurgery_intake_plan"
+            payload = {
+                "schema_version": "bioprism-neurosurgery-intake-plan/0.1",
+                "plan_digest": "2" * 64,
+                "question_digest": question_digest,
+                "candidates": [{"specialty": "glioma", "score_bps": 1000, "matched_terms": ["glioma"]}],
+                "selected_specialty": "glioma",
+                "confidence_bps": 1000,
+                "abstained": False,
+                "reason": "selected",
+                "route": ["safety_gate", "real_glioma_snapshot", "human_review_hold"],
+                "evidence_sources": ["real_glioma_snapshot"],
+                "reviewer_roles": ["neurosurgery"],
+                "next_actions": ["supply a real snapshot"],
+                "human_review_required": True,
+                "provider": "none",
+                "network": False,
+                "effect": "read_only",
+                "limitations": [],
+            }
+            return ToolResult(name, {"content": [{"type": "text", "text": json.dumps(payload)}]})
+
+    args = (
+        "grounded-autopilot",
+        "--provider", "local",
+        "--model", "local-model",
+        "--mcp-command", "fake-mcp",
+        "--question", question,
+        "--without-real-data",
+        "--without-public-literature",
+        "--intake-output", str(output_path),
+        "--max-passes", "2",
+        "--max-follow-ups-per-pass", "0",
+        "--approve-provider-call",
+    )
+    code, payload, errors = _invoke(*args, client_factory=lambda *_args, **_kwargs: FakeClient())
+    assert code == 0, errors
+    assert payload["intake"]["status"] == "needs_evidence"
+    assert payload["persistence"]["resumed"] is False
+    assert calls == ["neurosurgery_intake_plan"]
+    original_store = output_path.read_text(encoding="utf-8")
+
+    code, resumed, errors = _invoke(
+        *args, "--resume", client_factory=lambda *_args, **_kwargs: FakeClient()
+    )
+    assert code == 0, errors
+    assert resumed["persistence"]["resumed"] is True
+    assert calls == ["neurosurgery_intake_plan", "neurosurgery_intake_plan"]
+
+    tampered = json.loads(original_store)
+    tampered["controls"]["max_hits"] = 128
+    output_path.write_text(json.dumps(tampered), encoding="utf-8")
+    code, payload, errors = _invoke(
+        *args, "--resume", client_factory=lambda *_args, **_kwargs: FakeClient()
+    )
+    assert code == 2
+    assert payload is None
+    assert "command failed" in errors
+
+    output_path.write_text(original_store, encoding="utf-8")
+    drift_args = tuple(argument for argument in args if argument != "--without-public-literature")
+    code, payload, errors = _invoke(
+        *drift_args,
+        "--public-literature-file", str(literature_path),
+        "--resume",
+        client_factory=lambda *_args, **_kwargs: FakeClient(),
+    )
+    assert code == 2
+    assert payload is None
+    assert "command failed" in errors

@@ -87,6 +87,8 @@ members = [
     "crates/figures",
     "crates/research",
     "crates/receipts-audit",
+    "crates/neurosurgery",
+    "crates/research-campaign",
 ]
 
 [workspace.package]
@@ -188,6 +190,8 @@ bioprism-autopilot = { path = "crates/autopilot" }
 bioprism-figures = { path = "crates/figures" }
 bioprism-research = { path = "crates/research" }
 bioprism-receipts-audit = { path = "crates/receipts-audit" }
+bioprism-neurosurgery = { path = "crates/neurosurgery" }
+bioprism-research-campaign = { path = "crates/research-campaign" }
 
 [profile.release]
 lto = "thin"

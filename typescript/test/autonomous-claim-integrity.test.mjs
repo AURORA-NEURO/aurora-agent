@@ -98,6 +98,57 @@ test("integrity temporal firewall and secret metadata fail closed", () => {
   assert.ok(result.claims.every((item) => ["blocked", "missing"].includes(item.status)));
 });
 
+test("integrity evidence quality and posture must be explicit", () => {
+  const complete = {
+    evidence_id: "explicit-evidence",
+    domain: "science",
+    claim_ids: ["explicit-claim"],
+    source_id: "explicit-source",
+    evidence_digest: digest("explicit-evidence"),
+    observed_at: "2026-08-25T12:00:00Z",
+    reliability: 0.9,
+    support: 0.9,
+    status: "accepted",
+    stance: "support",
+  };
+  for (const missingField of ["reliability", "support", "status", "stance"]) {
+    const incomplete = { ...complete };
+    delete incomplete[missingField];
+    assert.throws(() => assessAutonomousClaimIntegrity({
+      contextDigest: digest("explicit-task"),
+      claims: [claim("explicit-claim", "science")],
+      evidence: [incomplete],
+      referenceTime: REFERENCE,
+    }));
+  }
+});
+
+test("integrity rejects replayed evidence but accepts distinct independent observations", () => {
+  const repeatedDigest = digest("same-observation");
+  assert.throws(() => assessAutonomousClaimIntegrity({
+    contextDigest: digest("replayed-task"),
+    claims: [claim("replayed-claim", "science")],
+    evidence: [
+      evidence("replay-a", "replayed-claim", "science", { source: "source-a", evidenceDigest: repeatedDigest }),
+      evidence("replay-b", "replayed-claim", "science", { source: "source-b", evidenceDigest: repeatedDigest }),
+    ],
+    referenceTime: REFERENCE,
+  }), /duplicate evidence digests/);
+
+  const result = assessAutonomousClaimIntegrity({
+    contextDigest: digest("independent-task"),
+    claims: [claim("independent-claim", "science", { requiredSupport: 0.8, requiredIndependentSources: 2 })],
+    evidence: [
+      evidence("independent-a", "independent-claim", "science", { source: "source-a", reliability: 0.8, support: 0.5 }),
+      evidence("independent-b", "independent-claim", "science", { source: "source-b", reliability: 0.8, support: 0.5 }),
+    ],
+    referenceTime: REFERENCE,
+  });
+  assert.equal(result.claims[0].status, "supported");
+  assert.equal(result.claims[0].independent_source_count, 2);
+  assert.equal(result.claims[0].support_score, 0.8);
+});
+
 test("agent facade binds task digest without provider or source dispatch", () => {
   const agent = new AutonomousAgent(new LLMRuntime());
   const result = agent.assessClaimIntegrity("decide whether a bounded science claim may be used", { claims: [claim("science-claim", "science")], evidence: [evidence("science-evidence", "science-claim", "science")], referenceTime: REFERENCE });

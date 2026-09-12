@@ -9,7 +9,6 @@ or grant an external effect.
 
 from __future__ import annotations
 
-from copy import deepcopy
 from dataclasses import dataclass
 import json
 from typing import Any, Mapping, NoReturn, Sequence
@@ -302,6 +301,14 @@ def _sorted_blockers(rows: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
     ]
 
 
+def _summarize_tool_names(names: Sequence[str], maximum: int = 1_700) -> str:
+    joined = ", ".join(names)
+    if len(joined) <= maximum:
+        return joined
+    suffix = f" … (+{len(names)} total; list truncated)"
+    return f"{joined[:max(0, maximum - len(suffix))]}{suffix}"
+
+
 def _workflow_maps(agent: Mapping[str, Any]) -> tuple[dict[str, Mapping[str, Any]], dict[str, Mapping[str, Any]]]:
     workflows: dict[str, Mapping[str, Any]] = {}
     packs: dict[str, Mapping[str, Any]] = {}
@@ -403,9 +410,9 @@ def _domain_row(
 
     required_tools, available_tools, missing_tools = _tool_gate(agent, domain, row)
     if policy.require_tool_catalogue and missing_tools:
-        domain_blockers.append(_blocker("tool_catalogue", "domain", domain, "required domain tools are missing: " + ", ".join(missing_tools), "attach and review the live tool catalogue"))
+        domain_blockers.append(_blocker("tool_catalogue", "domain", domain, "required domain tools are missing: " + _summarize_tool_names(missing_tools), "attach and review the live tool catalogue"))
     elif missing_tools:
-        warnings.append(_blocker("tool_catalogue", "domain", domain, "optional domain tools are not currently attached: " + ", ".join(missing_tools), "attach a reviewed tool catalogue for richer execution", "warning"))
+        warnings.append(_blocker("tool_catalogue", "domain", domain, "optional domain tools are not currently attached: " + _summarize_tool_names(missing_tools), "attach a reviewed tool catalogue for richer execution", "warning"))
 
     evidence_status, evidence_digest = _evidence_gate(agent, domain, row)
     if policy.require_evidence and evidence_status != "ready":

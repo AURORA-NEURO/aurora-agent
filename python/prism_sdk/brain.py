@@ -3488,6 +3488,29 @@ def _compose_provider_observers(
 ) -> ProviderInvocationObserver | None:
     """Keep execution admission and caller telemetry attached to the same provider turn."""
 
+    # Resumable execution carries one SDK-provenance request fence in a private composite.  When
+    # execution admission adds a policy observer, preserve that fence at the outermost transport
+    # layer rather than nesting it behind a metadata-only observer boundary.
+    reserved_fence = None
+    external_observers: tuple[ProviderInvocationObserver, ...]
+    if type(external_observer) is CompositeProviderInvocationObserver:
+        reserved_fence = external_observer._sdk_provider_dispatch_fence()
+        if reserved_fence is not None:
+            external_observers = external_observer.observers
+        else:
+            external_observers = (external_observer,)
+    else:
+        external_observers = (
+            () if external_observer is None else (external_observer,)
+        )
+    if reserved_fence is not None:
+        return CompositeProviderInvocationObserver._with_provider_dispatch_fence(
+            (
+                () if policy_observer is None else (policy_observer,)
+            )
+            + external_observers,
+            reserved_fence,
+        )
     observers = tuple(observer for observer in (policy_observer, external_observer) if observer is not None)
     if not observers:
         return None

@@ -1,0 +1,12 @@
+{
+  "max_program_tracks_per_lane": 6,
+  "max_program_references_per_track": 8,
+  "max_acquisition_steps": 16,
+  "max_acquisition_references_per_step": 4,
+  "max_synthesis_references": 64,
+  "include_source_text": false,
+  "real_data_reasoning_context": {
+    "max_chars": 24000,
+    "include_abstracts": false
+  }
+}

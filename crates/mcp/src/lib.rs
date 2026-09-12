@@ -6,6 +6,10 @@
 //! This is the adoption wedge: an agent in any framework can compile a decision context, descend
 //! only as far into the evidence as it needs, and verify a certificate — without linking the
 //! engine or learning a new SDK.
+
+// The protocol catalogue is intentionally explicit and now includes the six-lane neurosurgical
+// workbench. Keep macro expansion headroom proportional to that versioned schema surface.
+#![recursion_limit = "512"]
 //!
 //! # Not implemented, deliberately
 //!
@@ -29,6 +33,7 @@
 #![recursion_limit = "1024"]
 
 mod brain_control;
+mod research_campaign;
 pub mod evolution_assurance;
 pub mod federated_quality_control_assurance;
 pub mod knowledge_representation_contract_model;

@@ -194,10 +194,10 @@ export interface AutonomousClaimIntegrityEvidenceInput {
   observedAt: string;
   validFrom?: string | null;
   validUntil?: string | null;
-  reliability?: number;
-  support?: number;
-  status?: AutonomousClaimIntegrityEvidenceStatus;
-  stance?: AutonomousClaimIntegrityStance;
+  reliability: number;
+  support: number;
+  status: AutonomousClaimIntegrityEvidenceStatus;
+  stance: AutonomousClaimIntegrityStance;
   modality?: string;
   reproducibility?: AutonomousClaimIntegrityReproducibility;
   metadata?: Readonly<Record<string, unknown>>;
@@ -214,9 +214,9 @@ export class AutonomousClaimIntegrityEvidence {
     this.evidenceDigest = digest("evidence evidenceDigest", input.evidenceDigest)!; this.sourceDigest = digest("evidence sourceDigest", input.sourceDigest ?? null, true); this.observedAt = timestamp("evidence observedAt", input.observedAt);
     this.validFrom = input.validFrom === undefined || input.validFrom === null ? null : timestamp("evidence validFrom", input.validFrom); this.validUntil = input.validUntil === undefined || input.validUntil === null ? null : timestamp("evidence validUntil", input.validUntil);
     if (this.validFrom !== null && this.validUntil !== null && epoch(this.validFrom) >= epoch(this.validUntil)) fail("evidence validFrom must precede validUntil");
-    this.reliability = finite("evidence reliability", input.reliability ?? 0.5, 0, 1); this.support = finite("evidence support", input.support ?? 0.5, 0, 1);
-    this.status = input.status ?? "accepted"; if (!(AUTONOMOUS_CLAIM_INTEGRITY_EVIDENCE_STATUSES as readonly string[]).includes(this.status)) fail("evidence status is unsupported");
-    this.stance = input.stance ?? "support"; if (!(AUTONOMOUS_CLAIM_INTEGRITY_STANCES as readonly string[]).includes(this.stance)) fail("evidence stance is unsupported"); this.modality = identifier("evidence modality", input.modality ?? "unspecified");
+    this.reliability = finite("evidence reliability", input.reliability, 0, 1); this.support = finite("evidence support", input.support, 0, 1);
+    this.status = input.status; if (!(AUTONOMOUS_CLAIM_INTEGRITY_EVIDENCE_STATUSES as readonly string[]).includes(this.status)) fail("evidence status is unsupported");
+    this.stance = input.stance; if (!(AUTONOMOUS_CLAIM_INTEGRITY_STANCES as readonly string[]).includes(this.stance)) fail("evidence stance is unsupported"); this.modality = identifier("evidence modality", input.modality ?? "unspecified");
     this.reproducibility = input.reproducibility ?? "unverified"; if (!(AUTONOMOUS_CLAIM_INTEGRITY_REPRODUCIBILITY as readonly string[]).includes(this.reproducibility)) fail("evidence reproducibility is unsupported");
     const metadata = input.metadata ?? {}; if (!isObject(metadata)) fail("evidence metadata must be an object"); safeMetadata(metadata, "evidence metadata"); this.metadata = { ...metadata };
   }
@@ -413,7 +413,7 @@ function normalizeEvidence(value: AutonomousClaimIntegrityEvidence | AutonomousC
   if (value instanceof AutonomousClaimIntegrityEvidence) return value;
   if ("evidenceId" in value) return new AutonomousClaimIntegrityEvidence(value as AutonomousClaimIntegrityEvidenceInput);
   const record = value as Record<string, unknown>;
-  return new AutonomousClaimIntegrityEvidence({ evidenceId: String(read(record, "evidence_id", "evidenceId")), domain: read(record, "domain", "domain") as AutonomousDomainName, claimIds: (read(record, "claim_ids", "claimIds", []) as string[]) ?? [], sourceId: String(read(record, "source_id", "sourceId")), evidenceDigest: String(read(record, "evidence_digest", "evidenceDigest")), sourceDigest: read(record, "source_digest", "sourceDigest", null) as string | null, observedAt: String(read(record, "observed_at", "observedAt")), validFrom: read(record, "valid_from", "validFrom", null) as string | null, validUntil: read(record, "valid_until", "validUntil", null) as string | null, reliability: read(record, "reliability", "reliability", 0.5) as number, support: read(record, "support", "support", 0.5) as number, status: read(record, "status", "status", "accepted") as AutonomousClaimIntegrityEvidenceStatus, stance: read(record, "stance", "stance", "support") as AutonomousClaimIntegrityStance, modality: String(read(record, "modality", "modality", "unspecified")), reproducibility: read(record, "reproducibility", "reproducibility", "unverified") as AutonomousClaimIntegrityReproducibility, metadata: (read(record, "metadata", "metadata", {}) as Record<string, unknown>) ?? {} });
+  return new AutonomousClaimIntegrityEvidence({ evidenceId: String(read(record, "evidence_id", "evidenceId")), domain: read(record, "domain", "domain") as AutonomousDomainName, claimIds: (read(record, "claim_ids", "claimIds", []) as string[]) ?? [], sourceId: String(read(record, "source_id", "sourceId")), evidenceDigest: String(read(record, "evidence_digest", "evidenceDigest")), sourceDigest: read(record, "source_digest", "sourceDigest", null) as string | null, observedAt: String(read(record, "observed_at", "observedAt")), validFrom: read(record, "valid_from", "validFrom", null) as string | null, validUntil: read(record, "valid_until", "validUntil", null) as string | null, reliability: read(record, "reliability", "reliability") as number, support: read(record, "support", "support") as number, status: read(record, "status", "status") as AutonomousClaimIntegrityEvidenceStatus, stance: read(record, "stance", "stance") as AutonomousClaimIntegrityStance, modality: String(read(record, "modality", "modality", "unspecified")), reproducibility: read(record, "reproducibility", "reproducibility", "unverified") as AutonomousClaimIntegrityReproducibility, metadata: (read(record, "metadata", "metadata", {}) as Record<string, unknown>) ?? {} });
 }
 function normalizeAcquisitionCandidate(value: AutonomousInformationAcquisitionCandidate | AutonomousInformationAcquisitionCandidateInput | Record<string, unknown>): AutonomousInformationAcquisitionCandidate {
   if (value instanceof AutonomousInformationAcquisitionCandidate) return value;
@@ -465,7 +465,7 @@ export interface AssessAutonomousClaimIntegrityOptions { contextDigest: string; 
 
 export function assessAutonomousClaimIntegrity(options: AssessAutonomousClaimIntegrityOptions): AutonomousClaimIntegrityAssessment {
   const contextDigest = digest("contextDigest", options.contextDigest)!; const referenceTime = timestamp("referenceTime", options.referenceTime); const policy = normalizePolicy(options.policy); if (!Array.isArray(options.claims) || options.claims.length < 1 || options.claims.length > AUTONOMOUS_CLAIM_INTEGRITY_MAX_CLAIMS) fail("claims are outside their bounds"); if (!Array.isArray(options.evidence) || options.evidence.length > AUTONOMOUS_CLAIM_INTEGRITY_MAX_EVIDENCE) fail("evidence is outside its bounds");
-  const claims = options.claims.map(normalizeClaim); const evidence = options.evidence.map(normalizeEvidence); const claimIds = new Set(claims.map((claim) => claim.claimId)); const evidenceIds = evidence.map((item) => item.evidenceId); if (claimIds.size !== claims.length) fail("claims contain duplicate ids"); if (new Set(evidenceIds).size !== evidenceIds.length) fail("evidence contains duplicate ids");
+  const claims = options.claims.map(normalizeClaim); const evidence = options.evidence.map(normalizeEvidence); const claimIds = new Set(claims.map((claim) => claim.claimId)); const evidenceIds = evidence.map((item) => item.evidenceId); const evidenceDigests = evidence.map((item) => item.evidenceDigest); if (claimIds.size !== claims.length) fail("claims contain duplicate ids"); if (new Set(evidenceIds).size !== evidenceIds.length) fail("evidence contains duplicate ids"); if (new Set(evidenceDigests).size !== evidenceDigests.length) fail("evidence contains duplicate evidence digests");
   const referenceSeconds = epoch(referenceTime); const rows = evidence.map((item) => evidenceRow(item, referenceSeconds, policy, claimIds)); const rowById = new Map(rows.map((row) => [row.evidence_id, row])); const assessments: AutonomousClaimIntegrityClaimAssessmentJSON[] = [];
   for (const claim of claims) {
     const linked = evidence.filter((item) => item.claimIds.includes(claim.claimId)); const usable = linked.filter((item) => rowById.get(item.evidenceId)!.usable && item.domain === claim.domain); const domainMismatch = linked.filter((item) => item.domain !== claim.domain); const supporting = usable.filter((item) => item.stance === "support"); const contradicting = usable.filter((item) => item.stance === "contradict"); const usableIds = usable.map((item) => item.evidenceId); const supportingIds = supporting.map((item) => item.evidenceId); const contradictingIds = contradicting.map((item) => item.evidenceId); const sources = new Set(supporting.map((item) => item.sourceDigest ?? item.sourceId)); const modalities = [...new Set(supporting.map((item) => item.modality))].sort();

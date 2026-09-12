@@ -48,6 +48,26 @@ test("provider/model quotas reserve, settle, fence concurrency, and roll windows
   assert.equal(quota.status("offline", "offline-model")[0].window_start, 1_001_000);
 });
 
+test("invalid authoritative usage leaves a dispatched reservation recoverable", () => {
+  const quota = new ProviderQuotaController({ clock: () => 1_500_000 });
+  quota.setPolicy({ provider: "recoverable", model: "recoverable-model", windowMs: 10_000, maxRequests: 4, maxConcurrent: 1 });
+  const reservation = quota.reserve({ provider: "recoverable", model: "recoverable-model", inputTokens: 4, outputTokens: 8 });
+  reservation.markDispatched();
+
+  assert.throws(
+    () => reservation.settle({ inputTokens: 2_000_000_001, outputTokens: 0 }),
+    /provider quota settlement inputTokens/,
+  );
+  assert.equal(quota.status("recoverable", "recoverable-model")[0].concurrent, 1);
+
+  const settlement = reservation.settle({ inputTokens: 4, outputTokens: 2 });
+  assert.equal(settlement.charged_input_tokens, 4);
+  const [status] = quota.status("recoverable", "recoverable-model");
+  assert.equal(status.concurrent, 0);
+  assert.equal(status.requests_reserved, 0);
+  assert.equal(status.requests_used, 1);
+});
+
 test("quota snapshots are canonical, digest checked, and metadata-only", async () => {
   const quota = new ProviderQuotaController({ clock: () => 2_000_000 });
   quota.setPolicy({ provider: "offline", model: "offline-model", windowMs: 10_000, maxRequests: 5, maxOutputTokens: 512 });

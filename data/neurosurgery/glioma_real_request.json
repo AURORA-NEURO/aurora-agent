@@ -1,0 +1,11 @@
+{
+  "schema_version": "bioprism-neurosurgery/0.1",
+  "case_id": "glioma-public-evidence-2026-08-30",
+  "specialty": "glioma",
+  "request_use": "research_synthesis",
+  "question": "Synthesize the provenance-bound public glioblastoma registry, genomic-project, study-catalog, and guideline records; expose what remains unmeasured before any human research review.",
+  "direct_identifier_fields": [],
+  "observations": [],
+  "evidence": [],
+  "requested_tools": []
+}

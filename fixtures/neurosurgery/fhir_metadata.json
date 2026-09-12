@@ -1,0 +1,48 @@
+{
+  "schema_version": "bioprism-neurosurgery-case-fhir-import/0.1",
+  "specialty": "glioma",
+  "deidentified": true,
+  "synthetic_data": false,
+  "source_id": "fhir-export-2026-01",
+  "bundle": {
+    "resourceType": "Bundle",
+    "type": "collection",
+    "entry": [
+      {
+        "resource": {
+          "resourceType": "ImagingStudy",
+          "id": "img-1",
+          "extension": [
+            {
+              "url": "https://aurora-neuro.dev/fhir/StructureDefinition/case-asset-kind",
+              "valueCode": "imaging_series"
+            }
+          ],
+          "status": "available"
+        }
+      },
+      {
+        "resource": {
+          "resourceType": "Observation",
+          "id": "obs-1"
+        }
+      }
+    ]
+  },
+  "resource_hints": [
+    {
+      "resource_id": "img-1",
+      "asset_kind": "imaging_series",
+      "status": "observed",
+      "content_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "modality": "MR",
+      "body_region": "brain",
+      "observed_at": "2026-01-01T00:00:00Z",
+      "timepoint": "baseline"
+    }
+  ],
+  "query": {
+    "requested_kinds": ["imaging_series"],
+    "max_review_items": 32
+  }
+}

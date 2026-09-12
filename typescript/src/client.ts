@@ -416,6 +416,8 @@ import type {
   RepositoryCatalogArgs,
   RepositoryImpactArgs,
   RestToolResponse,
+  ResearchCampaignOfflineRunArgs,
+  ResearchCampaignOfflineRunResult,
   RouteReviewEvidenceResponse,
   RuntimeExecutionSimulateArgs,
   RuntimeExecutionSimulateResult,
@@ -519,6 +521,12 @@ const DEFAULT_MAX_RESPONSE_BYTES = 20_000_000;
 const DEFAULT_MAX_REQUEST_BYTES = 10_000_000;
 const MAX_EVENT_PAGE = 1_000;
 const MAX_REQUEST_ID_BYTES = 256;
+const RESEARCH_CAMPAIGN_OFFLINE_LIMITATIONS = [
+  "supports only synthetic_research and brain_plan campaign stages",
+  "synthetic_research measures seeded repository fixtures and does not search external literature",
+  "brain_plan validates and orders a plan but never executes its steps",
+  "this first slice has no resume or execution-journal reconciliation; an interrupted output directory must be inspected rather than retried",
+] as const;
 const MAX_MISSION_WAIT_MS = 86_400_000;
 const MAX_MISSION_POLL_INTERVAL_MS = 60_000;
 
@@ -1687,6 +1695,35 @@ export class ApiClient {
     const tool = pathSegment(name, "tool name");
     if (!isObject(arguments_)) throw new ArgumentError("tool arguments must be a JSON object");
     return this.request<RestToolResponse<T>>("POST", `/v1/tools/${encodeURIComponent(tool)}`, arguments_, options);
+  }
+
+  /**
+   * Validate and run a bounded, path-only offline research campaign.
+   *
+   * Confirmation is never inferred. Omitting it sends `false`, which asks the
+   * server for a no-write preview.
+   */
+  async researchCampaignRunOffline(
+    args: ResearchCampaignOfflineRunArgs,
+    options?: ClientRequestOptions,
+  ): Promise<RestToolResponse<ResearchCampaignOfflineRunResult>> {
+    const validated = validateResearchCampaignOfflineRunArgs(args);
+    const response = await this.callTool<ResearchCampaignOfflineRunResult>(
+      "research_campaign_run_offline",
+      validated,
+      options,
+    );
+    const projected = validateResearchCampaignOfflineResponse(response, validated, options?.requestId);
+    if (projected !== null && response.mcp.result?.structuredContent === undefined) {
+      return {
+        ...response,
+        mcp: {
+          ...response.mcp,
+          result: { ...response.mcp.result, structuredContent: projected },
+        },
+      };
+    }
+    return response;
   }
 
   /** Select a model through the value-only autonomous brain kernel; credentials never cross this call. */
@@ -3919,6 +3956,508 @@ function pathSegment(value: string, name: string): string {
   visible(value, name, 256);
   if (value === "." || value === ".." || value.includes("/") || value.includes("\\")) throw new ArgumentError(`${name} must be a path-safe string`);
   return value;
+}
+
+function validateResearchCampaignOfflineRunArgs(
+  args: ResearchCampaignOfflineRunArgs,
+): ResearchCampaignOfflineRunArgs {
+  if (!isObject(args)) throw new ArgumentError("research campaign arguments must be a JSON object");
+  const allowed = new Set(["spec_path", "stage_input_paths", "output_dir", "confirm"]);
+  if (Object.keys(args).some((key) => !allowed.has(key))) {
+    throw new ArgumentError("research campaign arguments contain an unknown field");
+  }
+  const specPath = workspaceRelativePath(args.spec_path, "spec_path");
+  const outputDir = workspaceRelativePath(args.output_dir, "output_dir");
+  if (!isObject(args.stage_input_paths) || Array.isArray(args.stage_input_paths)) {
+    throw new ArgumentError("stage_input_paths must be an object");
+  }
+  const entries = Object.entries(args.stage_input_paths);
+  if (entries.length < 1 || entries.length > 8) {
+    throw new ArgumentError("stage_input_paths must contain 1..=8 stages");
+  }
+  const validatedEntries: Array<[string, string]> = [];
+  for (const [stageId, path] of entries) {
+    visible(stageId, "stage_input_paths stage id", 256);
+    if (stageId.trim() !== stageId) {
+      throw new ArgumentError("stage_input_paths stage ids must not have surrounding whitespace");
+    }
+    if (typeof path !== "string") {
+      throw new ArgumentError("stage_input_paths values must be strings");
+    }
+    validatedEntries.push([stageId, workspaceRelativePath(path, `stage_input_paths.${stageId}`)]);
+  }
+  if (args.confirm !== undefined && typeof args.confirm !== "boolean") {
+    throw new ArgumentError("confirm must be boolean when supplied");
+  }
+  return {
+    spec_path: specPath,
+    stage_input_paths: Object.fromEntries(validatedEntries),
+    output_dir: outputDir,
+    confirm: args.confirm ?? false,
+  };
+}
+
+function workspaceRelativePath(value: string, name: string): string {
+  if (typeof value !== "string") throw new ArgumentError(`${name} must be a string`);
+  visible(value, name, 4_096);
+  if (value.trim().length === 0) throw new ArgumentError(`${name} must not be blank`);
+  if (value.includes("\\") || value.startsWith("/") || /^[A-Za-z]:/.test(value) || value.startsWith("//")) {
+    throw new ArgumentError(`${name} must be a portable workspace-relative path`);
+  }
+  const segments = value.split("/");
+  if (segments.some((segment) => segment.length === 0 || segment === "." || segment === "..")) {
+    throw new ArgumentError(`${name} must not contain empty, current-directory, or parent-directory segments`);
+  }
+  if (value.includes("\0")) throw new ArgumentError(`${name} must not contain NUL`);
+  return value;
+}
+
+function validateResearchCampaignOfflineResponse(
+  response: RestToolResponse<ResearchCampaignOfflineRunResult>,
+  request: ResearchCampaignOfflineRunArgs,
+  expectedRequestId?: string,
+): ResearchCampaignOfflineRunResult | null {
+  if (!isObject(response)) throw new ProtocolError("research campaign HTTP envelope must be an object");
+  assertExactCampaignKeys(response, ["ok", "tool", "request_id", "mcp", "guarantee"], "HTTP envelope");
+  if (response.ok !== true) {
+    throw new ProtocolError("research campaign successful HTTP response has an invalid ok field");
+  }
+  if (response.tool !== "research_campaign_run_offline") {
+    throw new ProtocolError("research campaign HTTP envelope has invalid tool or request identity");
+  }
+  const responseRequestId = campaignProtocolString(response.request_id, "request_id", 1_024);
+  if (expectedRequestId !== undefined && responseRequestId !== expectedRequestId) {
+    throw new ProtocolError("research campaign HTTP envelope does not match the requested identity");
+  }
+  if (response.guarantee !== "REST and MCP calls share the same in-process tool dispatcher") {
+    throw new ProtocolError("research campaign HTTP envelope changed its dispatcher guarantee");
+  }
+  const mcp = response.mcp;
+  if (!isObject(mcp)) throw new ProtocolError("research campaign HTTP envelope has no MCP object");
+  assertExactCampaignKeys(mcp, ["jsonrpc", "id", "result"], "MCP envelope");
+  if (mcp.jsonrpc !== "2.0" || mcp.id !== responseRequestId || !isObject(mcp.result)) {
+    throw new ProtocolError("research campaign MCP envelope has invalid protocol or request identity");
+  }
+  const resultKeys = mcp.result.structuredContent === undefined
+    ? ["content", "isError"]
+    : ["content", "isError", "structuredContent"];
+  assertExactCampaignKeys(mcp.result, resultKeys, "MCP result envelope");
+  if (typeof mcp.result.isError !== "boolean") {
+    throw new ProtocolError("research campaign MCP result has a non-boolean isError field");
+  }
+  const textProjection = parseResearchCampaignTextProjection(mcp.result.content);
+  if (mcp.result.isError === true) {
+    if (mcp.result.structuredContent !== undefined) {
+      throw new ProtocolError("research campaign MCP refusal cannot contain structured success content");
+    }
+    assertExactCampaignKeys(textProjection, ["ok", "error"], "MCP refusal projection");
+    if (textProjection.ok !== false) {
+      throw new ProtocolError("research campaign MCP refusal projection has an invalid ok field");
+    }
+    campaignProtocolString(textProjection.error, "MCP refusal error", 16_384);
+    return null;
+  }
+  const structured = mcp.result.structuredContent;
+  if (structured !== undefined && !isObject(structured)) {
+    throw new ProtocolError("research campaign structured result must be an object");
+  }
+  if (structured !== undefined && !campaignJsonEquivalent(structured, textProjection)) {
+    throw new ProtocolError("research campaign MCP text and structured results disagree");
+  }
+  const resultCandidate: unknown = structured ?? textProjection;
+  const result = resultCandidate as unknown as ResearchCampaignOfflineRunResult;
+  assertExactCampaignKeys(result, [
+    "schema",
+    "workflow",
+    "execution",
+    "campaign_id",
+    "spec_digest",
+    "campaign_status",
+    "actions_used",
+    "stages",
+    "checkpoint",
+    "trusted_head",
+    "manifest",
+    "written",
+    "limitations",
+  ], "result");
+  if (result.schema !== "bioprism-mcp/research-campaign-offline-run/0.1") {
+    throw new ProtocolError("research campaign result has an unsupported schema");
+  }
+  if (result.workflow !== "research_campaign_run_offline") {
+    throw new ProtocolError("research campaign result has an unsupported workflow");
+  }
+  const campaignId = campaignProtocolString(result.campaign_id, "campaign_id", 1_024);
+  requireCampaignDigest(result.spec_digest, "spec_digest");
+  const executionState = validateCampaignExecution(result.execution);
+  const expectedStatus = executionState === "not_started" ? "planned" : executionState;
+  if (result.campaign_status !== expectedStatus) {
+    throw new ProtocolError("research campaign execution and campaign status disagree");
+  }
+  if (!Number.isSafeInteger(result.actions_used) || result.actions_used < 0 || result.actions_used > 8) {
+    throw new ProtocolError("research campaign result has an invalid action count");
+  }
+  if (!Array.isArray(result.stages) || result.stages.length < 1 || result.stages.length > 8) {
+    throw new ProtocolError("research campaign result has an invalid stage list");
+  }
+  const ordinals = new Set<number>();
+  const stageIds = new Set<string>();
+  for (const [stageIndex, stage] of result.stages.entries()) {
+    if (!isObject(stage)) throw new ProtocolError("research campaign stage must be an object");
+    const stageId = campaignProtocolString(stage.stage_id, "stage.stage_id", 256);
+    if (stageIds.has(stageId)) throw new ProtocolError("research campaign result has duplicate stage ids");
+    stageIds.add(stageId);
+    requireCampaignDigest(stage.input_digest, "stage.input_digest");
+    if (stage.kind !== "synthetic_research" && stage.kind !== "brain_plan") {
+      throw new ProtocolError("research campaign result has an unsupported stage kind");
+    }
+    campaignProtocolRelativePath(stage.artifact_locator, "stage.artifact_locator");
+    const artifactSuffix = stage.kind === "synthetic_research" ? "research-dossier" : "brain-plan-report";
+    if (stage.artifact_locator !== `artifacts/${String(stageIndex + 1).padStart(4, "0")}-${artifactSuffix}.json`) {
+      throw new ProtocolError("research campaign stage has a non-canonical artifact locator");
+    }
+    if (stage.state === "not_started") {
+      assertExactCampaignKeys(stage, ["state", "stage_id", "kind", "input_digest", "artifact_locator"], "not-started stage");
+    } else if (stage.state === "settled") {
+      assertExactCampaignKeys(stage, [
+        "state",
+        "stage_id",
+        "kind",
+        "input_digest",
+        "action_ordinal",
+        "disposition",
+        "artifact_digest",
+        "receipt_digest",
+        "artifact_locator",
+        "file_sha256",
+      ], "settled stage");
+      if (!Number.isSafeInteger(stage.action_ordinal) || stage.action_ordinal < 1 || stage.action_ordinal > result.actions_used) {
+        throw new ProtocolError("research campaign result has an invalid stage ordinal");
+      }
+      if (stage.action_ordinal !== stageIndex + 1) {
+        throw new ProtocolError("research campaign stage ordinal does not match campaign order");
+      }
+      if (ordinals.has(stage.action_ordinal)) throw new ProtocolError("research campaign result has duplicate stage ordinals");
+      ordinals.add(stage.action_ordinal);
+      if (!["succeeded", "completed_with_negative_findings", "missing_input", "unknown_completion", "awaiting_human_review", "exhausted", "refused"].includes(String(stage.disposition))) {
+        throw new ProtocolError("research campaign result has an unknown stage disposition");
+      }
+      requireCampaignDigest(stage.artifact_digest, "stage.artifact_digest");
+      requireCampaignDigest(stage.receipt_digest, "stage.receipt_digest");
+      requireCampaignDigest(stage.file_sha256, "stage.file_sha256");
+    } else if (stage.state === "reconciliation_required") {
+      assertExactCampaignKeys(stage, [
+        "state",
+        "stage_id",
+        "kind",
+        "input_digest",
+        "action_ordinal",
+        "authorization_digest",
+        "artifact_locator",
+        "reason",
+      ], "reconciliation stage");
+      if (!Number.isSafeInteger(stage.action_ordinal) || stage.action_ordinal < 1 || stage.action_ordinal > result.actions_used) {
+        throw new ProtocolError("research campaign reconciliation stage has an invalid ordinal");
+      }
+      if (stage.action_ordinal !== stageIndex + 1) {
+        throw new ProtocolError("research campaign reconciliation ordinal does not match campaign order");
+      }
+      if (ordinals.has(stage.action_ordinal)) throw new ProtocolError("research campaign result has duplicate stage ordinals");
+      ordinals.add(stage.action_ordinal);
+      requireCampaignDigest(stage.authorization_digest, "stage.authorization_digest");
+      campaignProtocolString(stage.reason, "stage.reason", 2_048);
+    } else {
+      throw new ProtocolError("research campaign result has an unknown stage state");
+    }
+  }
+  const requestedStageIds = Object.keys(request.stage_input_paths).sort();
+  const returnedStageIds = [...stageIds].sort();
+  if (requestedStageIds.length !== returnedStageIds.length || requestedStageIds.some((stageId, index) => stageId !== returnedStageIds[index])) {
+    throw new ProtocolError("research campaign result stages do not match the request");
+  }
+  const orderedOrdinals = [...ordinals].sort((left, right) => left - right);
+  if (orderedOrdinals.length !== result.actions_used || orderedOrdinals.some((ordinal, index) => ordinal !== index + 1)) {
+    throw new ProtocolError("research campaign action ordinals do not exactly cover actions_used");
+  }
+  if (executionState === "not_started") {
+    if (result.actions_used !== 0 || result.stages.some((stage) => stage.state !== "not_started")) {
+      throw new ProtocolError("research campaign preview cannot report authorized or settled work");
+    }
+  } else if (executionState === "completed") {
+    if (result.stages.some((stage) => stage.state !== "settled" || !["succeeded", "completed_with_negative_findings"].includes(String(stage.disposition)))) {
+      throw new ProtocolError("completed research campaign contains an unsettled or non-completing stage");
+    }
+  } else if (executionState !== "completed" && executionState !== "reconciliation_required") {
+    const pausedStageId = (result.execution as Record<string, unknown>).stage_id;
+    if (typeof pausedStageId !== "string" || !stageIds.has(pausedStageId)) {
+      throw new ProtocolError("research campaign pause references an unknown stage");
+    }
+    const pausedStage = result.stages.find((stage) => stage.stage_id === pausedStageId);
+    const expectedDisposition: Record<string, string> = {
+      awaiting_human_review: "awaiting_human_review",
+      refused: "refused",
+      needs_input: "missing_input",
+      exhausted: "exhausted",
+    };
+    if (pausedStage?.state !== "settled" || pausedStage.disposition !== expectedDisposition[executionState]) {
+      throw new ProtocolError("research campaign pause disagrees with its stage disposition");
+    }
+    if (pausedStage.action_ordinal !== result.actions_used) {
+      throw new ProtocolError("research campaign pause does not identify the latest action");
+    }
+    const pausedIndex = result.stages.indexOf(pausedStage);
+    if (result.stages.slice(0, pausedIndex).some((stage) => stage.state !== "settled" || !["succeeded", "completed_with_negative_findings"].includes(String(stage.disposition)))
+      || result.stages.slice(pausedIndex + 1).some((stage) => stage.state !== "not_started")) {
+      throw new ProtocolError("research campaign pause has invalid surrounding stage progress");
+    }
+  }
+
+  const checkpoint = validateCampaignCheckpoint(result.checkpoint);
+  const trustedHead = validateCampaignTrustedHead(result.trusted_head, campaignId, String(result.spec_digest));
+  validateCampaignManifest(result.manifest);
+  if (result.manifest !== null && result.manifest.digest !== result.manifest.file_sha256) {
+    throw new ProtocolError("research campaign manifest digest does not match its file digest");
+  }
+  const persistentParts = [checkpoint, trustedHead, result.manifest].filter((value) => value !== null).length;
+  if ((checkpoint === null) !== (trustedHead === null) || (result.manifest !== null && checkpoint === null)) {
+    throw new ProtocolError("research campaign durable metadata has an incomplete checkpoint/head pair");
+  }
+  if (checkpoint !== null && trustedHead !== null && (
+    checkpoint.generation !== trustedHead.generation || checkpoint.snapshot_digest !== trustedHead.snapshot_digest
+  )) {
+    throw new ProtocolError("research campaign checkpoint and trusted head disagree");
+  }
+  if (result.manifest !== null) {
+    if (result.checkpoint?.locator !== "campaign.checkpoint.json"
+      || result.trusted_head?.locator !== "campaign.head.json"
+      || result.manifest.locator !== "campaign.manifest.json"
+      || result.checkpoint.generation !== result.actions_used + 1) {
+      throw new ProtocolError("research campaign committed metadata has invalid canonical locators or generation");
+    }
+  } else if (result.checkpoint !== null && result.trusted_head !== null) {
+    const authorizationFile = `authority/${String(result.checkpoint.generation).padStart(4, "0")}-authorization.json`;
+    if (result.checkpoint.generation !== result.actions_used
+      || result.checkpoint.locator !== `${authorizationFile}#/checkpoint`
+      || result.trusted_head.locator !== `${authorizationFile}#/candidate_checkpoint_head`) {
+      throw new ProtocolError("research campaign partial metadata does not identify its authorization envelope");
+    }
+  }
+  if (executionState === "not_started" && persistentParts !== 0) {
+    throw new ProtocolError("research campaign preview cannot contain durable metadata");
+  }
+  if (!["not_started", "reconciliation_required"].includes(executionState) && persistentParts !== 3) {
+    throw new ProtocolError("confirmed research campaign terminal state lacks durable metadata");
+  }
+  if (executionState === "reconciliation_required") {
+    const uncertainStages = result.stages.filter((stage) => stage.state === "reconciliation_required");
+    if (uncertainStages.length > 1 || (result.actions_used > 0 && uncertainStages.length !== 1)) {
+      throw new ProtocolError("research campaign reconciliation state has invalid active-stage cardinality");
+    }
+    if (result.actions_used === 0) {
+      if (persistentParts !== 0 || result.stages.some((stage) => stage.state !== "not_started")) {
+        throw new ProtocolError("unestablished research campaign reconciliation cannot claim durable or executed work");
+      }
+    } else if (checkpoint === null || trustedHead === null) {
+      throw new ProtocolError("authorized research campaign reconciliation lacks its checkpoint and trusted head");
+    }
+    const active = uncertainStages[0];
+    if (active !== undefined) {
+      const activeIndex = result.stages.indexOf(active);
+      if (active.action_ordinal !== result.actions_used
+        || result.stages.slice(0, activeIndex).some((stage) => stage.state !== "settled" || !["succeeded", "completed_with_negative_findings"].includes(String(stage.disposition)))
+        || result.stages.slice(activeIndex + 1).some((stage) => stage.state !== "not_started")) {
+        throw new ProtocolError("research campaign reconciliation stage has invalid surrounding progress");
+      }
+    }
+  }
+  if (!Array.isArray(result.written) || result.written.length > 20) {
+    throw new ProtocolError("research campaign result has an invalid written locator list");
+  }
+  const written = new Set<string>();
+  for (const locator of result.written) {
+    const path = campaignProtocolRelativePath(locator, "written locator", 8_192);
+    if (written.has(path)) throw new ProtocolError("research campaign result has duplicate written locators");
+    if (!path.startsWith(`${request.output_dir}/`)) {
+      throw new ProtocolError("research campaign result reports a write outside output_dir");
+    }
+    written.add(path);
+  }
+  if (executionState === "not_started" && result.written.length !== 0) {
+    throw new ProtocolError("research campaign preview cannot report writes");
+  }
+  if (request.confirm ? executionState === "not_started" : executionState !== "not_started") {
+    throw new ProtocolError("research campaign result disagrees with the requested confirmation mode");
+  }
+  const expectedWritten = new Set<string>();
+  const allowedWritten = new Set<string>();
+  for (const stage of result.stages) {
+    const artifact = campaignOutputLocator(request.output_dir, stage.artifact_locator);
+    if (stage.state === "settled") expectedWritten.add(artifact);
+    if (stage.state === "settled" || stage.state === "reconciliation_required") allowedWritten.add(artifact);
+  }
+  for (const metadata of [result.checkpoint, result.trusted_head, result.manifest]) {
+    if (metadata !== null) expectedWritten.add(campaignOutputLocator(request.output_dir, metadata.locator));
+  }
+  if (result.checkpoint !== null) {
+    for (let generation = 1; generation <= result.actions_used; generation += 1) {
+      expectedWritten.add(campaignOutputLocator(
+        request.output_dir,
+        `authority/${String(generation).padStart(4, "0")}-authorization.json`,
+      ));
+    }
+  }
+  if (result.manifest !== null && result.checkpoint !== null) {
+    expectedWritten.add(campaignOutputLocator(
+      request.output_dir,
+      `authority/${String(result.checkpoint.generation).padStart(4, "0")}-terminal.json`,
+    ));
+  }
+  expectedWritten.forEach((locator) => allowedWritten.add(locator));
+  if ([...expectedWritten].some((locator) => !written.has(locator))) {
+    throw new ProtocolError("research campaign written locators omit persisted result metadata");
+  }
+  if ([...written].some((locator) => !allowedWritten.has(locator))) {
+    throw new ProtocolError("research campaign result reports an unrecognized append-only file");
+  }
+  if (!Array.isArray(result.limitations) || result.limitations.length < 1 || result.limitations.length > 8) {
+    throw new ProtocolError("research campaign result has an invalid limitations list");
+  }
+  result.limitations.forEach((value) => campaignProtocolString(value, "limitation", 2_048));
+  if (result.limitations.length !== RESEARCH_CAMPAIGN_OFFLINE_LIMITATIONS.length
+    || result.limitations.some((value, index) => value !== RESEARCH_CAMPAIGN_OFFLINE_LIMITATIONS[index])) {
+    throw new ProtocolError("research campaign result changed its fixed limitation disclosure");
+  }
+  return result;
+}
+
+function isSha256(value: unknown): value is string {
+  return typeof value === "string" && /^[0-9a-f]{64}$/.test(value);
+}
+
+function validateCampaignExecution(value: unknown): string {
+  if (!isObject(value) || typeof value.state !== "string") {
+    throw new ProtocolError("research campaign result has an invalid execution state");
+  }
+  if (value.state === "not_started" || value.state === "completed") {
+    assertExactCampaignKeys(value, ["state"], "execution");
+    return value.state;
+  }
+  if (["awaiting_human_review", "refused", "needs_input", "exhausted"].includes(value.state)) {
+    assertExactCampaignKeys(value, ["state", "stage_id"], "stage execution");
+    campaignProtocolString(value.stage_id, "execution.stage_id", 256);
+    return value.state;
+  }
+  if (value.state === "reconciliation_required") {
+    assertExactCampaignKeys(value, ["state", "reason"], "reconciliation execution");
+    campaignProtocolString(value.reason, "execution.reason", 2_048);
+    return value.state;
+  }
+  throw new ProtocolError("research campaign result has an unknown execution state");
+}
+
+function validateCampaignCheckpoint(value: unknown): Record<string, unknown> | null {
+  if (value === null) return null;
+  if (!isObject(value)) throw new ProtocolError("research campaign checkpoint metadata must be an object or null");
+  assertExactCampaignKeys(value, ["locator", "schema", "generation", "snapshot_digest"], "checkpoint");
+  campaignProtocolRelativePath(value.locator, "checkpoint.locator");
+  if (value.schema !== "bioprism-research-campaign-checkpoint/0.1") {
+    throw new ProtocolError("research campaign checkpoint has an unsupported schema");
+  }
+  if (typeof value.generation !== "number" || !Number.isSafeInteger(value.generation) || value.generation < 1) {
+    throw new ProtocolError("research campaign checkpoint has an invalid generation");
+  }
+  requireCampaignDigest(value.snapshot_digest, "checkpoint.snapshot_digest");
+  return value;
+}
+
+function validateCampaignTrustedHead(value: unknown, campaignId: string, specDigest: string): Record<string, unknown> | null {
+  if (value === null) return null;
+  if (!isObject(value)) throw new ProtocolError("research campaign trusted head must be an object or null");
+  assertExactCampaignKeys(value, ["locator", "campaign_id", "spec_digest", "generation", "snapshot_digest"], "trusted head");
+  campaignProtocolRelativePath(value.locator, "trusted_head.locator");
+  if (value.campaign_id !== campaignId || value.spec_digest !== specDigest) {
+    throw new ProtocolError("research campaign trusted head has drifted identity");
+  }
+  if (typeof value.generation !== "number" || !Number.isSafeInteger(value.generation) || value.generation < 1) {
+    throw new ProtocolError("research campaign trusted head has an invalid generation");
+  }
+  requireCampaignDigest(value.snapshot_digest, "trusted_head.snapshot_digest");
+  return value;
+}
+
+function validateCampaignManifest(value: unknown): void {
+  if (value === null) return;
+  if (!isObject(value)) throw new ProtocolError("research campaign manifest metadata must be an object or null");
+  assertExactCampaignKeys(value, ["locator", "digest", "file_sha256"], "manifest");
+  campaignProtocolRelativePath(value.locator, "manifest.locator");
+  requireCampaignDigest(value.digest, "manifest.digest");
+  requireCampaignDigest(value.file_sha256, "manifest.file_sha256");
+}
+
+function assertExactCampaignKeys(value: Record<string, unknown>, expected: readonly string[], label: string): void {
+  const keys = Object.keys(value).sort();
+  const wanted = [...expected].sort();
+  if (keys.length !== wanted.length || keys.some((key, index) => key !== wanted[index])) {
+    throw new ProtocolError(`research campaign ${label} has missing or unknown fields`);
+  }
+}
+
+function requireCampaignDigest(value: unknown, name: string): asserts value is string {
+  if (!isSha256(value)) throw new ProtocolError(`research campaign ${name} must be a lowercase SHA-256 digest`);
+}
+
+function campaignProtocolString(value: unknown, name: string, maxBytes: number): string {
+  if (typeof value !== "string" || value.length === 0 || /[\r\n\0]/.test(value) || new TextEncoder().encode(value).byteLength > maxBytes) {
+    throw new ProtocolError(`research campaign ${name} is invalid`);
+  }
+  return value;
+}
+
+function campaignProtocolRelativePath(value: unknown, name: string, maxBytes = 4_096): string {
+  const path = campaignProtocolString(value, name, maxBytes);
+  if (path.includes("\\") || path.startsWith("/") || /^[A-Za-z]:/.test(path) || path.startsWith("//")) {
+    throw new ProtocolError(`research campaign ${name} is not workspace-relative`);
+  }
+  if (path.split("/").some((segment) => segment.length === 0 || segment === "." || segment === "..")) {
+    throw new ProtocolError(`research campaign ${name} contains an unsafe path segment`);
+  }
+  return path;
+}
+
+function campaignOutputLocator(outputDir: string, locator: string): string {
+  return `${outputDir}/${locator.split("#", 1)[0]}`;
+}
+
+function parseResearchCampaignTextProjection(value: unknown): Record<string, unknown> {
+  if (!Array.isArray(value) || value.length !== 1 || !isObject(value[0]) || value[0].type !== "text" || typeof value[0].text !== "string") {
+    throw new ProtocolError("research campaign MCP content must be exactly one JSON text block");
+  }
+  assertExactCampaignKeys(value[0], ["type", "text"], "MCP text block");
+  if (new TextEncoder().encode(value[0].text).byteLength > 256_000) {
+    throw new ProtocolError("research campaign MCP text projection exceeds its response bound");
+  }
+  let decoded: unknown;
+  try {
+    decoded = JSON.parse(value[0].text);
+  } catch {
+    throw new ProtocolError("research campaign MCP text projection is not valid JSON");
+  }
+  if (!isObject(decoded)) throw new ProtocolError("research campaign MCP text projection is not an object");
+  return decoded;
+}
+
+function campaignJsonEquivalent(left: unknown, right: unknown): boolean {
+  if (left === right) return true;
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return Array.isArray(left) && Array.isArray(right)
+      && left.length === right.length
+      && left.every((value, index) => campaignJsonEquivalent(value, right[index]));
+  }
+  if (!isObject(left) || !isObject(right)) return false;
+  const leftKeys = Object.keys(left).sort();
+  const rightKeys = Object.keys(right).sort();
+  return leftKeys.length === rightKeys.length
+    && leftKeys.every((key, index) => key === rightKeys[index] && campaignJsonEquivalent(left[key], right[key]));
 }
 
 function parseUnsignedHeader(value: string | null, name: string): number | null {

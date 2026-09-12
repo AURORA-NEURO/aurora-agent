@@ -1,0 +1,23 @@
+[package]
+name = "bioprism-research-campaign"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Checkpointed composition kernel for bounded, provider-neutral research campaigns"
+
+[features]
+default = []
+neurosurgery-adapter = ["dep:bioprism-neurosurgery"]
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+bioprism-ids = { workspace = true }
+bioprism-research = { workspace = true }
+bioprism-brain = { workspace = true }
+bioprism-autopilot = { workspace = true }
+bioprism-neurosurgery = { workspace = true, optional = true }
+

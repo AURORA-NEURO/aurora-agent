@@ -1,0 +1,1413 @@
+{
+    "schema_version":  "bioprism-neurosurgery-real/0.1",
+    "generated_at":  "2026-08-30T05:16:19Z",
+    "synthetic_data":  false,
+    "sources":  [
+                    {
+                        "source_id":  "clinicaltrials_glioblastoma",
+                        "kind":  "clinical_trials_registry",
+                        "authority":  "ClinicalTrials.gov / U.S. National Library of Medicine",
+                        "uri":  "https://clinicaltrials.gov/api/v2/studies?query.cond=Glioblastoma\u0026pageSize=5\u0026format=json",
+                        "retrieved_at":  "2026-08-30T05:16:19Z",
+                        "content_sha256":  "2a95294ed43a6b57a756aa9041e7e5145cbe33bcc772485484fb1daeaf01472c",
+                        "record_count":  5
+                    },
+                    {
+                        "source_id":  "gdc_tcga_gbm",
+                        "kind":  "genomic_commons",
+                        "authority":  "NCI Genomic Data Commons",
+                        "uri":  "https://api.gdc.cancer.gov/projects/TCGA-GBM?format=json",
+                        "retrieved_at":  "2026-08-30T05:16:19Z",
+                        "content_sha256":  "b594489f27fead1db2b37689ed1a14c39aaec0184a4f03344b4cf0ebca8422f7",
+                        "record_count":  1
+                    },
+                    {
+                        "source_id":  "cbioportal_gbm_catalog",
+                        "kind":  "study_portal",
+                        "authority":  "cBioPortal for Cancer Genomics",
+                        "uri":  "https://www.cbioportal.org/api/studies?keyword=gbm",
+                        "retrieved_at":  "2026-08-30T05:16:19Z",
+                        "content_sha256":  "6642ca0417f4136a91b1d810ec956dac1213027091eca9a8ee40ea54ba52b78c",
+                        "record_count":  61
+                    },
+                    {
+                        "source_id":  "nci_adult_cns_pdq",
+                        "kind":  "guideline",
+                        "authority":  "National Cancer Institute",
+                        "uri":  "https://www.cancer.gov/types/brain/hp/adult-brain-treatment-pdq",
+                        "retrieved_at":  "2026-08-30T05:16:19Z",
+                        "content_sha256":  "22c6c0f7bc45f5e98d673f23173a63a3b9912599e3cb67fe3746ff79e2757726",
+                        "record_count":  1
+                    },
+                    {
+                        "source_id":  "pubmed_glioblastoma",
+                        "kind":  "literature_index",
+                        "authority":  "U.S. National Library of Medicine PubMed",
+                        "uri":  "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed\u0026term=glioblastoma%20AND%20(molecular%20OR%20genomic)\u0026retmax=20\u0026retmode=json\u0026sort=pub_date",
+                        "retrieved_at":  "2026-08-30T05:16:19Z",
+                        "content_sha256":  "388a90cc29d525eb8cd5cd5d7840a13997d5164e6b3792ecde0d0fb6b42ee42d",
+                        "record_count":  20
+                    }
+                ],
+    "clinical_trials":  [
+                            {
+                                "source_id":  "clinicaltrials_glioblastoma",
+                                "nct_id":  "NCT05941234",
+                                "title":  "Stem Cell Analysis, Omics (Including Immunomics) and Artificial Intelligence in Glioblastoma",
+                                "overall_status":  "RECRUITING",
+                                "phases":  [
+                                               "NA"
+                                           ],
+                                "last_update":  "2025-03-13",
+                                "study_type":  "INTERVENTIONAL",
+                                "enrollment_count":  120,
+                                "intervention_names":  [
+                                                            "Biological biomarker analysis"
+                                                        ]
+                            },
+                            {
+                                "source_id":  "clinicaltrials_glioblastoma",
+                                "nct_id":  "NCT00402116",
+                                "title":  "Phase 1/2 Study of Enzastaurin in Newly Diagnosed Glioblastoma Multiforme (GBM) and Gliosarcoma (GS) Patients",
+                                "overall_status":  "COMPLETED",
+                                "phases":  [
+                                               "PHASE1",
+                                               "PHASE2"
+                                           ],
+                                "last_update":  "2020-08-06",
+                                "study_type":  "INTERVENTIONAL",
+                                "enrollment_count":  72,
+                                "intervention_names":  [
+                                                            "enzastaurin",
+                                                            "temozolomide",
+                                                            "radiation therapy"
+                                                        ]
+                            },
+                            {
+                                "source_id":  "clinicaltrials_glioblastoma",
+                                "nct_id":  "NCT01933815",
+                                "title":  "Dose-Escalation Study of TPI 287 + Avastin Followed by Randomized Study of the Same Versus Avastin for Glioblastoma",
+                                "overall_status":  "SUSPENDED",
+                                "phases":  [
+                                               "PHASE1",
+                                               "PHASE2"
+                                           ],
+                                "last_update":  "2023-02-22",
+                                "study_type":  "INTERVENTIONAL",
+                                "enrollment_count":  92,
+                                "intervention_names":  [
+                                                            "TPI 287",
+                                                            "Bevacizumab"
+                                                        ]
+                            },
+                            {
+                                "source_id":  "clinicaltrials_glioblastoma",
+                                "nct_id":  "NCT04915404",
+                                "title":  "Berubicin in Adult Patients With Recurrent Glioblastoma Multiforme (WHO Grade IV)",
+                                "overall_status":  "TERMINATED",
+                                "phases":  [
+                                               "PHASE1",
+                                               "PHASE2"
+                                           ],
+                                "last_update":  "2024-06-06",
+                                "study_type":  "INTERVENTIONAL",
+                                "enrollment_count":  5,
+                                "intervention_names":  [
+                                                            "Berubicin Hydrochloride"
+                                                        ]
+                            },
+                            {
+                                "source_id":  "clinicaltrials_glioblastoma",
+                                "nct_id":  "NCT00005955",
+                                "title":  "Temozolomide Followed by Radiation Therapy in Treating Children With Newly Diagnosed Malignant CNS Tumors",
+                                "overall_status":  "COMPLETED",
+                                "phases":  [
+                                               "PHASE2"
+                                           ],
+                                "last_update":  "2013-06-20",
+                                "study_type":  "INTERVENTIONAL",
+                                "enrollment_count":  0,
+                                "intervention_names":  [
+                                                            "temozolomide"
+                                                        ]
+                            }
+                        ],
+    "genomic_projects":  [
+                             {
+                                 "source_id":  "gdc_tcga_gbm",
+                                 "project_id":  "TCGA-GBM",
+                                 "name":  "Glioblastoma Multiforme",
+                                 "primary_site":  [
+                                                      "Brain"
+                                                  ],
+                                 "disease_types":  [
+                                                       "Gliomas",
+                                                       "Not Reported"
+                                                   ],
+                                 "case_count":  617
+                             }
+                         ],
+    "portal_studies":  [
+                           {
+                               "source_id":  "cbioportal_gbm_catalog",
+                               "study_id":  "gbm_mayo_pdx_sarkaria_2019",
+                               "name":  "Brain Tumor PDXs (Mayo Clinic, Clin Cancer Res 2020)",
+                               "description":  "WES on a total of 106 PDXs and 80 PDXs have the matched germline (blood) samples sequenced. A total of 66 PDXs have RNASeq available",
+                               "sample_count":  106,
+                               "pmid":  "31852831",
+                               "public_study":  true
+                           },
+                           {
+                               "source_id":  "cbioportal_gbm_catalog",
+                               "study_id":  "gbm_cptac_2021",
+                               "name":  "Glioblastoma (CPTAC, Cell 2021)",
+                               "description":  "Proteogenomic and metabolomic characterization of human glioblastoma. Whole genome or whole exome sequencing of 99 samples. Generated by CPTAC.",
+                               "sample_count":  99,
+                               "pmid":  "33577785",
+                               "public_study":  true
+                           },
+                           {
+                               "source_id":  "cbioportal_gbm_catalog",
+                               "study_id":  "gbm_columbia_2019",
+                               "name":  "Glioblastoma (Columbia, Nat Med. 2019)",
+                               "description":  "Whole-exome sequencing of 32 out of 42 glioblastomas patients with matched normals.",
+                               "sample_count":  42,
+                               "pmid":  "30742119",
+                               "public_study":  true
+                           },
+                           {
+                               "source_id":  "cbioportal_gbm_catalog",
+                               "study_id":  "gbm_iatlas_prins_2019",
+                               "name":  "Glioblastoma (Randomized Clinical Trial, Nat Med. 2019) - iAtlas Harmonized",
+                               "description":  "Whole-exome sequencing and neoantigen landscape analysis of 30 recurrent glioblastomas and their matched normals from a randomized, multi-institution clinical trial to evaluate immune responses and survival following neoadjuvant and/or adjuvant therapy with pembrolizumab. The reprocessing of raw sequencing data is coordinated by CRI iAtlas.",
+                               "sample_count":  30,
+                               "pmid":  "30742122",
+                               "public_study":  true
+                           },
+                           {
+                               "source_id":  "cbioportal_gbm_catalog",
+                               "study_id":  "gbm_tcga_pub2013",
+                               "name":  "Glioblastoma (TCGA, Cell 2013)",
+                               "description":  "Whole-exome and/or whole-genome sequencing of 291 of the 577 glioblastoma tumor/normal pairs. The Cancer Genome Atlas (TCGA) Glioblastoma Project.",
+                               "sample_count":  577,
+                               "pmid":  "24120142",
+                               "public_study":  true
+                           },
+                           {
+                               "source_id":  "cbioportal_gbm_catalog",
+                               "study_id":  "gbm_tcga_pub",
+                               "name":  "Glioblastoma (TCGA, Nature 2008)",
+                               "description":  "Targeted sequencing in 91 of the 206 primary glioblastoma tumors (143 with matched normals) from the Cancer Genome Atlas (TCGA) Glioblastoma Project.",
+                               "sample_count":  206,
+                               "pmid":  "18772890",
+                               "public_study":  true
+                           },
+                           {
+                               "source_id":  "cbioportal_gbm_catalog",
+                               "study_id":  "gbm_tcga_gdc",
+                               "name":  "Glioblastoma Multiforme (TCGA GDC, 2025)",
+                               "description":  "TCGA Glioblastoma Multiforme. Source data from NCI GDC and generated in Aug 2025 using Cancer Data Aggregator.",
+                               "sample_count":  611,
+                               "pmid":  null,
+                               "public_study":  true
+                           }
+                       ],
+    "portal_molecular_profiles":  [
+                                      {
+                                          "source_id":  "cbioportal_gbm_catalog",
+                                          "study_id":  "gbm_mayo_pdx_sarkaria_2019",
+                                          "profile_id":  "gbm_mayo_pdx_sarkaria_2019_cna",
+                                          "name":  "Copy Number Alterations",
+                                          "molecular_alteration_type":  "COPY_NUMBER_ALTERATION",
+                                          "datatype":  "DISCRETE",
+                                          "description":  "Discrete Copy Number Data",
+                                          "show_in_analysis":  true,
+                                          "patient_level":  false
+                                      },
+                                      {
+                                          "source_id":  "cbioportal_gbm_catalog",
+                                          "study_id":  "gbm_mayo_pdx_sarkaria_2019",
+                                          "profile_id":  "gbm_mayo_pdx_sarkaria_2019_log2CNA",
+                                          "name":  "Log2 copy-number values",
+                                          "molecular_alteration_type":  "COPY_NUMBER_ALTERATION",
+                                          "datatype":  "LOG2-VALUE",
+                                          "description":  "Log2 copy-number values for each gene.",
+                                          "show_in_analysis":  false,
+                                          "patient_level":  false
+                                      },
+                                      {
+                                          "source_id":  "cbioportal_gbm_catalog",
+                                          "study_id":  "gbm_mayo_pdx_sarkaria_2019",
+                                          "profile_id":  "gbm_mayo_pdx_sarkaria_2019_methylation_hm450",
+                                          "name":  "Methylation EPIC 850K array",
+                                          "molecular_alteration_type":  "METHYLATION",
+                                          "datatype":  "CONTINUOUS",
+                                          "description":  "Methylation beta-values (HM850 EPIC platform).  For genes with multiple methylation probes, the probe least correlated with expression is selected (most negative)",
+                                          "show_in_analysis":  false,
+                                          "patient_level":  false
+                                      },
+                                      {
+                                          "source_id":  "cbioportal_gbm_catalog",
+                                          "study_id":  "gbm_mayo_pdx_sarkaria_2019",
+                                          "profile_id":  "gbm_mayo_pdx_sarkaria_2019_mutations",
+                                          "name":  "Mutations",
+                                          "molecular_alteration_type":  "MUTATION_EXTENDED",
+                                          "datatype":  "MAF",
+                                          "description":  "Mutation data of whole exome sequencing data.",
+                                          "show_in_analysis":  true,
+                                          "patient_level":  false
+                                      },
+                                      {
+                                          "source_id":  "cbioportal_gbm_catalog",
+                                          "study_id":  "gbm_mayo_pdx_sarkaria_2019",
+                                          "profile_id":  "gbm_mayo_pdx_sarkaria_2019_rna_seq_mrna",
+                                          "name":  "mRNA RNAseq RPKM expression",
+                                          "molecular_alteration_type":  "MRNA_EXPRESSION",
+                                          "datatype":  "CONTINUOUS",
+                                          "description":  "RNAseq RPKM expression",
+                                          "show_in_analysis":  false,
+                                          "patient_level":  false
+                                      },
+                                      {
+                                          "source_id":  "cbioportal_gbm_catalog",
+                                          "study_id":  "gbm_mayo_pdx_sarkaria_2019",
+                                          "profile_id":  "gbm_mayo_pdx_sarkaria_2019_rna_seq_mrna_median_Zscores",
+                                          "name":  "mRNA expression z-scores relative to diploid samples (RNA Seq RPKM)",
+                                          "molecular_alteration_type":  "MRNA_EXPRESSION",
+                                          "datatype":  "Z-SCORE",
+                                          "description":  "mRNA z-scores (RNA Seq RPKM) compared to the expression distribution of each gene tumors that are diploid for this gene.",
+                                          "show_in_analysis":  true,
+                                          "patient_level":  false
+                                      },
+                                      {
+                                          "source_id":  "cbioportal_gbm_catalog",
+                                          "study_id":  "gbm_mayo_pdx_sarkaria_2019",
+                                          "profile_id":  "gbm_mayo_pdx_sarkaria_2019_rna_seq_mrna_median_all_sample_Zscores",
+                                          "name":  "mRNA expression z-scores relative to all samples (log RNA Seq RPKM)",
+                                          "molecular_alteration_type":  "MRNA_EXPRESSION",
+                                          "datatype":  "Z-SCORE",
+                                          "description":  "Log-transformed mRNA z-Scores compared to the expression distribution of all samples (RNA-Seq RPKM).",
+                                          "show_in_analysis":  true,
+                                          "patient_level":  false
+                                      },
+                                      {
+                                          "source_id":  "cbioportal_gbm_catalog",
+                                          "study_id":  "gbm_cptac_2021",
+                                          "profile_id":  "gbm_cptac_2021_acetylprotein_quantification",
+                                          "name":  "Acetylprotein abundance ratio",
+                                          "molecular_alteration_type":  "GENERIC_ASSAY",
+                                          "datatype":  "LIMIT-VALUE",
+                                          "description":  "Abundance ratio for acetylproteins measured by mass spectrometry.",
+                                          "show_in_analysis":  true,
+                                          "patient_level":  false
+                                      },
+                                      {
+                                          "source_id":  "cbioportal_gbm_catalog",
+                                          "study_id":  "gbm_cptac_2021",
+                                          "profile_id":  "gbm_cptac_2021_crna_quantification",
+                                          "name":  "cRNA expression (FPKM-UQ)",
+                                          "molecular_alteration_type":  "GENERIC_ASSAY",
+                                          "datatype":  "LIMIT-VALUE",
+                                          "description":  "Expression of circular RNA abundance in FPKM-UQ values",
+                                          "show_in_analysis":  true,
+                                          "patient_level":  false
+                                      },
+                                      {
+                                          "source_id":  "cbioportal_gbm_catalog",
+                                          "study_id":  "gbm_cptac_2021",
+                                          "profile_id":  "gbm_cptac_2021_gistic",
+                                          "name":  "Discrete copy number alteration values",
+                                          "molecular_alteration_type":  "COPY_NUMBER_ALTERATION",
+                                          "datatype":  "DISCRETE",
+                                          "description":  "Discrete copy number alterations",
+                                          "show_in_analysis":  true,
+                                          "patient_level":  false
+                                      },
+                                      {
+                                          "source_id":  "cbioportal_gbm_catalog",
+                                          "study_id":  "gbm_cptac_2021",
+                                          "profile_id":  "gbm_cptac_2021_lipidome_negative_quantification",
+                                          "name":  "Lipid abundance ratio (negative mode)",
+                                          "molecular_alteration_type":  "GENERIC_ASSAY",
+                                          "datatype":  "LIMIT-VALUE",
+                                          "description":  "Abundance log2 ratio for lipids measured by mass spectrometry (negative mode).",
+                                          "show_in_analysis":  true,
+                                          "patient_level":  false
+                                      },
+                                      {
+                                          "source_id":  "cbioportal_gbm_catalog",
+                                          "study_id":  "gbm_cptac_2021",
+                                          "profile_id":  "gbm_cptac_2021_lipidome_positive_quantification",
+                                          "name":  "Lipid abundance ratio (positive mode)",
+                                          "molecular_alteration_type":  "GENERIC_ASSAY",
+                                          "datatype":  "LIMIT-VALUE",
+                                          "description":  "Abundance log2 ratio for lipids measured by mass spectrometry (positive mode).",
+                                          "show_in_analysis":  true,
+                                          "patient_level":  false
+                                      },
+                                      {
+                                          "source_id":  "cbioportal_gbm_catalog",
+                                          "study_id":  "gbm_cptac_2021",
+                                          "profile_id":  "gbm_cptac_2021_log2CNA",
+                                          "name":  "Log2 copy-number values",
+                                          "molecular_alteration_type":  "COPY_NUMBER_ALTERATION",
+                                          "datatype":  "LOG2-VALUE",
+                                          "description":  "Log2 copy-number values.",
+                                          "show_in_analysis":  false,
+                                          "patient_level":  false
+                                      },
+                                      {
+                                          "source_id":  "cbioportal_gbm_catalog",
+                                          "study_id":  "gbm_cptac_2021",
+                                          "profile_id":  "gbm_cptac_2021_methylation_epic",
+                                          "name":  "Methylation (EPIC)",
+                                          "molecular_alteration_type":  "METHYLATION",
+                                          "datatype":  "CONTINUOUS",
+                                          "description":  "Methylation beta-values (EPIC platform)",
+                                          "show_in_analysis":  false,
+                                          "patient_level":  false
+                                      },
+                                      {
+                                          "source_id":  "cbioportal_gbm_catalog",
+                                          "study_id":  "gbm_cptac_2021",
+                                          "profile_id":  "gbm_cptac_2021_mirna",
+                                          "name":  "miRNA expression (FPKM uq)",
+                                          "molecular_alteration_type":  "MRNA_EXPRESSION",
+                                          "datatype":  "CONTINUOUS",
+                                          "description":  "Micro RNA expression by miRNA abundance in FPKM values",
+                                          "show_in_analysis":  false,
+                                          "patient_level":  false
+                                      },
+                                      {
+                                          "source_id":  "cbioportal_gbm_catalog",
+                                          "study_id":  "gbm_cptac_2021",
+                                          "profile_id":  "gbm_cptac_2021_mirna_median_Zscores",
+                                          "name":  "Z-scores of miRNA expression (FPKM-UQ)",
+                                          "molecular_alteration_type":  "MRNA_EXPRESSION",
+                                          "datatype":  "Z-SCORE",
+                                          "description":  "Z-scores of miRNA abundance in FPKM-UQ values, calculated over all diploid samples.",
+                                          "show_in_analysis":  true,
+                                          "patient_level":  false
+                                      },
+                                      {
+                                          "source_id":  "cbioportal_gbm_catalog",
+                                          "study_id":  "gbm_cptac_2021",
+                                          "profile_id":  "gbm_cptac_2021_mrna",
+                                          "name":  "mRNA expression (FPKM UQ)",
+                                          "molecular_alteration_type":  "MRNA_EXPRESSION",
+                                          "datatype":  "CONTINUOUS",
+                                          "description":  "Gene expression by mRNA abundance in upper-quartile (UQ)-normalized FPKM values, median-centered by gene.",
+                                          "show_in_analysis":  false,
+                                          "patient_level":  false
+                                      },
+                                      {
+                                          "source_id":  "cbioportal_gbm_catalog",
+                                          "study_id":  "gbm_cptac_2021",
+                                          "profile_id":  "gbm_cptac_2021_mrna_seq_fpkm_Zscores",
+                                          "name":  "Z-scores of mRNA expression (FPKM-UQ, log2 transformed)",
+                                          "molecular_alteration_type":  "MRNA_EXPRESSION",
+                                          "datatype":  "Z-SCORE",
+                                          "description":  "Z-scores of mRNA abundance in FPKM-UQ values (log2 transformed), calculated over all diploid samples.",
+                                          "show_in_analysis":  true,
+                                          "patient_level":  false
+                                      },
+                                      {
+                                          "source_id":  "cbioportal_gbm_catalog",
+                                          "study_id":  "gbm_cptac_2021",
+                                          "profile_id":  "gbm_cptac_2021_mrna_seq_fpkm_all_sample_Zscores",
+                                          "name":  "mRNA expression z-scores relative to all samples (FPKM capture, log2 transformed)",
+                                          "molecular_alteration_type":  "MRNA_EXPRESSION",
+                                          "datatype":  "Z-SCORE",
+                                          "description":  "Log-transformed mRNA z-scores compared to expression distribution of all samples (RNA Seq FPKM).",
+                                          "show_in_analysis":  true,
+                                          "patient_level":  false
+                                      },
+                                      {
+                                          "source_id":  "cbioportal_gbm_catalog",
+                                          "study_id":  "gbm_cptac_2021",
+                                          "profile_id":  "gbm_cptac_2021_mutations",
+                                          "name":  "Mutations",
+                                          "molecular_alteration_type":  "MUTATION_EXTENDED",
+                                          "datatype":  "MAF",
+                                          "description":  "Somatic mutation data of whole genome or whole exome sequencing of 99 samples.",
+                                          "show_in_analysis":  true,
+                                          "patient_level":  false
+                                      },
+                                      {
+                                          "source_id":  "cbioportal_gbm_catalog",
+                                          "study_id":  "gbm_cptac_2021",
+                                          "profile_id":  "gbm_cptac_2021_phosphoproteome",
+                                          "name":  "Phosphoprotein abundance ratio",
+                                          "molecular_alteration_type":  "GENERIC_ASSAY",
+                                          "datatype":  "LIMIT-VALUE",
+                                          "description":  "Abundance ratio for phosphoproteins measured by mass spectrometry.",
+                                          "show_in_analysis":  true,
+                                          "patient_level":  false
+                                      },
+                                      {
+                                          "source_id":  "cbioportal_gbm_catalog",
+                                          "study_id":  "gbm_cptac_2021",
+                                          "profile_id":  "gbm_cptac_2021_protein_quantification",
+                                          "name":  "Protein abundance ratio",
+                                          "molecular_alteration_type":  "PROTEIN_LEVEL",
+                                          "datatype":  "LOG2-VALUE",
+                                          "description":  "Protein abundance ratio measured by mass spectrometry",
+                                          "show_in_analysis":  false,
+                                          "patient_level":  false
+                                      },
+                                      {
+                                          "source_id":  "cbioportal_gbm_catalog",
+                                          "study_id":  "gbm_cptac_2021",
+                                          "profile_id":  "gbm_cptac_2021_protein_quantification_zscores",
+                                          "name":  "Protein abundance ratio Z-scores",
+                                          "molecular_alteration_type":  "PROTEIN_LEVEL",
+                                          "datatype":  "Z-SCORE",
+                                          "description":  "Z-scores of protein abundance ratio measured by mass spectrometry, calculated over all diploid samples.",
+                                          "show_in_analysis":  true,
+                                          "patient_level":  false
+                                      },
+                                      {
+                                          "source_id":  "cbioportal_gbm_catalog",
+                                          "study_id":  "gbm_cptac_2021",
+                                          "profile_id":  "gbm_cptac_2021_single_cell_cycle_phases",
+                                          "name":  "Single cell - cell cycle phase values",
+                                          "molecular_alteration_type":  "GENERIC_ASSAY",
+                                          "datatype":  "LIMIT-VALUE",
+                                          "description":  "Cell growth phase assignments",
+                                          "show_in_analysis":  true,
+                                          "patient_level":  false
+                                      },
+                                      {
+                                          "source_id":  "cbioportal_gbm_catalog",
+                                          "study_id":  "gbm_cptac_2021",
+                                          "profile_id":  "gbm_cptac_2021_single_cell_type_fractions",
+                                          "name":  "Single cell - cell type assignment fractions",
+                                          "molecular_alteration_type":  "GENERIC_ASSAY",
+                                          "datatype":  "LIMIT-VALUE",
+                                          "description":  "Cell type assignments",
+                                          "show_in_analysis":  true,
+                                          "patient_level":  false
+                                      },
+                                      {
+                                          "source_id":  "cbioportal_gbm_catalog",
+                                          "study_id":  "gbm_columbia_2019",
+                                          "profile_id":  "gbm_columbia_2019_mutations",
+                                          "name":  "Mutations",
+                                          "molecular_alteration_type":  "MUTATION_EXTENDED",
+                                          "datatype":  "MAF",
+                                          "description":  "Somatic mutations of whole exome sequencing data from 32 glioblastomas samples with matched normals.",
+                                          "show_in_analysis":  true,
+                                          "patient_level":  false
+                                      },
+                                      {
+                                          "source_id":  "cbioportal_gbm_catalog",
+                                          "study_id":  "gbm_iatlas_prins_2019",
+                                          "profile_id":  "gbm_iatlas_prins_2019_gene_signatures",
+                                          "name":  "Gene expression signature",
+                                          "molecular_alteration_type":  "GENERIC_ASSAY",
+                                          "datatype":  "LIMIT-VALUE",
+                                          "description":  "Gene expression signature annotation",
+                                          "show_in_analysis":  true,
+                                          "patient_level":  false
+                                      },
+                                      {
+                                          "source_id":  "cbioportal_gbm_catalog",
+                                          "study_id":  "gbm_iatlas_prins_2019",
+                                          "profile_id":  "gbm_iatlas_prins_2019_rna_seq_mrna",
+                                          "name":  "mRNA expression (log2 upper quartile normalized counts)",
+                                          "molecular_alteration_type":  "MRNA_EXPRESSION",
+                                          "datatype":  "CONTINUOUS",
+                                          "description":  "Expression levels (log2 upper quartile normalized counts)",
+                                          "show_in_analysis":  false,
+                                          "patient_level":  false
+                                      },
+                                      {
+                                          "source_id":  "cbioportal_gbm_catalog",
+                                          "study_id":  "gbm_tcga_pub2013",
+                                          "profile_id":  "gbm_tcga_pub2013_gistic",
+                                          "name":  "Putative copy-number alterations from GISTIC",
+                                          "molecular_alteration_type":  "COPY_NUMBER_ALTERATION",
+                                          "datatype":  "DISCRETE",
+                                          "description":  "Putative copy-number calls on 563 cases determined using GISTIC 2.0. Values: -2 = homozygous deletion; -1 = hemizygous deletion; 0 = neutral / no change; 1 = gain; 2 = high level amplification.",
+                                          "show_in_analysis":  true,
+                                          "patient_level":  false
+                                      },
+                                      {
+                                          "source_id":  "cbioportal_gbm_catalog",
+                                          "study_id":  "gbm_tcga_pub2013",
+                                          "profile_id":  "gbm_tcga_pub2013_linear_CNA",
+                                          "name":  "Capped relative linear copy-number values",
+                                          "molecular_alteration_type":  "COPY_NUMBER_ALTERATION",
+                                          "datatype":  "CONTINUOUS",
+                                          "description":  "Capped relative linear copy-number values for each gene (from Affymetrix SNP6).",
+                                          "show_in_analysis":  false,
+                                          "patient_level":  false
+                                      },
+                                      {
+                                          "source_id":  "cbioportal_gbm_catalog",
+                                          "study_id":  "gbm_tcga_pub2013",
+                                          "profile_id":  "gbm_tcga_pub2013_mutations",
+                                          "name":  "Mutations",
+                                          "molecular_alteration_type":  "MUTATION_EXTENDED",
+                                          "datatype":  "MAF",
+                                          "description":  "Mutation data from whole exome sequencing of 291 tumors/normal pairs.",
+                                          "show_in_analysis":  true,
+                                          "patient_level":  false
+                                      },
+                                      {
+                                          "source_id":  "cbioportal_gbm_catalog",
+                                          "study_id":  "gbm_tcga_pub2013",
+                                          "profile_id":  "gbm_tcga_pub2013_protein_quantification",
+                                          "name":  "Protein expression (RPPA)",
+                                          "molecular_alteration_type":  "PROTEIN_LEVEL",
+                                          "datatype":  "CONTINUOUS",
+                                          "description":  "Protein expression measured by reverse-phase protein array",
+                                          "show_in_analysis":  false,
+                                          "patient_level":  false
+                                      },
+                                      {
+                                          "source_id":  "cbioportal_gbm_catalog",
+                                          "study_id":  "gbm_tcga_pub2013",
+                                          "profile_id":  "gbm_tcga_pub2013_protein_quantification_zscores",
+                                          "name":  "Protein expression z-scores (RPPA)",
+                                          "molecular_alteration_type":  "PROTEIN_LEVEL",
+                                          "datatype":  "Z-SCORE",
+                                          "description":  "Protein expression, measured by reverse-phase protein array, Z-scores",
+                                          "show_in_analysis":  true,
+                                          "patient_level":  false
+                                      },
+                                      {
+                                          "source_id":  "cbioportal_gbm_catalog",
+                                          "study_id":  "gbm_tcga_pub2013",
+                                          "profile_id":  "gbm_tcga_pub2013_rna_seq_v2_mrna",
+                                          "name":  "mRNA expression (RNA Seq V2 RSEM)",
+                                          "molecular_alteration_type":  "MRNA_EXPRESSION",
+                                          "datatype":  "CONTINUOUS",
+                                          "description":  "mRNA gene expression (RNA Seq V2 RSEM)",
+                                          "show_in_analysis":  false,
+                                          "patient_level":  false
+                                      },
+                                      {
+                                          "source_id":  "cbioportal_gbm_catalog",
+                                          "study_id":  "gbm_tcga_pub2013",
+                                          "profile_id":  "gbm_tcga_pub2013_rna_seq_v2_mrna_median_Zscores",
+                                          "name":  "mRNA expression z-scores relative to diploid samples (RNA Seq V2 RSEM)",
+                                          "molecular_alteration_type":  "MRNA_EXPRESSION",
+                                          "datatype":  "Z-SCORE",
+                                          "description":  "mRNA z-Scores (RNA Seq V2 RSEM) compared to the expression distribution of each gene tumors that are diploid for this gene.",
+                                          "show_in_analysis":  true,
+                                          "patient_level":  false
+                                      },
+                                      {
+                                          "source_id":  "cbioportal_gbm_catalog",
+                                          "study_id":  "gbm_tcga_pub2013",
+                                          "profile_id":  "gbm_tcga_pub2013_rna_seq_v2_mrna_median_all_sample_Zscores",
+                                          "name":  "mRNA expression z-scores relative to all samples (log RNA Seq V2 RSEM)",
+                                          "molecular_alteration_type":  "MRNA_EXPRESSION",
+                                          "datatype":  "Z-SCORE",
+                                          "description":  "Log-transformed mRNA z-Scores compared to the expression distribution of all samples (RNA Seq V2 RSEM).",
+                                          "show_in_analysis":  true,
+                                          "patient_level":  false
+                                      },
+                                      {
+                                          "source_id":  "cbioportal_gbm_catalog",
+                                          "study_id":  "gbm_tcga_pub",
+                                          "profile_id":  "gbm_tcga_pub_cna_consensus",
+                                          "name":  "Putative copy-number alterations (Consensus)",
+                                          "molecular_alteration_type":  "COPY_NUMBER_ALTERATION",
+                                          "datatype":  "DISCRETE",
+                                          "description":  "Putative copy-number calls for genes implicated in glioblastoma (206 cases). These calls were used for the pathway analysis in the initial TCGA manuscript, and they are the consensus of a combination of the Agilent 244k and Affymetrix SNP6 platforms and three different methods (RAE, GISTIC, GTS). Values: -2 = homozygous deletion; -1 = hemizygous deletion; 0 = neutral / no change; 1 = gain; 2 = high level amplification.",
+                                          "show_in_analysis":  true,
+                                          "patient_level":  false
+                                      },
+                                      {
+                                          "source_id":  "cbioportal_gbm_catalog",
+                                          "study_id":  "gbm_tcga_pub",
+                                          "profile_id":  "gbm_tcga_pub_cna_rae",
+                                          "name":  "Putative copy-number alterations (RAE)",
+                                          "molecular_alteration_type":  "COPY_NUMBER_ALTERATION",
+                                          "datatype":  "DISCRETE",
+                                          "description":  "Putative copy-number calls for all genes in 203 GBM cases. Copy number calls were determined from the Agilent 244k platform using the RAE algorithm by Barry Taylor @ MSKCC. Values: -2 = homozygous deletion; -1 = hemizygous deletion; 0 = neutral / no change; 1 = gain; 2 = high level amplification.",
+                                          "show_in_analysis":  true,
+                                          "patient_level":  false
+                                      },
+                                      {
+                                          "source_id":  "cbioportal_gbm_catalog",
+                                          "study_id":  "gbm_tcga_pub",
+                                          "profile_id":  "gbm_tcga_pub_methylation_hm27",
+                                          "name":  "Methylation (HM27)",
+                                          "molecular_alteration_type":  "METHYLATION",
+                                          "datatype":  "CONTINUOUS",
+                                          "description":  "Methylation beta-values (Infinium HumanMethylation27 platform). For genes with multiple methylation probes, the probe most negatively correlated with expression is used.",
+                                          "show_in_analysis":  false,
+                                          "patient_level":  false
+                                      },
+                                      {
+                                          "source_id":  "cbioportal_gbm_catalog",
+                                          "study_id":  "gbm_tcga_pub",
+                                          "profile_id":  "gbm_tcga_pub_mirna",
+                                          "name":  "microRNA expression",
+                                          "molecular_alteration_type":  "MRNA_EXPRESSION",
+                                          "datatype":  "CONTINUOUS",
+                                          "description":  "expression levels for microRNAs.",
+                                          "show_in_analysis":  false,
+                                          "patient_level":  false
+                                      },
+                                      {
+                                          "source_id":  "cbioportal_gbm_catalog",
+                                          "study_id":  "gbm_tcga_pub",
+                                          "profile_id":  "gbm_tcga_pub_mirna_median_Zscores",
+                                          "name":  "microRNA expression Z-scores",
+                                          "molecular_alteration_type":  "MRNA_EXPRESSION",
+                                          "datatype":  "Z-SCORE",
+                                          "description":  "microRNA expression Z-scores compared to all tumors.",
+                                          "show_in_analysis":  true,
+                                          "patient_level":  false
+                                      },
+                                      {
+                                          "source_id":  "cbioportal_gbm_catalog",
+                                          "study_id":  "gbm_tcga_pub",
+                                          "profile_id":  "gbm_tcga_pub_mrna",
+                                          "name":  "mRNA expression",
+                                          "molecular_alteration_type":  "MRNA_EXPRESSION",
+                                          "datatype":  "CONTINUOUS",
+                                          "description":  "mRNA expression levels for 18,698 genes in 503 GBM cases using integrated values from the Affymetrix U133, Affymetrix Exon, and Agilent Platforms.",
+                                          "show_in_analysis":  false,
+                                          "patient_level":  false
+                                      },
+                                      {
+                                          "source_id":  "cbioportal_gbm_catalog",
+                                          "study_id":  "gbm_tcga_pub",
+                                          "profile_id":  "gbm_tcga_pub_mrna_median_Zscores",
+                                          "name":  "mRNA expression z-scores relative to diploid samples (microarray)",
+                                          "molecular_alteration_type":  "MRNA_EXPRESSION",
+                                          "datatype":  "Z-SCORE",
+                                          "description":  "18,698 genes in 503 GBM cases using median expression values from the Affymetrix U133, Affymetrix Exon, and Agilent Platforms. z-Scores are computed relative to the expression distribution of each gene in tumors that are diploid for this gene.",
+                                          "show_in_analysis":  true,
+                                          "patient_level":  false
+                                      },
+                                      {
+                                          "source_id":  "cbioportal_gbm_catalog",
+                                          "study_id":  "gbm_tcga_pub",
+                                          "profile_id":  "gbm_tcga_pub_mrna_median_all_sample_Zscores",
+                                          "name":  "mRNA expression z-scores relative to all samples (log microarray)",
+                                          "molecular_alteration_type":  "MRNA_EXPRESSION",
+                                          "datatype":  "Z-SCORE",
+                                          "description":  "Log-transformed mRNA z-Scores compared to the expression distribution of all samples  (Agilent microarray).",
+                                          "show_in_analysis":  true,
+                                          "patient_level":  false
+                                      },
+                                      {
+                                          "source_id":  "cbioportal_gbm_catalog",
+                                          "study_id":  "gbm_tcga_pub",
+                                          "profile_id":  "gbm_tcga_pub_mrna_merged_median_Zscores",
+                                          "name":  "mRNA/miRNA expression Z-scores (all genes)",
+                                          "molecular_alteration_type":  "MRNA_EXPRESSION",
+                                          "datatype":  "Z-SCORE",
+                                          "description":  "mRNA and microRNA Z-scores merged: mRNA expression Z-scores compared to diploid tumors (diploid for each gene), median values from all three mRNA expression platforms; and miRNA z-Scores compared to all tumours.",
+                                          "show_in_analysis":  true,
+                                          "patient_level":  false
+                                      },
+                                      {
+                                          "source_id":  "cbioportal_gbm_catalog",
+                                          "study_id":  "gbm_tcga_pub",
+                                          "profile_id":  "gbm_tcga_pub_mutations",
+                                          "name":  "Mutations",
+                                          "molecular_alteration_type":  "MUTATION_EXTENDED",
+                                          "datatype":  "MAF",
+                                          "description":  "Mutation data for targeted sequencing in 91 primary glioblastoma tumor/normal pairs (Phases I/II of the TCGA glioblastoma project).",
+                                          "show_in_analysis":  true,
+                                          "patient_level":  false
+                                      },
+                                      {
+                                          "source_id":  "cbioportal_gbm_catalog",
+                                          "study_id":  "gbm_tcga_gdc",
+                                          "profile_id":  "gbm_tcga_gdc_cna",
+                                          "name":  "Putative copy-number alterations from GISTIC",
+                                          "molecular_alteration_type":  "COPY_NUMBER_ALTERATION",
+                                          "datatype":  "DISCRETE",
+                                          "description":  "Putative copy-number from GISTIC 2.0. Values: -2 = homozygous deletion; -1 = hemizygous deletion; 0 = neutral / no change; 1 = gain; 2 = high level amplification.",
+                                          "show_in_analysis":  true,
+                                          "patient_level":  false
+                                      },
+                                      {
+                                          "source_id":  "cbioportal_gbm_catalog",
+                                          "study_id":  "gbm_tcga_gdc",
+                                          "profile_id":  "gbm_tcga_gdc_mrna_seq_fpkm",
+                                          "name":  "mRNA Expression (FPKM)",
+                                          "molecular_alteration_type":  "MRNA_EXPRESSION",
+                                          "datatype":  "CONTINUOUS",
+                                          "description":  "mRNA expression from capture (RNA Seq FPKM)",
+                                          "show_in_analysis":  false,
+                                          "patient_level":  false
+                                      },
+                                      {
+                                          "source_id":  "cbioportal_gbm_catalog",
+                                          "study_id":  "gbm_tcga_gdc",
+                                          "profile_id":  "gbm_tcga_gdc_mrna_seq_fpkm_Zscores",
+                                          "name":  "mRNA Expression FPKM z-scores",
+                                          "molecular_alteration_type":  "MRNA_EXPRESSION",
+                                          "datatype":  "Z-SCORE",
+                                          "description":  "mRNA expression from capture (RNA Seq FPKM) zscores",
+                                          "show_in_analysis":  true,
+                                          "patient_level":  false
+                                      },
+                                      {
+                                          "source_id":  "cbioportal_gbm_catalog",
+                                          "study_id":  "gbm_tcga_gdc",
+                                          "profile_id":  "gbm_tcga_gdc_mrna_seq_read_counts_Zscores",
+                                          "name":  "mRNA Expression z-scores",
+                                          "molecular_alteration_type":  "MRNA_EXPRESSION",
+                                          "datatype":  "Z-SCORE",
+                                          "description":  "mRNA expression from capture read count zscores",
+                                          "show_in_analysis":  true,
+                                          "patient_level":  false
+                                      },
+                                      {
+                                          "source_id":  "cbioportal_gbm_catalog",
+                                          "study_id":  "gbm_tcga_gdc",
+                                          "profile_id":  "gbm_tcga_gdc_mrna_seq_tpm",
+                                          "name":  "mRNA Expression (TPM)",
+                                          "molecular_alteration_type":  "MRNA_EXPRESSION",
+                                          "datatype":  "CONTINUOUS",
+                                          "description":  "mRNA expression from capture (RNA Seq TPM)",
+                                          "show_in_analysis":  false,
+                                          "patient_level":  false
+                                      },
+                                      {
+                                          "source_id":  "cbioportal_gbm_catalog",
+                                          "study_id":  "gbm_tcga_gdc",
+                                          "profile_id":  "gbm_tcga_gdc_mrna_seq_tpm_Zscores",
+                                          "name":  "mRNA Expression TPM z-scores",
+                                          "molecular_alteration_type":  "MRNA_EXPRESSION",
+                                          "datatype":  "Z-SCORE",
+                                          "description":  "mRNA expression from capture (RNA Seq TPM) zscores",
+                                          "show_in_analysis":  true,
+                                          "patient_level":  false
+                                      },
+                                      {
+                                          "source_id":  "cbioportal_gbm_catalog",
+                                          "study_id":  "gbm_tcga_gdc",
+                                          "profile_id":  "gbm_tcga_gdc_mutations",
+                                          "name":  "Mutations",
+                                          "molecular_alteration_type":  "MUTATION_EXTENDED",
+                                          "datatype":  "MAF",
+                                          "description":  "Mutation data from whole exome sequencing.",
+                                          "show_in_analysis":  true,
+                                          "patient_level":  false
+                                      },
+                                      {
+                                          "source_id":  "cbioportal_gbm_catalog",
+                                          "study_id":  "gbm_tcga_gdc",
+                                          "profile_id":  "gbm_tcga_gdc_rna_seq_mrna",
+                                          "name":  "mRNA Expression",
+                                          "molecular_alteration_type":  "MRNA_EXPRESSION",
+                                          "datatype":  "CONTINUOUS",
+                                          "description":  "Expression levels",
+                                          "show_in_analysis":  false,
+                                          "patient_level":  false
+                                      }
+                                  ],
+    "references":  [
+                       {
+                           "source_id":  "nci_adult_cns_pdq",
+                           "reference_id":  "NCI-PDQ-adult-CNS",
+                           "title":  "Central Nervous System Tumors Treatment (PDQ) - Health Professional Version",
+                           "uri":  "https://www.cancer.gov/types/brain/hp/adult-brain-treatment-pdq",
+                           "publisher":  "National Cancer Institute"
+                       }
+                   ],
+    "literature":  [
+                       {
+                           "source_id":  "pubmed_glioblastoma",
+                           "pmid":  "31852831",
+                           "title":  "Genomic and Phenotypic Characterization of a Broad Panel of Patient-Derived Xenografts Reflects the Diversity of Glioblastoma.",
+                           "journal":  "Clinical cancer research : an official journal of the American Association for Cancer Research",
+                           "publication_date":  "2019-12-18",
+                           "doi":  "10.1158/1078-0432.CCR-19-0909",
+                           "abstract_text":  "PURPOSE: Glioblastoma is the most frequent and lethal primary brain tumor. Development of novel therapies relies on the availability of relevant preclinical models. We have established a panel of 96 glioblastoma patient-derived xenografts (PDX) and undertaken its genomic and phenotypic characterization. EXPERIMENTAL DESIGN: PDXs were established from glioblastoma, IDH-wildtype (n = 93), glioblastoma, IDH-mutant (n = 2), diffuse midline glioma, H3 K27M-mutant (n = 1), and both primary (n = 60) and recurrent (n = 34) tumors. Tumor growth rates, histopathology, and treatment response were characterized. Integrated molecular profiling was performed by whole-exome sequencing (WES, n = 83), RNA-sequencing (n = 68), and genome-wide methylation profiling (n = 76). WES data from 24 patient tumors was compared with derivative models. RESULTS: PDXs recapitulate many key phenotypic and molecular features of patient tumors. Orthotopic PDXs show characteristic tumor morphology and invasion patterns, but largely lack microvascular proliferation and necrosis. PDXs capture common and rare molecular drivers, including alterations of TERT, EGFR, PTEN, TP53, BRAF, and IDH1, most at frequencies comparable with human glioblastoma. However, PDGFRA amplification was absent. RNA-sequencing and genome-wide methylation profiling demonstrated broad representation of glioblastoma molecular subtypes. MGMT promoter methylation correlated with increased survival in response to temozolomide. WES of 24 matched patient tumors showed preservation of most genetic driver alterations, including EGFR amplification. However, in four patient-PDX pairs, driver alterations were gained or lost on engraftment, consistent with clonal selection. CONCLUSIONS: Our PDX panel captures the molecular heterogeneity of glioblastoma and recapitulates many salient genetic and phenotypic features. All models and genomic data are openly available to investigators.",
+                           "abstract_truncated":  false,
+                           "publication_types":  [
+                                                     "Journal Article",
+                                                     "Research Support, N.I.H., Extramural",
+                                                     "Research Support, Non-U.S. Gov\u0027t"
+                                                 ],
+                           "mesh_terms":  [
+                                              "Adult",
+                                              "Aged",
+                                              "Aged, 80 and over",
+                                              "Animals",
+                                              "Antineoplastic Agents, Alkylating",
+                                              "Biomarkers, Tumor",
+                                              "Brain Neoplasms",
+                                              "DNA Methylation",
+                                              "DNA Modification Methylases",
+                                              "DNA Repair Enzymes",
+                                              "ErbB Receptors",
+                                              "Female",
+                                              "Genotype",
+                                              "Glioblastoma",
+                                              "Humans",
+                                              "Isocitrate Dehydrogenase",
+                                              "Male",
+                                              "Mice",
+                                              "Middle Aged",
+                                              "Mutation",
+                                              "Neoplasm Staging",
+                                              "Phenotype",
+                                              "Promoter Regions, Genetic",
+                                              "Survival Rate",
+                                              "Temozolomide",
+                                              "Tumor Suppressor Proteins",
+                                              "Exome Sequencing",
+                                              "Xenograft Model Antitumor Assays",
+                                              "Young Adult"
+                                          ]
+                       },
+                       {
+                           "source_id":  "pubmed_glioblastoma",
+                           "pmid":  "33577785",
+                           "title":  "Proteogenomic and metabolomic characterization of human glioblastoma.",
+                           "journal":  "Cancer cell",
+                           "publication_date":  "2021-02-11",
+                           "doi":  "10.1016/j.ccell.2021.01.006",
+                           "abstract_text":  "Glioblastoma (GBM) is the most aggressive nervous system cancer. Understanding its molecular pathogenesis is crucial to improving diagnosis and treatment. Integrated analysis of genomic, proteomic, post-translational modification and metabolomic data on 99 treatment-naive GBMs provides insights to GBM biology. We identify key phosphorylation events (e.g., phosphorylated PTPN11 and PLCG1) as potential switches mediating oncogenic pathway activation, as well as potential targets for EGFR-, TP53-, and RB1-altered tumors. Immune subtypes with distinct immune cell types are discovered using bulk omics methodologies, validated by snRNA-seq, and correlated with specific expression and histone acetylation patterns. Histone H2B acetylation in classical-like and immune-low GBM is driven largely by BRDs, CREBBP, and EP300. Integrated metabolomic and proteomic data identify specific lipid distributions across subtypes and distinct global metabolic changes in IDH-mutated tumors. This work highlights biological relationships that could contribute to stratification of GBM patients for more effective treatment.",
+                           "abstract_truncated":  false,
+                           "publication_types":  [
+                                                     "Journal Article",
+                                                     "Research Support, N.I.H., Extramural"
+                                                 ],
+                           "mesh_terms":  [
+                                              "Brain Neoplasms",
+                                              "Computational Biology",
+                                              "Glioblastoma",
+                                              "Humans",
+                                              "Metabolomics",
+                                              "Mutation",
+                                              "Phospholipase C gamma",
+                                              "Phosphorylation",
+                                              "Protein Tyrosine Phosphatase, Non-Receptor Type 11",
+                                              "Proteogenomics",
+                                              "Proteomics"
+                                          ]
+                       },
+                       {
+                           "source_id":  "pubmed_glioblastoma",
+                           "pmid":  "30742119",
+                           "title":  "Immune and genomic correlates of response to anti-PD-1 immunotherapy in glioblastoma.",
+                           "journal":  "Nature medicine",
+                           "publication_date":  "2019-02-11",
+                           "doi":  "10.1038/s41591-019-0349-y",
+                           "abstract_text":  "Immune checkpoint inhibitors have been successful across several tumor types; however, their efficacy has been uncommon and unpredictable in glioblastomas (GBM), where \u003c10% of patients show long-term responses. To understand the molecular determinants of immunotherapeutic response in GBM, we longitudinally profiled 66 patients, including 17 long-term responders, during standard therapy and after treatment with PD-1 inhibitors (nivolumab or pembrolizumab). Genomic and transcriptomic analysis revealed a significant enrichment of PTEN mutations associated with immunosuppressive expression signatures in non-responders, and an enrichment of MAPK pathway alterations (PTPN11, BRAF) in responders. Responsive tumors were also associated with branched patterns of evolution from the elimination of neoepitopes as well as with differences in T cell clonal diversity and tumor microenvironment profiles. Our study shows that clinical response to anti-PD-1 immunotherapy in GBM is associated with specific molecular alterations, immune expression signatures, and immune infiltration that reflect the tumor\u0027s clonal evolution during treatment.",
+                           "abstract_truncated":  false,
+                           "publication_types":  [
+                                                     "Journal Article",
+                                                     "Research Support, N.I.H., Extramural",
+                                                     "Research Support, Non-U.S. Gov\u0027t"
+                                                 ],
+                           "mesh_terms":  [
+                                              "Adult",
+                                              "Aged",
+                                              "Antibodies, Monoclonal, Humanized",
+                                              "Antineoplastic Agents, Immunological",
+                                              "Brain Neoplasms",
+                                              "Female",
+                                              "Gene Expression Profiling",
+                                              "Genomics",
+                                              "Glioblastoma",
+                                              "Humans",
+                                              "Immune Tolerance",
+                                              "Longitudinal Studies",
+                                              "Male",
+                                              "Middle Aged",
+                                              "Mutation",
+                                              "Nivolumab",
+                                              "PTEN Phosphohydrolase",
+                                              "Programmed Cell Death 1 Receptor",
+                                              "Protein Tyrosine Phosphatase, Non-Receptor Type 11",
+                                              "Proto-Oncogene Proteins B-raf",
+                                              "T-Lymphocytes",
+                                              "Treatment Outcome",
+                                              "Tumor Microenvironment",
+                                              "Young Adult"
+                                          ]
+                       },
+                       {
+                           "source_id":  "pubmed_glioblastoma",
+                           "pmid":  "30742122",
+                           "title":  "Neoadjuvant anti-PD-1 immunotherapy promotes a survival benefit with intratumoral and systemic immune responses in recurrent glioblastoma.",
+                           "journal":  "Nature medicine",
+                           "publication_date":  "2019-02-11",
+                           "doi":  "10.1038/s41591-018-0337-7",
+                           "abstract_text":  "Glioblastoma is the most common primary malignant brain tumor in adults and is associated with poor survival. The Ivy Foundation Early Phase Clinical Trials Consortium conducted a randomized, multi-institution clinical trial to evaluate immune responses and survival following neoadjuvant and/or adjuvant therapy with pembrolizumab in 35 patients with recurrent, surgically resectable glioblastoma. Patients who were randomized to receive neoadjuvant pembrolizumab, with continued adjuvant therapy following surgery, had significantly extended overall survival compared to patients that were randomized to receive adjuvant, post-surgical programmed cell death protein 1 (PD-1) blockade alone. Neoadjuvant PD-1 blockade was associated with upregulation of T cell- and interferon-γ-related gene expression, but downregulation of cell-cycle-related gene expression within the tumor, which was not seen in patients that received adjuvant therapy alone. Focal induction of programmed death-ligand 1 in the tumor microenvironment, enhanced clonal expansion of T cells, decreased PD-1 expression on peripheral blood T cells and a decreasing monocytic population was observed more frequently in the neoadjuvant group than in patients treated only in the adjuvant setting. These findings suggest that the neoadjuvant administration of PD-1 blockade enhances both the local and systemic antitumor immune response and may represent a more efficacious approach to the treatment of this uniformly lethal brain tumor.",
+                           "abstract_truncated":  false,
+                           "publication_types":  [
+                                                     "Journal Article",
+                                                     "Randomized Controlled Trial",
+                                                     "Research Support, N.I.H., Extramural",
+                                                     "Research Support, Non-U.S. Gov\u0027t"
+                                                 ],
+                           "mesh_terms":  [
+                                              "Adult",
+                                              "Aged",
+                                              "Antibodies, Monoclonal, Humanized",
+                                              "Antineoplastic Agents, Immunological",
+                                              "Brain Neoplasms",
+                                              "Chemotherapy, Adjuvant",
+                                              "Female",
+                                              "Glioblastoma",
+                                              "Humans",
+                                              "Male",
+                                              "Middle Aged",
+                                              "Neoadjuvant Therapy",
+                                              "Neoplasm Recurrence, Local",
+                                              "Neurosurgical Procedures",
+                                              "Programmed Cell Death 1 Receptor",
+                                              "Survival Rate",
+                                              "T-Lymphocytes",
+                                              "Tumor Microenvironment"
+                                          ]
+                       },
+                       {
+                           "source_id":  "pubmed_glioblastoma",
+                           "pmid":  "24120142",
+                           "title":  "The somatic genomic landscape of glioblastoma.",
+                           "journal":  "Cell",
+                           "publication_date":  null,
+                           "doi":  "10.1016/j.cell.2013.09.034",
+                           "abstract_text":  "We describe the landscape of somatic genomic alterations based on multidimensional and comprehensive characterization of more than 500 glioblastoma tumors (GBMs). We identify several novel mutated genes as well as complex rearrangements of signature receptors, including EGFR and PDGFRA. TERT promoter mutations are shown to correlate with elevated mRNA expression, supporting a role in telomerase reactivation. Correlative analyses confirm that the survival advantage of the proneural subtype is conferred by the G-CIMP phenotype, and MGMT DNA methylation may be a predictive biomarker for treatment response only in classical subtype GBM. Integrative analysis of genomic and proteomic profiles challenges the notion of therapeutic inhibition of a pathway as an alternative to inhibition of the target itself. These data will facilitate the discovery of therapeutic and diagnostic target candidates, the validation of research and clinical observations and the generation of unanticipated hypotheses that can advance our molecular understanding of this lethal cancer.",
+                           "abstract_truncated":  false,
+                           "publication_types":  [
+                                                     "Journal Article",
+                                                     "Research Support, N.I.H., Extramural",
+                                                     "Research Support, Non-U.S. Gov\u0027t"
+                                                 ],
+                           "mesh_terms":  [
+                                              "Brain Neoplasms",
+                                              "Female",
+                                              "Gene Expression Profiling",
+                                              "Gene Regulatory Networks",
+                                              "Glioblastoma",
+                                              "Humans",
+                                              "Male",
+                                              "Mutation",
+                                              "Proteome",
+                                              "Signal Transduction"
+                                          ]
+                       },
+                       {
+                           "source_id":  "pubmed_glioblastoma",
+                           "pmid":  "18772890",
+                           "title":  "Comprehensive genomic characterization defines human glioblastoma genes and core pathways.",
+                           "journal":  "Nature",
+                           "publication_date":  "2008-09-04",
+                           "doi":  "10.1038/nature07385",
+                           "abstract_text":  "Human cancer cells typically harbour multiple chromosomal aberrations, nucleotide substitutions and epigenetic modifications that drive malignant transformation. The Cancer Genome Atlas (TCGA) pilot project aims to assess the value of large-scale multi-dimensional analysis of these molecular characteristics in human cancer and to provide the data rapidly to the research community. Here we report the interim integrative analysis of DNA copy number, gene expression and DNA methylation aberrations in 206 glioblastomas--the most common type of adult brain cancer--and nucleotide sequence aberrations in 91 of the 206 glioblastomas. This analysis provides new insights into the roles of ERBB2, NF1 and TP53, uncovers frequent mutations of the phosphatidylinositol-3-OH kinase regulatory subunit gene PIK3R1, and provides a network view of the pathways altered in the development of glioblastoma. Furthermore, integration of mutation, DNA methylation and clinical treatment data reveals a link between MGMT promoter methylation and a hypermutator phenotype consequent to mismatch repair deficiency in treated glioblastomas, an observation with potential clinical implications. Together, these findings establish the feasibility and power of TCGA, demonstrating that it can rapidly expand knowledge of the molecular basis of cancer.",
+                           "abstract_truncated":  false,
+                           "publication_types":  [
+                                                     "Journal Article",
+                                                     "Research Support, N.I.H., Extramural"
+                                                 ],
+                           "mesh_terms":  [
+                                              "Adolescent",
+                                              "Adult",
+                                              "Aged",
+                                              "Aged, 80 and over",
+                                              "Brain Neoplasms",
+                                              "DNA Methylation",
+                                              "DNA Modification Methylases",
+                                              "DNA Repair",
+                                              "DNA Repair Enzymes",
+                                              "Female",
+                                              "Gene Dosage",
+                                              "Gene Expression Regulation, Neoplastic",
+                                              "Genes, Tumor Suppressor",
+                                              "Genes, erbB-1",
+                                              "Genome, Human",
+                                              "Genomics",
+                                              "Glioblastoma",
+                                              "Humans",
+                                              "Male",
+                                              "Middle Aged",
+                                              "Models, Molecular",
+                                              "Mutation",
+                                              "Neurofibromin 1",
+                                              "Phosphatidylinositol 3-Kinases",
+                                              "Protein Structure, Tertiary",
+                                              "Retrospective Studies",
+                                              "Signal Transduction",
+                                              "Tumor Suppressor Proteins"
+                                          ]
+                       },
+                       {
+                           "source_id":  "pubmed_glioblastoma",
+                           "pmid":  "42626999",
+                           "title":  "G protein-coupled estrogen receptor (GPER) modulates epithelial-mesenchymal transition-like phenotype in human glioblastoma cells.",
+                           "journal":  "Cell adhesion \u0026 migration",
+                           "publication_date":  "2026-08-21",
+                           "doi":  "10.1080/19336918.2026.2720325",
+                           "abstract_text":  "Glioblastomas (GBs) are the most frequent and aggressive central nervous system tumors, whose progression is influenced by sex hormones. 17β-estradiol (E2), promotes an epithelial-to-mesenchymal transition (EMT)-like process and enhances proliferative, migratory, and invasive capacities in GB through intracellular estrogen receptors. However, the role of G protein-coupled estrogen receptor (GPER) in GB remains poorly understood. We evaluated the effects of E2, the GPER-agonist G-1, and the GPER-antagonist G-15 on EMT-related processes, migration, and invasion in U251 and U87 GB-derived cells. GPER activation by E2 and G-1 increased migration and invasion, whereas G-15, alone or combined, reduced these effects. GPER activation also induced a mesenchymal-like phenotype. These findings suggest that GPER-associated signaling contributes to EMT-like phenotypic changes, migration, and invasion in GB.",
+                           "abstract_truncated":  false,
+                           "publication_types":  [
+                                                     "Journal Article"
+                                                 ],
+                           "mesh_terms":  [
+                                              "Humans",
+                                              "Epithelial-Mesenchymal Transition",
+                                              "Receptors, G-Protein-Coupled",
+                                              "Cell Movement",
+                                              "Receptors, Estrogen",
+                                              "Glioblastoma",
+                                              "Cell Line, Tumor",
+                                              "Estradiol",
+                                              "Phenotype",
+                                              "Neoplasm Invasiveness",
+                                              "Signal Transduction",
+                                              "Cyclopentanes",
+                                              "Quinolines"
+                                          ]
+                       },
+                       {
+                           "source_id":  "pubmed_glioblastoma",
+                           "pmid":  "41772940",
+                           "title":  "Steroid receptor coactivator 3-deficient regulatory T cells eradicate multiple solid tumors in syngeneic mouse models.",
+                           "journal":  "Oncoimmunology",
+                           "publication_date":  "2026-03-02",
+                           "doi":  "10.1080/2162402X.2026.2640261",
+                           "abstract_text":  "Steroid receptor coactivator 3 (SRC-3) is highly expressed in regulatory T cells (Tregs) and is important for their immunosuppressive activity. Recently, we demonstrated that disrupting SRC-3 expression in Tregs eliminates triple-negative breast cancer (TNBC) and prostate cancer in syngeneic animal models by generating an anti-tumor immune microenvironment without inducing immune-related adverse events (irAEs). Further analysis of these mice revealed that SRC-3 knockout (KO) Tregs infiltrated breast tumors and facilitated the infiltration of CD8+, CD4+, and natural killer (NK) immune cells into the tumor microenvironment (TME). Given the anti-tumor effects of SRC-3KO Tregs in two different solid cancers, we sought to extend our studies to additional cancer types. Here, we showed that SRC-3KO Tregs exerted a potent antitumor immunity-like effect, capable of eradicating glioblastoma, melanoma, and lung cancer in their respective syngeneic mouse models by generating an anti-tumor immune environment. These results support the translational development of SRC-3-targeted Treg modulation as a safe and effective immunotherapy platform for treatment-refractory cancers.",
+                           "abstract_truncated":  false,
+                           "publication_types":  [
+                                                     "Journal Article"
+                                                 ],
+                           "mesh_terms":  [
+                                              "Animals",
+                                              "T-Lymphocytes, Regulatory",
+                                              "Mice",
+                                              "Nuclear Receptor Coactivator 3",
+                                              "Mice, Knockout",
+                                              "Female",
+                                              "Disease Models, Animal",
+                                              "Tumor Microenvironment",
+                                              "Cell Line, Tumor",
+                                              "Humans",
+                                              "Mice, Inbred C57BL",
+                                              "Male",
+                                              "Lymphocytes, Tumor-Infiltrating"
+                                          ]
+                       },
+                       {
+                           "source_id":  "pubmed_glioblastoma",
+                           "pmid":  "41612972",
+                           "title":  "Muribaculum intestinale negatively impacts glioma growth in mice through the toll-like receptor 2.",
+                           "journal":  "Gut microbes",
+                           "publication_date":  "2026-01-30",
+                           "doi":  "10.1080/19490976.2026.2623349",
+                           "abstract_text":  "Glioblastoma (GBM) is the most common and malignant brain tumor in adult humans. Recent studies have demonstrated a link between the composition of the gut microbiota and glioma progression. Here, we describe that the growth of glioma in mice is inversely correlated with the relative abundance of the anaerobic bacterium Muribaculum intestinale in the feces. We found that M. intestinale administration: 1) induced an inflammatory environment in the gut; 2) reduced glioma growth; 3) increased the pro-inflammatory profile of tumor-associated microglial cells and the frequency of CD8+ T cells; and 4) increased the peripheral TNF-α levels. The effects induced by M. intestinale administration were significantly attenuated upon toll-like receptor 2 (TLR2) silencing using TLR2-targeting siRNA. As a pattern-recognition receptor, TLR2 detects microbial-associated molecular patterns and orchestrates host immune responses to infection. Collectively, these data demonstrate that M. intestinale induces a pro-inflammatory response in glioma bearing mice, inhibiting tumor growth via TLR2-dependent signaling.",
+                           "abstract_truncated":  false,
+                           "publication_types":  [
+                                                     "Journal Article"
+                                                 ],
+                           "mesh_terms":  [
+                                              "Animals",
+                                              "Toll-Like Receptor 2",
+                                              "Mice",
+                                              "Glioma",
+                                              "Feces",
+                                              "Gastrointestinal Microbiome",
+                                              "Mice, Inbred C57BL",
+                                              "Brain Neoplasms",
+                                              "CD8-Positive T-Lymphocytes",
+                                              "Tumor Necrosis Factor-alpha",
+                                              "Humans",
+                                              "Microglia",
+                                              "Male"
+                                          ]
+                       },
+                       {
+                           "source_id":  "pubmed_glioblastoma",
+                           "pmid":  "41582518",
+                           "title":  "In vitro generated macrophages reflect the immunosuppressive phenotype of in vivo glioblastoma-associated macrophages.",
+                           "journal":  "Oncoimmunology",
+                           "publication_date":  "2026-01-25",
+                           "doi":  "10.1080/2162402X.2025.2610562",
+                           "abstract_text":  "Glioblastoma (GBM) is the most common primary central nervous system tumor with a dismal prognosis and limited treatment options. Recent success utilizing immunotherapies for treating other solid tumors have been largely unsuccessful in GBM. One of the primary mechanisms of GBM immunotherapeutic resistance is because of excessive infiltration of myeloid cells that create an immunosuppressive tumor microenvironment (TME). Among these infiltrating myeloid cells, tumor-associated macrophages (TAMs), comprise a substantial portion of the TME and are associated with poor prognosis in GBM patients. Researchers have only recently begun to dissect the dynamics and complexity of TAMs. However, reliable and reproducible translational methods for generating GBM TAMs in vitro are lacking. Here, we have investigated an in vitro, reproducible murine-based model for bone marrow-derived, glioma-educated macrophages (gTAMs) and performed rigorous analysis to expand our understanding of gTAMs to provide a validated tool for investigating therapeutic response.",
+                           "abstract_truncated":  false,
+                           "publication_types":  [
+                                                     "Journal Article"
+                                                 ],
+                           "mesh_terms":  [
+                                              "Glioblastoma",
+                                              "Animals",
+                                              "Humans",
+                                              "Tumor Microenvironment",
+                                              "Mice",
+                                              "Tumor-Associated Macrophages",
+                                              "Phenotype",
+                                              "Brain Neoplasms",
+                                              "Macrophages"
+                                          ]
+                       },
+                       {
+                           "source_id":  "pubmed_glioblastoma",
+                           "pmid":  "41542939",
+                           "title":  "A fasting-mimicking environment enhances procaspase-activating compound 1 in 2D and 3D glioma cell models.",
+                           "journal":  "Cell cycle (Georgetown, Tex.)",
+                           "publication_date":  "2026-01-16",
+                           "doi":  "10.1080/15384101.2026.2614017",
+                           "abstract_text":  "Glioblastoma multiforme (GBM) is the most common form of malignant brain cancer and is generally approached with palliative intent. Preclinical studies suggest that short-term fasting may be an effective tool for enhancing existing cancer therapies by disrupting the glucose-dependent, oncogenic phenotype of many cancers. In this study, we investigated whether a fasting-mimicking environment (FME) enhances the efficacy of an emerging proapoptotic drug, procaspase-activating compound 1 (PAC-1), in 2D and 3D GBM cell models. Ad libitum food consumption (Fed) and FME conditions were simulated in vitro by modifying glucose, ketone and serum concentrations. The FME conditions enhanced PAC-1 in U87-MG, T98G and 9L-GS monolayer experiments by significantly reducing the PAC-1 50% inhibitory concentration (IC50), delaying cell growth and increasing apoptosis. Similarly, in the 3D spheroid models, the minimum concentration of PAC-1 required to reduce U87-MG and 9L-GS spheroid area was lower in the FME conditions than the Fed conditions. Additionally, we discovered that serum restriction was primarily responsible for the FME-induced PAC-1 enhancement. These finding are the first to demonstrate that fasting-mimicking conditions sensitize 2D and 3D glioma cell models to PAC-1, supporting the use of short-term fasting as a low-cost and widely accessible strategy for enhancing cancer therapies.",
+                           "abstract_truncated":  false,
+                           "publication_types":  [
+                                                     "Journal Article"
+                                                 ],
+                           "mesh_terms":  [
+                                              "Humans",
+                                              "Cell Line, Tumor",
+                                              "Apoptosis",
+                                              "Piperazines",
+                                              "Glioma",
+                                              "Fasting",
+                                              "Cell Proliferation",
+                                              "Brain Neoplasms",
+                                              "Spheroids, Cellular",
+                                              "Hydrazones"
+                                          ]
+                       },
+                       {
+                           "source_id":  "pubmed_glioblastoma",
+                           "pmid":  "42573440",
+                           "title":  "Pathway dysregulation and therapeutic resistance in glioblastoma: molecular mechanisms and emerging therapeutic targets.",
+                           "journal":  "Future science OA",
+                           "publication_date":  "2026-08-10",
+                           "doi":  "10.1080/20565623.2026.2715646",
+                           "abstract_text":  "The review further examines mechanisms underlying treatment resistance and the limitations of current targeted therapies. Although many pathway-directed treatments have demonstrated promising preclinical activity, clinical translation remains challenging because of compensatory signaling, blood-brain barrier limitations, and molecular heterogeneity.Conclusion: Future progress will likely depend on biomarker-driven patient stratification, improved CNS drug delivery, and rational combination therapies capable of simultaneously targeting multiple tumor-promoting mechanisms.",
+                           "abstract_truncated":  false,
+                           "publication_types":  [
+                                                     "Journal Article",
+                                                     "Review"
+                                                 ],
+                           "mesh_terms":  [
+
+                                          ]
+                       },
+                       {
+                           "source_id":  "pubmed_glioblastoma",
+                           "pmid":  "42474259",
+                           "title":  "Trichodermin exhibits potent anti-glioblastoma activity by inducing cell cycle arrest and apoptosis, suppressing invasion, and enhancing temozolomide efficacy.",
+                           "journal":  "Journal of enzyme inhibition and medicinal chemistry",
+                           "publication_date":  "2026-07-20",
+                           "doi":  "10.1080/14756366.2026.2694181",
+                           "abstract_text":  "Trichodermin, a sesquiterpene antibiotic from Trichoderma species, shows anticancer potential. In this study, anti-glioblastoma activity was evaluated by (3-(4,5-di methyl thiazol-2-yl)-2,5-diphenyltetrazolium bromide) (MTT) assay, colony formation, lactate dehydrogenase (LDH) release assay, flow cytometry, wound-healing, transwell invasion, adhesion, Western blot, combination-index analysis, and an orthotopic luciferase glioblastoma mouse model. Trichodermin reduced viability and clonogenicity and increased LDH release of T98G and A172 cells. Trichodermin induced G2/M arrest with p53 activation and downregulation of cyclin B, cyclin A, and cyclin-dependent kinase 1 (CDK1). In addition, trichodermin induced caspase-dependent apoptosis. Invasion, wound healing, and adhesion were suppressed with modulation of epithelial-mesenchymal transition (EMT)-related proteins. Combination index analysis demonstrated a synergistic interaction between trichodermin and temozolomide, possibly due to increased apoptosis. In the mouse model, intraperitoneal trichodermin inhibited intracranial tumour growth and prolonged survival, and increased cleaved caspase-3 expression in tumour tissues. These findings indicate that trichodermin exerts anti-glioblastoma activity and warrants further preclinical evaluation as a potential adjunct to temozolomide therapy.",
+                           "abstract_truncated":  false,
+                           "publication_types":  [
+                                                     "Journal Article"
+                                                 ],
+                           "mesh_terms":  [
+                                              "Apoptosis",
+                                              "Temozolomide",
+                                              "Glioblastoma",
+                                              "Animals",
+                                              "Humans",
+                                              "Mice",
+                                              "Antineoplastic Agents",
+                                              "Trichodermin",
+                                              "Drug Screening Assays, Antitumor",
+                                              "Dose-Response Relationship, Drug",
+                                              "Cell Cycle Checkpoints",
+                                              "Cell Proliferation",
+                                              "Molecular Structure",
+                                              "Structure-Activity Relationship",
+                                              "Neoplasm Invasiveness",
+                                              "Tumor Cells, Cultured"
+                                          ]
+                       },
+                       {
+                           "source_id":  "pubmed_glioblastoma",
+                           "pmid":  "42283227",
+                           "title":  "Predictive value of EGFR amplification and EGFRvIII mutation in EGFR-targeted therapy for recurrent glioblastoma: a systematic review.",
+                           "journal":  "CNS oncology",
+                           "publication_date":  "2026-06-12",
+                           "doi":  "10.1080/20450907.2026.2685339",
+                           "abstract_text":  "INTRODUCTION: Glioblastoma (GBM) is the most aggressive and biologically heterogeneous tumor of the central nervous system, associated with dismal prognosis and frequent recurrence. Amplification of the epidermal growth factor receptor (EGFR) and EGFRvIII mutation are common alterations, yet their prognostic significance remains unclear. This systematic review evaluated whether clinical evidence supports a predictive association between EGFR amplification or EGFRvIII mutation and response to EGFR-targeted therapy in adults with recurrent GBM. METHODS: PubMed, Embase and the Cochrane Library were searched (2010-2025) for studies of adults with recurrent GBM treated with EGFR-targeted therapies, with outcomes stratified by EGFR amplification and/or EGFRvIII. Screening, data extraction and risk-of-bias assessment were performed independently. RESULTS: Twelve studies (565 patients) met inclusion criteria. EGFR amplification was assessed in 11 studies and EGFRvIII in six using FISH, qPCR, RT-PCR, or NGS. Median overall survival ranged from 5.7 to 10.3 months and progression-free survival from 1.7 to 6.0 months, with no consistent survival benefit observed. CONCLUSION: EGFR amplification and EGFRvIII mutation have not demonstrated reliable predictive value for EGFR-targeted therapy in recurrent GBM. The available evidence is largely derived from heterogeneous, single-arm studies, limiting robust assessment of biomarker specific treatment response and therefore these alterations are not recommended to be used to guide off-trial treatment decisions in recurrent GBM.Protocol Registration: www.crd.york.ac.uk/prospero identifier is CRD420251071466.",
+                           "abstract_truncated":  false,
+                           "publication_types":  [
+                                                     "Journal Article",
+                                                     "Systematic Review"
+                                                 ],
+                           "mesh_terms":  [
+                                              "Humans",
+                                              "ErbB Receptors",
+                                              "Glioblastoma",
+                                              "Brain Neoplasms",
+                                              "Mutation",
+                                              "Neoplasm Recurrence, Local",
+                                              "Gene Amplification",
+                                              "Molecular Targeted Therapy",
+                                              "Predictive Value of Tests",
+                                              "Prognosis"
+                                          ]
+                       },
+                       {
+                           "source_id":  "pubmed_glioblastoma",
+                           "pmid":  "42113227",
+                           "title":  "Radioiodinated compound FJR01: a novel P2X7R-targeted SPECT tracer for visualizing glioma-associated microglia/macrophages in a rat glioblastoma model.",
+                           "journal":  "Journal of enzyme inhibition and medicinal chemistry",
+                           "publication_date":  "2026-05-11",
+                           "doi":  "10.1080/14756366.2026.2659995",
+                           "abstract_text":  "The P2X7 receptor (P2X7R) is an imaging biomarker of glioblastoma-associated microglia/macrophages (GAMMs), yet no SPECT tracer is currently available for GAMM imaging. Guided by the high-affinity P2X7R scaffold JNJ-64413739 and molecular docking, we designed two radioiodination-ready analogues, FJR01 and FJR02. Compounds were screened in vitro using homogenates from cell lines stably expressing mouse or human P2X7R; FJR01 was prioritised (hP2X7R, IC50 = 8.8 nM). Radioiodination afforded [131I]FJR01 in high radiochemical yield (95%) with excellent stability. In normal mice, biodistribution showed high brain uptake and rapid clearance. In a rat C6 glioma model, in vivo SPECT demonstrated focal tumour accumulation, which was corroborated by ex vivo autoradiography; immunofluorescence confirmed P2X7R expression in GAMMs. Histopathology (H\u0026E) and mouse-to-human dosimetry supported a favourable safety profile and the clinical translation potential of [131I]FJR01. In addition, [131I]FJR01 is well suited as a probe for competitive binding assays to screen next-generation P2X7R-targeted ligands.",
+                           "abstract_truncated":  false,
+                           "publication_types":  [
+                                                     "Journal Article"
+                                                 ],
+                           "mesh_terms":  [
+                                              "Animals",
+                                              "Receptors, Purinergic P2X7",
+                                              "Rats",
+                                              "Tomography, Emission-Computed, Single-Photon",
+                                              "Macrophages",
+                                              "Glioblastoma",
+                                              "Humans",
+                                              "Mice",
+                                              "Iodine Radioisotopes",
+                                              "Microglia",
+                                              "Molecular Structure",
+                                              "Tissue Distribution",
+                                              "Dose-Response Relationship, Drug",
+                                              "Structure-Activity Relationship",
+                                              "Radiopharmaceuticals",
+                                              "Disease Models, Animal",
+                                              "Glioma",
+                                              "Male",
+                                              "Brain Neoplasms",
+                                              "Purinergic P2X Receptor Antagonists"
+                                          ]
+                       },
+                       {
+                           "source_id":  "pubmed_glioblastoma",
+                           "pmid":  "42109224",
+                           "title":  "Structural optimization of CHI3L1 inhibitors with improved pharmacokinetics and functional activity in 3D glioblastoma models.",
+                           "journal":  "Journal of enzyme inhibition and medicinal chemistry",
+                           "publication_date":  "2026-05-11",
+                           "doi":  "10.1080/14756366.2026.2668243",
+                           "abstract_text":  "Chitinase-3-like protein 1 (CHI3L1) is a key driver of glioblastoma (GBM) progression and an emerging therapeutic target. Building on the CHI3L1 inhibitor 11 g, we optimised the scaffold through medicinal chemistry to assess structure-property relationships and improve pharmacokinetics. Using microscale thermophoresis (MST) and computational studies, we validated 10p, which exhibits a CHI3L1 binding affinity (Kd) of 13.22 µM. Notably, 10p overcomes previous developability hurdles by achieving a kinetic solubility of 758 µM, a five-fold improvement over 11 g. It further demonstrates high metabolic stability across species and no hERG inhibition. In 3D GBM spheroid models, 10p significantly reduced tumour viability, mass, and migration, exceeding the efficacy of prior analogues. Collectively, these findings establish 10p as a CHI3L1 inhibitor with a superior pharmacokinetic profile and robust functional activity, marking it as a promising candidate for further GBM drug development.",
+                           "abstract_truncated":  false,
+                           "publication_types":  [
+                                                     "Journal Article"
+                                                 ],
+                           "mesh_terms":  [
+                                              "Chitinase-3-Like Protein 1",
+                                              "Humans",
+                                              "Glioblastoma",
+                                              "Structure-Activity Relationship",
+                                              "Antineoplastic Agents",
+                                              "Drug Screening Assays, Antitumor",
+                                              "Molecular Structure",
+                                              "Dose-Response Relationship, Drug",
+                                              "Animals",
+                                              "Cell Proliferation",
+                                              "Cell Survival",
+                                              "Enzyme Inhibitors"
+                                          ]
+                       },
+                       {
+                           "source_id":  "pubmed_glioblastoma",
+                           "pmid":  "42007489",
+                           "title":  "Role of the WNT signalling pathway in physiological and pathological blood-brain barrier.",
+                           "journal":  "Annals of medicine",
+                           "publication_date":  "2026-04-20",
+                           "doi":  "10.1080/07853890.2026.2657638",
+                           "abstract_text":  "BACKGROUND: The blood-brain barrier (BBB) is essential for maintaining central nervous system (CNS) homeostasis and protecting neural tissue. The wingless-type MMTV integration site family (WNT) signalling pathway has emerged as a key regulator of BBB development, maintenance, and repair. Dysregulation of this pathway is implicated in BBB dysfunction associated with various neurological disorders. METHODS: We conducted a comprehensive review of recent literature integrating data from animal models, human induced pluripotent stem cell (iPSC)-derived BBB systems, and disease-specific mechanistic studies. The role of canonical and non-canonical WNT signalling in BBB formation, maturation, and pathological alteration was systematically analyzed. RESULTS: WNT7a/b ligands activate β-catenin-dependent signalling to drive cerebral angiogenesis and BBB differentiation, with G protein‑coupled receptor 124 (GPR124), Reversion‑inducing cysteine‑rich protein with Kazal motifs (RECK), and SRY‑related HMG‑box transcription factor 17 (Sox17) identified as critical co-regulators. In the mature BBB, WNT activity is suppressed epigenetically to maintain barrier stability. In diseases such as ischaemic stroke, Alzheimer\u0027s disease, multiple sclerosis, and glioblastoma, WNT signalling is disrupted, leading to BBB breakdown. Pharmacological activation of WNT/β-catenin signalling (e.g. lithium, Glycogen synthase kinase 3β (GSK-3β) inhibitors and engineered WNT ligands) restores BBB integrity in preclinical models. Additionally, modulation of WNT signalling can enhance drug delivery across the BBB, offering therapeutic advantages in brain tumours and neurodegenerative diseases. CONCLUSIONS: WNT signalling is a central molecular axis governing BBB integrity under both physiological and pathological conditions. Targeted modulation of this pathway represents a promising therapeutic strategy for restoring BBB function and improving CNS drug delivery. Further mechanistic and translational studies are warranted to advance clinical applications.",
+                           "abstract_truncated":  false,
+                           "publication_types":  [
+                                                     "Journal Article",
+                                                     "Review"
+                                                 ],
+                           "mesh_terms":  [
+                                              "Blood-Brain Barrier",
+                                              "Humans",
+                                              "Animals",
+                                              "Wnt Signaling Pathway",
+                                              "beta Catenin",
+                                              "Wnt Proteins",
+                                              "Induced Pluripotent Stem Cells"
+                                          ]
+                       },
+                       {
+                           "source_id":  "pubmed_glioblastoma",
+                           "pmid":  "42425316",
+                           "title":  "Genomic and chromosomal Instability: Hidden drivers of Glioblastoma aggressiveness.",
+                           "journal":  "Gene",
+                           "publication_date":  "2026-07-09",
+                           "doi":  "10.1016/j.gene.2026.150311",
+                           "abstract_text":  "Glioblastoma is the most common and aggressive primary brain tumor in adults, characterized by rapid proliferation, diffuse infiltration, and poor clinical outcomes despite multimodal therapy. A hallmark of GBM biology is its remarkable genomic (GI) and chromosomal instability (CIN), which act as fundamental engines of tumor evolution. These processes fuel extensive intratumoral heterogeneity, drive the emergence of therapy-resistant clones, and contribute to immune evasion and disease recurrence. GI arises from replication stress, oxidative damage, and impaired DNA damage response pathways, while CIN encompasses large-scale chromosomal missegregation, aneuploidy, and structural rearrangements that perpetuate clonal diversity. Epigenetic deregulation and non-coding RNAs further modulate these mechanisms by altering the expression of oncogenes, tumor suppressors genes, and genome maintenance factors. Understanding the molecular underpinnings of GI and CIN in Glioblastoma, is crucial to elucidate the mechanisms driving its aggressiveness and therapeutic resistance. This review integrates recent advances on the origins and consequences of GI and CIN in GBM, underscores its prognostic and biological relevance, and discusses emerging therapeutic strategies that exploit these vulnerabilities to improve patient outcomes.",
+                           "abstract_truncated":  false,
+                           "publication_types":  [
+                                                     "Journal Article",
+                                                     "Review"
+                                                 ],
+                           "mesh_terms":  [
+                                              "Humans",
+                                              "Glioblastoma",
+                                              "Chromosomal Instability",
+                                              "Genomic Instability",
+                                              "Brain Neoplasms",
+                                              "Epigenesis, Genetic",
+                                              "DNA Damage",
+                                              "Gene Expression Regulation, Neoplastic"
+                                          ]
+                       },
+                       {
+                           "source_id":  "pubmed_glioblastoma",
+                           "pmid":  "42574937",
+                           "title":  "Synthesis, characterization and molecular docking studies of iridium(III) complex with substituted morpholine for glioblastoma cells.",
+                           "journal":  "Journal of inorganic biochemistry",
+                           "publication_date":  "2026-08-08",
+                           "doi":  "10.1016/j.jinorgbio.2026.113428",
+                           "abstract_text":  "A new iridium(III) complex containing 2-(1H-benzimidazol-2-yl) quinoline functionalized with morpholine moiety (Ir-Morph) was synthesized and characterized by FT-IR, NMR, HRMS mass spectrometry, UV-Vis absorption-emission spectroscopy and cyclic voltammetry. The anticancer activity of iridium complex has been evaluated on U87 and LN18 glioblastoma cell lines. To further assess the impact of Ir-Morph on glioblastoma cell viability at the cellular level, U87 and LN18 cells were stained with DiOC₆ and fluorescence intensity was quantified under different Ir-Morph treatments. Molecular docking studies were conducted to explore the predicted binding modes and relative docking scores of Ir-Morph with selected target proteins associated with treatment resistance, cell proliferation, and apoptotic escape in glioblastoma. Immunoblotting was subsequently performed to evaluate Ir-Morph-associated changes in the expression or phosphorylation of selected proteins. The results of our study revealed that Ir-Morph decreased the cell viablity of both glioblastoma cell lines by causing cytotoxic effects. Ir-Morph treatments also reduced mitochondrial membrane potential suggesting that apoptotic cell death was activated. This fact was supported by the increased PARP cleavage in U87 and LN18 cells. Our findings showed that both total and phosphorylated Akt level increased following even high concentration of Ir-Morph exposure in both cell lines, suggesting that GBM cells keep Akt signaling. We also detected crucial proteins in drug ressitance in glioblastoma were upregulated in U87 but remained same in LN18 cells, suggesting that increased resistance response is not essential to prevent Ir-Morph -induced apoptotic cell death.",
+                           "abstract_truncated":  false,
+                           "publication_types":  [
+                                                     "Journal Article"
+                                                 ],
+                           "mesh_terms":  [
+                                              "Humans",
+                                              "Glioblastoma",
+                                              "Iridium",
+                                              "Molecular Docking Simulation",
+                                              "Morpholines",
+                                              "Antineoplastic Agents",
+                                              "Cell Line, Tumor",
+                                              "Apoptosis",
+                                              "Coordination Complexes",
+                                              "Cell Proliferation",
+                                              "Cell Survival"
+                                          ]
+                       },
+                       {
+                           "source_id":  "pubmed_glioblastoma",
+                           "pmid":  "42556067",
+                           "title":  "Neurocognitive and neuropsychiatric presentation identifies a higher-risk clinical phenotype in IDH-wildtype glioblastoma: A retrospective cohort study.",
+                           "journal":  "Clinical neurology and neurosurgery",
+                           "publication_date":  "2026-08-04",
+                           "doi":  "10.1016/j.clineuro.2026.109602",
+                           "abstract_text":  "OBJECTIVE: In IDH-wildtype glioblastoma, prognosis is conventionally interpreted through established molecular, clinical, surgical and anatomical factors, whereas the prognostic meaning of the mode of onset is less defined. We hypothesized that neurocognitive/neuropsychiatric presentation identifies an adverse clinical phenotype, potentially reflecting diagnostic delay and/or early disruption of distributed cerebral networks. METHODS: We retrospectively analyzed 165 patients with IDH-wildtype glioblastoma treated with standard chemoradiation at a single institution. The main presenting symptom was reviewed from clinical documentation and dichotomized as neurocognitive/neuropsychiatric versus all other presentations. The primary endpoint was progression-free survival (PFS), and overall survival (OS) was the secondary endpoint. Multivariable Cox models were adjusted for prespecified covariates: MGMT promoter methylation, extent of resection, baseline Karnofsky Performance Status, age, and subventricular zone contact. RESULTS: Thirty-one patients (18.8%) had a neurocognitive/neuropsychiatric onset. In unadjusted analysis, PFS showed a non-significant separation (log-rank p = 0.175), and OS curves did not differ (log-rank p = 0.896). After adjustment, neurocognitive/neuropsychiatric onset was associated with shorter PFS (HR 1.77, 95% CI 1.13-2.77; p = 0.012). The OS estimate was concordant and reached statistical significance in the secondary multivariable model (HR 1.71, 95% CI 1.02-2.87; p = 0.041). The PFS association was consistent across sensitivity analyses. CONCLUSION: Neurocognitive/neuropsychiatric onset identified a higher-risk presentation phenotype associated with shorter PFS and, in secondary analyses, shorter OS after adjustment for established prognostic factors. These hypothesis-generating findings suggest that clinical mode of onset may capture prognostic information not fully reflected by conventional variables and warrant prospective multicenter validation.",
+                           "abstract_truncated":  false,
+                           "publication_types":  [
+                                                     "Journal Article"
+                                                 ],
+                           "mesh_terms":  [
+                                              "Humans",
+                                              "Female",
+                                              "Retrospective Studies",
+                                              "Brain Neoplasms",
+                                              "Glioblastoma",
+                                              "Male",
+                                              "Middle Aged",
+                                              "Phenotype",
+                                              "Isocitrate Dehydrogenase",
+                                              "Adult",
+                                              "Aged",
+                                              "Prognosis",
+                                              "Cohort Studies"
+                                          ]
+                       }
+                   ]
+}

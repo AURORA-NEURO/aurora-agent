@@ -757,7 +757,7 @@ export type AutonomousBrainDomainEvidenceBrainRunResult = AutonomousDomainEviden
 /** Restart-safe evidence execution controls with caller-owned checkpoint persistence. */
 export type AutonomousBrainEvidenceBackedResumableExecutionOptions = AutonomousEvidenceBackedResumableExecutionOptions;
 
-/** Restart-safe evidence result; provider dispatch after a pending checkpoint remains explicit. */
+/** Restart-safe evidence result; pending work needs approval and attempted work needs reconciliation. */
 export type AutonomousBrainEvidenceBackedResumableRun = AutonomousEvidenceBackedResumableRun;
 
 /** Long-horizon goal runtime controls with the facade-owned agent and brain omitted. */
@@ -2122,7 +2122,7 @@ function evidenceTraceRouteDigest(result: EvidenceTraceResult): string | null {
 }
 
 function evidenceTraceStatus(status: string): ReturnType<typeof autonomousRunTraceStatus> {
-  if (status === "evidence_review_required" || status === "evidence_blocked" || status === "provider_pending" || status === "provider_reconciliation_required") return "paused";
+  if (status === "evidence_review_required" || status === "evidence_blocked" || status === "provider_pending" || status === "provider_in_flight" || status === "provider_reconciliation_required") return "paused";
   if (status === "evidence_incomplete") return "partial";
   if (status === "evidence_failed") return "failed";
   return autonomousRunTraceStatus(status);
@@ -3857,8 +3857,9 @@ export class AutonomousBrainFacade {
   }
 
   /**
-   * Execute reviewed evidence through the restart-safe checkpoint protocol. A provider result is
-   * never replayed implicitly: recovery requires a caller rehydrator or an explicit resume flag.
+   * Execute reviewed evidence through the restart-safe checkpoint protocol. Pending work needs
+   * fresh approval; an in-flight checkpoint records attempted work and can only reconcile, never
+   * redispatch. A settled provider result still requires a caller-owned rehydrator.
    */
   async runWithReviewedEvidenceResumable(
     task: string,
@@ -3901,33 +3902,44 @@ export class AutonomousBrainFacade {
         traceStore: _traceStore,
         runId: _runId,
         checkpointSink: callerCheckpointSink,
+        checkpointCompareAndStore: callerCheckpointCompareAndStore,
         ...runOptions
       } = options;
+      const recordCheckpoint = async (checkpoint: Parameters<typeof callerCheckpointSink>[0]): Promise<void> => {
+        if (!planRecorded) {
+          planRecorded = true;
+          await trace.record({
+            phase: "plan_compiled",
+            status: "running",
+            plan_digest: checkpoint.execution_plan_digest,
+            detail_digest: digestJsonSync({ checkpoint_status: checkpoint.status }),
+          });
+        }
+        await trace.record({
+          phase: "evaluation_settled",
+          status: "running",
+          plan_digest: checkpoint.execution_plan_digest,
+          detail_digest: digestJsonSync({
+            checkpoint_status: checkpoint.status,
+            checkpoint_digest: checkpoint.checkpoint_digest,
+            provider_result_digest: checkpoint.provider_result_digest,
+            provider_rehydrated: checkpoint.provider_result_digest !== null,
+          }),
+        });
+      };
       const run = await this.runWithReviewedEvidenceResumable(task, {
         ...runOptions,
         checkpointSink: async (checkpoint) => {
-          if (!planRecorded) {
-            planRecorded = true;
-            await trace.record({
-              phase: "plan_compiled",
-              status: "running",
-              plan_digest: checkpoint.execution_plan_digest,
-              detail_digest: digestJsonSync({ checkpoint_status: checkpoint.status }),
-            });
-          }
           await callerCheckpointSink(checkpoint);
-          await trace.record({
-            phase: "evaluation_settled",
-            status: "running",
-            plan_digest: checkpoint.execution_plan_digest,
-            detail_digest: digestJsonSync({
-              checkpoint_status: checkpoint.status,
-              checkpoint_digest: checkpoint.checkpoint_digest,
-              provider_result_digest: checkpoint.provider_result_digest,
-              provider_rehydrated: checkpoint.provider_result_digest !== null,
-            }),
-          });
+          await recordCheckpoint(checkpoint);
         },
+        ...(callerCheckpointCompareAndStore === undefined ? {} : {
+          checkpointCompareAndStore: async (expectedCheckpointDigest, checkpoint) => {
+            const committed = await callerCheckpointCompareAndStore(expectedCheckpointDigest, checkpoint);
+            if (committed) await recordCheckpoint(checkpoint);
+            return committed;
+          },
+        }),
         run: tracedEvidenceRunOptions(runOptions.run, trace),
       });
       const evidenceResult = run.result;

@@ -390,13 +390,13 @@ class AutonomousClaimIntegrityEvidence:
     source_id: str
     evidence_digest: str
     source_digest: str | None = None
-    observed_at: str = ""
+    observed_at: str = field(kw_only=True)
     valid_from: str | None = None
     valid_until: str | None = None
-    reliability: float = 0.5
-    support: float = 0.5
-    status: str = "accepted"
-    stance: str = "support"
+    reliability: float = field(kw_only=True)
+    support: float = field(kw_only=True)
+    status: str = field(kw_only=True)
+    stance: str = field(kw_only=True)
     modality: str = "unspecified"
     reproducibility: str = "unverified"
     metadata: Mapping[str, Any] = field(default_factory=dict, repr=False, compare=False)
@@ -456,10 +456,10 @@ class AutonomousClaimIntegrityEvidence:
             observed_at=value.get("observed_at", value.get("observedAt")),
             valid_from=value.get("valid_from", value.get("validFrom")),
             valid_until=value.get("valid_until", value.get("validUntil")),
-            reliability=value.get("reliability", 0.5),
-            support=value.get("support", 0.5),
-            status=value.get("status", "accepted"),
-            stance=value.get("stance", "support"),
+            reliability=value.get("reliability"),
+            support=value.get("support"),
+            status=value.get("status"),
+            stance=value.get("stance"),
             modality=value.get("modality", "unspecified"),
             reproducibility=value.get("reproducibility", "unverified"),
             metadata=value.get("metadata", {}),
@@ -1139,14 +1139,16 @@ def assess_autonomous_claim_integrity(
         raise ArgumentError("integrity claims must contain at least one claim")
     claim_ids = [claim.claim_id for claim in normalized_claims]
     evidence_ids = [item.evidence_id for item in normalized_evidence]
+    evidence_digests = [item.evidence_digest for item in normalized_evidence]
     if len(set(claim_ids)) != len(claim_ids):
         raise ArgumentError("integrity claims contain duplicate ids")
     if len(set(evidence_ids)) != len(evidence_ids):
         raise ArgumentError("integrity evidence contains duplicate ids")
+    if len(set(evidence_digests)) != len(evidence_digests):
+        raise ArgumentError("integrity evidence contains duplicate evidence digests")
     selected_policy = policy if isinstance(policy, AutonomousClaimIntegrityPolicy) else AutonomousClaimIntegrityPolicy.from_mapping(policy)
     reference_seconds = _timestamp_seconds(reference_time)
     rows = tuple(_evidence_row(item, reference_seconds, selected_policy, set(claim_ids)) for item in normalized_evidence)
-    by_id = {item.evidence_id: item for item in normalized_evidence}
     row_by_id = {row.evidence_id: row for row in rows}
     assessments: list[AutonomousClaimIntegrityClaimAssessment] = []
 

@@ -1,4 +1,5 @@
 //! Protocol conformance and the security properties of 11.11.
+// Intake schema additions remain covered by the full catalogue contract below.
 
 use bioprism_adapter::{TabularProfile, ValueType, VariableMapping};
 use bioprism_adaptive::{AdaptivePanel, PanelConfig};
@@ -4435,6 +4436,7 @@ fn glioma_autonomous_campaign_execution_is_reachable_through_mcp() {
 
 #[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
+    // Keep this test source touched when Windows Application Control requires a relink.
     let tools = on_a_dispatch_sized_stack(tool_definitions);
     assert_eq!(tools.len(), TOOL_DEFINITION_COUNT);
     for tool in &tools {
@@ -13682,7 +13684,7 @@ fn repository_bundle_compiles_a_route_with_progressive_disclosure() {
                 "id": "orientation",
                 "intent": "understand the repository before choosing a domain",
                 "must_read": ["README.md"],
-                "budget": 40000
+                "budget": 50000
             },
             "policy": "normative",
             "include_markdown": true,

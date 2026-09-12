@@ -688,6 +688,7 @@ dependencies = [
  "bioprism-metrics",
  "bioprism-modalities",
  "bioprism-mutation",
+ "bioprism-neurosurgery",
  "bioprism-obligation",
  "bioprism-onco",
  "bioprism-oncoworlds",
@@ -701,6 +702,7 @@ dependencies = [
  "bioprism-registry",
  "bioprism-repair",
  "bioprism-research",
+ "bioprism-research-campaign",
  "bioprism-routing",
  "bioprism-runtime",
  "bioprism-safety",
@@ -777,6 +779,16 @@ dependencies = [
  "bioprism-worldgen",
  "serde",
  "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "bioprism-neurosurgery"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sha2",
  "thiserror",
 ]
 
@@ -992,6 +1004,20 @@ dependencies = [
  "bioprism-section",
  "bioprism-world",
  "bioprism-worldgen",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "bioprism-research-campaign"
+version = "0.1.0"
+dependencies = [
+ "bioprism-autopilot",
+ "bioprism-brain",
+ "bioprism-ids",
+ "bioprism-neurosurgery",
+ "bioprism-research",
  "serde",
  "serde_json",
  "thiserror",

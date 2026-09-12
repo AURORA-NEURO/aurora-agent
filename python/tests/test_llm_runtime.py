@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+import math
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -13,6 +14,7 @@ import pytest
 from prism_sdk.errors import ArgumentError
 
 from prism_sdk.llm_runtime import (
+    CompositeProviderInvocationObserver,
     CredentialError,
     CredentialProvisioner,
     CredentialStore,
@@ -38,6 +40,7 @@ from prism_sdk.llm_runtime import (
     deepseek_provider,
     groq_provider,
     mistral_provider,
+    ollama_provider,
     openai_compatible_provider,
     openai_provider,
     openrouter_provider,
@@ -136,6 +139,150 @@ def test_provider_invocation_effect_boundary_projects_transient_response() -> No
     with pytest.raises(AutonomousEffectReconciliationRequiredError):
         runtime.invoke("offline", request)
     assert calls == 1
+
+
+def test_composite_provider_observers_receive_metadata_only_response_projection() -> None:
+    observed: list[ProviderResponse | None] = []
+
+    class Observer:
+        def before(self, _metadata: object) -> None:
+            return None
+
+        def after(
+            self,
+            _metadata: object,
+            response: ProviderResponse | None,
+            _error: BaseException | None,
+            _latency_ms: float,
+        ) -> None:
+            observed.append(response)
+
+    runtime = LLMRuntime()
+    runtime.register_in_memory_provider(
+        "observer-redaction",
+        lambda _request: {
+            "text": '{"private":"provider text"}',
+            "request_id": "private-provider-request-id",
+            "usage": {
+                "input_tokens": 3,
+                "output_tokens": 2,
+                "private_usage": "provider-owned",
+            },
+            "structured": {"private": "structured provider value"},
+        },
+    )
+    response = runtime.invoke(
+        "observer-redaction",
+        ProviderRequest(
+            model="observer-model",
+            messages=({"role": "user", "content": "private prompt"},),
+        ),
+        invocation_observer=CompositeProviderInvocationObserver((Observer(),)),
+    )
+    assert response.text == '{"private":"provider text"}'
+    assert response.structured == {"private": "structured provider value"}
+    assert len(observed) == 1
+    projected = observed[0]
+    assert projected is not None
+    assert projected.text == ""
+    assert projected.request_id is None
+    assert projected.structured is None
+    assert projected.tool_calls == ()
+    assert projected.provider_output_items == ()
+    assert projected.raw == {
+        "retention": "metadata_only_no_provider_payloads",
+        "redacted": True,
+    }
+    assert projected.usage == {"input_tokens": 3, "output_tokens": 2}
+
+
+def test_composite_provider_observers_receive_detached_sanitized_error_projection() -> None:
+    observed: list[BaseException | None] = []
+    sentinel = "private-provider-failure-sentinel"
+
+    class Observer:
+        def before(self, _metadata: object) -> None:
+            return None
+
+        def after(
+            self,
+            _metadata: object,
+            _response: ProviderResponse | None,
+            error: BaseException | None,
+            _latency_ms: float,
+        ) -> None:
+            observed.append(error)
+
+    def fail(_request: ProviderRequest) -> str:
+        provider_failure = RuntimeError(sentinel)
+        provider_failure.private_payload = {"secret": sentinel}  # type: ignore[attr-defined]
+        raise provider_failure
+
+    runtime = LLMRuntime()
+    runtime.register_in_memory_provider("observer-error-redaction", fail)
+    with pytest.raises(ProviderError) as raised:
+        runtime.invoke(
+            "observer-error-redaction",
+            ProviderRequest(
+                model="observer-model",
+                messages=({"role": "user", "content": "private prompt"},),
+            ),
+            invocation_observer=CompositeProviderInvocationObserver((Observer(),)),
+        )
+
+    assert raised.value.__cause__ is not None
+    assert sentinel in str(raised.value.__cause__)
+    assert len(observed) == 1
+    projected = observed[0]
+    assert type(projected) is ProviderError
+    assert str(projected) == "provider invocation failed"
+    assert projected.__cause__ is None
+    assert projected.__context__ is None
+    assert projected.__traceback__ is None
+    assert projected.request_id is None
+    assert projected.provider is None
+    assert projected.operation is None
+    assert sentinel not in repr(vars(projected))
+
+
+def test_composite_provider_observer_refuses_multiple_private_dispatch_fences() -> None:
+    class Observer:
+        def before(self, _metadata: object) -> None:
+            return None
+
+        def after(
+            self,
+            _metadata: object,
+            _response: object,
+            _error: object,
+            _latency_ms: float,
+        ) -> None:
+            return None
+
+    class Fence:
+        def prepare_dispatch(
+            self,
+            _provider: str,
+            request: ProviderRequest,
+        ) -> ProviderRequest:
+            return request
+
+        def before_transport(
+            self,
+            _metadata: object,
+            _context: object,
+        ) -> None:
+            return None
+
+    inner = CompositeProviderInvocationObserver._with_provider_dispatch_fence(
+        (Observer(),),
+        Fence(),
+    )
+    with pytest.raises(TypeError, match="multiple private dispatch fences"):
+        CompositeProviderInvocationObserver._with_provider_dispatch_fence(
+            (inner,),
+            Fence(),
+        )
 
 
 def test_provider_authorization_rejects_before_credentials_or_transport() -> None:
@@ -673,10 +820,37 @@ class LlmRuntimeTests(unittest.TestCase):
                 messages=({"role": "user", "content": ({"type": "image_url", "url": "https://evidence.example/image.png", "api_key": "must-refuse"},)},),
             )
 
+    def test_ollama_preset_is_credentialless_and_loopback_by_default(self) -> None:
+        config = ollama_provider()
+        self.assertEqual(config.provider, "ollama")
+        self.assertEqual(config.protocol, "openai_chat_completions")
+        self.assertEqual(config.base_url, "http://127.0.0.1:11434/v1")
+        self.assertEqual(config.endpoint[2], "/v1/chat/completions")
+        self.assertEqual(config.models_endpoint[2], "/v1/models")
+        self.assertFalse(config.requires_credential)
+        self.assertTrue(config.allow_insecure_http)
+        self.assertEqual(config.structured_output_mode, "json_object")
+
     def test_credential_value_is_bounded_before_storage(self) -> None:
         store = CredentialStore()
         with self.assertRaises(CredentialError):
             store.register("openai", "x" * 16_385)
+
+    def test_ttl_credentials_reject_non_finite_time_inputs(self) -> None:
+        for invalid_now in (math.nan, math.inf, -math.inf):
+            with self.subTest(now=invalid_now):
+                store = CredentialStore(clock=lambda value=invalid_now: value)
+                with self.assertRaisesRegex(CredentialError, "clock must return a finite number"):
+                    store.register("openai", "bounded-secret", ttl_seconds=60)
+        store = CredentialStore(clock=lambda: 1_000.0)
+        for invalid_ttl in (True, math.nan, math.inf, -math.inf):
+            with self.subTest(ttl=invalid_ttl):
+                with self.assertRaisesRegex(CredentialError, "ttl_seconds must be positive"):
+                    store.register("openai", "bounded-secret", ttl_seconds=invalid_ttl)
+
+    def test_credential_store_requires_a_callable_clock(self) -> None:
+        with self.assertRaisesRegex(CredentialError, "clock must be callable"):
+            CredentialStore(clock=None)  # type: ignore[arg-type]
 
     def test_prompt_path_is_injectable_for_no_echo_ui_and_tests(self) -> None:
         store = CredentialStore()

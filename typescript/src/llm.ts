@@ -6,7 +6,7 @@ import { AutonomousEffectReconciliationRequiredError } from "./autonomous-effect
 import type { AutonomousEffectBoundary } from "./autonomous-effects.js";
 import { canonicalJson, digestJson } from "./tooling.js";
 import type { JsonObject, JsonValue } from "./types.js";
-import { ProviderQuotaController, type ProviderQuotaReservation } from "./provider-quota.js";
+import { ProviderQuotaController, type ProviderQuotaReservation, type ProviderQuotaSettlementInput } from "./provider-quota.js";
 import {
   advanceAutonomousModelContinuationState,
   compileAutonomousModelContinuationPlan,
@@ -25,6 +25,86 @@ import {
   type AutonomousContextBudgetPlan,
 } from "./autonomous-context-budget.js";
 import type { AutonomousAuthorizationContext } from "./autonomous-authorization.js";
+
+// Capture the platform primitives used to derive and parse provider wire values once, before any
+// caller observer can run.  A dispatch callback must not be able to replace global URL/JSON
+// helpers, restore them before the private fence, and send a body or credential to another host.
+const NativeURL = globalThis.URL;
+const NativeAbortController = globalThis.AbortController;
+const NativePromise = globalThis.Promise;
+const NativeTextEncoder = globalThis.TextEncoder;
+const NativeTextDecoder = globalThis.TextDecoder;
+const nativeStructuredClone = globalThis.structuredClone;
+const nativeJsonStringify = JSON.stringify.bind(JSON);
+const nativeJsonParse = JSON.parse.bind(JSON);
+const nativeObjectFreeze = Object.freeze;
+const nativeObjectGetOwnPropertyDescriptor = Object.getOwnPropertyDescriptor;
+const nativeReflectApply = Reflect.apply;
+const nativeMapGet = Map.prototype.get;
+const nativeMapSet = Map.prototype.set;
+const nativeMapHas = Map.prototype.has;
+const nativeMapDelete = Map.prototype.delete;
+const nativeWeakMapGet = WeakMap.prototype.get;
+const nativeWeakMapSet = WeakMap.prototype.set;
+const nativeWeakMapDelete = WeakMap.prototype.delete;
+const nativeDateNow = Date.now.bind(Date);
+const nativeNumberIsFinite = Number.isFinite;
+const nativeNumberIsInteger = Number.isInteger;
+const nativeTextEncoderEncode = NativeTextEncoder.prototype.encode;
+const nativeTextDecoderDecode = NativeTextDecoder.prototype.decode;
+const nativeAbortControllerAbort = NativeAbortController.prototype.abort;
+const nativeAbortControllerSignalGetter = nativeObjectGetOwnPropertyDescriptor(
+  NativeAbortController.prototype,
+  "signal",
+)?.get as (this: AbortController) => AbortSignal;
+const nativeAbortSignalAbortedGetter = nativeObjectGetOwnPropertyDescriptor(
+  AbortSignal.prototype,
+  "aborted",
+)?.get as (this: AbortSignal) => boolean;
+const nativeEventTargetAddEventListener = EventTarget.prototype.addEventListener;
+const nativeEventTargetRemoveEventListener = EventTarget.prototype.removeEventListener;
+const nativeSetTimeout = globalThis.setTimeout.bind(globalThis);
+const nativeClearTimeout = globalThis.clearTimeout.bind(globalThis);
+const nativePromiseResolve = NativePromise.resolve.bind(NativePromise);
+const defaultCredentialClock = (): number => nativeDateNow();
+
+function abortSignalIsAborted(signal: AbortSignal | undefined): boolean {
+  return signal === undefined
+    ? false
+    : nativeReflectApply(nativeAbortSignalAbortedGetter, signal, []);
+}
+
+function abortControllerSignal(controller: AbortController): AbortSignal {
+  return nativeReflectApply(nativeAbortControllerSignalGetter, controller, []);
+}
+
+function abortController(controller: AbortController): void {
+  nativeReflectApply(nativeAbortControllerAbort, controller, []);
+}
+
+function addAbortListener(signal: AbortSignal | undefined, listener: EventListener): void {
+  if (signal !== undefined) {
+    nativeReflectApply(nativeEventTargetAddEventListener, signal, ["abort", listener, { once: true }]);
+  }
+}
+
+function removeAbortListener(signal: AbortSignal | undefined, listener: EventListener): void {
+  if (signal !== undefined) {
+    nativeReflectApply(nativeEventTargetRemoveEventListener, signal, ["abort", listener]);
+  }
+}
+
+function utf8Bytes(value: string): Uint8Array<ArrayBuffer> {
+  return nativeReflectApply(nativeTextEncoderEncode, new NativeTextEncoder(), [value]) as Uint8Array<ArrayBuffer>;
+}
+
+function decodeUtf8(
+  decoder: TextDecoder,
+  value?: AllowSharedBufferSource,
+  options?: TextDecodeOptions,
+): string {
+  return nativeReflectApply(nativeTextDecoderDecode, decoder, [value, options]);
+}
 
 /** Public schema for the cross-language, application-owned provider runtime. */
 export const LLM_RUNTIME_SCHEMA = "bioprism-typescript-llm-runtime/0.1" as const;
@@ -196,12 +276,12 @@ export class CredentialHandle {
     this.provider = provider;
     this.id = newOpaqueId();
     this.expiresAt = expiresAt;
-    Object.freeze(this);
+    nativeObjectFreeze(this);
   }
 
   static create(provider: string, entry: CredentialEntry): CredentialHandle {
     const handle = new CredentialHandle(provider, entry.expiresAt);
-    credentialEntries.set(handle, entry);
+    nativeReflectApply(nativeWeakMapSet, credentialEntries, [handle, entry]);
     return handle;
   }
 
@@ -225,7 +305,7 @@ export class CredentialStore {
   private readonly clock: () => number;
 
   constructor(options: { clock?: () => number } = {}) {
-    this.clock = options.clock ?? (() => Date.now());
+    this.clock = options.clock ?? defaultCredentialClock;
   }
 
   register(provider: string, value: string, options: { ttlMs?: number } = {}): CredentialHandle {
@@ -238,7 +318,7 @@ export class CredentialStore {
       : this.expiryFromTtl(options.ttlMs);
     const entry: CredentialEntry = { provider: normalizedProvider, secret: value, expiresAt };
     const handle = CredentialHandle.create(normalizedProvider, entry);
-    this.entries.set(handle, entry);
+    nativeReflectApply(nativeMapSet, this.entries, [handle, entry]);
     return handle;
   }
 
@@ -269,7 +349,7 @@ export class CredentialStore {
 
   revoke(handle: CredentialHandle): void {
     this.assertHandle(handle);
-    this.entries.delete(handle);
+    nativeReflectApply(nativeMapDelete, this.entries, [handle]);
   }
 
   clear(): void {
@@ -310,27 +390,117 @@ export class CredentialStore {
   }
 
   resolve(handle: CredentialHandle, provider: string): string {
-    if (!(handle instanceof CredentialHandle)) throw new CredentialError("credential must be an opaque CredentialHandle");
-    const entry = this.entries.get(handle);
-    if (!entry || credentialEntries.get(handle) !== entry) throw new CredentialError("credential handle is revoked or unknown");
-    if (entry.provider !== provider || handle.provider !== provider) throw new CredentialError("credential provider does not match invocation provider");
-    if (entry.expiresAt !== null && entry.expiresAt <= this.clock()) {
-      this.entries.delete(handle);
-      throw new CredentialError("credential handle has expired");
-    }
-    return entry.secret;
+    return resolveCredentialSnapshot(this, handle, provider).secret;
   }
 
   private assertHandle(handle: CredentialHandle): void {
-    if (!(handle instanceof CredentialHandle) || !this.entries.has(handle)) throw new CredentialError("credential handle is revoked or unknown");
+    if (!(handle instanceof CredentialHandle) || !nativeReflectApply(nativeMapHas, this.entries, [handle])) throw new CredentialError("credential handle is revoked or unknown");
   }
 
   private expiryFromTtl(ttlMs: number): number {
-    if (!Number.isFinite(ttlMs) || !Number.isInteger(ttlMs) || ttlMs < 1 || ttlMs > 7 * 24 * 60 * 60 * 1000) {
+    if (!nativeNumberIsFinite(ttlMs) || !nativeNumberIsInteger(ttlMs) || ttlMs < 1 || ttlMs > 7 * 24 * 60 * 60 * 1000) {
       throw new CredentialError("credential ttlMs must be an integer between 1ms and 7 days");
     }
-    return this.clock() + ttlMs;
+    const now = this.clock();
+    if (!nativeNumberIsFinite(now)) throw new CredentialError("credential clock must return a finite number");
+    const expiresAt = now + ttlMs;
+    if (!nativeNumberIsFinite(expiresAt)) throw new CredentialError("credential expiry must be finite");
+    return expiresAt;
   }
+}
+
+interface ResolvedCredentialSnapshot {
+  readonly entries: Map<CredentialHandle, CredentialEntry>;
+  readonly clock: () => number;
+  readonly entry: CredentialEntry;
+  readonly provider: string;
+  readonly secret: string;
+  readonly expiresAt: number | null;
+}
+
+function credentialStoreState(store: CredentialStore): {
+  entries: Map<CredentialHandle, CredentialEntry>;
+  clock: () => number;
+} {
+  const entriesDescriptor = nativeObjectGetOwnPropertyDescriptor(store, "entries");
+  const clockDescriptor = nativeObjectGetOwnPropertyDescriptor(store, "clock");
+  if (!entriesDescriptor || !("value" in entriesDescriptor) || !clockDescriptor || !("value" in clockDescriptor)
+      || typeof clockDescriptor.value !== "function") {
+    throw new CredentialError("credential store state is not data-bound");
+  }
+  return {
+    entries: entriesDescriptor.value as Map<CredentialHandle, CredentialEntry>,
+    clock: clockDescriptor.value as () => number,
+  };
+}
+
+/** Resolve through captured collection intrinsics and recheck after a caller-owned clock runs. */
+function resolveCredentialSnapshot(
+  store: CredentialStore,
+  handle: CredentialHandle,
+  provider: string,
+): ResolvedCredentialSnapshot {
+  const { entries, clock } = credentialStoreState(store);
+  const entry = nativeReflectApply(nativeMapGet, entries, [handle]) as CredentialEntry | undefined;
+  const privateEntry = nativeReflectApply(nativeWeakMapGet, credentialEntries, [handle]) as CredentialEntry | undefined;
+  if (!entry || privateEntry !== entry) throw new CredentialError("credential handle is revoked or unknown");
+  const capturedProvider = entry.provider;
+  const capturedSecret = entry.secret;
+  const capturedExpiresAt = entry.expiresAt;
+  if (capturedProvider !== provider || handle.provider !== provider) throw new CredentialError("credential provider does not match invocation provider");
+  if (capturedExpiresAt !== null) {
+    const now = clock();
+    const currentStoreState = credentialStoreState(store);
+    const currentEntry = nativeReflectApply(nativeMapGet, entries, [handle]) as CredentialEntry | undefined;
+    const currentPrivateEntry = nativeReflectApply(nativeWeakMapGet, credentialEntries, [handle]) as CredentialEntry | undefined;
+    if (currentStoreState.entries !== entries || currentStoreState.clock !== clock
+        || currentEntry !== entry || currentPrivateEntry !== entry
+        || entry.provider !== capturedProvider || entry.secret !== capturedSecret || entry.expiresAt !== capturedExpiresAt) {
+      throw new CredentialError("credential handle changed while its expiry was checked");
+    }
+    if (!nativeNumberIsFinite(now) || capturedExpiresAt <= now) {
+      nativeReflectApply(nativeMapDelete, entries, [handle]);
+      throw new CredentialError("credential handle has expired");
+    }
+  }
+  return nativeObjectFreeze({
+    entries,
+    clock,
+    entry,
+    provider: capturedProvider,
+    secret: capturedSecret,
+    expiresAt: capturedExpiresAt,
+  });
+}
+
+interface ProviderCredentialBinding {
+  readonly secret: string | null;
+  readonly stillValid: () => boolean;
+}
+
+function captureProviderCredential(
+  store: CredentialStore,
+  config: NormalizedProviderConfig,
+  handle: CredentialHandle | undefined,
+): ProviderCredentialBinding {
+  if (config.requiresCredential && handle === undefined) throw new CredentialError(`provider ${config.provider} requires a user credential handle`);
+  if (!config.requiresCredential && handle !== undefined) throw new CredentialError(`provider ${config.provider} does not accept a credential handle`);
+  if (handle === undefined) return nativeObjectFreeze({ secret: null, stillValid: () => true });
+  const captured = resolveCredentialSnapshot(store, handle, config.provider);
+  const stillValid = (): boolean => {
+    try {
+      const current = resolveCredentialSnapshot(store, handle, config.provider);
+      return current.entries === captured.entries
+        && current.clock === captured.clock
+        && current.entry === captured.entry
+        && current.provider === captured.provider
+        && current.secret === captured.secret
+        && current.expiresAt === captured.expiresAt;
+    } catch {
+      return false;
+    }
+  };
+  return nativeObjectFreeze({ secret: captured.secret, stillValid });
 }
 
 export interface ProviderMessage {
@@ -550,10 +720,76 @@ export interface ProviderInvocationOutcome {
   retryable?: boolean;
 }
 
+/** Keep authoritative outcome accounting private from observational callbacks. */
+function providerInvocationOutcomeSnapshot(outcome: ProviderInvocationOutcome): Readonly<ProviderInvocationOutcome> {
+  return nativeObjectFreeze({ ...outcome });
+}
+
 export interface ProviderInvocationObserver {
   before?(metadata: ProviderInvocationMetadata): void | Promise<void>;
+  /** Invoked immediately before each actual local or HTTP transport attempt. */
+  dispatch?(metadata: ProviderInvocationMetadata): void | Promise<void>;
   after?(metadata: ProviderInvocationMetadata, outcome: ProviderInvocationOutcome): void | Promise<void>;
 }
+
+/**
+ * Privileged, transient dispatch context. Unlike an ordinary invocation observer, this boundary
+ * receives the final provider idempotency key so a durable controller can atomically record the
+ * exact transport attempt before it is sent. It must never be included in public projections.
+ * Registered local transports and custom fetch implementations remain caller-owned trust roots:
+ * one successful fence completion authorizes exactly one immediately following handler call.
+ */
+export interface ProviderTransportDispatchContext {
+  provider: string;
+  model: string;
+  kind: string;
+  requestDigest: string;
+  providerIdempotencyKey: string | null;
+  transportAttempt: number;
+}
+
+const providerTransportDispatchBindings = new WeakMap<ProviderTransportDispatchContext, Readonly<{
+  providerConfig: object;
+  fetchImplementation: Function;
+  localTransport: object | null;
+  credentialStore: object;
+  credentialBindingProbe: () => boolean;
+}>>();
+
+/** @internal Exact non-serializable transport identity carried only to the private final fence. */
+export function internalProviderTransportDispatchBinding(
+  context: ProviderTransportDispatchContext,
+): Readonly<{
+  providerConfig: object;
+  fetchImplementation: Function;
+  localTransport: object | null;
+  credentialStore: object;
+  credentialBindingProbe: () => boolean;
+}> | null {
+  return nativeReflectApply(nativeWeakMapGet, providerTransportDispatchBindings, [context]) ?? null;
+}
+
+function boundProviderTransportDispatchContext(
+  context: ProviderTransportDispatchContext,
+  providerConfig: NormalizedProviderConfig,
+  fetchImplementation: FetchImplementation,
+  credentialStore: CredentialStore,
+  credentialBindingProbe: () => boolean,
+): ProviderTransportDispatchContext {
+  const bound = nativeObjectFreeze({ ...context });
+  nativeReflectApply(nativeWeakMapSet, providerTransportDispatchBindings, [bound, nativeObjectFreeze({
+    providerConfig,
+    fetchImplementation,
+    localTransport: providerConfig.transport ?? null,
+    credentialStore,
+    credentialBindingProbe,
+  })]);
+  return bound;
+}
+
+export type ProviderTransportDispatchFence = (
+  context: ProviderTransportDispatchContext,
+) => void | Promise<void>;
 
 /**
  * Stable, value-only evidence for one provider invocation made by the autonomous runtime.
@@ -740,6 +976,8 @@ export interface ProviderInvocationOptions {
   credential?: CredentialHandle;
   signal?: AbortSignal;
   observer?: ProviderInvocationObserver;
+  /** @internal Privileged final fence immediately before each concrete transport attempt. */
+  providerDispatchFence?: ProviderTransportDispatchFence;
   /** Optional metadata-only crash-safe boundary for the actual provider dispatch. */
   effectBoundary?: AutonomousEffectBoundary;
   /** Observe the exact metadata-only effect identity used for a live provider dispatch. */
@@ -906,7 +1144,7 @@ export interface AutonomousSelectionWeights extends JsonObject {
 export const AUTONOMOUS_SELECTION_WEIGHTS_SCHEMA = "bioprism-autonomous-selection-weights/0.1" as const;
 
 /** Defaults shared with the executable Rust selection kernel. */
-export const DEFAULT_AUTONOMOUS_SELECTION_WEIGHTS: Readonly<AutonomousSelectionWeights> = Object.freeze({
+export const DEFAULT_AUTONOMOUS_SELECTION_WEIGHTS: Readonly<AutonomousSelectionWeights> = nativeObjectFreeze({
   quality: 0.55,
   reliability: 0.25,
   cost: 0.10,
@@ -1116,6 +1354,8 @@ export interface AutonomousStreamInvocationOptions {
   credentialFor?: (provider: string) => CredentialHandle | undefined;
   signal?: AbortSignal;
   observer?: ProviderInvocationObserver;
+  /** @internal Privileged final fence immediately before each concrete transport attempt. */
+  providerDispatchFence?: ProviderTransportDispatchFence;
   feedback?: (decision: AutonomousSelectionDecision, outcome: ProviderInvocationOutcome) => void | Promise<void>;
   selectionEventCallback?: AutonomousModelSelectionTraceEventCallback;
   execution?: AutonomousExecutionController;
@@ -1248,7 +1488,7 @@ function boundedIdentifier(name: string, value: unknown, maximum: number): strin
 }
 
 function boundedText(name: string, value: unknown, maximum: number): string {
-  if (typeof value !== "string" || value.length === 0 || new TextEncoder().encode(value).byteLength > maximum) {
+  if (typeof value !== "string" || value.length === 0 || utf8Bytes(value).byteLength > maximum) {
     throw new ProviderRuntimeError(`${name} is outside its bounded text contract`);
   }
   return value;
@@ -1263,20 +1503,20 @@ function boundedPath(name: string, value: string): string {
 }
 
 function bytes(value: string): number {
-  return new TextEncoder().encode(value).byteLength;
+  return utf8Bytes(value).byteLength;
 }
 
 function safeJson(value: unknown, label: string, maximum: number): JsonObject {
   let encoded: string;
   try {
-    encoded = JSON.stringify(value);
+    encoded = nativeJsonStringify(value);
   } catch {
     throw new ProviderRuntimeError(`${label} is not JSON-serializable`);
   }
   if (encoded === undefined || bytes(encoded) > maximum) throw new ProviderRuntimeError(`${label} exceeds its bounded JSON size`);
   let parsed: unknown;
   try {
-    parsed = JSON.parse(encoded);
+    parsed = nativeJsonParse(encoded);
   } catch {
     throw new ProviderRuntimeError(`${label} is not valid JSON`);
   }
@@ -1287,14 +1527,14 @@ function safeJson(value: unknown, label: string, maximum: number): JsonObject {
 function safeJsonValue(value: unknown, label: string, maximum: number): JsonValue {
   let encoded: string;
   try {
-    encoded = JSON.stringify(value);
+    encoded = nativeJsonStringify(value);
   } catch {
     throw new ProviderRuntimeError(`${label} is not JSON-serializable`);
   }
   if (encoded === undefined || bytes(encoded) > maximum) throw new ProviderRuntimeError(`${label} exceeds its bounded JSON size`);
   let parsed: unknown;
   try {
-    parsed = JSON.parse(encoded);
+    parsed = nativeJsonParse(encoded);
   } catch {
     throw new ProviderRuntimeError(`${label} is not valid JSON`);
   }
@@ -1316,13 +1556,13 @@ function asNonNegativeInteger(value: unknown): number | null {
 
 function jsonText(value: unknown): string {
   if (typeof value === "string") return value;
-  const encoded = JSON.stringify(value);
+  const encoded = nativeJsonStringify(value);
   return encoded === undefined ? "null" : encoded;
 }
 
 function parseArguments(value: unknown): JsonObject {
   const decoded = typeof value === "string" ? (() => {
-    try { return JSON.parse(value) as unknown; } catch { return null; }
+    try { return nativeJsonParse(value) as unknown; } catch { return null; }
   })() : value;
   if (!isObject(decoded)) throw new ProviderRuntimeError("provider returned malformed tool arguments");
   const normalized = safeJson(decoded, "provider tool arguments", MAX_PROVIDER_TOOL_ARGUMENT_BYTES);
@@ -1366,8 +1606,8 @@ function validateStructuredResponse(value: unknown, schema: JsonObject, path = "
     (candidate === "boolean" && typeof value === "boolean") ||
     (candidate === "null" && value === null)
   ))) throw new ProviderRuntimeError(`structured response violates responseSchema at ${path}`);
-  if (Array.isArray(schema.enum) && !schema.enum.some((candidate) => JSON.stringify(candidate) === JSON.stringify(value))) throw new ProviderRuntimeError(`structured response violates responseSchema.enum at ${path}`);
-  if (schema.const !== undefined && JSON.stringify(schema.const) !== JSON.stringify(value)) throw new ProviderRuntimeError(`structured response violates responseSchema.const at ${path}`);
+  if (Array.isArray(schema.enum) && !schema.enum.some((candidate) => nativeJsonStringify(candidate) === nativeJsonStringify(value))) throw new ProviderRuntimeError(`structured response violates responseSchema.enum at ${path}`);
+  if (schema.const !== undefined && nativeJsonStringify(schema.const) !== nativeJsonStringify(value)) throw new ProviderRuntimeError(`structured response violates responseSchema.const at ${path}`);
   if (typeof value === "string") {
     if (schema.minLength !== undefined && (typeof schema.minLength !== "number" || !Number.isSafeInteger(schema.minLength) || value.length < schema.minLength)) throw new ProviderRuntimeError(`structured response violates responseSchema.minLength at ${path}`);
     if (schema.maxLength !== undefined && (typeof schema.maxLength !== "number" || !Number.isSafeInteger(schema.maxLength) || value.length > schema.maxLength)) throw new ProviderRuntimeError(`structured response violates responseSchema.maxLength at ${path}`);
@@ -1474,7 +1714,7 @@ function normalizeConfig(config: ProviderConfig): NormalizedProviderConfig {
     throw new ProviderRuntimeError("provider protocol is unsupported");
   }
   let url: URL;
-  try { url = new URL(config.baseUrl); } catch { throw new ProviderRuntimeError("provider baseUrl is invalid"); }
+  try { url = new NativeURL(config.baseUrl); } catch { throw new ProviderRuntimeError("provider baseUrl is invalid"); }
   const allowInsecure = config.allowInsecureHttp ?? false;
   if (url.protocol !== "https:" && !(allowInsecure && url.protocol === "http:")) {
     throw new ProviderRuntimeError("provider baseUrl must use HTTPS unless insecure HTTP is explicitly enabled");
@@ -1483,13 +1723,23 @@ function normalizeConfig(config: ProviderConfig): NormalizedProviderConfig {
   if (!Number.isFinite(url.port ? Number(url.port) : 0)) throw new ProviderRuntimeError("provider baseUrl port is invalid");
   const path = boundedPath("provider path", config.path ?? DEFAULT_PATHS[config.protocol]);
   const modelsPath = boundedPath("provider modelsPath", config.modelsPath ?? "/models");
-  if (config.transport !== undefined && (!config.transport || typeof config.transport.invoke !== "function")) {
+  const configuredTransport = config.transport;
+  const localInvoke = configuredTransport?.invoke;
+  const localStream = configuredTransport?.stream;
+  const localDiscoverModels = configuredTransport?.discoverModels;
+  if (configuredTransport !== undefined && (!configuredTransport || typeof localInvoke !== "function")) {
     throw new ProviderRuntimeError("provider local transport must expose a callable invoke handler");
   }
-  if (config.transport !== undefined && config.requiresCredential === true) {
+  if (localStream !== undefined && typeof localStream !== "function") {
+    throw new ProviderRuntimeError("provider local stream transport must be callable");
+  }
+  if (localDiscoverModels !== undefined && typeof localDiscoverModels !== "function") {
+    throw new ProviderRuntimeError("provider local model discovery transport must be callable");
+  }
+  if (configuredTransport !== undefined && config.requiresCredential === true) {
     throw new ProviderRuntimeError("an in-memory provider transport cannot require a credential");
   }
-  const requiresCredential = config.transport !== undefined ? false : config.requiresCredential ?? true;
+  const requiresCredential = configuredTransport !== undefined ? false : config.requiresCredential ?? true;
   const timeoutMs = config.timeoutMs ?? 60_000;
   const maxAttempts = config.maxAttempts ?? 1;
   const retryBackoffMs = config.retryBackoffMs ?? 0;
@@ -1505,7 +1755,14 @@ function normalizeConfig(config: ProviderConfig): NormalizedProviderConfig {
   const structuredOutputMode = config.structuredOutputMode ?? (config.protocol === "openai_responses" ? "json_schema" : config.protocol === "anthropic_messages" ? "disabled" : "json_object");
   const apiKeyHeader = config.apiKeyHeader ?? (config.protocol === "anthropic_messages" ? "x-api-key" : "Authorization");
   boundedIdentifier("provider apiKeyHeader", apiKeyHeader, 256);
-  return {
+  // Registration is a policy snapshot. Retaining the caller's mutable transport object would let
+  // a later source/prompt callback replace the handler after a resumable operation was bound.
+  const transport = configuredTransport === undefined ? undefined : nativeObjectFreeze({
+    invoke: localInvoke!,
+    ...(localStream === undefined ? {} : { stream: localStream }),
+    ...(localDiscoverModels === undefined ? {} : { discoverModels: localDiscoverModels }),
+  });
+  return nativeObjectFreeze({
     provider,
     baseUrl: url.toString().replace(/\/$/, ""),
     protocol: config.protocol,
@@ -1520,8 +1777,8 @@ function normalizeConfig(config: ProviderConfig): NormalizedProviderConfig {
     circuitBreakerResetMs: resetMs,
     maxResponseBytes,
     structuredOutputMode,
-    ...(config.transport ? { transport: config.transport } : {}),
-  };
+    ...(transport ? { transport } : {}),
+  });
 }
 
 function requestMetadata(provider: string, request: ProviderRequest, kind: string): ProviderInvocationMetadata {
@@ -1563,6 +1820,65 @@ function generatedProviderIdempotencyKey(prefix: string): string {
   const cryptoObject = globalThis.crypto as { randomUUID?: () => string } | undefined;
   const uuid = typeof cryptoObject?.randomUUID === "function" ? cryptoObject.randomUUID() : `${Date.now().toString(16)}-${Math.random().toString(16).slice(2)}`;
   return `${prefix}-${uuid}`;
+}
+
+async function providerToolTurnIdempotencyKey(
+  root: string,
+  turn: number,
+  request: ProviderRequest,
+): Promise<string> {
+  const requestDigest = await providerRequestDigest(request);
+  return digestJson({
+    schema: "bioprism-typescript-provider-tool-turn-idempotency/0.1",
+    root_idempotency_key: root,
+    turn,
+    request_digest: requestDigest,
+  });
+}
+
+async function providerRequestDigest(request: ProviderRequest): Promise<string> {
+  // validateRequest already establishes the typed contract, while safeJson removes optional
+  // properties whose value is explicitly `undefined`.  Callers commonly construct requests by
+  // spreading option bags, so hashing the live object directly would make the last transport
+  // fence fail even though JSON/wire semantics treat those properties as absent.
+  const normalized = safeJson(request, "provider request", MAX_PROVIDER_REQUEST_BYTES);
+  return digestJson({
+    model: normalized.model,
+    messages: normalized.messages,
+    max_output_tokens: normalized.maxOutputTokens,
+    temperature: normalized.temperature ?? null,
+    require_json: normalized.requireJson ?? false,
+    response_schema: normalized.responseSchema ?? null,
+    tools: normalized.tools ?? [],
+    tool_choice: normalized.toolChoice ?? null,
+  });
+}
+
+async function autonomousProviderAttemptRequest(
+  request: ProviderRequest,
+  input: {
+    phase: "invoke" | "stream" | "tool_loop";
+    failovers: number;
+    provider: string;
+    model: string;
+  },
+): Promise<ProviderRequest> {
+  const rootIdempotencyKey = request.idempotencyKey;
+  const selected = nativeStructuredClone({ ...request, model: input.model });
+  if (rootIdempotencyKey === undefined) return selected;
+  const { idempotencyKey: _idempotencyKey, ...requestWithoutIdempotency } = selected;
+  return {
+    ...requestWithoutIdempotency,
+    idempotencyKey: await digestJson({
+      schema: "bioprism-typescript-autonomous-provider-attempt-idempotency/0.1",
+      root_idempotency_key: rootIdempotencyKey,
+      phase: input.phase,
+      attempt: input.failovers + 1,
+      provider: input.provider,
+      model: input.model,
+      request_digest: await providerRequestDigest(requestWithoutIdempotency),
+    }),
+  };
 }
 
 function normalizedContentPart(value: unknown): ProviderContentPart {
@@ -1691,6 +2007,18 @@ function validateRequest(request: ProviderRequest): void {
   safeJson(request, "provider request", MAX_PROVIDER_REQUEST_BYTES);
 }
 
+/**
+ * Validate and detach the exact request that one invocation will use.  Ordinary observers can
+ * retain the caller's original object, so validation alone is not a transport fence: without a
+ * private snapshot they could rewrite local-handler input after its dispatch digest was computed.
+ */
+function snapshotProviderRequest(request: ProviderRequest): ProviderRequest {
+  validateRequest(request);
+  const snapshot = safeJson(request, "provider request", MAX_PROVIDER_REQUEST_BYTES) as unknown as ProviderRequest;
+  validateRequest(snapshot);
+  return snapshot;
+}
+
 function validateStructuredOutputSupport(config: NormalizedProviderConfig, request: ProviderRequest): void {
   if (request.requireJson !== true) return;
   if (config.structuredOutputMode === "disabled") throw new ProviderRuntimeError(`provider ${config.provider} does not support structured JSON output`, { code: "invalid_request" });
@@ -1706,7 +2034,7 @@ function wireMessages(protocol: ProviderProtocol, messages: readonly ProviderMes
         const assistantContent = wireContent(protocol, message.content, message.role);
         if (Array.isArray(assistantContent)) output.push({ role: "assistant", content: assistantContent });
         else if (assistantContent) output.push({ role: "assistant", content: assistantContent });
-        for (const call of message.toolCalls) output.push({ type: "function_call", call_id: call.id, name: call.name, arguments: JSON.stringify(call.arguments) });
+        for (const call of message.toolCalls) output.push({ type: "function_call", call_id: call.id, name: call.name, arguments: nativeJsonStringify(call.arguments) });
       } else {
         output.push({ role: message.role, content: wireContent(protocol, message.content, message.role) });
       }
@@ -1728,7 +2056,7 @@ function wireMessages(protocol: ProviderProtocol, messages: readonly ProviderMes
       const row: Record<string, JsonValue> = { role: message.role, content: wireContent(protocol, message.content, message.role) };
       if (message.name) row.name = message.name;
       if (message.toolCallId) row.tool_call_id = message.toolCallId;
-      if (message.toolCalls?.length) row.tool_calls = message.toolCalls.map((call) => ({ id: call.id, type: "function", function: { name: call.name, arguments: JSON.stringify(call.arguments) } }));
+      if (message.toolCalls?.length) row.tool_calls = message.toolCalls.map((call) => ({ id: call.id, type: "function", function: { name: call.name, arguments: nativeJsonStringify(call.arguments) } }));
       output.push(row);
     }
   }
@@ -1851,7 +2179,7 @@ function parseResponse(config: NormalizedProviderConfig, payload: JsonObject, st
   if (toolCalls.some((call) => !allowedTools.has(call.name))) throw new ProviderRuntimeError("provider returned an unrequested tool call");
   let structured: JsonValue | null = null;
   if (!toolCalls.length && request.requireJson) {
-    try { structured = JSON.parse(text) as JsonValue; } catch { throw new ProviderRuntimeError("provider returned invalid JSON for the requested structured response", { code: "invalid_response" }); }
+    try { structured = nativeJsonParse(text) as JsonValue; } catch { throw new ProviderRuntimeError("provider returned invalid JSON for the requested structured response", { code: "invalid_response" }); }
     validateStructuredResponseOrThrow(structured, request.responseSchema);
   }
   return { provider: config.provider, model, text, statusCode, requestId, usage, structured, toolCalls, stopReason };
@@ -1894,7 +2222,7 @@ function normalizeLocalResponse(config: NormalizedProviderConfig, value: InMemor
   ];
   if (!envelopeKeys.some((key) => Object.prototype.hasOwnProperty.call(source, key))) {
     const structured = safeJson(source, "in-memory provider response", config.maxResponseBytes);
-    source = { text: JSON.stringify(structured), structured };
+    source = { text: nativeJsonStringify(structured), structured };
   }
   const provider = source.provider === undefined ? config.provider : boundedIdentifier("in-memory provider response provider", source.provider, 128);
   const model = source.model === undefined ? request.model : boundedIdentifier("in-memory provider response model", source.model, 512);
@@ -1916,7 +2244,7 @@ function normalizeLocalResponse(config: NormalizedProviderConfig, value: InMemor
   }
   if (!toolCalls.length && request.requireJson) {
     const candidate = structured ?? (() => {
-      try { return JSON.parse(text) as JsonValue; } catch { throw new ProviderRuntimeError("in-memory provider returned invalid JSON for the requested structured response", { code: "invalid_response" }); }
+      try { return nativeJsonParse(text) as JsonValue; } catch { throw new ProviderRuntimeError("in-memory provider returned invalid JSON for the requested structured response", { code: "invalid_response" }); }
     })();
     validateStructuredResponseOrThrow(candidate, request.responseSchema);
     structured = candidate;
@@ -2167,14 +2495,14 @@ async function readBoundedBody(response: Response, maximum: number): Promise<str
     return text;
   }
   const reader = response.body.getReader();
-  const decoder = new TextDecoder();
+  const decoder = new NativeTextDecoder();
   const chunks: string[] = [];
   let total = 0;
   try {
     while (true) {
       const next = await reader.read();
       if (next.done) break;
-      const chunk = decoder.decode(next.value, { stream: true });
+      const chunk = decodeUtf8(decoder, next.value, { stream: true });
       total += bytes(chunk);
       if (total > maximum) {
         await reader.cancel();
@@ -2182,7 +2510,7 @@ async function readBoundedBody(response: Response, maximum: number): Promise<str
       }
       chunks.push(chunk);
     }
-    const final = decoder.decode();
+    const final = decodeUtf8(decoder);
     total += bytes(final);
     if (total > maximum) throw new ResponseTooLargeError(maximum);
     chunks.push(final);
@@ -2197,6 +2525,41 @@ function retryableStatus(status: number): boolean {
 }
 
 type ProviderFailure = ProviderRuntimeError | CredentialError | ResponseTooLargeError;
+
+class ProviderDispatchObserverError extends Error {
+  override readonly name = "ProviderDispatchObserverError";
+  constructor(readonly reason: unknown) {
+    super("provider dispatch observer refused transport");
+  }
+}
+
+interface ProviderHttpResponseLease {
+  readonly release: () => void;
+  readonly timedOut: () => boolean;
+}
+
+const providerHttpResponseLeases = new WeakMap<Response, ProviderHttpResponseLease>();
+
+function providerHttpResponseLease(response: Response): ProviderHttpResponseLease | null {
+  return nativeReflectApply(nativeWeakMapGet, providerHttpResponseLeases, [response]) ?? null;
+}
+
+function releaseProviderHttpResponse(response: Response): void {
+  const lease = providerHttpResponseLease(response);
+  if (lease === null) return;
+  nativeReflectApply(nativeWeakMapDelete, providerHttpResponseLeases, [response]);
+  lease.release();
+}
+
+type BeforeProviderTransportDispatch = (
+  transportAttempt: number,
+  requestDigest: string,
+  providerIdempotencyKey: string | null,
+  providerConfig: NormalizedProviderConfig,
+  fetchImplementation: FetchImplementation,
+) => void | Promise<void>;
+
+type ProviderTransportEntered = () => void;
 
 function errorFromUnknown(error: unknown): ProviderFailure {
   if (error instanceof CredentialError) return error;
@@ -2253,39 +2616,36 @@ function autonomousProviderFailoverLimit(options: { maxProviderFailovers?: numbe
 }
 
 function abortFailure(callerSignal: AbortSignal | undefined, timedOut: boolean): ProviderRuntimeError {
-  if (callerSignal?.aborted) return new ProviderRuntimeError("provider request was aborted by the caller", { code: "aborted" });
+  if (abortSignalIsAborted(callerSignal)) return new ProviderRuntimeError("provider request was aborted by the caller", { code: "aborted" });
   if (timedOut) return new ProviderRuntimeError("provider request timed out", { code: "timeout", retryable: true });
   return new ProviderRuntimeError("provider request was aborted", { code: "aborted" });
 }
 
 function waitForRetry(delayMs: number, signal: AbortSignal | undefined): Promise<boolean> {
-  if (delayMs <= 0) return Promise.resolve(!signal?.aborted);
-  return new Promise((resolve) => {
+  if (delayMs <= 0) return nativePromiseResolve(!abortSignalIsAborted(signal));
+  return new NativePromise((resolve) => {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const finish = (completed: boolean): void => {
-      if (timer !== undefined) clearTimeout(timer);
-      signal?.removeEventListener("abort", onAbort);
+      if (timer !== undefined) nativeClearTimeout(timer);
+      removeAbortListener(signal, onAbort);
       resolve(completed);
     };
     const onAbort = (): void => finish(false);
-    timer = setTimeout(() => finish(true), delayMs);
-    if (signal?.aborted) finish(false);
-    else signal?.addEventListener("abort", onAbort, { once: true });
+    timer = nativeSetTimeout(() => finish(true), delayMs);
+    if (abortSignalIsAborted(signal)) finish(false);
+    else addAbortListener(signal, onAbort);
   });
 }
 
 function endpointUrl(config: NormalizedProviderConfig): string {
-  const url = new URL(config.baseUrl);
-  const basePath = url.pathname.replace(/\/+$/, "");
-  url.pathname = `${basePath}${config.path}` || "/";
-  return url.toString();
+  // normalizeConfig already removes the sole trailing slash and rejects query/fragment/userinfo.
+  // Joining two immutable normalized primitives avoids consulting mutable URL prototype methods
+  // after a durable dispatch acknowledgement.
+  return `${config.baseUrl}${config.path}`;
 }
 
 function modelsEndpointUrl(config: NormalizedProviderConfig): string {
-  const url = new URL(config.baseUrl);
-  const basePath = url.pathname.replace(/\/+$/, "");
-  url.pathname = `${basePath}${config.modelsPath}` || "/";
-  return url.toString();
+  return `${config.baseUrl}${config.modelsPath}`;
 }
 
 function nowMs(): number {
@@ -2552,7 +2912,9 @@ export class LLMRuntime {
       if (options.credential !== undefined) throw new CredentialError(`provider ${provider} does not accept a credential handle`);
       if (!config.transport.discoverModels) throw new ProviderRuntimeError(`provider ${provider} does not expose local model discovery`, { code: "invalid_request" });
       try {
+        if (abortSignalIsAborted(options.signal)) throw abortFailure(options.signal, false);
         const payload = await config.transport.discoverModels();
+        if (abortSignalIsAborted(options.signal)) throw abortFailure(options.signal, false);
         return projectModelCatalog(config, safeJson(payload, "in-memory provider model catalog", config.maxResponseBytes), 200, null);
       } catch (error) {
         throw contextProviderFailure(errorFromUnknown(error), provider, "model_discovery");
@@ -2565,15 +2927,21 @@ export class LLMRuntime {
       const error = contextProviderFailure(errorFromUnknown(unknownError), provider, "model_discovery");
       throw error;
     }
+    const lease = providerHttpResponseLease(response);
     try {
       const body = await readBoundedBody(response, config.maxResponseBytes);
       if (response.status >= 400) throw providerHttpError(response.status, response.headers);
       let payload: unknown;
-      try { payload = JSON.parse(body); } catch { throw new ProviderRuntimeError("provider model catalog returned non-JSON data", { statusCode: response.status, code: "invalid_response" }); }
+      try { payload = nativeJsonParse(body); } catch { throw new ProviderRuntimeError("provider model catalog returned non-JSON data", { statusCode: response.status, code: "invalid_response" }); }
       if (!isObject(payload)) throw new ProviderRuntimeError("provider model catalog must be a JSON object", { statusCode: response.status, code: "invalid_response" });
       return projectModelCatalog(config, payload as JsonObject, response.status, requestIdFromHeaders(response.headers));
     } catch (unknownError) {
-      throw contextProviderFailure(errorFromUnknown(unknownError), provider, "model_discovery");
+      const normalizedUnknown = isAbortError(unknownError)
+        ? abortFailure(options.signal, lease?.timedOut() ?? false)
+        : unknownError;
+      throw contextProviderFailure(errorFromUnknown(normalizedUnknown), provider, "model_discovery");
+    } finally {
+      releaseProviderHttpResponse(response);
     }
   }
 
@@ -2630,7 +2998,7 @@ export class LLMRuntime {
       };
     });
     const signature = canonicalJson({ providers, models });
-    if (this.cachedHealthSnapshot !== null && this.cachedHealthSignature === signature) return structuredClone(this.cachedHealthSnapshot);
+    if (this.cachedHealthSnapshot !== null && this.cachedHealthSignature === signature) return nativeStructuredClone(this.cachedHealthSnapshot);
     const body = {
       schema: LLM_RUNTIME_HEALTH_SNAPSHOT_SCHEMA,
       snapshot_generation: this.healthSnapshotGeneration + 1,
@@ -2643,9 +3011,9 @@ export class LLMRuntime {
     const snapshot = await validateLLMRuntimeHealthSnapshot({ ...body, snapshot_digest: await digestJson(body) });
     this.healthSnapshotGeneration = snapshot.snapshot_generation!;
     this.previousHealthSnapshotDigest = snapshot.snapshot_digest;
-    this.cachedHealthSnapshot = structuredClone(snapshot);
+    this.cachedHealthSnapshot = nativeStructuredClone(snapshot);
     this.cachedHealthSignature = signature;
-    return structuredClone(snapshot);
+    return nativeStructuredClone(snapshot);
   }
 
   /** Restore validated provider transport health atomically; providers must already be registered. */
@@ -2689,7 +3057,7 @@ export class LLMRuntime {
     for (const [arm, state] of models) this.modelHealthState.set(arm, state);
     this.healthSnapshotGeneration = snapshot.snapshot_generation ?? 0;
     this.previousHealthSnapshotDigest = this.healthSnapshotGeneration === 0 ? null : snapshot.snapshot_digest;
-    this.cachedHealthSnapshot = snapshot.schema === LLM_RUNTIME_HEALTH_SNAPSHOT_SCHEMA ? structuredClone(snapshot) : null;
+    this.cachedHealthSnapshot = snapshot.schema === LLM_RUNTIME_HEALTH_SNAPSHOT_SCHEMA ? nativeStructuredClone(snapshot) : null;
     this.cachedHealthSignature = this.cachedHealthSnapshot === null ? null : canonicalJson({ providers: this.cachedHealthSnapshot.providers, models: this.cachedHealthSnapshot.models });
   }
 
@@ -2714,36 +3082,97 @@ export class LLMRuntime {
     request: ProviderRequest,
     options: ProviderInvocationOptions = {},
   ): Promise<ProviderResponse> {
+    options = { ...options };
     const config = this.requireProvider(provider);
-    validateRequest(request);
+    request = snapshotProviderRequest(request);
     validateStructuredOutputSupport(config, request);
-    const metadata = requestMetadata(provider, request, options.invocationKind ?? "provider_call");
+    const observer = options.observer;
+    const providerDispatchFence = options.providerDispatchFence;
+    const selectedCredential = options.credential;
+    const signal = options.signal;
+    const selectedBoundary = options.effectBoundary ?? this.effectBoundaryValue;
+    const metadata = nativeObjectFreeze(requestMetadata(provider, request, options.invocationKind ?? "provider_call"));
     this.authorizeProvider(options, provider, request, metadata.kind);
+    const credentialBinding = captureProviderCredential(this.credentials, config, selectedCredential);
     const quota = options.providerQuota ?? this.providerQuota;
     const quotaReservation = quota?.reserve({ provider, model: request.model, inputTokens: metadata.inputTokens, outputTokens: request.maxOutputTokens, costUnits: options.estimatedCostUnits ?? 0 });
-    const releaseCost = options.reserveCost?.(options.estimatedCostUnits ?? 0);
+    let releaseCost: AutonomousCostReservation | void;
+    try {
+      releaseCost = options.reserveCost?.(options.estimatedCostUnits ?? 0);
+    } catch (error) {
+      // Quota and aggregate-cost admission form one transaction. A caller-owned cost gate can
+      // reject after quota has already reserved capacity, so unwind the first admission here.
+      quotaReservation?.release();
+      throw error;
+    }
     try {
       await options.execution?.admitProviderCall({ provider, model: request.model, invocationKind: metadata.kind, attempt: options.executionAttempt, turn: options.executionTurn, selectionDigest: options.selectionDigest, estimatedCostUnits: options.estimatedCostUnits, costUnits: options.estimatedCostUnits, failover: options.executionFailover });
-      await options.observer?.before?.(metadata);
+      await observer?.before?.(metadata);
     } catch (error) {
       quotaReservation?.release();
       releaseCost?.();
       throw error;
     }
     const started = nowMs();
+    let transportEntered = false;
+    let quotaFinalized = false;
+    let costReleased = false;
+    const settleQuota = (input: ProviderQuotaSettlementInput = {}): void => {
+      if (quotaFinalized) return;
+      quotaReservation?.settle(input);
+      quotaFinalized = true;
+    };
+    const releaseAdmission = (): void => {
+      if (!quotaFinalized) {
+        quotaReservation?.release();
+        quotaFinalized = true;
+      }
+      if (!costReleased) {
+        costReleased = true;
+        releaseCost?.();
+      }
+    };
+    const markTransportEntered: ProviderTransportEntered = () => { transportEntered = true; };
     let outcomeRecorded = false;
     const recordOutcome = async (outcome: ProviderInvocationOutcome): Promise<void> => {
       if (outcomeRecorded) return;
       outcomeRecorded = true;
-      await options.observer?.after?.(metadata, outcome);
-      await recordExecutionProviderOutcome(options.execution, metadata, outcome, { attempt: options.executionAttempt, turn: options.executionTurn, selectionDigest: options.selectionDigest, estimatedCostUnits: options.estimatedCostUnits });
+      const authoritativeOutcome = providerInvocationOutcomeSnapshot(outcome);
+      try {
+        await observer?.after?.({ ...metadata }, { ...authoritativeOutcome });
+      } catch {
+        // Outcome observers are diagnostics after an authoritative provider result. Their failure
+        // must not relabel a successful transport as retryable or trigger a duplicate provider call.
+      } finally {
+        await recordExecutionProviderOutcome(options.execution, metadata, authoritativeOutcome, { attempt: options.executionAttempt, turn: options.executionTurn, selectionDigest: options.selectionDigest, estimatedCostUnits: options.estimatedCostUnits });
+      }
+    };
+    const beforeTransportDispatch: BeforeProviderTransportDispatch = async (
+      transportAttempt,
+      requestDigest,
+      providerIdempotencyKey,
+      providerConfig,
+      fetchImplementation,
+    ) => {
+      await observer?.dispatch?.(metadata);
+      if (abortSignalIsAborted(signal)) throw abortFailure(signal, false);
+      // Quota implementations are caller-owned code. Run their last mutation-capable hook before
+      // the private durable fence, then re-attest transport and credential state in that fence.
+      quotaReservation?.markDispatched();
+      if (abortSignalIsAborted(signal)) throw abortFailure(signal, false);
+      await providerDispatchFence?.(boundProviderTransportDispatchContext({
+        provider,
+        model: request.model,
+        kind: metadata.kind,
+        requestDigest,
+        providerIdempotencyKey,
+        transportAttempt,
+      }, providerConfig, fetchImplementation, this.credentials, credentialBinding.stillValid));
     };
     try {
-      const selectedBoundary = options.effectBoundary ?? this.effectBoundaryValue;
       let response: ProviderResponse;
       if (!selectedBoundary) {
-        quotaReservation?.markDispatched();
-        response = await this.request(config, request, options.credential, options.signal, false);
+        response = await this.request(config, request, credentialBinding.secret, credentialBinding.stillValid, signal, false, beforeTransportDispatch, markTransportEntered);
       } else {
         const requestDigest = await digestJson({
           provider,
@@ -2777,42 +3206,66 @@ export class LLMRuntime {
             },
           },
           async (context) => {
-            quotaReservation?.markDispatched();
-            return this.request(config, request.idempotencyKey ? request : { ...request, idempotencyKey: context.idempotency_key }, options.credential, options.signal, false);
+            return this.request(config, request.idempotencyKey ? request : { ...request, idempotencyKey: context.idempotency_key }, credentialBinding.secret, credentialBinding.stillValid, signal, false, beforeTransportDispatch, markTransportEntered);
           },
           { execution: options.execution, resultProjector: providerEffectProjection, cacheResult: false, definiteFailure: providerEffectFailureIsDefinite },
         );
       }
       const latencyMs = Math.max(0, nowMs() - started);
+      settleQuota({ inputTokens: response.usage.input_tokens ?? metadata.inputTokens, outputTokens: response.usage.output_tokens ?? 0, costUnits: options.estimatedCostUnits ?? 0 });
       this.record(provider, request.model, true, latencyMs, response.statusCode, response);
       await recordOutcome({ success: true, status: "completed", latencyMs, inputTokens: response.usage.input_tokens ?? metadata.inputTokens, outputTokens: response.usage.output_tokens ?? 0, statusCode: response.statusCode });
-      quotaReservation?.settle({ inputTokens: response.usage.input_tokens ?? metadata.inputTokens, outputTokens: response.usage.output_tokens ?? 0, costUnits: options.estimatedCostUnits ?? 0 });
       return response;
     } catch (unknownError) {
+      if (unknownError instanceof ProviderDispatchObserverError) {
+        // A later retry can be refused by its final fence after an earlier attempt already entered
+        // provider transport. Preserve that earlier charge; only a wholly pre-transport refusal is
+        // eligible to release quota and aggregate cost.
+        try {
+          if (transportEntered) settleQuota(); else releaseAdmission();
+        } catch {
+          // Final accounting must not replace the authoritative dispatch-fence refusal.
+        }
+        throw unknownError.reason;
+      }
       if (unknownError instanceof AutonomousEffectReconciliationRequiredError) {
         const latencyMs = Math.max(0, nowMs() - started);
         this.record(provider, request.model, false, latencyMs, null);
-        await recordOutcome({ success: false, status: "provider_refused", latencyMs, inputTokens: metadata.inputTokens, outputTokens: 0, failureClass: "provider_error", failureCode: "provider_error", retryable: false });
+        try {
+          if (transportEntered) settleQuota(); else releaseAdmission();
+        } catch {
+          // Preserve reconciliation as the authoritative failure.
+        }
+        try {
+          await recordOutcome({ success: false, status: "provider_refused", latencyMs, inputTokens: metadata.inputTokens, outputTokens: 0, failureClass: "provider_error", failureCode: "provider_error", retryable: false });
+        } catch {
+          // Post-outcome persistence cannot mask a required reconciliation.
+        }
         throw unknownError;
       }
       const error = contextProviderFailure(errorFromUnknown(unknownError), provider, "invoke");
       const latencyMs = Math.max(0, nowMs() - started);
       this.record(provider, request.model, false, latencyMs, error instanceof ProviderRuntimeError ? error.statusCode ?? null : null);
-      await recordOutcome({
-        success: false,
-        status: "provider_refused",
-        latencyMs,
-        inputTokens: metadata.inputTokens,
-        outputTokens: 0,
-        ...(error instanceof ProviderRuntimeError && error.statusCode !== undefined ? { statusCode: error.statusCode } : {}),
-        failureClass: failureClass(error),
-        failureCode: failureCode(error),
-        requestId: error instanceof ProviderRuntimeError ? error.requestId ?? null : null,
-        retryable: error instanceof ProviderRuntimeError ? error.retryable : false,
-      });
-      if (quotaReservation) {
-        if (quotaReservation.isDispatched) quotaReservation.settle();
-        else quotaReservation.release();
+      try {
+        if (transportEntered) settleQuota(); else releaseAdmission();
+      } catch {
+        // Keep the provider failure authoritative even if a local accounting adapter fails.
+      }
+      try {
+        await recordOutcome({
+          success: false,
+          status: "provider_refused",
+          latencyMs,
+          inputTokens: metadata.inputTokens,
+          outputTokens: 0,
+          ...(error instanceof ProviderRuntimeError && error.statusCode !== undefined ? { statusCode: error.statusCode } : {}),
+          failureClass: failureClass(error),
+          failureCode: failureCode(error),
+          requestId: error instanceof ProviderRuntimeError ? error.requestId ?? null : null,
+          retryable: error instanceof ProviderRuntimeError ? error.retryable : false,
+        });
+      } catch {
+        // A provider error remains the caller-visible failure when outcome persistence fails.
       }
       throw error;
     }
@@ -2823,6 +3276,8 @@ export class LLMRuntime {
     request: ProviderRequest,
     options: ProviderInvocationOptions = {},
   ): AsyncIterable<ProviderStreamEvent> {
+    options = { ...options };
+    request = snapshotProviderRequest(request);
     this.authorizeProvider(options, provider, request, options.invocationKind ?? "provider_stream");
     const selectedBoundary = options.effectBoundary ?? this.effectBoundaryValue;
     if (!selectedBoundary) {
@@ -2898,16 +3353,28 @@ export class LLMRuntime {
     request: ProviderRequest,
     options: ProviderInvocationOptions = {},
   ): AsyncIterable<ProviderStreamEvent> {
+    options = { ...options };
     const config = this.requireProvider(provider);
-    validateRequest(request);
+    request = snapshotProviderRequest(request);
     validateStructuredOutputSupport(config, request);
-    const metadata = requestMetadata(provider, request, options.invocationKind ?? "provider_stream");
+    const observer = options.observer;
+    const providerDispatchFence = options.providerDispatchFence;
+    const selectedCredential = options.credential;
+    const signal = options.signal;
+    const metadata = nativeObjectFreeze(requestMetadata(provider, request, options.invocationKind ?? "provider_stream"));
+    const credentialBinding = captureProviderCredential(this.credentials, config, selectedCredential);
     const quota = options.providerQuota ?? this.providerQuota;
     const quotaReservation = quota?.reserve({ provider, model: request.model, inputTokens: metadata.inputTokens, outputTokens: request.maxOutputTokens, costUnits: options.estimatedCostUnits ?? 0 });
-    const releaseCost = options.reserveCost?.(options.estimatedCostUnits ?? 0);
+    let releaseCost: AutonomousCostReservation | void;
+    try {
+      releaseCost = options.reserveCost?.(options.estimatedCostUnits ?? 0);
+    } catch (error) {
+      quotaReservation?.release();
+      throw error;
+    }
     try {
       await options.execution?.admitProviderCall({ provider, model: request.model, invocationKind: metadata.kind, attempt: options.executionAttempt, turn: options.executionTurn, selectionDigest: options.selectionDigest, estimatedCostUnits: options.estimatedCostUnits, costUnits: options.estimatedCostUnits, failover: options.executionFailover });
-      await options.observer?.before?.(metadata);
+      await observer?.before?.(metadata);
     } catch (error) {
       quotaReservation?.release();
       releaseCost?.();
@@ -2917,21 +3384,80 @@ export class LLMRuntime {
     let outcome: ProviderInvocationOutcome | null = null;
     let doneSeen = false;
     let emittedEventCount = 0;
+    let activeHttpResponse: Response | null = null;
+    let transportEntered = false;
+    let quotaFinalized = false;
+    let costReleased = false;
+    let hasPrimaryError = false;
+    const settleQuota = (): void => {
+      if (quotaFinalized) return;
+      quotaReservation?.settle({ inputTokens: metadata.inputTokens, outputTokens: request.maxOutputTokens, costUnits: options.estimatedCostUnits ?? 0 });
+      quotaFinalized = true;
+    };
+    const releaseAdmission = (): void => {
+      if (!quotaFinalized) {
+        quotaReservation?.release();
+        quotaFinalized = true;
+      }
+      if (!costReleased) {
+        costReleased = true;
+        releaseCost?.();
+      }
+    };
+    const markTransportEntered: ProviderTransportEntered = () => { transportEntered = true; };
     const validateEvent = (event: ProviderStreamEvent): ProviderStreamEvent => {
       if (doneSeen) throw new ProviderRuntimeError("provider stream emitted an event after its terminal done event", { code: "invalid_response" });
       emittedEventCount += 1;
       if (event.done) doneSeen = true;
       return event;
     };
+    const beforeTransportDispatch: BeforeProviderTransportDispatch = async (
+      transportAttempt,
+      requestDigest,
+      providerIdempotencyKey,
+      providerConfig,
+      fetchImplementation,
+    ) => {
+      await observer?.dispatch?.(metadata);
+      if (abortSignalIsAborted(signal)) throw abortFailure(signal, false);
+      quotaReservation?.markDispatched();
+      if (abortSignalIsAborted(signal)) throw abortFailure(signal, false);
+      await providerDispatchFence?.(boundProviderTransportDispatchContext({
+        provider,
+        model: request.model,
+        kind: metadata.kind,
+        requestDigest,
+        providerIdempotencyKey,
+        transportAttempt,
+      }, providerConfig, fetchImplementation, this.credentials, credentialBinding.stillValid));
+    };
     try {
       if (config.transport) {
+        const fetchImplementation = this.fetchImplementation;
         const circuit = this.circuits.get(provider) ?? { consecutiveFailures: 0, openedUntil: null };
-        if (options.signal?.aborted) throw new ProviderRuntimeError("provider request was aborted before dispatch", { code: "aborted" });
+        if (abortSignalIsAborted(signal)) throw new ProviderRuntimeError("provider request was aborted before dispatch", { code: "aborted" });
         if (circuit.openedUntil !== null && circuit.openedUntil > this.clock()) throw new ProviderRuntimeError("provider circuit is open; invocation is temporarily refused", { circuitOpen: true, code: "circuit_open" });
         if (circuit.openedUntil !== null) { circuit.openedUntil = null; circuit.consecutiveFailures = 0; }
         try {
-          quotaReservation?.markDispatched();
-          for await (const event of streamLocalTransport(config, request)) yield validateEvent(event);
+          try {
+            await beforeTransportDispatch(
+              1,
+              await providerRequestDigest(request),
+              request.idempotencyKey ?? null,
+              config,
+              fetchImplementation,
+            );
+          } catch (error) {
+            throw new ProviderDispatchObserverError(error);
+          }
+          if (!credentialBinding.stillValid()) throw new CredentialError("credential handle changed before provider transport");
+          if (abortSignalIsAborted(signal)) throw new ProviderRuntimeError("provider request was aborted before dispatch", { code: "aborted" });
+          markTransportEntered();
+          for await (const event of streamLocalTransport(config, request)) {
+            if (abortSignalIsAborted(signal)) throw abortFailure(signal, false);
+            yield validateEvent(event);
+          }
+          if (abortSignalIsAborted(signal)) throw abortFailure(signal, false);
           if (!doneSeen) throw new ProviderRuntimeError("provider stream ended without a done event", { retryable: emittedEventCount === 0, code: "invalid_response" });
           circuit.consecutiveFailures = 0;
           circuit.openedUntil = null;
@@ -2939,6 +3465,7 @@ export class LLMRuntime {
           outcome = { success: true, status: "completed", latencyMs: Math.max(0, nowMs() - started), inputTokens: metadata.inputTokens, outputTokens: 0, statusCode: 200 };
           return;
         } catch (error) {
+          if (error instanceof ProviderDispatchObserverError) throw error;
           const normalized = errorFromUnknown(error);
           if (normalized instanceof ProviderRuntimeError && normalized.retryable) {
             circuit.consecutiveFailures += 1;
@@ -2947,21 +3474,24 @@ export class LLMRuntime {
           throw normalized;
         }
       }
-      quotaReservation?.markDispatched();
-      const response = await this.fetchWithRetries(config, request, options.credential, options.signal, true);
+      const response = await this.fetchWithRetries(config, request, credentialBinding.secret, credentialBinding.stillValid, signal, true, beforeTransportDispatch, markTransportEntered);
       if (isProviderResponseValue(response)) throw new ProviderRuntimeError("provider stream returned a non-stream response");
+      activeHttpResponse = response;
       if (response.status >= 400) throw providerHttpError(response.status, response.headers);
       const contentType = response.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase() ?? "";
       if (contentType && contentType !== "text/event-stream") throw new ProviderRuntimeError("provider stream did not return text/event-stream", { statusCode: response.status });
       if (!response.body) throw new ProviderRuntimeError("provider stream did not return a readable body");
       const reader = response.body.getReader();
-      const decoder = new TextDecoder();
+      const decoder = new NativeTextDecoder();
       let buffer = "";
+      let bodyExhausted = false;
       const state: StreamState = { model: request.model, requestId: requestIdFromHeaders(response.headers), sequence: 0, textBytes: 0, usage: {}, calls: new Map(), anthropicCalls: new Map() };
       try {
         while (true) {
+          if (abortSignalIsAborted(signal)) throw abortFailure(signal, false);
           const next = await reader.read();
-          const text = decoder.decode(next.value, { stream: !next.done });
+          if (abortSignalIsAborted(signal)) throw abortFailure(signal, false);
+          const text = decodeUtf8(decoder, next.value, { stream: !next.done });
           buffer += text;
           const split = splitSseFrames(buffer);
           buffer = split.remainder;
@@ -2982,7 +3512,7 @@ export class LLMRuntime {
               continue;
             }
             let payload: JsonObject;
-            try { const decodedPayload: unknown = JSON.parse(parsed.data); if (!isObject(decodedPayload)) throw new Error(); payload = decodedPayload as JsonObject; } catch { throw new ProviderRuntimeError("provider stream contained invalid JSON"); }
+            try { const decodedPayload: unknown = nativeJsonParse(parsed.data); if (!isObject(decodedPayload)) throw new Error(); payload = decodedPayload as JsonObject; } catch { throw new ProviderRuntimeError("provider stream contained invalid JSON"); }
             for (const projected of projectStreamPayload(config.protocol, parsed.event, payload, state, request)) {
               if (projected.text) {
                 state.textBytes += bytes(projected.text);
@@ -3005,7 +3535,8 @@ export class LLMRuntime {
             }
           }
           if (next.done) {
-            const final = decoder.decode();
+            bodyExhausted = true;
+            const final = decodeUtf8(decoder);
             if (final) buffer += final;
             const parsed = parseSseFrame(buffer);
             if (parsed?.data === "[DONE]" && !doneSeen) {
@@ -3018,7 +3549,7 @@ export class LLMRuntime {
               yield validateEvent(streamEvent(provider, state.model, state.sequence, "stream.done", state.requestId, "", state.usage, true, undefined));
             } else if (parsed && parsed.data !== "[DONE]") {
               let payload: JsonObject;
-              try { const decodedPayload: unknown = JSON.parse(parsed.data); if (!isObject(decodedPayload)) throw new Error(); payload = decodedPayload as JsonObject; } catch { throw new ProviderRuntimeError("provider stream contained invalid JSON"); }
+              try { const decodedPayload: unknown = nativeJsonParse(parsed.data); if (!isObject(decodedPayload)) throw new Error(); payload = decodedPayload as JsonObject; } catch { throw new ProviderRuntimeError("provider stream contained invalid JSON"); }
               for (const projected of projectStreamPayload(config.protocol, parsed.event, payload, state, request)) {
                 state.sequence += 1;
                 if (projected.calls?.length) {
@@ -3038,12 +3569,25 @@ export class LLMRuntime {
             break;
           }
         }
-      } finally { reader.releaseLock(); }
+      } finally {
+        if (!bodyExhausted) {
+          try { await reader.cancel(); } catch { /* best-effort socket/body cleanup must not mask the primary result */ }
+        }
+        reader.releaseLock();
+      }
       if (!doneSeen) throw new ProviderRuntimeError("provider stream ended without a done event", { retryable: emittedEventCount === 0, code: "invalid_response" });
       this.record(provider, request.model, true, Math.max(0, nowMs() - started), 200);
       outcome = { success: true, status: "completed", latencyMs: Math.max(0, nowMs() - started), inputTokens: metadata.inputTokens, outputTokens: 0, statusCode: 200 };
     } catch (unknownError) {
-      const error = contextProviderFailure(errorFromUnknown(unknownError), provider, "stream");
+      if (unknownError instanceof ProviderDispatchObserverError) {
+        hasPrimaryError = true;
+        throw unknownError.reason;
+      }
+      const activeLease = activeHttpResponse === null ? null : providerHttpResponseLease(activeHttpResponse);
+      const normalizedUnknown = isAbortError(unknownError)
+        ? abortFailure(signal, activeLease?.timedOut() ?? false)
+        : unknownError;
+      const error = contextProviderFailure(errorFromUnknown(normalizedUnknown), provider, "stream");
       const latencyMs = Math.max(0, nowMs() - started);
       this.record(provider, request.model, false, latencyMs, error instanceof ProviderRuntimeError ? error.statusCode ?? null : null);
       outcome = {
@@ -3058,18 +3602,55 @@ export class LLMRuntime {
         requestId: error instanceof ProviderRuntimeError ? error.requestId ?? null : null,
         retryable: error instanceof ProviderRuntimeError ? error.retryable : false,
       };
+      hasPrimaryError = true;
       throw error;
     } finally {
-      if (outcome) {
-        await options.observer?.after?.(metadata, outcome);
-        await recordExecutionProviderOutcome(options.execution, metadata, outcome, { attempt: options.executionAttempt, turn: options.executionTurn, selectionDigest: options.selectionDigest, estimatedCostUnits: options.estimatedCostUnits });
-        if (quotaReservation?.isDispatched) quotaReservation.settle({ inputTokens: metadata.inputTokens, outputTokens: request.maxOutputTokens, costUnits: options.estimatedCostUnits ?? 0 });
-        else quotaReservation?.release();
+      if (outcome === null && transportEntered) {
+        const latencyMs = Math.max(0, nowMs() - started);
+        if (doneSeen) {
+          this.record(provider, request.model, true, latencyMs, 200);
+          outcome = { success: true, status: "completed", latencyMs, inputTokens: metadata.inputTokens, outputTokens: 0, statusCode: 200 };
+        } else {
+          const abandoned = new ProviderRuntimeError("provider stream was closed before completion", { code: "aborted" });
+          this.record(provider, request.model, false, latencyMs, null);
+          outcome = {
+            success: false,
+            status: "provider_refused",
+            latencyMs,
+            inputTokens: metadata.inputTokens,
+            outputTokens: 0,
+            failureClass: failureClass(abandoned),
+            failureCode: failureCode(abandoned),
+            retryable: false,
+          };
+        }
+      }
+      if (activeHttpResponse !== null) releaseProviderHttpResponse(activeHttpResponse);
+      try {
+        if (transportEntered) settleQuota(); else releaseAdmission();
+      } catch (accountingError) {
+        if (!hasPrimaryError) throw accountingError;
+      }
+      try {
+        if (outcome) {
+          const authoritativeOutcome = providerInvocationOutcomeSnapshot(outcome);
+          try {
+            await observer?.after?.({ ...metadata }, { ...authoritativeOutcome });
+          } catch {
+            // A diagnostic observer cannot reopen or retry an already settled streaming transport.
+          } finally {
+            await recordExecutionProviderOutcome(options.execution, metadata, authoritativeOutcome, { attempt: options.executionAttempt, turn: options.executionTurn, selectionDigest: options.selectionDigest, estimatedCostUnits: options.estimatedCostUnits });
+          }
+        }
+      } catch (outcomeError) {
+        if (!hasPrimaryError) throw outcomeError;
       }
     }
   }
 
   async collectStream(provider: string, request: ProviderRequest, options: ProviderInvocationOptions = {}): Promise<ProviderResponse> {
+    options = { ...options };
+    request = snapshotProviderRequest(request);
     this.authorizeProvider(options, provider, request, options.invocationKind ?? "provider_stream");
     const collect = async (dispatchedRequest: ProviderRequest): Promise<ProviderResponse> => {
       const text: string[] = [];
@@ -3093,7 +3674,7 @@ export class LLMRuntime {
       const outputText = text.join("");
       let structured: JsonValue | null = null;
       if (!calls.length && dispatchedRequest.requireJson) {
-        try { structured = JSON.parse(outputText) as JsonValue; } catch { throw new ProviderRuntimeError("provider stream returned invalid JSON", { code: "invalid_response" }); }
+        try { structured = nativeJsonParse(outputText) as JsonValue; } catch { throw new ProviderRuntimeError("provider stream returned invalid JSON", { code: "invalid_response" }); }
         validateStructuredResponseOrThrow(structured, dispatchedRequest.responseSchema);
       }
       return { provider, model, text: outputText, statusCode: 200, requestId, usage, structured, toolCalls: calls, stopReason: null };
@@ -3149,6 +3730,8 @@ export class LLMRuntime {
       toolReadOnly?: (call: ProviderToolCall) => boolean | Promise<boolean>;
     },
   ): Promise<ProviderToolLoopResult> {
+    options = { ...options };
+    request = snapshotProviderRequest(request);
     if (typeof options.authorizeAndExecute !== "function") throw new ProviderRuntimeError("authorizeAndExecute must be callable");
     const maxTurns = options.maxTurns ?? 4;
     const maxToolCalls = options.maxToolCalls ?? MAX_PROVIDER_TOOLS;
@@ -3160,12 +3743,15 @@ export class LLMRuntime {
     let toolCalls = 0;
     for (let turn = 0; turn < maxTurns; turn += 1) {
       if (options.contextBudget !== undefined) current = (await compactAutonomousProviderRequest(current, options.contextBudget)).request;
+      const requestForTurn = current.idempotencyKey === undefined
+        ? current
+        : { ...current, idempotencyKey: await providerToolTurnIdempotencyKey(current.idempotencyKey, turn + 1, current) };
       const providerOptions = {
         ...options,
         executionTurn: turn + 1,
-        ...(options.costEstimator ? { estimatedCostUnits: options.costEstimator(current) } : {}),
+        ...(options.costEstimator ? { estimatedCostUnits: options.costEstimator(requestForTurn) } : {}),
       };
-      response ??= options.stream ? await this.collectStream(provider, current, providerOptions) : await this.invoke(provider, current, providerOptions);
+      response ??= options.stream ? await this.collectStream(provider, requestForTurn, providerOptions) : await this.invoke(provider, requestForTurn, providerOptions);
       responses.push(response);
       if (response.toolCalls.length === 0) return { status: "completed", responses, finalResponse: response, turns: responses.length, toolCalls };
       toolCalls += response.toolCalls.length;
@@ -3204,37 +3790,67 @@ export class LLMRuntime {
     return config;
   }
 
-  private async request(config: NormalizedProviderConfig, request: ProviderRequest, credential: CredentialHandle | undefined, signal: AbortSignal | undefined, stream: boolean): Promise<ProviderResponse> {
-    const response = await this.fetchWithRetries(config, request, credential, signal, stream);
+  private async request(
+    config: NormalizedProviderConfig,
+    request: ProviderRequest,
+    credentialSecret: string | null,
+    credentialBindingProbe: () => boolean,
+    signal: AbortSignal | undefined,
+    stream: boolean,
+    beforeDispatch?: BeforeProviderTransportDispatch,
+    onTransportEntered?: ProviderTransportEntered,
+  ): Promise<ProviderResponse> {
+    const response = await this.fetchWithRetries(config, request, credentialSecret, credentialBindingProbe, signal, stream, beforeDispatch, onTransportEntered);
     if (isProviderResponseValue(response)) return response;
-    const body = await readBoundedBody(response, config.maxResponseBytes);
-    if (response.status >= 400) throw providerHttpError(response.status, response.headers);
-    let payload: unknown;
-    try { payload = JSON.parse(body); } catch { throw new ProviderRuntimeError("provider returned a non-JSON response", { statusCode: response.status }); }
-    if (!isObject(payload)) throw new ProviderRuntimeError("provider response must be a JSON object", { statusCode: response.status });
-    const parsed = parseResponse(config, payload as JsonObject, response.status, request, requestIdFromHeaders(response.headers) ?? asString(payload.id));
-    return parsed;
+    const lease = providerHttpResponseLease(response);
+    try {
+      const body = await readBoundedBody(response, config.maxResponseBytes);
+      if (response.status >= 400) throw providerHttpError(response.status, response.headers);
+      let payload: unknown;
+      try { payload = nativeJsonParse(body); } catch { throw new ProviderRuntimeError("provider returned a non-JSON response", { statusCode: response.status }); }
+      if (!isObject(payload)) throw new ProviderRuntimeError("provider response must be a JSON object", { statusCode: response.status });
+      const parsed = parseResponse(config, payload as JsonObject, response.status, request, requestIdFromHeaders(response.headers) ?? asString(payload.id));
+      return parsed;
+    } catch (error) {
+      if (isAbortError(error)) throw abortFailure(signal, lease?.timedOut() ?? false);
+      throw error;
+    } finally {
+      releaseProviderHttpResponse(response);
+    }
   }
 
-  private async fetchWithRetries(config: NormalizedProviderConfig, request: ProviderRequest, credential: CredentialHandle | undefined, signal: AbortSignal | undefined, stream: boolean): Promise<Response | ProviderResponse> {
+  private async fetchWithRetries(
+    config: NormalizedProviderConfig,
+    request: ProviderRequest,
+    credentialSecret: string | null,
+    credentialBindingProbe: () => boolean,
+    signal: AbortSignal | undefined,
+    stream: boolean,
+    beforeDispatch?: BeforeProviderTransportDispatch,
+    onTransportEntered?: ProviderTransportEntered,
+  ): Promise<Response | ProviderResponse> {
     const circuit = this.circuits.get(config.provider) ?? { consecutiveFailures: 0, openedUntil: null };
-    if (signal?.aborted) throw new ProviderRuntimeError("provider request was aborted before dispatch", { code: "aborted" });
+    if (abortSignalIsAborted(signal)) throw new ProviderRuntimeError("provider request was aborted before dispatch", { code: "aborted" });
     if (circuit.openedUntil !== null && circuit.openedUntil > this.clock()) throw new ProviderRuntimeError("provider circuit is open; invocation is temporarily refused", { circuitOpen: true, code: "circuit_open" });
     if (circuit.openedUntil !== null) { circuit.openedUntil = null; circuit.consecutiveFailures = 0; }
     let lastError: ProviderFailure | null = null;
     for (let attempt = 0; attempt < config.maxAttempts; attempt += 1) {
       try {
-        const response = await this.fetchOnce(config, request, credential, signal, stream);
+        const response = await this.fetchOnce(config, request, credentialSecret, credentialBindingProbe, signal, stream, attempt + 1, beforeDispatch, onTransportEntered);
         if (isProviderResponseValue(response)) {
           circuit.consecutiveFailures = 0;
           circuit.openedUntil = null;
           return response;
         }
-        if (response.status >= 400) throw providerHttpError(response.status, response.headers);
+        if (response.status >= 400) {
+          releaseProviderHttpResponse(response);
+          throw providerHttpError(response.status, response.headers);
+        }
         circuit.consecutiveFailures = 0;
         circuit.openedUntil = null;
         return response;
       } catch (unknownError) {
+        if (unknownError instanceof ProviderDispatchObserverError) throw unknownError;
         const normalizedError = errorFromUnknown(unknownError);
         const error = normalizedError instanceof ProviderRuntimeError
           ? normalizedError.withContext({ provider: config.provider, operation: "provider_request", attempt: attempt + 1 })
@@ -3254,62 +3870,140 @@ export class LLMRuntime {
     throw lastError ?? new ProviderRuntimeError("provider invocation failed", { code: "transport", retryable: true, provider: config.provider, operation: "provider_request" });
   }
 
-  private async fetchOnce(config: NormalizedProviderConfig, request: ProviderRequest, credential: CredentialHandle | undefined, callerSignal: AbortSignal | undefined, stream: boolean): Promise<Response | ProviderResponse> {
-    if (config.requiresCredential && credential === undefined) throw new CredentialError(`provider ${config.provider} requires a user credential handle`);
-    if (!config.requiresCredential && credential !== undefined) throw new CredentialError(`provider ${config.provider} does not accept a credential handle`);
-    if (callerSignal?.aborted) throw abortFailure(callerSignal, false);
+  private async fetchOnce(
+    config: NormalizedProviderConfig,
+    request: ProviderRequest,
+    credentialSecret: string | null,
+    credentialBindingProbe: () => boolean,
+    callerSignal: AbortSignal | undefined,
+    stream: boolean,
+    transportAttempt: number,
+    beforeDispatch?: BeforeProviderTransportDispatch,
+    onTransportEntered?: ProviderTransportEntered,
+  ): Promise<Response | ProviderResponse> {
+    // Hold the concrete fetch function for this attempt before any observer/fence callback can
+    // yield. Resumable callers also revalidate its runtime identity at the final fence; keeping
+    // this local prevents a later microtask from swapping the transport after that check.
+    const fetchImplementation = this.fetchImplementation;
+    if (abortSignalIsAborted(callerSignal)) throw abortFailure(callerSignal, false);
     if (config.transport) {
       if (stream) throw new ProviderRuntimeError("in-memory streaming is handled by the stream transport boundary");
-      return invokeLocalTransport(config, request);
+      try {
+        await beforeDispatch?.(
+          transportAttempt,
+          await providerRequestDigest(request),
+          request.idempotencyKey ?? null,
+          config,
+          fetchImplementation,
+        );
+      } catch (error) {
+        throw new ProviderDispatchObserverError(error);
+      }
+      if (!credentialBindingProbe()) throw new CredentialError("credential handle changed before provider transport");
+      if (abortSignalIsAborted(callerSignal)) throw abortFailure(callerSignal, false);
+      onTransportEntered?.();
+      const response = await invokeLocalTransport(config, request);
+      if (abortSignalIsAborted(callerSignal)) throw abortFailure(callerSignal, false);
+      return response;
     }
     const body = requestBody(config, request, stream);
-    const encoded = JSON.stringify(body);
+    const encoded = nativeJsonStringify(body);
     if (encoded === undefined || bytes(encoded) > MAX_PROVIDER_REQUEST_BYTES) throw new ProviderRuntimeError("provider request exceeds its bounded size");
-    const secret = credential === undefined ? null : this.credentials.resolve(credential, config.provider);
     const headers: Record<string, string> = { Accept: stream ? "text/event-stream" : "application/json", "Content-Type": "application/json" };
-    if (secret !== null) {
-      headers[config.apiKeyHeader] = config.protocol === "anthropic_messages" ? secret : `Bearer ${secret}`;
+    if (credentialSecret !== null) {
+      headers[config.apiKeyHeader] = config.protocol === "anthropic_messages" ? credentialSecret : `Bearer ${credentialSecret}`;
       if (config.protocol === "anthropic_messages") headers["anthropic-version"] = "2023-06-01";
     }
     if (request.idempotencyKey !== undefined) headers["Idempotency-Key"] = boundedIdentifier("idempotency key", request.idempotencyKey, 512);
-    const controller = new AbortController();
+    const controller = new NativeAbortController();
+    const transportSignal = abortControllerSignal(controller);
     let timedOut = false;
-    const timer = setTimeout(() => { timedOut = true; controller.abort(); }, config.timeoutMs);
-    const abort = (): void => controller.abort();
-    callerSignal?.addEventListener("abort", abort, { once: true });
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const abort = (): void => abortController(controller);
+    let leaseTransferred = false;
+    let released = false;
+    const release = (): void => {
+      if (released) return;
+      released = true;
+      if (timer !== undefined) nativeClearTimeout(timer);
+      removeAbortListener(callerSignal, abort);
+    };
+    addAbortListener(callerSignal, abort);
     try {
-      return await this.fetchImplementation(endpointUrl(config), { method: "POST", headers, body: encoded, signal: controller.signal });
+      // This is the last fallible policy step before fetch. The sentinel keeps a refusal out of
+      // the transport retry/error taxonomy while the surrounding finally still cleans up.
+      try {
+        await beforeDispatch?.(
+          transportAttempt,
+          await digestJson({ provider: config.provider, protocol: config.protocol, stream, body }),
+          request.idempotencyKey ?? null,
+          config,
+          fetchImplementation,
+        );
+      } catch (error) {
+        throw new ProviderDispatchObserverError(error);
+      }
+      if (!credentialBindingProbe()) throw new CredentialError("credential handle changed before provider transport");
+      // The transport deadline starts only after the durable final fence. Starting it before an
+      // awaited receipt commit can abort before a fetch implementation has observed the signal,
+      // and would charge persistence latency against the provider's own timeout budget.
+      if (abortSignalIsAborted(transportSignal) || abortSignalIsAborted(callerSignal)) throw abortFailure(callerSignal, false);
+      timer = nativeSetTimeout(() => { timedOut = true; abortController(controller); }, config.timeoutMs);
+      onTransportEntered?.();
+      const response = await fetchImplementation(endpointUrl(config), { method: "POST", headers, body: encoded, signal: transportSignal });
+      nativeReflectApply(nativeWeakMapSet, providerHttpResponseLeases, [response, nativeObjectFreeze({
+        release,
+        timedOut: () => timedOut,
+      })]);
+      leaseTransferred = true;
+      return response;
     } catch (unknownError) {
+      if (unknownError instanceof ProviderDispatchObserverError) throw unknownError;
+      if (unknownError instanceof CredentialError) throw unknownError;
       if (unknownError instanceof ProviderRuntimeError) throw unknownError;
       if (isAbortError(unknownError)) throw abortFailure(callerSignal, timedOut);
       throw new ProviderRuntimeError("provider transport failed; credential material was discarded", { retryable: true, code: "transport" });
     } finally {
-      clearTimeout(timer);
-      callerSignal?.removeEventListener("abort", abort);
+      if (!leaseTransferred) release();
     }
   }
 
   private async fetchModelCatalog(config: NormalizedProviderConfig, credential: CredentialHandle | undefined, callerSignal: AbortSignal | undefined): Promise<Response> {
     if (config.requiresCredential && credential === undefined) throw new CredentialError(`provider ${config.provider} requires a user credential handle`);
     if (!config.requiresCredential && credential !== undefined) throw new CredentialError(`provider ${config.provider} does not accept a credential handle`);
-    if (callerSignal?.aborted) throw abortFailure(callerSignal, false);
-    const secret = credential === undefined ? null : this.credentials.resolve(credential, config.provider);
+    if (abortSignalIsAborted(callerSignal)) throw abortFailure(callerSignal, false);
+    const secret = credential === undefined ? null : resolveCredentialSnapshot(this.credentials, credential, config.provider).secret;
     const headers: Record<string, string> = { Accept: "application/json" };
     if (secret !== null) headers[config.apiKeyHeader] = config.protocol === "anthropic_messages" ? secret : `Bearer ${secret}`;
-    const controller = new AbortController();
+    const controller = new NativeAbortController();
+    const transportSignal = abortControllerSignal(controller);
     let timedOut = false;
-    const timer = setTimeout(() => { timedOut = true; controller.abort(); }, config.timeoutMs);
-    const abort = (): void => controller.abort();
-    callerSignal?.addEventListener("abort", abort, { once: true });
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const abort = (): void => abortController(controller);
+    let leaseTransferred = false;
+    let released = false;
+    const release = (): void => {
+      if (released) return;
+      released = true;
+      if (timer !== undefined) nativeClearTimeout(timer);
+      removeAbortListener(callerSignal, abort);
+    };
+    addAbortListener(callerSignal, abort);
     try {
-      return await this.fetchImplementation(modelsEndpointUrl(config), { method: "GET", headers, signal: controller.signal });
+      timer = nativeSetTimeout(() => { timedOut = true; abortController(controller); }, config.timeoutMs);
+      const response = await this.fetchImplementation(modelsEndpointUrl(config), { method: "GET", headers, signal: transportSignal });
+      nativeReflectApply(nativeWeakMapSet, providerHttpResponseLeases, [response, nativeObjectFreeze({
+        release,
+        timedOut: () => timedOut,
+      })]);
+      leaseTransferred = true;
+      return response;
     } catch (unknownError) {
       if (unknownError instanceof CredentialError || unknownError instanceof ProviderRuntimeError) throw unknownError;
       if (isAbortError(unknownError)) throw abortFailure(callerSignal, timedOut);
       throw new ProviderRuntimeError("provider model discovery transport failed; credential material was discarded", { retryable: true, code: "transport" });
     } finally {
-      clearTimeout(timer);
-      callerSignal?.removeEventListener("abort", abort);
+      if (!leaseTransferred) release();
     }
   }
 
@@ -3443,7 +4137,7 @@ export async function validateLLMRuntimeHealthSnapshot(value: unknown): Promise<
   if (await digestJson(descriptor) !== snapshotDigest) throw new ProviderRuntimeError("LLM runtime health snapshot digest mismatch");
   const snapshot = { ...descriptor, snapshot_digest: snapshotDigest };
   if (bytes(canonicalJson(snapshot)) > MAX_LLM_RUNTIME_HEALTH_SNAPSHOT_BYTES) throw new ProviderRuntimeError("LLM runtime health snapshot exceeds its byte capacity");
-  return structuredClone(snapshot);
+  return nativeStructuredClone(snapshot);
 }
 
 /** Canonical JSON persistence for transport-health snapshots over a caller-owned text store. */
@@ -3463,7 +4157,7 @@ export class JsonLLMRuntimeHealthSnapshotPersistence implements LLMRuntimeHealth
     if (encoded === null) return null;
     if (typeof encoded !== "string" || bytes(encoded) > this.maxBytes) throw new ProviderRuntimeError("LLM runtime health JSON exceeds its byte bound");
     let parsed: unknown;
-    try { parsed = JSON.parse(encoded); } catch { throw new ProviderRuntimeError("LLM runtime health JSON is invalid"); }
+    try { parsed = nativeJsonParse(encoded); } catch { throw new ProviderRuntimeError("LLM runtime health JSON is invalid"); }
     if (canonicalJson(parsed) !== encoded) throw new ProviderRuntimeError("LLM runtime health JSON is not canonical");
     const snapshot = await validateLLMRuntimeHealthSnapshot(parsed);
     if (bytes(canonicalJson(snapshot)) > this.maxBytes) throw new ProviderRuntimeError("LLM runtime health JSON exceeds its byte bound");
@@ -3531,7 +4225,7 @@ export class LLMRuntimeHealthPersistenceCoordinator {
       const snapshot = await validateLLMRuntimeHealthSnapshot(raw);
       await this.runtime.restoreHealth(snapshot);
       this.expectedSnapshotDigest = snapshot.snapshot_digest;
-      return structuredClone(snapshot);
+      return nativeStructuredClone(snapshot);
     });
   }
 
@@ -3542,7 +4236,7 @@ export class LLMRuntimeHealthPersistenceCoordinator {
         if (!await this.persistence.writeIfUnchanged(this.expectedSnapshotDigest, snapshot)) throw new ProviderRuntimeError("LLM runtime health persistence compare-and-swap conflict");
       } else await this.persistence.write(snapshot);
       this.expectedSnapshotDigest = snapshot.snapshot_digest;
-      return structuredClone(snapshot);
+      return nativeStructuredClone(snapshot);
     });
   }
 
@@ -3752,6 +4446,7 @@ export class AutonomousRuntime {
       credentialFor?: (provider: string) => CredentialHandle | undefined;
       signal?: AbortSignal;
       observer?: ProviderInvocationObserver;
+      providerDispatchFence?: ProviderTransportDispatchFence;
       feedback?: (decision: AutonomousSelectionDecision, outcome: ProviderInvocationOutcome) => void | Promise<void>;
       selectionEventCallback?: AutonomousModelSelectionTraceEventCallback;
       execution?: AutonomousExecutionController;
@@ -3788,29 +4483,35 @@ export class AutonomousRuntime {
       const credential = options.credential ?? options.credentialFor?.(provider);
       const observer: ProviderInvocationObserver = {
         before: options.observer?.before,
+        dispatch: options.observer?.dispatch,
         after: async (metadata, outcome) => {
-          try {
-            await options.observer?.after?.(metadata, outcome);
-            await options.feedback?.(selection, outcome);
-          } finally {
-            invocationSamples.push({
-              executionId,
-              metadata: { ...metadata },
-              outcome: { ...outcome },
-              attempt: failovers,
-              turn: 0,
-              selectionDigest,
-              estimatedCostUnits,
-              costPerMillionTokens: selectedCandidate?.cost_per_million_tokens ?? 0,
-            });
-          }
+          const authoritativeMetadata = nativeObjectFreeze({ ...metadata });
+          const authoritativeOutcome = providerInvocationOutcomeSnapshot(outcome);
+          try { await options.observer?.after?.({ ...authoritativeMetadata }, { ...authoritativeOutcome }); } catch { /* diagnostic isolation */ }
+          try { await options.feedback?.(nativeStructuredClone(selection), { ...authoritativeOutcome }); } catch { /* feedback isolation */ }
+          invocationSamples.push({
+            executionId,
+            metadata: { ...authoritativeMetadata },
+            outcome: { ...authoritativeOutcome },
+            attempt: failovers,
+            turn: 0,
+            selectionDigest,
+            estimatedCostUnits,
+            costPerMillionTokens: selectedCandidate?.cost_per_million_tokens ?? 0,
+          });
         },
       };
       const selectedCandidate = plan.candidates.find((candidate) => candidate.provider === provider && candidate.model === step.model);
       const estimatedCostUnits = estimatedProviderCostUnits(selectedCandidate, plan.request);
       const selectionDigest = await digestJson(selection);
+      const providerRequest = await autonomousProviderAttemptRequest(plan.request, {
+        phase: "invoke",
+        failovers,
+        provider,
+        model: step.model,
+      });
       try {
-        const response = await this.llm.invoke(provider, { ...plan.request, model: step.model }, { credential, signal: options.signal, observer, invocationKind: "autonomous_selected_model", execution: options.execution, executionAttempt: options.executionAttempt, executionTurn: 1, executionFailover: failovers > 0, selectionDigest, estimatedCostUnits, reserveCost: options.reserveCost, authorizationContext: options.authorizationContext, authorizationDomain: options.authorizationDomain ?? plan.domain, authorizationAttempt: failovers, authorizationTurn: 0 });
+        const response = await this.llm.invoke(provider, providerRequest, { credential, signal: options.signal, observer, providerDispatchFence: options.providerDispatchFence, invocationKind: "autonomous_selected_model", execution: options.execution, executionAttempt: options.executionAttempt, executionTurn: 1, executionFailover: failovers > 0, selectionDigest, estimatedCostUnits, reserveCost: options.reserveCost, authorizationContext: options.authorizationContext, authorizationDomain: options.authorizationDomain ?? plan.domain, authorizationAttempt: failovers, authorizationTurn: 0 });
         continuationState = await completeAutonomousModelContinuationState(continuationPlan, continuationState, { provider, model: step.model, statusCode: response.statusCode });
         const projection = await autonomousProviderInvocationProjection(invocationSamples, continuationPlan);
         return { selection, response, continuation_plan: continuationPlan, provider_invocations: projection.providerInvocations, provider_failover: projection.providerFailover, context_budget: contextBudget };
@@ -3922,33 +4623,40 @@ export class AutonomousRuntime {
             const selectedCandidate = plan.candidates.find((candidate) => candidate.provider === provider && candidate.model === step.model);
             const estimatedCostUnits = estimatedProviderCostUnits(selectedCandidate, plan.request);
             const selectionDigest = await digestJson(selection);
+            const providerRequest = await autonomousProviderAttemptRequest(plan.request, {
+              phase: "stream",
+              failovers,
+              provider,
+              model: step.model,
+            });
             const observer: ProviderInvocationObserver = {
               before: options.observer?.before,
+              dispatch: options.observer?.dispatch,
               after: async (metadata, outcome) => {
-                try {
-                  await options.observer?.after?.(metadata, outcome);
-                  await options.feedback?.(selection, outcome);
-                } finally {
-                  invocationSamples.push({
-                    executionId,
-                    metadata: { ...metadata },
-                    outcome: { ...outcome },
-                    attempt: failovers,
-                    turn: 0,
-                    selectionDigest,
-                    estimatedCostUnits,
-                    costPerMillionTokens: selectedCandidate?.cost_per_million_tokens ?? 0,
-                  });
-                }
+                const authoritativeMetadata = nativeObjectFreeze({ ...metadata });
+                const authoritativeOutcome = providerInvocationOutcomeSnapshot(outcome);
+                try { await options.observer?.after?.({ ...authoritativeMetadata }, { ...authoritativeOutcome }); } catch { /* diagnostic isolation */ }
+                try { await options.feedback?.(nativeStructuredClone(selection), { ...authoritativeOutcome }); } catch { /* feedback isolation */ }
+                invocationSamples.push({
+                  executionId,
+                  metadata: { ...authoritativeMetadata },
+                  outcome: { ...authoritativeOutcome },
+                  attempt: failovers,
+                  turn: 0,
+                  selectionDigest,
+                  estimatedCostUnits,
+                  costPerMillionTokens: selectedCandidate?.cost_per_million_tokens ?? 0,
+                });
               },
             };
             const attemptEventCount = eventCount;
             try {
               let localDone = false;
-              for await (const event of runtime.invokeStream(provider, { ...plan.request, model: step.model }, {
+              for await (const event of runtime.invokeStream(provider, providerRequest, {
                 credential,
                 signal: options.signal,
                 observer,
+                providerDispatchFence: options.providerDispatchFence,
                 effectBoundary: options.effectBoundary,
                 invocationKind: "autonomous_selected_model_stream",
                 execution: options.execution,
@@ -4031,6 +4739,7 @@ export class AutonomousRuntime {
       stream?: boolean;
       signal?: AbortSignal;
       observer?: ProviderInvocationObserver;
+      providerDispatchFence?: ProviderTransportDispatchFence;
       feedback?: (decision: AutonomousSelectionDecision, outcome: ProviderInvocationOutcome) => void | Promise<void>;
       selectionEventCallback?: AutonomousModelSelectionTraceEventCallback;
       execution?: AutonomousExecutionController;
@@ -4068,35 +4777,41 @@ export class AutonomousRuntime {
       const credential = options.credential ?? options.credentialFor?.(provider);
       const observer: ProviderInvocationObserver = {
         before: options.observer?.before,
+        dispatch: options.observer?.dispatch,
         after: async (metadata, outcome) => {
-          try {
-            await options.observer?.after?.(metadata, outcome);
-            await options.feedback?.(selection, outcome);
-          } finally {
-            invocationSamples.push({
-              executionId,
-              metadata: { ...metadata },
-              outcome: { ...outcome },
-              attempt: failovers,
-              turn: invocationTurn,
-              selectionDigest,
-              estimatedCostUnits,
-              costPerMillionTokens: selectedCandidate?.cost_per_million_tokens ?? 0,
-            });
-            invocationTurn += 1;
-          }
+          const authoritativeMetadata = nativeObjectFreeze({ ...metadata });
+          const authoritativeOutcome = providerInvocationOutcomeSnapshot(outcome);
+          try { await options.observer?.after?.({ ...authoritativeMetadata }, { ...authoritativeOutcome }); } catch { /* diagnostic isolation */ }
+          try { await options.feedback?.(nativeStructuredClone(selection), { ...authoritativeOutcome }); } catch { /* feedback isolation */ }
+          invocationSamples.push({
+            executionId,
+            metadata: { ...authoritativeMetadata },
+            outcome: { ...authoritativeOutcome },
+            attempt: failovers,
+            turn: invocationTurn,
+            selectionDigest,
+            estimatedCostUnits,
+            costPerMillionTokens: selectedCandidate?.cost_per_million_tokens ?? 0,
+          });
+          invocationTurn += 1;
         },
       };
       const selectedCandidate = plan.candidates.find((candidate) => candidate.provider === provider && candidate.model === step.model);
       const estimatedCostUnits = estimatedProviderCostUnits(selectedCandidate, plan.request);
       const selectionDigest = await digestJson(selection);
+      const providerRequest = await autonomousProviderAttemptRequest(plan.request, {
+        phase: "tool_loop",
+        failovers,
+        provider,
+        model: step.model,
+      });
       let invocationTurn = 0;
       const authorizeAndExecute = async (calls: ProviderToolCall[]): Promise<ProviderToolResult[]> => {
         if (calls.length > 0) toolActivity = true;
         return options.authorizeAndExecute(calls);
       };
       try {
-        const loop = await this.llm.invokeToolLoop(provider, { ...plan.request, model: step.model }, {
+        const loop = await this.llm.invokeToolLoop(provider, providerRequest, {
           credential,
           authorizeAndExecute,
           maxTurns: options.maxTurns,
@@ -4104,6 +4819,7 @@ export class AutonomousRuntime {
           stream: options.stream,
           signal: options.signal,
           observer,
+          providerDispatchFence: options.providerDispatchFence,
           execution: options.execution,
           executionAttempt: options.executionAttempt,
           executionFailover: failovers > 0,
@@ -4407,6 +5123,26 @@ export function openaiCompatibleProvider(provider: string, baseUrl: string, opti
   return { provider, baseUrl, protocol: "openai_chat_completions", ...options };
 }
 
+/**
+ * First-class Ollama preset for a caller-owned local model server.
+ *
+ * Ollama exposes an OpenAI-compatible endpoint at `/v1`; the preset deliberately pins the
+ * transport to loopback-by-default, disables credential requirements, and opts into the
+ * bounded JSON-object mode supported by current Ollama releases. A caller may provide a
+ * different explicitly allowed base URL when the local server is reachable elsewhere.
+ */
+export function ollamaProvider(options: ProviderFactoryOptions = {}): ProviderConfig {
+  const { baseUrl, ...rest } = options;
+  return openaiCompatibleProvider("ollama", baseUrl ?? "http://127.0.0.1:11434/v1", {
+    ...rest,
+    path: rest.path ?? "/chat/completions",
+    modelsPath: rest.modelsPath ?? "/models",
+    requiresCredential: false,
+    allowInsecureHttp: true,
+    structuredOutputMode: rest.structuredOutputMode ?? "json_object",
+  });
+}
+
 /** Official OpenAI-compatible provider presets used by the autonomous BYOK setup flow. */
 export function deepseekProvider(options: ProviderFactoryOptions = {}): ProviderConfig {
   const { baseUrl, ...rest } = options;
@@ -4486,7 +5222,7 @@ function boundedCredentialTtl(ttlMs: number | null | undefined): number | null {
 async function digestCredentialReference(reference: string): Promise<string> {
   const cryptoObject = (globalThis as { crypto?: { subtle?: SubtleCrypto } }).crypto;
   if (cryptoObject?.subtle) {
-    const digest = await cryptoObject.subtle.digest("SHA-256", new TextEncoder().encode(reference));
+    const digest = await cryptoObject.subtle.digest("SHA-256", utf8Bytes(reference));
     return [...new Uint8Array(digest)].map((value) => value.toString(16).padStart(2, "0")).join("");
   }
   // Older non-secure test/browser runtimes may not expose Web Crypto. This fallback is only a
