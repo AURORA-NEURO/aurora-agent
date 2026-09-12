@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 687;
+const TOOL_DEFINITION_COUNT: usize = 688;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -2402,6 +2402,65 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
         .as_array()
         .unwrap()
         .is_empty());
+
+    let autonomous_gap_cycle = call(
+        &mut server,
+        "glioma_autonomous_gap_cycle",
+        json!({
+            "request": {
+                "gap": {
+                    "objective": "rank invasion mechanisms",
+                    "max_claims": 8,
+                    "max_candidates": 16,
+                    "max_candidates_per_claim": 8,
+                    "max_template_cost_units": 10,
+                    "min_frontier_priority_milli": 0,
+                    "templates": [
+                        {"template_id":"imaging-atlas","source_family":"atlas","source_kind":"dataset","modality":"imaging","model_system":"organoid","cost_units":2,"reproducibility_milli":800,"failure_probability_milli":100,"privacy_risk_milli":50,"local_only":true,"contains_human_data":false},
+                        {"template_id":"replication-site","source_family":"consortium","source_kind":"replication","modality":null,"model_system":null,"cost_units":3,"reproducibility_milli":900,"failure_probability_milli":150,"privacy_risk_milli":50,"local_only":true,"contains_human_data":false}
+                    ]
+                },
+                "planning": {
+                    "objective": "rank invasion mechanisms",
+                    "budget_units": 12,
+                    "max_candidates": 16,
+                    "max_selected": 4,
+                    "beam_width": 16,
+                    "min_source_families": 1,
+                    "max_per_independence_group": 2,
+                    "max_privacy_risk_milli": 1000,
+                    "min_portfolio_score_milli": 0,
+                    "required_modalities": ["imaging"],
+                    "required_model_systems": ["organoid"],
+                    "weights": {
+                        "support_milli": 180,
+                        "uncertainty_reduction_milli": 180,
+                        "contradiction_resolution_milli": 160,
+                        "freshness_milli": 90,
+                        "workflow_leverage_milli": 150,
+                        "reproducibility_milli": 120,
+                        "failure_penalty_milli": 70,
+                        "cost_penalty_milli": 50
+                    }
+                },
+                "execution_budget_units": 12,
+                "execution_max_retries": 1,
+                "stop_on_negative": false,
+                "require_artifacts": true
+            },
+            "knowledge": knowledge["knowledge"].clone(),
+            "frontier": knowledge_frontier["frontier"].clone()
+        }),
+    );
+    assert_eq!(autonomous_gap_cycle["dispatch"], json!("dry_run"));
+    assert_eq!(autonomous_gap_cycle["simulation_only"], json!(true));
+    assert_eq!(
+        autonomous_gap_cycle["cycle"]["phase_order"]
+            .as_array()
+            .unwrap()
+            .len(),
+        3
+    );
 
     let decision_context = call(
         &mut server,

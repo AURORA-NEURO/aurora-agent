@@ -1,5 +1,6 @@
 //! Evidence-to-typed-knowledge program ownership.
 
+pub mod autonomous_cycle;
 pub mod belief_revision;
 pub mod campaign;
 pub mod claim_frontier;
@@ -11,6 +12,11 @@ pub use gap_compiler::{
     compile_glioma_knowledge_gaps, KnowledgeGapClaimMapping, KnowledgeGapCompilerError,
     KnowledgeGapCompilerRequest, KnowledgeGapPortfolio, KnowledgeGapPortfolioDisposition,
     KnowledgeGapSourceTemplate,
+};
+
+pub use autonomous_cycle::{
+    execute_glioma_autonomous_gap_cycle, AutonomousGapCycle, AutonomousGapCycleDisposition,
+    AutonomousGapCycleError, AutonomousGapCycleRequest,
 };
 
 pub use campaign::{

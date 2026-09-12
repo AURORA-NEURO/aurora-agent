@@ -59,11 +59,13 @@ pub use programs::p01_evidence_surveillance::{
 };
 pub use programs::p02_evidence_knowledge::{
     compile_glioma_knowledge_gaps, compile_typed_knowledge, compose_knowledge_graph,
-    execute_glioma_knowledge_resolution_campaign, prioritize_knowledge_frontier,
-    revise_glioma_beliefs, BeliefConflict, BeliefRevision, BeliefRevisionDecision,
-    BeliefRevisionDecisionKind, BeliefRevisionDisposition, BeliefRevisionError,
-    BeliefRevisionRequest, DryRunKnowledgeResolutionCampaignExecutor, FrontierActionKind,
-    KnowledgeClaim, KnowledgeClaimDisposition, KnowledgeComponentDisposition, KnowledgeComposition,
+    execute_glioma_autonomous_gap_cycle, execute_glioma_knowledge_resolution_campaign,
+    prioritize_knowledge_frontier, revise_glioma_beliefs, AutonomousGapCycle,
+    AutonomousGapCycleDisposition, AutonomousGapCycleError, AutonomousGapCycleRequest,
+    BeliefConflict, BeliefRevision, BeliefRevisionDecision, BeliefRevisionDecisionKind,
+    BeliefRevisionDisposition, BeliefRevisionError, BeliefRevisionRequest,
+    DryRunKnowledgeResolutionCampaignExecutor, FrontierActionKind, KnowledgeClaim,
+    KnowledgeClaimDisposition, KnowledgeComponentDisposition, KnowledgeComposition,
     KnowledgeCompositionComponent, KnowledgeCompositionDisposition, KnowledgeCompositionError,
     KnowledgeCompositionPath, KnowledgeCompositionRequest, KnowledgeDisposition, KnowledgeError,
     KnowledgeFrontier, KnowledgeFrontierDisposition, KnowledgeFrontierError,

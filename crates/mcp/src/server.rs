@@ -511,15 +511,16 @@ use bioprism_research::{
     execute_federated_benchmark_campaign, execute_glioma_action_portfolio,
     execute_glioma_active_learning_campaign, execute_glioma_adaptive_allocation_campaign,
     execute_glioma_adaptive_mechanism_campaign, execute_glioma_autonomous_campaign,
-    execute_glioma_autonomous_research_engine, execute_glioma_autonomous_research_mission,
-    execute_glioma_computation, execute_glioma_computation_campaign,
-    execute_glioma_computation_portfolio, execute_glioma_decision_context_campaign,
-    execute_glioma_evidence_acquisition_campaign, execute_glioma_evidence_campaign,
-    execute_glioma_evidence_gated_research, execute_glioma_evidence_refresh_campaign,
-    execute_glioma_instrument_campaign, execute_glioma_instrument_fleet,
-    execute_glioma_instrument_plan, execute_glioma_knowledge_resolution_campaign,
-    execute_glioma_mechanism_discrimination_campaign, execute_glioma_multi_fidelity_campaign,
-    execute_glioma_multimodal_ingestion_campaign, execute_glioma_multimodal_mechanism_campaign,
+    execute_glioma_autonomous_gap_cycle, execute_glioma_autonomous_research_engine,
+    execute_glioma_autonomous_research_mission, execute_glioma_computation,
+    execute_glioma_computation_campaign, execute_glioma_computation_portfolio,
+    execute_glioma_decision_context_campaign, execute_glioma_evidence_acquisition_campaign,
+    execute_glioma_evidence_campaign, execute_glioma_evidence_gated_research,
+    execute_glioma_evidence_refresh_campaign, execute_glioma_instrument_campaign,
+    execute_glioma_instrument_fleet, execute_glioma_instrument_plan,
+    execute_glioma_knowledge_resolution_campaign, execute_glioma_mechanism_discrimination_campaign,
+    execute_glioma_multi_fidelity_campaign, execute_glioma_multimodal_ingestion_campaign,
+    execute_glioma_multimodal_mechanism_campaign,
     execute_glioma_multimodal_mechanism_campaign_with_executor, execute_glioma_protocol,
     execute_glioma_replay_campaign, execute_glioma_replication_campaign,
     execute_glioma_research_autopilot, execute_glioma_research_director,
@@ -546,24 +547,25 @@ use bioprism_research::{
     AdaptiveAllocationRequest, AdaptiveArmObservation, AdaptiveDoseSurfaceRequest,
     AdaptiveFrontierRequest, AdaptiveInformationCampaignRequest, AdaptiveInformationObservation,
     AdaptiveMechanismCampaignRequest, AdaptiveMechanismPolicyRequest, AnalysisDataset,
-    AnalysisRequest, AssayEvidenceObservation, AssayEvidenceRequest, BeliefConflict,
-    BeliefRevisionRequest, CalibrationRequest, CalibrationRun, CampaignAction, CampaignMechanism,
-    CampaignObservation, CausalContrastRequest, ClonalEvolutionGraph, ClonalEvolutionRequest,
-    CloneContinuationCandidate, CloneContinuationRequest, ClonePanelObservation,
-    ClonePanelOutcomeAnalysis, ClonePanelOutcomeRequest, ClonePerturbationCandidate,
-    ClonePerturbationPanel, ClonePerturbationPanelRequest, CloneProfile, ClosedLoopCampaignRequest,
-    CombinationObservation, CombinationSynergyRequest, ComputationCandidate,
-    ComputationExecutionRequest, ComputationPlacementRequest, ComputationPortfolioExecutionRequest,
-    ComputationPortfolioRequest, ConcordanceRequest, ConsensusRequest, ContrastDesignRequest,
-    CounterfactualEnsembleRequest, CounterfactualIntervention, CounterfactualModel,
-    CounterfactualRequest, DecisionActionGraphRequest, DecisionActionPlanRequest,
-    DecisionBranchPlannerRequest, DecisionContext, DecisionContextCampaignRequest,
-    DecisionContextRequest, DesignAction, DesignMechanism, DoseResponseObservation,
-    DoseResponseRequest, DryRunActiveLearningCampaignExecutor,
-    DryRunAdaptiveAllocationCampaignExecutor, DryRunAdaptiveMechanismPolicyExecutor,
-    DryRunDecisionContextCampaignExecutor, DryRunEvidenceAcquisitionExecutor,
-    DryRunEvidenceRefreshCampaignExecutor, DryRunFederatedBenchmarkCampaignExecutor,
-    DryRunGliomaActionExecutor, DryRunGliomaComputationExecutor, DryRunGliomaProtocolExecutor,
+    AnalysisRequest, AssayEvidenceObservation, AssayEvidenceRequest, AutonomousGapCycleRequest,
+    BeliefConflict, BeliefRevisionRequest, CalibrationRequest, CalibrationRun, CampaignAction,
+    CampaignMechanism, CampaignObservation, CausalContrastRequest, ClonalEvolutionGraph,
+    ClonalEvolutionRequest, CloneContinuationCandidate, CloneContinuationRequest,
+    ClonePanelObservation, ClonePanelOutcomeAnalysis, ClonePanelOutcomeRequest,
+    ClonePerturbationCandidate, ClonePerturbationPanel, ClonePerturbationPanelRequest,
+    CloneProfile, ClosedLoopCampaignRequest, CombinationObservation, CombinationSynergyRequest,
+    ComputationCandidate, ComputationExecutionRequest, ComputationPlacementRequest,
+    ComputationPortfolioExecutionRequest, ComputationPortfolioRequest, ConcordanceRequest,
+    ConsensusRequest, ContrastDesignRequest, CounterfactualEnsembleRequest,
+    CounterfactualIntervention, CounterfactualModel, CounterfactualRequest,
+    DecisionActionGraphRequest, DecisionActionPlanRequest, DecisionBranchPlannerRequest,
+    DecisionContext, DecisionContextCampaignRequest, DecisionContextRequest, DesignAction,
+    DesignMechanism, DoseResponseObservation, DoseResponseRequest,
+    DryRunActiveLearningCampaignExecutor, DryRunAdaptiveAllocationCampaignExecutor,
+    DryRunAdaptiveMechanismPolicyExecutor, DryRunDecisionContextCampaignExecutor,
+    DryRunEvidenceAcquisitionExecutor, DryRunEvidenceRefreshCampaignExecutor,
+    DryRunFederatedBenchmarkCampaignExecutor, DryRunGliomaActionExecutor,
+    DryRunGliomaComputationExecutor, DryRunGliomaProtocolExecutor,
     DryRunGliomaReplicationCampaignExecutor, DryRunInstrumentExecutor,
     DryRunKnowledgeResolutionCampaignExecutor, DryRunMechanismDiscriminationCampaignExecutor,
     DryRunMultiFidelityCampaignExecutor, DryRunMultimodalIngestionCampaignExecutor,
@@ -585,8 +587,8 @@ use bioprism_research::{
     HarmonizationVector, InformationDesignRequest, InstrumentCampaignRequest,
     InstrumentExecutionRequest, InstrumentExecutionRun, InstrumentFleetExecutionRequest,
     InstrumentFleetScheduleRequest, InstrumentInterlockSnapshot, InstrumentPreflightRequest,
-    InterpretationSynthesisRequest, KnowledgeCompositionRequest, KnowledgeFrontierRequest,
-    KnowledgeGapCompilerRequest, KnowledgeRelation, KnowledgeRequest,
+    InterpretationSynthesisRequest, KnowledgeCompositionRequest, KnowledgeFrontier,
+    KnowledgeFrontierRequest, KnowledgeGapCompilerRequest, KnowledgeRelation, KnowledgeRequest,
     KnowledgeResolutionCampaignRequest, LatentFactorRequest, LatentFactorVector,
     LigandReceptorPair, MechanismActionPlannerConfig, MechanismCalibration,
     MechanismCalibrationObservation, MechanismCalibrationRequest, MechanismCandidate,
@@ -2257,6 +2259,7 @@ impl Server {
             "glioma_belief_revision" => self.glioma_belief_revision(&arguments),
             "glioma_knowledge_frontier" => self.glioma_knowledge_frontier(&arguments),
             "glioma_knowledge_gap_compile" => self.glioma_knowledge_gap_compile(&arguments),
+            "glioma_autonomous_gap_cycle" => self.glioma_autonomous_gap_cycle(&arguments),
             "glioma_decision_context" => self.glioma_decision_context(&arguments),
             "glioma_decision_action_graph" => self.glioma_decision_action_graph(&arguments),
             "glioma_decision_branch_plan" => self.glioma_decision_branch_plan(&arguments),
@@ -8071,6 +8074,51 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma knowledge-gap portfolio: {error}"))
+    }
+
+    /// Run the bounded P02-to-P01 autonomous research cycle with MCP's deterministic local
+    /// executor. This compiles knowledge debt, plans acquisition, and executes only a dry run;
+    /// institution-local callers must provide the production executor for real effects.
+    fn glioma_autonomous_gap_cycle(&self, arguments: &Value) -> Result<Value, String> {
+        let request: AutonomousGapCycleRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_autonomous_gap_cycle requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma autonomous gap-cycle request: {error}"))?;
+        let knowledge: TypedKnowledge = serde_json::from_value(
+            arguments
+                .get("knowledge")
+                .cloned()
+                .ok_or_else(|| "glioma_autonomous_gap_cycle requires knowledge".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma typed knowledge: {error}"))?;
+        let frontier: KnowledgeFrontier = serde_json::from_value(
+            arguments
+                .get("frontier")
+                .cloned()
+                .ok_or_else(|| "glioma_autonomous_gap_cycle requires frontier".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma knowledge frontier: {error}"))?;
+        let mut executor = DryRunEvidenceAcquisitionExecutor;
+        let cycle =
+            execute_glioma_autonomous_gap_cycle(&request, &knowledge, &frontier, &mut executor)
+                .map_err(|error| format!("glioma autonomous gap-cycle refused: {error}"))?;
+        serde_json::to_value(json!({
+            "cycle": cycle,
+            "dispatch": "dry_run",
+            "simulation_only": true,
+            "next_route": "glioma_knowledge_compile",
+            "guarantees": [
+                "P02 typed coverage, contradiction, uncertainty, negative, and replication debt is compiled into P01 acquisition candidates",
+                "source-diverse acquisition planning is budgeted and policy-bounded before any executor call",
+                "only a deterministic local dry-run executor is used by MCP; production effects require an institution-local executor",
+                "partial, negative, unknown, blocked, retry, and budget outcomes remain explicit and no dry-run artifact becomes biological evidence",
+                "the route performs no network retrieval, protected-data movement, clinical decision, or treatment recommendation"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma autonomous gap-cycle: {error}"))
     }
 
     /// Turn typed glioma knowledge gaps into executable candidates for the bounded action
@@ -49688,6 +49736,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_belief_revision",
                 "glioma_knowledge_frontier",
                 "glioma_knowledge_gap_compile",
+                "glioma_autonomous_gap_cycle",
                 "glioma_decision_context",
                 "glioma_decision_action_graph",
                 "glioma_decision_branch_plan",
@@ -59282,6 +59331,19 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "KnowledgeGapCompilerRequest1@1 with objective, claim/candidate bounds, priority floor, cost ceiling, and local source templates."},
+                "knowledge": {"type": "object", "description": "TypedKnowledge1@1 from glioma_knowledge_compile."},
+                "frontier": {"type": "object", "description": "KnowledgeFrontier1@1 from glioma_knowledge_frontier, bound to the same knowledge digest and objective."}
+            },
+            "required": ["request", "knowledge", "frontier"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_autonomous_gap_cycle",
+        "description": "Run a bounded autonomous preclinical glioma research cycle: compile typed P02 knowledge debt, plan a source-diverse P01 acquisition portfolio, and execute it through MCP's deterministic local dry-run executor. Production effects require an institution-local executor; partial, negative, unknown, blocked, retry, and budget outcomes stay explicit.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "AutonomousGapCycleRequest1@1 with gap compiler request, acquisition planning request, execution budget, retry bound, negative-stop policy, and artifact requirement."},
                 "knowledge": {"type": "object", "description": "TypedKnowledge1@1 from glioma_knowledge_compile."},
                 "frontier": {"type": "object", "description": "KnowledgeFrontier1@1 from glioma_knowledge_frontier, bound to the same knowledge digest and objective."}
             },
