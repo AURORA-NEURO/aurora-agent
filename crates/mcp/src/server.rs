@@ -532,13 +532,13 @@ use bioprism_research::{
     plan_glioma_adaptive_workflow, plan_glioma_clone_continuation,
     plan_glioma_clone_perturbation_panel, plan_glioma_closed_loop_campaign,
     plan_glioma_computation_portfolio, plan_glioma_decision_branches,
-    plan_glioma_information_design, plan_glioma_multi_fidelity_optimization,
-    plan_glioma_robust_active_learning, plan_glioma_robust_intervention_portfolio,
-    plan_glioma_sequential_design, plan_glioma_workflow, preflight_glioma_instrument,
-    prioritize_glioma_evidence, prioritize_knowledge_frontier, propagate_glioma_mechanism_graph,
-    qualify_evidence, register_glioma_spatial_samples, revise_glioma_beliefs,
-    schedule_glioma_computation_placement, schedule_glioma_instrument_fleet, select_glioma_actions,
-    simulate_glioma_counterfactual, simulate_glioma_counterfactual_ensemble,
+    plan_glioma_evidence_acquisition, plan_glioma_information_design,
+    plan_glioma_multi_fidelity_optimization, plan_glioma_robust_active_learning,
+    plan_glioma_robust_intervention_portfolio, plan_glioma_sequential_design, plan_glioma_workflow,
+    preflight_glioma_instrument, prioritize_glioma_evidence, prioritize_knowledge_frontier,
+    propagate_glioma_mechanism_graph, qualify_evidence, register_glioma_spatial_samples,
+    revise_glioma_beliefs, schedule_glioma_computation_placement, schedule_glioma_instrument_fleet,
+    select_glioma_actions, simulate_glioma_counterfactual, simulate_glioma_counterfactual_ensemble,
     simulate_glioma_mechanism_dynamics, simulate_glioma_protocol, surveil_glioma_evidence,
     synthesize_glioma_interpretation, triangulate_glioma_evidence, validate_feature_catalog,
     ActionPortfolioExecutionRequest, ActiveLearningCampaignRequest, ActiveLearningCandidate,
@@ -569,9 +569,10 @@ use bioprism_research::{
     DryRunMultiFidelityCampaignExecutor, DryRunMultimodalIngestionCampaignExecutor,
     DryRunReplayCampaignExecutor, DryRunRobustActiveLearningCampaignExecutor,
     DryRunSequentialCampaignExecutor, DynamicPolicyCandidate, DynamicPolicyRequest,
-    DynamicPolicyTrajectory, EvidenceCalibrationObservation, EvidenceCalibrationRequest,
-    EvidencePriorityRequest, EvidenceRecord, EvidenceRefreshCampaignRequest, EvidenceRequest,
-    EvidenceSurveillanceRequest, EvidenceTriangulationRequest, ExperimentArm, ExperimentRequest,
+    DynamicPolicyTrajectory, EvidenceAcquisitionCandidate, EvidenceAcquisitionRequest,
+    EvidenceCalibrationObservation, EvidenceCalibrationRequest, EvidencePriorityRequest,
+    EvidenceRecord, EvidenceRefreshCampaignRequest, EvidenceRequest, EvidenceSurveillanceRequest,
+    EvidenceTriangulationRequest, ExperimentArm, ExperimentRequest,
     FederatedBenchmarkCampaignRequest, FederatedBenchmarkRequest, FederatedBenchmarkSite,
     FederatedBenchmarkSitePlannerRequest, FederatedMechanismSite,
     FederatedMechanismTransportRequest, FidelityCandidate, FidelityObservation,
@@ -2244,6 +2245,7 @@ impl Server {
             "glioma_evidence_qualify" => self.glioma_evidence_qualify(&arguments),
             "glioma_evidence_surveillance" => self.glioma_evidence_surveillance(&arguments),
             "glioma_evidence_priority" => self.glioma_evidence_priority(&arguments),
+            "glioma_evidence_acquisition_plan" => self.glioma_evidence_acquisition_plan(&arguments),
             "glioma_evidence_calibrate" => self.glioma_evidence_calibrate(&arguments),
             "glioma_evidence_triangulate" => self.glioma_evidence_triangulate(&arguments),
             "glioma_knowledge_compile" => self.glioma_knowledge_compile(&arguments),
@@ -7751,6 +7753,38 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma evidence priority: {error}"))
+    }
+
+    /// Compile a dependency-closed, source-diverse evidence-acquisition portfolio for the next
+    /// autonomous glioma research cycle. This route only plans over caller-supplied candidates;
+    /// it never fetches sources, moves protected data, or claims an acquisition succeeded.
+    fn glioma_evidence_acquisition_plan(&self, arguments: &Value) -> Result<Value, String> {
+        let request: EvidenceAcquisitionRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_evidence_acquisition_plan requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma evidence-acquisition request: {error}"))?;
+        let candidates: Vec<EvidenceAcquisitionCandidate> =
+            serde_json::from_value(arguments.get("candidates").cloned().ok_or_else(|| {
+                "glioma_evidence_acquisition_plan requires candidates".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma evidence-acquisition candidates: {error}"))?;
+        let plan = plan_glioma_evidence_acquisition(&request, &candidates)
+            .map_err(|error| format!("glioma evidence-acquisition planning refused: {error}"))?;
+        serde_json::to_value(json!({
+            "acquisition": plan,
+            "dispatch": "not_started",
+            "preflight_required": true,
+            "guarantees": [
+                "dependency-closed source-diverse portfolios are selected under budget, privacy, and independence gates",
+                "human-data, non-local payload, and privacy-ceiling violations remain blocked",
+                "expected value, worst-case value, missing coverage, deferred candidates, and negative evidence remain explicit",
+                "the route never fetches sources, moves protected bytes, or claims acquisition success"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma evidence-acquisition plan: {error}"))
     }
 
     /// Calibrate source-family support scores against resolved local preclinical outcomes. The
@@ -49570,6 +49604,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_evidence_qualify",
                 "glioma_evidence_surveillance",
                 "glioma_evidence_priority",
+                "glioma_evidence_acquisition_plan",
                 "glioma_evidence_calibrate",
                 "glioma_evidence_triangulate",
                 "glioma_knowledge_compile",
@@ -59064,6 +59099,18 @@ pub fn tool_definitions() -> Vec<Value> {
                 "records": {"type": "array", "items": {"type": "object"}, "description": "Current local EvidenceRecord1@1 snapshot; negative, stale, contradictory, unknown, and unmeasured records are valid inputs."}
             },
             "required": ["request", "records"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_evidence_acquisition_plan",
+        "description": "Select a dependency-closed, source-diverse portfolio of local preclinical glioma literature, datasets, assays, simulations, and replications under explicit budget, privacy, independence, modality, and model-system gates. Reports expected and worst-case value, missing coverage, deferred work, and policy blocks; it never fetches sources, moves protected bytes, executes biology, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "EvidenceAcquisitionRequest1@1 with budget, selection, beam, source-diversity, privacy, coverage, and weighted value constraints."},
+                "candidates": {"type": "array", "items": {"type": "object"}, "description": "EvidenceAcquisitionCandidate1@1 records with typed source kind, modality/model scope, dependencies, costs, expected scientific value, failure risk, and local-only policy metadata."}
+            },
+            "required": ["request", "candidates"]
         }
     }));
     definitions.push(json!({

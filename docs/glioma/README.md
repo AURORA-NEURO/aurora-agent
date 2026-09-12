@@ -74,6 +74,8 @@ crates/research/src/glioma/
                                              P01 snapshot delta surveillance and prioritized evidence review actions
   programs/p01_evidence_surveillance/priority.rs
                                              P01 recency/state/coverage action queue for the next autonomous cycle
+  programs/p01_evidence_surveillance/acquisition.rs
+                                             P01 dependency-closed, source-diverse evidence-acquisition portfolio optimizer
   programs/p01_evidence_surveillance/campaign.rs
                                              P01 bounded autonomous evidence refresh and round-by-round surveillance replanning
   programs/p01_evidence_surveillance/calibration.rs
@@ -250,7 +252,7 @@ portfolio plan and executable code; it does not promote a planned slot to implem
 
 | Program | Product owner | Engine stages | Observable product result |
 | --- | --- | --- | --- |
-| P01 Evidence surveillance | evidence curator | evidence surveillance | snapshot deltas, recency/state/coverage action queues, source calibration, cross-family claim triangulation, review/revalidation actions, and stale/unknown/contradictory coverage |
+| P01 Evidence surveillance | evidence curator | evidence surveillance | snapshot deltas, recency/state/coverage action queues, dependency-closed evidence-acquisition portfolios, source calibration, cross-family claim triangulation, review/revalidation actions, and stale/unknown/contradictory coverage |
 | P02 Evidence-to-typed-knowledge | knowledge engineer | evidence compilation | scoped claims, contradiction-aware maximal-consistency portfolios, ranked rival frontiers, and competing explanations bound to source artifacts |
 | P03 Multimodal ingestion and QC | data steward | multimodal ingestion/QC | comparable cells, robust batch harmonization, feature-level concordance, consensus clusters, spatial niches, ligand-receptor communication, cross-sample registration, spatial-state diffusion, and explicit defects |
 | P04 Question-to-decision context | principal investigator | intent normalization, context compilation | bounded decision context, scenario-aware Pareto workflow branches, selected executable action batches, and unresolved omissions |
@@ -323,6 +325,14 @@ outcomes using quality-weighted isotonic regression. Non-monotonic score/outcome
 pooled deterministically, unknown/stale/unmeasured outcomes do not count as resolved support, and
 under-observed or high-error families become explicit review actions with calibrated reliability
 and uncertainty for P02/P04/P07 planning.
+P01 now also compiles a budgeted evidence-acquisition portfolio (`plan_glioma_evidence_acquisition`)
+for the autonomous engine. It closes candidate dependencies before selection, rewards independent
+source families and cross-modality/model coverage, penalizes expected failure and cost, and emits
+expected versus worst-case value. Human-data, non-local payloads, privacy-ceiling violations, and
+independence overuse are blocked before dispatch; deferred work, missing coverage, negative policy
+evidence, and the candidate frontier remain explicit. The planner is intentionally acquisition
+agnostic: a separate approved adapter must perform retrieval, assay setup, or replication, and no
+successful acquisition is claimed by the planning route.
 P09 now includes a bounded robustness suite (`assess_glioma_robustness`) that
 recomputes the declared effect under leave-one-batch-out and optional leave-one-row-out omissions;
 unresolved subsets, fragile effects, and null results remain explicit. Provider-specific execution
