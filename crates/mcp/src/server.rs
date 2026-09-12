@@ -536,12 +536,13 @@ use bioprism_research::{
     preflight_glioma_instrument, prioritize_glioma_evidence, prioritize_knowledge_frontier,
     propagate_glioma_mechanism_graph, qualify_evidence, register_glioma_spatial_samples,
     revise_glioma_beliefs, select_glioma_actions, simulate_glioma_counterfactual,
-    simulate_glioma_counterfactual_ensemble, simulate_glioma_protocol, surveil_glioma_evidence,
-    synthesize_glioma_interpretation, triangulate_glioma_evidence, validate_feature_catalog,
-    ActionPortfolioExecutionRequest, ActiveLearningCampaignRequest, ActiveLearningCandidate,
-    ActiveLearningObservation, ActiveLearningRequest, AdaptiveAllocationCampaignRequest,
-    AdaptiveAllocationRequest, AdaptiveArmObservation, AdaptiveDoseSurfaceRequest,
-    AdaptiveFrontierRequest, AdaptiveInformationCampaignRequest, AdaptiveInformationObservation,
+    simulate_glioma_counterfactual_ensemble, simulate_glioma_mechanism_dynamics,
+    simulate_glioma_protocol, surveil_glioma_evidence, synthesize_glioma_interpretation,
+    triangulate_glioma_evidence, validate_feature_catalog, ActionPortfolioExecutionRequest,
+    ActiveLearningCampaignRequest, ActiveLearningCandidate, ActiveLearningObservation,
+    ActiveLearningRequest, AdaptiveAllocationCampaignRequest, AdaptiveAllocationRequest,
+    AdaptiveArmObservation, AdaptiveDoseSurfaceRequest, AdaptiveFrontierRequest,
+    AdaptiveInformationCampaignRequest, AdaptiveInformationObservation,
     AdaptiveMechanismCampaignRequest, AdaptiveMechanismPolicyRequest, AnalysisDataset,
     AnalysisRequest, AssayEvidenceObservation, AssayEvidenceRequest, BeliefConflict,
     BeliefRevisionRequest, CalibrationRequest, CalibrationRun, CampaignAction, CampaignMechanism,
@@ -583,25 +584,26 @@ use bioprism_research::{
     LatentFactorVector, LigandReceptorPair, MechanismActionPlannerConfig, MechanismCalibration,
     MechanismCalibrationObservation, MechanismCalibrationRequest, MechanismCandidate,
     MechanismDiscrimination, MechanismDiscriminationCampaignRequest,
-    MechanismDiscriminationRequest, MechanismDiscriminatorAction, MechanismFeatureObservation,
-    MechanismGraphEdge, MechanismGraphNode, MechanismGraphRequest, MechanismHypothesis,
-    MechanismRequest, MediationObservation, MediationRequest, MetaAnalysisRequest, ModalityVector,
-    MultiFidelityCampaignRequest, MultiFidelityOptimizationRequest,
-    MultimodalIngestionCampaignRequest, MultimodalMechanismCampaignRequest, MultimodalObservation,
-    MultimodalRequest, PathwayActivityDefinition, PathwayActivityObservation,
-    PathwayActivityRequest, ProtocolExecutionRequest, ProtocolSimulationRequest,
-    ReleaseGateRequest, ReplayCampaign, ReplayCampaignRequest, ReplicationRequest,
-    ReplicationStudy, ResearchObjectRequest, RobustActiveLearningCampaignRequest,
-    RobustActiveLearningCandidate, RobustActiveLearningObservation, RobustActiveLearningRequest,
-    RobustInterventionCandidate, RobustInterventionRequest, RobustnessRequest,
-    SensitivityObservation, SensitivityRequest, SequentialArmObservation,
-    SequentialCampaignRequest, SequentialDesignRequest, SpatialCell, SpatialCommunicationCell,
-    SpatialCommunicationRequest, SpatialNicheRequest, SpatialPropagationRequest,
-    SpatialRegistrationCell, SpatialRegistrationRequest, StateTransitionObservation,
-    StateTransitionRequest, StaticGliomaActionPlanner, StaticGliomaComputationPlanner,
-    StratifiedCausalRequest, StratifiedObservation, TemporalFusionRequest, TemporalObservation,
-    TrajectoryObservation, TrajectoryRequest, TransportStudy, TransportabilityRequest,
-    TypedKnowledge,
+    MechanismDiscriminationRequest, MechanismDiscriminatorAction, MechanismDynamicsEdge,
+    MechanismDynamicsIntervention, MechanismDynamicsNode, MechanismDynamicsRequest,
+    MechanismFeatureObservation, MechanismGraphEdge, MechanismGraphNode, MechanismGraphRequest,
+    MechanismHypothesis, MechanismRequest, MediationObservation, MediationRequest,
+    MetaAnalysisRequest, ModalityVector, MultiFidelityCampaignRequest,
+    MultiFidelityOptimizationRequest, MultimodalIngestionCampaignRequest,
+    MultimodalMechanismCampaignRequest, MultimodalObservation, MultimodalRequest,
+    PathwayActivityDefinition, PathwayActivityObservation, PathwayActivityRequest,
+    ProtocolExecutionRequest, ProtocolSimulationRequest, ReleaseGateRequest, ReplayCampaign,
+    ReplayCampaignRequest, ReplicationRequest, ReplicationStudy, ResearchObjectRequest,
+    RobustActiveLearningCampaignRequest, RobustActiveLearningCandidate,
+    RobustActiveLearningObservation, RobustActiveLearningRequest, RobustInterventionCandidate,
+    RobustInterventionRequest, RobustnessRequest, SensitivityObservation, SensitivityRequest,
+    SequentialArmObservation, SequentialCampaignRequest, SequentialDesignRequest, SpatialCell,
+    SpatialCommunicationCell, SpatialCommunicationRequest, SpatialNicheRequest,
+    SpatialPropagationRequest, SpatialRegistrationCell, SpatialRegistrationRequest,
+    StateTransitionObservation, StateTransitionRequest, StaticGliomaActionPlanner,
+    StaticGliomaComputationPlanner, StratifiedCausalRequest, StratifiedObservation,
+    TemporalFusionRequest, TemporalObservation, TrajectoryObservation, TrajectoryRequest,
+    TransportStudy, TransportabilityRequest, TypedKnowledge,
 };
 use bioprism_routing::{
     lab::{run as run_routing_lab, LabSettings, Task},
@@ -2246,6 +2248,7 @@ impl Server {
             "glioma_decision_action_plan" => self.glioma_decision_action_plan(&arguments),
             "glioma_multimodal_qc" => self.glioma_multimodal_qc(&arguments),
             "glioma_mechanism_explore" => self.glioma_mechanism_explore(&arguments),
+            "glioma_mechanism_dynamics" => self.glioma_mechanism_dynamics(&arguments),
             "glioma_mechanism_discriminate" => self.glioma_mechanism_discriminate(&arguments),
             "glioma_mechanism_calibrate" => self.glioma_mechanism_calibrate(&arguments),
             "glioma_mechanism_action_plan" => self.glioma_mechanism_action_plan(&arguments),
@@ -8030,6 +8033,54 @@ impl Server {
             .map_err(|error| format!("glioma mechanism exploration refused: {error}"))?;
         serde_json::to_value(output)
             .map_err(|error| format!("cannot encode glioma mechanism portfolio: {error}"))
+    }
+
+    /// Simulate signed delayed mechanism feedback for a local preclinical glioma model. The
+    /// result is a bounded scientific trajectory and intervention-sensitivity plan; it never
+    /// treats the model as observed biology or selects a clinical treatment.
+    fn glioma_mechanism_dynamics(&self, arguments: &Value) -> Result<Value, String> {
+        let request: MechanismDynamicsRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_mechanism_dynamics requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma mechanism-dynamics request: {error}"))?;
+        let nodes: Vec<MechanismDynamicsNode> = serde_json::from_value(
+            arguments
+                .get("nodes")
+                .cloned()
+                .ok_or_else(|| "glioma_mechanism_dynamics requires nodes".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma mechanism-dynamics nodes: {error}"))?;
+        let edges: Vec<MechanismDynamicsEdge> = serde_json::from_value(
+            arguments
+                .get("edges")
+                .cloned()
+                .ok_or_else(|| "glioma_mechanism_dynamics requires edges".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma mechanism-dynamics edges: {error}"))?;
+        let interventions: Vec<MechanismDynamicsIntervention> = serde_json::from_value(
+            arguments
+                .get("interventions")
+                .cloned()
+                .unwrap_or_else(|| json!([])),
+        )
+        .map_err(|error| format!("invalid glioma mechanism-dynamics interventions: {error}"))?;
+        let plan = simulate_glioma_mechanism_dynamics(&request, &nodes, &edges, &interventions)
+            .map_err(|error| format!("glioma mechanism dynamics refused: {error}"))?;
+        serde_json::to_value(json!({
+            "plan": plan,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "signed delayed feedback is evaluated with bounded fixed-point arithmetic",
+                "stability, oscillation, divergence, risk, and budget states remain explicit",
+                "intervention sensitivity is leave-one-out model sensitivity, not observed efficacy",
+                "the route never dispatches an assay or makes a clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma mechanism-dynamics plan: {error}"))
     }
 
     /// Score competing mechanistic predictions against local observations and rank the next
@@ -49354,6 +49405,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_pathway_activity",
                 "glioma_multimodal_mechanism_campaign",
                 "glioma_multimodal_mechanism_campaign_execute",
+                "glioma_mechanism_dynamics",
                 "glioma_mechanism_counterfactual",
                 "glioma_mechanism_ensemble_counterfactual",
                 "glioma_robust_intervention_portfolio",
@@ -58934,6 +58986,20 @@ pub fn tool_definitions() -> Vec<Value> {
                 "candidates": {"type": "array", "items": {"type": "object"}, "description": "MechanismCandidate1@1 values."}
             },
             "required": ["request", "candidates"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_mechanism_dynamics",
+        "description": "Simulate a bounded signed delayed-feedback mechanism network for local preclinical glioma research. Ranks typed intervention pulses by sensitivity-per-cost, detects stability, oscillation, divergence, risk and budget blocks, and reports leave-one-out terminal-state sensitivity. The result is a model-backed planning trajectory, not observed efficacy; it never dispatches an assay, selects a clinical treatment, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "MechanismDynamicsRequest1@1 with model system, fixed-point integration bounds, stability/divergence gates, intervention budget, and risk ceiling."},
+                "nodes": {"type": "array", "items": {"type": "object"}, "description": "MechanismDynamicsNode1@1 signed state nodes."},
+                "edges": {"type": "array", "items": {"type": "object"}, "description": "MechanismDynamicsEdge1@1 delayed signed feedback edges with confidence."},
+                "interventions": {"type": "array", "items": {"type": "object"}, "description": "Optional MechanismDynamicsIntervention1@1 local perturbation pulses."}
+            },
+            "required": ["request", "nodes", "edges"]
         }
     }));
     definitions.push(json!({

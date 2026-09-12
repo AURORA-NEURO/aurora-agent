@@ -11,6 +11,7 @@ pub mod discrimination;
 pub mod discrimination_campaign;
 pub mod ensemble_counterfactual;
 pub mod graph_propagation;
+pub mod mechanism_dynamics;
 pub mod pathway_activity;
 pub mod robust_portfolio;
 
@@ -66,6 +67,12 @@ pub use graph_propagation::{
     propagate_glioma_mechanism_graph, MechanismGraphDisposition, MechanismGraphEdge,
     MechanismGraphError, MechanismGraphNode, MechanismGraphPropagation, MechanismGraphRelation,
     MechanismGraphRequest, MechanismNodeScore,
+};
+pub use mechanism_dynamics::{
+    simulate_glioma_mechanism_dynamics, MechanismDynamicsDisposition, MechanismDynamicsEdge,
+    MechanismDynamicsError, MechanismDynamicsIntervention, MechanismDynamicsNode,
+    MechanismDynamicsPlan, MechanismDynamicsRequest, MechanismDynamicsSensitivity,
+    MechanismDynamicsState, MechanismDynamicsStep,
 };
 pub use pathway_activity::{
     analyze_glioma_pathway_activity, PathwayActivityAnalysis, PathwayActivityDefinition,

@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 678;
+const TOOL_DEFINITION_COUNT: usize = 679;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -2572,6 +2572,51 @@ fn glioma_sequential_campaign_executes_and_replans_in_sandbox() {
         .as_array()
         .is_some_and(|batches| !batches.is_empty()));
     assert!(campaign["campaign"]["final_plan"]["decisions"].is_array());
+}
+
+#[test]
+fn glioma_mechanism_dynamics_exposes_feedback_and_intervention_sensitivity() {
+    let mut server = server();
+    let plan = call(
+        &mut server,
+        "glioma_mechanism_dynamics",
+        json!({
+            "request": {
+                "objective": "simulate hypoxia-driven invasion feedback",
+                "model_system": "organoid",
+                "max_steps": 12,
+                "time_step_milli": 200,
+                "stability_window": 3,
+                "stability_delta_milli": 2,
+                "divergence_abs_milli": 1000,
+                "max_selected_interventions": 1,
+                "budget_units": 4,
+                "risk_ceiling_milli": 800,
+                "sensitivity_delta_milli": 5
+            },
+            "nodes": [
+                {"node_id":"hypoxia","label":"hypoxia state","initial_state_milli":300,"drift_milli":-30,"uncertainty_milli":20},
+                {"node_id":"invasion","label":"invasion state","initial_state_milli":100,"drift_milli":-10,"uncertainty_milli":20}
+            ],
+            "edges": [
+                {"edge_id":"hypoxia-to-invasion","source_node":"hypoxia","target_node":"invasion","weight_milli":500,"lag_steps":0,"confidence_milli":900},
+                {"edge_id":"invasion-to-hypoxia","source_node":"invasion","target_node":"hypoxia","weight_milli":-100,"lag_steps":1,"confidence_milli":800}
+            ],
+            "interventions": [
+                {"intervention_id":"oxygenation","target_node":"hypoxia","delta_milli":-250,"start_step":0,"duration_steps":6,"cost_units":2,"risk_milli":200,"confidence_milli":900}
+            ]
+        }),
+    );
+    assert_eq!(plan["dispatch"], json!("not_started"));
+    assert_eq!(plan["simulation_only"], json!(true));
+    assert_eq!(
+        plan["plan"]["selected_intervention_order"],
+        json!(["oxygenation"])
+    );
+    assert!(plan["plan"]["steps"]
+        .as_array()
+        .is_some_and(|steps| !steps.is_empty()));
+    assert_eq!(plan["plan"]["sensitivities"].as_array().unwrap().len(), 1);
 }
 
 #[test]
