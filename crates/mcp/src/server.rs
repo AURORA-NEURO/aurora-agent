@@ -504,10 +504,10 @@ use bioprism_research::{
     analyze_replication_meta_analysis, analyze_stratified_causal_adjustment,
     assess_glioma_robustness, assess_replication, build_research_object_manifest,
     calibrate_glioma_evidence, calibrate_glioma_mechanisms, compile_decision_action_graph,
-    compile_decision_context, compile_glioma_computation_workflow, compile_mechanism_action_plan,
-    compile_typed_knowledge, compose_knowledge_graph, design_glioma_contrast_panel,
-    design_preclinical_experiment, discriminate_mechanisms, dry_run_glioma_research,
-    evaluate_glioma_dynamic_policies, evaluate_glioma_release_gate,
+    compile_decision_context, compile_glioma_computation_workflow, compile_glioma_knowledge_gaps,
+    compile_mechanism_action_plan, compile_typed_knowledge, compose_knowledge_graph,
+    design_glioma_contrast_panel, design_preclinical_experiment, discriminate_mechanisms,
+    dry_run_glioma_research, evaluate_glioma_dynamic_policies, evaluate_glioma_release_gate,
     execute_federated_benchmark_campaign, execute_glioma_action_portfolio,
     execute_glioma_active_learning_campaign, execute_glioma_adaptive_allocation_campaign,
     execute_glioma_adaptive_mechanism_campaign, execute_glioma_autonomous_campaign,
@@ -586,8 +586,9 @@ use bioprism_research::{
     InstrumentExecutionRequest, InstrumentExecutionRun, InstrumentFleetExecutionRequest,
     InstrumentFleetScheduleRequest, InstrumentInterlockSnapshot, InstrumentPreflightRequest,
     InterpretationSynthesisRequest, KnowledgeCompositionRequest, KnowledgeFrontierRequest,
-    KnowledgeRelation, KnowledgeRequest, KnowledgeResolutionCampaignRequest, LatentFactorRequest,
-    LatentFactorVector, LigandReceptorPair, MechanismActionPlannerConfig, MechanismCalibration,
+    KnowledgeGapCompilerRequest, KnowledgeRelation, KnowledgeRequest,
+    KnowledgeResolutionCampaignRequest, LatentFactorRequest, LatentFactorVector,
+    LigandReceptorPair, MechanismActionPlannerConfig, MechanismCalibration,
     MechanismCalibrationObservation, MechanismCalibrationRequest, MechanismCandidate,
     MechanismDiscrimination, MechanismDiscriminationCampaignRequest,
     MechanismDiscriminationRequest, MechanismDiscriminatorAction, MechanismDynamicsEdge,
@@ -2255,6 +2256,7 @@ impl Server {
             "glioma_knowledge_compose" => self.glioma_knowledge_compose(&arguments),
             "glioma_belief_revision" => self.glioma_belief_revision(&arguments),
             "glioma_knowledge_frontier" => self.glioma_knowledge_frontier(&arguments),
+            "glioma_knowledge_gap_compile" => self.glioma_knowledge_gap_compile(&arguments),
             "glioma_decision_context" => self.glioma_decision_context(&arguments),
             "glioma_decision_action_graph" => self.glioma_decision_action_graph(&arguments),
             "glioma_decision_branch_plan" => self.glioma_decision_branch_plan(&arguments),
@@ -8029,6 +8031,46 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma knowledge frontier: {error}"))
+    }
+
+    /// Compile P02 typed-knowledge frontier debt into P01 acquisition candidates. This handoff
+    /// is deterministic and local; it does not select, fetch, execute, or promote evidence.
+    fn glioma_knowledge_gap_compile(&self, arguments: &Value) -> Result<Value, String> {
+        let request: KnowledgeGapCompilerRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_knowledge_gap_compile requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma knowledge-gap compiler request: {error}"))?;
+        let knowledge: TypedKnowledge = serde_json::from_value(
+            arguments
+                .get("knowledge")
+                .cloned()
+                .ok_or_else(|| "glioma_knowledge_gap_compile requires knowledge".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma typed knowledge: {error}"))?;
+        let frontier: bioprism_research::KnowledgeFrontier = serde_json::from_value(
+            arguments
+                .get("frontier")
+                .cloned()
+                .ok_or_else(|| "glioma_knowledge_gap_compile requires frontier".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma knowledge frontier: {error}"))?;
+        let portfolio = compile_glioma_knowledge_gaps(&request, &knowledge, &frontier)
+            .map_err(|error| format!("glioma knowledge-gap compilation refused: {error}"))?;
+        serde_json::to_value(json!({
+            "portfolio": portfolio,
+            "dispatch": "not_started",
+            "next_route": "glioma_evidence_acquisition_plan",
+            "guarantees": [
+                "typed P02 coverage, contradiction, uncertainty, negative, and replication debt becomes concrete P01 candidate metadata",
+                "candidate generation is deterministic, local-only, source-template bounded, and digest-bound to knowledge and frontier inputs",
+                "human-data and non-local source templates are blocked rather than emitted as executable candidates",
+                "the route performs no retrieval, assay, simulation, data movement, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma knowledge-gap portfolio: {error}"))
     }
 
     /// Turn typed glioma knowledge gaps into executable candidates for the bounded action
@@ -49645,6 +49687,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_knowledge_compose",
                 "glioma_belief_revision",
                 "glioma_knowledge_frontier",
+                "glioma_knowledge_gap_compile",
                 "glioma_decision_context",
                 "glioma_decision_action_graph",
                 "glioma_decision_branch_plan",
@@ -59230,6 +59273,19 @@ pub fn tool_definitions() -> Vec<Value> {
                 "knowledge": {"type": "object", "description": "TypedKnowledge1@1 from glioma_knowledge_compile."}
             },
             "required": ["request", "knowledge"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_knowledge_gap_compile",
+        "description": "Compile a typed preclinical glioma knowledge/frontier pair into concrete local P01 evidence-acquisition candidates for coverage closure, contradiction resolution, uncertainty reduction, negative-result revalidation, and independent validation. The result is digest-bound to both inputs and source templates; it blocks human/non-local templates and performs no retrieval, assay, simulation, data movement, or clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "KnowledgeGapCompilerRequest1@1 with objective, claim/candidate bounds, priority floor, cost ceiling, and local source templates."},
+                "knowledge": {"type": "object", "description": "TypedKnowledge1@1 from glioma_knowledge_compile."},
+                "frontier": {"type": "object", "description": "KnowledgeFrontier1@1 from glioma_knowledge_frontier, bound to the same knowledge digest and objective."}
+            },
+            "required": ["request", "knowledge", "frontier"]
         }
     }));
     definitions.push(json!({

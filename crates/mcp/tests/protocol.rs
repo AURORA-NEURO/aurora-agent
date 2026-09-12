@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 686;
+const TOOL_DEFINITION_COUNT: usize = 687;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -2372,6 +2372,36 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
             .len(),
         1
     );
+
+    let knowledge_gap_portfolio = call(
+        &mut server,
+        "glioma_knowledge_gap_compile",
+        json!({
+            "request": {
+                "objective": "rank invasion mechanisms",
+                "max_claims": 8,
+                "max_candidates": 16,
+                "max_candidates_per_claim": 8,
+                "max_template_cost_units": 10,
+                "min_frontier_priority_milli": 0,
+                "templates": [
+                    {"template_id":"imaging-atlas","source_family":"atlas","source_kind":"dataset","modality":"imaging","model_system":"organoid","cost_units":2,"reproducibility_milli":800,"failure_probability_milli":100,"privacy_risk_milli":50,"local_only":true,"contains_human_data":false},
+                    {"template_id":"replication-site","source_family":"consortium","source_kind":"replication","modality":null,"model_system":null,"cost_units":3,"reproducibility_milli":900,"failure_probability_milli":150,"privacy_risk_milli":50,"local_only":true,"contains_human_data":false}
+                ]
+            },
+            "knowledge": knowledge["knowledge"].clone(),
+            "frontier": knowledge_frontier["frontier"].clone()
+        }),
+    );
+    assert_eq!(knowledge_gap_portfolio["dispatch"], json!("not_started"));
+    assert_eq!(
+        knowledge_gap_portfolio["next_route"],
+        json!("glioma_evidence_acquisition_plan")
+    );
+    assert!(!knowledge_gap_portfolio["portfolio"]["candidates"]
+        .as_array()
+        .unwrap()
+        .is_empty());
 
     let decision_context = call(
         &mut server,

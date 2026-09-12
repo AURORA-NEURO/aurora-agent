@@ -26,6 +26,8 @@ crates/research/src/glioma/
                                              P02 explicit-conflict maximal-consistency revision with rival-claim frontier
   programs/p02_evidence_knowledge/claim_frontier.rs
                                              P02 uncertainty/coverage/contradiction frontier prioritization
+  programs/p02_evidence_knowledge/gap_compiler.rs
+                                             P02 typed-knowledge frontier to P01 acquisition-candidate compiler
   programs/p04_decision_context/context_compiler.rs
                                              P04 evidence-gap to typed next-action compilation
   programs/p04_decision_context/action_graph.rs
@@ -255,7 +257,7 @@ portfolio plan and executable code; it does not promote a planned slot to implem
 | Program | Product owner | Engine stages | Observable product result |
 | --- | --- | --- | --- |
 | P01 Evidence surveillance | evidence curator | evidence surveillance | snapshot deltas, recency/state/coverage action queues, dependency-closed evidence-acquisition portfolios, source calibration, cross-family claim triangulation, review/revalidation actions, and stale/unknown/contradictory coverage |
-| P02 Evidence-to-typed-knowledge | knowledge engineer | evidence compilation | scoped claims, contradiction-aware maximal-consistency portfolios, ranked rival frontiers, and competing explanations bound to source artifacts |
+| P02 Evidence-to-typed-knowledge | knowledge engineer | evidence compilation | scoped claims, contradiction-aware maximal-consistency portfolios, ranked rival frontiers, typed frontier-to-acquisition candidate compilation, and competing explanations bound to source artifacts |
 | P03 Multimodal ingestion and QC | data steward | multimodal ingestion/QC | comparable cells, robust batch harmonization, feature-level concordance, consensus clusters, spatial niches, ligand-receptor communication, cross-sample registration, spatial-state diffusion, and explicit defects |
 | P04 Question-to-decision context | principal investigator | intent normalization, context compilation | bounded decision context, scenario-aware Pareto workflow branches, selected executable action batches, and unresolved omissions |
 | P05 Mechanism exploration | mechanism scientist | molecular landscape, mechanism exploration | residual-fit competing mechanisms, posterior-weighted next-assay information gain, signed mechanism-network propagation, delayed-feedback mechanism dynamics, model-averaged counterfactuals, robust lower-tail intervention portfolios, and discriminating actions |

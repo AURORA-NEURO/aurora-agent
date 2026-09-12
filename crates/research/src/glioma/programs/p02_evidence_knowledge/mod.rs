@@ -4,7 +4,14 @@ pub mod belief_revision;
 pub mod campaign;
 pub mod claim_frontier;
 pub mod composition;
+pub mod gap_compiler;
 pub mod knowledge_graph;
+
+pub use gap_compiler::{
+    compile_glioma_knowledge_gaps, KnowledgeGapClaimMapping, KnowledgeGapCompilerError,
+    KnowledgeGapCompilerRequest, KnowledgeGapPortfolio, KnowledgeGapPortfolioDisposition,
+    KnowledgeGapSourceTemplate,
+};
 
 pub use campaign::{
     execute_glioma_knowledge_resolution_campaign, DryRunKnowledgeResolutionCampaignExecutor,
