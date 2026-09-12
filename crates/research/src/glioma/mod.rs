@@ -331,6 +331,7 @@ pub use programs::p11_research_object_release::{
 pub use programs::p12_federated_benchmarking::{
     analyze_federated_benchmark, analyze_federated_mechanism_transport,
     execute_federated_benchmark_campaign,
+    plan_federated_benchmark_sites,
     DryRunFederatedBenchmarkCampaignExecutor, FederatedBenchmarkAction,
     FederatedBenchmarkActionKind, FederatedBenchmarkCampaign,
     FederatedBenchmarkCampaignDisposition, FederatedBenchmarkCampaignError,
@@ -339,6 +340,9 @@ pub use programs::p12_federated_benchmarking::{
     FederatedBenchmarkConsensus, FederatedBenchmarkContribution, FederatedBenchmarkDisposition,
     FederatedBenchmarkError, FederatedBenchmarkExecutionFailure, FederatedBenchmarkRequest,
     FederatedBenchmarkSite, FederatedBenchmarkSiteDisposition,
+    FederatedBenchmarkCandidate, FederatedBenchmarkCandidateScore,
+    FederatedBenchmarkPlanDisposition, FederatedBenchmarkSitePlan,
+    FederatedBenchmarkSitePlannerError, FederatedBenchmarkSitePlannerRequest,
     FederatedMechanismContribution, FederatedMechanismSite,
     FederatedMechanismTransportAnalysis, FederatedMechanismTransportDisposition,
     FederatedMechanismTransportError, FederatedMechanismTransportRequest, FederatedModelCoverage,

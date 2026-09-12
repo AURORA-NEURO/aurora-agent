@@ -5,6 +5,7 @@ use crate::glioma::catalog::{glioma_program_catalog, GliomaProgramDescriptor, Gl
 pub mod campaign;
 pub mod consensus;
 pub mod mechanism_transport;
+pub mod site_planner;
 
 pub use campaign::{
     execute_federated_benchmark_campaign, DryRunFederatedBenchmarkCampaignExecutor,
@@ -26,6 +27,13 @@ pub use mechanism_transport::{
     FederatedMechanismSite, FederatedMechanismTransportAnalysis,
     FederatedMechanismTransportDisposition, FederatedMechanismTransportError,
     FederatedMechanismTransportRequest, FederatedModelCoverage,
+};
+
+pub use site_planner::{
+    plan_federated_benchmark_sites, FederatedBenchmarkCandidate,
+    FederatedBenchmarkCandidateScore, FederatedBenchmarkPlanDisposition,
+    FederatedBenchmarkSitePlan, FederatedBenchmarkSitePlannerError,
+    FederatedBenchmarkSitePlannerRequest,
 };
 
 pub const PROGRAM_ID: GliomaProgramId = GliomaProgramId::FederatedBenchmarking;

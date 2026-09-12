@@ -100,6 +100,8 @@ crates/research/src/glioma/
     p12_federated_benchmarking/
     p12_federated_benchmarking/mechanism_transport.rs
                                              P12 aggregate-only cross-model mechanism transport and fragility analysis
+    p12_federated_benchmarking/site_planner.rs
+                                             P12 conservative influence-aware consortium expansion and site portfolio planning
   workflow.rs                               P07 adaptive campaign planner and guarded execution
     p07_protocol_simulation/simulator.rs    P07 deterministic resource-constrained scheduling
     p07_protocol_simulation/execution.rs   P07 guarded local protocol execution with retries
@@ -233,7 +235,7 @@ portfolio plan and executable code; it does not promote a planned slot to implem
 | P09 Reproducible computation | computational scientist | computational execution | checkpointed/replayable computation, intent-to-DAG compilation, budgeted portfolio execution, and omission-stress robustness suite |
 | P10 Causal interpretation and replication | methods reviewer | statistical interpretation, replication/robustness | uncertainty-aware endpoint, longitudinal, stratified causal, causal-contrast, meta-analytic, and cross-site verdicts |
 | P11 Research-object release | reproducibility steward | research-object release | portable manifest with limitations and negative evidence |
-| P12 Federated benchmarking | consortium administrator | federation benchmarking | aggregate-only cross-site benchmark consensus with robust pooling, heterogeneity, and site-influence analysis |
+| P12 Federated benchmarking | consortium administrator | federation benchmarking | aggregate-only cross-site benchmark consensus, influence-aware site portfolio planning, robust pooling, heterogeneity, and site-influence analysis |
 
 ## Feature expansion
 
@@ -526,6 +528,12 @@ current pooled effect, heterogeneity, replicate floor, and leave-one-site-out in
 local executor for new site aggregates, and recomputes consensus after each bounded round. Site
 raw traces stay local; duplicate identities, unbound results, budget exhaustion, negative evidence,
 and unresolved heterogeneity remain explicit campaign outcomes.
+P12 also exposes a conservative site-portfolio planner (`plan_federated_benchmark_sites`). It
+uses bounded beam search over candidate independent studies, pessimistically discounts expected
+scores by declared uncertainty, and replays the real consensus analyzer for every projected
+portfolio. Budget, privacy risk, replicate floors, heterogeneity, spread, and leave-one-site-out
+influence are optimized together; a ready plan is still a scenario requiring future validation,
+never a fabricated benchmark observation.
 P11 now adds a dependency-aware reproducibility replay campaign
 (`execute_glioma_replay_campaign`). It schedules declared program replays, compares exact artifact
 hashes, blocks downstream tasks after mismatch or unavailable outputs, and only emits a

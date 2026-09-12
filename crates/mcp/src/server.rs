@@ -468,6 +468,7 @@ use bioprism_repair::{
 };
 use bioprism_research::{
     allocate_glioma_assays, analyze_causal_sensitivity, analyze_federated_benchmark,
+    plan_federated_benchmark_sites,
     analyze_glioma_causal_contrast, analyze_glioma_combination_synergy,
     analyze_glioma_dose_response, analyze_glioma_latent_factors, analyze_glioma_mediation,
     analyze_glioma_multimodal_graph_fusion, analyze_glioma_pathway_activity,
@@ -541,6 +542,7 @@ use bioprism_research::{
     EvidencePriorityRequest, EvidenceRecord, EvidenceRefreshCampaignRequest, EvidenceRequest,
     EvidenceSurveillanceRequest, EvidenceTriangulationRequest, ExperimentArm, ExperimentRequest,
     FederatedBenchmarkCampaignRequest, FederatedBenchmarkRequest, FederatedBenchmarkSite,
+    FederatedBenchmarkSitePlannerRequest,
     FederatedMechanismSite, FederatedMechanismTransportRequest,
     FidelityCandidate, FidelityObservation, GliomaActionCandidate, GliomaAutonomousCampaignRequest,
     GliomaComputationCampaignRequest, GliomaComputationWorkflowRequest,
@@ -2179,6 +2181,9 @@ impl Server {
             }
             "glioma_federated_benchmark_consensus" => {
                 self.glioma_federated_benchmark_consensus(&arguments)
+            }
+            "glioma_federated_benchmark_site_plan" => {
+                self.glioma_federated_benchmark_site_plan(&arguments)
             }
             "glioma_federated_mechanism_transport" => {
                 self.glioma_federated_mechanism_transport(&arguments)
@@ -6410,6 +6415,31 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma federated benchmark consensus: {error}"))
+    }
+
+    /// Plan an aggregate-only consortium expansion without dispatching a site or moving raw data.
+    fn glioma_federated_benchmark_site_plan(&self, arguments: &Value) -> Result<Value, String> {
+        let request: FederatedBenchmarkSitePlannerRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_federated_benchmark_site_plan requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma federated benchmark site-plan request: {error}"))?;
+        let plan = plan_federated_benchmark_sites(&request)
+            .map_err(|error| format!("glioma federated benchmark site plan refused: {error}"))?;
+        serde_json::to_value(json!({
+            "site_plan": plan,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "candidate site projections are conservative scenarios, never observations",
+                "the planner reuses robust consensus, heterogeneity, and leave-one-site-out influence gates",
+                "budget, privacy-risk, replicate, independent-study, and candidate bounds are explicit",
+                "only aggregate scores and local artifact references are modeled; no raw data, assay, or clinical decision is moved"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma federated benchmark site plan: {error}"))
     }
 
     /// Analyze aggregate mechanism effects across federated preclinical model systems. This is a
@@ -46685,6 +46715,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_autonomous_research_mission_execute",
                 "glioma_multi_fidelity_campaign_execute",
                 "glioma_federated_benchmark_consensus",
+                "glioma_federated_benchmark_site_plan",
                 "glioma_federated_mechanism_transport",
                 "glioma_federated_benchmark_campaign_execute",
                 "glioma_replay_campaign_execute",
@@ -54691,6 +54722,17 @@ pub fn tool_definitions() -> Vec<Value> {
                 "sites": {"type": "array", "items": {"type": "object"}, "description": "FederatedMechanismSite1@1 aggregate-only mechanism effects with bounded population signatures and local artifact references."}
             },
             "required": ["request", "sites"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_federated_benchmark_site_plan",
+        "description": "Plan a conservative aggregate-only expansion of a preclinical glioma benchmark consortium. Bounded beam search evaluates candidate sites and replicate portfolios against the real consensus analyzer, accounting for budget, privacy risk, independent-study identity, heterogeneity, signal, spread, and leave-one-site-out influence. Projections are scenarios, not observations; no raw data or clinical decision is produced.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "FederatedBenchmarkSitePlannerRequest1@1 with benchmark thresholds, current aggregate sites, candidate site scenarios, budget/privacy bounds, beam width, and conservatism setting."}
+            },
+            "required": ["request"]
         }
     }));
     definitions.push(json!({
