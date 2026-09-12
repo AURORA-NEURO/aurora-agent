@@ -7,10 +7,7 @@
 //! only as far into the evidence as it needs, and verify a certificate — without linking the
 //! engine or learning a new SDK.
 
-// The protocol catalogue is intentionally explicit and now includes the six-lane neurosurgical
-// workbench. Keep macro expansion headroom proportional to that versioned schema surface.
-#![recursion_limit = "512"]
-//!
+//! 
 //! # Not implemented, deliberately
 //!
 //! * **One transport.** [`serve`] speaks newline-delimited JSON-RPC over a reader and a writer,
