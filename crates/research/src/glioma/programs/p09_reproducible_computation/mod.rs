@@ -2,8 +2,8 @@
 
 use crate::glioma::catalog::{glioma_program_catalog, GliomaProgramDescriptor, GliomaProgramId};
 
-pub mod execution;
 pub mod campaign;
+pub mod execution;
 pub mod planning;
 pub mod portfolio_execution;
 pub mod robustness;
@@ -26,9 +26,8 @@ pub use campaign::{
     execute_glioma_computation_campaign, GliomaComputationCampaign,
     GliomaComputationCampaignDisposition, GliomaComputationCampaignError,
     GliomaComputationCampaignRequest, GliomaComputationCampaignRound,
-    GliomaComputationCampaignStopReason, GliomaComputationPlanner,
-    GliomaComputationPlannerContext, GliomaComputationPlannerFailure,
-    StaticGliomaComputationPlanner,
+    GliomaComputationCampaignStopReason, GliomaComputationPlanner, GliomaComputationPlannerContext,
+    GliomaComputationPlannerFailure, StaticGliomaComputationPlanner,
 };
 
 pub use planning::{
@@ -44,8 +43,8 @@ pub use portfolio_execution::{
 };
 
 pub use workflow::{
-    compile_glioma_computation_workflow, GliomaComputationWorkflow,
-    GliomaComputationWorkflowError, GliomaComputationWorkflowRequest,
+    compile_glioma_computation_workflow, GliomaComputationWorkflow, GliomaComputationWorkflowError,
+    GliomaComputationWorkflowRequest,
 };
 
 pub const PROGRAM_ID: GliomaProgramId = GliomaProgramId::ReproducibleComputation;

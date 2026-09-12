@@ -863,14 +863,19 @@ mod tests {
     fn resumed_campaign_does_not_repeat_completed_context_action() {
         let request = request();
         let mut first_executor = DryRunDecisionContextCampaignExecutor;
-        let first = execute_glioma_decision_context_campaign(&request, &mut first_executor).unwrap();
+        let first =
+            execute_glioma_decision_context_campaign(&request, &mut first_executor).unwrap();
         let mut resumed = request;
         resumed.action_plan.completed_action_order = first.completed_order.clone();
         let mut second_executor = DryRunDecisionContextCampaignExecutor;
-        let second = execute_glioma_decision_context_campaign(&resumed, &mut second_executor).unwrap();
+        let second =
+            execute_glioma_decision_context_campaign(&resumed, &mut second_executor).unwrap();
         assert!(second.rounds.is_empty());
         assert_eq!(second.completed_order, first.completed_order);
-        assert_eq!(second.disposition, DecisionContextCampaignDisposition::Qualified);
+        assert_eq!(
+            second.disposition,
+            DecisionContextCampaignDisposition::Qualified
+        );
         second.validate().unwrap();
     }
 }

@@ -132,7 +132,10 @@ impl InstrumentCalibration {
             || self.metric_name.trim().is_empty()
             || self.run_order.len() != self.points.len()
             || self.run_order.windows(2).any(|pair| pair[0] >= pair[1])
-            || self.reference_order.windows(2).any(|pair| pair[0] >= pair[1])
+            || self
+                .reference_order
+                .windows(2)
+                .any(|pair| pair[0] >= pair[1])
             || self.points.windows(2).any(|pair| {
                 (pair[0].sequence_index, &pair[0].run_id)
                     >= (pair[1].sequence_index, &pair[1].run_id)
@@ -143,7 +146,10 @@ impl InstrumentCalibration {
                     || point.drift_from_reference_milli.unsigned_abs() > MAX_VALUE_MILLI
                     || point.robust_z_milli > u64::MAX / 2
             })
-            || self.negative_evidence.windows(2).any(|pair| pair[0] >= pair[1])
+            || self
+                .negative_evidence
+                .windows(2)
+                .any(|pair| pair[0] >= pair[1])
             || self.uncertainty.windows(2).any(|pair| pair[0] >= pair[1])
         {
             return Err(CalibrationError::InvalidOutput(
@@ -156,7 +162,11 @@ impl InstrumentCalibration {
             .iter()
             .map(|point| point.run_id.clone())
             .collect::<BTreeSet<_>>();
-        let references = self.reference_order.iter().cloned().collect::<BTreeSet<_>>();
+        let references = self
+            .reference_order
+            .iter()
+            .cloned()
+            .collect::<BTreeSet<_>>();
         if runs != points || !references.is_subset(&runs) {
             return Err(CalibrationError::InvalidOutput(
                 "run, point, and reference partitions do not reconcile".into(),
@@ -285,8 +295,14 @@ pub fn analyze_instrument_calibration(
         .last()
         .map(|point| point.drift_from_reference_milli)
         .unwrap_or(0);
-    let run_order = points.iter().map(|point| point.run_id.clone()).collect::<Vec<_>>();
-    let reference_order = reference.iter().map(|run| run.run_id.clone()).collect::<Vec<_>>();
+    let run_order = points
+        .iter()
+        .map(|point| point.run_id.clone())
+        .collect::<Vec<_>>();
+    let reference_order = reference
+        .iter()
+        .map(|run| run.run_id.clone())
+        .collect::<Vec<_>>();
     let mut negative = BTreeSet::new();
     let mut uncertainty = BTreeSet::new();
     if runs.len() < request.minimum_runs {
@@ -407,7 +423,11 @@ mod tests {
     fn insufficient_history_is_unresolved() {
         let mut request = request();
         request.minimum_runs = 4;
-        let output = analyze_instrument_calibration(&request, &[run("r1", 1, 500), run("r2", 2, 500), run("r3", 3, 500)]).unwrap();
+        let output = analyze_instrument_calibration(
+            &request,
+            &[run("r1", 1, 500), run("r2", 2, 500), run("r3", 3, 500)],
+        )
+        .unwrap();
         assert_eq!(output.disposition, CalibrationDisposition::Unresolved);
         assert!(output
             .uncertainty

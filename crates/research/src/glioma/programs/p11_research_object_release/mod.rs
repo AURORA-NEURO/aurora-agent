@@ -2,8 +2,8 @@
 
 use crate::glioma::catalog::{glioma_program_catalog, GliomaProgramDescriptor, GliomaProgramId};
 
-pub mod replay;
 pub mod release_gate;
+pub mod replay;
 
 pub use replay::{
     execute_glioma_replay_campaign, DryRunReplayCampaignExecutor, ReplayCampaign,

@@ -2,11 +2,11 @@
 
 use crate::glioma::catalog::{glioma_program_catalog, GliomaProgramDescriptor, GliomaProgramId};
 
+pub mod adaptive_frontier;
+pub mod campaign;
 pub mod causal_adjustment;
 pub mod causal_contrast;
-pub mod campaign;
 pub mod clone_outcomes;
-pub mod adaptive_frontier;
 pub mod mediation;
 pub mod meta_analysis;
 pub mod sensitivity;
@@ -15,18 +15,9 @@ pub mod synthesis;
 pub mod trajectory;
 pub mod transportability;
 
-pub use causal_adjustment::{
-    analyze_stratified_causal_adjustment, CausalStratumSummary, StratifiedCausalActionKind,
-    StratifiedCausalAdjustment, StratifiedCausalDisposition, StratifiedCausalError,
-    StratifiedCausalRequest, StratifiedObservation,
-};
 pub use adaptive_frontier::{
     plan_glioma_adaptive_research_frontier, AdaptiveFrontierCandidate, AdaptiveFrontierDisposition,
     AdaptiveFrontierError, AdaptiveFrontierRequest, AdaptiveResearchFrontier, AdaptiveTarget,
-};
-pub use causal_contrast::{
-    analyze_glioma_causal_contrast, CausalContrastAnalysis, CausalContrastDisposition,
-    CausalContrastError, CausalContrastRequest, UnitContrast,
 };
 pub use campaign::{
     execute_glioma_replication_campaign, DryRunGliomaReplicationCampaignExecutor,
@@ -35,6 +26,15 @@ pub use campaign::{
     GliomaReplicationCampaignExecutor, GliomaReplicationCampaignObservation,
     GliomaReplicationCampaignRequest, GliomaReplicationCampaignRound,
     GliomaReplicationCampaignStopReason, GliomaReplicationExecutionFailure,
+};
+pub use causal_adjustment::{
+    analyze_stratified_causal_adjustment, CausalStratumSummary, StratifiedCausalActionKind,
+    StratifiedCausalAdjustment, StratifiedCausalDisposition, StratifiedCausalError,
+    StratifiedCausalRequest, StratifiedObservation,
+};
+pub use causal_contrast::{
+    analyze_glioma_causal_contrast, CausalContrastAnalysis, CausalContrastDisposition,
+    CausalContrastError, CausalContrastRequest, UnitContrast,
 };
 pub use clone_outcomes::{
     analyze_glioma_clone_panel_outcomes, ClonePanelBranchAnalysis, ClonePanelCandidateAnalysis,

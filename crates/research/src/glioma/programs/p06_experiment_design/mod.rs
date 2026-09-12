@@ -36,9 +36,9 @@ pub use adaptive_allocation_campaign::{
     DryRunAdaptiveAllocationCampaignExecutor,
 };
 pub use adaptive_dose_surface::{
-    plan_adaptive_glioma_dose_surface, AdaptiveDoseSurfaceDisposition,
-    AdaptiveDoseSurfaceError, AdaptiveDoseSurfacePlan, AdaptiveDoseSurfaceRequest,
-    DoseSurfaceCellState, DoseSurfaceEstimate, DoseSurfaceObservation,
+    plan_adaptive_glioma_dose_surface, AdaptiveDoseSurfaceDisposition, AdaptiveDoseSurfaceError,
+    AdaptiveDoseSurfacePlan, AdaptiveDoseSurfaceRequest, DoseSurfaceCellState, DoseSurfaceEstimate,
+    DoseSurfaceObservation,
 };
 pub use adaptive_information_campaign::{
     execute_glioma_adaptive_information_campaign, plan_glioma_adaptive_information_campaign,

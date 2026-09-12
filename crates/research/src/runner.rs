@@ -25,7 +25,9 @@ use crate::findings::{
 };
 use crate::protocol::{plan_protocol, ProtocolStep};
 use crate::request::ResearchRequest;
-use bioprism_baseline::{compare, default_panel, run_sweep, ContextStrategy, SweepGrid, SweepTable};
+use bioprism_baseline::{
+    compare, default_panel, run_sweep, ContextStrategy, SweepGrid, SweepTable,
+};
 use bioprism_fiber::{compile, CompileOutput, Query};
 use bioprism_ids::ContentHash;
 use bioprism_mutation::{generate as mutate, measure, standard_suite};
@@ -98,12 +100,13 @@ fn compile_and_roundtrip(
         .map_err(canonicalisation)?;
     match ContextCertificate::verify(&certificate).map_err(canonicalisation)? {
         CertificateVerification::Valid => Ok((output, certificate)),
-        CertificateVerification::DigestMismatch { claimed, recomputed } => {
-            Err(ResearchError::CertificateRoundTrip {
-                world_id: world_id.to_string(),
-                reason: format!("digest mismatch: claimed {claimed}, recomputed {recomputed}"),
-            })
-        }
+        CertificateVerification::DigestMismatch {
+            claimed,
+            recomputed,
+        } => Err(ResearchError::CertificateRoundTrip {
+            world_id: world_id.to_string(),
+            reason: format!("digest mismatch: claimed {claimed}, recomputed {recomputed}"),
+        }),
         CertificateVerification::Malformed(reason) => Err(ResearchError::CertificateRoundTrip {
             world_id: world_id.to_string(),
             reason: format!("malformed: {reason}"),
@@ -219,13 +222,17 @@ pub fn run_research(request: &ResearchRequest) -> Result<Value, ResearchError> {
     for (step_index, step) in protocol.steps.iter().enumerate() {
         let record = match step {
             ProtocolStep::AnchorReferenceFixture => {
-                let world_value: Value = serde_json::from_str(REFERENCE_WORLD_JSON)
-                    .map_err(|error| ResearchError::ReferenceFixtureUnusable {
-                        reason: format!("world fixture does not parse: {error}"),
+                let world_value: Value =
+                    serde_json::from_str(REFERENCE_WORLD_JSON).map_err(|error| {
+                        ResearchError::ReferenceFixtureUnusable {
+                            reason: format!("world fixture does not parse: {error}"),
+                        }
                     })?;
-                let query_value: Value = serde_json::from_str(REFERENCE_QUERY_JSON)
-                    .map_err(|error| ResearchError::ReferenceFixtureUnusable {
-                        reason: format!("query fixture does not parse: {error}"),
+                let query_value: Value =
+                    serde_json::from_str(REFERENCE_QUERY_JSON).map_err(|error| {
+                        ResearchError::ReferenceFixtureUnusable {
+                            reason: format!("query fixture does not parse: {error}"),
+                        }
                     })?;
                 let world_digest = digest_of(&world_value)?;
                 let query_digest = digest_of(&query_value)?;
