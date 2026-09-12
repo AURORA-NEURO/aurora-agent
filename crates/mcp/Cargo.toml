@@ -69,7 +69,6 @@ bioprism-prism = { workspace = true }
 bioprism-research = { workspace = true }
 bioprism-project = { workspace = true }
 bioprism-registry = { workspace = true }
-bioprism-research = { workspace = true }
 bioprism-research-campaign = { workspace = true }
 bioprism-repair = { workspace = true }
 bioprism-routing = { workspace = true }
