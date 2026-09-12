@@ -535,14 +535,14 @@ use bioprism_research::{
     plan_glioma_robust_intervention_portfolio, plan_glioma_sequential_design, plan_glioma_workflow,
     preflight_glioma_instrument, prioritize_glioma_evidence, prioritize_knowledge_frontier,
     propagate_glioma_mechanism_graph, qualify_evidence, register_glioma_spatial_samples,
-    revise_glioma_beliefs, select_glioma_actions, simulate_glioma_counterfactual,
-    simulate_glioma_counterfactual_ensemble, simulate_glioma_mechanism_dynamics,
-    simulate_glioma_protocol, surveil_glioma_evidence, synthesize_glioma_interpretation,
-    triangulate_glioma_evidence, validate_feature_catalog, ActionPortfolioExecutionRequest,
-    ActiveLearningCampaignRequest, ActiveLearningCandidate, ActiveLearningObservation,
-    ActiveLearningRequest, AdaptiveAllocationCampaignRequest, AdaptiveAllocationRequest,
-    AdaptiveArmObservation, AdaptiveDoseSurfaceRequest, AdaptiveFrontierRequest,
-    AdaptiveInformationCampaignRequest, AdaptiveInformationObservation,
+    revise_glioma_beliefs, schedule_glioma_instrument_fleet, select_glioma_actions,
+    simulate_glioma_counterfactual, simulate_glioma_counterfactual_ensemble,
+    simulate_glioma_mechanism_dynamics, simulate_glioma_protocol, surveil_glioma_evidence,
+    synthesize_glioma_interpretation, triangulate_glioma_evidence, validate_feature_catalog,
+    ActionPortfolioExecutionRequest, ActiveLearningCampaignRequest, ActiveLearningCandidate,
+    ActiveLearningObservation, ActiveLearningRequest, AdaptiveAllocationCampaignRequest,
+    AdaptiveAllocationRequest, AdaptiveArmObservation, AdaptiveDoseSurfaceRequest,
+    AdaptiveFrontierRequest, AdaptiveInformationCampaignRequest, AdaptiveInformationObservation,
     AdaptiveMechanismCampaignRequest, AdaptiveMechanismPolicyRequest, AnalysisDataset,
     AnalysisRequest, AssayEvidenceObservation, AssayEvidenceRequest, BeliefConflict,
     BeliefRevisionRequest, CalibrationRequest, CalibrationRun, CampaignAction, CampaignMechanism,
@@ -579,10 +579,11 @@ use bioprism_research::{
     GliomaResearchAutopilotRequest, GliomaResearchDirectorRequest, GliomaResearchIntent,
     GliomaWorkflowRequest, GraphFusionRequest, GraphFusionVector, HarmonizationRequest,
     HarmonizationVector, InformationDesignRequest, InstrumentCampaignRequest,
-    InstrumentExecutionRequest, InstrumentExecutionRun, InstrumentPreflightRequest,
-    InterpretationSynthesisRequest, KnowledgeCompositionRequest, KnowledgeFrontierRequest,
-    KnowledgeRelation, KnowledgeRequest, KnowledgeResolutionCampaignRequest, LatentFactorRequest,
-    LatentFactorVector, LigandReceptorPair, MechanismActionPlannerConfig, MechanismCalibration,
+    InstrumentExecutionRequest, InstrumentExecutionRun, InstrumentFleetScheduleRequest,
+    InstrumentPreflightRequest, InterpretationSynthesisRequest, KnowledgeCompositionRequest,
+    KnowledgeFrontierRequest, KnowledgeRelation, KnowledgeRequest,
+    KnowledgeResolutionCampaignRequest, LatentFactorRequest, LatentFactorVector,
+    LigandReceptorPair, MechanismActionPlannerConfig, MechanismCalibration,
     MechanismCalibrationObservation, MechanismCalibrationRequest, MechanismCandidate,
     MechanismDiscrimination, MechanismDiscriminationCampaignRequest,
     MechanismDiscriminationRequest, MechanismDiscriminatorAction, MechanismDynamicsEdge,
@@ -2290,6 +2291,7 @@ impl Server {
             "glioma_multi_fidelity_optimize" => self.glioma_multi_fidelity_optimize(&arguments),
             "glioma_instrument_calibration" => self.glioma_instrument_calibration(&arguments),
             "glioma_instrument_preflight" => self.glioma_instrument_preflight(&arguments),
+            "glioma_instrument_fleet_schedule" => self.glioma_instrument_fleet_schedule(&arguments),
             "glioma_instrument_execute" => self.glioma_instrument_execute(&arguments),
             "glioma_instrument_campaign_execute" => {
                 self.glioma_instrument_campaign_execute(&arguments)
@@ -8823,6 +8825,32 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma instrument preflight: {error}"))
+    }
+
+    /// Schedule a bounded fleet of compatible preclinical instruments before per-instrument
+    /// preflight. Scheduling never admits or dispatches hardware and never consumes material.
+    fn glioma_instrument_fleet_schedule(&self, arguments: &Value) -> Result<Value, String> {
+        let request: InstrumentFleetScheduleRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_instrument_fleet_schedule requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma instrument fleet request: {error}"))?;
+        let schedule = schedule_glioma_instrument_fleet(&request)
+            .map_err(|error| format!("glioma instrument fleet scheduling refused: {error}"))?;
+        serde_json::to_value(json!({
+            "schedule": schedule,
+            "dispatch": "not_started",
+            "preflight_required": true,
+            "guarantees": [
+                "dependency-safe assignment respects instrument capability, availability, calibration, operator, deadline, and shared-risk gates",
+                "critical path, fleet utilization, blocked tasks, and negative scheduling evidence remain explicit",
+                "dispatch_permitted is always false until each assignment passes the existing instrument preflight and gateway authorization",
+                "the route does not contact hardware or consume biological material"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma instrument fleet schedule: {error}"))
     }
 
     /// Execute an admitted preclinical instrument plan through the deterministic local gateway
@@ -49460,6 +49488,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_multi_fidelity_optimize",
                 "glioma_instrument_calibration",
                 "glioma_instrument_preflight",
+                "glioma_instrument_fleet_schedule",
                 "glioma_instrument_execute",
                 "glioma_instrument_campaign_execute",
                 "glioma_instrument_assay_adjudicate",
@@ -59333,6 +59362,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "InstrumentPreflightRequest1@1 containing InstrumentAction1@1 values, InstrumentCalibration1@1, interlocks, authorization, and bounded budgets."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_instrument_fleet_schedule",
+        "description": "Schedule a bounded fleet of preclinical glioma instruments with dependency closure, capability matching, calibration and availability windows, operator slots, deadlines, critical-path analysis, utilization, and a shared risk budget. The schedule is a preflight handoff only: it never admits or dispatches hardware and never consumes biological material.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "InstrumentFleetScheduleRequest1@1 containing typed tasks, candidate instruments, model/operation capabilities, availability/calibration windows, operator capacity, and risk budget."}
             },
             "required": ["request"]
         }

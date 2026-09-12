@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 680;
+const TOOL_DEFINITION_COUNT: usize = 681;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -2830,6 +2830,50 @@ fn glioma_transportability_analysis_preserves_model_distance() {
             .unwrap_or_default()
             < 700
     );
+}
+
+#[test]
+fn glioma_instrument_fleet_schedule_closes_dependencies_and_requires_preflight() {
+    let mut server = server();
+    let schedule = call(
+        &mut server,
+        "glioma_instrument_fleet_schedule",
+        json!({
+            "request": {
+                "objective": "coordinate organoid imaging and sequencing",
+                "model_system": "organoid",
+                "current_tick": 0,
+                "max_end_tick": 30,
+                "maximum_total_risk_milli": 1000,
+                "operator_capacity": 1,
+                "tasks": [
+                    {"task_id":"image","label":"image","operation":"acquire_image","model_system":"organoid","candidate_instrument_order":["scope-a","scope-b"],"depends_on":[],"release_tick":0,"duration_ticks":5,"risk_milli":100,"information_milli":500,"requires_operator":false,"output_schema":"Image1@1"},
+                    {"task_id":"sequence","label":"sequence","operation":"sequence","model_system":"organoid","candidate_instrument_order":["scope-a","scope-b"],"depends_on":[],"release_tick":0,"duration_ticks":5,"risk_milli":100,"information_milli":500,"requires_operator":false,"output_schema":"Sequence1@1"},
+                    {"task_id":"integrate","label":"integrate","operation":"acquire_image","model_system":"organoid","candidate_instrument_order":["scope-a","scope-b"],"depends_on":["image","sequence"],"release_tick":0,"duration_ticks":5,"risk_milli":100,"information_milli":500,"requires_operator":false,"output_schema":"Integrate1@1"}
+                ],
+                "resources": [
+                    {"instrument_id":"scope-a","model_system_order":["organoid"],"operation_order":["acquire_image","sequence"],"available_from_tick":0,"available_until_tick":30,"calibration_valid_until_tick":30,"enabled":true},
+                    {"instrument_id":"scope-b","model_system_order":["organoid"],"operation_order":["acquire_image","sequence"],"available_from_tick":0,"available_until_tick":30,"calibration_valid_until_tick":30,"enabled":true}
+                ]
+            }
+        }),
+    );
+    assert_eq!(schedule["dispatch"], json!("not_started"));
+    assert_eq!(schedule["preflight_required"], json!(true));
+    assert_eq!(schedule["schedule"]["disposition"], json!("ready"));
+    assert_eq!(
+        schedule["schedule"]["assignments"]
+            .as_array()
+            .unwrap()
+            .len(),
+        3
+    );
+    assert_eq!(schedule["schedule"]["dispatch_permitted"], json!(false));
+    assert!(schedule["schedule"]["critical_path_order"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| item == "integrate"));
 }
 
 #[test]

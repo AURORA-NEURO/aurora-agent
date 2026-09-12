@@ -106,7 +106,7 @@ fn main() {
                      glioma_evidence_calibrate,\n\
                      glioma_evidence_triangulate,\n\
                      glioma_instrument_calibration,\n\
-                     glioma_instrument_preflight,\n\
+                     glioma_instrument_preflight, glioma_instrument_fleet_schedule,\n\
                      glioma_instrument_execute,\n\
                      glioma_instrument_campaign_execute,\n\
                      glioma_instrument_assay_adjudicate,\n\

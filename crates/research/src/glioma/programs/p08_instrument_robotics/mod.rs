@@ -6,6 +6,7 @@ pub mod assay_adjudication;
 pub mod calibration;
 pub mod campaign;
 pub mod execution;
+pub mod fleet_scheduler;
 pub mod preflight;
 
 pub use assay_adjudication::{
@@ -31,6 +32,13 @@ pub use execution::{
     InstrumentExecutionError, InstrumentExecutionFailure, InstrumentExecutionRequest,
     InstrumentExecutionResult, InstrumentExecutionRun, InstrumentExecutionStopReason,
     InstrumentExecutor,
+};
+
+pub use fleet_scheduler::{
+    schedule_glioma_instrument_fleet, InstrumentFleetAssignment, InstrumentFleetBlockedTask,
+    InstrumentFleetDisposition, InstrumentFleetResource, InstrumentFleetSchedule,
+    InstrumentFleetScheduleRequest, InstrumentFleetSchedulerError, InstrumentFleetTask,
+    InstrumentFleetUtilization,
 };
 
 pub use campaign::{
