@@ -112,6 +112,7 @@ fn main() {
                      glioma_instrument_assay_adjudicate,\n\
                      glioma_computation_execute,\n\
                      glioma_computation_portfolio_plan,\n\
+                     glioma_computation_placement,\n\
                      glioma_computation_portfolio_execute,\n\
                      glioma_computation_campaign_execute,\n\
                      glioma_computation_workflow_execute,\n\

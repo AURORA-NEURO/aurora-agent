@@ -536,14 +536,14 @@ use bioprism_research::{
     plan_glioma_sequential_design, plan_glioma_workflow, preflight_glioma_instrument,
     prioritize_glioma_evidence, prioritize_knowledge_frontier, propagate_glioma_mechanism_graph,
     qualify_evidence, register_glioma_spatial_samples, revise_glioma_beliefs,
-    schedule_glioma_instrument_fleet, select_glioma_actions, simulate_glioma_counterfactual,
-    simulate_glioma_counterfactual_ensemble, simulate_glioma_mechanism_dynamics,
-    simulate_glioma_protocol, surveil_glioma_evidence, synthesize_glioma_interpretation,
-    triangulate_glioma_evidence, validate_feature_catalog, ActionPortfolioExecutionRequest,
-    ActiveLearningCampaignRequest, ActiveLearningCandidate, ActiveLearningObservation,
-    ActiveLearningRequest, AdaptiveAllocationCampaignRequest, AdaptiveAllocationRequest,
-    AdaptiveArmObservation, AdaptiveDoseSurfaceRequest, AdaptiveFrontierRequest,
-    AdaptiveInformationCampaignRequest, AdaptiveInformationObservation,
+    schedule_glioma_computation_placement, schedule_glioma_instrument_fleet, select_glioma_actions,
+    simulate_glioma_counterfactual, simulate_glioma_counterfactual_ensemble,
+    simulate_glioma_mechanism_dynamics, simulate_glioma_protocol, surveil_glioma_evidence,
+    synthesize_glioma_interpretation, triangulate_glioma_evidence, validate_feature_catalog,
+    ActionPortfolioExecutionRequest, ActiveLearningCampaignRequest, ActiveLearningCandidate,
+    ActiveLearningObservation, ActiveLearningRequest, AdaptiveAllocationCampaignRequest,
+    AdaptiveAllocationRequest, AdaptiveArmObservation, AdaptiveDoseSurfaceRequest,
+    AdaptiveFrontierRequest, AdaptiveInformationCampaignRequest, AdaptiveInformationObservation,
     AdaptiveMechanismCampaignRequest, AdaptiveMechanismPolicyRequest, AnalysisDataset,
     AnalysisRequest, AssayEvidenceObservation, AssayEvidenceRequest, BeliefConflict,
     BeliefRevisionRequest, CalibrationRequest, CalibrationRun, CampaignAction, CampaignMechanism,
@@ -552,16 +552,17 @@ use bioprism_research::{
     ClonePanelOutcomeAnalysis, ClonePanelOutcomeRequest, ClonePerturbationCandidate,
     ClonePerturbationPanel, ClonePerturbationPanelRequest, CloneProfile, ClosedLoopCampaignRequest,
     CombinationObservation, CombinationSynergyRequest, ComputationCandidate,
-    ComputationExecutionRequest, ComputationPortfolioExecutionRequest, ComputationPortfolioRequest,
-    ConcordanceRequest, ConsensusRequest, ContrastDesignRequest, CounterfactualEnsembleRequest,
-    CounterfactualIntervention, CounterfactualModel, CounterfactualRequest,
-    DecisionActionGraphRequest, DecisionActionPlanRequest, DecisionBranchPlannerRequest,
-    DecisionContext, DecisionContextCampaignRequest, DecisionContextRequest, DesignAction,
-    DesignMechanism, DoseResponseObservation, DoseResponseRequest,
-    DryRunActiveLearningCampaignExecutor, DryRunAdaptiveAllocationCampaignExecutor,
-    DryRunAdaptiveMechanismPolicyExecutor, DryRunDecisionContextCampaignExecutor,
-    DryRunEvidenceRefreshCampaignExecutor, DryRunFederatedBenchmarkCampaignExecutor,
-    DryRunGliomaActionExecutor, DryRunGliomaComputationExecutor, DryRunGliomaProtocolExecutor,
+    ComputationExecutionRequest, ComputationPlacementRequest, ComputationPortfolioExecutionRequest,
+    ComputationPortfolioRequest, ConcordanceRequest, ConsensusRequest, ContrastDesignRequest,
+    CounterfactualEnsembleRequest, CounterfactualIntervention, CounterfactualModel,
+    CounterfactualRequest, DecisionActionGraphRequest, DecisionActionPlanRequest,
+    DecisionBranchPlannerRequest, DecisionContext, DecisionContextCampaignRequest,
+    DecisionContextRequest, DesignAction, DesignMechanism, DoseResponseObservation,
+    DoseResponseRequest, DryRunActiveLearningCampaignExecutor,
+    DryRunAdaptiveAllocationCampaignExecutor, DryRunAdaptiveMechanismPolicyExecutor,
+    DryRunDecisionContextCampaignExecutor, DryRunEvidenceRefreshCampaignExecutor,
+    DryRunFederatedBenchmarkCampaignExecutor, DryRunGliomaActionExecutor,
+    DryRunGliomaComputationExecutor, DryRunGliomaProtocolExecutor,
     DryRunGliomaReplicationCampaignExecutor, DryRunInstrumentExecutor,
     DryRunKnowledgeResolutionCampaignExecutor, DryRunMechanismDiscriminationCampaignExecutor,
     DryRunMultiFidelityCampaignExecutor, DryRunMultimodalIngestionCampaignExecutor,
@@ -2175,6 +2176,7 @@ impl Server {
             "glioma_computation_portfolio_plan" => {
                 self.glioma_computation_portfolio_plan(&arguments)
             }
+            "glioma_computation_placement" => self.glioma_computation_placement(&arguments),
             "glioma_computation_portfolio_execute" => {
                 self.glioma_computation_portfolio_execute(&arguments)
             }
@@ -6130,6 +6132,34 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma computation portfolio: {error}"))
+    }
+
+    /// Place a typed multimodal computation DAG onto institution-local workers without
+    /// dispatching it. The schedule accounts for data locality, transfer and compute budgets,
+    /// replay-valid cache artifacts, worker windows, critical path, and blocked work; callers
+    /// may pass the validated handoff to their own execution adapter.
+    fn glioma_computation_placement(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ComputationPlacementRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_computation_placement requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma computation placement request: {error}"))?;
+        let schedule = schedule_glioma_computation_placement(&request)
+            .map_err(|error| format!("glioma computation placement refused: {error}"))?;
+        serde_json::to_value(json!({
+            "schedule": schedule,
+            "dispatch": "not_started",
+            "preflight_required": true,
+            "guarantees": [
+                "typed DAG dependencies, completed work, cache reuse, and blocked descendants remain explicit",
+                "worker capability, availability, data locality, transfer, compute-budget, and mission-window gates are deterministic",
+                "only replay-valid schema-compatible local artifacts are reused",
+                "the route never executes code, moves payloads, dispatches a worker, or makes a clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma computation placement: {error}"))
     }
 
     /// Plan and execute a selected computation portfolio through the deterministic sandbox
@@ -49444,6 +49474,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_multimodal_ingestion_campaign_execute",
                 "glioma_computation_execute",
                 "glioma_computation_portfolio_plan",
+                "glioma_computation_placement",
                 "glioma_computation_portfolio_execute",
                 "glioma_computation_campaign_execute",
                 "glioma_computation_workflow_execute",
@@ -58395,6 +58426,17 @@ pub fn tool_definitions() -> Vec<Value> {
                 "candidates": {"type": "array", "items": {"type": "object"}, "description": "ComputationCandidate1@1 records wrapping typed ComputationTask1@1 DAG nodes with modality, information gain, uncertainty reduction, coverage debt, redundancy group, and required flag."}
             },
             "required": ["request", "candidates"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_computation_placement",
+        "description": "Build a deterministic pre-dispatch placement schedule for a typed multimodal preclinical glioma computation DAG. The scheduler chooses compatible institution-local workers, accounts for artifact locality and transfer budgets, reuses only replay-valid local cache entries, exposes critical-path and utilization data, and preserves blocked or budget-exhausted work. It never executes code, moves payloads, dispatches workers, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ComputationPlacementRequest1@1 containing typed ComputationTask1@1 nodes, worker profiles, replay identity, completed task order, local cache entries, and bounded compute/transfer/time budgets."}
+            },
+            "required": ["request"]
         }
     }));
     definitions.push(json!({

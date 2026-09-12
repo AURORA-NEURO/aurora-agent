@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 682;
+const TOOL_DEFINITION_COUNT: usize = 683;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -3026,6 +3026,46 @@ fn glioma_computation_portfolio_planner_closes_dependencies() {
         json!(["normalize", "integrate"])
     );
     assert_eq!(plan["plan"]["disposition"], json!("qualified"));
+}
+
+#[test]
+fn glioma_computation_placement_builds_locality_aware_pre_dispatch_schedule() {
+    let mut server = server();
+    let replay = "1".repeat(64);
+    let schedule = call(
+        &mut server,
+        "glioma_computation_placement",
+        json!({
+            "request": {
+                "objective": "place a reproducible organoid imaging and transcriptomics DAG",
+                "model_system": "organoid",
+                "replay_identity": replay,
+                "current_tick": 0,
+                "max_end_tick": 100,
+                "max_budget_units": 100,
+                "max_transfer_cost_units": 100,
+                "tasks": [
+                    {"task_id":"integrate","operation":"integrate","model_system":"organoid","depends_on":["normalize"],"input_artifact_ids":["matrix"],"output_schema":"Integrate1@1","estimated_cost_units":10,"estimated_duration_ticks":5,"deterministic":true},
+                    {"task_id":"normalize","operation":"normalize","model_system":"organoid","depends_on":[],"input_artifact_ids":["matrix"],"output_schema":"Normalize1@1","estimated_cost_units":10,"estimated_duration_ticks":5,"deterministic":true}
+                ],
+                "workers": [
+                    {"worker_id":"gpu-a","model_system_order":["organoid"],"operation_order":["normalize","integrate"],"local_artifact_order":["matrix"],"available_from_tick":0,"available_until_tick":100,"max_task_cost_units":1000,"transfer_ticks_per_artifact":2,"transfer_cost_units_per_artifact":3,"speed_milli":1000,"enabled":true},
+                    {"worker_id":"cpu-b","model_system_order":["organoid"],"operation_order":["normalize","integrate"],"local_artifact_order":[],"available_from_tick":0,"available_until_tick":100,"max_task_cost_units":1000,"transfer_ticks_per_artifact":2,"transfer_cost_units_per_artifact":3,"speed_milli":1000,"enabled":true}
+                ],
+                "completed_task_order": [],
+                "cache": []
+            }
+        }),
+    );
+    assert_eq!(schedule["dispatch"], json!("not_started"));
+    assert_eq!(schedule["preflight_required"], json!(true));
+    assert_eq!(schedule["schedule"]["disposition"], json!("ready"));
+    assert_eq!(
+        schedule["schedule"]["assigned_order"],
+        json!(["integrate", "normalize"])
+    );
+    assert_eq!(schedule["schedule"]["total_transfer_cost_units"], json!(0));
+    assert_eq!(schedule["schedule"]["dispatch_permitted"], json!(false));
 }
 
 #[test]

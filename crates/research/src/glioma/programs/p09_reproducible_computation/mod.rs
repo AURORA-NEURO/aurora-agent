@@ -4,6 +4,7 @@ use crate::glioma::catalog::{glioma_program_catalog, GliomaProgramDescriptor, Gl
 
 pub mod campaign;
 pub mod execution;
+pub mod placement;
 pub mod planning;
 pub mod portfolio_execution;
 pub mod robustness;
@@ -40,6 +41,13 @@ pub use portfolio_execution::{
     execute_glioma_computation_portfolio, ComputationPortfolioExecution,
     ComputationPortfolioExecutionDisposition, ComputationPortfolioExecutionError,
     ComputationPortfolioExecutionRequest,
+};
+
+pub use placement::{
+    schedule_glioma_computation_placement, ComputationPlacementAssignment,
+    ComputationPlacementBlockedTask, ComputationPlacementDisposition, ComputationPlacementError,
+    ComputationPlacementRequest, ComputationPlacementSchedule, ComputationWorkerProfile,
+    ComputationWorkerUtilization,
 };
 
 pub use workflow::{

@@ -166,6 +166,8 @@ crates/research/src/glioma/
                                              P09 bounded multi-round computation campaign with typed replanning
     p09_reproducible_computation/workflow.rs
                                              P09 intent-to-DAG compiler for modality-aware autonomous computation
+    p09_reproducible_computation/placement.rs
+                                             P09 locality-aware worker placement with replay-valid cache and transfer gates
     p10_interpretation_replication/trajectory.rs
                                              P10 longitudinal per-unit trajectory analysis
     p10_interpretation_replication/transportability.rs
@@ -254,7 +256,7 @@ portfolio plan and executable code; it does not promote a planned slot to implem
 | P06 Power-aware experiment design | experimentalist | experiment design | falsifiable allocation, power, blocking, dose-response, adaptive replicate allocation, sequential Bayesian success/futility stopping, local sequential campaign execution, uncertainty-aware dose-surface acquisition, mechanism-aware closed-loop campaign rounds, combination-synergy fitting, and null-result plan |
 | P07 Protocol simulation | lab operations lead | protocol simulation, adaptive workflow planning | critical-path scheduling, outcome-aware dependency scheduling, evidence-gated director admission, evidence-priority execution cycles, context-to-action execution, multimodal mechanism campaigns, utilization, deterministic next batches, and repair/abstain routing before physical effects |
 | P08 Instrument and robotics preflight | instrument operator | instrument preflight | robust control calibration, drift detection, multi-instrument dependency scheduling, signed interlocked planning, guarded execution, and fail-closed multi-run campaigns |
-| P09 Reproducible computation | computational scientist | computational execution | checkpointed/replayable computation, intent-to-DAG compilation, budgeted portfolio execution, and omission-stress robustness suite |
+| P09 Reproducible computation | computational scientist | computational execution | checkpointed/replayable computation, intent-to-DAG compilation, locality-aware worker placement, budgeted portfolio execution, and omission-stress robustness suite |
 | P10 Causal interpretation and replication | methods reviewer | statistical interpretation, replication/robustness | uncertainty-aware endpoint, longitudinal, stratified causal, dynamic-policy, causal-contrast, meta-analytic, and cross-site verdicts |
 | P11 Research-object release | reproducibility steward | research-object release | portable manifest with limitations and negative evidence |
 | P12 Federated benchmarking | consortium administrator | federation benchmarking | aggregate-only cross-site benchmark consensus, influence-aware site portfolio planning, robust pooling, heterogeneity, and site-influence analysis |
@@ -647,6 +649,12 @@ from ingest through integration, model fitting, validation, and export into a de
 It reports estimated cost/time shortfalls before execution and then reuses the same autonomous
 campaign gates, so a high-level glioma question can become an executable local computation plan
 without hand-authoring task plumbing or fabricating evidence.
+P09 now also exposes deterministic computation placement (`glioma_computation_placement`). It
+maps the compiled DAG onto compatible institution-local workers, accounts for artifact locality,
+transfer cost, availability windows, critical-path timing, and utilization, and reuses only
+replay-valid schema-compatible local cache artifacts. Completed, cached, budget-blocked, and
+worker-incompatible tasks remain explicit. The MCP route returns a pre-dispatch handoff with
+preflight required; it never executes code, moves payloads, or dispatches a worker.
 P05 now also includes counterfactual mechanism simulation (`simulate_glioma_counterfactual`). It
 compares baseline and signed node perturbation fixed points over activating/inhibiting networks,
 rank-orders downstream changes, and exposes low-confidence edges and non-convergence as unresolved.
