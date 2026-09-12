@@ -22,6 +22,8 @@ crates/research/src/glioma/
                                              P02 scoped claim graph and support/contradiction synthesis
   programs/p02_evidence_knowledge/composition.rs
                                              P02 explicit relation graph composition with path bottlenecks and contradiction gates
+  programs/p02_evidence_knowledge/belief_revision.rs
+                                             P02 explicit-conflict maximal-consistency revision with rival-claim frontier
   programs/p02_evidence_knowledge/claim_frontier.rs
                                              P02 uncertainty/coverage/contradiction frontier prioritization
   programs/p04_decision_context/context_compiler.rs
@@ -231,7 +233,7 @@ portfolio plan and executable code; it does not promote a planned slot to implem
 | Program | Product owner | Engine stages | Observable product result |
 | --- | --- | --- | --- |
 | P01 Evidence surveillance | evidence curator | evidence surveillance | snapshot deltas, recency/state/coverage action queues, cross-family claim triangulation, review/revalidation actions, and stale/unknown/contradictory coverage |
-| P02 Evidence-to-typed-knowledge | knowledge engineer | evidence compilation | scoped claims, ranked uncertainty frontiers, and competing explanations bound to source artifacts |
+| P02 Evidence-to-typed-knowledge | knowledge engineer | evidence compilation | scoped claims, contradiction-aware maximal-consistency portfolios, ranked rival frontiers, and competing explanations bound to source artifacts |
 | P03 Multimodal ingestion and QC | data steward | multimodal ingestion/QC | comparable cells, robust batch harmonization, feature-level concordance, consensus clusters, spatial niches, ligand-receptor communication, cross-sample registration, spatial-state diffusion, and explicit defects |
 | P04 Question-to-decision context | principal investigator | intent normalization, context compilation | bounded decision context, selected executable action batches, and unresolved omissions |
 | P05 Mechanism exploration | mechanism scientist | molecular landscape, mechanism exploration | residual-fit competing mechanisms, posterior-weighted next-assay information gain, signed mechanism-network propagation, model-averaged counterfactuals, robust lower-tail intervention portfolios, and discriminating actions |
@@ -358,6 +360,11 @@ only caller-declared supports and prerequisites, computes weakest-link path stre
 contradiction edges, identifies connected claim components and bottleneck claims, and returns
 replay-stable paths for P04/P05. It is an evidence-network planning capability, not causal
 identification or clinical guidance.
+Belief revision (`revise_glioma_beliefs`) adds an explicit-conflict maximal-consistency layer. It
+accepts only typed conflict edges, retains the strongest compatible claim portfolio with bounded
+beam search, and preserves rival claims, negative claims, unresolved coverage, conflict evidence,
+and a ranked frontier for the next autonomous cycle. It never infers contradiction from wording or
+turns a research claim into a clinical decision.
 P04 now includes decision-context compilation (`compile_decision_context`) that converts those
 gaps into typed A1 candidates for coverage closure, contradiction replication, negative-result
 falsification, evidence resolution, or mechanism validation; the existing action selector then

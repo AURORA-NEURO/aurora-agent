@@ -1,5 +1,6 @@
 //! Evidence-to-typed-knowledge program ownership.
 
+pub mod belief_revision;
 pub mod campaign;
 pub mod claim_frontier;
 pub mod composition;
@@ -11,6 +12,12 @@ pub use campaign::{
     KnowledgeResolutionCampaignError, KnowledgeResolutionCampaignExecutor,
     KnowledgeResolutionCampaignRequest, KnowledgeResolutionCampaignRound,
     KnowledgeResolutionCampaignStopReason, KnowledgeResolutionExecutionFailure,
+};
+
+pub use belief_revision::{
+    revise_glioma_beliefs, BeliefConflict, BeliefRevision, BeliefRevisionDecision,
+    BeliefRevisionDecisionKind, BeliefRevisionDisposition, BeliefRevisionError,
+    BeliefRevisionRequest,
 };
 
 pub use claim_frontier::{

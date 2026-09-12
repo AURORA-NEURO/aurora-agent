@@ -349,7 +349,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 57;
-const TOOL_DEFINITION_COUNT: usize = 625;
+const TOOL_DEFINITION_COUNT: usize = 626;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -3838,6 +3838,19 @@ fn glioma_knowledge_composition_exposes_supported_paths_and_bottlenecks() {
     assert_eq!(composed["composition"]["disposition"], json!("qualified"));
     assert_eq!(composed["composition"]["selected_path_order"].as_array().unwrap().len(), 1);
     assert_eq!(composed["composition"]["bottleneck_claim_order"].as_array().unwrap().len(), 1);
+    let revision = call(
+        &mut server,
+        "glioma_belief_revision",
+        json!({
+            "request": {"objective":"compose invasion mechanism evidence","min_support_milli":700,"min_conflict_milli":500,"max_hypotheses":1,"beam_width":16,"allow_contested":false},
+            "knowledge": knowledge.clone(),
+            "conflicts": [{"conflict_id":"knowledge-conflict","left_claim_id":claims[0],"right_claim_id":claims[1],"contradiction_milli":900,"evidence_order":["e1","e2"]}]
+        }),
+    );
+    assert_eq!(revision["dispatch"], json!("not_started"));
+    assert_eq!(revision["simulation_only"], json!(true));
+    assert_eq!(revision["revision"]["retained_claim_order"].as_array().unwrap().len(), 1);
+    assert_eq!(revision["revision"]["rival_claim_order"].as_array().unwrap().len(), 1);
     let context = call(
         &mut server,
         "glioma_decision_context",

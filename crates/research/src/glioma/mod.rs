@@ -49,6 +49,9 @@ pub use programs::p01_evidence_surveillance::{
 };
 pub use programs::p02_evidence_knowledge::{
     compile_typed_knowledge, execute_glioma_knowledge_resolution_campaign,
+    revise_glioma_beliefs, BeliefConflict, BeliefRevision, BeliefRevisionDecision,
+    BeliefRevisionDecisionKind, BeliefRevisionDisposition, BeliefRevisionError,
+    BeliefRevisionRequest,
     prioritize_knowledge_frontier, DryRunKnowledgeResolutionCampaignExecutor, FrontierActionKind,
     KnowledgeClaim, KnowledgeClaimDisposition, KnowledgeDisposition, KnowledgeError,
     KnowledgeFrontier, KnowledgeFrontierDisposition, KnowledgeFrontierError,

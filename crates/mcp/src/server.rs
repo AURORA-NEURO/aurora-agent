@@ -516,7 +516,7 @@ use bioprism_research::{
     plan_glioma_robust_intervention_portfolio, plan_glioma_adaptive_workflow,
     plan_glioma_workflow, preflight_glioma_instrument,
     prioritize_glioma_evidence, prioritize_knowledge_frontier, propagate_glioma_mechanism_graph,
-    qualify_evidence, select_glioma_actions, simulate_glioma_counterfactual,
+    qualify_evidence, revise_glioma_beliefs, select_glioma_actions, simulate_glioma_counterfactual,
     simulate_glioma_counterfactual_ensemble, simulate_glioma_protocol, surveil_glioma_evidence,
     triangulate_glioma_evidence,
     validate_feature_catalog, ActionPortfolioExecutionRequest, ActiveLearningCampaignRequest,
@@ -561,6 +561,7 @@ use bioprism_research::{
     InstrumentCampaignRequest, InstrumentExecutionRequest,
     InstrumentExecutionRun,
     InstrumentPreflightRequest, KnowledgeFrontierRequest, KnowledgeRequest,
+    BeliefConflict, BeliefRevisionRequest,
     KnowledgeResolutionCampaignRequest, KnowledgeCompositionRequest, KnowledgeRelation,
     LatentFactorRequest, LatentFactorVector,
     LigandReceptorPair, MechanismActionPlannerConfig, MechanismCalibration,
@@ -2124,6 +2125,7 @@ impl Server {
             "glioma_evidence_triangulate" => self.glioma_evidence_triangulate(&arguments),
             "glioma_knowledge_compile" => self.glioma_knowledge_compile(&arguments),
             "glioma_knowledge_compose" => self.glioma_knowledge_compose(&arguments),
+            "glioma_belief_revision" => self.glioma_belief_revision(&arguments),
             "glioma_knowledge_frontier" => self.glioma_knowledge_frontier(&arguments),
             "glioma_decision_context" => self.glioma_decision_context(&arguments),
             "glioma_decision_action_graph" => self.glioma_decision_action_graph(&arguments),
@@ -5281,6 +5283,47 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma knowledge composition: {error}"))
+    }
+
+    /// Revise an explicit preclinical claim-conflict graph into a bounded consistent portfolio.
+    /// The route never infers conflict from text and never promotes a retained claim to a
+    /// clinical or therapeutic conclusion.
+    fn glioma_belief_revision(&self, arguments: &Value) -> Result<Value, String> {
+        let request: BeliefRevisionRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_belief_revision requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma belief-revision request: {error}"))?;
+        let knowledge: TypedKnowledge = serde_json::from_value(
+            arguments
+                .get("knowledge")
+                .cloned()
+                .ok_or_else(|| "glioma_belief_revision requires knowledge".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma typed knowledge: {error}"))?;
+        let conflicts: Vec<BeliefConflict> = serde_json::from_value(
+            arguments
+                .get("conflicts")
+                .cloned()
+                .ok_or_else(|| "glioma_belief_revision requires conflicts".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma belief conflicts: {error}"))?;
+        let revision = revise_glioma_beliefs(&request, &knowledge, &conflicts)
+            .map_err(|error| format!("glioma belief revision refused: {error}"))?;
+        serde_json::to_value(json!({
+            "revision": revision,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "only explicit typed conflict edges can exclude a claim from the retained portfolio",
+                "rival, negative, unresolved, and conflict evidence remain visible for the next autonomous cycle",
+                "bounded maximal-consistency search is deterministic and replay-stable",
+                "the route performs no retrieval, assay, raw-data movement, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma belief revision: {error}"))
     }
 
     /// Rank the claims that should drive the next autonomous glioma research cycle. This is a
@@ -46772,6 +46815,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_evidence_triangulate",
                 "glioma_knowledge_compile",
                 "glioma_knowledge_compose",
+                "glioma_belief_revision",
                 "glioma_knowledge_frontier",
                 "glioma_decision_context",
                 "glioma_decision_action_graph",
@@ -54349,6 +54393,19 @@ pub fn tool_definitions() -> Vec<Value> {
                 "relations": {"type": "array", "items": {"type": "object"}, "description": "KnowledgeRelation1@1 records with explicit supports, requires, or contradicts direction between claim ids."}
             },
             "required": ["request", "knowledge", "relations"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_belief_revision",
+        "description": "Resolve an explicit preclinical glioma claim-conflict graph into a bounded maximal-consistency portfolio. Uses deterministic beam search over typed claim support and confidence, preserves rival claims, negative claims, unresolved coverage, conflict evidence, and a ranked frontier, and never infers contradiction from wording or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "BeliefRevisionRequest1@1 with objective binding, support/conflict thresholds, hypothesis and beam bounds, and contested-claim policy."},
+                "knowledge": {"type": "object", "description": "TypedKnowledge1@1 from glioma_knowledge_compile."},
+                "conflicts": {"type": "array", "items": {"type": "object"}, "description": "BeliefConflict1@1 records supplied by an evidence adjudicator; conflict edges are never inferred from text."}
+            },
+            "required": ["request", "knowledge", "conflicts"]
         }
     }));
     definitions.push(json!({
