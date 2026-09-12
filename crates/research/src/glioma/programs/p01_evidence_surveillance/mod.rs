@@ -2,6 +2,7 @@
 
 use crate::glioma::catalog::{glioma_program_catalog, GliomaProgramDescriptor, GliomaProgramId};
 
+pub mod calibration;
 pub mod campaign;
 pub mod priority;
 pub mod surveillance;
@@ -13,6 +14,12 @@ pub use triangulation::{
     TriangulatedClaimVerdict,
 };
 
+pub use calibration::{
+    calibrate_glioma_evidence, CalibrationBin, CalibrationBinDisposition,
+    EvidenceCalibrationAnalysis, EvidenceCalibrationDisposition, EvidenceCalibrationError,
+    EvidenceCalibrationObservation, EvidenceCalibrationRequest, SourceCalibration,
+    SourceCalibrationDisposition,
+};
 pub use campaign::{
     execute_glioma_evidence_refresh_campaign, DryRunEvidenceRefreshCampaignExecutor,
     EvidenceRefreshCampaign, EvidenceRefreshCampaignDisposition, EvidenceRefreshCampaignError,

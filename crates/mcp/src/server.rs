@@ -468,6 +468,7 @@ use bioprism_repair::{
 };
 use bioprism_research::{
     allocate_glioma_assays, analyze_causal_sensitivity, analyze_federated_benchmark,
+    calibrate_glioma_evidence,
     plan_federated_benchmark_sites,
     analyze_glioma_causal_contrast, analyze_glioma_combination_synergy,
     analyze_glioma_dose_response, analyze_glioma_latent_factors, analyze_glioma_mediation,
@@ -558,6 +559,7 @@ use bioprism_research::{
     InterpretationSynthesisRequest, GliomaResearchDirectorRequest,
     GraphFusionRequest, GraphFusionVector, HarmonizationRequest, HarmonizationVector,
     AssayEvidenceObservation, AssayEvidenceRequest, InformationDesignRequest,
+    EvidenceCalibrationObservation, EvidenceCalibrationRequest,
     InstrumentCampaignRequest, InstrumentExecutionRequest,
     InstrumentExecutionRun,
     InstrumentPreflightRequest, KnowledgeFrontierRequest, KnowledgeRequest,
@@ -2122,6 +2124,7 @@ impl Server {
             "glioma_evidence_qualify" => self.glioma_evidence_qualify(&arguments),
             "glioma_evidence_surveillance" => self.glioma_evidence_surveillance(&arguments),
             "glioma_evidence_priority" => self.glioma_evidence_priority(&arguments),
+            "glioma_evidence_calibrate" => self.glioma_evidence_calibrate(&arguments),
             "glioma_evidence_triangulate" => self.glioma_evidence_triangulate(&arguments),
             "glioma_knowledge_compile" => self.glioma_knowledge_compile(&arguments),
             "glioma_knowledge_compose" => self.glioma_knowledge_compose(&arguments),
@@ -5178,6 +5181,39 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma evidence priority: {error}"))
+    }
+
+    /// Calibrate source-family support scores against resolved local preclinical outcomes. The
+    /// route plans review work only and never fetches evidence or dispatches an assay.
+    fn glioma_evidence_calibrate(&self, arguments: &Value) -> Result<Value, String> {
+        let request: EvidenceCalibrationRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_evidence_calibrate requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma evidence-calibration request: {error}"))?;
+        let observations: Vec<EvidenceCalibrationObservation> = serde_json::from_value(
+            arguments
+                .get("observations")
+                .cloned()
+                .ok_or_else(|| "glioma_evidence_calibrate requires observations".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma evidence-calibration observations: {error}"))?;
+        let analysis = calibrate_glioma_evidence(&request, &observations)
+            .map_err(|error| format!("glioma evidence calibration refused: {error}"))?;
+        serde_json::to_value(json!({
+            "calibration": analysis,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "quality-weighted isotonic regression is deterministic and monotonic across score bins",
+                "unknown, stale, and unmeasured outcomes do not count as resolved support",
+                "under-observed and miscalibrated source families become explicit review actions",
+                "the route performs no retrieval, raw-data movement, biological execution, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma evidence calibration: {error}"))
     }
 
     /// Triangulate scoped glioma claims across independent source families and local artifacts.
@@ -46812,6 +46848,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_evidence_qualify",
                 "glioma_evidence_surveillance",
                 "glioma_evidence_priority",
+                "glioma_evidence_calibrate",
                 "glioma_evidence_triangulate",
                 "glioma_knowledge_compile",
                 "glioma_knowledge_compose",
@@ -54356,6 +54393,18 @@ pub fn tool_definitions() -> Vec<Value> {
                 "records": {"type": "array", "items": {"type": "object"}, "description": "Current local EvidenceRecord1@1 snapshot; negative, stale, contradictory, unknown, and unmeasured records are valid inputs."}
             },
             "required": ["request", "records"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_evidence_calibrate",
+        "description": "Calibrate source-family support scores against resolved local preclinical glioma outcomes with quality-weighted isotonic regression. Returns monotonic reliability curves, Brier/ECE metrics, under-observation and miscalibration review actions, and preserved negative/unknown evidence; it does not retrieve sources, move raw data, execute biology, or make a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "EvidenceCalibrationRequest1@1 with objective, bounded score bins, resolved-observation floors, and calibration-error gate."},
+                "observations": {"type": "array", "items": {"type": "object"}, "description": "Local EvidenceCalibrationObservation1@1 score/outcome records with source family, independent group, quality, and metadata-only artifact reference."}
+            },
+            "required": ["request", "observations"]
         }
     }));
     definitions.push(json!({

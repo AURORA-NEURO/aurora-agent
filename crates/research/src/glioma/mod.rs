@@ -46,6 +46,10 @@ pub use programs::p01_evidence_surveillance::{
     EvidenceRefreshCampaignStopReason, EvidenceRefreshExecutionFailure, EvidenceSurveillance,
     EvidenceSurveillanceAction, EvidenceSurveillanceActionKind, EvidenceSurveillanceDisposition,
     EvidenceSurveillanceError, EvidenceSurveillanceRequest,
+    calibrate_glioma_evidence, CalibrationBin, CalibrationBinDisposition,
+    EvidenceCalibrationAnalysis, EvidenceCalibrationDisposition, EvidenceCalibrationError,
+    EvidenceCalibrationObservation, EvidenceCalibrationRequest, SourceCalibration,
+    SourceCalibrationDisposition,
 };
 pub use programs::p02_evidence_knowledge::{
     compile_typed_knowledge, execute_glioma_knowledge_resolution_campaign,

@@ -66,6 +66,8 @@ crates/research/src/glioma/
                                              P01 recency/state/coverage action queue for the next autonomous cycle
   programs/p01_evidence_surveillance/campaign.rs
                                              P01 bounded autonomous evidence refresh and round-by-round surveillance replanning
+  programs/p01_evidence_surveillance/calibration.rs
+                                             P01 quality-weighted isotonic source calibration and review-frontier generation
   programs/p01_evidence_surveillance/triangulation.rs
                                              P01 cross-family claim triangulation with contradiction and source-dominance gates
   programs/p02_evidence_knowledge/campaign.rs
@@ -232,7 +234,7 @@ portfolio plan and executable code; it does not promote a planned slot to implem
 
 | Program | Product owner | Engine stages | Observable product result |
 | --- | --- | --- | --- |
-| P01 Evidence surveillance | evidence curator | evidence surveillance | snapshot deltas, recency/state/coverage action queues, cross-family claim triangulation, review/revalidation actions, and stale/unknown/contradictory coverage |
+| P01 Evidence surveillance | evidence curator | evidence surveillance | snapshot deltas, recency/state/coverage action queues, source calibration, cross-family claim triangulation, review/revalidation actions, and stale/unknown/contradictory coverage |
 | P02 Evidence-to-typed-knowledge | knowledge engineer | evidence compilation | scoped claims, contradiction-aware maximal-consistency portfolios, ranked rival frontiers, and competing explanations bound to source artifacts |
 | P03 Multimodal ingestion and QC | data steward | multimodal ingestion/QC | comparable cells, robust batch harmonization, feature-level concordance, consensus clusters, spatial niches, ligand-receptor communication, cross-sample registration, spatial-state diffusion, and explicit defects |
 | P04 Question-to-decision context | principal investigator | intent normalization, context compilation | bounded decision context, selected executable action batches, and unresolved omissions |
@@ -299,7 +301,13 @@ unknown coverage, source-family diversity, and leave-one-artifact sensitivity. A
 qualified when its support clears the declared floors without contradiction, incompleteness, or
 source dominance; otherwise the engine emits a partial, negative, or unresolved state with a
 specific next action. This is a scientific synthesis gate, not a literature fetcher or clinical
-decision-maker. P09 now includes a bounded robustness suite (`assess_glioma_robustness`) that
+decision-maker.
+P01 also calibrates source-family scores (`calibrate_glioma_evidence`) against resolved local
+outcomes using quality-weighted isotonic regression. Non-monotonic score/outcome relationships are
+pooled deterministically, unknown/stale/unmeasured outcomes do not count as resolved support, and
+under-observed or high-error families become explicit review actions with calibrated reliability
+and uncertainty for P02/P04/P07 planning.
+P09 now includes a bounded robustness suite (`assess_glioma_robustness`) that
 recomputes the declared effect under leave-one-batch-out and optional leave-one-row-out omissions;
 unresolved subsets, fragile effects, and null results remain explicit. Provider-specific execution
 for the remaining programs remains subsequent build work rather than being implied as complete.

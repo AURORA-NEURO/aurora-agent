@@ -349,7 +349,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 57;
-const TOOL_DEFINITION_COUNT: usize = 626;
+const TOOL_DEFINITION_COUNT: usize = 627;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -4443,6 +4443,70 @@ fn every_tool_declares_an_input_schema_with_required_fields() {
         assert_eq!(tool["inputSchema"]["type"], json!("object"));
         assert!(tool["inputSchema"]["required"].is_array());
     }
+}
+
+#[test]
+fn glioma_evidence_calibration_preserves_negative_and_unknown_outcomes() {
+    let mut server = server();
+    let artifact_hash = "0".repeat(64);
+    let response = call(
+        &mut server,
+        "glioma_evidence_calibrate",
+        json!({
+            "request": {
+                "objective": "calibrate source families before mechanistic planning",
+                "bin_count": 4,
+                "min_observations_per_family": 1,
+                "min_resolved_per_bin": 1,
+                "max_expected_calibration_error_milli": 800
+            },
+            "observations": [
+                {
+                    "observation_id": "cal-low",
+                    "source_family": "assay",
+                    "predicted_support_milli": 100,
+                    "outcome": "supported",
+                    "quality_milli": 900,
+                    "independent_group": "replicate-a",
+                    "artifact": {"artifact_id":"cal-artifact-low","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-calibration+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}
+                },
+                {
+                    "observation_id": "cal-high",
+                    "source_family": "assay",
+                    "predicted_support_milli": 900,
+                    "outcome": "contradicted",
+                    "quality_milli": 900,
+                    "independent_group": "replicate-b",
+                    "artifact": {"artifact_id":"cal-artifact-high","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-calibration+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}
+                },
+                {
+                    "observation_id": "cal-unknown",
+                    "source_family": "literature",
+                    "predicted_support_milli": 700,
+                    "outcome": "unknown",
+                    "quality_milli": 900,
+                    "independent_group": "review-a",
+                    "artifact": {"artifact_id":"cal-artifact-unknown","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-calibration+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}
+                }
+            ]
+        }),
+    );
+    assert_eq!(response["dispatch"], json!("not_started"));
+    assert_eq!(response["simulation_only"], json!(true));
+    assert!(response["calibration"]["negative_evidence_order"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|value| value == "cal-high"));
+    assert!(response["calibration"]["unknown_order"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|value| value == "cal-unknown"));
+    assert_eq!(
+        response["calibration"]["families"].as_array().unwrap().len(),
+        2
+    );
 }
 
 #[test]
