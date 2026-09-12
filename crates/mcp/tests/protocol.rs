@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 683;
+const TOOL_DEFINITION_COUNT: usize = 684;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -2874,6 +2874,51 @@ fn glioma_instrument_fleet_schedule_closes_dependencies_and_requires_preflight()
         .unwrap()
         .iter()
         .any(|item| item == "integrate"));
+}
+
+#[test]
+fn glioma_instrument_fleet_execute_preserves_schedule_blocks_without_dispatch() {
+    let mut server = server();
+    let schedule = call(
+        &mut server,
+        "glioma_instrument_fleet_schedule",
+        json!({
+            "request": {
+                "objective": "execute blocked organoid imaging fleet",
+                "model_system": "organoid",
+                "current_tick": 0,
+                "max_end_tick": 30,
+                "maximum_total_risk_milli": 1000,
+                "operator_capacity": 1,
+                "tasks": [
+                    {"task_id":"image-blocked","label":"image blocked","operation":"acquire_image","model_system":"organoid","candidate_instrument_order":["scope-a"],"depends_on":[],"release_tick":0,"duration_ticks":5,"risk_milli":100,"information_milli":500,"requires_operator":false,"output_schema":"ImageBlocked1@1"}
+                ],
+                "resources": [
+                    {"instrument_id":"scope-a","model_system_order":["organoid"],"operation_order":["sequence"],"available_from_tick":0,"available_until_tick":30,"calibration_valid_until_tick":30,"enabled":true}
+                ]
+            }
+        }),
+    );
+    assert_eq!(schedule["schedule"]["disposition"], json!("blocked"));
+    let execution = call(
+        &mut server,
+        "glioma_instrument_fleet_execute",
+        json!({
+            "request": {
+                "objective": "execute blocked organoid imaging fleet",
+                "schedule": schedule["schedule"].clone(),
+                "runs": [],
+                "stop_on_negative": true
+            }
+        }),
+    );
+    assert_eq!(execution["dispatch"], json!("not_started"));
+    assert_eq!(execution["simulation_only"], json!(true));
+    assert_eq!(execution["execution"]["disposition"], json!("blocked"));
+    assert_eq!(
+        execution["execution"]["blocked_order"],
+        json!(["image-blocked"])
+    );
 }
 
 #[test]

@@ -516,9 +516,10 @@ use bioprism_research::{
     execute_glioma_computation_portfolio, execute_glioma_decision_context_campaign,
     execute_glioma_evidence_campaign, execute_glioma_evidence_gated_research,
     execute_glioma_evidence_refresh_campaign, execute_glioma_instrument_campaign,
-    execute_glioma_instrument_plan, execute_glioma_knowledge_resolution_campaign,
-    execute_glioma_mechanism_discrimination_campaign, execute_glioma_multi_fidelity_campaign,
-    execute_glioma_multimodal_ingestion_campaign, execute_glioma_multimodal_mechanism_campaign,
+    execute_glioma_instrument_fleet, execute_glioma_instrument_plan,
+    execute_glioma_knowledge_resolution_campaign, execute_glioma_mechanism_discrimination_campaign,
+    execute_glioma_multi_fidelity_campaign, execute_glioma_multimodal_ingestion_campaign,
+    execute_glioma_multimodal_mechanism_campaign,
     execute_glioma_multimodal_mechanism_campaign_with_executor, execute_glioma_protocol,
     execute_glioma_replay_campaign, execute_glioma_replication_campaign,
     execute_glioma_research_autopilot, execute_glioma_research_director,
@@ -581,11 +582,11 @@ use bioprism_research::{
     GliomaResearchAutopilotRequest, GliomaResearchDirectorRequest, GliomaResearchIntent,
     GliomaWorkflowRequest, GraphFusionRequest, GraphFusionVector, HarmonizationRequest,
     HarmonizationVector, InformationDesignRequest, InstrumentCampaignRequest,
-    InstrumentExecutionRequest, InstrumentExecutionRun, InstrumentFleetScheduleRequest,
-    InstrumentPreflightRequest, InterpretationSynthesisRequest, KnowledgeCompositionRequest,
-    KnowledgeFrontierRequest, KnowledgeRelation, KnowledgeRequest,
-    KnowledgeResolutionCampaignRequest, LatentFactorRequest, LatentFactorVector,
-    LigandReceptorPair, MechanismActionPlannerConfig, MechanismCalibration,
+    InstrumentExecutionRequest, InstrumentExecutionRun, InstrumentFleetExecutionRequest,
+    InstrumentFleetScheduleRequest, InstrumentInterlockSnapshot, InstrumentPreflightRequest,
+    InterpretationSynthesisRequest, KnowledgeCompositionRequest, KnowledgeFrontierRequest,
+    KnowledgeRelation, KnowledgeRequest, KnowledgeResolutionCampaignRequest, LatentFactorRequest,
+    LatentFactorVector, LigandReceptorPair, MechanismActionPlannerConfig, MechanismCalibration,
     MechanismCalibrationObservation, MechanismCalibrationRequest, MechanismCandidate,
     MechanismDiscrimination, MechanismDiscriminationCampaignRequest,
     MechanismDiscriminationRequest, MechanismDiscriminatorAction, MechanismDynamicsEdge,
@@ -2296,6 +2297,7 @@ impl Server {
             "glioma_instrument_calibration" => self.glioma_instrument_calibration(&arguments),
             "glioma_instrument_preflight" => self.glioma_instrument_preflight(&arguments),
             "glioma_instrument_fleet_schedule" => self.glioma_instrument_fleet_schedule(&arguments),
+            "glioma_instrument_fleet_execute" => self.glioma_instrument_fleet_execute(&arguments),
             "glioma_instrument_execute" => self.glioma_instrument_execute(&arguments),
             "glioma_instrument_campaign_execute" => {
                 self.glioma_instrument_campaign_execute(&arguments)
@@ -8916,6 +8918,54 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma instrument fleet schedule: {error}"))
+    }
+
+    /// Execute a validated fleet schedule through the deterministic local gateway. Every run
+    /// remains bound to its scheduled instrument and admitted preflight plan; MCP uses a dry-run
+    /// executor while institution-local callers can supply a hardware gateway through Rust.
+    fn glioma_instrument_fleet_execute(&self, arguments: &Value) -> Result<Value, String> {
+        let request: InstrumentFleetExecutionRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_instrument_fleet_execute requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma instrument fleet execution request: {error}"))?;
+        let interlocks = request
+            .runs
+            .first()
+            .map(|run| run.execution.live_interlocks.clone())
+            .unwrap_or(InstrumentInterlockSnapshot {
+                observed_tick: 0,
+                emergency_stop_clear: true,
+                guard_closed: true,
+                deck_clear: true,
+                consumables_available: true,
+                waste_capacity_milli: 0,
+                temperature_milli: None,
+                minimum_temperature_milli: None,
+                maximum_temperature_milli: None,
+                calibration_valid_until_tick: 0,
+                calibration_sequence_index: 0,
+            });
+        let mut executor = DryRunInstrumentExecutor {
+            interlocks,
+            emergency_stop_called: false,
+        };
+        let execution = execute_glioma_instrument_fleet(&request, &mut executor)
+            .map_err(|error| format!("glioma instrument fleet execution refused: {error}"))?;
+        serde_json::to_value(json!({
+            "execution": execution,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "every admitted schedule task is bound to its assigned instrument and preflight plan before gateway entry",
+                "dependency-blocked, schedule-blocked, negative, partial, unresolved, failed, retry, and emergency-stop outcomes remain explicit",
+                "the existing guarded executor rechecks authorization and live interlocks before every operation",
+                "MCP emits synthetic local artifacts only; no hardware, raw-data, or clinical effect occurs"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma instrument fleet execution: {error}"))
     }
 
     /// Execute an admitted preclinical instrument plan through the deterministic local gateway
@@ -49556,6 +49606,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_instrument_calibration",
                 "glioma_instrument_preflight",
                 "glioma_instrument_fleet_schedule",
+                "glioma_instrument_fleet_execute",
                 "glioma_instrument_execute",
                 "glioma_instrument_campaign_execute",
                 "glioma_instrument_assay_adjudicate",
@@ -59463,6 +59514,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "InstrumentFleetScheduleRequest1@1 containing typed tasks, candidate instruments, model/operation capabilities, availability/calibration windows, operator capacity, and risk budget."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_instrument_fleet_execute",
+        "description": "Execute the admitted portion of a preclinical glioma instrument fleet schedule through the guarded local gateway. Every run is bound to its scheduled instrument and admitted preflight plan, dependency-safe ordering is enforced, and negative, partial, unresolved, failed, blocked, retry, and emergency-stop outcomes remain explicit. MCP uses a deterministic dry-run gateway; production hardware remains behind the institution-owned InstrumentExecutor seam.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "InstrumentFleetExecutionRequest1@1 containing a validated InstrumentFleetSchedule1@1, one InstrumentFleetExecutionRunRequest1@1 per admitted task, dependency bindings, admitted InstrumentExecutionRequest1@1 plans, and negative-stop policy."}
             },
             "required": ["request"]
         }
