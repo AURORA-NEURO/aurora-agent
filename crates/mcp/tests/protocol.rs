@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 681;
+const TOOL_DEFINITION_COUNT: usize = 682;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -2874,6 +2874,56 @@ fn glioma_instrument_fleet_schedule_closes_dependencies_and_requires_preflight()
         .unwrap()
         .iter()
         .any(|item| item == "integrate"));
+}
+
+#[test]
+fn glioma_decision_branch_plan_ranks_scenario_robust_portfolios() {
+    let mut server = server();
+    let hash = "0".repeat(64);
+    let knowledge = call(
+        &mut server,
+        "glioma_knowledge_compile",
+        json!({
+            "request": {"objective":"rank invasion mechanisms","required_modalities":["genomics"],"required_model_systems":["organoid"],"min_support_milli":700,"min_sources_per_claim":1,"max_claims":8},
+            "records": [{"evidence_id":"branch-e1","source_artifact":{"artifact_id":"branch-a1","content_hash":hash,"content_type":"application/vnd.aurora.glioma-evidence+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"source_kind":"dataset","claim":"EGFR signaling increases invasion","scope":"preclinical glioma","modality":"genomics","model_system":"organoid","state":"supported","relevance_milli":900,"quality_milli":900,"reproducibility_milli":900,"release_epoch":1}]
+        }),
+    );
+    let context_response = call(
+        &mut server,
+        "glioma_decision_context",
+        json!({"request":{"objective":"rank invasion mechanisms","max_actions":8,"default_cost_units":4},"knowledge":knowledge["knowledge"].clone()}),
+    );
+    let context_candidate = context_response["context"]["actions"][0]["candidate"].clone();
+    let context_id = context_candidate["action_id"].as_str().unwrap().to_string();
+    let branch = call(
+        &mut server,
+        "glioma_decision_branch_plan",
+        json!({
+            "request": {
+                "objective":"rank invasion mechanisms",
+                "candidates":[context_candidate, {"action_id":"branch-independent","stage_kind":"mechanism_exploration","modality":"genomics","model_system":"organoid","depends_on":[],"cost_units":3,"information_gain_milli":800,"frontier_novelty_milli":800,"workflow_leverage_milli":800,"cross_stage_unlock_milli":800,"reproducibility_safety_milli":900,"federation_value_milli":500,"feasibility_milli":900,"autonomy_tier":"a1","effects":["read_local_data","execute_local_computation"]}],
+                "completed_action_order":[],
+                "scenarios":[
+                    {"scenario_id":"invasion_high","probability_milli":600,"outcomes":[{"action_id":context_id,"value_milli":700,"uncertainty_milli":100,"failure_probability_milli":50},{"action_id":"branch-independent","value_milli":600,"uncertainty_milli":150,"failure_probability_milli":50}]},
+                    {"scenario_id":"invasion_low","probability_milli":400,"outcomes":[{"action_id":context_id,"value_milli":300,"uncertainty_milli":200,"failure_probability_milli":100},{"action_id":"branch-independent","value_milli":450,"uncertainty_milli":150,"failure_probability_milli":100}]}
+                ],
+                "budget_units":8,"max_actions_per_branch":2,"max_branches":8,"beam_width":16,"minimum_robustness_milli":0,"uncertainty_penalty_milli":300,"failure_penalty_milli":300,
+                "selection_weights":{"information_gain":25,"frontier_novelty":20,"workflow_leverage":15,"cross_stage_unlock":15,"reproducibility_safety":10,"federation_value":10,"feasibility":5}
+            },
+            "context":context_response["context"].clone()
+        }),
+    );
+    assert_eq!(branch["dispatch"], json!("not_started"));
+    assert!(branch["plan"]["selected_branch_id"].is_string());
+    assert!(!branch["plan"]["frontier_order"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+    assert!(branch["plan"]["portfolios"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|portfolio| portfolio["scenario_scores"].as_array().unwrap().len() == 2));
 }
 
 #[test]

@@ -530,19 +530,20 @@ use bioprism_research::{
     plan_glioma_adaptive_mechanism_policy, plan_glioma_adaptive_research_frontier,
     plan_glioma_adaptive_workflow, plan_glioma_clone_continuation,
     plan_glioma_clone_perturbation_panel, plan_glioma_closed_loop_campaign,
-    plan_glioma_computation_portfolio, plan_glioma_information_design,
-    plan_glioma_multi_fidelity_optimization, plan_glioma_robust_active_learning,
-    plan_glioma_robust_intervention_portfolio, plan_glioma_sequential_design, plan_glioma_workflow,
-    preflight_glioma_instrument, prioritize_glioma_evidence, prioritize_knowledge_frontier,
-    propagate_glioma_mechanism_graph, qualify_evidence, register_glioma_spatial_samples,
-    revise_glioma_beliefs, schedule_glioma_instrument_fleet, select_glioma_actions,
-    simulate_glioma_counterfactual, simulate_glioma_counterfactual_ensemble,
-    simulate_glioma_mechanism_dynamics, simulate_glioma_protocol, surveil_glioma_evidence,
-    synthesize_glioma_interpretation, triangulate_glioma_evidence, validate_feature_catalog,
-    ActionPortfolioExecutionRequest, ActiveLearningCampaignRequest, ActiveLearningCandidate,
-    ActiveLearningObservation, ActiveLearningRequest, AdaptiveAllocationCampaignRequest,
-    AdaptiveAllocationRequest, AdaptiveArmObservation, AdaptiveDoseSurfaceRequest,
-    AdaptiveFrontierRequest, AdaptiveInformationCampaignRequest, AdaptiveInformationObservation,
+    plan_glioma_computation_portfolio, plan_glioma_decision_branches,
+    plan_glioma_information_design, plan_glioma_multi_fidelity_optimization,
+    plan_glioma_robust_active_learning, plan_glioma_robust_intervention_portfolio,
+    plan_glioma_sequential_design, plan_glioma_workflow, preflight_glioma_instrument,
+    prioritize_glioma_evidence, prioritize_knowledge_frontier, propagate_glioma_mechanism_graph,
+    qualify_evidence, register_glioma_spatial_samples, revise_glioma_beliefs,
+    schedule_glioma_instrument_fleet, select_glioma_actions, simulate_glioma_counterfactual,
+    simulate_glioma_counterfactual_ensemble, simulate_glioma_mechanism_dynamics,
+    simulate_glioma_protocol, surveil_glioma_evidence, synthesize_glioma_interpretation,
+    triangulate_glioma_evidence, validate_feature_catalog, ActionPortfolioExecutionRequest,
+    ActiveLearningCampaignRequest, ActiveLearningCandidate, ActiveLearningObservation,
+    ActiveLearningRequest, AdaptiveAllocationCampaignRequest, AdaptiveAllocationRequest,
+    AdaptiveArmObservation, AdaptiveDoseSurfaceRequest, AdaptiveFrontierRequest,
+    AdaptiveInformationCampaignRequest, AdaptiveInformationObservation,
     AdaptiveMechanismCampaignRequest, AdaptiveMechanismPolicyRequest, AnalysisDataset,
     AnalysisRequest, AssayEvidenceObservation, AssayEvidenceRequest, BeliefConflict,
     BeliefRevisionRequest, CalibrationRequest, CalibrationRun, CampaignAction, CampaignMechanism,
@@ -554,13 +555,13 @@ use bioprism_research::{
     ComputationExecutionRequest, ComputationPortfolioExecutionRequest, ComputationPortfolioRequest,
     ConcordanceRequest, ConsensusRequest, ContrastDesignRequest, CounterfactualEnsembleRequest,
     CounterfactualIntervention, CounterfactualModel, CounterfactualRequest,
-    DecisionActionGraphRequest, DecisionActionPlanRequest, DecisionContext,
-    DecisionContextCampaignRequest, DecisionContextRequest, DesignAction, DesignMechanism,
-    DoseResponseObservation, DoseResponseRequest, DryRunActiveLearningCampaignExecutor,
-    DryRunAdaptiveAllocationCampaignExecutor, DryRunAdaptiveMechanismPolicyExecutor,
-    DryRunDecisionContextCampaignExecutor, DryRunEvidenceRefreshCampaignExecutor,
-    DryRunFederatedBenchmarkCampaignExecutor, DryRunGliomaActionExecutor,
-    DryRunGliomaComputationExecutor, DryRunGliomaProtocolExecutor,
+    DecisionActionGraphRequest, DecisionActionPlanRequest, DecisionBranchPlannerRequest,
+    DecisionContext, DecisionContextCampaignRequest, DecisionContextRequest, DesignAction,
+    DesignMechanism, DoseResponseObservation, DoseResponseRequest,
+    DryRunActiveLearningCampaignExecutor, DryRunAdaptiveAllocationCampaignExecutor,
+    DryRunAdaptiveMechanismPolicyExecutor, DryRunDecisionContextCampaignExecutor,
+    DryRunEvidenceRefreshCampaignExecutor, DryRunFederatedBenchmarkCampaignExecutor,
+    DryRunGliomaActionExecutor, DryRunGliomaComputationExecutor, DryRunGliomaProtocolExecutor,
     DryRunGliomaReplicationCampaignExecutor, DryRunInstrumentExecutor,
     DryRunKnowledgeResolutionCampaignExecutor, DryRunMechanismDiscriminationCampaignExecutor,
     DryRunMultiFidelityCampaignExecutor, DryRunMultimodalIngestionCampaignExecutor,
@@ -2248,6 +2249,7 @@ impl Server {
             "glioma_knowledge_frontier" => self.glioma_knowledge_frontier(&arguments),
             "glioma_decision_context" => self.glioma_decision_context(&arguments),
             "glioma_decision_action_graph" => self.glioma_decision_action_graph(&arguments),
+            "glioma_decision_branch_plan" => self.glioma_decision_branch_plan(&arguments),
             "glioma_decision_action_plan" => self.glioma_decision_action_plan(&arguments),
             "glioma_multimodal_qc" => self.glioma_multimodal_qc(&arguments),
             "glioma_mechanism_explore" => self.glioma_mechanism_explore(&arguments),
@@ -8001,6 +8003,39 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma decision-action graph: {error}"))
+    }
+
+    /// Plan robust, dependency-closed alternatives across explicit preclinical scenarios. The
+    /// branch planner compares portfolios only; the caller-owned selector or executor retains
+    /// authority for every assay, instrument, computation, and federation effect.
+    fn glioma_decision_branch_plan(&self, arguments: &Value) -> Result<Value, String> {
+        let request: DecisionBranchPlannerRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_decision_branch_plan requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma decision branch request: {error}"))?;
+        let context: DecisionContext = serde_json::from_value(
+            arguments
+                .get("context")
+                .cloned()
+                .ok_or_else(|| "glioma_decision_branch_plan requires context".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma decision context: {error}"))?;
+        let plan = plan_glioma_decision_branches(&request, &context)
+            .map_err(|error| format!("glioma decision branch planning refused: {error}"))?;
+        serde_json::to_value(json!({
+            "plan": plan,
+            "dispatch": "not_started",
+            "guarantees": [
+                "candidate portfolios are dependency-closed and bounded by action, cost, beam, and branch limits",
+                "expected value, worst-case value, uncertainty, failure risk, and Pareto frontier remain explicit across declared scenarios",
+                "missing or negative scenario outcomes never become confident evidence and remain visible as unresolved or negative findings",
+                "the route performs no assay, instrument, computation, federation, or clinical action"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma decision branch plan: {error}"))
     }
 
     /// Select the next executable portfolio from a compiled glioma decision context. This keeps
@@ -49462,6 +49497,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_knowledge_frontier",
                 "glioma_decision_context",
                 "glioma_decision_action_graph",
+                "glioma_decision_branch_plan",
                 "glioma_decision_action_plan",
                 "glioma_multimodal_qc",
                 "glioma_mechanism_explore",
@@ -59034,6 +59070,18 @@ pub fn tool_definitions() -> Vec<Value> {
                 "composition": {"type": "object", "description": "KnowledgeComposition1@1 from glioma_knowledge_compose."}
             },
             "required": ["request", "context", "composition"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_decision_branch_plan",
+        "description": "Plan robust, dependency-closed alternative preclinical glioma research portfolios across explicit scenario outcomes. Uses bounded beam search and Pareto ranking over expected value, worst-case value, uncertainty, failure risk, and cost; preserves missing and negative outcomes and never executes a scientific or clinical action.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "DecisionBranchPlannerRequest1@1 with typed candidates, completed ids, at least two weighted scenarios, resource bounds, penalties, and selection weights."},
+                "context": {"type": "object", "description": "DecisionContext1@1 from glioma_decision_context used as the immutable scientific context binding."}
+            },
+            "required": ["request", "context"]
         }
     }));
     definitions.push(json!({

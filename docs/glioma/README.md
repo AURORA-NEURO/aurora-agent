@@ -30,6 +30,8 @@ crates/research/src/glioma/
                                              P04 evidence-gap to typed next-action compilation
   programs/p04_decision_context/action_graph.rs
                                              P04 claim-path to dependency-closed action DAG and parallel waves
+  programs/p04_decision_context/branch_planner.rs
+                                             P04 scenario-aware branch-and-bound portfolio planning with Pareto frontier and uncertainty gates
   programs/p04_decision_context/action_bridge.rs
                                              P04 compiler-to-executable action portfolio bridge
   programs/p04_decision_context/campaign.rs
@@ -247,7 +249,7 @@ portfolio plan and executable code; it does not promote a planned slot to implem
 | P01 Evidence surveillance | evidence curator | evidence surveillance | snapshot deltas, recency/state/coverage action queues, source calibration, cross-family claim triangulation, review/revalidation actions, and stale/unknown/contradictory coverage |
 | P02 Evidence-to-typed-knowledge | knowledge engineer | evidence compilation | scoped claims, contradiction-aware maximal-consistency portfolios, ranked rival frontiers, and competing explanations bound to source artifacts |
 | P03 Multimodal ingestion and QC | data steward | multimodal ingestion/QC | comparable cells, robust batch harmonization, feature-level concordance, consensus clusters, spatial niches, ligand-receptor communication, cross-sample registration, spatial-state diffusion, and explicit defects |
-| P04 Question-to-decision context | principal investigator | intent normalization, context compilation | bounded decision context, selected executable action batches, and unresolved omissions |
+| P04 Question-to-decision context | principal investigator | intent normalization, context compilation | bounded decision context, scenario-aware Pareto workflow branches, selected executable action batches, and unresolved omissions |
 | P05 Mechanism exploration | mechanism scientist | molecular landscape, mechanism exploration | residual-fit competing mechanisms, posterior-weighted next-assay information gain, signed mechanism-network propagation, delayed-feedback mechanism dynamics, model-averaged counterfactuals, robust lower-tail intervention portfolios, and discriminating actions |
 | P06 Power-aware experiment design | experimentalist | experiment design | falsifiable allocation, power, blocking, dose-response, adaptive replicate allocation, sequential Bayesian success/futility stopping, local sequential campaign execution, uncertainty-aware dose-surface acquisition, mechanism-aware closed-loop campaign rounds, combination-synergy fitting, and null-result plan |
 | P07 Protocol simulation | lab operations lead | protocol simulation, adaptive workflow planning | critical-path scheduling, outcome-aware dependency scheduling, evidence-gated director admission, evidence-priority execution cycles, context-to-action execution, multimodal mechanism campaigns, utilization, deterministic next batches, and repair/abstain routing before physical effects |

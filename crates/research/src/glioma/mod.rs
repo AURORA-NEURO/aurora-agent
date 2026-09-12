@@ -101,15 +101,18 @@ pub use programs::p03_multimodal_ingestion_qc::{
 };
 pub use programs::p04_decision_context::{
     compile_decision_action_graph, compile_decision_context,
-    execute_glioma_decision_context_campaign, plan_decision_actions, DecisionAction,
-    DecisionActionGraph, DecisionActionGraphDisposition, DecisionActionGraphError,
+    execute_glioma_decision_context_campaign, plan_decision_actions, plan_glioma_decision_branches,
+    DecisionAction, DecisionActionGraph, DecisionActionGraphDisposition, DecisionActionGraphError,
     DecisionActionGraphRequest, DecisionActionKind, DecisionActionPlan,
     DecisionActionPlanDisposition, DecisionActionPlanError, DecisionActionPlanRequest,
-    DecisionContext, DecisionContextCampaign, DecisionContextCampaignDisposition,
-    DecisionContextCampaignError, DecisionContextCampaignExecutionFailure,
-    DecisionContextCampaignExecutor, DecisionContextCampaignRequest, DecisionContextCampaignRound,
+    DecisionBranchPlan, DecisionBranchPlanDisposition, DecisionBranchPlannerError,
+    DecisionBranchPlannerRequest, DecisionBranchPortfolio, DecisionContext,
+    DecisionContextCampaign, DecisionContextCampaignDisposition, DecisionContextCampaignError,
+    DecisionContextCampaignExecutionFailure, DecisionContextCampaignExecutor,
+    DecisionContextCampaignRequest, DecisionContextCampaignRound,
     DecisionContextCampaignStopReason, DecisionContextDisposition, DecisionContextError,
-    DecisionContextRequest, DecisionGraphNode, DryRunDecisionContextCampaignExecutor,
+    DecisionContextRequest, DecisionGraphNode, DecisionScenario, DecisionScenarioOutcome,
+    DecisionScenarioScore, DryRunDecisionContextCampaignExecutor,
 };
 pub use programs::p05_mechanism_exploration::{
     analyze_glioma_clonal_evolution, analyze_glioma_pathway_activity, calibrate_glioma_mechanisms,
