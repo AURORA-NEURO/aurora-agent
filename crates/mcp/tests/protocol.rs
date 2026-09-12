@@ -349,7 +349,7 @@ fn hub_review_fixture(id: &str, artifact: &[u8]) -> Value {
 const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
-const CAPABILITY_GROUP_COUNT: usize = 57;
+const CAPABILITY_GROUP_COUNT: usize = 58;
 const TOOL_DEFINITION_COUNT: usize = 676;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
@@ -13684,7 +13684,7 @@ fn repository_bundle_compiles_a_route_with_progressive_disclosure() {
                 "id": "orientation",
                 "intent": "understand the repository before choosing a domain",
                 "must_read": ["README.md"],
-                "budget": 50000
+                "budget": 60000
             },
             "policy": "normative",
             "include_markdown": true,
