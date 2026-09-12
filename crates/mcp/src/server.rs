@@ -485,6 +485,7 @@ use bioprism_research::{
     compile_decision_action_graph, compile_decision_context,
     compile_glioma_computation_workflow, compile_mechanism_action_plan,
     compile_typed_knowledge, compose_knowledge_graph, design_glioma_contrast_panel,
+    plan_adaptive_glioma_dose_surface,
     design_preclinical_experiment,
     discriminate_mechanisms,
     dry_run_glioma_research, execute_federated_benchmark_campaign, execute_glioma_action_portfolio,
@@ -519,6 +520,7 @@ use bioprism_research::{
     validate_feature_catalog, ActionPortfolioExecutionRequest, ActiveLearningCampaignRequest,
     ActiveLearningCandidate, ActiveLearningObservation, ActiveLearningRequest,
     AdaptiveAllocationCampaignRequest, AdaptiveAllocationRequest, AdaptiveArmObservation,
+    AdaptiveDoseSurfaceRequest,
     AdaptiveInformationCampaignRequest, AdaptiveInformationObservation,
     AdaptiveMechanismCampaignRequest, AdaptiveMechanismPolicyRequest, AnalysisDataset,
     AnalysisRequest, CalibrationRequest, CalibrationRun, CampaignAction, CampaignMechanism,
@@ -2092,6 +2094,7 @@ impl Server {
             "glioma_adaptive_allocation" => self.glioma_adaptive_allocation(&arguments),
             "glioma_closed_loop_campaign" => self.glioma_closed_loop_campaign(&arguments),
             "glioma_combination_synergy" => self.glioma_combination_synergy(&arguments),
+            "glioma_adaptive_dose_surface" => self.glioma_adaptive_dose_surface(&arguments),
             "glioma_multimodal_concordance" => self.glioma_multimodal_concordance(&arguments),
             "glioma_multimodal_consensus" => self.glioma_multimodal_consensus(&arguments),
             "glioma_multimodal_harmonize" => self.glioma_multimodal_harmonize(&arguments),
@@ -4471,6 +4474,32 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma combination synergy: {error}"))
+    }
+
+    /// Select the next diverse combination cells for a local preclinical glioma response surface.
+    /// The planner interpolates only typed local observations and never recommends a clinical dose.
+    fn glioma_adaptive_dose_surface(&self, arguments: &Value) -> Result<Value, String> {
+        let request: AdaptiveDoseSurfaceRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_adaptive_dose_surface requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma adaptive dose-surface request: {error}"))?;
+        let plan = plan_adaptive_glioma_dose_surface(&request)
+            .map_err(|error| format!("glioma adaptive dose-surface planner refused: {error}"))?;
+        serde_json::to_value(json!({
+            "plan": plan,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "dose cells are planned for institution-local preclinical assays, never clinical treatment",
+                "unmeasured cells are interpolated only from bounded neighboring observations and retain uncertainty",
+                "replicate debt, residual noise, dose caps, budget, and diversity constraints remain explicit",
+                "selected cells are validation plans, not observed biological effects"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma adaptive dose-surface plan: {error}"))
     }
 
     /// Compare typed local glioma modality vectors for one sample lineage. This is a scientific
@@ -46653,6 +46682,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_adaptive_allocation_campaign_execute",
                 "glioma_closed_loop_campaign",
                 "glioma_combination_synergy",
+                "glioma_adaptive_dose_surface",
                 "glioma_multimodal_concordance",
                 "glioma_multimodal_consensus",
                 "glioma_multimodal_harmonize",
@@ -53928,6 +53958,17 @@ pub fn tool_definitions() -> Vec<Value> {
                 "observations": {"type": "array", "items": {"type": "object"}, "description": "Local CombinationObservation1@1 values with bounded inhibition responses."}
             },
             "required": ["request", "observations"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_adaptive_dose_surface",
+        "description": "Plan the next diverse combination cells for an institution-local preclinical glioma response surface. Uses inverse-distance interpolation, replicate debt, residual noise, upper-confidence acquisition, total-dose and uncertainty ceilings, and a dose-space diversity constraint. Returns validation cells and explicit sparse-neighborhood/budget/replicate uncertainty; never recommends a clinical dose or dispatches an assay.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "AdaptiveDoseSurfaceRequest1@1 with local observations, candidate DosePair cells, replicate/budget/cost bounds, target response, exploration weight, uncertainty ceiling, total-dose cap, and separation constraint."}
+            },
+            "required": ["request"]
         }
     }));
     definitions.push(json!({

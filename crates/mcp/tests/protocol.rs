@@ -349,7 +349,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 57;
-const TOOL_DEFINITION_COUNT: usize = 622;
+const TOOL_DEFINITION_COUNT: usize = 623;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -957,6 +957,46 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
     assert_eq!(synergy["dispatch"], json!("not_started"));
     assert_eq!(synergy["analysis"]["disposition"], json!("qualified"));
     assert_eq!(synergy["analysis"]["cells"][0]["synergy_milli"], json!(260));
+
+    let adaptive_dose_surface = call(
+        &mut server,
+        "glioma_adaptive_dose_surface",
+        json!({
+            "request": {
+                "objective": "map an organoid glioma combination response surface",
+                "model_system": "organoid",
+                "observations": [
+                    {"observation_id":"surface-control","unit_id":"surface-u0","batch_id":"surface-b0","model_system":"organoid","dose_a_milli":0,"dose_b_milli":0,"response_milli":0,"uncertainty_milli":20},
+                    {"observation_id":"surface-low","unit_id":"surface-u1","batch_id":"surface-b1","model_system":"organoid","dose_a_milli":100,"dose_b_milli":100,"response_milli":300,"uncertainty_milli":35},
+                    {"observation_id":"surface-high","unit_id":"surface-u2","batch_id":"surface-b2","model_system":"organoid","dose_a_milli":300,"dose_b_milli":300,"response_milli":760,"uncertainty_milli":40}
+                ],
+                "candidate_pairs": [
+                    {"dose_a_milli":100,"dose_b_milli":100},
+                    {"dose_a_milli":200,"dose_b_milli":200},
+                    {"dose_a_milli":400,"dose_b_milli":400}
+                ],
+                "min_replicates_per_cell": 2,
+                "budget_units": 4,
+                "cost_per_pair_units": 2,
+                "max_next_pairs": 2,
+                "target_response_milli": 600,
+                "exploration_weight_milli": 700,
+                "max_estimate_uncertainty_milli": 1000,
+                "max_total_dose_milli": 1000,
+                "min_pair_separation_milli": 100
+            }
+        }),
+    );
+    assert_eq!(adaptive_dose_surface["dispatch"], json!("not_started"));
+    assert_eq!(adaptive_dose_surface["simulation_only"], json!(true));
+    assert_eq!(
+        adaptive_dose_surface["plan"]["disposition"],
+        json!("ready_for_validation")
+    );
+    assert_eq!(
+        adaptive_dose_surface["plan"]["selected_order"].as_array().unwrap().len(),
+        2
+    );
 
     let concordance = call(
         &mut server,

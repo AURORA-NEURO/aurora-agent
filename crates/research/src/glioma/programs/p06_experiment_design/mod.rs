@@ -5,6 +5,7 @@ use crate::glioma::catalog::{glioma_program_catalog, GliomaProgramDescriptor, Gl
 pub mod active_learning;
 pub mod adaptive_allocation;
 pub mod adaptive_allocation_campaign;
+pub mod adaptive_dose_surface;
 pub mod adaptive_information_campaign;
 pub mod campaign;
 pub mod clonal_panel;
@@ -33,6 +34,11 @@ pub use adaptive_allocation_campaign::{
     AdaptiveAllocationCampaignExecutor, AdaptiveAllocationCampaignRequest,
     AdaptiveAllocationCampaignRound, AdaptiveAllocationCampaignStopReason,
     DryRunAdaptiveAllocationCampaignExecutor,
+};
+pub use adaptive_dose_surface::{
+    plan_adaptive_glioma_dose_surface, AdaptiveDoseSurfaceDisposition,
+    AdaptiveDoseSurfaceError, AdaptiveDoseSurfacePlan, AdaptiveDoseSurfaceRequest,
+    DoseSurfaceCellState, DoseSurfaceEstimate, DoseSurfaceObservation,
 };
 pub use adaptive_information_campaign::{
     execute_glioma_adaptive_information_campaign, plan_glioma_adaptive_information_campaign,

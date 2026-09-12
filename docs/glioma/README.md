@@ -54,6 +54,8 @@ crates/research/src/glioma/
                                              P06 clone-aware perturbation/readout panel selection under cost and branch-coverage gates
   programs/p06_experiment_design/contrast_design.rs
                                              P06 balanced factorial contrast-panel compiler with interaction and budget gates
+  programs/p06_experiment_design/adaptive_dose_surface.rs
+                                             P06 uncertainty-aware adaptive combination dose-surface acquisition planning
   programs/p10_interpretation_replication/clone_outcomes.rs
                                              P10 replicate-level clone-panel outcome adjudication with explicit null/contradictory evidence
   programs/p01_evidence_surveillance/surveillance.rs
@@ -229,7 +231,7 @@ portfolio plan and executable code; it does not promote a planned slot to implem
 | P03 Multimodal ingestion and QC | data steward | multimodal ingestion/QC | comparable cells, robust batch harmonization, feature-level concordance, consensus clusters, spatial niches, ligand-receptor communication, spatial-state diffusion, and explicit defects |
 | P04 Question-to-decision context | principal investigator | intent normalization, context compilation | bounded decision context, selected executable action batches, and unresolved omissions |
 | P05 Mechanism exploration | mechanism scientist | molecular landscape, mechanism exploration | residual-fit competing mechanisms, posterior-weighted next-assay information gain, signed mechanism-network propagation, model-averaged counterfactuals, robust lower-tail intervention portfolios, and discriminating actions |
-| P06 Power-aware experiment design | experimentalist | experiment design | falsifiable allocation, power, blocking, dose-response, adaptive replicate allocation, mechanism-aware closed-loop campaign rounds, combination-synergy fitting, and null-result plan |
+| P06 Power-aware experiment design | experimentalist | experiment design | falsifiable allocation, power, blocking, dose-response, adaptive replicate allocation, uncertainty-aware dose-surface acquisition, mechanism-aware closed-loop campaign rounds, combination-synergy fitting, and null-result plan |
 | P07 Protocol simulation | lab operations lead | protocol simulation, adaptive workflow planning | critical-path scheduling, evidence-gated director admission, evidence-priority execution cycles, context-to-action execution, multimodal mechanism campaigns, utilization, deterministic next batches, and repair/abstain routing before physical effects |
 | P08 Instrument and robotics preflight | instrument operator | instrument preflight | robust control calibration, drift detection, signed interlocked planning, guarded execution, and fail-closed multi-run campaigns |
 | P09 Reproducible computation | computational scientist | computational execution | checkpointed/replayable computation, intent-to-DAG compilation, budgeted portfolio execution, and omission-stress robustness suite |
@@ -522,6 +524,13 @@ conditions, names each main-effect estimand, checks required interaction coverag
 replicate/adequacy/budget gates. Its adequacy score is deliberately a bounded design proxy rather
 than formal power; variance, batch, and site calibration remain downstream obligations. The MCP
 route only compiles the panel and never randomizes material or executes an assay.
+The adaptive dose-surface planner (`plan_adaptive_glioma_dose_surface`) chooses the next local
+combination cells from typed preclinical observations. It uses inverse-distance response-surface
+interpolation, replicate-debt and residual-noise estimates, an upper-confidence acquisition score,
+hard total-dose and uncertainty ceilings, and a diversity constraint so a batch does not collapse
+onto one neighborhood. Sparse neighborhoods, missing controls, under-replicated cells, budget
+shortfalls, and already-complete cells remain explicit; the result is a validation plan, never a
+clinical dose recommendation or an observed biological effect.
 P12 now also exposes an autonomous federated benchmark campaign
 (`execute_federated_benchmark_campaign`). It ranks aggregate-only follow-up actions from the
 current pooled effect, heterogeneity, replicate floor, and leave-one-site-out influence, asks a
