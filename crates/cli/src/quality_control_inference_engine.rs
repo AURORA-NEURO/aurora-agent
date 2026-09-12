@@ -373,8 +373,8 @@ pub fn infer_quality(
     };
     let effect_receipts = if disposition == "qualified" {
         vec![
-            format!("retain:quality-inference:{}", request.request_id),
             format!("exchange:aggregate-quality-summary:{}", request.request_id),
+            format!("retain:quality-inference:{}", request.request_id),
         ]
     } else {
         vec!["block:unsafe-release".into()]

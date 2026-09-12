@@ -59,6 +59,13 @@ use std::collections::BTreeSet;
 /// caller read "the minimum distortion at this rate" off a number that is not one.
 pub const MAX_ENUMERATED_SUBSETS: u64 = 1 << 16;
 
+fn validate_compatibility_floor(value: f64) -> Result<(), EpistemicError> {
+    if !value.is_finite() || !(0.0..=1.0).contains(&value) {
+        return Err(EpistemicError::InadmissibleCompatibilityFloor { value });
+    }
+    Ok(())
+}
+
 /// How the loss of a compressed context is measured.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -151,6 +158,7 @@ impl FullEvidence {
         pool: &EvidencePool,
         compatibility_floor: f64,
     ) -> Result<Self, EpistemicError> {
+        validate_compatibility_floor(compatibility_floor)?;
         prior.check_against(problem)?;
         pool.check_against(problem)?;
 
@@ -393,6 +401,7 @@ pub fn identification(
     if !tolerance.is_finite() || tolerance < 0.0 {
         return Err(EpistemicError::InadmissibleTolerance { value: tolerance });
     }
+    validate_compatibility_floor(compatibility_floor)?;
     let full = pool.full_posterior(prior)?;
     let compatible = full.support_above(compatibility_floor);
     if problem.actions_agree(&compatible) {

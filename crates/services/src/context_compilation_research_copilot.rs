@@ -160,6 +160,9 @@ impl CertifiedDecisionSection3 {
                 return Err(invalid("decision-section ordering is not canonical"));
             }
         }
+        // `query_order` is the observed query universe.  Required queries that were not
+        // supplied are intentionally outside that universe so a missing query can remain an
+        // honest unresolved omission without being forced into a fabricated state partition.
         let all = self.query_order.iter().cloned().collect::<BTreeSet<_>>();
         let parts = self
             .selected_query_order
@@ -168,24 +171,21 @@ impl CertifiedDecisionSection3 {
             .chain(self.blocked_query_order.iter())
             .cloned()
             .collect::<BTreeSet<_>>();
+        let missing_queries = self
+            .missing_query_order
+            .iter()
+            .cloned()
+            .collect::<BTreeSet<_>>();
         if all.len() != self.query_order.len()
-            || parts.len() + self.missing_query_order.len() != all.len()
-            || !parts.is_disjoint(&self.missing_query_order.iter().cloned().collect())
-            || parts
-                .union(&self.missing_query_order.iter().cloned().collect())
-                .cloned()
-                .collect::<BTreeSet<_>>()
-                != all
+            || parts.len() != all.len()
+            || parts != all
+            || missing_queries.len() != self.missing_query_order.len()
+            || !parts.is_disjoint(&missing_queries)
         {
             return Err(invalid("query states do not form a complete partition"));
         }
         let required_queries = self
             .required_query_order
-            .iter()
-            .cloned()
-            .collect::<BTreeSet<_>>();
-        let missing_queries = self
-            .missing_query_order
             .iter()
             .cloned()
             .collect::<BTreeSet<_>>();

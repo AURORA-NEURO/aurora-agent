@@ -430,7 +430,14 @@ pub fn compile_context(
         .filter(|id| !unresolved_sources.contains(*id) && !blocked_sources.contains(*id))
         .cloned()
         .collect::<BTreeSet<_>>();
-    let context_order = ranked.clone();
+    // The context state vectors are a complete, canonical partition.  Required
+    // contexts that are not present in the fragment set still need to appear in
+    // the universe so the missing state is observable and the receipt validates.
+    // Keep the evidence-ranked ordering for selection above, then canonicalize
+    // the published order for byte-stable cross-language replay.
+    let mut context_order = ranked.clone();
+    context_order.extend(missing.iter().cloned());
+    context_order.sort();
     let source_order = source_order.into_iter().collect::<Vec<_>>();
     let globally_open = request.policy_allow
         && request.protected_closure

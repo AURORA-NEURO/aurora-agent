@@ -1,18 +1,361 @@
 //! Bounded context-compilation research copilots for Worldgen P03 F09-F12.
-use std::collections::BTreeSet;
-use bioprism_foundation::{PRECLINICAL_BOUNDARY,RESEARCH_CONTRACT_SCHEMA_VERSION};
+use super::context_compilation_support::{self, ContextCompilationRequest};
+use bioprism_foundation::{PRECLINICAL_BOUNDARY, RESEARCH_CONTRACT_SCHEMA_VERSION};
 use bioprism_ids::ContentHash;
-use serde::{Deserialize,Serialize};
+use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::collections::BTreeSet;
 use thiserror::Error;
-use super::context_compilation_support::{self,ContextCompilationRequest};
-pub const CONTENT_TYPE:&str="application/vnd.aurora.worldgen.context-copilot-receipt+json";
-#[derive(Debug,Clone,PartialEq,Eq,Serialize,Deserialize)]pub struct ContextCopilotRequest{pub context_request:ContextCompilationRequest,pub action_order:Vec<String>,pub action_budget:u64,pub dry_run:bool,pub signed_approval:bool,pub federation_approved:bool,pub boundary:String}
-#[derive(Debug,Clone,PartialEq,Eq,Serialize,Deserialize)]pub struct ContextCopilotReceipt{pub schema_version:String,pub contract_version:String,pub feature_id:String,pub request_id:String,pub disposition:String,pub action_order:Vec<String>,pub admitted_action_order:Vec<String>,pub denied_action_order:Vec<String>,pub context_disposition:String,pub context_digest:ContentHash,pub copilot_digest:ContentHash,pub replay_identity:ContentHash,pub omissions:Vec<String>,pub uncertainty:Vec<String>,pub negative_evidence:Vec<String>,pub effect_receipts:Vec<String>,pub artifact:serde_json::Value,pub raw_data_local:bool,pub aggregate_only:bool,pub boundary:String}
-#[derive(Debug,Error,Clone,PartialEq,Eq)]pub enum ContextCopilotError{#[error("invalid context copilot request: {0}")]Invalid(String),#[error("context copilot inference failed: {0}")]Inference(String),#[error("invalid context copilot receipt: {0}")]Receipt(String),#[error("context copilot artifact failed: {0}")]Artifact(String)}
-fn ordered(v:&[String])->bool{v.windows(2).all(|p|p[0]<p[1])}fn digest(v:&ContentHash)->bool{v.as_str().len()==64&&v.as_str().bytes().all(|b|b.is_ascii_hexdigit())}
-impl ContextCopilotReceipt{pub fn validate(&self)->Result<(),ContextCopilotError>{if self.schema_version!=RESEARCH_CONTRACT_SCHEMA_VERSION||self.boundary!=PRECLINICAL_BOUNDARY||self.artifact.get("boundary").and_then(|v|v.as_str())!=Some(PRECLINICAL_BOUNDARY)||self.artifact.get("content_type").and_then(|v|v.as_str())!=Some(CONTENT_TYPE)||!self.raw_data_local||!self.aggregate_only||self.request_id.trim().is_empty()||self.action_order.is_empty()||self.effect_receipts.is_empty()||![&self.context_digest,&self.copilot_digest,&self.replay_identity].into_iter().all(digest){return Err(ContextCopilotError::Receipt("context copilot identity, locality, actions, digests, or effects are incomplete".into()));}for v in [&self.action_order,&self.admitted_action_order,&self.denied_action_order,&self.omissions,&self.uncertainty,&self.negative_evidence,&self.effect_receipts]{if !ordered(v){return Err(ContextCopilotError::Receipt("context copilot ordering is not canonical".into()));}}let ids=self.action_order.iter().cloned().collect::<BTreeSet<_>>();let parts=self.admitted_action_order.iter().chain(&self.denied_action_order).cloned().collect::<Vec<_>>();if ids.len()!=self.action_order.len()||parts.len()!=ids.len()||parts.iter().cloned().collect::<BTreeSet<_>>()!=ids{return Err(ContextCopilotError::Receipt("context copilot actions do not partition".into()));}if self.effect_receipts.iter().any(|e|!e.starts_with("invoke:bounded-context-tool:")&&e!="block:unsafe-release"){return Err(ContextCopilotError::Receipt("context copilot effect is outside bounded-tool gate".into()));}Ok(())}}
-pub fn manifest(feature_id:&str,version:&str,input_schema:&str,scale:&str,autonomy:&str)->serde_json::Value{json!({"schema_version":RESEARCH_CONTRACT_SCHEMA_VERSION,"capability_id":feature_id,"version":version,"owner_crate":"worldgen","consumers":["research program lead","preclinical neuroscientist","context compiler"],"behavior":format!("run bounded context-compilation copilot actions for {scale}"),"value":"turns typed context compilation into an approval-bounded agent product without hiding omissions","input_schema":input_schema,"output_schema":"CompiledResearchContext6@1","effects":["invoke:bounded-context-tool","block:unsafe-release"],"permissions":["invoke:declared-context-tool"],"determinism":"byte_stable","autonomy_tier":autonomy,"boundary":PRECLINICAL_BOUNDARY})}
-pub fn run(request:&ContextCopilotRequest,feature_id:&str,version:&str,scale:&str,require_approval:bool,require_federation:bool)->Result<ContextCopilotReceipt,ContextCopilotError>{if request.boundary!=PRECLINICAL_BOUNDARY||request.context_request.boundary!=PRECLINICAL_BOUNDARY||!request.context_request.raw_data_local||!request.context_request.aggregate_only||request.action_order.is_empty()||!ordered(&request.action_order)||request.action_order.iter().collect::<BTreeSet<_>>().len()!=request.action_order.len()||request.action_budget==0{return Err(ContextCopilotError::Invalid("context copilot boundary, actions, budget, locality, or boundary is invalid".into()));}let context=context_compilation_support::compile(&request.context_request,feature_id,version,scale,require_federation).map_err(|e|ContextCopilotError::Inference(e.to_string()))?;let mut admitted=BTreeSet::new();let mut denied=BTreeSet::new();let mut omissions=context.omissions.clone();let uncertainty=context.uncertainty.clone();let negative=context.negative_evidence.clone();let approvals=(!require_approval||request.signed_approval)&&(!require_federation||request.federation_approved);if !approvals{omissions.push("copilot:approval-missing".into());}if request.dry_run{omissions.push("copilot:dry-run-no-effect".into());}if request.action_order.len() as u64>request.action_budget{omissions.push("copilot:action-budget-exceeded".into());}let safe=context.disposition!="blocked"&&approvals&&request.action_order.len() as u64<=request.action_budget;for a in &request.action_order{if safe{admitted.insert(a.clone());}else{denied.insert(a.clone());}}let disposition=if safe{"qualified"}else if context.disposition=="blocked"||!approvals{"blocked"}else{"partial"};let effects=if disposition=="blocked"{vec!["block:unsafe-release".into()]}else{vec![format!("invoke:bounded-context-tool:{}",request.context_request.request_id)]};let payload=json!({"schema_version":RESEARCH_CONTRACT_SCHEMA_VERSION,"contract_version":version,"feature_id":feature_id,"request_id":request.context_request.request_id,"disposition":disposition,"action_order":request.action_order,"admitted_action_order":admitted,"denied_action_order":denied,"context_disposition":context.disposition,"context_digest":context.context_digest,"replay_identity":context.replay_identity,"omissions":omissions,"uncertainty":uncertainty,"negative_evidence":negative,"effect_receipts":effects,"raw_data_local":true,"aggregate_only":true,"boundary":PRECLINICAL_BOUNDARY});let copilot_digest=ContentHash::of_value(&payload).map_err(|e|ContextCopilotError::Artifact(e.to_string()))?;let artifact=json!({"artifact_id":format!("context-copilot:{}",request.context_request.request_id),"content_type":CONTENT_TYPE,"content_hash":copilot_digest,"boundary":PRECLINICAL_BOUNDARY});let receipt=ContextCopilotReceipt{schema_version:RESEARCH_CONTRACT_SCHEMA_VERSION.into(),contract_version:version.into(),feature_id:feature_id.into(),request_id:request.context_request.request_id.clone(),disposition:disposition.into(),action_order:request.action_order.clone(),admitted_action_order:admitted.into_iter().collect(),denied_action_order:denied.into_iter().collect(),context_disposition:context.disposition,context_digest:context.context_digest,copilot_digest,replay_identity:context.replay_identity,omissions:sorted(omissions),uncertainty:uncertainty.clone(),negative_evidence:negative.clone(),effect_receipts:effects,artifact,raw_data_local:true,aggregate_only:true,boundary:PRECLINICAL_BOUNDARY.into()};receipt.validate()?;Ok(receipt)}
-fn sorted(mut v:Vec<String>)->Vec<String>{v.sort();v.dedup();v}
-#[cfg(test)]mod tests{use super::*;use crate::context_compilation_support::ContextFact;use bioprism_foundation::EvidenceState;fn h(v:&str)->ContentHash{ContentHash::of_bytes(v.as_bytes())}fn request()->ContextCopilotRequest{let replay=h("replay");let fact=ContextFact{fact_id:"fact:a".into(),statement:"supported".into(),support_milli:900,state:EvidenceState::Supported,evidence_digest:h("e"),provenance_digest:h("p"),artifact_digest:h("a"),replay_identity:replay.clone(),negative_result:false,raw_data_local:true,boundary:PRECLINICAL_BOUNDARY.into()};ContextCopilotRequest{context_request:ContextCompilationRequest{request_id:"copilot:req".into(),objective:"compile".into(),scope:"study:one".into(),required_fact_order:vec!["fact:a".into()],minimum_support_milli:500,facts:vec![fact],replay_identity:replay,policy_allow:true,protected_closure:true,federation_approved:true,raw_data_local:true,aggregate_only:true,boundary:PRECLINICAL_BOUNDARY.into()},action_order:vec!["read:context".into()],action_budget:2,dry_run:false,signed_approval:true,federation_approved:true,boundary:PRECLINICAL_BOUNDARY.into()}}#[test]fn local_qualified_invokes_bounded_tool(){let r=run(&request(),"AFA-worldgen-P03-F09","worldgen-local-context-compilation-copilot/1.0","local single-study",false,false).unwrap();assert_eq!(r.disposition,"qualified");assert!(r.effect_receipts[0].starts_with("invoke:bounded-context-tool:"));assert_eq!(r.copilot_digest.as_str().len(),64)}#[test]fn approval_missing_blocks(){let mut q=request();q.signed_approval=false;let r=run(&q,"AFA-worldgen-P03-F10","worldgen-multimodal-context-compilation-copilot/1.0","multimodal multi-study",true,false).unwrap();assert_eq!(r.disposition,"blocked");assert_eq!(r.effect_receipts,vec!["block:unsafe-release"]);assert!(r.omissions.iter().any(|x|x=="copilot:approval-missing"))}#[test]fn action_budget_is_explicit(){let mut q=request();q.action_order=vec!["a".into(),"b".into()];q.action_budget=1;let r=run(&q,"AFA-worldgen-P03-F11","worldgen-throughput-context-compilation-copilot/1.0","prospective high-throughput",true,true).unwrap();assert_eq!(r.disposition,"partial");assert!(r.omissions.iter().any(|x|x=="copilot:action-budget-exceeded"))}}
+pub const CONTENT_TYPE: &str = "application/vnd.aurora.worldgen.context-copilot-receipt+json";
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ContextCopilotRequest {
+    pub context_request: ContextCompilationRequest,
+    pub action_order: Vec<String>,
+    pub action_budget: u64,
+    pub dry_run: bool,
+    pub signed_approval: bool,
+    pub federation_approved: bool,
+    pub boundary: String,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ContextCopilotReceipt {
+    pub schema_version: String,
+    pub contract_version: String,
+    pub feature_id: String,
+    pub request_id: String,
+    pub disposition: String,
+    pub action_order: Vec<String>,
+    pub admitted_action_order: Vec<String>,
+    pub denied_action_order: Vec<String>,
+    pub context_disposition: String,
+    pub context_digest: ContentHash,
+    pub copilot_digest: ContentHash,
+    pub replay_identity: ContentHash,
+    pub omissions: Vec<String>,
+    pub uncertainty: Vec<String>,
+    pub negative_evidence: Vec<String>,
+    pub effect_receipts: Vec<String>,
+    pub artifact: serde_json::Value,
+    pub raw_data_local: bool,
+    pub aggregate_only: bool,
+    pub boundary: String,
+}
+#[derive(Debug, Error, Clone, PartialEq, Eq)]
+pub enum ContextCopilotError {
+    #[error("invalid context copilot request: {0}")]
+    Invalid(String),
+    #[error("context copilot inference failed: {0}")]
+    Inference(String),
+    #[error("invalid context copilot receipt: {0}")]
+    Receipt(String),
+    #[error("context copilot artifact failed: {0}")]
+    Artifact(String),
+}
+fn ordered(v: &[String]) -> bool {
+    v.windows(2).all(|p| p[0] < p[1])
+}
+fn digest(v: &ContentHash) -> bool {
+    v.as_str().len() == 64 && v.as_str().bytes().all(|b| b.is_ascii_hexdigit())
+}
+impl ContextCopilotReceipt {
+    pub fn validate(&self) -> Result<(), ContextCopilotError> {
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION
+            || self.boundary != PRECLINICAL_BOUNDARY
+            || self.artifact.get("boundary").and_then(|v| v.as_str()) != Some(PRECLINICAL_BOUNDARY)
+            || self.artifact.get("content_type").and_then(|v| v.as_str()) != Some(CONTENT_TYPE)
+            || !self.raw_data_local
+            || !self.aggregate_only
+            || self.request_id.trim().is_empty()
+            || self.action_order.is_empty()
+            || self.effect_receipts.is_empty()
+            || ![
+                &self.context_digest,
+                &self.copilot_digest,
+                &self.replay_identity,
+            ]
+            .into_iter()
+            .all(digest)
+        {
+            return Err(ContextCopilotError::Receipt(
+                "context copilot identity, locality, actions, digests, or effects are incomplete"
+                    .into(),
+            ));
+        }
+        for v in [
+            &self.action_order,
+            &self.admitted_action_order,
+            &self.denied_action_order,
+            &self.omissions,
+            &self.uncertainty,
+            &self.negative_evidence,
+            &self.effect_receipts,
+        ] {
+            if !ordered(v) {
+                return Err(ContextCopilotError::Receipt(
+                    "context copilot ordering is not canonical".into(),
+                ));
+            }
+        }
+        let ids = self.action_order.iter().cloned().collect::<BTreeSet<_>>();
+        let parts = self
+            .admitted_action_order
+            .iter()
+            .chain(&self.denied_action_order)
+            .cloned()
+            .collect::<Vec<_>>();
+        if ids.len() != self.action_order.len()
+            || parts.len() != ids.len()
+            || parts.iter().cloned().collect::<BTreeSet<_>>() != ids
+        {
+            return Err(ContextCopilotError::Receipt(
+                "context copilot actions do not partition".into(),
+            ));
+        }
+        if self
+            .effect_receipts
+            .iter()
+            .any(|e| !e.starts_with("invoke:bounded-context-tool:") && e != "block:unsafe-release")
+        {
+            return Err(ContextCopilotError::Receipt(
+                "context copilot effect is outside bounded-tool gate".into(),
+            ));
+        }
+        Ok(())
+    }
+}
+pub fn manifest(
+    feature_id: &str,
+    version: &str,
+    input_schema: &str,
+    scale: &str,
+    autonomy: &str,
+) -> serde_json::Value {
+    json!({"schema_version":RESEARCH_CONTRACT_SCHEMA_VERSION,"capability_id":feature_id,"version":version,"owner_crate":"worldgen","consumers":["research program lead","preclinical neuroscientist","context compiler"],"behavior":format!("run bounded context-compilation copilot actions for {scale}"),"value":"turns typed context compilation into an approval-bounded agent product without hiding omissions","input_schema":input_schema,"output_schema":"CompiledResearchContext6@1","effects":["invoke:bounded-context-tool","block:unsafe-release"],"permissions":["invoke:declared-context-tool"],"determinism":"byte_stable","autonomy_tier":autonomy,"boundary":PRECLINICAL_BOUNDARY})
+}
+pub fn run(
+    request: &ContextCopilotRequest,
+    feature_id: &str,
+    version: &str,
+    scale: &str,
+    require_approval: bool,
+    require_federation: bool,
+) -> Result<ContextCopilotReceipt, ContextCopilotError> {
+    if request.boundary != PRECLINICAL_BOUNDARY
+        || request.context_request.boundary != PRECLINICAL_BOUNDARY
+        || !request.context_request.raw_data_local
+        || !request.context_request.aggregate_only
+        || request.action_order.is_empty()
+        || !ordered(&request.action_order)
+        || request.action_order.iter().collect::<BTreeSet<_>>().len() != request.action_order.len()
+        || request.action_budget == 0
+    {
+        return Err(ContextCopilotError::Invalid(
+            "context copilot boundary, actions, budget, locality, or boundary is invalid".into(),
+        ));
+    }
+    let context = context_compilation_support::compile(
+        &request.context_request,
+        feature_id,
+        version,
+        scale,
+        require_federation,
+    )
+    .map_err(|e| ContextCopilotError::Inference(e.to_string()))?;
+    let mut admitted = BTreeSet::new();
+    let mut denied = BTreeSet::new();
+    let mut omissions = context.omissions.clone();
+    let uncertainty = context.uncertainty.clone();
+    let negative = context.negative_evidence.clone();
+    let approvals = (!require_approval || request.signed_approval)
+        && (!require_federation || request.federation_approved);
+    if !approvals {
+        omissions.push("copilot:approval-missing".into());
+    }
+    if request.dry_run {
+        omissions.push("copilot:dry-run-no-effect".into());
+    }
+    if request.action_order.len() as u64 > request.action_budget {
+        omissions.push("copilot:action-budget-exceeded".into());
+    }
+    let safe = context.disposition == "qualified"
+        && approvals
+        && request.action_order.len() as u64 <= request.action_budget;
+    for a in &request.action_order {
+        if safe {
+            admitted.insert(a.clone());
+        } else {
+            denied.insert(a.clone());
+        }
+    }
+    let disposition = if context.disposition == "blocked" || !approvals {
+        "blocked"
+    } else if context.disposition == "unknown" {
+        "unknown"
+    } else if safe {
+        "qualified"
+    } else {
+        "partial"
+    };
+    let effects = if disposition == "qualified" || disposition == "partial" {
+        vec![format!(
+            "invoke:bounded-context-tool:{}",
+            request.context_request.request_id
+        )]
+    } else {
+        vec!["block:unsafe-release".into()]
+    };
+    let payload = json!({"schema_version":RESEARCH_CONTRACT_SCHEMA_VERSION,"contract_version":version,"feature_id":feature_id,"request_id":request.context_request.request_id,"disposition":disposition,"action_order":request.action_order,"admitted_action_order":admitted,"denied_action_order":denied,"context_disposition":context.disposition,"context_digest":context.context_digest,"replay_identity":context.replay_identity,"omissions":omissions,"uncertainty":uncertainty,"negative_evidence":negative,"effect_receipts":effects,"raw_data_local":true,"aggregate_only":true,"boundary":PRECLINICAL_BOUNDARY});
+    let copilot_digest = ContentHash::of_value(&payload)
+        .map_err(|e| ContextCopilotError::Artifact(e.to_string()))?;
+    let artifact = json!({"artifact_id":format!("context-copilot:{}",request.context_request.request_id),"content_type":CONTENT_TYPE,"content_hash":copilot_digest,"boundary":PRECLINICAL_BOUNDARY});
+    let receipt = ContextCopilotReceipt {
+        schema_version: RESEARCH_CONTRACT_SCHEMA_VERSION.into(),
+        contract_version: version.into(),
+        feature_id: feature_id.into(),
+        request_id: request.context_request.request_id.clone(),
+        disposition: disposition.into(),
+        action_order: request.action_order.clone(),
+        admitted_action_order: admitted.into_iter().collect(),
+        denied_action_order: denied.into_iter().collect(),
+        context_disposition: context.disposition,
+        context_digest: context.context_digest,
+        copilot_digest,
+        replay_identity: context.replay_identity,
+        omissions: sorted(omissions),
+        uncertainty: uncertainty.clone(),
+        negative_evidence: negative.clone(),
+        effect_receipts: effects,
+        artifact,
+        raw_data_local: true,
+        aggregate_only: true,
+        boundary: PRECLINICAL_BOUNDARY.into(),
+    };
+    receipt.validate()?;
+    Ok(receipt)
+}
+fn sorted(mut v: Vec<String>) -> Vec<String> {
+    v.sort();
+    v.dedup();
+    v
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::context_compilation_support::ContextFact;
+    use bioprism_foundation::EvidenceState;
+    fn h(v: &str) -> ContentHash {
+        ContentHash::of_bytes(v.as_bytes())
+    }
+    fn request() -> ContextCopilotRequest {
+        let replay = h("replay");
+        let fact = ContextFact {
+            fact_id: "fact:a".into(),
+            statement: "supported".into(),
+            support_milli: 900,
+            state: EvidenceState::Supported,
+            evidence_digest: h("e"),
+            provenance_digest: h("p"),
+            artifact_digest: h("a"),
+            replay_identity: replay.clone(),
+            negative_result: false,
+            raw_data_local: true,
+            boundary: PRECLINICAL_BOUNDARY.into(),
+        };
+        ContextCopilotRequest {
+            context_request: ContextCompilationRequest {
+                request_id: "copilot:req".into(),
+                objective: "compile".into(),
+                scope: "study:one".into(),
+                required_fact_order: vec!["fact:a".into()],
+                minimum_support_milli: 500,
+                facts: vec![fact],
+                replay_identity: replay,
+                policy_allow: true,
+                protected_closure: true,
+                federation_approved: true,
+                raw_data_local: true,
+                aggregate_only: true,
+                boundary: PRECLINICAL_BOUNDARY.into(),
+            },
+            action_order: vec!["read:context".into()],
+            action_budget: 2,
+            dry_run: false,
+            signed_approval: true,
+            federation_approved: true,
+            boundary: PRECLINICAL_BOUNDARY.into(),
+        }
+    }
+    #[test]
+    fn local_qualified_invokes_bounded_tool() {
+        let r = run(
+            &request(),
+            "AFA-worldgen-P03-F09",
+            "worldgen-local-context-compilation-copilot/1.0",
+            "local single-study",
+            false,
+            false,
+        )
+        .unwrap();
+        assert_eq!(r.disposition, "qualified");
+        assert!(r.effect_receipts[0].starts_with("invoke:bounded-context-tool:"));
+        assert_eq!(r.copilot_digest.as_str().len(), 64)
+    }
+    #[test]
+    fn approval_missing_blocks() {
+        let mut q = request();
+        q.signed_approval = false;
+        let r = run(
+            &q,
+            "AFA-worldgen-P03-F10",
+            "worldgen-multimodal-context-compilation-copilot/1.0",
+            "multimodal multi-study",
+            true,
+            false,
+        )
+        .unwrap();
+        assert_eq!(r.disposition, "blocked");
+        assert_eq!(r.effect_receipts, vec!["block:unsafe-release"]);
+        assert!(r.omissions.iter().any(|x| x == "copilot:approval-missing"))
+    }
+
+    #[test]
+    fn unknown_context_never_admits_or_invokes_an_action() {
+        let mut q = request();
+        q.context_request.facts.clear();
+        let receipt = run(
+            &q,
+            "AFA-worldgen-P03-F12",
+            "worldgen-federated-context-compilation-copilot/1.0",
+            "federated continual/autonomous",
+            false,
+            false,
+        )
+        .unwrap();
+        assert_eq!(receipt.context_disposition, "unknown");
+        assert_eq!(receipt.disposition, "unknown");
+        assert!(receipt.admitted_action_order.is_empty());
+        assert_eq!(receipt.denied_action_order, vec!["read:context"]);
+        assert_eq!(receipt.effect_receipts, vec!["block:unsafe-release"]);
+    }
+
+    #[test]
+    fn action_budget_is_explicit() {
+        let mut q = request();
+        q.action_order = vec!["a".into(), "b".into()];
+        q.action_budget = 1;
+        let r = run(
+            &q,
+            "AFA-worldgen-P03-F11",
+            "worldgen-throughput-context-compilation-copilot/1.0",
+            "prospective high-throughput",
+            true,
+            true,
+        )
+        .unwrap();
+        assert_eq!(r.disposition, "partial");
+        assert!(r
+            .omissions
+            .iter()
+            .any(|x| x == "copilot:action-budget-exceeded"))
+    }
+}

@@ -65,7 +65,74 @@ fn main() {
                      hub_card_render, hub_leaderboard_render, bioatlas_publication_audit, telemetry_project,\n\
                      governance_schema_check,\n\
                      developer_platform_status, capability_audit, capability_dashboard, capability_discover, capability_route, agent_mission, developer_workbench, developer_workbench_verify, developer_workbench_import, developer_workbench_query, developer_workbench_get, ci_provider_normalize, ci_provider_evidence_audit, ci_provider_evidence_import, ci_provider_evidence_query, ci_provider_evidence_get, ci_execution_evidence_audit, execution_provenance_audit, developer_delivery_audit, engineering_execution_plan, safety_posture, security_redteam_simulate, security_privacy_audit, sandbox_admission_audit, sandbox_runtime_simulate, security_program_audit, weave_protocol_catalog, world_index,\n\
-                      workspace_capabilities, brain_model_select, brain_model_select_contextual, brain_prompt_assemble, brain_plan, neurosurgery_intake_plan, neurosurgery_catalogue, neurosurgery_evidence_audit, neurosurgery_evidence_graph, neurosurgery_real_data_coverage, neurosurgery_real_data_cohort_landscape, neurosurgery_real_data_reconciliation, neurosurgery_real_data_diff, neurosurgery_real_data_review_queue, neurosurgery_real_data_review_disposition, neurosurgery_real_data_evidence_packet, neurosurgery_real_data_reasoning_context, neurosurgery_real_data_draft_audit, neurosurgery_public_literature_reasoning_context, neurosurgery_research_brief, neurosurgery_research_plan, neurosurgery_plan, neurosurgery_real_data_query, neurosurgery_real_data_trial_landscape, neurosurgery_public_literature_query, neurosurgery_session, neurosurgery_mission, brain_bandit_select, brain_bandit_update, brain_outcome_record, brain_job_submit, brain_job_status, brain_job_events, brain_job_approval, brain_job_claim, brain_job_claim_next, brain_job_renew, brain_job_checkpoint, brain_job_complete, brain_job_fail, brain_job_reconcile, brain_job_cancel, brain_model_health, brain_replay_evaluate, repository_catalog, repository_bundle, repository_impact\n\
+                     workspace_capabilities, brain_model_select, brain_model_select_contextual, brain_prompt_assemble, brain_plan, neurosurgery_intake_plan, neurosurgery_catalogue, neurosurgery_evidence_audit, neurosurgery_evidence_graph, neurosurgery_real_data_coverage, neurosurgery_real_data_cohort_landscape, neurosurgery_real_data_reconciliation, neurosurgery_real_data_diff, neurosurgery_real_data_review_queue, neurosurgery_real_data_review_disposition, neurosurgery_real_data_evidence_packet, neurosurgery_real_data_reasoning_context, neurosurgery_real_data_draft_audit, neurosurgery_public_literature_reasoning_context, neurosurgery_research_brief, neurosurgery_research_plan, neurosurgery_plan, neurosurgery_real_data_query, neurosurgery_real_data_trial_landscape, neurosurgery_public_literature_query, neurosurgery_session, neurosurgery_mission, brain_bandit_select, brain_bandit_update, brain_outcome_record, brain_job_submit, brain_job_status, brain_job_events, brain_job_approval, brain_job_claim, brain_job_claim_next, brain_job_renew, brain_job_checkpoint, brain_job_complete, brain_job_fail, brain_job_reconcile, brain_job_cancel, brain_model_health, brain_replay_evaluate, glioma_research_dry_run, glioma_workflow_plan, glioma_protocol_simulate, glioma_protocol_execute, glioma_action_portfolio_execute, glioma_robustness_suite, glioma_trajectory_analyze, glioma_state_transition_analyze, glioma_causal_contrast, glioma_dose_response, glioma_combination_synergy, glioma_adaptive_dose_surface, glioma_multimodal_concordance, glioma_spatial_registration, glioma_research_select_actions, glioma_program_catalog, glioma_evidence_qualify, glioma_knowledge_compile, glioma_knowledge_compose, glioma_belief_revision, glioma_decision_context, glioma_decision_action_graph, glioma_multimodal_qc, glioma_mechanism_explore, glioma_experiment_design, glioma_analysis_run, glioma_replication_assess, glioma_research_object_prepare, repository_catalog, repository_bundle, repository_impact\n\
+                     glioma_decision_branch_plan, glioma_decision_action_plan, glioma_knowledge_frontier,\n\
+                     glioma_multimodal_consensus, glioma_replication_meta_analyze, glioma_replication_campaign_execute,\n\
+                     glioma_autonomous_research_mission_execute,\n\
+                     glioma_multi_fidelity_campaign_execute,\n\
+                     glioma_autonomous_campaign_execute,\n\
+                     glioma_research_autopilot_execute,\n\
+                     glioma_evidence_campaign_execute,\n\
+                     glioma_evidence_refresh_campaign_execute,\n\
+                     glioma_knowledge_resolution_campaign_execute,\n\
+                     glioma_decision_context_campaign_execute,\n\
+                     glioma_multimodal_ingestion_campaign_execute,\n\
+                     glioma_mechanism_discrimination_campaign_execute,\n\
+                     glioma_causal_mediation,\n\
+                     glioma_multimodal_harmonize, glioma_multimodal_latent_factors, glioma_multimodal_graph_fusion, glioma_spatial_niches, glioma_spatial_communication, glioma_spatial_state_propagation, glioma_state_transition_analyze, glioma_transportability_analyze, glioma_protocol_execute, glioma_action_portfolio_execute, glioma_causal_sensitivity,\n\
+                     glioma_mechanism_discriminate, glioma_mechanism_calibrate,\n\
+                     glioma_mechanism_dynamics,\n\
+                     glioma_mechanism_action_plan,\n\
+                     glioma_adaptive_mechanism_policy, glioma_adaptive_mechanism_campaign_execute,\n\
+                     glioma_mechanism_graph_propagate, glioma_pathway_activity, glioma_multimodal_mechanism_campaign, glioma_multimodal_mechanism_campaign_execute,\n\
+                     glioma_mechanism_counterfactual,\n\
+                     glioma_mechanism_ensemble_counterfactual,\n\
+                     glioma_robust_intervention_portfolio,\n\
+                     glioma_information_design,\n\
+                     glioma_adaptive_information_campaign,\n\
+                     glioma_active_learning,\n\
+                     glioma_active_learning_campaign_execute,\n\
+                     glioma_robust_active_learning,\n\
+                     glioma_robust_active_learning_campaign_execute,\n\
+                     glioma_multi_fidelity_optimize,\n\
+                     glioma_stratified_causal_adjustment, glioma_dynamic_policy_evaluate,\n\
+                     glioma_adaptive_allocation,\n\
+                     glioma_adaptive_allocation_campaign_execute,\n\
+                     glioma_sequential_design,\n\
+                     glioma_sequential_campaign_execute,\n\
+                     glioma_closed_loop_campaign,\n\
+                     glioma_evidence_surveillance,\n\
+                     glioma_evidence_priority,\n\
+                     glioma_evidence_calibrate,\n\
+                     glioma_evidence_triangulate,\n\
+                     glioma_instrument_calibration,\n\
+                     glioma_instrument_preflight, glioma_instrument_fleet_schedule,\n\
+                     glioma_instrument_execute,\n\
+                     glioma_instrument_campaign_execute,\n\
+                     glioma_instrument_assay_adjudicate,\n\
+                     glioma_computation_execute,\n\
+                     glioma_computation_portfolio_plan,\n\
+                     glioma_computation_portfolio_execute,\n\
+                     glioma_computation_campaign_execute,\n\
+                     glioma_computation_workflow_execute,\n\
+                     glioma_research_director_execute,\n\
+                     glioma_evidence_gated_research_execute,\n\
+                     glioma_autonomous_research_engine_execute,\n\
+                     glioma_adaptive_workflow,\n\
+                     glioma_interpretation_synthesize,\n\
+                     glioma_adaptive_research_frontier,\n\
+                     glioma_temporal_multimodal_fusion,\n\
+                     glioma_clonal_evolution,\n\
+                     glioma_clone_perturbation_panel,\n\
+                     glioma_clone_panel_outcomes,\n\
+                     glioma_clone_continuation,\n\
+                     glioma_federated_benchmark_consensus,\n\
+                     glioma_federated_benchmark_site_plan,\n\
+                     glioma_federated_mechanism_transport,\n\
+                     glioma_federated_benchmark_campaign_execute,\n\
+                     glioma_replay_campaign_execute,\n\
+                     glioma_research_object_release_gate,\n\
+                     glioma_contrast_panel_design,\n\
                      Resources: fiber-world, fiber-query, context-certificate schemas and the\n\
                      neurosurgery_intake_mission, neurosurgery_intake_portfolio,\n\\
                      workspace capability catalog"

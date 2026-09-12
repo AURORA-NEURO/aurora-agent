@@ -478,13 +478,14 @@ pub fn qualify_statistical_analysis(
     let unresolved_order = unresolved.into_iter().collect::<Vec<_>>();
     let blocked_order = blocked.into_iter().collect::<Vec<_>>();
     let missing_order = missing.into_iter().collect::<Vec<_>>();
-    let disposition = if global_block
-        || !blocked_order.is_empty()
-        || !missing_order.is_empty()
-        || selected_order.is_empty()
-    {
+    let disposition = if global_block || !blocked_order.is_empty() || !missing_order.is_empty() {
         AnalysisDisposition::Blocked
-    } else if !unresolved_order.is_empty() || !us.is_empty() || !um.is_empty() || !ux.is_empty() {
+    } else if selected_order.is_empty()
+        || !unresolved_order.is_empty()
+        || !us.is_empty()
+        || !um.is_empty()
+        || !ux.is_empty()
+    {
         AnalysisDisposition::Unresolved
     } else {
         AnalysisDisposition::Qualified

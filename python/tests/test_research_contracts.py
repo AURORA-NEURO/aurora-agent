@@ -106,6 +106,33 @@ def test_empty_evidence_is_explicit_unknown():
     receipt.validate()
 
 
+def test_evidence_receipt_digest_is_stable_and_fail_closed():
+    receipt = EvidenceReceipt(
+        receipt_id="evidence:digest-1",
+        intent="compare preclinical mechanisms",
+        sources=({"source_id": "paper-1", "source_type": "paper", "locator": "doi:1", "availability": "available"},),
+        derivation=("extract:claim-1",),
+        uncertainty=({"kind": "epistemic", "statement": "single study"},),
+        omissions=(),
+        conclusion_state="supported",
+    )
+    assert receipt.digest() == receipt.digest()
+    invalid = EvidenceReceipt(
+        receipt_id=receipt.receipt_id,
+        intent=receipt.intent,
+        sources=receipt.sources,
+        derivation=(),
+        uncertainty=receipt.uncertainty,
+        omissions=receipt.omissions,
+        conclusion_state=receipt.conclusion_state,
+    )
+    try:
+        invalid.digest()
+    except ResearchContractError:
+        return
+    raise AssertionError("an incomplete evidence receipt was hashed")
+
+
 def test_unresolved_policy_cannot_allow():
     receipt = PolicyReceipt(receipt_id="policy:q1", decision="allow", reasons=("unresolved",))
     try:

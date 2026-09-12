@@ -378,8 +378,7 @@ fn an_oracle_refused_row_is_recorded_as_neither_sound_nor_unsound() {
         facts_exposed: 3,
         source: FiberError::QueryNotAnObject,
     });
-    let comparison =
-        synthetic_comparison(vec![judged("fiber", 11, true, 1.0), refused]);
+    let comparison = synthetic_comparison(vec![judged("fiber", 11, true, 1.0), refused]);
     let findings = comparison_findings(&comparison, DIGEST);
     let rows = by_rule(&findings, "oracle_refused_row");
     assert_eq!(rows.len(), 1);
@@ -445,7 +444,9 @@ fn mutation_inflation_above_one_marks_the_yield_finding_negative() {
     };
     let negative = mutation_findings(&family, &inflated, DIGEST, DIGEST);
     assert!(negative[0].negative);
-    assert!(negative[0].claim.contains("instance count is not benchmark count"));
+    assert!(negative[0]
+        .claim
+        .contains("instance count is not benchmark count"));
     let positive = mutation_findings(&family, &honest, DIGEST, DIGEST);
     assert!(!positive[0].negative);
 }
@@ -501,7 +502,9 @@ fn a_reduction_claim_leads_with_preservation_only_when_the_re_check_preserved_it
 
     let preserved = minimization_findings(&minimization, &Preservation::Preserved, DIGEST);
     assert!(
-        preserved[0].claim.starts_with("a 1-minimal subset of 1 of 10 facts preserves the oracle"),
+        preserved[0]
+            .claim
+            .starts_with("a 1-minimal subset of 1 of 10 facts preserves the oracle"),
         "a preserved re-check may state the preservation first: {}",
         preserved[0].claim
     );
@@ -515,7 +518,9 @@ fn a_reduction_claim_leads_with_preservation_only_when_the_re_check_preserved_it
         DIGEST,
     );
     assert!(
-        diverged[0].claim.starts_with("the independent re-check DIVERGED"),
+        diverged[0]
+            .claim
+            .starts_with("the independent re-check DIVERGED"),
         "a diverged re-check must lead the claim, not trail it after a semicolon: {}",
         diverged[0].claim
     );
@@ -533,7 +538,9 @@ fn a_reduction_claim_leads_with_preservation_only_when_the_re_check_preserved_it
         DIGEST,
     );
     assert!(
-        unverifiable[0].claim.starts_with("the independent re-check was unverifiable"),
+        unverifiable[0]
+            .claim
+            .starts_with("the independent re-check was unverifiable"),
         "an unchecked reduction must say so first: {}",
         unverifiable[0].claim
     );
@@ -543,9 +550,19 @@ fn a_reduction_claim_leads_with_preservation_only_when_the_re_check_preserved_it
         unverifiable[0].claim
     );
 
-    for claim in [&preserved[0].claim, &diverged[0].claim, &unverifiable[0].claim] {
-        assert!(claim.contains("10"), "every outcome still reports what was reduced: {claim}");
-        assert!(claim.contains("11 evaluation"), "and at what search cost: {claim}");
+    for claim in [
+        &preserved[0].claim,
+        &diverged[0].claim,
+        &unverifiable[0].claim,
+    ] {
+        assert!(
+            claim.contains("10"),
+            "every outcome still reports what was reduced: {claim}"
+        );
+        assert!(
+            claim.contains("11 evaluation"),
+            "and at what search cost: {claim}"
+        );
     }
 }
 
@@ -793,7 +810,10 @@ fn every_figure_carries_its_source_digest_in_caption_and_footer() {
             .nth(1)
             .and_then(|rest| rest.split('`').next())
             .expect("digest extractable");
-        assert!(ContentHash::parse(digest).is_ok(), "caption digest is 64-hex");
+        assert!(
+            ContentHash::parse(digest).is_ok(),
+            "caption digest is 64-hex"
+        );
         assert!(
             svg.contains(digest),
             "{filename}: figure footer must carry the same digest the caption cites"
@@ -860,7 +880,12 @@ fn a_digest_only_figure_source_is_refused_by_the_renderer() {
 #[test]
 fn a_full_protocol_run_carries_sweep_mutation_and_minimization_evidence() {
     let dossier = full_dossier();
-    for name in ["sweep-table", "mutation-family", "mutation-diversity", "minimization"] {
+    for name in [
+        "sweep-table",
+        "mutation-family",
+        "mutation-diversity",
+        "minimization",
+    ] {
         artifact(dossier, name);
     }
     let verification = verify_dossier(dossier).expect("verifiable");
@@ -899,7 +924,6 @@ fn the_dossier_echoes_the_planned_protocol_and_every_step_completed() {
         assert_eq!(step["step"], planned["steps"][index]);
     }
 }
-
 
 // ---------------------------------------------------------------- the configuration matrix
 //

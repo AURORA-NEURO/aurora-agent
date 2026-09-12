@@ -122,6 +122,7 @@ pub struct ResourceDiscoveryAssuranceReceipt {
     pub boundary: String,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn federation_manifest_payload(
     request_id: &str,
     federation_id: &str,

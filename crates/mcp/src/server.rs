@@ -489,6 +489,125 @@ use bioprism_repair::{
     plan_for_issue, predicate_from_json, verify as verify_repair, AcceptanceReport,
     DeclaredItem as RepairDeclaredItem, PlanOptions as RepairPlanOptions, RepairPlan,
 };
+use bioprism_research::{
+    adjudicate_glioma_assay_evidence, allocate_glioma_assays, analyze_causal_sensitivity,
+    analyze_federated_benchmark, analyze_federated_mechanism_transport,
+    analyze_glioma_causal_contrast, analyze_glioma_clonal_evolution,
+    analyze_glioma_clone_panel_outcomes, analyze_glioma_combination_synergy,
+    analyze_glioma_dose_response, analyze_glioma_latent_factors, analyze_glioma_mediation,
+    analyze_glioma_multimodal_graph_fusion, analyze_glioma_pathway_activity,
+    analyze_glioma_spatial_communication, analyze_glioma_spatial_niches,
+    analyze_glioma_spatial_state_propagation, analyze_glioma_state_transitions,
+    analyze_glioma_temporal_multimodal_fusion, analyze_glioma_trajectories,
+    analyze_glioma_transportability, analyze_instrument_calibration,
+    analyze_multimodal_concordance, analyze_multimodal_consensus, analyze_preclinical_outcomes,
+    analyze_replication_meta_analysis, analyze_stratified_causal_adjustment,
+    assess_glioma_robustness, assess_replication, build_research_object_manifest,
+    calibrate_glioma_evidence, calibrate_glioma_mechanisms, compile_decision_action_graph,
+    compile_decision_context, compile_glioma_computation_workflow, compile_mechanism_action_plan,
+    compile_typed_knowledge, compose_knowledge_graph, design_glioma_contrast_panel,
+    design_preclinical_experiment, discriminate_mechanisms, dry_run_glioma_research,
+    evaluate_glioma_dynamic_policies, evaluate_glioma_release_gate,
+    execute_federated_benchmark_campaign, execute_glioma_action_portfolio,
+    execute_glioma_active_learning_campaign, execute_glioma_adaptive_allocation_campaign,
+    execute_glioma_adaptive_mechanism_campaign, execute_glioma_autonomous_campaign,
+    execute_glioma_autonomous_research_engine, execute_glioma_autonomous_research_mission,
+    execute_glioma_computation, execute_glioma_computation_campaign,
+    execute_glioma_computation_portfolio, execute_glioma_decision_context_campaign,
+    execute_glioma_evidence_campaign, execute_glioma_evidence_gated_research,
+    execute_glioma_evidence_refresh_campaign, execute_glioma_instrument_campaign,
+    execute_glioma_instrument_plan, execute_glioma_knowledge_resolution_campaign,
+    execute_glioma_mechanism_discrimination_campaign, execute_glioma_multi_fidelity_campaign,
+    execute_glioma_multimodal_ingestion_campaign, execute_glioma_multimodal_mechanism_campaign,
+    execute_glioma_multimodal_mechanism_campaign_with_executor, execute_glioma_protocol,
+    execute_glioma_replay_campaign, execute_glioma_replication_campaign,
+    execute_glioma_research_autopilot, execute_glioma_research_director,
+    execute_glioma_robust_active_learning_campaign, execute_glioma_sequential_campaign,
+    explore_mechanisms, generate_feature_catalog, glioma_program_catalog,
+    harmonize_glioma_multimodal_batches, harmonize_multimodal_inputs,
+    plan_adaptive_glioma_dose_surface, plan_decision_actions, plan_federated_benchmark_sites,
+    plan_glioma_active_learning, plan_glioma_adaptive_information_campaign,
+    plan_glioma_adaptive_mechanism_policy, plan_glioma_adaptive_research_frontier,
+    plan_glioma_adaptive_workflow, plan_glioma_clone_continuation,
+    plan_glioma_clone_perturbation_panel, plan_glioma_closed_loop_campaign,
+    plan_glioma_computation_portfolio, plan_glioma_decision_branches,
+    plan_glioma_information_design, plan_glioma_multi_fidelity_optimization,
+    plan_glioma_robust_active_learning, plan_glioma_robust_intervention_portfolio,
+    plan_glioma_sequential_design, plan_glioma_workflow, preflight_glioma_instrument,
+    prioritize_glioma_evidence, prioritize_knowledge_frontier, propagate_glioma_mechanism_graph,
+    qualify_evidence, register_glioma_spatial_samples, revise_glioma_beliefs,
+    schedule_glioma_instrument_fleet, select_glioma_actions, simulate_glioma_counterfactual,
+    simulate_glioma_counterfactual_ensemble, simulate_glioma_mechanism_dynamics,
+    simulate_glioma_protocol, surveil_glioma_evidence, synthesize_glioma_interpretation,
+    triangulate_glioma_evidence, validate_feature_catalog, ActionPortfolioExecutionRequest,
+    ActiveLearningCampaignRequest, ActiveLearningCandidate, ActiveLearningObservation,
+    ActiveLearningRequest, AdaptiveAllocationCampaignRequest, AdaptiveAllocationRequest,
+    AdaptiveArmObservation, AdaptiveDoseSurfaceRequest, AdaptiveFrontierRequest,
+    AdaptiveInformationCampaignRequest, AdaptiveInformationObservation,
+    AdaptiveMechanismCampaignRequest, AdaptiveMechanismPolicyRequest, AnalysisDataset,
+    AnalysisRequest, AssayEvidenceObservation, AssayEvidenceRequest, BeliefConflict,
+    BeliefRevisionRequest, CalibrationRequest, CalibrationRun, CampaignAction, CampaignMechanism,
+    CampaignObservation, CausalContrastRequest, ClonalEvolutionGraph, ClonalEvolutionRequest,
+    CloneContinuationCandidate, CloneContinuationRequest, ClonePanelObservation,
+    ClonePanelOutcomeAnalysis, ClonePanelOutcomeRequest, ClonePerturbationCandidate,
+    ClonePerturbationPanel, ClonePerturbationPanelRequest, CloneProfile, ClosedLoopCampaignRequest,
+    CombinationObservation, CombinationSynergyRequest, ComputationCandidate,
+    ComputationExecutionRequest, ComputationPortfolioExecutionRequest, ComputationPortfolioRequest,
+    ConcordanceRequest, ConsensusRequest, ContrastDesignRequest, CounterfactualEnsembleRequest,
+    CounterfactualIntervention, CounterfactualModel, CounterfactualRequest,
+    DecisionActionGraphRequest, DecisionActionPlanRequest, DecisionBranchPlannerRequest,
+    DecisionContext, DecisionContextCampaignRequest, DecisionContextRequest, DesignAction,
+    DesignMechanism, DoseResponseObservation, DoseResponseRequest,
+    DryRunActiveLearningCampaignExecutor, DryRunAdaptiveAllocationCampaignExecutor,
+    DryRunAdaptiveMechanismPolicyExecutor, DryRunDecisionContextCampaignExecutor,
+    DryRunEvidenceRefreshCampaignExecutor, DryRunFederatedBenchmarkCampaignExecutor,
+    DryRunGliomaActionExecutor, DryRunGliomaComputationExecutor, DryRunGliomaProtocolExecutor,
+    DryRunGliomaReplicationCampaignExecutor, DryRunInstrumentExecutor,
+    DryRunKnowledgeResolutionCampaignExecutor, DryRunMechanismDiscriminationCampaignExecutor,
+    DryRunMultiFidelityCampaignExecutor, DryRunMultimodalIngestionCampaignExecutor,
+    DryRunReplayCampaignExecutor, DryRunRobustActiveLearningCampaignExecutor,
+    DryRunSequentialCampaignExecutor, DynamicPolicyCandidate, DynamicPolicyRequest,
+    DynamicPolicyTrajectory, EvidenceCalibrationObservation, EvidenceCalibrationRequest,
+    EvidencePriorityRequest, EvidenceRecord, EvidenceRefreshCampaignRequest, EvidenceRequest,
+    EvidenceSurveillanceRequest, EvidenceTriangulationRequest, ExperimentArm, ExperimentRequest,
+    FederatedBenchmarkCampaignRequest, FederatedBenchmarkRequest, FederatedBenchmarkSite,
+    FederatedBenchmarkSitePlannerRequest, FederatedMechanismSite,
+    FederatedMechanismTransportRequest, FidelityCandidate, FidelityObservation,
+    GliomaActionCandidate, GliomaAdaptiveWorkflowSchedulerRequest, GliomaAutonomousCampaignRequest,
+    GliomaAutonomousResearchEngineRequest, GliomaComputationCampaignRequest,
+    GliomaComputationWorkflowRequest, GliomaEvidenceCampaignRequest,
+    GliomaEvidenceGatedResearchRequest, GliomaMissionRequest, GliomaReplicationCampaignRequest,
+    GliomaResearchAutopilotRequest, GliomaResearchDirectorRequest, GliomaResearchIntent,
+    GliomaWorkflowRequest, GraphFusionRequest, GraphFusionVector, HarmonizationRequest,
+    HarmonizationVector, InformationDesignRequest, InstrumentCampaignRequest,
+    InstrumentExecutionRequest, InstrumentExecutionRun, InstrumentFleetScheduleRequest,
+    InstrumentPreflightRequest, InterpretationSynthesisRequest, KnowledgeCompositionRequest,
+    KnowledgeFrontierRequest, KnowledgeRelation, KnowledgeRequest,
+    KnowledgeResolutionCampaignRequest, LatentFactorRequest, LatentFactorVector,
+    LigandReceptorPair, MechanismActionPlannerConfig, MechanismCalibration,
+    MechanismCalibrationObservation, MechanismCalibrationRequest, MechanismCandidate,
+    MechanismDiscrimination, MechanismDiscriminationCampaignRequest,
+    MechanismDiscriminationRequest, MechanismDiscriminatorAction, MechanismDynamicsEdge,
+    MechanismDynamicsIntervention, MechanismDynamicsNode, MechanismDynamicsRequest,
+    MechanismFeatureObservation, MechanismGraphEdge, MechanismGraphNode, MechanismGraphRequest,
+    MechanismHypothesis, MechanismRequest, MediationObservation, MediationRequest,
+    MetaAnalysisRequest, ModalityVector, MultiFidelityCampaignRequest,
+    MultiFidelityOptimizationRequest, MultimodalIngestionCampaignRequest,
+    MultimodalMechanismCampaignRequest, MultimodalObservation, MultimodalRequest,
+    PathwayActivityDefinition, PathwayActivityObservation, PathwayActivityRequest,
+    ProtocolExecutionRequest, ProtocolSimulationRequest, ReleaseGateRequest, ReplayCampaign,
+    ReplayCampaignRequest, ReplicationRequest, ReplicationStudy, ResearchObjectRequest,
+    RobustActiveLearningCampaignRequest, RobustActiveLearningCandidate,
+    RobustActiveLearningObservation, RobustActiveLearningRequest, RobustInterventionCandidate,
+    RobustInterventionRequest, RobustnessRequest, SensitivityObservation, SensitivityRequest,
+    SequentialArmObservation, SequentialCampaignRequest, SequentialDesignRequest, SpatialCell,
+    SpatialCommunicationCell, SpatialCommunicationRequest, SpatialNicheRequest,
+    SpatialPropagationRequest, SpatialRegistrationCell, SpatialRegistrationRequest,
+    StateTransitionObservation, StateTransitionRequest, StaticGliomaActionPlanner,
+    StaticGliomaComputationPlanner, StratifiedCausalRequest, StratifiedObservation,
+    TemporalFusionRequest, TemporalObservation, TrajectoryObservation, TrajectoryRequest,
+    TransportStudy, TransportabilityRequest, TypedKnowledge,
+};
 use bioprism_routing::{
     lab::{run as run_routing_lab, LabSettings, Task},
     EvidenceLedger, Fingerprint, RoutingPolicy, FEDERATED_EXECUTION_COPILOT_CONTRACT_VERSION,
@@ -1862,6 +1981,14 @@ impl Server {
             .get("arguments")
             .cloned()
             .unwrap_or_else(|| json!({}));
+        if !arguments.is_object() {
+            return Response::error(
+                id,
+                code::INVALID_PARAMS,
+                "tools/call arguments must be an object".into(),
+                None,
+            );
+        }
 
         audit(name, &arguments);
 
@@ -2020,6 +2147,191 @@ impl Server {
             "brain_job_cancel" => self.brain_job_cancel(&arguments),
             "brain_model_health" => self.brain_model_health(&arguments),
             "brain_replay_evaluate" => self.brain_replay_evaluate(&arguments),
+            "glioma_research_dry_run" => self.glioma_research_dry_run(&arguments),
+            "glioma_workflow_plan" => self.glioma_workflow_plan(&arguments),
+            "glioma_protocol_simulate" => self.glioma_protocol_simulate(&arguments),
+            "glioma_protocol_execute" => self.glioma_protocol_execute(&arguments),
+            "glioma_action_portfolio_execute" => self.glioma_action_portfolio_execute(&arguments),
+            "glioma_autonomous_campaign_execute" => {
+                self.glioma_autonomous_campaign_execute(&arguments)
+            }
+            "glioma_research_autopilot_execute" => {
+                self.glioma_research_autopilot_execute(&arguments)
+            }
+            "glioma_evidence_campaign_execute" => self.glioma_evidence_campaign_execute(&arguments),
+            "glioma_evidence_refresh_campaign_execute" => {
+                self.glioma_evidence_refresh_campaign_execute(&arguments)
+            }
+            "glioma_knowledge_resolution_campaign_execute" => {
+                self.glioma_knowledge_resolution_campaign_execute(&arguments)
+            }
+            "glioma_decision_context_campaign_execute" => {
+                self.glioma_decision_context_campaign_execute(&arguments)
+            }
+            "glioma_multimodal_ingestion_campaign_execute" => {
+                self.glioma_multimodal_ingestion_campaign_execute(&arguments)
+            }
+            "glioma_computation_execute" => self.glioma_computation_execute(&arguments),
+            "glioma_computation_portfolio_plan" => {
+                self.glioma_computation_portfolio_plan(&arguments)
+            }
+            "glioma_computation_portfolio_execute" => {
+                self.glioma_computation_portfolio_execute(&arguments)
+            }
+            "glioma_computation_campaign_execute" => {
+                self.glioma_computation_campaign_execute(&arguments)
+            }
+            "glioma_computation_workflow_execute" => {
+                self.glioma_computation_workflow_execute(&arguments)
+            }
+            "glioma_research_director_execute" => self.glioma_research_director_execute(&arguments),
+            "glioma_evidence_gated_research_execute" => {
+                self.glioma_evidence_gated_research_execute(&arguments)
+            }
+            "glioma_autonomous_research_engine_execute" => {
+                self.glioma_autonomous_research_engine_execute(&arguments)
+            }
+            "glioma_adaptive_workflow" => self.glioma_adaptive_workflow(&arguments),
+            "glioma_interpretation_synthesize" => self.glioma_interpretation_synthesize(&arguments),
+            "glioma_temporal_multimodal_fusion" => {
+                self.glioma_temporal_multimodal_fusion(&arguments)
+            }
+            "glioma_clonal_evolution" => self.glioma_clonal_evolution(&arguments),
+            "glioma_clone_perturbation_panel" => self.glioma_clone_perturbation_panel(&arguments),
+            "glioma_clone_panel_outcomes" => self.glioma_clone_panel_outcomes(&arguments),
+            "glioma_clone_continuation" => self.glioma_clone_continuation(&arguments),
+            "glioma_adaptive_research_frontier" => {
+                self.glioma_adaptive_research_frontier(&arguments)
+            }
+            "glioma_robustness_suite" => self.glioma_robustness_suite(&arguments),
+            "glioma_trajectory_analyze" => self.glioma_trajectory_analyze(&arguments),
+            "glioma_state_transition_analyze" => self.glioma_state_transition_analyze(&arguments),
+            "glioma_transportability_analyze" => self.glioma_transportability_analyze(&arguments),
+            "glioma_causal_contrast" => self.glioma_causal_contrast(&arguments),
+            "glioma_causal_mediation" => self.glioma_causal_mediation(&arguments),
+            "glioma_stratified_causal_adjustment" => {
+                self.glioma_stratified_causal_adjustment(&arguments)
+            }
+            "glioma_dynamic_policy_evaluate" => self.glioma_dynamic_policy_evaluate(&arguments),
+            "glioma_dose_response" => self.glioma_dose_response(&arguments),
+            "glioma_adaptive_allocation" => self.glioma_adaptive_allocation(&arguments),
+            "glioma_sequential_design" => self.glioma_sequential_design(&arguments),
+            "glioma_closed_loop_campaign" => self.glioma_closed_loop_campaign(&arguments),
+            "glioma_combination_synergy" => self.glioma_combination_synergy(&arguments),
+            "glioma_adaptive_dose_surface" => self.glioma_adaptive_dose_surface(&arguments),
+            "glioma_multimodal_concordance" => self.glioma_multimodal_concordance(&arguments),
+            "glioma_multimodal_consensus" => self.glioma_multimodal_consensus(&arguments),
+            "glioma_multimodal_harmonize" => self.glioma_multimodal_harmonize(&arguments),
+            "glioma_multimodal_latent_factors" => self.glioma_multimodal_latent_factors(&arguments),
+            "glioma_multimodal_graph_fusion" => self.glioma_multimodal_graph_fusion(&arguments),
+            "glioma_pathway_activity" => self.glioma_pathway_activity(&arguments),
+            "glioma_multimodal_mechanism_campaign" => {
+                self.glioma_multimodal_mechanism_campaign(&arguments)
+            }
+            "glioma_multimodal_mechanism_campaign_execute" => {
+                self.glioma_multimodal_mechanism_campaign_execute(&arguments)
+            }
+            "glioma_spatial_niches" => self.glioma_spatial_niches(&arguments),
+            "glioma_spatial_communication" => self.glioma_spatial_communication(&arguments),
+            "glioma_spatial_state_propagation" => self.glioma_spatial_state_propagation(&arguments),
+            "glioma_spatial_registration" => self.glioma_spatial_registration(&arguments),
+            "glioma_causal_sensitivity" => self.glioma_causal_sensitivity(&arguments),
+            "glioma_research_select_actions" => self.glioma_research_select_actions(&arguments),
+            "glioma_program_catalog" => self.glioma_program_catalog(&arguments),
+            "glioma_evidence_qualify" => self.glioma_evidence_qualify(&arguments),
+            "glioma_evidence_surveillance" => self.glioma_evidence_surveillance(&arguments),
+            "glioma_evidence_priority" => self.glioma_evidence_priority(&arguments),
+            "glioma_evidence_calibrate" => self.glioma_evidence_calibrate(&arguments),
+            "glioma_evidence_triangulate" => self.glioma_evidence_triangulate(&arguments),
+            "glioma_knowledge_compile" => self.glioma_knowledge_compile(&arguments),
+            "glioma_knowledge_compose" => self.glioma_knowledge_compose(&arguments),
+            "glioma_belief_revision" => self.glioma_belief_revision(&arguments),
+            "glioma_knowledge_frontier" => self.glioma_knowledge_frontier(&arguments),
+            "glioma_decision_context" => self.glioma_decision_context(&arguments),
+            "glioma_decision_action_graph" => self.glioma_decision_action_graph(&arguments),
+            "glioma_decision_branch_plan" => self.glioma_decision_branch_plan(&arguments),
+            "glioma_decision_action_plan" => self.glioma_decision_action_plan(&arguments),
+            "glioma_multimodal_qc" => self.glioma_multimodal_qc(&arguments),
+            "glioma_mechanism_explore" => self.glioma_mechanism_explore(&arguments),
+            "glioma_mechanism_dynamics" => self.glioma_mechanism_dynamics(&arguments),
+            "glioma_mechanism_discriminate" => self.glioma_mechanism_discriminate(&arguments),
+            "glioma_mechanism_calibrate" => self.glioma_mechanism_calibrate(&arguments),
+            "glioma_mechanism_action_plan" => self.glioma_mechanism_action_plan(&arguments),
+            "glioma_adaptive_mechanism_policy" => self.glioma_adaptive_mechanism_policy(&arguments),
+            "glioma_adaptive_mechanism_campaign_execute" => {
+                self.glioma_adaptive_mechanism_campaign_execute(&arguments)
+            }
+            "glioma_mechanism_discrimination_campaign_execute" => {
+                self.glioma_mechanism_discrimination_campaign_execute(&arguments)
+            }
+            "glioma_mechanism_graph_propagate" => self.glioma_mechanism_graph_propagate(&arguments),
+            "glioma_mechanism_counterfactual" => self.glioma_mechanism_counterfactual(&arguments),
+            "glioma_mechanism_ensemble_counterfactual" => {
+                self.glioma_mechanism_ensemble_counterfactual(&arguments)
+            }
+            "glioma_robust_intervention_portfolio" => {
+                self.glioma_robust_intervention_portfolio(&arguments)
+            }
+            "glioma_information_design" => self.glioma_information_design(&arguments),
+            "glioma_adaptive_information_campaign" => {
+                self.glioma_adaptive_information_campaign(&arguments)
+            }
+            "glioma_adaptive_allocation_campaign_execute" => {
+                self.glioma_adaptive_allocation_campaign_execute(&arguments)
+            }
+            "glioma_sequential_campaign_execute" => {
+                self.glioma_sequential_campaign_execute(&arguments)
+            }
+            "glioma_active_learning" => self.glioma_active_learning(&arguments),
+            "glioma_active_learning_campaign_execute" => {
+                self.glioma_active_learning_campaign_execute(&arguments)
+            }
+            "glioma_robust_active_learning" => self.glioma_robust_active_learning(&arguments),
+            "glioma_robust_active_learning_campaign_execute" => {
+                self.glioma_robust_active_learning_campaign_execute(&arguments)
+            }
+            "glioma_multi_fidelity_optimize" => self.glioma_multi_fidelity_optimize(&arguments),
+            "glioma_instrument_calibration" => self.glioma_instrument_calibration(&arguments),
+            "glioma_instrument_preflight" => self.glioma_instrument_preflight(&arguments),
+            "glioma_instrument_fleet_schedule" => self.glioma_instrument_fleet_schedule(&arguments),
+            "glioma_instrument_execute" => self.glioma_instrument_execute(&arguments),
+            "glioma_instrument_campaign_execute" => {
+                self.glioma_instrument_campaign_execute(&arguments)
+            }
+            "glioma_instrument_assay_adjudicate" => {
+                self.glioma_instrument_assay_adjudicate(&arguments)
+            }
+            "glioma_experiment_design" => self.glioma_experiment_design(&arguments),
+            "glioma_contrast_panel_design" => self.glioma_contrast_panel_design(&arguments),
+            "glioma_analysis_run" => self.glioma_analysis_run(&arguments),
+            "glioma_replication_assess" => self.glioma_replication_assess(&arguments),
+            "glioma_replication_meta_analyze" => self.glioma_replication_meta_analyze(&arguments),
+            "glioma_replication_campaign_execute" => {
+                self.glioma_replication_campaign_execute(&arguments)
+            }
+            "glioma_autonomous_research_mission_execute" => {
+                self.glioma_autonomous_research_mission_execute(&arguments)
+            }
+            "glioma_multi_fidelity_campaign_execute" => {
+                self.glioma_multi_fidelity_campaign_execute(&arguments)
+            }
+            "glioma_federated_benchmark_consensus" => {
+                self.glioma_federated_benchmark_consensus(&arguments)
+            }
+            "glioma_federated_benchmark_site_plan" => {
+                self.glioma_federated_benchmark_site_plan(&arguments)
+            }
+            "glioma_federated_mechanism_transport" => {
+                self.glioma_federated_mechanism_transport(&arguments)
+            }
+            "glioma_federated_benchmark_campaign_execute" => {
+                self.glioma_federated_benchmark_campaign_execute(&arguments)
+            }
+            "glioma_replay_campaign_execute" => self.glioma_replay_campaign_execute(&arguments),
+            "glioma_research_object_release_gate" => {
+                self.glioma_research_object_release_gate(&arguments)
+            }
+            "glioma_research_object_prepare" => self.glioma_research_object_prepare(&arguments),
             "domain_evidence_harmonization_coverage" => {
                 self.domain_evidence_harmonization_coverage(&arguments)
             }
@@ -5438,6 +5750,3640 @@ impl Server {
             .lock()
             .map_err(|_| "brain control-plane state is unavailable".to_string())?
             .replay_evaluate(arguments)
+    }
+
+    /// Rehearse a complete glioma research program locally. The dry-run intentionally executes
+    /// no provider, instrument, network, or federation effect; it is a bounded way to inspect the
+    /// compiled stage graph and replay/checkpoint behavior before wiring real local executors.
+    fn glioma_research_dry_run(&self, arguments: &Value) -> Result<Value, String> {
+        let intent_value = arguments
+            .get("intent")
+            .cloned()
+            .ok_or_else(|| "glioma_research_dry_run requires intent".to_string())?;
+        let intent: GliomaResearchIntent = serde_json::from_value(intent_value)
+            .map_err(|error| format!("invalid glioma research intent: {error}"))?;
+        let receipt = dry_run_glioma_research(&intent)
+            .map_err(|error| format!("glioma dry-run refused: {error}"))?;
+        serde_json::to_value(receipt)
+            .map_err(|error| format!("cannot encode glioma execution receipt: {error}"))
+    }
+
+    /// Plan the next adaptive, checkpoint-aware glioma workflow batch. This is a pure planning
+    /// surface: it never dispatches a provider, moves raw data, calls an instrument, or asserts a
+    /// biological result. A local host can submit the returned `next_ready_batch` to its own
+    /// caller-owned executor after applying its institution's approvals.
+    fn glioma_workflow_plan(&self, arguments: &Value) -> Result<Value, String> {
+        let request: GliomaWorkflowRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_workflow_plan requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma workflow request: {error}"))?;
+        let plan = plan_glioma_workflow(&request)
+            .map_err(|error| format!("glioma workflow planning refused: {error}"))?;
+        let next_ready_batch = plan.next_ready_batch();
+        serde_json::to_value(json!({
+            "plan": plan,
+            "next_ready_batch": next_ready_batch,
+            "dispatch": "not_started",
+            "guarantees": [
+                "mode scope closes over upstream evidence, QC, and policy dependencies",
+                "unknown, contradictory, underpowered, and non-local inputs hold or abstain",
+                "the returned plan is deterministic and digest-bound",
+                "physical execution remains behind a caller-owned local executor and approval gate"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma workflow plan: {error}"))
+    }
+
+    /// Simulate a caller-declared glioma protocol with deterministic resource-constrained list
+    /// scheduling. This computes timing, parallelism, critical path, utilization, and explicit
+    /// capacity/risk/approval stops; it never dispatches a provider or claims an assay result.
+    fn glioma_protocol_simulate(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ProtocolSimulationRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_protocol_simulate requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma protocol simulation request: {error}"))?;
+        let output = simulate_glioma_protocol(&request)
+            .map_err(|error| format!("glioma protocol simulation refused: {error}"))?;
+        serde_json::to_value(json!({
+            "simulation": output,
+            "dispatch": "not_started",
+            "guarantees": [
+                "critical-path-first scheduling is deterministic from typed tasks and resources",
+                "capacity, horizon, risk, and instrument approvals fail closed",
+                "unscheduled work remains explicit and is never treated as completed",
+                "the output is a scheduling model, not biological evidence"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma protocol simulation: {error}"))
+    }
+
+    /// Execute a feasible protocol through the deterministic synthetic executor. Production
+    /// instrument or worker effects remain behind the Rust `GliomaProtocolExecutor` seam.
+    fn glioma_protocol_execute(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ProtocolExecutionRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_protocol_execute requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma protocol execution request: {error}"))?;
+        let mut executor = DryRunGliomaProtocolExecutor;
+        let execution = execute_glioma_protocol(&request, &mut executor)
+            .map_err(|error| format!("glioma protocol execution refused: {error}"))?;
+        serde_json::to_value(json!({
+            "execution": execution,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "execution requires a feasible deterministic protocol simulation",
+                "dependency order, typed output schemas, retries, partial results, and skipped work remain explicit",
+                "the MCP route uses synthetic local artifacts and performs no biological or instrument effect",
+                "production effects require a caller-owned local GliomaProtocolExecutor"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma protocol execution: {error}"))
+    }
+
+    /// Execute the beam-selected action portfolio through the deterministic synthetic executor.
+    /// Production assays, analysis workers, and instruments remain behind the Rust
+    /// `GliomaActionExecutor` seam.
+    fn glioma_action_portfolio_execute(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ActionPortfolioExecutionRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_action_portfolio_execute requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma action portfolio execution request: {error}"))?;
+        let mut executor = DryRunGliomaActionExecutor;
+        let execution = execute_glioma_action_portfolio(&request, &mut executor)
+            .map_err(|error| format!("glioma action portfolio execution refused: {error}"))?;
+        serde_json::to_value(json!({
+            "execution": execution,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "the beam-selected portfolio is executed in dependency order through a caller-owned seam",
+                "bounded transient retries, missing artifacts, failures, partial results, and skipped dependents remain explicit",
+                "the MCP route uses synthetic local artifacts and performs no biological, instrument, or external effect",
+                "production workers and gateways require a caller-owned GliomaActionExecutor"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma action portfolio execution: {error}"))
+    }
+
+    /// Run a bounded observation-driven autonomous glioma campaign through deterministic local
+    /// planner/worker seams. Production planners and workers remain caller-owned.
+    fn glioma_autonomous_campaign_execute(&self, arguments: &Value) -> Result<Value, String> {
+        let request: GliomaAutonomousCampaignRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_autonomous_campaign_execute requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma autonomous campaign request: {error}"))?;
+        let mut planner = StaticGliomaActionPlanner;
+        let mut executor = DryRunGliomaActionExecutor;
+        let campaign = execute_glioma_autonomous_campaign(&request, &mut planner, &mut executor)
+            .map_err(|error| format!("glioma autonomous campaign refused: {error}"))?;
+        serde_json::to_value(json!({
+            "campaign": campaign,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "the campaign replans only from typed outcomes returned by the local executor",
+                "the action registry, budget, rounds, dependencies, and failure boundaries are bounded",
+                "negative, partial, failed, skipped, and no-candidate stops remain explicit",
+                "the MCP route performs no biological, instrument, or external effect",
+                "production planners and workers require caller-owned GliomaActionPlanner and GliomaActionExecutor implementations"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma autonomous campaign: {error}"))
+    }
+
+    /// Close one evidence-to-action-to-execution cycle with the deterministic sandbox worker.
+    /// Institution-local callers can replace the worker through the Rust SDK seam.
+    fn glioma_research_autopilot_execute(&self, arguments: &Value) -> Result<Value, String> {
+        let request: GliomaResearchAutopilotRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_research_autopilot_execute requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma research autopilot request: {error}"))?;
+        let mut executor = DryRunGliomaActionExecutor;
+        let run = execute_glioma_research_autopilot(&request, &mut executor)
+            .map_err(|error| format!("glioma research autopilot refused: {error}"))?;
+        serde_json::to_value(json!({
+            "run": run,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "P04 compiled context is selected and executed through the same dependency-safe P07 portfolio path",
+                "completed actions, budget, policy, artifacts, negative results, and failures remain explicit",
+                "a no-runnable-action hold has no synthetic execution result",
+                "the MCP route uses a synthetic local worker; production assay or analysis effects require a caller-owned GliomaActionExecutor"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma research autopilot: {error}"))
+    }
+
+    /// Execute the pending P01 evidence-priority queue through typed local adapters. The MCP
+    /// adapter uses a synthetic worker, while institution-local Rust callers can provide a real
+    /// assay, analysis, or instrument gateway behind the executor trait.
+    fn glioma_evidence_campaign_execute(&self, arguments: &Value) -> Result<Value, String> {
+        let request: GliomaEvidenceCampaignRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_evidence_campaign_execute requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma evidence campaign request: {error}"))?;
+        let mut executor = DryRunGliomaActionExecutor;
+        let execution = execute_glioma_evidence_campaign(&request, &mut executor)
+            .map_err(|error| format!("glioma evidence campaign refused: {error}"))?;
+        serde_json::to_value(json!({
+            "campaign": execution,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "only selected evidence-priority actions and their declared dependency closure are admitted",
+                "missing adapters, approval blocks, retries, partial effects, failures, and negative results remain explicit",
+                "the queue digest is carried into the execution result and cannot be silently replaced",
+                "the MCP route uses a synthetic local worker; production effects require a caller-owned GliomaActionExecutor"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma evidence campaign: {error}"))
+    }
+
+    /// Refresh P01 evidence deltas through a bounded, institution-local executor and replan
+    /// surveillance after each round. The MCP adapter remains a synthetic sandbox worker.
+    fn glioma_evidence_refresh_campaign_execute(&self, arguments: &Value) -> Result<Value, String> {
+        let request: EvidenceRefreshCampaignRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_evidence_refresh_campaign_execute requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma evidence refresh campaign request: {error}")
+            })?;
+        let mut executor = DryRunEvidenceRefreshCampaignExecutor;
+        let campaign = execute_glioma_evidence_refresh_campaign(&request, &mut executor)
+            .map_err(|error| format!("glioma evidence refresh campaign refused: {error}"))?;
+        serde_json::to_value(json!({
+            "campaign": campaign,
+            "dispatch": "dry_run",
+            "simulation_only": true,
+            "guarantees": [
+                "surveillance deltas are recomputed after every returned local evidence record",
+                "only typed de-identified local evidence metadata crosses the MCP boundary",
+                "stale, unknown, contradictory, negative, and missing coverage remain explicit",
+                "retry, budget, no-progress, executor failure, and malformed-record stops remain explicit",
+                "the route performs no internet fetch, raw data movement, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma evidence refresh campaign: {error}"))
+    }
+
+    /// Compile, resolve, and recompile the P02 claim frontier through a bounded local worker.
+    /// The MCP adapter is synthetic; production adapters remain institution-local.
+    fn glioma_knowledge_resolution_campaign_execute(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: KnowledgeResolutionCampaignRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_knowledge_resolution_campaign_execute requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma knowledge resolution campaign request: {error}")
+            })?;
+        let mut executor = DryRunKnowledgeResolutionCampaignExecutor;
+        let campaign = execute_glioma_knowledge_resolution_campaign(&request, &mut executor)
+            .map_err(|error| format!("glioma knowledge resolution campaign refused: {error}"))?;
+        serde_json::to_value(json!({
+            "campaign": campaign,
+            "dispatch": "dry_run",
+            "simulation_only": true,
+            "guarantees": [
+                "typed knowledge and frontier are recomputed from returned evidence after every round",
+                "contradictory, negative, unknown, missing-coverage, retry, budget, and no-progress states remain explicit",
+                "only local de-identified evidence metadata crosses this MCP boundary",
+                "the route performs no internet fetch, raw data movement, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma knowledge resolution campaign: {error}"))
+    }
+
+    /// Execute bounded metadata-only multimodal ingestion/QC rounds through a local adapter.
+    fn glioma_multimodal_ingestion_campaign_execute(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: MultimodalIngestionCampaignRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_multimodal_ingestion_campaign_execute requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma multimodal ingestion campaign request: {error}")
+            })?;
+        let mut executor = DryRunMultimodalIngestionCampaignExecutor;
+        let campaign = execute_glioma_multimodal_ingestion_campaign(&request, &mut executor)
+            .map_err(|error| format!("glioma multimodal ingestion campaign refused: {error}"))?;
+        serde_json::to_value(json!({
+            "campaign": campaign,
+            "dispatch": "dry_run",
+            "simulation_only": true,
+            "guarantees": [
+                "QC is recomputed from every returned observation after each bounded round",
+                "missing modalities, model coverage, excluded observations, defects, retries, budget, and no-progress remain explicit",
+                "raw payloads remain institution-local and only de-identified metadata crosses the MCP boundary",
+                "the route performs no clinical decision or external instrument effect"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma multimodal ingestion campaign: {error}"))
+    }
+
+    /// Compile and dispatch a bounded P04 question-to-action campaign through a local adapter.
+    fn glioma_decision_context_campaign_execute(&self, arguments: &Value) -> Result<Value, String> {
+        let request: DecisionContextCampaignRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_decision_context_campaign_execute requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma decision-context campaign request: {error}")
+            })?;
+        let mut executor = DryRunDecisionContextCampaignExecutor;
+        let campaign = execute_glioma_decision_context_campaign(&request, &mut executor)
+            .map_err(|error| format!("glioma decision-context campaign refused: {error}"))?;
+        serde_json::to_value(json!({
+            "campaign": campaign,
+            "dispatch": "dry_run",
+            "simulation_only": true,
+            "guarantees": [
+                "typed knowledge, decision context, and selected action portfolio are recomputed after every returned evidence row",
+                "the action executor receives only a typed claim-scoped contract and cannot promote a plan into evidence",
+                "negative, contradictory, unresolved, omission, retry, budget, and no-progress states remain explicit",
+                "raw payloads remain institution-local and the route performs no clinical decision or external instrument effect"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma decision-context campaign: {error}"))
+    }
+
+    /// Execute a typed multimodal computation DAG through the deterministic synthetic worker.
+    /// Production containers, GPUs, and schedulers remain caller-owned through the Rust SDK seam.
+    fn glioma_computation_execute(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ComputationExecutionRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_computation_execute requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma computation execution request: {error}"))?;
+        let mut executor = DryRunGliomaComputationExecutor;
+        let execution = execute_glioma_computation(&request, &mut executor)
+            .map_err(|error| format!("glioma computation execution refused: {error}"))?;
+        serde_json::to_value(json!({
+            "execution": execution,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "stable topological order, replay-keyed cache, bounded budget, and retries are explicit",
+                "typed local artifacts and dependency-blocked work remain visible",
+                "the MCP route uses a synthetic worker and performs no external computation or data movement",
+                "production containers, GPUs, and schedulers require a caller-owned GliomaComputationExecutor"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma computation execution: {error}"))
+    }
+
+    /// Compile a resource-bounded, dependency-closed multimodal computation portfolio. The
+    /// planner only emits an execution-ready order; it never invokes external code or moves raw
+    /// data. Institution-local workers can pass the selected tasks to the computation executor.
+    fn glioma_computation_portfolio_plan(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ComputationPortfolioRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_computation_portfolio_plan requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma computation portfolio request: {error}"))?;
+        let candidates: Vec<ComputationCandidate> =
+            serde_json::from_value(arguments.get("candidates").cloned().ok_or_else(|| {
+                "glioma_computation_portfolio_plan requires candidates".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma computation portfolio candidates: {error}"))?;
+        let plan = plan_glioma_computation_portfolio(&request, &candidates)
+            .map_err(|error| format!("glioma computation portfolio refused: {error}"))?;
+        serde_json::to_value(json!({
+            "plan": plan,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "prerequisite closure and deterministic task order are explicit",
+                "budget, duration, task-count, modality, and deterministic-policy gates are fail-closed",
+                "missing dependencies, cycles, deferred work, and negative evidence remain visible",
+                "the route does not execute external code, move raw data, or make a clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma computation portfolio: {error}"))
+    }
+
+    /// Plan and execute a selected computation portfolio through the deterministic sandbox
+    /// worker. Institution-local callers can replace the worker through the Rust executor seam.
+    fn glioma_computation_portfolio_execute(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ComputationPortfolioExecutionRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_computation_portfolio_execute requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma computation portfolio execution request: {error}")
+            })?;
+        let mut executor = DryRunGliomaComputationExecutor;
+        let execution = execute_glioma_computation_portfolio(&request, &mut executor)
+            .map_err(|error| format!("glioma computation portfolio execution refused: {error}"))?;
+        serde_json::to_value(json!({
+            "execution": execution,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "portfolio selection and execution share one replayable objective and dependency closure",
+                "the selected DAG is passed only to the typed local computation executor",
+                "partial, failed, blocked, unresolved, deferred, and negative states remain explicit",
+                "the MCP route uses a synthetic worker and performs no external computation or data movement"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma computation portfolio execution: {error}"))
+    }
+
+    /// Run a bounded multi-round glioma computation campaign with a deterministic dry-run
+    /// planner/worker. Institution-local hosts replace both seams for adaptive analyses.
+    fn glioma_computation_campaign_execute(&self, arguments: &Value) -> Result<Value, String> {
+        let request: GliomaComputationCampaignRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_computation_campaign_execute requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma computation campaign request: {error}"))?;
+        let mut planner = StaticGliomaComputationPlanner;
+        let mut executor = DryRunGliomaComputationExecutor;
+        let campaign = execute_glioma_computation_campaign(&request, &mut planner, &mut executor)
+            .map_err(|error| format!("glioma computation campaign refused: {error}"))?;
+        serde_json::to_value(json!({
+            "campaign": campaign,
+            "dispatch": "dry_run",
+            "simulation_only": true,
+            "guarantees": [
+                "each round replans only from typed local computation outcomes",
+                "hard cost, duration, deterministic-task, dependency, retry, cache, and artifact gates remain active",
+                "negative, partial, failed, skipped, blocked, and unresolved work is never promoted to completion",
+                "the MCP route performs no external computation or raw-data movement"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma computation campaign: {error}"))
+    }
+
+    /// Compile a high-level glioma computation intent into a closed DAG and run it through the
+    /// existing bounded campaign controller. Institution-local callers replace the dry-run
+    /// planner/worker while retaining the same compiler and safety gates.
+    fn glioma_computation_workflow_execute(&self, arguments: &Value) -> Result<Value, String> {
+        let request: GliomaComputationWorkflowRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_computation_workflow_execute requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma computation workflow request: {error}"))?;
+        let workflow = compile_glioma_computation_workflow(&request)
+            .map_err(|error| format!("glioma computation workflow refused: {error}"))?;
+        let campaign_request = workflow
+            .campaign_request(&request)
+            .map_err(|error| format!("glioma computation workflow campaign refused: {error}"))?;
+        let mut planner = StaticGliomaComputationPlanner;
+        let mut executor = DryRunGliomaComputationExecutor;
+        let campaign =
+            execute_glioma_computation_campaign(&campaign_request, &mut planner, &mut executor)
+                .map_err(|error| {
+                    format!("glioma computation workflow execution refused: {error}")
+                })?;
+        serde_json::to_value(json!({
+            "workflow": workflow,
+            "campaign": campaign,
+            "dispatch": "dry_run",
+            "simulation_only": true,
+            "guarantees": [
+                "researcher intent expands into a deterministic modality-aware dependency-closed DAG",
+                "resource estimates and declared shortfalls remain visible before campaign execution",
+                "the compiled DAG reuses P09 cost, duration, deterministic-task, retry, cache, artifact, and negative-result gates",
+                "MCP uses a synthetic worker and performs no external computation, raw-data movement, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma computation workflow: {error}"))
+    }
+
+    /// Synthesize independent preclinical interpretation families into a bounded research
+    /// conclusion. The gate exposes disagreement, negative evidence, missing replication, and
+    /// leave-one-family-out instability instead of silently collapsing them into confidence.
+    fn glioma_interpretation_synthesize(&self, arguments: &Value) -> Result<Value, String> {
+        let request: InterpretationSynthesisRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_interpretation_synthesize requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma interpretation synthesis request: {error}"))?;
+        let synthesis = synthesize_glioma_interpretation(&request)
+            .map_err(|error| format!("glioma interpretation synthesis refused: {error}"))?;
+        serde_json::to_value(json!({
+            "synthesis": synthesis,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "cross-family effects are aggregated only from typed local preclinical summaries",
+                "contradictory, missing, unresolved, low-quality, and negative evidence remains visible",
+                "leave-one-family-out stability and declared replication/family floors gate qualification",
+                "MCP executes no assays, moves no raw data, and makes no clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma interpretation synthesis: {error}"))
+    }
+
+    /// Infer longitudinal multimodal state transitions from caller-supplied local preclinical
+    /// summaries. Missing timepoints, modalities, and non-comparable features remain explicit;
+    /// this route does not fetch data, execute an assay, or make a clinical decision.
+    fn glioma_temporal_multimodal_fusion(&self, arguments: &Value) -> Result<Value, String> {
+        let request: TemporalFusionRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_temporal_multimodal_fusion requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma temporal fusion request: {error}"))?;
+        let observations: Vec<TemporalObservation> =
+            serde_json::from_value(arguments.get("observations").cloned().ok_or_else(|| {
+                "glioma_temporal_multimodal_fusion requires observations".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma temporal fusion observations: {error}"))?;
+        let analysis = analyze_glioma_temporal_multimodal_fusion(&request, &observations)
+            .map_err(|error| format!("glioma temporal fusion refused: {error}"))?;
+        serde_json::to_value(json!({
+            "analysis": analysis,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "longitudinal states are joined only by declared sample, timepoint, modality, and local artifact identity",
+                "transition priority is based on comparable-feature distance and support, not an unbounded confidence score",
+                "missing timepoints, modalities, and non-comparable transitions remain partial or unresolved",
+                "stable transitions are published as negative evidence; MCP executes no assay and makes no clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma temporal fusion: {error}"))
+    }
+
+    /// Infer a bounded marker-aware clonal-evolution graph from caller-supplied local
+    /// preclinical profiles. Parentage is a reproducible proposal with explicit ambiguity;
+    /// this route never claims a clinical phylogeny or executes a biological intervention.
+    fn glioma_clonal_evolution(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ClonalEvolutionRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_clonal_evolution requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma clonal evolution request: {error}"))?;
+        let profiles: Vec<CloneProfile> = serde_json::from_value(
+            arguments
+                .get("profiles")
+                .cloned()
+                .ok_or_else(|| "glioma_clonal_evolution requires profiles".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma clonal evolution profiles: {error}"))?;
+        let analysis = analyze_glioma_clonal_evolution(&request, &profiles)
+            .map_err(|error| format!("glioma clonal evolution refused: {error}"))?;
+        serde_json::to_value(json!({
+            "analysis": analysis,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "parent-child edges are bounded to the declared preclinical sample lineage and time window",
+                "marker gains, losses, unmeasured states, weak support, parallel branches, and unparented nodes remain explicit",
+                "the output is a mechanism-discovery graph proposal and not a clinical phylogeny or diagnosis",
+                "MCP executes no assay, moves no raw data, and makes no clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma clonal evolution: {error}"))
+    }
+
+    /// Compile a bounded, clone-aware preclinical perturbation/readout panel from a local
+    /// clonal-evolution graph. Selection is deterministic set cover per declared cost; no live
+    /// perturbation, specimen edit, raw-data movement, or clinical decision occurs here.
+    fn glioma_clone_perturbation_panel(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ClonePerturbationPanelRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_clone_perturbation_panel requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma clone panel request: {error}"))?;
+        let graph: ClonalEvolutionGraph = serde_json::from_value(
+            arguments
+                .get("graph")
+                .cloned()
+                .ok_or_else(|| "glioma_clone_perturbation_panel requires graph".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma clone panel graph: {error}"))?;
+        let candidates: Vec<ClonePerturbationCandidate> =
+            serde_json::from_value(arguments.get("candidates").cloned().ok_or_else(|| {
+                "glioma_clone_perturbation_panel requires candidates".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma clone panel candidates: {error}"))?;
+        let panel = plan_glioma_clone_perturbation_panel(&request, &graph, &candidates)
+            .map_err(|error| format!("glioma clone perturbation panel refused: {error}"))?;
+        serde_json::to_value(json!({
+            "panel": panel,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "selection is bounded by declared budget, candidate count, and branch-coverage policy",
+                "unmeasured targets, uncovered branches, budget shortfalls, and negative evidence remain explicit",
+                "the output is a preclinical design artifact and not treatment, resistance, diagnosis, or clinical advice",
+                "MCP executes no perturbation, moves no raw data, and makes no clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma clone perturbation panel: {error}"))
+    }
+
+    /// Reconcile local replicate outcomes against a selected clone-aware preclinical panel.
+    /// Missing and contradictory cells remain unresolved; this route produces interpretation
+    /// evidence and next-measurement priorities but never executes biology or makes a clinical
+    /// decision.
+    fn glioma_clone_panel_outcomes(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ClonePanelOutcomeRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_clone_panel_outcomes requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma clone panel outcome request: {error}"))?;
+        let panel: ClonePerturbationPanel = serde_json::from_value(
+            arguments
+                .get("panel")
+                .cloned()
+                .ok_or_else(|| "glioma_clone_panel_outcomes requires panel".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma clone panel: {error}"))?;
+        let observations: Vec<ClonePanelObservation> = serde_json::from_value(
+            arguments
+                .get("observations")
+                .cloned()
+                .ok_or_else(|| "glioma_clone_panel_outcomes requires observations".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma clone panel observations: {error}"))?;
+        let analysis = analyze_glioma_clone_panel_outcomes(&request, &panel, &observations)
+            .map_err(|error| format!("glioma clone panel outcome analysis refused: {error}"))?;
+        serde_json::to_value(json!({
+            "analysis": analysis,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "replicate floors, uncertainty bounds, null effects, contradictions, and missing cells remain explicit",
+                "a qualified design panel is never promoted to evidence without local observations",
+                "next actions are measurement or retest priorities, not treatment or resistance claims",
+                "MCP executes no assay, moves no raw data, and makes no clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma clone panel outcome analysis: {error}"))
+    }
+
+    /// Compile a dependency-closed next-action frontier from unresolved or contradictory clone
+    /// outcomes. The route plans only; institution-local executors own approvals, instruments,
+    /// and any permitted federation effects.
+    fn glioma_clone_continuation(&self, arguments: &Value) -> Result<Value, String> {
+        let request: CloneContinuationRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_clone_continuation requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma clone continuation request: {error}"))?;
+        let outcome: ClonePanelOutcomeAnalysis = serde_json::from_value(
+            arguments
+                .get("outcome")
+                .cloned()
+                .ok_or_else(|| "glioma_clone_continuation requires outcome".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma clone panel outcome: {error}"))?;
+        let candidates: Vec<CloneContinuationCandidate> = serde_json::from_value(
+            arguments
+                .get("candidates")
+                .cloned()
+                .ok_or_else(|| "glioma_clone_continuation requires candidates".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma clone continuation candidates: {error}"))?;
+        let plan = plan_glioma_clone_continuation(&request, &outcome, &candidates)
+            .map_err(|error| format!("glioma clone continuation refused: {error}"))?;
+        serde_json::to_value(json!({
+            "plan": plan,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "dependency closure, budget, risk, instrument, federation, and approval gates are explicit",
+                "unresolved targets, deferred actions, blocked actions, uncertainty, and negative evidence remain visible",
+                "the plan is a preclinical research continuation artifact and not treatment, resistance, diagnosis, or clinical advice",
+                "MCP executes no assay, moves no raw data, and makes no clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma clone continuation plan: {error}"))
+    }
+
+    /// Direct one bounded, dependency-closed glioma research batch from a high-level intent.
+    /// MCP supplies only a deterministic synthetic action worker; institution-local callers
+    /// replace that worker with their approved analysis, simulator, or gateway adapter.
+    fn glioma_research_director_execute(&self, arguments: &Value) -> Result<Value, String> {
+        let request: GliomaResearchDirectorRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_research_director_execute requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma research director request: {error}"))?;
+        let mut executor = DryRunGliomaActionExecutor;
+        let run = execute_glioma_research_director(&request, &mut executor)
+            .map_err(|error| format!("glioma research director refused: {error}"))?;
+        serde_json::to_value(json!({
+            "director": run,
+            "dispatch": "dry_run",
+            "simulation_only": true,
+            "guarantees": [
+                "the director compiles the closed glioma stage graph before selecting any action",
+                "dependency closure, bounded beam selection, checkpoint locality, approval, instrument, and federation gates remain active",
+                "dry-run artifacts are synthetic and never count as biological evidence",
+                "production execution remains caller-owned and no clinical decision is produced"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma research director run: {error}"))
+    }
+
+    /// Admit the director only after local P01 evidence triangulation clears the caller's gate.
+    /// MCP uses the same deterministic dry-run action worker as the director route; no biological
+    /// effect or clinical decision is performed here.
+    fn glioma_evidence_gated_research_execute(&self, arguments: &Value) -> Result<Value, String> {
+        let request: GliomaEvidenceGatedResearchRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_evidence_gated_research_execute requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma evidence-gated research request: {error}"))?;
+        let mut executor = DryRunGliomaActionExecutor;
+        let run = execute_glioma_evidence_gated_research(&request, &mut executor)
+            .map_err(|error| format!("glioma evidence-gated research refused: {error}"))?;
+        let dispatch = if run.execution_started {
+            "dry_run"
+        } else {
+            "not_started"
+        };
+        serde_json::to_value(json!({
+            "gated_research": run,
+            "dispatch": dispatch,
+            "simulation_only": true,
+            "guarantees": [
+                "partial, negative, contradictory, incomplete, and source-dominant evidence holds the workflow before director execution",
+                "only independently triangulated qualified claims can admit the bounded director",
+                "director dependency, budget, approval, locality, instrument, and federation gates remain active",
+                "the route performs no real assay, instrument effect, raw-data movement, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma evidence-gated research run: {error}"))
+    }
+
+    /// Run the end-to-end autonomous glioma engine. The MCP adapter uses a deterministic local
+    /// worker for rehearsal; an institution-owned caller can provide an approved executor to the
+    /// same research-crate function for real preclinical computation or instrument gateways.
+    fn glioma_autonomous_research_engine_execute(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: GliomaAutonomousResearchEngineRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_autonomous_research_engine_execute requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma autonomous research engine request: {error}")
+            })?;
+        let mut executor = DryRunGliomaActionExecutor;
+        let engine = execute_glioma_autonomous_research_engine(&request, &mut executor)
+            .map_err(|error| format!("glioma autonomous research engine refused: {error}"))?;
+        serde_json::to_value(json!({
+            "engine": engine,
+            "dispatch": "dry_run",
+            "simulation_only": true,
+            "guarantees": [
+                "the engine compiles the high-level glioma intent into the closed dependency graph before each cycle",
+                "only returned typed local artifacts become downstream checkpoints; stale or missing artifacts cannot unlock work",
+                "each cycle preserves selected actions, execution outcomes, negative evidence, uncertainty, budget, and policy holds",
+                "bounded retries, instrument and federation permissions, and preclinical data-locality constraints remain active",
+                "the MCP route performs no real assay, instrument effect, clinical decision, or raw-data movement"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma autonomous research engine run: {error}"))
+    }
+
+    /// Plan the next bounded autonomous glioma workflow batch from typed prior outcomes. The
+    /// scheduler is planning-only: production callers own execution through the existing action
+    /// executor and instrument/computation gates.
+    fn glioma_adaptive_workflow(&self, arguments: &Value) -> Result<Value, String> {
+        let request: GliomaAdaptiveWorkflowSchedulerRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_adaptive_workflow requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma adaptive workflow request: {error}"))?;
+        let plan = plan_glioma_adaptive_workflow(&request)
+            .map_err(|error| format!("glioma adaptive workflow refused: {error}"))?;
+        serde_json::to_value(json!({
+            "plan": plan,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "qualified, negative, inconclusive, failed, and blocked observations update utility without erasing negative evidence",
+                "selected actions are dependency-closed in executable order under cost, risk, authority, instrument, federation, and action-count budgets",
+                "blocked and deferred actions carry explicit reasons for later replanning",
+                "the route performs no assay, instrument effect, raw-data movement, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma adaptive workflow plan: {error}"))
+    }
+
+    /// Convert a typed cross-family interpretation into a bounded next-action frontier.  The
+    /// route performs no assay or instrument effect; an institution-local caller owns execution
+    /// after reviewing the selected actions and any unresolved holds.
+    fn glioma_adaptive_research_frontier(&self, arguments: &Value) -> Result<Value, String> {
+        let request: AdaptiveFrontierRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_adaptive_research_frontier requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma adaptive frontier request: {error}"))?;
+        let frontier = plan_glioma_adaptive_research_frontier(&request)
+            .map_err(|error| format!("glioma adaptive frontier refused: {error}"))?;
+        serde_json::to_value(json!({
+            "frontier": frontier,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "typed interpretation outcomes determine which uncertainty, contradiction, replication, and negative-result debts receive next-action capacity",
+                "candidate ranking reuses the bounded, deterministic glioma action selector with explicit budget and authority gates",
+                "unresolved and negative synthesis states remain holds or partial outcomes rather than being promoted",
+                "MCP executes no assay, moves no raw data, and makes no clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma adaptive frontier: {error}"))
+    }
+
+    /// Stress-test a local two-arm glioma analysis under deterministic batch and row omissions.
+    /// The suite never promotes an unresolved omission to support and never treats a null result
+    /// as a failed computation; it is a bounded scientific robustness report, not execution.
+    fn glioma_robustness_suite(&self, arguments: &Value) -> Result<Value, String> {
+        let request: RobustnessRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_robustness_suite requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma robustness request: {error}"))?;
+        let dataset: AnalysisDataset = serde_json::from_value(
+            arguments
+                .get("dataset")
+                .cloned()
+                .ok_or_else(|| "glioma_robustness_suite requires dataset".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma robustness dataset: {error}"))?;
+        let output = assess_glioma_robustness(&request, &dataset)
+            .map_err(|error| format!("glioma robustness assessment refused: {error}"))?;
+        serde_json::to_value(json!({
+            "suite": output,
+            "dispatch": "not_started",
+            "guarantees": [
+                "leave-one-batch and optional leave-one-row analyses use the declared estimand",
+                "unresolved omissions never count as supporting evidence",
+                "null and negative outcomes remain first-class scientific results",
+                "the bounded battery is deterministic and digest-bound",
+                "raw data remains local and no clinical decision is produced"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma robustness suite: {error}"))
+    }
+
+    /// Analyze local longitudinal preclinical glioma observations with deterministic per-unit
+    /// slopes. This remains a value-only computation: it never fetches data, dispatches an assay,
+    /// or turns a trajectory into a clinical conclusion.
+    fn glioma_trajectory_analyze(&self, arguments: &Value) -> Result<Value, String> {
+        let request: TrajectoryRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_trajectory_analyze requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma trajectory request: {error}"))?;
+        let observations: Vec<TrajectoryObservation> = serde_json::from_value(
+            arguments
+                .get("observations")
+                .cloned()
+                .ok_or_else(|| "glioma_trajectory_analyze requires observations".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma trajectory observations: {error}"))?;
+        let output = analyze_glioma_trajectories(&request, &observations)
+            .map_err(|error| format!("glioma trajectory analysis refused: {error}"))?;
+        serde_json::to_value(json!({
+            "analysis": output,
+            "dispatch": "not_started",
+            "guarantees": [
+                "per-unit slopes use deterministic integer least squares",
+                "missing, duplicate, noisy, and non-monotone trajectories remain explicit",
+                "time-grid and unit-floor failures are unresolved rather than imputed",
+                "the output is preclinical research analysis, not clinical decision support"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma trajectory analysis: {error}"))
+    }
+
+    /// Estimate longitudinal discrete-state transition matrices for local preclinical glioma
+    /// observations. This is descriptive research analysis only: it never executes an assay,
+    /// moves raw data, or produces a clinical decision.
+    fn glioma_state_transition_analyze(&self, arguments: &Value) -> Result<Value, String> {
+        let request: StateTransitionRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_state_transition_analyze requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma state-transition request: {error}"))?;
+        let observations: Vec<StateTransitionObservation> =
+            serde_json::from_value(arguments.get("observations").cloned().ok_or_else(|| {
+                "glioma_state_transition_analyze requires observations".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma state-transition observations: {error}"))?;
+        let output = analyze_glioma_state_transitions(&request, &observations)
+            .map_err(|error| format!("glioma state-transition analysis refused: {error}"))?;
+        serde_json::to_value(json!({
+            "analysis": output,
+            "dispatch": "not_started",
+            "guarantees": [
+                "transition probabilities use deterministic consecutive within-unit observations",
+                "irregular windows, absent transitions, sparse arms, null contrasts, and negative evidence remain explicit",
+                "state ordering is investigator-declared and is never interpreted as a clinical severity scale",
+                "the output is preclinical research analysis, not clinical decision support"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma state-transition analysis: {error}"))
+    }
+
+    /// Estimate whether a preclinical glioma effect transports to a declared target model system.
+    /// Similarity, heterogeneity, and leave-one-study-out sensitivity stay visible; this route
+    /// never turns transportability into a clinical or treatment recommendation.
+    fn glioma_transportability_analyze(&self, arguments: &Value) -> Result<Value, String> {
+        let request: TransportabilityRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_transportability_analyze requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma transportability request: {error}"))?;
+        let studies: Vec<TransportStudy> = serde_json::from_value(
+            arguments
+                .get("studies")
+                .cloned()
+                .ok_or_else(|| "glioma_transportability_analyze requires studies".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma transportability studies: {error}"))?;
+        let analysis = analyze_glioma_transportability(&request, &studies)
+            .map_err(|error| format!("glioma transportability analysis refused: {error}"))?;
+        serde_json::to_value(json!({
+            "analysis": analysis,
+            "dispatch": "not_started",
+            "guarantees": [
+                "source effects are weighted by declared signature similarity, quality, replicates, and uncertainty",
+                "heterogeneity, target-model distance, excluded studies, and leave-one-out shifts remain explicit",
+                "insufficient, negative, distant, and unstable evidence cannot be promoted into portability",
+                "the route performs preclinical interpretation only and never makes a clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma transportability analysis: {error}"))
+    }
+
+    /// Estimate a pre/post treatment contrast for a preclinical glioma study. This is analysis
+    /// only: it does not select a clinical dose, dispatch an assay, or move raw observations.
+    fn glioma_causal_contrast(&self, arguments: &Value) -> Result<Value, String> {
+        let request: CausalContrastRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_causal_contrast requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma causal-contrast request: {error}"))?;
+        let observations: Vec<TrajectoryObservation> = serde_json::from_value(
+            arguments
+                .get("observations")
+                .cloned()
+                .ok_or_else(|| "glioma_causal_contrast requires observations".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma causal-contrast observations: {error}"))?;
+        let output = analyze_glioma_causal_contrast(&request, &observations)
+            .map_err(|error| format!("glioma causal contrast refused: {error}"))?;
+        serde_json::to_value(json!({
+            "analysis": output,
+            "dispatch": "not_started",
+            "guarantees": [
+                "pre and post windows are declared and computed per tracked unit",
+                "the effect is a treatment-minus-control difference in differences",
+                "exact label permutations and leave-one-unit bounds remain deterministic",
+                "underpowered, capped, null, or non-significant results remain explicit"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma causal contrast: {error}"))
+    }
+
+    /// Decompose a preclinical treatment contrast into mediator, direct, and indirect effects.
+    /// This is an interpretation computation only; it never recommends an intervention.
+    fn glioma_causal_mediation(&self, arguments: &Value) -> Result<Value, String> {
+        let request: MediationRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_causal_mediation requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma causal mediation request: {error}"))?;
+        let observations: Vec<MediationObservation> = serde_json::from_value(
+            arguments
+                .get("observations")
+                .cloned()
+                .ok_or_else(|| "glioma_causal_mediation requires observations".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma causal mediation observations: {error}"))?;
+        let analysis = analyze_glioma_mediation(&request, &observations)
+            .map_err(|error| format!("glioma causal mediation refused: {error}"))?;
+        serde_json::to_value(json!({
+            "analysis": analysis,
+            "dispatch": "not_started",
+            "guarantees": [
+                "mediator, total, direct, and indirect effects use deterministic integer covariance",
+                "measurement uncertainty and leave-one-unit-out influence are explicit",
+                "underpowered, null, zero-variance, and fragile decompositions are not promoted",
+                "the route performs no biological or clinical decision effect"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma causal mediation: {error}"))
+    }
+
+    /// Estimate a stratified, overlap-checked preclinical glioma contrast. This is interpretation
+    /// only: it does not infer patient benefit, select a dose, or dispatch an assay.
+    fn glioma_stratified_causal_adjustment(&self, arguments: &Value) -> Result<Value, String> {
+        let request: StratifiedCausalRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_stratified_causal_adjustment requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma stratified-causal request: {error}"))?;
+        let observations: Vec<StratifiedObservation> =
+            serde_json::from_value(arguments.get("observations").cloned().ok_or_else(|| {
+                "glioma_stratified_causal_adjustment requires observations".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma stratified-causal observations: {error}"))?;
+        let output = analyze_stratified_causal_adjustment(&request, &observations)
+            .map_err(|error| format!("glioma stratified causal adjustment refused: {error}"))?;
+        serde_json::to_value(json!({
+            "adjustment": output,
+            "dispatch": "not_started",
+            "guarantees": [
+                "repeated observations collapse to de-identified unit means before adjustment",
+                "only strata with declared arm overlap and unit floors enter the weighted contrast",
+                "leave-one-stratum influence, overlap imbalance, excluded strata, and missing coverage remain explicit",
+                "the route produces a preclinical estimand only and never makes a clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma stratified causal adjustment: {error}"))
+    }
+
+    /// Evaluate competing finite-horizon preclinical glioma experiment policies from local
+    /// longitudinal trajectories. This ranks workflow policies only; it never dispatches an
+    /// assay, recommends a treatment, or treats an off-policy estimate as clinical evidence.
+    fn glioma_dynamic_policy_evaluate(&self, arguments: &Value) -> Result<Value, String> {
+        let request: DynamicPolicyRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_dynamic_policy_evaluate requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma dynamic-policy request: {error}"))?;
+        let policies: Vec<DynamicPolicyCandidate> = serde_json::from_value(
+            arguments
+                .get("policies")
+                .cloned()
+                .ok_or_else(|| "glioma_dynamic_policy_evaluate requires policies".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma dynamic-policy policies: {error}"))?;
+        let trajectories: Vec<DynamicPolicyTrajectory> =
+            serde_json::from_value(arguments.get("trajectories").cloned().ok_or_else(|| {
+                "glioma_dynamic_policy_evaluate requires trajectories".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma dynamic-policy trajectories: {error}"))?;
+        let evaluation = evaluate_glioma_dynamic_policies(&request, &policies, &trajectories)
+            .map_err(|error| format!("glioma dynamic-policy evaluation refused: {error}"))?;
+        serde_json::to_value(json!({
+            "evaluation": evaluation,
+            "dispatch": "not_started",
+            "policy_frontier": "preclinical_workflow_only",
+            "guarantees": [
+                "finite-horizon policies are evaluated with self-normalized inverse-propensity weighting",
+                "positivity violations, support coverage, weight clipping, effective sample size, and leave-one-trajectory-out instability remain explicit",
+                "selected policy is a bounded workflow frontier and not an observed efficacy or clinical treatment recommendation",
+                "raw trajectories remain institution-local and the route performs no external effect"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma dynamic-policy evaluation: {error}"))
+    }
+
+    /// Fit a bounded monotone preclinical glioma dose-response curve. This is analysis only: it
+    /// does not choose a clinical dose, dispatch an assay, or move raw observations.
+    fn glioma_dose_response(&self, arguments: &Value) -> Result<Value, String> {
+        let request: DoseResponseRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_dose_response requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma dose-response request: {error}"))?;
+        let observations: Vec<DoseResponseObservation> = serde_json::from_value(
+            arguments
+                .get("observations")
+                .cloned()
+                .ok_or_else(|| "glioma_dose_response requires observations".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma dose-response observations: {error}"))?;
+        let output = analyze_glioma_dose_response(&request, &observations)
+            .map_err(|error| format!("glioma dose-response analysis refused: {error}"))?;
+        serde_json::to_value(json!({
+            "analysis": output,
+            "dispatch": "not_started",
+            "guarantees": [
+                "the monotone fit uses weighted pool-adjacent-violators arithmetic",
+                "raw means, fitted means, residuals, and monotonicity violations remain visible",
+                "missing dose levels and replicate floors remain unresolved",
+                "half-maximal dose is interpolated only on the declared preclinical grid"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma dose-response analysis: {error}"))
+    }
+
+    /// Select a bounded next replicate batch for a preclinical glioma campaign. This is a
+    /// conservative statistical allocation only: it never chooses a clinical dose or dispatches
+    /// an instrument/protocol.
+    fn glioma_adaptive_allocation(&self, arguments: &Value) -> Result<Value, String> {
+        let request: AdaptiveAllocationRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_adaptive_allocation requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma adaptive-allocation request: {error}"))?;
+        let arms: Vec<AdaptiveArmObservation> = serde_json::from_value(
+            arguments
+                .get("arms")
+                .cloned()
+                .ok_or_else(|| "glioma_adaptive_allocation requires arms".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma adaptive-allocation arms: {error}"))?;
+        let output = allocate_glioma_assays(&request, &arms)
+            .map_err(|error| format!("glioma adaptive allocation refused: {error}"))?;
+        serde_json::to_value(json!({
+            "allocation": output,
+            "dispatch": "not_started",
+            "guarantees": [
+                "Beta posteriors and Cantelli lower bounds are computed with deterministic integer arithmetic",
+                "control contrasts, exploration, replicate floors, risk ceilings, and budget limits remain explicit",
+                "underpowered, negative, risk-blocked, and budget-capped arms are never silently promoted",
+                "the route proposes a next batch only and never executes an assay or makes a clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma adaptive allocation: {error}"))
+    }
+
+    /// Make a bounded sequential interim decision for a local preclinical glioma campaign.
+    /// This is the stopping/allocation layer: it can stop for a declared success or futility
+    /// gate, hold underpowered arms, or compile one next replicate round. It never dispatches
+    /// an assay, chooses a clinical dose, or turns a posterior into a clinical decision.
+    fn glioma_sequential_design(&self, arguments: &Value) -> Result<Value, String> {
+        let request: SequentialDesignRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_sequential_design requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma sequential-design request: {error}"))?;
+        let observations: Vec<SequentialArmObservation> = serde_json::from_value(
+            arguments
+                .get("observations")
+                .cloned()
+                .ok_or_else(|| "glioma_sequential_design requires observations".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma sequential-design observations: {error}"))?;
+        let plan = plan_glioma_sequential_design(&request, &observations)
+            .map_err(|error| format!("glioma sequential design refused: {error}"))?;
+        serde_json::to_value(json!({
+            "plan": plan,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "Beta posteriors and integer Cantelli-style gates are deterministic",
+                "replicate floors prevent premature success or futility promotion",
+                "risk, budget, negative evidence, and uncertainty remain explicit",
+                "the route compiles a local next round only and never dispatches assays or makes clinical decisions"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma sequential-design plan: {error}"))
+    }
+
+    /// Execute a bounded sequential preclinical glioma campaign in the deterministic local
+    /// sandbox. Each accepted aggregate batch updates the arm posterior before the next plan;
+    /// a governed institution can replace the executor behind this route without granting MCP
+    /// direct hardware or clinical authority.
+    fn glioma_sequential_campaign_execute(&self, arguments: &Value) -> Result<Value, String> {
+        let request: SequentialCampaignRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_sequential_campaign_execute requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma sequential-campaign request: {error}"))?;
+        let mut executor = DryRunSequentialCampaignExecutor;
+        let campaign = execute_glioma_sequential_campaign(&request, &mut executor)
+            .map_err(|error| format!("glioma sequential campaign refused: {error}"))?;
+        serde_json::to_value(json!({
+            "campaign": campaign,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "the planner is rerun after every accepted aggregate batch",
+                "exact replicate accounting, arm binding, local-only artifacts, retries, and budget debits are validated",
+                "success, futility, risk, budget, no-progress, and executor-failure stops remain explicit",
+                "MCP never contacts hardware, moves raw biology, or makes a clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma sequential campaign: {error}"))
+    }
+
+    /// Rank and batch mechanism-discriminating preclinical assays for a closed-loop campaign.
+    /// The controller recomputes a deterministic posterior from local observations, then emits
+    /// an information/cost/risk-aware next batch. It never dispatches hardware or asserts a
+    /// biological result.
+    fn glioma_closed_loop_campaign(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ClosedLoopCampaignRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_closed_loop_campaign requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma closed-loop campaign request: {error}"))?;
+        let mechanisms: Vec<CampaignMechanism> = serde_json::from_value(
+            arguments
+                .get("mechanisms")
+                .cloned()
+                .ok_or_else(|| "glioma_closed_loop_campaign requires mechanisms".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma campaign mechanisms: {error}"))?;
+        let actions: Vec<CampaignAction> = serde_json::from_value(
+            arguments
+                .get("actions")
+                .cloned()
+                .ok_or_else(|| "glioma_closed_loop_campaign requires actions".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma campaign actions: {error}"))?;
+        let observations: Vec<CampaignObservation> = serde_json::from_value(
+            arguments
+                .get("observations")
+                .cloned()
+                .unwrap_or_else(|| json!([])),
+        )
+        .map_err(|error| format!("invalid glioma campaign observations: {error}"))?;
+        let output =
+            plan_glioma_closed_loop_campaign(&request, &mechanisms, &actions, &observations)
+                .map_err(|error| format!("glioma closed-loop campaign refused: {error}"))?;
+        serde_json::to_value(json!({
+            "campaign": output,
+            "dispatch": "not_started",
+            "guarantees": [
+                "posterior reweighting uses bounded deterministic residual arithmetic",
+                "assay batches maximize mechanism separation while respecting cost, feasibility, risk, and replicate ceilings",
+                "negative observations, no-information states, budget exhaustion, and posterior convergence remain explicit",
+                "the route returns a caller-owned local execution plan and never dispatches an instrument or makes a clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma closed-loop campaign: {error}"))
+    }
+
+    /// Analyze a two-agent preclinical glioma response surface with fixed-point Bliss synergy.
+    /// This is analysis only: it does not choose a clinical dose or dispatch an assay.
+    fn glioma_combination_synergy(&self, arguments: &Value) -> Result<Value, String> {
+        let request: CombinationSynergyRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_combination_synergy requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma combination-synergy request: {error}"))?;
+        let observations: Vec<CombinationObservation> = serde_json::from_value(
+            arguments
+                .get("observations")
+                .cloned()
+                .ok_or_else(|| "glioma_combination_synergy requires observations".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma combination-synergy observations: {error}"))?;
+        let output = analyze_glioma_combination_synergy(&request, &observations)
+            .map_err(|error| format!("glioma combination synergy refused: {error}"))?;
+        serde_json::to_value(json!({
+            "analysis": output,
+            "dispatch": "not_started",
+            "guarantees": [
+                "single-agent controls are required for every combination cell",
+                "Bliss expected response and synergy use bounded integer arithmetic",
+                "under-replicated and noisy cells remain unresolved",
+                "antagonistic and null responses remain negative evidence"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma combination synergy: {error}"))
+    }
+
+    /// Select the next diverse combination cells for a local preclinical glioma response surface.
+    /// The planner interpolates only typed local observations and never recommends a clinical dose.
+    fn glioma_adaptive_dose_surface(&self, arguments: &Value) -> Result<Value, String> {
+        let request: AdaptiveDoseSurfaceRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_adaptive_dose_surface requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma adaptive dose-surface request: {error}"))?;
+        let plan = plan_adaptive_glioma_dose_surface(&request)
+            .map_err(|error| format!("glioma adaptive dose-surface planner refused: {error}"))?;
+        serde_json::to_value(json!({
+            "plan": plan,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "dose cells are planned for institution-local preclinical assays, never clinical treatment",
+                "unmeasured cells are interpolated only from bounded neighboring observations and retain uncertainty",
+                "replicate debt, residual noise, dose caps, budget, and diversity constraints remain explicit",
+                "selected cells are validation plans, not observed biological effects"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma adaptive dose-surface plan: {error}"))
+    }
+
+    /// Compare typed local glioma modality vectors for one sample lineage. This is a scientific
+    /// concordance computation only; it never moves raw data or treats correlation as causation.
+    fn glioma_multimodal_concordance(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ConcordanceRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_multimodal_concordance requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma concordance request: {error}"))?;
+        let vectors: Vec<ModalityVector> = serde_json::from_value(
+            arguments
+                .get("vectors")
+                .cloned()
+                .ok_or_else(|| "glioma_multimodal_concordance requires vectors".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma concordance vectors: {error}"))?;
+        let output = analyze_multimodal_concordance(&request, &vectors)
+            .map_err(|error| format!("glioma multimodal concordance refused: {error}"))?;
+        serde_json::to_value(json!({
+            "concordance": output,
+            "dispatch": "not_started",
+            "guarantees": [
+                "feature identifiers are aligned before correlation",
+                "missing overlap and zero-variance pairs remain unresolved",
+                "negative or contradictory modality pairs remain visible",
+                "the output is local preclinical evidence, not a causal or clinical conclusion"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma multimodal concordance: {error}"))
+    }
+
+    /// Cluster de-identified preclinical glioma sample lineages from multiple modality vectors.
+    /// This is a deterministic consensus computation only: it never imputes missing assays,
+    /// moves raw data, dispatches an instrument, or makes a clinical decision.
+    fn glioma_multimodal_consensus(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ConsensusRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_multimodal_consensus requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma consensus request: {error}"))?;
+        let vectors: Vec<ModalityVector> = serde_json::from_value(
+            arguments
+                .get("vectors")
+                .cloned()
+                .ok_or_else(|| "glioma_multimodal_consensus requires vectors".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma consensus vectors: {error}"))?;
+        let output = analyze_multimodal_consensus(&request, &vectors)
+            .map_err(|error| format!("glioma multimodal consensus refused: {error}"))?;
+        serde_json::to_value(json!({
+            "consensus": output,
+            "dispatch": "not_started",
+            "guarantees": [
+                "per-sample feature values use deterministic modality medians without imputation",
+                "sample assignments use bounded deterministic k-medoids with stable tie-breaking",
+                "missing modality coverage, disconnected pairs, and distance-bound failures remain explicit",
+                "the output is local preclinical evidence, not a causal or clinical conclusion"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma multimodal consensus: {error}"))
+    }
+
+    /// Harmonize local preclinical glioma modality vectors with deterministic robust
+    /// median-centering. Missing features remain missing and no raw artifact leaves the caller.
+    fn glioma_multimodal_harmonize(&self, arguments: &Value) -> Result<Value, String> {
+        let request: HarmonizationRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_multimodal_harmonize requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma harmonization request: {error}"))?;
+        let vectors: Vec<HarmonizationVector> = serde_json::from_value(
+            arguments
+                .get("vectors")
+                .cloned()
+                .ok_or_else(|| "glioma_multimodal_harmonize requires vectors".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma harmonization vectors: {error}"))?;
+        let output = harmonize_glioma_multimodal_batches(&request, &vectors)
+            .map_err(|error| format!("glioma multimodal harmonization refused: {error}"))?;
+        serde_json::to_value(json!({
+            "harmonization": output,
+            "dispatch": "not_started",
+            "guarantees": [
+                "batch corrections use robust per-modality medians with deterministic integer arithmetic",
+                "reference batches, correction magnitudes, residual spread, and excluded batches remain visible",
+                "missing features and modality overlap are never imputed or silently treated as comparable",
+                "the route produces local preclinical vectors only and never makes a clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma multimodal harmonization: {error}"))
+    }
+
+    /// Extract deterministic latent states from complete-case multimodal glioma vectors. This is
+    /// a local analysis only: it does not impute missing values, export raw artifacts, or dispatch
+    /// an assay.
+    fn glioma_multimodal_latent_factors(&self, arguments: &Value) -> Result<Value, String> {
+        let request: LatentFactorRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_multimodal_latent_factors requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma latent-factor request: {error}"))?;
+        let vectors: Vec<LatentFactorVector> = serde_json::from_value(
+            arguments
+                .get("vectors")
+                .cloned()
+                .ok_or_else(|| "glioma_multimodal_latent_factors requires vectors".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma latent-factor vectors: {error}"))?;
+        let output = analyze_glioma_latent_factors(&request, &vectors)
+            .map_err(|error| format!("glioma latent-factor analysis refused: {error}"))?;
+        serde_json::to_value(json!({
+            "analysis": output,
+            "dispatch": "not_started",
+            "guarantees": [
+                "complete-case rows and robust median/MAD scaling are deterministic",
+                "latent components use bounded fixed-point power iteration with explicit convergence",
+                "explained variance, reconstruction error, omitted features, and modality gaps remain visible",
+                "the route produces local preclinical analysis only and never makes a clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma latent-factor analysis: {error}"))
+    }
+
+    /// Fuse modality-specific sample neighbourhoods into a bounded local graph. Dropout,
+    /// sparse overlap, reliability weighting, and cross-modal disagreement remain explicit.
+    fn glioma_multimodal_graph_fusion(&self, arguments: &Value) -> Result<Value, String> {
+        let request: GraphFusionRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_multimodal_graph_fusion requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma graph-fusion request: {error}"))?;
+        let vectors: Vec<GraphFusionVector> = serde_json::from_value(
+            arguments
+                .get("vectors")
+                .cloned()
+                .ok_or_else(|| "glioma_multimodal_graph_fusion requires vectors".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma graph-fusion vectors: {error}"))?;
+        let output = analyze_glioma_multimodal_graph_fusion(&request, &vectors)
+            .map_err(|error| format!("glioma multimodal graph fusion refused: {error}"))?;
+        serde_json::to_value(json!({
+            "analysis": output,
+            "dispatch": "not_started",
+            "guarantees": [
+                "modality-specific neighbours are fused only from observed local vectors",
+                "reliability weighting, missing modalities, sparse shared features, cross-modal disagreement, and diffusion limits remain explicit",
+                "the route does not move raw artifacts, dispatch instruments, or make a clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma multimodal graph fusion: {error}"))
+    }
+
+    /// Score signed pathway activity from local preclinical glioma observations. This emits
+    /// ranked mechanism priorities and bottlenecks; it does not infer a clinical state.
+    fn glioma_pathway_activity(&self, arguments: &Value) -> Result<Value, String> {
+        let request: PathwayActivityRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_pathway_activity requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma pathway-activity request: {error}"))?;
+        let definitions: Vec<PathwayActivityDefinition> = serde_json::from_value(
+            arguments
+                .get("definitions")
+                .cloned()
+                .ok_or_else(|| "glioma_pathway_activity requires definitions".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma pathway definitions: {error}"))?;
+        let observations: Vec<PathwayActivityObservation> = serde_json::from_value(
+            arguments
+                .get("observations")
+                .cloned()
+                .ok_or_else(|| "glioma_pathway_activity requires observations".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma pathway observations: {error}"))?;
+        let output = analyze_glioma_pathway_activity(&request, &definitions, &observations)
+            .map_err(|error| format!("glioma pathway activity refused: {error}"))?;
+        serde_json::to_value(json!({
+            "analysis": output,
+            "dispatch": "not_started",
+            "guarantees": [
+                "signed node activity is reliability- and weight-adjusted without imputing missing features",
+                "coverage, cross-modal agreement, confidence, and bottleneck nodes remain explicit",
+                "the route produces mechanism research priorities only and never makes a clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma pathway activity: {error}"))
+    }
+
+    /// Run the multimodal graph, pathway activity, and bounded action-selection vertical as one
+    /// autonomous research cycle. Actions remain plans until existing execution gates admit them.
+    fn glioma_multimodal_mechanism_campaign(&self, arguments: &Value) -> Result<Value, String> {
+        let request: MultimodalMechanismCampaignRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_multimodal_mechanism_campaign requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma mechanism campaign request: {error}"))?;
+        let graph_vectors: Vec<GraphFusionVector> =
+            serde_json::from_value(arguments.get("graph_vectors").cloned().ok_or_else(|| {
+                "glioma_multimodal_mechanism_campaign requires graph_vectors".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma mechanism campaign graph vectors: {error}"))?;
+        let pathway_definitions: Vec<PathwayActivityDefinition> =
+            serde_json::from_value(arguments.get("pathway_definitions").cloned().ok_or_else(
+                || "glioma_multimodal_mechanism_campaign requires pathway_definitions".to_string(),
+            )?)
+            .map_err(|error| {
+                format!("invalid glioma mechanism campaign pathway definitions: {error}")
+            })?;
+        let pathway_observations: Vec<PathwayActivityObservation> =
+            serde_json::from_value(arguments.get("pathway_observations").cloned().ok_or_else(
+                || "glioma_multimodal_mechanism_campaign requires pathway_observations".to_string(),
+            )?)
+            .map_err(|error| {
+                format!("invalid glioma mechanism campaign pathway observations: {error}")
+            })?;
+        let candidates: Vec<GliomaActionCandidate> =
+            serde_json::from_value(arguments.get("candidates").cloned().ok_or_else(|| {
+                "glioma_multimodal_mechanism_campaign requires candidates".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma mechanism campaign candidates: {error}"))?;
+        let output = execute_glioma_multimodal_mechanism_campaign(
+            &request,
+            &graph_vectors,
+            &pathway_definitions,
+            &pathway_observations,
+            &candidates,
+        )
+        .map_err(|error| format!("glioma multimodal mechanism campaign refused: {error}"))?;
+        serde_json::to_value(json!({
+            "campaign": output,
+            "dispatch": "not_started",
+            "guarantees": [
+                "graph and pathway evidence are evaluated before action selection",
+                "selected actions are dependency-safe plans and still require existing policy, approval, and execution gates",
+                "partial, unresolved, contradictory, and missing evidence remains visible; no clinical decision is made"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma multimodal mechanism campaign: {error}"))
+    }
+
+    /// Execute the selected mechanism portfolio through the deterministic dry-run worker.
+    /// Institution-local deployments provide the production executor through the Rust API.
+    fn glioma_multimodal_mechanism_campaign_execute(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: MultimodalMechanismCampaignRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_multimodal_mechanism_campaign_execute requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma mechanism campaign execution request: {error}")
+            })?;
+        let graph_vectors: Vec<GraphFusionVector> =
+            serde_json::from_value(arguments.get("graph_vectors").cloned().ok_or_else(|| {
+                "glioma_multimodal_mechanism_campaign_execute requires graph_vectors".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma mechanism campaign execution graph vectors: {error}")
+            })?;
+        let pathway_definitions: Vec<PathwayActivityDefinition> =
+            serde_json::from_value(arguments.get("pathway_definitions").cloned().ok_or_else(
+                || {
+                    "glioma_multimodal_mechanism_campaign_execute requires pathway_definitions"
+                        .to_string()
+                },
+            )?)
+            .map_err(|error| {
+                format!("invalid glioma mechanism campaign execution pathway definitions: {error}")
+            })?;
+        let pathway_observations: Vec<PathwayActivityObservation> =
+            serde_json::from_value(arguments.get("pathway_observations").cloned().ok_or_else(
+                || {
+                    "glioma_multimodal_mechanism_campaign_execute requires pathway_observations"
+                        .to_string()
+                },
+            )?)
+            .map_err(|error| {
+                format!("invalid glioma mechanism campaign execution pathway observations: {error}")
+            })?;
+        let candidates: Vec<GliomaActionCandidate> =
+            serde_json::from_value(arguments.get("candidates").cloned().ok_or_else(|| {
+                "glioma_multimodal_mechanism_campaign_execute requires candidates".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma mechanism campaign execution candidates: {error}")
+            })?;
+        let max_retries = arguments
+            .get("max_retries")
+            .and_then(Value::as_u64)
+            .unwrap_or(1)
+            .min(8) as u8;
+        let require_artifacts = arguments
+            .get("require_artifacts")
+            .and_then(Value::as_bool)
+            .unwrap_or(true);
+        let mut executor = DryRunGliomaActionExecutor;
+        let output = execute_glioma_multimodal_mechanism_campaign_with_executor(
+            &request,
+            &graph_vectors,
+            &pathway_definitions,
+            &pathway_observations,
+            &candidates,
+            max_retries,
+            require_artifacts,
+            &mut executor,
+        )
+        .map_err(|error| {
+            format!("glioma multimodal mechanism campaign execution refused: {error}")
+        })?;
+        serde_json::to_value(json!({
+            "execution": output,
+            "dispatch": "dry_run",
+            "simulation_only": true,
+            "guarantees": [
+                "unresolved graph or pathway evidence blocks dispatch",
+                "selected actions execute only through dependency, retry, local-artifact, and policy gates",
+                "this MCP worker creates synthetic local artifacts and never touches instruments, biology, or clinical decisions"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma multimodal mechanism campaign execution: {error}"))
+    }
+
+    /// Build spatially connected same-lineage niches and retain cross-lineage interaction
+    /// enrichment for local preclinical glioma observations. This is analysis only: it does not
+    /// move raw spatial data, dispatch an assay, or make a clinical decision.
+    fn glioma_spatial_niches(&self, arguments: &Value) -> Result<Value, String> {
+        let request: SpatialNicheRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_spatial_niches requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma spatial-niche request: {error}"))?;
+        let cells: Vec<SpatialCell> = serde_json::from_value(
+            arguments
+                .get("cells")
+                .cloned()
+                .ok_or_else(|| "glioma_spatial_niches requires cells".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma spatial-niche cells: {error}"))?;
+        let output = analyze_glioma_spatial_niches(&request, &cells)
+            .map_err(|error| format!("glioma spatial-niche analysis refused: {error}"))?;
+        serde_json::to_value(json!({
+            "analysis": output,
+            "dispatch": "not_started",
+            "guarantees": [
+                "same-lineage spatial components are deterministic candidate niches",
+                "cross-lineage edges are compared with a random-mixing expected-edge null model",
+                "isolated cells, undersized niches, sparse graphs, and absent interactions remain explicit",
+                "the route produces local preclinical spatial analysis only and never makes a clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma spatial-niche analysis: {error}"))
+    }
+
+    /// Infer local ligand-receptor communication enrichments in preclinical glioma spatial data.
+    /// The analyzer compares observed sender/receiver signal with a lineage-marginal null; it
+    /// never claims causal signalling or dispatches an assay.
+    fn glioma_spatial_communication(&self, arguments: &Value) -> Result<Value, String> {
+        let request: SpatialCommunicationRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_spatial_communication requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma spatial-communication request: {error}"))?;
+        let cells: Vec<SpatialCommunicationCell> = serde_json::from_value(
+            arguments
+                .get("cells")
+                .cloned()
+                .ok_or_else(|| "glioma_spatial_communication requires cells".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma spatial-communication cells: {error}"))?;
+        let pairs: Vec<LigandReceptorPair> = serde_json::from_value(
+            arguments
+                .get("pairs")
+                .cloned()
+                .ok_or_else(|| "glioma_spatial_communication requires pairs".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma ligand-receptor pairs: {error}"))?;
+        let output = analyze_glioma_spatial_communication(&request, &cells, &pairs)
+            .map_err(|error| format!("glioma spatial-communication analysis refused: {error}"))?;
+        serde_json::to_value(json!({
+            "analysis": output,
+            "dispatch": "not_started",
+            "guarantees": [
+                "sender-receiver neighborhoods are deterministic from the declared spatial radius",
+                "observed communication is compared with a lineage-marginal random-mixing null",
+                "missing ligand/receptor coverage, sparse neighborhoods, zero-null signal, and non-enrichment remain explicit",
+                "the route produces local preclinical association analysis only and never makes a clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma spatial-communication analysis: {error}"))
+    }
+
+    /// Propagate a declared state signal over local same-sample spatial neighborhoods. The
+    /// integer diffusion is a bounded simulation for sampling and mechanism prioritisation; it
+    /// never treats geometry as biological proof or dispatches an assay.
+    fn glioma_spatial_state_propagation(&self, arguments: &Value) -> Result<Value, String> {
+        let request: SpatialPropagationRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_spatial_state_propagation requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma spatial-propagation request: {error}"))?;
+        let cells: Vec<SpatialCell> = serde_json::from_value(
+            arguments
+                .get("cells")
+                .cloned()
+                .ok_or_else(|| "glioma_spatial_state_propagation requires cells".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma spatial-propagation cells: {error}"))?;
+        let output = analyze_glioma_spatial_state_propagation(&request, &cells)
+            .map_err(|error| format!("glioma spatial-state propagation refused: {error}"))?;
+        serde_json::to_value(json!({
+            "analysis": output,
+            "dispatch": "not_started",
+            "guarantees": [
+                "same-sample neighborhood edges and integer diffusion are deterministic and replayable",
+                "self-retention, neighbor coupling, cross-lineage attenuation, radius, and step bounds are explicit",
+                "isolated cells, non-convergence, and no-neighborhood null results remain visible",
+                "the route is a local preclinical spatial simulation and never executes biology or makes a clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma spatial-state propagation: {error}"))
+    }
+
+    /// Register institution-local glioma spatial samples into a declared reference frame using
+    /// lineage landmarks; no raw image payload or clinical interpretation leaves the process.
+    fn glioma_spatial_registration(&self, arguments: &Value) -> Result<Value, String> {
+        let request: SpatialRegistrationRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_spatial_registration requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma spatial-registration request: {error}"))?;
+        let cells: Vec<SpatialRegistrationCell> = serde_json::from_value(
+            arguments
+                .get("cells")
+                .cloned()
+                .ok_or_else(|| "glioma_spatial_registration requires cells".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma spatial-registration cells: {error}"))?;
+        let output = register_glioma_spatial_samples(&request, &cells)
+            .map_err(|error| format!("glioma spatial registration refused: {error}"))?;
+        serde_json::to_value(json!({
+            "analysis": output,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "transforms are estimated only from repeated typed lineage landmarks in local preclinical samples",
+                "shared-lineage coverage, residuals, missing landmarks, and unregistered cells remain explicit",
+                "rotation and shear are not silently inferred; downstream consumers receive the declared uncertainty",
+                "the route aligns coordinates for research analysis only and never makes a clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma spatial-registration analysis: {error}"))
+    }
+
+    /// Quantify the declared hidden-confounding budget at which a local preclinical effect tips.
+    fn glioma_causal_sensitivity(&self, arguments: &Value) -> Result<Value, String> {
+        let request: SensitivityRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_causal_sensitivity requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma causal-sensitivity request: {error}"))?;
+        let observations: Vec<SensitivityObservation> = serde_json::from_value(
+            arguments
+                .get("observations")
+                .cloned()
+                .ok_or_else(|| "glioma_causal_sensitivity requires observations".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma causal-sensitivity observations: {error}"))?;
+        let output = analyze_causal_sensitivity(&request, &observations)
+            .map_err(|error| format!("glioma causal-sensitivity analysis refused: {error}"))?;
+        serde_json::to_value(json!({
+            "analysis": output,
+            "dispatch": "not_started",
+            "guarantees": [
+                "declared confounder strength is swept with deterministic worst-case effect intervals",
+                "the exact threshold tipping point and maximum robust strength remain visible",
+                "leave-one-unit-out instability is reported rather than hidden",
+                "the route produces local preclinical interpretation only and never makes a clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma causal-sensitivity analysis: {error}"))
+    }
+
+    /// Choose a bounded next batch of local glioma actions. This only ranks typed candidates; it
+    /// does not execute assays, contact instruments, move data, or claim scientific results.
+    fn glioma_research_select_actions(&self, arguments: &Value) -> Result<Value, String> {
+        let candidates_value = arguments
+            .get("candidates")
+            .cloned()
+            .ok_or_else(|| "glioma_research_select_actions requires candidates".to_string())?;
+        let candidates: Vec<GliomaActionCandidate> = serde_json::from_value(candidates_value)
+            .map_err(|error| format!("invalid glioma action candidates: {error}"))?;
+        let completed = arguments
+            .get("completed_actions")
+            .cloned()
+            .unwrap_or_else(|| Value::Array(Vec::new()));
+        let completed: BTreeSet<String> = serde_json::from_value(completed)
+            .map_err(|error| format!("invalid completed_actions: {error}"))?;
+        let config = arguments
+            .get("config")
+            .cloned()
+            .map(|value| {
+                serde_json::from_value(value)
+                    .map_err(|error| format!("invalid glioma selection config: {error}"))
+            })
+            .transpose()?
+            .unwrap_or_default();
+        let selection = select_glioma_actions(&candidates, &completed, &config)
+            .map_err(|error| format!("glioma action selection refused: {error}"))?;
+        serde_json::to_value(selection)
+            .map_err(|error| format!("cannot encode glioma action selection: {error}"))
+    }
+
+    /// Return the folder-owned glioma program and feature catalog used by local orchestration.
+    fn glioma_program_catalog(&self, _arguments: &Value) -> Result<Value, String> {
+        let programs = glioma_program_catalog();
+        let features = generate_feature_catalog();
+        validate_feature_catalog(&features)
+            .map_err(|error| format!("glioma program catalog is invalid: {error}"))?;
+        serde_json::to_value(json!({
+            "programs": programs,
+            "features": features,
+            "program_count": 12,
+            "features_per_program": 32,
+            "feature_count": 384,
+            "organization_root": "crates/research/src/glioma/programs",
+        }))
+        .map_err(|error| format!("cannot encode glioma program catalog: {error}"))
+    }
+
+    fn glioma_evidence_qualify(&self, arguments: &Value) -> Result<Value, String> {
+        let request: EvidenceRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_evidence_qualify requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma evidence request: {error}"))?;
+        let records: Vec<EvidenceRecord> = serde_json::from_value(
+            arguments
+                .get("records")
+                .cloned()
+                .ok_or_else(|| "glioma_evidence_qualify requires records".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma evidence records: {error}"))?;
+        let output = qualify_evidence(&request, &records)
+            .map_err(|error| format!("glioma evidence qualification refused: {error}"))?;
+        serde_json::to_value(output)
+            .map_err(|error| format!("cannot encode glioma evidence qualification: {error}"))
+    }
+
+    /// Detect changes between local evidence snapshots and compile bounded review actions for a
+    /// continuing glioma research campaign. No external retrieval or source movement occurs.
+    fn glioma_evidence_surveillance(&self, arguments: &Value) -> Result<Value, String> {
+        let request: EvidenceSurveillanceRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_evidence_surveillance requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma evidence surveillance request: {error}"))?;
+        let previous: Vec<EvidenceRecord> = serde_json::from_value(
+            arguments
+                .get("previous")
+                .cloned()
+                .ok_or_else(|| "glioma_evidence_surveillance requires previous".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma previous evidence snapshot: {error}"))?;
+        let current: Vec<EvidenceRecord> = serde_json::from_value(
+            arguments
+                .get("current")
+                .cloned()
+                .ok_or_else(|| "glioma_evidence_surveillance requires current".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma current evidence snapshot: {error}"))?;
+        let output = surveil_glioma_evidence(&request, &previous, &current)
+            .map_err(|error| format!("glioma evidence surveillance refused: {error}"))?;
+        serde_json::to_value(json!({
+            "surveillance": output,
+            "dispatch": "not_started",
+            "guarantees": [
+                "additions, removals, state transitions, score shifts, and scope changes are detected deterministically",
+                "contradictory, negative, stale, unknown, and removed evidence produce explicit review actions",
+                "required modality/model coverage and snapshot omissions remain visible",
+                "the route does not fetch literature, move source bytes, infer causality, or make a clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma evidence surveillance: {error}"))
+    }
+
+    /// Rank concrete refresh, resolution, measurement, revalidation, coverage, and replication
+    /// actions for the next local glioma research cycle. This route only schedules work over a
+    /// caller-supplied snapshot; it does not fetch evidence or execute biology.
+    fn glioma_evidence_priority(&self, arguments: &Value) -> Result<Value, String> {
+        let request: EvidencePriorityRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_evidence_priority requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma evidence-priority request: {error}"))?;
+        let records: Vec<EvidenceRecord> = serde_json::from_value(
+            arguments
+                .get("records")
+                .cloned()
+                .ok_or_else(|| "glioma_evidence_priority requires records".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma evidence-priority records: {error}"))?;
+        let priority = prioritize_glioma_evidence(&request, &records)
+            .map_err(|error| format!("glioma evidence prioritization refused: {error}"))?;
+        serde_json::to_value(json!({
+            "priority": priority,
+            "dispatch": "not_started",
+            "guarantees": [
+                "recency, evidence state pressure, quality, relevance, reproducibility, and coverage debt are scored deterministically",
+                "stale, contradictory, unknown, negative, coverage-deficient, and supported records become explicit bounded actions",
+                "negative evidence and unresolved uncertainty remain visible in the plan and are never promoted",
+                "the route performs no external retrieval, source movement, biological execution, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma evidence priority: {error}"))
+    }
+
+    /// Calibrate source-family support scores against resolved local preclinical outcomes. The
+    /// route plans review work only and never fetches evidence or dispatches an assay.
+    fn glioma_evidence_calibrate(&self, arguments: &Value) -> Result<Value, String> {
+        let request: EvidenceCalibrationRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_evidence_calibrate requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma evidence-calibration request: {error}"))?;
+        let observations: Vec<EvidenceCalibrationObservation> = serde_json::from_value(
+            arguments
+                .get("observations")
+                .cloned()
+                .ok_or_else(|| "glioma_evidence_calibrate requires observations".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma evidence-calibration observations: {error}"))?;
+        let analysis = calibrate_glioma_evidence(&request, &observations)
+            .map_err(|error| format!("glioma evidence calibration refused: {error}"))?;
+        serde_json::to_value(json!({
+            "calibration": analysis,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "quality-weighted isotonic regression is deterministic and monotonic across score bins",
+                "unknown, stale, and unmeasured outcomes do not count as resolved support",
+                "under-observed and miscalibrated source families become explicit review actions",
+                "the route performs no retrieval, raw-data movement, biological execution, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma evidence calibration: {error}"))
+    }
+
+    /// Triangulate scoped glioma claims across independent source families and local artifacts.
+    /// This is a scientific synthesis route: it exposes contradiction, incomplete states, source
+    /// dominance, and next evidence actions without fetching literature or making a clinical claim.
+    fn glioma_evidence_triangulate(&self, arguments: &Value) -> Result<Value, String> {
+        let request: EvidenceTriangulationRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_evidence_triangulate requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma evidence triangulation request: {error}"))?;
+        let records: Vec<EvidenceRecord> = serde_json::from_value(
+            arguments
+                .get("records")
+                .cloned()
+                .ok_or_else(|| "glioma_evidence_triangulate requires records".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma evidence triangulation records: {error}"))?;
+        let output = triangulate_glioma_evidence(&request, &records)
+            .map_err(|error| format!("glioma evidence triangulation refused: {error}"))?;
+        serde_json::to_value(json!({
+            "triangulation": output,
+            "dispatch": "not_started",
+            "guarantees": [
+                "claim support must survive independent source-family and artifact floors",
+                "contradiction, negative, stale, unknown, and unmeasured records remain explicit",
+                "leave-one-artifact sensitivity exposes source-dominant claims before promotion",
+                "the route does not fetch literature, move raw data, infer causality, or make a clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma evidence triangulation: {error}"))
+    }
+
+    /// Compile caller-supplied local evidence into scoped, ranked preclinical glioma knowledge.
+    /// This is an analysis capability only: it does not infer causality or execute an assay.
+    fn glioma_knowledge_compile(&self, arguments: &Value) -> Result<Value, String> {
+        let request: KnowledgeRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_knowledge_compile requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma knowledge request: {error}"))?;
+        let records: Vec<EvidenceRecord> = serde_json::from_value(
+            arguments
+                .get("records")
+                .cloned()
+                .ok_or_else(|| "glioma_knowledge_compile requires records".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma knowledge records: {error}"))?;
+        let output = compile_typed_knowledge(&request, &records)
+            .map_err(|error| format!("glioma typed-knowledge compilation refused: {error}"))?;
+        serde_json::to_value(json!({
+            "knowledge": output,
+            "dispatch": "not_started",
+            "guarantees": [
+                "claims are coalesced only within their declared preclinical scope",
+                "support, negative, contradictory, stale, and unknown evidence remain addressable",
+                "required modality and model coverage is evaluated on supporting records",
+                "the result ranks research claims and never infers causality or clinical action"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma typed knowledge: {error}"))
+    }
+
+    /// Compose explicit typed-knowledge relations into auditable preclinical evidence paths.
+    /// Relation direction is caller-declared; MCP never infers causality or promotes a path into
+    /// a clinical or therapeutic conclusion.
+    fn glioma_knowledge_compose(&self, arguments: &Value) -> Result<Value, String> {
+        let request: KnowledgeCompositionRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_knowledge_compose requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma knowledge-composition request: {error}"))?;
+        let knowledge: TypedKnowledge = serde_json::from_value(
+            arguments
+                .get("knowledge")
+                .cloned()
+                .ok_or_else(|| "glioma_knowledge_compose requires knowledge".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma typed knowledge: {error}"))?;
+        let relations: Vec<KnowledgeRelation> = serde_json::from_value(
+            arguments
+                .get("relations")
+                .cloned()
+                .ok_or_else(|| "glioma_knowledge_compose requires relations".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma knowledge relations: {error}"))?;
+        let composition = compose_knowledge_graph(&request, &knowledge, &relations)
+            .map_err(|error| format!("glioma knowledge composition refused: {error}"))?;
+        serde_json::to_value(json!({
+            "composition": composition,
+            "dispatch": "not_started",
+            "guarantees": [
+                "only caller-declared supports, prerequisites, and contradictions are traversed",
+                "path strength is bounded by claim confidence and the weakest relation",
+                "contradiction, unresolved dependencies, negative evidence, and bottleneck claims remain explicit",
+                "the result is an evidence-network planning artifact, not causal identification, treatment advice, or a clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma knowledge composition: {error}"))
+    }
+
+    /// Revise an explicit preclinical claim-conflict graph into a bounded consistent portfolio.
+    /// The route never infers conflict from text and never promotes a retained claim to a
+    /// clinical or therapeutic conclusion.
+    fn glioma_belief_revision(&self, arguments: &Value) -> Result<Value, String> {
+        let request: BeliefRevisionRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_belief_revision requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma belief-revision request: {error}"))?;
+        let knowledge: TypedKnowledge = serde_json::from_value(
+            arguments
+                .get("knowledge")
+                .cloned()
+                .ok_or_else(|| "glioma_belief_revision requires knowledge".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma typed knowledge: {error}"))?;
+        let conflicts: Vec<BeliefConflict> = serde_json::from_value(
+            arguments
+                .get("conflicts")
+                .cloned()
+                .ok_or_else(|| "glioma_belief_revision requires conflicts".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma belief conflicts: {error}"))?;
+        let revision = revise_glioma_beliefs(&request, &knowledge, &conflicts)
+            .map_err(|error| format!("glioma belief revision refused: {error}"))?;
+        serde_json::to_value(json!({
+            "revision": revision,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "only explicit typed conflict edges can exclude a claim from the retained portfolio",
+                "rival, negative, unresolved, and conflict evidence remain visible for the next autonomous cycle",
+                "bounded maximal-consistency search is deterministic and replay-stable",
+                "the route performs no retrieval, assay, raw-data movement, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma belief revision: {error}"))
+    }
+
+    /// Rank the claims that should drive the next autonomous glioma research cycle. This is a
+    /// local prioritizer over typed knowledge; it does not fetch evidence or promote a claim.
+    fn glioma_knowledge_frontier(&self, arguments: &Value) -> Result<Value, String> {
+        let request: KnowledgeFrontierRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_knowledge_frontier requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma knowledge-frontier request: {error}"))?;
+        let knowledge: TypedKnowledge = serde_json::from_value(
+            arguments
+                .get("knowledge")
+                .cloned()
+                .ok_or_else(|| "glioma_knowledge_frontier requires knowledge".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma typed knowledge: {error}"))?;
+        let frontier = prioritize_knowledge_frontier(&request, &knowledge)
+            .map_err(|error| format!("glioma knowledge frontier refused: {error}"))?;
+        serde_json::to_value(json!({
+            "frontier": frontier,
+            "dispatch": "not_started",
+            "guarantees": [
+                "coverage debt, contradiction, uncertainty, support, and workflow leverage are scored deterministically",
+                "selected claim ids are suitable for the next P04 decision-context cycle",
+                "negative and unresolved evidence remain visible and no claim evidence state is upgraded",
+                "the route performs no external retrieval, biological execution, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma knowledge frontier: {error}"))
+    }
+
+    /// Turn typed glioma knowledge gaps into executable candidates for the bounded action
+    /// selector. The returned candidates are still caller-dispatched and cannot touch instruments
+    /// or export data without the selector's explicit policy gates.
+    fn glioma_decision_context(&self, arguments: &Value) -> Result<Value, String> {
+        let request: DecisionContextRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_decision_context requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma decision-context request: {error}"))?;
+        let knowledge: TypedKnowledge = serde_json::from_value(
+            arguments
+                .get("knowledge")
+                .cloned()
+                .ok_or_else(|| "glioma_decision_context requires knowledge".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma typed knowledge: {error}"))?;
+        let output = compile_decision_context(&request, &knowledge)
+            .map_err(|error| format!("glioma decision-context compilation refused: {error}"))?;
+        serde_json::to_value(json!({
+            "context": output,
+            "dispatch": "not_started",
+            "guarantees": [
+                "each action is a typed candidate consumable by glioma_research_select_actions",
+                "missing coverage, contradictions, negative results, and unknown evidence receive distinct actions",
+                "all candidates are local A1 computation and remain subject to downstream budget and policy gates",
+                "no action is executed and no clinical decision is produced"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma decision context: {error}"))
+    }
+
+    /// Compile composed knowledge paths into dependency-closed, parallelizable decision actions.
+    /// This remains a planning surface; the downstream selector and local executor retain policy
+    /// authority for every effect.
+    fn glioma_decision_action_graph(&self, arguments: &Value) -> Result<Value, String> {
+        let request: DecisionActionGraphRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_decision_action_graph requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma decision-action graph request: {error}"))?;
+        let context: DecisionContext = serde_json::from_value(
+            arguments
+                .get("context")
+                .cloned()
+                .ok_or_else(|| "glioma_decision_action_graph requires context".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma decision context: {error}"))?;
+        let composition: bioprism_research::KnowledgeComposition = serde_json::from_value(
+            arguments
+                .get("composition")
+                .cloned()
+                .ok_or_else(|| "glioma_decision_action_graph requires composition".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma knowledge composition: {error}"))?;
+        let graph = compile_decision_action_graph(&request, &context, &composition)
+            .map_err(|error| format!("glioma decision-action graph refused: {error}"))?;
+        serde_json::to_value(json!({
+            "graph": graph,
+            "dispatch": "not_started",
+            "guarantees": [
+                "explicit claim paths become dependency-closed action candidates with deterministic topological order",
+                "independent branches are grouped into bounded parallel waves and critical-path cost is reported",
+                "missing claims, unresolved paths, negative evidence, and budget blocks remain visible",
+                "the route performs no assay, instrument effect, federation export, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma decision-action graph: {error}"))
+    }
+
+    /// Plan robust, dependency-closed alternatives across explicit preclinical scenarios. The
+    /// branch planner compares portfolios only; the caller-owned selector or executor retains
+    /// authority for every assay, instrument, computation, and federation effect.
+    fn glioma_decision_branch_plan(&self, arguments: &Value) -> Result<Value, String> {
+        let request: DecisionBranchPlannerRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_decision_branch_plan requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma decision branch request: {error}"))?;
+        let context: DecisionContext = serde_json::from_value(
+            arguments
+                .get("context")
+                .cloned()
+                .ok_or_else(|| "glioma_decision_branch_plan requires context".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma decision context: {error}"))?;
+        let plan = plan_glioma_decision_branches(&request, &context)
+            .map_err(|error| format!("glioma decision branch planning refused: {error}"))?;
+        serde_json::to_value(json!({
+            "plan": plan,
+            "dispatch": "not_started",
+            "guarantees": [
+                "candidate portfolios are dependency-closed and bounded by action, cost, beam, and branch limits",
+                "expected value, worst-case value, uncertainty, failure risk, and Pareto frontier remain explicit across declared scenarios",
+                "missing or negative scenario outcomes never become confident evidence and remain visible as unresolved or negative findings",
+                "the route performs no assay, instrument, computation, federation, or clinical action"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma decision branch plan: {error}"))
+    }
+
+    /// Select the next executable portfolio from a compiled glioma decision context. This keeps
+    /// evidence compilation and action selection composable while preserving a planning-only MCP
+    /// boundary; the returned ids can be submitted to a caller-owned local executor.
+    fn glioma_decision_action_plan(&self, arguments: &Value) -> Result<Value, String> {
+        let request: DecisionActionPlanRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_decision_action_plan requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma decision-action request: {error}"))?;
+        let context: DecisionContext = serde_json::from_value(
+            arguments
+                .get("context")
+                .cloned()
+                .ok_or_else(|| "glioma_decision_action_plan requires context".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma decision context: {error}"))?;
+        let plan = plan_decision_actions(&request, &context)
+            .map_err(|error| format!("glioma decision-action planning refused: {error}"))?;
+        serde_json::to_value(json!({
+            "plan": plan,
+            "dispatch": "not_started",
+            "guarantees": [
+                "compiled evidence gaps are selected with the dependency-aware glioma portfolio policy",
+                "completed actions are never selected again and budget or policy holds remain explicit",
+                "the selected_order can be handed to glioma_action_portfolio_execute or a caller-owned worker",
+                "this route performs no assay, instrument, federation, or clinical action"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma decision-action plan: {error}"))
+    }
+
+    fn glioma_multimodal_qc(&self, arguments: &Value) -> Result<Value, String> {
+        let request: MultimodalRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_multimodal_qc requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma multimodal request: {error}"))?;
+        let observations: Vec<MultimodalObservation> = serde_json::from_value(
+            arguments
+                .get("observations")
+                .cloned()
+                .ok_or_else(|| "glioma_multimodal_qc requires observations".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma multimodal observations: {error}"))?;
+        let output = harmonize_multimodal_inputs(&request, &observations)
+            .map_err(|error| format!("glioma multimodal QC refused: {error}"))?;
+        serde_json::to_value(output)
+            .map_err(|error| format!("cannot encode glioma multimodal QC: {error}"))
+    }
+
+    fn glioma_mechanism_explore(&self, arguments: &Value) -> Result<Value, String> {
+        let request: MechanismRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_mechanism_explore requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma mechanism request: {error}"))?;
+        let candidates: Vec<MechanismCandidate> = serde_json::from_value(
+            arguments
+                .get("candidates")
+                .cloned()
+                .ok_or_else(|| "glioma_mechanism_explore requires candidates".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma mechanism candidates: {error}"))?;
+        let output = explore_mechanisms(&request, &candidates)
+            .map_err(|error| format!("glioma mechanism exploration refused: {error}"))?;
+        serde_json::to_value(output)
+            .map_err(|error| format!("cannot encode glioma mechanism portfolio: {error}"))
+    }
+
+    /// Simulate signed delayed mechanism feedback for a local preclinical glioma model. The
+    /// result is a bounded scientific trajectory and intervention-sensitivity plan; it never
+    /// treats the model as observed biology or selects a clinical treatment.
+    fn glioma_mechanism_dynamics(&self, arguments: &Value) -> Result<Value, String> {
+        let request: MechanismDynamicsRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_mechanism_dynamics requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma mechanism-dynamics request: {error}"))?;
+        let nodes: Vec<MechanismDynamicsNode> = serde_json::from_value(
+            arguments
+                .get("nodes")
+                .cloned()
+                .ok_or_else(|| "glioma_mechanism_dynamics requires nodes".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma mechanism-dynamics nodes: {error}"))?;
+        let edges: Vec<MechanismDynamicsEdge> = serde_json::from_value(
+            arguments
+                .get("edges")
+                .cloned()
+                .ok_or_else(|| "glioma_mechanism_dynamics requires edges".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma mechanism-dynamics edges: {error}"))?;
+        let interventions: Vec<MechanismDynamicsIntervention> = serde_json::from_value(
+            arguments
+                .get("interventions")
+                .cloned()
+                .unwrap_or_else(|| json!([])),
+        )
+        .map_err(|error| format!("invalid glioma mechanism-dynamics interventions: {error}"))?;
+        let plan = simulate_glioma_mechanism_dynamics(&request, &nodes, &edges, &interventions)
+            .map_err(|error| format!("glioma mechanism dynamics refused: {error}"))?;
+        serde_json::to_value(json!({
+            "plan": plan,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "signed delayed feedback is evaluated with bounded fixed-point arithmetic",
+                "stability, oscillation, divergence, risk, and budget states remain explicit",
+                "intervention sensitivity is leave-one-out model sensitivity, not observed efficacy",
+                "the route never dispatches an assay or makes a clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma mechanism-dynamics plan: {error}"))
+    }
+
+    /// Score competing mechanistic predictions against local observations and rank the next
+    /// assay by expected information gain. This is a bounded planning computation: it does not
+    /// execute an assay or infer a clinical action.
+    fn glioma_mechanism_discriminate(&self, arguments: &Value) -> Result<Value, String> {
+        let request: MechanismDiscriminationRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_mechanism_discriminate requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma mechanism discrimination request: {error}"))?;
+        let hypotheses: Vec<MechanismHypothesis> = serde_json::from_value(
+            arguments
+                .get("hypotheses")
+                .cloned()
+                .ok_or_else(|| "glioma_mechanism_discriminate requires hypotheses".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma mechanism hypotheses: {error}"))?;
+        let observations: Vec<MechanismFeatureObservation> =
+            serde_json::from_value(arguments.get("observations").cloned().ok_or_else(|| {
+                "glioma_mechanism_discriminate requires observations".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma mechanism observations: {error}"))?;
+        let actions: Vec<MechanismDiscriminatorAction> = serde_json::from_value(
+            arguments
+                .get("actions")
+                .cloned()
+                .ok_or_else(|| "glioma_mechanism_discriminate requires actions".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma discriminator actions: {error}"))?;
+        let output = discriminate_mechanisms(&request, &hypotheses, &observations, &actions)
+            .map_err(|error| format!("glioma mechanism discrimination refused: {error}"))?;
+        serde_json::to_value(json!({
+            "discrimination": output,
+            "dispatch": "not_started",
+            "guarantees": [
+                "mechanism fit uses bounded residual likelihood with explicit feature coverage",
+                "action ranking uses posterior-weighted pairwise prediction separation, feasibility, and cost",
+                "missing observations, diffuse posteriors, and information-poor actions remain explicit",
+                "the route plans a preclinical assay and never executes instruments or makes a clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma mechanism discrimination: {error}"))
+    }
+
+    /// Calibrate mechanism probabilities against future local observations using deterministic
+    /// reliability bins and a prequential holdout. This route evaluates value-only artifacts; it
+    /// never refits a model, executes an assay, or turns calibration into a causal claim.
+    fn glioma_mechanism_calibrate(&self, arguments: &Value) -> Result<Value, String> {
+        let request: MechanismCalibrationRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_mechanism_calibrate requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma mechanism calibration request: {error}"))?;
+        let observations: Vec<MechanismCalibrationObservation> = serde_json::from_value(
+            arguments
+                .get("observations")
+                .cloned()
+                .ok_or_else(|| "glioma_mechanism_calibrate requires observations".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma mechanism calibration observations: {error}"))?;
+        let calibration: MechanismCalibration =
+            calibrate_glioma_mechanisms(&request, &observations)
+                .map_err(|error| format!("glioma mechanism calibration refused: {error}"))?;
+        serde_json::to_value(json!({
+            "calibration": calibration,
+            "dispatch": "not_started",
+            "guarantees": [
+                "scores are computed from typed local value-only observations with fixed reliability bins",
+                "the final observed round is reported as a prequential holdout and is never imputed",
+                "calibration error, Brier loss, negative discordance, and underpowered mechanisms remain explicit",
+                "the route does not refit a model, execute an assay, move raw data, or make a clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma mechanism calibration: {error}"))
+    }
+
+    /// Compile discriminator information gain into executable local action candidates for the
+    /// autonomous campaign controller. This route plans only; it never dispatches an assay.
+    fn glioma_mechanism_action_plan(&self, arguments: &Value) -> Result<Value, String> {
+        let discrimination: MechanismDiscrimination =
+            serde_json::from_value(arguments.get("discrimination").cloned().ok_or_else(|| {
+                "glioma_mechanism_action_plan requires discrimination".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma mechanism discrimination: {error}"))?;
+        let config: MechanismActionPlannerConfig = serde_json::from_value(
+            arguments
+                .get("config")
+                .cloned()
+                .ok_or_else(|| "glioma_mechanism_action_plan requires config".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma mechanism action planner config: {error}"))?;
+        let plan = compile_mechanism_action_plan(&discrimination, &config)
+            .map_err(|error| format!("glioma mechanism action planning refused: {error}"))?;
+        serde_json::to_value(json!({
+            "plan": plan,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "residual-likelihood information gain is compiled into typed A1 local candidates",
+                "ranking accounts for information per cost, feasibility, measurement uncertainty, and mechanism-unlock value",
+                "source uncertainty and negative evidence remain attached to the plan",
+                "the route does not invent observations, execute assays, or make a clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma mechanism action plan: {error}"))
+    }
+
+    /// Compile a finite-horizon, model-uncertainty-aware mechanism policy. This is a planner;
+    /// it does not treat posterior mass as causal truth or dispatch an assay.
+    fn glioma_adaptive_mechanism_policy(&self, arguments: &Value) -> Result<Value, String> {
+        let request: AdaptiveMechanismPolicyRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_adaptive_mechanism_policy requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma adaptive mechanism policy request: {error}"))?;
+        let policy = plan_glioma_adaptive_mechanism_policy(&request)
+            .map_err(|error| format!("glioma adaptive mechanism policy refused: {error}"))?;
+        serde_json::to_value(json!({
+            "policy": policy,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "posterior updates use bounded integer likelihoods from returned local observations",
+                "action scores combine Gini information gain, expected effect, lower-tail robustness, feasibility, risk, cost, and redundancy",
+                "beam selection is finite-horizon and budget bounded; no inferred estimate is emitted as an observation",
+                "the route plans preclinical assays only and never makes a causal, clinical, or treatment decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma adaptive mechanism policy: {error}"))
+    }
+
+    /// Execute the adaptive mechanism policy through a deterministic sandbox worker. Production
+    /// institutions call the research-crate executor seam with their own local assay gateway.
+    fn glioma_adaptive_mechanism_campaign_execute(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: AdaptiveMechanismCampaignRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_adaptive_mechanism_campaign_execute requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma adaptive mechanism campaign request: {error}")
+            })?;
+        let mut executor = DryRunAdaptiveMechanismPolicyExecutor;
+        let campaign = execute_glioma_adaptive_mechanism_campaign(&request, &mut executor)
+            .map_err(|error| format!("glioma adaptive mechanism campaign refused: {error}"))?;
+        serde_json::to_value(json!({
+            "campaign": campaign,
+            "dispatch": "dry_run",
+            "simulation_only": true,
+            "guarantees": [
+                "each round replans from the returned typed observation and never promotes synthetic output to biological evidence",
+                "finite-horizon posterior, information, robustness, feasibility, retry, budget, and convergence gates remain explicit",
+                "duplicate action observations, invalid artifacts, worker failure, and no-progress states fail closed",
+                "the MCP route performs no instrument execution, clinical decision, or raw-data movement"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma adaptive mechanism campaign: {error}"))
+    }
+
+    /// Execute a bounded mechanism-discrimination loop through a local feature-measurement adapter.
+    fn glioma_mechanism_discrimination_campaign_execute(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: MechanismDiscriminationCampaignRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_mechanism_discrimination_campaign_execute requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma mechanism discrimination campaign request: {error}")
+            })?;
+        let mut executor = DryRunMechanismDiscriminationCampaignExecutor;
+        let campaign = execute_glioma_mechanism_discrimination_campaign(&request, &mut executor)
+            .map_err(|error| {
+                format!("glioma mechanism discrimination campaign refused: {error}")
+            })?;
+        serde_json::to_value(json!({
+            "campaign": campaign,
+            "dispatch": "dry_run",
+            "simulation_only": true,
+            "guarantees": [
+                "the next feature is selected from posterior-weighted information gain and recomputed after every returned observation",
+                "feature observations are claim-scoped, local-only, artifact-validated, and never synthesized into clinical or causal conclusions",
+                "diffuse mechanisms, missing features, negative evidence, retries, budget, no-progress, and executor failure remain explicit",
+                "the route performs no instrument effect or raw-data movement; production adapters remain institution-local"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma mechanism discrimination campaign: {error}"))
+    }
+
+    /// Propagate signed mechanistic support over a local preclinical glioma evidence graph. This
+    /// is a bounded fixed-point calculation only; it never executes an assay or makes a clinical
+    /// decision.
+    fn glioma_mechanism_graph_propagate(&self, arguments: &Value) -> Result<Value, String> {
+        let request: MechanismGraphRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_mechanism_graph_propagate requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma mechanism graph request: {error}"))?;
+        let nodes: Vec<MechanismGraphNode> = serde_json::from_value(
+            arguments
+                .get("nodes")
+                .cloned()
+                .ok_or_else(|| "glioma_mechanism_graph_propagate requires nodes".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma mechanism graph nodes: {error}"))?;
+        let edges: Vec<MechanismGraphEdge> = serde_json::from_value(
+            arguments
+                .get("edges")
+                .cloned()
+                .ok_or_else(|| "glioma_mechanism_graph_propagate requires edges".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma mechanism graph edges: {error}"))?;
+        let output = propagate_glioma_mechanism_graph(&request, &nodes, &edges)
+            .map_err(|error| format!("glioma mechanism graph propagation refused: {error}"))?;
+        serde_json::to_value(json!({
+            "propagation": output,
+            "dispatch": "not_started",
+            "guarantees": [
+                "activating and inhibiting edges propagate signed support with bounded fixed-point arithmetic",
+                "low-confidence edges, disconnected nodes, contradiction, and non-convergence remain visible",
+                "ranking is deterministic and top-k bounded without turning scores into claims of truth",
+                "the route produces local preclinical mechanism priorities only and never makes a clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma mechanism graph propagation: {error}"))
+    }
+
+    /// Compare a mathematical mechanism-network baseline with signed node perturbations. The
+    /// result prioritizes assays and never represents a causal estimate or clinical advice.
+    fn glioma_mechanism_counterfactual(&self, arguments: &Value) -> Result<Value, String> {
+        let request: CounterfactualRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_mechanism_counterfactual requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma mechanism counterfactual request: {error}"))?;
+        let nodes: Vec<MechanismGraphNode> = serde_json::from_value(
+            arguments
+                .get("nodes")
+                .cloned()
+                .ok_or_else(|| "glioma_mechanism_counterfactual requires nodes".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma mechanism counterfactual nodes: {error}"))?;
+        let edges: Vec<MechanismGraphEdge> = serde_json::from_value(
+            arguments
+                .get("edges")
+                .cloned()
+                .ok_or_else(|| "glioma_mechanism_counterfactual requires edges".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma mechanism counterfactual edges: {error}"))?;
+        let interventions: Vec<CounterfactualIntervention> =
+            serde_json::from_value(arguments.get("interventions").cloned().ok_or_else(|| {
+                "glioma_mechanism_counterfactual requires interventions".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma mechanism counterfactual interventions: {error}")
+            })?;
+        let output = simulate_glioma_counterfactual(&request, &nodes, &edges, &interventions)
+            .map_err(|error| format!("glioma mechanism counterfactual refused: {error}"))?;
+        serde_json::to_value(json!({
+            "counterfactual": output,
+            "dispatch": "not_started",
+            "guarantees": [
+                "baseline and intervention fixed points use bounded signed propagation with convergence gates",
+                "activating and inhibiting effects, low-confidence edges, and unresolved non-convergence remain explicit",
+                "target ranking is a mathematical assay-prioritization artifact and not a causal or clinical conclusion",
+                "the route never executes a perturbation or moves raw preclinical data"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma mechanism counterfactual: {error}"))
+    }
+
+    /// Run the same signed mechanism perturbation across multiple local models and expose only
+    /// targets that survive an explicit model-agreement gate. This route never executes biology.
+    fn glioma_mechanism_ensemble_counterfactual(&self, arguments: &Value) -> Result<Value, String> {
+        let request: CounterfactualEnsembleRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_mechanism_ensemble_counterfactual requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma mechanism ensemble request: {error}"))?;
+        let models: Vec<CounterfactualModel> =
+            serde_json::from_value(arguments.get("models").cloned().ok_or_else(|| {
+                "glioma_mechanism_ensemble_counterfactual requires models".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma mechanism ensemble models: {error}"))?;
+        let interventions: Vec<CounterfactualIntervention> =
+            serde_json::from_value(arguments.get("interventions").cloned().ok_or_else(|| {
+                "glioma_mechanism_ensemble_counterfactual requires interventions".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma mechanism ensemble interventions: {error}"))?;
+        let output = simulate_glioma_counterfactual_ensemble(&request, &models, &interventions)
+            .map_err(|error| {
+                format!("glioma mechanism ensemble counterfactual refused: {error}")
+            })?;
+        serde_json::to_value(json!({
+            "ensemble": output,
+            "dispatch": "not_started",
+            "guarantees": [
+                "effects are model-prior weighted and each model simulation remains inspectable",
+                "target direction is unresolved below the declared model-agreement floor",
+                "model averaging is an assay-prioritization artifact and not a causal or clinical conclusion",
+                "the route never executes a perturbation or moves raw preclinical data"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma mechanism ensemble counterfactual: {error}"))
+    }
+
+    /// Compile a robust, risk-aware intervention portfolio across local mechanistic models. The
+    /// route performs no biological dispatch; an institution-local executor must separately
+    /// authorize and run any selected assay.
+    fn glioma_robust_intervention_portfolio(&self, arguments: &Value) -> Result<Value, String> {
+        let request: RobustInterventionRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_robust_intervention_portfolio requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma robust portfolio request: {error}"))?;
+        let models: Vec<CounterfactualModel> =
+            serde_json::from_value(arguments.get("models").cloned().ok_or_else(|| {
+                "glioma_robust_intervention_portfolio requires models".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma robust portfolio models: {error}"))?;
+        let candidates: Vec<RobustInterventionCandidate> =
+            serde_json::from_value(arguments.get("candidates").cloned().ok_or_else(|| {
+                "glioma_robust_intervention_portfolio requires candidates".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma robust portfolio candidates: {error}"))?;
+        let output = plan_glioma_robust_intervention_portfolio(&request, &models, &candidates)
+            .map_err(|error| format!("glioma robust intervention portfolio refused: {error}"))?;
+        serde_json::to_value(json!({
+            "portfolio": output,
+            "dispatch": "not_started",
+            "guarantees": [
+                "each candidate is simulated independently across the declared local model ensemble",
+                "selection uses prior-weighted expected, lower-tail, worst-case, feasibility, risk, cost, and redundancy gates",
+                "model disagreement, risk blocks, budget deferrals, and unresolved effects remain explicit",
+                "the route only compiles a preclinical assay portfolio and never executes biology or makes a clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma robust intervention portfolio: {error}"))
+    }
+
+    /// Select a bounded local glioma assay batch by expected reduction in mechanism uncertainty.
+    /// The route is an information-design planner only: it does not execute biology, dispatch
+    /// instruments, or turn a model declaration into a clinical conclusion.
+    fn glioma_information_design(&self, arguments: &Value) -> Result<Value, String> {
+        let request: InformationDesignRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_information_design requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma information-design request: {error}"))?;
+        let mechanisms: Vec<DesignMechanism> = serde_json::from_value(
+            arguments
+                .get("mechanisms")
+                .cloned()
+                .ok_or_else(|| "glioma_information_design requires mechanisms".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma information-design mechanisms: {error}"))?;
+        let actions: Vec<DesignAction> = serde_json::from_value(
+            arguments
+                .get("actions")
+                .cloned()
+                .ok_or_else(|| "glioma_information_design requires actions".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma information-design actions: {error}"))?;
+        let output = plan_glioma_information_design(&request, &mechanisms, &actions)
+            .map_err(|error| format!("glioma information design refused: {error}"))?;
+        serde_json::to_value(json!({
+            "design": output,
+            "dispatch": "not_started",
+            "guarantees": [
+                "information gain is integer-only expected Gini reduction over caller-declared outcome distributions",
+                "selection is bounded by feasibility, risk, cost, budget, and replicate limits",
+                "the plan keeps unresolved and risk-blocked assays explicit for researcher review",
+                "the route prioritizes local preclinical assays but never executes biology or makes a clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma information design: {error}"))
+    }
+
+    /// Replan a local adaptive glioma assay campaign from categorical outcomes already returned
+    /// by an institution-local executor. This is a planning endpoint; physical execution remains
+    /// behind the typed Rust executor seam and is never performed by MCP.
+    fn glioma_adaptive_information_campaign(&self, arguments: &Value) -> Result<Value, String> {
+        let request: AdaptiveInformationCampaignRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_adaptive_information_campaign requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma adaptive campaign request: {error}"))?;
+        let mechanisms: Vec<DesignMechanism> =
+            serde_json::from_value(arguments.get("mechanisms").cloned().ok_or_else(|| {
+                "glioma_adaptive_information_campaign requires mechanisms".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma adaptive campaign mechanisms: {error}"))?;
+        let actions: Vec<DesignAction> =
+            serde_json::from_value(arguments.get("actions").cloned().ok_or_else(|| {
+                "glioma_adaptive_information_campaign requires actions".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma adaptive campaign actions: {error}"))?;
+        let observations: Vec<AdaptiveInformationObservation> = arguments
+            .get("observations")
+            .cloned()
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(|error| format!("invalid glioma adaptive campaign observations: {error}"))?
+            .unwrap_or_default();
+        let output = plan_glioma_adaptive_information_campaign(
+            &request,
+            &mechanisms,
+            &actions,
+            &observations,
+        )
+        .map_err(|error| format!("glioma adaptive information campaign refused: {error}"))?;
+        serde_json::to_value(json!({
+            "campaign": output,
+            "dispatch": "not_started",
+            "guarantees": [
+                "each returned categorical outcome is applied with integer Bayes normalization and explicit zero-likelihood refusal",
+                "every replan respects declared replicate, risk, feasibility, cost, and budget ceilings",
+                "posterior concentration, exhausted assays, unresolved information, and negative evidence remain visible",
+                "MCP only compiles the next local preclinical batch; an institution-owned executor must authorize and run any assay"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma adaptive information campaign: {error}"))
+    }
+
+    /// Execute a bounded adaptive replicate-allocation campaign through the deterministic local
+    /// sandbox. Each accepted aggregate batch updates the Beta posterior before the next arm is
+    /// selected; MCP never contacts hardware or makes a clinical decision.
+    fn glioma_adaptive_allocation_campaign_execute(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: AdaptiveAllocationCampaignRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_adaptive_allocation_campaign_execute requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma adaptive-allocation campaign request: {error}")
+            })?;
+        let mut executor = DryRunAdaptiveAllocationCampaignExecutor;
+        let campaign = execute_glioma_adaptive_allocation_campaign(&request, &mut executor)
+            .map_err(|error| format!("glioma adaptive-allocation campaign refused: {error}"))?;
+        serde_json::to_value(json!({
+            "campaign": campaign,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "each arm batch is selected from the posterior-aware allocator and replanned after the returned successes/failures",
+                "aggregate observations are arm-bound, local-only, artifact-validated, and require exact replicate accounting",
+                "underpowered, negative, risk-blocked, budget, retry, no-progress, and executor-failure states remain explicit",
+                "MCP never contacts hardware, moves raw biology, or makes a clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma adaptive-allocation campaign: {error}"))
+    }
+
+    /// Select the next local preclinical glioma assay with an uncertainty-aware kernel surrogate.
+    /// The optimizer is deterministic and bounded; it only compiles a next batch and never
+    /// dispatches biology or turns a surrogate estimate into a clinical recommendation.
+    fn glioma_active_learning(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ActiveLearningRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_active_learning requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma active-learning request: {error}"))?;
+        let candidates: Vec<ActiveLearningCandidate> = serde_json::from_value(
+            arguments
+                .get("candidates")
+                .cloned()
+                .ok_or_else(|| "glioma_active_learning requires candidates".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma active-learning candidates: {error}"))?;
+        let observations: Vec<ActiveLearningObservation> = arguments
+            .get("observations")
+            .cloned()
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(|error| format!("invalid glioma active-learning observations: {error}"))?
+            .unwrap_or_default();
+        let plan = plan_glioma_active_learning(&request, &candidates, &observations)
+            .map_err(|error| format!("glioma active-learning refused: {error}"))?;
+        serde_json::to_value(json!({
+            "plan": plan,
+            "dispatch": "not_started",
+            "guarantees": [
+                "same-candidate and nearby-candidate observations are combined with an integer inverse-distance kernel",
+                "contradictory or sparse support widens uncertainty instead of being averaged into confidence",
+                "selection respects cost, risk, replicate, budget, and redundancy-group limits with explicit blocked/deferred states",
+                "MCP compiles a local next batch only; an institution-owned executor must authorize and run any assay"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma active-learning plan: {error}"))
+    }
+
+    /// Execute a bounded active-learning campaign through the deterministic local sandbox
+    /// executor. A deployment may replace that executor with an institution-owned gateway;
+    /// this MCP route never contacts instruments or moves raw biology.
+    fn glioma_active_learning_campaign_execute(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ActiveLearningCampaignRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_active_learning_campaign_execute requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma active-learning campaign request: {error}"))?;
+        let mut executor = DryRunActiveLearningCampaignExecutor;
+        let campaign = execute_glioma_active_learning_campaign(&request, &mut executor)
+            .map_err(|error| format!("glioma active-learning campaign refused: {error}"))?;
+        serde_json::to_value(json!({
+            "campaign": campaign,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "each selected assay is executed only by the caller-owned deterministic sandbox executor",
+                "returned observations are candidate-bound, content-addressed, and used for the next replan",
+                "retry, budget, replicate, risk, redundancy, unresolved, and executor-failure gates are explicit",
+                "MCP never contacts hardware, moves raw data, or makes a clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma active-learning campaign: {error}"))
+    }
+
+    /// Score the next local assay across competing mechanistic surrogates. This route compiles a
+    /// conservative batch only; it never dispatches biology or converts model disagreement into a
+    /// clinical conclusion.
+    fn glioma_robust_active_learning(&self, arguments: &Value) -> Result<Value, String> {
+        let request: RobustActiveLearningRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_robust_active_learning requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma robust active-learning request: {error}"))?;
+        let candidates: Vec<RobustActiveLearningCandidate> = serde_json::from_value(
+            arguments
+                .get("candidates")
+                .cloned()
+                .ok_or_else(|| "glioma_robust_active_learning requires candidates".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma robust active-learning candidates: {error}"))?;
+        let observations: Vec<RobustActiveLearningObservation> = arguments
+            .get("observations")
+            .cloned()
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(|error| {
+                format!("invalid glioma robust active-learning observations: {error}")
+            })?
+            .unwrap_or_default();
+        let plan = plan_glioma_robust_active_learning(&request, &candidates, &observations)
+            .map_err(|error| format!("glioma robust active-learning refused: {error}"))?;
+        serde_json::to_value(json!({
+            "plan": plan,
+            "dispatch": "not_started",
+            "guarantees": [
+                "competing mechanistic surrogates are reliability- and prior-weighted without collapsing disagreement",
+                "lower-tail acquisition retains residual uncertainty and contradiction as explicit gates",
+                "selection respects risk, replicate, budget, model-support, and redundancy limits",
+                "MCP compiles a local next batch only; an institution-owned executor must authorize and run any assay"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma robust active-learning plan: {error}"))
+    }
+
+    /// Execute repeated robust ensemble-guided assay rounds in the deterministic local sandbox.
+    fn glioma_robust_active_learning_campaign_execute(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: RobustActiveLearningCampaignRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_robust_active_learning_campaign_execute requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid robust active-learning campaign request: {error}"))?;
+        let mut executor = DryRunRobustActiveLearningCampaignExecutor::default();
+        let campaign = execute_glioma_robust_active_learning_campaign(&request, &mut executor)
+            .map_err(|error| format!("glioma robust active-learning campaign refused: {error}"))?;
+        serde_json::to_value(json!({
+            "campaign": campaign,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "each round uses the reliability- and prior-weighted lower-tail ensemble planner",
+                "returned observations are candidate-bound and become inputs to the next replan",
+                "budget, replicate, risk, disagreement, retry, unresolved, and executor-failure states remain explicit",
+                "MCP never contacts hardware, moves raw data, or makes a clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode robust active-learning campaign: {error}"))
+    }
+
+    /// Choose a bounded next batch across screening, mechanistic, and validation model systems.
+    /// This is a local planner: it never dispatches an assay or converts a surrogate estimate
+    /// into a clinical recommendation.
+    fn glioma_multi_fidelity_optimize(&self, arguments: &Value) -> Result<Value, String> {
+        let request: MultiFidelityOptimizationRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_multi_fidelity_optimize requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma multi-fidelity request: {error}"))?;
+        let candidates: Vec<FidelityCandidate> = serde_json::from_value(
+            arguments
+                .get("candidates")
+                .cloned()
+                .ok_or_else(|| "glioma_multi_fidelity_optimize requires candidates".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma multi-fidelity candidates: {error}"))?;
+        let observations: Vec<FidelityObservation> = arguments
+            .get("observations")
+            .cloned()
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(|error| format!("invalid glioma multi-fidelity observations: {error}"))?
+            .unwrap_or_default();
+        let plan = plan_glioma_multi_fidelity_optimization(&request, &candidates, &observations)
+            .map_err(|error| format!("glioma multi-fidelity optimization refused: {error}"))?;
+        serde_json::to_value(json!({
+            "optimization": plan,
+            "dispatch": "not_started",
+            "guarantees": [
+                "paired cross-fidelity calibration is estimated from shared designs and carries residual uncertainty",
+                "unobserved candidates use transferred or neighborhood support instead of fabricated certainty",
+                "selection is bounded by cost, risk, replicate, fidelity-support, and portfolio-diversity gates",
+                "the route only plans local preclinical work and never executes biology or makes a clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma multi-fidelity optimization: {error}"))
+    }
+
+    /// Detect instrument-control drift before a preclinical run is admitted. The calibration
+    /// computation is local and deterministic; this endpoint never touches hardware.
+    fn glioma_instrument_calibration(&self, arguments: &Value) -> Result<Value, String> {
+        let request: CalibrationRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_instrument_calibration requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma instrument calibration request: {error}"))?;
+        let runs: Vec<CalibrationRun> = serde_json::from_value(
+            arguments
+                .get("runs")
+                .cloned()
+                .ok_or_else(|| "glioma_instrument_calibration requires runs".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma calibration runs: {error}"))?;
+        let output = analyze_instrument_calibration(&request, &runs)
+            .map_err(|error| format!("glioma instrument calibration refused: {error}"))?;
+        serde_json::to_value(json!({
+            "calibration": output,
+            "dispatch": "not_started",
+            "guarantees": [
+                "reference controls use a robust median/MAD rather than a single run",
+                "drift uses a deterministic Theil-Sen slope and explicit final/max deviations",
+                "noisy, drifting, or insufficient calibration history blocks admission explicitly",
+                "the route only plans a preclinical instrument gate and never executes hardware"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma instrument calibration: {error}"))
+    }
+
+    /// Compile an interlocked, authorization-bound instrument plan. The route never dispatches
+    /// hardware; an institution-local gateway must verify the approval digest again before use.
+    fn glioma_instrument_preflight(&self, arguments: &Value) -> Result<Value, String> {
+        let request: InstrumentPreflightRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_instrument_preflight requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma instrument preflight request: {error}"))?;
+        let plan = preflight_glioma_instrument(&request)
+            .map_err(|error| format!("glioma instrument preflight refused: {error}"))?;
+        serde_json::to_value(json!({
+            "preflight": plan,
+            "dispatch": "not_started",
+            "guarantees": [
+                "qualified calibration, emergency stop, guard, deck, temperature, waste, and authorization gates are explicit",
+                "actions are serialized, typed, parameter-bounded, risk-budgeted, and digest-bound",
+                "blocked and unmeasured actions remain visible with compensation order and reasons",
+                "the route never contacts an instrument or consumes biological material"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma instrument preflight: {error}"))
+    }
+
+    /// Schedule a bounded fleet of compatible preclinical instruments before per-instrument
+    /// preflight. Scheduling never admits or dispatches hardware and never consumes material.
+    fn glioma_instrument_fleet_schedule(&self, arguments: &Value) -> Result<Value, String> {
+        let request: InstrumentFleetScheduleRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_instrument_fleet_schedule requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma instrument fleet request: {error}"))?;
+        let schedule = schedule_glioma_instrument_fleet(&request)
+            .map_err(|error| format!("glioma instrument fleet scheduling refused: {error}"))?;
+        serde_json::to_value(json!({
+            "schedule": schedule,
+            "dispatch": "not_started",
+            "preflight_required": true,
+            "guarantees": [
+                "dependency-safe assignment respects instrument capability, availability, calibration, operator, deadline, and shared-risk gates",
+                "critical path, fleet utilization, blocked tasks, and negative scheduling evidence remain explicit",
+                "dispatch_permitted is always false until each assignment passes the existing instrument preflight and gateway authorization",
+                "the route does not contact hardware or consume biological material"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma instrument fleet schedule: {error}"))
+    }
+
+    /// Execute an admitted preclinical instrument plan through the deterministic local gateway
+    /// seam. MCP uses a dry-run executor; institution-owned callers can supply a gateway that
+    /// performs hardware authentication, interlock reads, and emergency-stop wiring.
+    fn glioma_instrument_execute(&self, arguments: &Value) -> Result<Value, String> {
+        let request: InstrumentExecutionRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_instrument_execute requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma instrument execution request: {error}"))?;
+        let mut executor = DryRunInstrumentExecutor {
+            interlocks: request.live_interlocks.clone(),
+            emergency_stop_called: false,
+        };
+        let execution = execute_glioma_instrument_plan(&request, &mut executor)
+            .map_err(|error| format!("glioma instrument execution refused: {error}"))?;
+        serde_json::to_value(json!({
+            "execution": execution,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "the admitted P08 preflight digest, authorization scope, and action order are checked before dispatch",
+                "live interlocks and gateway authorization are rechecked before every operation",
+                "retries are bounded and partial, failed, blocked, negative, and emergency-stop outcomes remain explicit",
+                "MCP emits local synthetic artifacts only; production hardware effects require an institution-owned InstrumentExecutor"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma instrument execution: {error}"))
+    }
+
+    /// Execute a bounded sequence of admitted instrument runs through the deterministic local
+    /// gateway. Any partial, unresolved, blocked, or failed run halts the remaining queue.
+    fn glioma_instrument_campaign_execute(&self, arguments: &Value) -> Result<Value, String> {
+        let request: InstrumentCampaignRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_instrument_campaign_execute requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma instrument campaign request: {error}"))?;
+        let interlocks = request
+            .runs
+            .first()
+            .map(|run| run.execution.live_interlocks.clone())
+            .ok_or_else(|| "glioma instrument campaign requires at least one run".to_string())?;
+        let mut executor = DryRunInstrumentExecutor {
+            interlocks,
+            emergency_stop_called: false,
+        };
+        let campaign = execute_glioma_instrument_campaign(&request, &mut executor)
+            .map_err(|error| format!("glioma instrument campaign refused: {error}"))?;
+        serde_json::to_value(json!({
+            "campaign": campaign,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "admitted plans execute only in declared order through the guarded P08 executor",
+                "partial, unresolved, blocked, failed, negative, retry, and emergency-stop states halt or partition the remaining queue explicitly",
+                "each run preserves its preflight digest, authorization, live interlock checks, local artifacts, and replay digest",
+                "MCP emits no hardware effect, raw-data movement, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma instrument campaign: {error}"))
+    }
+
+    /// Adjudicate typed local assay summaries after an instrument run. Hardware completion is
+    /// intentionally insufficient: QC, uncertainty, replicate, effect, and negative-control
+    /// gates must clear before any result becomes eligible for downstream science.
+    fn glioma_instrument_assay_adjudicate(&self, arguments: &Value) -> Result<Value, String> {
+        let request: AssayEvidenceRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_instrument_assay_adjudicate requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma assay evidence request: {error}"))?;
+        let execution: InstrumentExecutionRun =
+            serde_json::from_value(arguments.get("execution").cloned().ok_or_else(|| {
+                "glioma_instrument_assay_adjudicate requires execution".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma instrument execution: {error}"))?;
+        let observations: Vec<AssayEvidenceObservation> =
+            serde_json::from_value(arguments.get("observations").cloned().ok_or_else(|| {
+                "glioma_instrument_assay_adjudicate requires observations".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma assay observations: {error}"))?;
+        let assessment = adjudicate_glioma_assay_evidence(&request, &execution, &observations)
+            .map_err(|error| format!("glioma assay adjudication refused: {error}"))?;
+        serde_json::to_value(json!({
+            "assessment": assessment,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "hardware completion never becomes biological evidence without typed assay and QC adjudication",
+                "QC, uncertainty, replicate, effect, and negative-control gates remain explicit",
+                "missing, negative, partial, and unresolved results produce observable next actions",
+                "the route never executes hardware, moves raw data, or makes a clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma assay evidence assessment: {error}"))
+    }
+
+    fn glioma_experiment_design(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ExperimentRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_experiment_design requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma experiment request: {error}"))?;
+        let arms: Vec<ExperimentArm> = serde_json::from_value(
+            arguments
+                .get("arms")
+                .cloned()
+                .ok_or_else(|| "glioma_experiment_design requires arms".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma experiment arms: {error}"))?;
+        let output = design_preclinical_experiment(&request, &arms)
+            .map_err(|error| format!("glioma experiment design refused: {error}"))?;
+        serde_json::to_value(output)
+            .map_err(|error| format!("cannot encode glioma experiment design: {error}"))
+    }
+
+    /// Compile a balanced, multi-factor preclinical glioma contrast panel. This is a design-only
+    /// route: it never randomizes live material, executes an assay, or reports formal power.
+    fn glioma_contrast_panel_design(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ContrastDesignRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_contrast_panel_design requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma contrast design request: {error}"))?;
+        let design = design_glioma_contrast_panel(&request)
+            .map_err(|error| format!("glioma contrast panel design refused: {error}"))?;
+        serde_json::to_value(json!({
+            "design": design,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "factorial conditions and main-effect estimands are deterministic and balanced when admitted",
+                "required interaction coverage, replicate floors, budget blocks, and design limitations remain explicit",
+                "design adequacy is a bounded balance/replicate proxy and is not a formal power calculation",
+                "the route does not randomize material, execute an assay, move raw data, or make a clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma contrast panel design: {error}"))
+    }
+
+    fn glioma_analysis_run(&self, arguments: &Value) -> Result<Value, String> {
+        let request: AnalysisRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_analysis_run requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma analysis request: {error}"))?;
+        let dataset: AnalysisDataset = serde_json::from_value(
+            arguments
+                .get("dataset")
+                .cloned()
+                .ok_or_else(|| "glioma_analysis_run requires dataset".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma analysis dataset: {error}"))?;
+        let output = analyze_preclinical_outcomes(&request, &dataset)
+            .map_err(|error| format!("glioma analysis refused: {error}"))?;
+        serde_json::to_value(output)
+            .map_err(|error| format!("cannot encode glioma analysis result: {error}"))
+    }
+
+    fn glioma_replication_assess(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ReplicationRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_replication_assess requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma replication request: {error}"))?;
+        let studies: Vec<ReplicationStudy> = serde_json::from_value(
+            arguments
+                .get("studies")
+                .cloned()
+                .ok_or_else(|| "glioma_replication_assess requires studies".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma replication studies: {error}"))?;
+        let output = assess_replication(&request, &studies)
+            .map_err(|error| format!("glioma replication assessment refused: {error}"))?;
+        serde_json::to_value(output)
+            .map_err(|error| format!("cannot encode glioma replication assessment: {error}"))
+    }
+
+    /// Pool independent preclinical glioma studies with fixed-point inverse-uncertainty and
+    /// random-effects weights.
+    /// Heterogeneity, contradictory directions, and influential sites remain visible and never
+    /// become a clinical or treatment recommendation.
+    fn glioma_replication_meta_analyze(&self, arguments: &Value) -> Result<Value, String> {
+        let request: MetaAnalysisRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_replication_meta_analyze requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma replication meta-analysis request: {error}"))?;
+        let studies: Vec<ReplicationStudy> = serde_json::from_value(
+            arguments
+                .get("studies")
+                .cloned()
+                .ok_or_else(|| "glioma_replication_meta_analyze requires studies".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma replication meta-analysis studies: {error}"))?;
+        let output = analyze_replication_meta_analysis(&request, &studies)
+            .map_err(|error| format!("glioma replication meta-analysis refused: {error}"))?;
+        serde_json::to_value(json!({
+            "analysis": output,
+            "dispatch": "not_started",
+            "guarantees": [
+                "fixed-effect and deterministic random-effects inverse-uncertainty pools are reported",
+                "between-study variance, Cochran heterogeneity, I2, and leave-one-study-out influence are reported",
+                "underpowered, contradictory, heterogeneous, and signal-poor results remain explicit",
+                "the output is preclinical replication evidence, not a clinical recommendation"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma replication meta-analysis: {error}"))
+    }
+
+    /// Run the bounded P10 replication/interpretation loop with the simulation-only local
+    /// executor. Institution hosts can call the same Rust contract with a real local executor;
+    /// this MCP route never moves raw data or promotes synthetic observations into evidence.
+    fn glioma_replication_campaign_execute(&self, arguments: &Value) -> Result<Value, String> {
+        let request: GliomaReplicationCampaignRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_replication_campaign_execute requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma replication campaign request: {error}"))?;
+        let mut executor = DryRunGliomaReplicationCampaignExecutor::default();
+        let campaign = execute_glioma_replication_campaign(&request, &mut executor)
+            .map_err(|error| format!("glioma replication campaign refused: {error}"))?;
+        serde_json::to_value(json!({
+            "campaign": campaign,
+            "dispatch": "dry_run",
+            "simulation_only": true,
+            "guarantees": [
+                "replication, meta-analysis, and transportability are recomputed from typed local study objects each round",
+                "heterogeneity, influential studies, missing coverage, model distance, negative evidence, and unresolved states remain explicit",
+                "hard action, retry, budget, target-model, and no-progress gates remain active",
+                "simulation observations are never admitted as biological evidence",
+                "the MCP route performs no external computation, clinical decision, or raw-data movement"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma replication campaign: {error}"))
+    }
+
+    /// Run the science-aware cross-program glioma mission with the deterministic local executor.
+    /// Real institutions can call the same research-crate function with an approved local
+    /// executor; this MCP route never touches instruments, moves raw data, or promotes synthetic
+    /// outcomes into biological evidence.
+    fn glioma_autonomous_research_mission_execute(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: GliomaMissionRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_autonomous_research_mission_execute requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma autonomous mission request: {error}"))?;
+        let mut executor = DryRunGliomaActionExecutor;
+        let mission = execute_glioma_autonomous_research_mission(&request, &mut executor)
+            .map_err(|error| format!("glioma autonomous mission refused: {error}"))?;
+        serde_json::to_value(json!({
+            "mission": mission,
+            "dispatch": "dry_run",
+            "simulation_only": true,
+            "guarantees": [
+                "stage, model-system, modality, information-gain, and uncertainty gates are explicit",
+                "each round is replanned only from typed local action outcomes",
+                "negative results remain first-class and do not satisfy positive qualification gates",
+                "failed, partial, blocked, budget, and no-progress states stop the mission honestly",
+                "the MCP route performs no instrument execution, clinical decision, or raw-data movement"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma autonomous research mission: {error}"))
+    }
+
+    /// Run the P06 closed-loop multi-fidelity optimizer with a deterministic local worker. The
+    /// MCP adapter is rehearsal-only; institutions provide the production assay or analysis
+    /// executor through the research crate's explicit trait.
+    fn glioma_multi_fidelity_campaign_execute(&self, arguments: &Value) -> Result<Value, String> {
+        let request: MultiFidelityCampaignRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_multi_fidelity_campaign_execute requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma multi-fidelity campaign request: {error}"))?;
+        let mut executor = DryRunMultiFidelityCampaignExecutor;
+        let campaign = execute_glioma_multi_fidelity_campaign(&request, &mut executor)
+            .map_err(|error| format!("glioma multi-fidelity campaign refused: {error}"))?;
+        serde_json::to_value(json!({
+            "campaign": campaign,
+            "dispatch": "dry_run",
+            "simulation_only": true,
+            "guarantees": [
+                "screening, mechanistic, and validation candidates retain explicit fidelity and parent-support gates",
+                "transfer, neighbourhood, prior, and observed estimates are never conflated",
+                "each round replans only from returned typed local observations",
+                "duplicate replicate keys, missing artifacts, retries, worker failures, and budget stops remain explicit",
+                "the MCP route performs no instrument execution, clinical decision, or raw-data movement"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma multi-fidelity campaign: {error}"))
+    }
+
+    /// Compare aggregate benchmark outcomes from independent preclinical sites. Raw traces stay
+    /// at the institutions; this route computes robust pooled effects and blocks unstable
+    /// federation conclusions.
+    fn glioma_federated_benchmark_consensus(&self, arguments: &Value) -> Result<Value, String> {
+        let request: FederatedBenchmarkRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_federated_benchmark_consensus requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma federated benchmark request: {error}"))?;
+        let sites: Vec<FederatedBenchmarkSite> =
+            serde_json::from_value(arguments.get("sites").cloned().ok_or_else(|| {
+                "glioma_federated_benchmark_consensus requires sites".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma federated benchmark sites: {error}"))?;
+        let output = analyze_federated_benchmark(&request, &sites)
+            .map_err(|error| format!("glioma federated benchmark consensus refused: {error}"))?;
+        serde_json::to_value(json!({
+            "consensus": output,
+            "dispatch": "not_started",
+            "guarantees": [
+                "only aggregate site scores, baselines, uncertainty, and replicate counts cross the federation boundary",
+                "fixed-point inverse-uncertainty pooling, weighted median, heterogeneity, and leave-one-site-out influence are deterministic",
+                "underpowered, contradictory, heterogeneous, negative, and site-sensitive outcomes remain explicit",
+                "the output is a preclinical benchmark comparison, not a clinical recommendation or instrument command"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma federated benchmark consensus: {error}"))
+    }
+
+    /// Plan an aggregate-only consortium expansion without dispatching a site or moving raw data.
+    fn glioma_federated_benchmark_site_plan(&self, arguments: &Value) -> Result<Value, String> {
+        let request: FederatedBenchmarkSitePlannerRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_federated_benchmark_site_plan requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma federated benchmark site-plan request: {error}")
+            })?;
+        let plan = plan_federated_benchmark_sites(&request)
+            .map_err(|error| format!("glioma federated benchmark site plan refused: {error}"))?;
+        serde_json::to_value(json!({
+            "site_plan": plan,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "candidate site projections are conservative scenarios, never observations",
+                "the planner reuses robust consensus, heterogeneity, and leave-one-site-out influence gates",
+                "budget, privacy-risk, replicate, independent-study, and candidate bounds are explicit",
+                "only aggregate scores and local artifact references are modeled; no raw data, assay, or clinical decision is moved"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma federated benchmark site plan: {error}"))
+    }
+
+    /// Analyze aggregate mechanism effects across federated preclinical model systems. This is a
+    /// value-only scientific transport analysis; no raw observation, assay, or clinical action is
+    /// dispatched by MCP.
+    fn glioma_federated_mechanism_transport(&self, arguments: &Value) -> Result<Value, String> {
+        let request: FederatedMechanismTransportRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_federated_mechanism_transport requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma federated mechanism transport request: {error}")
+            })?;
+        let sites: Vec<FederatedMechanismSite> =
+            serde_json::from_value(arguments.get("sites").cloned().ok_or_else(|| {
+                "glioma_federated_mechanism_transport requires sites".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma federated mechanism transport sites: {error}")
+            })?;
+        let analysis = analyze_federated_mechanism_transport(&request, &sites)
+            .map_err(|error| format!("glioma federated mechanism transport refused: {error}"))?;
+        serde_json::to_value(json!({
+            "analysis": analysis,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "only aggregate mechanism effects, quality, replicate counts, signatures, and local artifact references cross the federation boundary",
+                "model-system coverage, similarity weighting, direction conflict, heterogeneity, and leave-one-site-out fragility remain explicit",
+                "underpowered, distant, low-quality, negative, partial, and unresolved sites are never imputed or silently excluded",
+                "the output is a preclinical transport analysis, not a clinical recommendation, treatment claim, or instrument command"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma federated mechanism transport: {error}"))
+    }
+
+    /// Run a bounded autonomous federated benchmark campaign. Only typed aggregate sites are
+    /// returned by the synthetic worker; institutions retain raw traces and execution authority.
+    fn glioma_federated_benchmark_campaign_execute(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: FederatedBenchmarkCampaignRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_federated_benchmark_campaign_execute requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma federated benchmark campaign request: {error}")
+            })?;
+        let mut executor = DryRunFederatedBenchmarkCampaignExecutor;
+        let campaign = execute_federated_benchmark_campaign(&request, &mut executor)
+            .map_err(|error| format!("glioma federated benchmark campaign refused: {error}"))?;
+        serde_json::to_value(json!({
+            "campaign": campaign,
+            "dispatch": "dry_run",
+            "simulation_only": true,
+            "guarantees": [
+                "the controller replans from deterministic aggregate consensus after each returned site",
+                "only local artifact references, scores, uncertainty, and replicate counts cross the federation boundary",
+                "heterogeneous, negative, underpowered, budget-blocked, failed, and unresolved states remain explicit",
+                "duplicate identities, unbound benchmark results, retries, and no-progress stops are rejected",
+                "the MCP route performs no raw-data movement, clinical decision, or instrument execution"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma federated benchmark campaign: {error}"))
+    }
+
+    /// Execute a local reproducibility replay campaign for a preclinical glioma release
+    /// candidate. The MCP worker is synthetic; production hosts provide the replay executor.
+    fn glioma_replay_campaign_execute(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ReplayCampaignRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_replay_campaign_execute requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma replay campaign request: {error}"))?;
+        let mut executor = DryRunReplayCampaignExecutor;
+        let campaign = execute_glioma_replay_campaign(&request, &mut executor)
+            .map_err(|error| format!("glioma replay campaign refused: {error}"))?;
+        serde_json::to_value(json!({
+            "campaign": campaign,
+            "dispatch": "dry_run",
+            "simulation_only": true,
+            "guarantees": [
+                "replay tasks execute only after declared dependencies match",
+                "content-hash mismatches, unavailable tasks, budget stops, and blocked dependants remain explicit",
+                "non-deterministic tasks are never fabricated as reproducible by the synthetic worker",
+                "raw experimental data and production compute credentials remain institution-local",
+                "the output is release-readiness evidence, not an unsigned publication or clinical conclusion"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma replay campaign: {error}"))
+    }
+
+    fn glioma_research_object_prepare(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ResearchObjectRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_research_object_prepare requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma research-object request: {error}"))?;
+        let output = build_research_object_manifest(&request)
+            .map_err(|error| format!("glioma research-object preparation refused: {error}"))?;
+        serde_json::to_value(output)
+            .map_err(|error| format!("cannot encode glioma research-object manifest: {error}"))
+    }
+
+    /// Evaluate replay and review evidence before a preclinical research object enters signing.
+    /// The route emits a deterministic gate only; it never signs, publishes, moves raw data, or
+    /// makes a clinical decision.
+    fn glioma_research_object_release_gate(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ReleaseGateRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_research_object_release_gate requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma release-gate request: {error}"))?;
+        let campaign: ReplayCampaign =
+            serde_json::from_value(arguments.get("campaign").cloned().ok_or_else(|| {
+                "glioma_research_object_release_gate requires campaign".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma replay campaign: {error}"))?;
+        let gate = evaluate_glioma_release_gate(&request, &campaign)
+            .map_err(|error| format!("glioma research-object release gate refused: {error}"))?;
+        serde_json::to_value(json!({
+            "gate": gate,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "replay coverage, exact hashes, manifest status, uncertainty, and review independence remain explicit",
+                "negative evidence is preserved as evidence and never converted into a publication pass",
+                "publishable means ready for accountable signing review, not signed or publicly released",
+                "MCP moves no raw data, creates no signature, and makes no clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma research-object release gate: {error}"))
     }
 
     fn compiled(
@@ -45480,6 +49426,274 @@ pub fn workspace_capabilities() -> Value {
             "status": "available"
         },
         {
+            "id": "glioma_autonomous_research_engine",
+            "domains": ["preclinical glioma research", "evidence surveillance", "multimodal QC", "molecular mechanism exploration", "experiment design", "protocol simulation", "instrument preflight", "reproducible computation", "longitudinal trajectory analysis", "state-transition interpretation", "omission-stress robustness", "replication and negative results", "adaptive next-action selection"],
+            "crates": ["bioprism-research", "bioprism-onco", "bioprism-foundation", "bioprism-mcp"],
+            "mcp_tools": [
+                "glioma_research_dry_run",
+                "glioma_workflow_plan",
+                "glioma_protocol_simulate",
+                "glioma_protocol_execute",
+                "glioma_action_portfolio_execute",
+                "glioma_autonomous_campaign_execute",
+                "glioma_research_autopilot_execute",
+                "glioma_evidence_campaign_execute",
+                "glioma_evidence_refresh_campaign_execute",
+                "glioma_knowledge_resolution_campaign_execute",
+                "glioma_decision_context_campaign_execute",
+                "glioma_multimodal_ingestion_campaign_execute",
+                "glioma_computation_execute",
+                "glioma_computation_portfolio_plan",
+                "glioma_computation_portfolio_execute",
+                "glioma_computation_campaign_execute",
+                "glioma_computation_workflow_execute",
+                "glioma_research_director_execute",
+                "glioma_evidence_gated_research_execute",
+                "glioma_autonomous_research_engine_execute",
+                "glioma_adaptive_workflow",
+                "glioma_interpretation_synthesize",
+                "glioma_adaptive_research_frontier",
+                "glioma_robustness_suite",
+                "glioma_trajectory_analyze",
+                "glioma_state_transition_analyze",
+                "glioma_transportability_analyze",
+                "glioma_causal_contrast",
+                "glioma_causal_mediation",
+                "glioma_stratified_causal_adjustment",
+                "glioma_dynamic_policy_evaluate",
+                "glioma_dose_response",
+                "glioma_adaptive_allocation",
+                "glioma_adaptive_allocation_campaign_execute",
+                "glioma_sequential_design",
+                "glioma_sequential_campaign_execute",
+                "glioma_closed_loop_campaign",
+                "glioma_combination_synergy",
+                "glioma_adaptive_dose_surface",
+                "glioma_multimodal_concordance",
+                "glioma_multimodal_consensus",
+                "glioma_multimodal_harmonize",
+                "glioma_multimodal_latent_factors",
+                "glioma_multimodal_graph_fusion",
+                "glioma_temporal_multimodal_fusion",
+                "glioma_clonal_evolution",
+                "glioma_clone_perturbation_panel",
+                "glioma_clone_panel_outcomes",
+                "glioma_clone_continuation",
+                "glioma_spatial_niches",
+                "glioma_spatial_communication",
+                "glioma_spatial_state_propagation",
+                "glioma_spatial_registration",
+                "glioma_causal_sensitivity",
+                "glioma_research_select_actions",
+                "glioma_program_catalog",
+                "glioma_evidence_qualify",
+                "glioma_evidence_surveillance",
+                "glioma_evidence_priority",
+                "glioma_evidence_calibrate",
+                "glioma_evidence_triangulate",
+                "glioma_knowledge_compile",
+                "glioma_knowledge_compose",
+                "glioma_belief_revision",
+                "glioma_knowledge_frontier",
+                "glioma_decision_context",
+                "glioma_decision_action_graph",
+                "glioma_decision_branch_plan",
+                "glioma_decision_action_plan",
+                "glioma_multimodal_qc",
+                "glioma_mechanism_explore",
+                "glioma_mechanism_discriminate",
+                "glioma_mechanism_calibrate",
+                "glioma_mechanism_action_plan",
+                "glioma_adaptive_mechanism_policy",
+                "glioma_adaptive_mechanism_campaign_execute",
+                "glioma_mechanism_discrimination_campaign_execute",
+                "glioma_mechanism_graph_propagate",
+                "glioma_pathway_activity",
+                "glioma_multimodal_mechanism_campaign",
+                "glioma_multimodal_mechanism_campaign_execute",
+                "glioma_mechanism_dynamics",
+                "glioma_mechanism_counterfactual",
+                "glioma_mechanism_ensemble_counterfactual",
+                "glioma_robust_intervention_portfolio",
+                "glioma_information_design",
+                "glioma_adaptive_information_campaign",
+                "glioma_active_learning",
+                "glioma_active_learning_campaign_execute",
+                "glioma_robust_active_learning",
+                "glioma_robust_active_learning_campaign_execute",
+                "glioma_multi_fidelity_optimize",
+                "glioma_instrument_calibration",
+                "glioma_instrument_preflight",
+                "glioma_instrument_fleet_schedule",
+                "glioma_instrument_execute",
+                "glioma_instrument_campaign_execute",
+                "glioma_instrument_assay_adjudicate",
+                "glioma_experiment_design",
+                "glioma_contrast_panel_design",
+                "glioma_analysis_run",
+                "glioma_replication_assess",
+                "glioma_replication_meta_analyze",
+                "glioma_replication_campaign_execute",
+                "glioma_autonomous_research_mission_execute",
+                "glioma_multi_fidelity_campaign_execute",
+                "glioma_federated_benchmark_consensus",
+                "glioma_federated_benchmark_site_plan",
+                "glioma_federated_mechanism_transport",
+                "glioma_federated_benchmark_campaign_execute",
+                "glioma_replay_campaign_execute",
+                "glioma_research_object_release_gate",
+                "glioma_research_object_prepare"
+            ],
+            "cli_entrypoints": [],
+            "status": "available"
+        },
+        {
+            "id": "frontier_capability_extensions",
+            "domains": ["crate-specific frontier capabilities", "cross-domain research workflows", "production capability extensions", "MCP transport parity"],
+            "crates": ["workspace frontier crates", "bioprism-mcp"],
+            "mcp_tools": [
+                "adapter_federated_context_copilot",
+                "adapter_federated_continual_evidence_surveillance_research_workbench",
+                "adapter_local_evidence_surveillance_research_workbench",
+                "adapter_multimodal_evidence_surveillance_research_workbench",
+                "adapter_throughput_evidence_surveillance_research_workbench",
+                "atlashub_mechanism_exploration_assurance",
+                "atlashub_provenance_signing_inference_engine",
+                "atlashub_quality_control_contract_model",
+                "atlashub_quality_control_research_copilot",
+                "atlashub_replication_negative_results_federated_control_plane",
+                "atlasx_computational_execution_assurance",
+                "atlasx_context_compilation_assurance",
+                "atlasx_federated_execution_control_plane",
+                "atlasx_mechanism_contract",
+                "backends_federated_retrieval_synthesis_workflow",
+                "bioethics_evidence_surveillance",
+                "bioethics_experiment_design_workflow_fabric",
+                "bioethics_multimodal_bounded_evolution_assurance",
+                "bioethics_multimodal_context_compilation_assurance",
+                "bioethics_prospective_computational_execution_assurance",
+                "bioethics_statistical_analysis_assurance",
+                "bioworlds_federated_context_research_workbench",
+                "bioworlds_knowledge_workflow_fabric",
+                "bioworlds_resource_discovery_copilot",
+                "conformance_context_compilation_assurance",
+                "conformance_retrieval_synthesis_contract_model",
+                "dataops_provenance_signing_workflow_fabric",
+                "devplat_multimodal_limitation_closure_assurance",
+                "devx_context_compilation_contract",
+                "devx_evidence_surveillance_control",
+                "docgraph_instrument_action_contract",
+                "epistemic_experiment_design_research_workbench",
+                "epistemic_retrieval_synthesis_federated_control_plane",
+                "evalengine_federated_protocol_simulation_copilot",
+                "evalengine_local_mechanism_exploration_assurance",
+                "fabric_experiment_design_contract_model",
+                "fabric_experiment_design_interoperability_gateway",
+                "factory_federated_quality_workbench",
+                "factory_prospective_evidence_surveillance",
+                "fiber_federated_analysis_control_plane",
+                "fiber_federated_resource_workbench",
+                "governance_experiment_design_assurance",
+                "hub_policy_autonomy_inference_engine",
+                "hubapi_federated_experiment_design_assurance",
+                "ids_adversarial_recovery",
+                "ids_bounded_evolution",
+                "ids_computational_execution_workbench",
+                "ids_context_compilation_federated_control_plane",
+                "ids_contract_frontier",
+                "ids_dependency_composition",
+                "ids_evaluation_assurance",
+                "ids_experiment_design_workbench",
+                "ids_federated_commons",
+                "ids_federated_interpretation_visualization_assurance",
+                "ids_federated_resource_discovery_interoperability",
+                "ids_federated_workflow_fabric",
+                "ids_federation_security_contract",
+                "ids_interoperability_extensibility_copilot",
+                "ids_interoperability_gateway",
+                "ids_knowledge_representation_federated_control_plane",
+                "ids_laboratory_integration_workflow_fabric",
+                "ids_limitation_closure",
+                "ids_local_evidence_surveillance_inference",
+                "ids_mechanism_exploration_assurance",
+                "ids_multimodal_ingestion_research_copilot",
+                "ids_performance_reliability_gateway",
+                "ids_policy_autonomy_interoperability_gateway",
+                "ids_policy_autonomy_workbench",
+                "ids_prospective_provenance_assurance",
+                "ids_protocol_simulation_workbench",
+                "ids_provenance_signing_assurance",
+                "ids_publication_research_object_release_control_plane",
+                "ids_quality_control_assurance",
+                "ids_reliability_copilot",
+                "ids_replication_negative_results_interoperability_gateway",
+                "ids_research_workbench",
+                "ids_retrieval_synthesis_assurance_harness",
+                "ids_scale_frontier",
+                "ids_semantic_parity",
+                "ids_statistical_causal_ml_research_copilot",
+                "ids_typed_determinism_assurance",
+                "ids_typed_determinism_interoperability_gateway",
+                "influence_local_evidence_surveillance_assurance",
+                "interweave_federated_commons_assurance",
+                "interweave_federated_interpretation_engine",
+                "lab_federated_experiment_design_interoperability_gateway",
+                "lab_instrument_interoperability_gateway",
+                "lens_provenance_signing_copilot",
+                "mcp_federated_quality_control",
+                "mcp_replication_negative_results_assurance",
+                "mutation_federated_continual_bounded_evolution_assurance",
+                "mutation_federated_publication_release",
+                "mutation_federated_resource_discovery_control_plane",
+                "obligation_knowledge_representation_assurance",
+                "obligation_prospective_release_assurance",
+                "obligation_security_federation_interoperability_gateway",
+                "onco_computational_execution_contract_model",
+                "onco_federated_provenance_signing",
+                "onco_instrument_research_workbench",
+                "oncoworlds_federated_resource_discovery_assurance",
+                "oncoworlds_federated_statistical_analysis_workbench",
+                "oncoworlds_prospective_evidence_surveillance_copilot",
+                "oncoworlds_prospective_replication_negative_results_assurance",
+                "oracle_evidence_surveillance_workflow_fabric",
+                "oracle_interoperability_research_workbench",
+                "oraclex_interpretation_inference",
+                "oraclex_performance_reliability_interoperability_gateway",
+                "oraclex_statistical_analysis_research_workbench",
+                "packs_local_quality_control_assurance",
+                "packs_protocol_simulation_workbench",
+                "policy_federated_analysis_copilot",
+                "prism_analysis_workbench",
+                "prism_laboratory_integration_copilot",
+                "prism_protocol_simulation_assurance",
+                "registry_replication_workbench",
+                "retrieval_synthesis_operations",
+                "routing_execution_copilot",
+                "routing_laboratory_inference_engine",
+                "routing_limitation_closure_workflow",
+                "runtime_interpretation_assurance",
+                "runtime_knowledge_representation_assurance",
+                "safety_prospective_laboratory_integration_assurance",
+                "scale_federation_trust_control_plane",
+                "scale_interpretation_interoperability_gateway",
+                "scale_interpretation_visualization_assurance",
+                "scale_quality_control_contract_model",
+                "scope_federated_commons_interoperability_gateway",
+                "scope_federated_evidence_control",
+                "services_context_compilation_research_copilot",
+                "services_multimodal_interpretation",
+                "stress_federated_multimodal_ingestion_contract_model",
+                "stress_publication_research_object_workbench",
+                "weavelang_federated_commons_assurance",
+                "worldfactory_computational_execution_federated_control_plane",
+                "worldfactory_protocol_simulation_federated_control_plane",
+                "worldgen_multimodal_execution",
+                "worldgen_multimodal_ingestion"
+            ],
+            "cli_entrypoints": [],
+            "status": "available"
+        },
+        {
             "id": "registry_operations_and_infrastructure",
             "domains": ["registry", "deployment", "storage", "cache", "leases", "observability"],
             "crates": ["bioprism-registry", "bioprism-hubapi", "bioprism-infra", "bioprism-ledger", "bioprism-factory", "bioprism-ops", "bioprism-services"],
@@ -45675,7 +49889,7 @@ pub fn tool_definitions() -> Vec<Value> {
         "additionalProperties": false
     });
 
-    let definitions = vec![
+    let mut definitions = vec![
         json!({
             "name": "brain_model_select",
             "description": "Select an available provider/model from explicit capability, context-window, quality, latency, cost, reliability, and caller-owned online-learning observations. An optional min_selection_confidence floor abstains on near-tied eligible ranks. Every rejected candidate remains visible, along with normalized rank-separation confidence. This tool accepts no API key, opens no network connection, and does not claim that a future model response will be correct.",
@@ -54019,6 +58233,1403 @@ pub fn tool_definitions() -> Vec<Value> {
         }),
     ];
     let mut control = crate::brain_control::tool_definitions();
+    definitions.push(json!({
+        "name": "glioma_research_dry_run",
+        "description": "Rehearse a complete preclinical glioma research program locally. Compiles a closed 14-stage evidence, multimodal, molecular, mechanism, experiment, computation, replication, and release pipeline, then runs deterministic simulated stage executors. No network, instrument, federation, clinical decision, or biological observation is performed; real providers plug into the research crate's caller-owned executor seam.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "intent": {
+                    "type": "object",
+                    "description": "Serialized bioprism-research GliomaResearchIntent1@1. Use only local, de-identified, aggregate preclinical inputs and research output uses."
+                }
+            },
+            "required": ["intent"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_workflow_plan",
+        "description": "Compile a deterministic adaptive preclinical glioma campaign plan and return its next runnable batch. The planner closes over evidence, multimodal QC, mechanism, experiment-power, locality, budget, and approval gates; it routes unknown, contradictory, underpowered, or unsafe states into explicit hold/abstain branches. It never dispatches a provider, instrument, network call, federation export, or clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {
+                    "type": "object",
+                    "description": "Serialized GliomaWorkflowRequest1@1 containing a GliomaResearchIntent, mode, optional validated checkpoint outputs, completed stage ids, and max_parallelism."
+                }
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_protocol_simulate",
+        "description": "Simulate a declared preclinical glioma protocol using deterministic critical-path-first resource scheduling. Returns typed task timing, parallelism, critical path, resource utilization, unscheduled work, and explicit capacity, horizon, risk, or instrument-approval stops. This is planning only: it never dispatches providers or instruments and never claims biological efficacy.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {
+                    "type": "object",
+                    "description": "Serialized ProtocolSimulationRequest1@1 containing typed tasks, local resource capacities, a bounded horizon/risk budget, and preclinical model binding."
+                }
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_protocol_execute",
+        "description": "Execute a feasible local preclinical glioma protocol through a deterministic synthetic executor for sandbox validation. The route enforces simulation feasibility, dependency order, typed output artifacts, bounded retries, and fail-closed partial results, but performs no biological or instrument effect; production effects require a caller-owned GliomaProtocolExecutor in the Rust SDK.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ProtocolExecutionRequest1@1 containing a ProtocolSimulationRequest1@1, bounded retries, and artifact requirement."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_action_portfolio_execute",
+        "description": "Execute the deterministic beam-selected portfolio of typed preclinical glioma assays, analyses, simulations, or gateway actions in a sandbox. Enforces dependency order, bounded transient retries, local artifact requirements, and explicit negative, partial, failed, or skipped outcomes; this MCP route uses synthetic artifacts only and production effects require a caller-owned GliomaActionExecutor.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ActionPortfolioExecutionRequest1@1 containing typed GliomaActionCandidate1@1 records, completed action ids, selection budget/policy, retry bound, and artifact requirement."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_autonomous_campaign_execute",
+        "description": "Run a bounded observation-driven preclinical glioma research campaign in a sandbox. It accepts typed seed actions, replans only from returned local outcomes, enforces a hard budget and round bound, and preserves negative, partial, failed, skipped, dependency-blocked, and no-candidate stops; the MCP route is simulation-only and production planners/workers require caller-owned Rust seams.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "GliomaAutonomousCampaignRequest1@1 with a preclinical intent, typed initial candidates, selection policy, round/retry bounds, and local-artifact requirement."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_research_autopilot_execute",
+        "description": "Run one autonomous preclinical glioma research cycle from a compiled decision context: select the next dependency-safe action portfolio and execute it through the local worker seam. Returns an explicit hold when no action is runnable, preserves negative or failed outcomes, and uses a synthetic worker in MCP without biological, instrument, federation, or clinical effects.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "GliomaResearchAutopilotRequest1@1 with DecisionContext1@1, matching objective, completed action ids, selection policy, retry bound, and artifact requirement."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_evidence_campaign_execute",
+        "description": "Execute the pending actions selected by a P01 glioma evidence-priority plan through typed local adapters. Computes dependency closure, reports missing adapters and policy blocks, preserves partial/negative outcomes, and carries the queue digest into the result. MCP uses a synthetic worker; production assay, analysis, or instrument effects require a caller-owned GliomaActionExecutor.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "GliomaEvidenceCampaignRequest1@1 containing EvidencePriorityPlan1@1, typed action adapters, completed queue ids, selection policy, retry bound, and artifact requirement."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_evidence_refresh_campaign_execute",
+        "description": "Run a bounded autonomous P01 evidence-refresh campaign for preclinical glioma research. It consumes typed surveillance deltas, dispatches stale, unknown, contradictory, negative, and coverage actions through a local executor, replans after every round, and preserves explicit budget, retry, failure, and unresolved states. MCP is a deterministic dry run with no source fetch, raw data movement, or clinical decision; production adapters remain institution-local.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "EvidenceRefreshCampaignRequest1@1 containing previous/current typed EvidenceRecord1@1 snapshots, EvidenceSurveillanceRequest1@1, bounded budget/round/retry limits, and stop policy."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_knowledge_resolution_campaign_execute",
+        "description": "Run a bounded autonomous P02 claim-resolution campaign for preclinical glioma research. It compiles typed knowledge, ranks coverage/contradiction/uncertainty frontier actions, dispatches them through a local executor, recompiles from returned evidence after each round, and preserves unresolved, negative, contradictory, retry, budget, and no-progress states. MCP is a deterministic dry run with no source fetch, raw data movement, or clinical decision; production adapters remain institution-local.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "KnowledgeResolutionCampaignRequest1@1 containing KnowledgeRequest1@1, KnowledgeFrontierRequest1@1, typed EvidenceRecord1@1 rows, and bounded budget/round/retry limits."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_multimodal_ingestion_campaign_execute",
+        "description": "Run a bounded autonomous P03 multimodal-ingestion and QC campaign for preclinical glioma research. It turns missing modality/model coverage, excluded observations, coordinate/unit defects, and missingness into typed local ingestion actions, recomputes QC after each returned observation, and preserves unresolved, retry, budget, and no-progress states. MCP is a deterministic dry run with no raw-data movement, instrument effect, or clinical decision; production adapters remain institution-local.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "MultimodalIngestionCampaignRequest1@1 containing MultimodalRequest1@1, metadata-only observations, and bounded budget/round/retry limits."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_decision_context_campaign_execute",
+        "description": "Run a bounded autonomous P04 question-to-action campaign for preclinical glioma research. It compiles typed knowledge into a decision context, selects a dependency-safe local action portfolio, dispatches claim-scoped actions through a local executor, recompiles from returned evidence after each round, and preserves unresolved, negative, contradictory, omission, retry, budget, and no-progress states. MCP is a deterministic dry run with no raw-data movement, instrument effect, or clinical decision; production adapters remain institution-local.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "DecisionContextCampaignRequest1@1 containing KnowledgeRequest1@1, DecisionContextRequest1@1, DecisionActionPlanRequest1@1, typed EvidenceRecord1@1 rows, and bounded budget/round/retry limits."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_computation_execute",
+        "description": "Execute a typed local multimodal glioma computation DAG through a deterministic synthetic worker for sandbox validation. The route chooses stable topological order, enforces replay-keyed cache and budgets, retries bounded transient failures, preserves negative/partial/failed/skipped tasks, and never runs external code or moves raw data; production workers require the Rust GliomaComputationExecutor seam.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ComputationExecutionRequest1@1 containing ComputationTask1@1 DAG nodes, replay identity, cache, and resource bounds."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_computation_portfolio_plan",
+        "description": "Compile an execution-ready portfolio of multimodal preclinical glioma computation tasks under declared cost, time, task-count, modality, and determinism budgets. Closes prerequisites in stable topological order, preserves required work, and reports deferred, blocked, unresolved, contradictory, and insufficient-coverage states. The route plans only: it does not execute external code, move raw data, or make a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ComputationPortfolioRequest1@1 with objective, model system, bounded resources, utility weights, modality coverage, deterministic policy, and completed replay order."},
+                "candidates": {"type": "array", "items": {"type": "object"}, "description": "ComputationCandidate1@1 records wrapping typed ComputationTask1@1 DAG nodes with modality, information gain, uncertainty reduction, coverage debt, redundancy group, and required flag."}
+            },
+            "required": ["request", "candidates"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_computation_portfolio_execute",
+        "description": "Plan and execute a selected multimodal preclinical glioma computation portfolio through the typed local computation worker. The bridge reuses the portfolio dependency closure and replay identity, enforces the same resource and determinism gates, and preserves partial, failed, blocked, unresolved, deferred, and negative results. MCP uses a synthetic worker; production containers, GPUs, schedulers, and raw-data access remain caller-owned.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ComputationPortfolioExecutionRequest1@1 containing a ComputationPortfolioRequest1@1, ComputationCandidate1@1 records, replay identity, retry/cache policy, and local-artifact requirement."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_computation_campaign_execute",
+        "description": "Run a bounded multi-round autonomous preclinical glioma computation campaign. Each round may replan from typed local task outcomes, while hard cost/time, dependency, deterministic-task, retry, cache, and artifact gates remain active. MCP uses a synthetic planner and worker; production planners, containers, GPUs, schedulers, and raw-data access remain caller-owned.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "GliomaComputationCampaignRequest1@1 with typed seed candidates, model binding, budget/time bounds, utility weights, modality coverage, replay identity, retry/cache policy, and local-artifact requirement."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_computation_workflow_execute",
+        "description": "Compile a high-level preclinical glioma computation intent into a modality-aware dependency-closed DAG and run it through the bounded P09 campaign controller. The compiler expands requested analyses into ingest, normalization, registration, segmentation, quantification, integration, modeling, validation, and export prerequisites, while preserving resource shortfalls and negative/partial outcomes. MCP uses a synthetic worker; production schedulers, containers, GPUs, and raw-data access remain caller-owned.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "GliomaComputationWorkflowRequest1@1 with study/model identity, modalities, terminal ComputationOperation values, local artifact identifiers, resource/policy bounds, cache policy, and replay identity."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_research_director_execute",
+        "description": "Compile a high-level preclinical glioma intent into a dependency-closed local action portfolio and execute one bounded director batch through a deterministic synthetic worker. Focus-aware multi-objective ranking, typed checkpoint locality, missing-input, approval, instrument, federation, retry, artifact, and dependency gates remain explicit. The route never treats synthetic output as biological evidence or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "GliomaResearchDirectorRequest1@1 with GliomaResearchIntent, focus, local typed checkpoints, budget, policy switches, selection weights, retry bound, and artifact requirement."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_autonomous_research_engine_execute",
+        "description": "Run the end-to-end autonomous preclinical glioma research engine. It compiles a high-level intent into the closed stage graph, executes bounded local cycles, promotes only returned typed artifacts into downstream checkpoints, and replans evidence, multimodal, mechanism, experiment, computation, replication, release, and federation work. Negative, partial, blocked, budget, policy, and no-progress states remain first-class; MCP uses a deterministic synthetic worker and never performs real assays, instrument effects, clinical decisions, or raw-data movement.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "GliomaAutonomousResearchEngineRequest1@1 with high-level GliomaResearchIntent, focus, typed starting checkpoints, cycle/action/budget bounds, authority switches, selection weights, retry bound, and local-artifact policy."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_adaptive_workflow",
+        "description": "Plan the next bounded autonomous preclinical glioma workflow batch from typed prior outcomes. An outcome-aware posterior utility model preserves qualified, negative, inconclusive, failed, and blocked observations; deterministic beam search closes prerequisites and enforces cost, risk, authority, instrument, federation, and action-count budgets. The route plans only and never executes an assay, moves raw data, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "GliomaAdaptiveWorkflowSchedulerRequest1@1 with typed GliomaActionCandidate1@1 records, completed actions, SchedulerObservation1@1 outcomes, budget/risk/beam bounds, authority switches, and GliomaSelectionWeights."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_evidence_gated_research_execute",
+        "description": "Gate one bounded autonomous preclinical glioma director cycle on P01 cross-family evidence triangulation. Partial, negative, contradictory, incomplete, and source-dominant claims hold before execution with explicit next evidence actions; independently qualified claims admit the existing dependency-safe director. MCP uses a deterministic synthetic worker and never performs a real assay, moves raw data, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "GliomaEvidenceGatedResearchRequest1@1 containing a GliomaResearchDirectorRequest1@1, validated EvidenceTriangulation1@1, minimum qualified claim floor, and global qualification policy."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_interpretation_synthesize",
+        "description": "Synthesize independent causal, mediation, trajectory, sensitivity, meta-analysis, transportability, and replication summaries for a preclinical glioma hypothesis. The gate uses typed local artifacts, quality and evidence floors, cross-family contradiction, negative evidence, and leave-one-family-out stability; it returns qualified, partial, negative, or unresolved without executing assays, moving raw data, or making a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "InterpretationSynthesisRequest1@1 with hypothesis, model system, evidence-family records, quality/floor thresholds, replication requirement, and replay identity."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_adaptive_research_frontier",
+        "description": "Turn a typed cross-family preclinical glioma interpretation into an adaptive next-action frontier. The planner scores contradiction, instability, replication gaps, missing evidence families, negative-result confirmation, model transfer, and mechanism discrimination, then applies the bounded action selector with explicit budget and authority gates. It does not promote a hypothesis, execute an assay, move raw data, or make a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "AdaptiveFrontierRequest1@1 containing a validated InterpretationSynthesis1@1, completed action ids, budget, authority switches, and GliomaSelectionWeights."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_robustness_suite",
+        "description": "Run a deterministic robustness battery for a local preclinical glioma analysis. Recomputes the declared estimand under leave-one-batch-out and optional leave-one-row-out omissions, reports effect ranges, direction/stability fractions, and explicit stable, fragile, null, or unresolved outcomes. It never counts an unresolved omission as support, never hides negative results, and never executes an assay or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {
+                    "type": "object",
+                    "description": "Serialized RobustnessRequest1@1 with an AnalysisRequest, bounded case budget, eligibility floor, and stability threshold."
+                },
+                "dataset": {
+                    "type": "object",
+                    "description": "Local AnalysisDataset1@1 containing de-identified preclinical two-arm rows."
+                }
+            },
+            "required": ["request", "dataset"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_trajectory_analyze",
+        "description": "Analyze local longitudinal preclinical glioma observations with deterministic per-unit least-squares slopes. Returns arm-level trajectory effects, residual uncertainty, monotonicity violations, time-grid compatibility, and qualified, negative, or unresolved outcomes. Duplicate or under-observed units are rejected or retained as unresolved; no assay is executed and no clinical decision is produced.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {
+                    "type": "object",
+                    "description": "Serialized TrajectoryRequest1@1 with model/arm bindings, timepoint and unit floors, slope threshold, noise tolerance, and balanced-grid policy."
+                },
+                "observations": {
+                    "type": "array",
+                    "items": {"type": "object"},
+                    "description": "Local TrajectoryObservation1@1 values from de-identified preclinical units."
+                }
+            },
+            "required": ["request", "observations"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_state_transition_analyze",
+        "description": "Estimate deterministic longitudinal state-transition matrices and treatment-vs-control contrasts for local preclinical glioma units. Uses caller-declared ordered research states, consecutive within-unit windows, explicit support floors, and irregular-gap accounting; absent, null, reduced, negative, and unresolved evidence remain visible. It never treats state order as clinical severity, executes an assay, moves raw data, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "StateTransitionRequest1@1 with model/arm bindings, ordered research states, unit/transition floors, time-gap bound, and contrast threshold."},
+                "observations": {"type": "array", "items": {"type": "object"}, "description": "Local StateTransitionObservation1@1 records from de-identified preclinical units with state labels, scores, timepoints, and local artifact references."}
+            },
+            "required": ["request", "observations"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_transportability_analyze",
+        "description": "Estimate whether an effect observed across preclinical glioma studies transports to a declared target model system. Uses signature similarity, quality, replicate count, uncertainty-weighted pooling, heterogeneity, target-model distance, and leave-one-study-out stability. Distant, heterogeneous, negative, excluded, and insufficient evidence remain explicit; this route never makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "TransportabilityRequest1@1 with target model/signature and study, distance, heterogeneity, signal, and stability gates."},
+                "studies": {"type": "array", "items": {"type": "object"}, "description": "TransportStudy1@1 local preclinical study effects with model system, population signature, uncertainty, quality, replicates, and local artifact."}
+            },
+            "required": ["request", "studies"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_causal_contrast",
+        "description": "Estimate a pre/post treatment-minus-control difference-in-differences for local preclinical glioma observations. Uses per-unit windows, exact label permutations under a bounded unit count, and leave-one-unit effect bounds; underpowered, capped, null, or non-significant results remain explicit and no clinical decision is made.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "CausalContrastRequest1@1 with intervention boundary, arm/model bindings, unit floor, effect threshold, and alpha."},
+                "observations": {"type": "array", "items": {"type": "object"}, "description": "Local TrajectoryObservation1@1 values with pre and post timepoints."}
+            },
+            "required": ["request", "observations"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_causal_mediation",
+        "description": "Decompose a local preclinical glioma treatment contrast into mediator, total, direct, and indirect effects with deterministic integer covariance, measurement uncertainty, and leave-one-unit-out influence bounds. Underpowered, zero-variance, null, or fragile decompositions remain explicit; this is interpretation only and never clinical decision support.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "MediationRequest1@1 with arm/model bindings, unit floor, effect threshold, signal-to-noise floor, and influence bound."},
+                "observations": {"type": "array", "items": {"type": "object"}, "description": "Local MediationObservation1@1 records with one independent de-identified unit per mediator/outcome pair and artifact references."}
+            },
+            "required": ["request", "observations"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_stratified_causal_adjustment",
+        "description": "Estimate a preclinical glioma treatment contrast after stratifying by a caller-declared confounder such as molecular subtype, batch, or organoid class. Collapses repeated observations to unit means, requires overlap and replicate floors, weights eligible strata by pooled units, and reports leave-one-stratum influence, imbalance, excluded coverage, and an explicit next action; it never infers patient benefit, selects a dose, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "StratifiedCausalRequest1@1 with arm/model bindings, overlap floors, effect threshold, and influence bounds."},
+                "observations": {"type": "array", "items": {"type": "object"}, "description": "Local StratifiedObservation1@1 values with de-identified units, confounder strata, outcomes, and artifact references."}
+            },
+            "required": ["request", "observations"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_dynamic_policy_evaluate",
+        "description": "Evaluate competing finite-horizon preclinical glioma experiment policies from local longitudinal trajectories with self-normalized inverse-propensity weighting. Reports support coverage, positivity violations, clipped importance weights, effective sample size, uncertainty, leave-one-trajectory-out instability, and a bounded workflow frontier; it never dispatches an assay, recommends a treatment, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "DynamicPolicyRequest1@1 with horizon, reference policy, optimization direction, overlap floors, weight cap, effect threshold, and stability gate."},
+                "policies": {"type": "array", "items": {"type": "object"}, "description": "DynamicPolicyCandidate1@1 finite-horizon state/time rules for preclinical assay or computation workflows."},
+                "trajectories": {"type": "array", "items": {"type": "object"}, "description": "DynamicPolicyTrajectory1@1 institution-local longitudinal preclinical observations with behavior propensities and local artifacts."}
+            },
+            "required": ["request", "policies", "trajectories"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_dose_response",
+        "description": "Fit a bounded monotone dose-response curve for local preclinical glioma observations using weighted pool-adjacent-violators arithmetic. Returns raw and fitted means, residual uncertainty, monotonicity violations, an interpolated half-maximal dose when identifiable on the declared grid, and qualified, negative, or unresolved outcomes. It never selects a clinical dose or executes an assay.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {
+                    "type": "object",
+                    "description": "Serialized DoseResponseRequest1@1 with model binding, monotonic direction, dose/replicate floors, effect threshold, and noise tolerance."
+                },
+                "observations": {
+                    "type": "array",
+                    "items": {"type": "object"},
+                    "description": "Local DoseResponseObservation1@1 values from de-identified preclinical units."
+                }
+            },
+            "required": ["request", "observations"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_adaptive_allocation",
+        "description": "Allocate a bounded next replicate batch for a local preclinical glioma campaign using Beta posteriors, a conservative Cantelli probability bound for exceeding the declared effect, uncertainty-driven exploration, replicate floors, risk ceilings, and a hard budget. Returns posterior diagnostics, selected arms, negative/underpowered/risk-blocked states, and replay-bound output; it never executes an assay, chooses a clinical dose, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "AdaptiveAllocationRequest1@1 with control contrast, posterior thresholds, exploration weight, risk ceiling, and batch budget."},
+                "arms": {"type": "array", "items": {"type": "object"}, "description": "Local AdaptiveArmObservation1@1 values containing de-identified binary assay counts and artifact references."}
+            },
+            "required": ["request", "arms"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_adaptive_allocation_campaign_execute",
+        "description": "Run a bounded autonomous preclinical glioma replicate-allocation campaign in the local deterministic sandbox. It selects one arm from Beta-posterior allocation, executes an exact aggregate replicate batch through a caller-owned adapter, validates the local artifact, merges successes/failures, and replans until negative, budget, no-allocation, retry, executor-failure, or round limits stop progress. The route never contacts hardware, moves raw biology, chooses a clinical dose, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "AdaptiveAllocationCampaignRequest1@1 containing AdaptiveAllocationRequest1@1, local AdaptiveArmObservation1@1 arms, round/retry bounds, and negative-stop policy."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_sequential_design",
+        "description": "Plan deterministic sequential interim decisions for a local preclinical glioma campaign. Maintains Beta posteriors per arm, compares candidates with a local control, applies replicate-floor success and futility gates, and selects a bounded next replicate round using uncertainty, risk, cost, and budget. Returns explicit success, futility, hold, risk-blocked, budget-blocked, negative-evidence, and unresolved states; it never dispatches an assay, chooses a clinical dose, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "SequentialDesignRequest1@1 with model system, endpoint, control arm, target-effect probability gates, replicate/round bounds, risk ceiling, exploration weight, and budget."},
+                "observations": {"type": "array", "items": {"type": "object"}, "description": "Local SequentialArmObservation1@1 values containing de-identified binary endpoint counts, priors, model-system binding, risk, cost, and local artifact references."}
+            },
+            "required": ["request", "observations"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_sequential_campaign_execute",
+        "description": "Execute a bounded sequential preclinical glioma campaign in the deterministic local sandbox. It repeatedly calls the sequential Bayesian interim planner, executes selected aggregate arm batches through a caller-owned adapter, updates successes/failures, and replans until success, futility, risk, budget, no-progress, executor-failure, or round limits stop progress. Returns every plan, batch, retry, posterior update, negative-evidence item, and final stopping rationale; it never contacts hardware, moves raw biology, chooses a clinical dose, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "SequentialCampaignRequest1@1 containing SequentialDesignRequest1@1, local SequentialArmObservation1@1 arms, and bounded retry count."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_closed_loop_campaign",
+        "description": "Plan a mechanism-aware closed-loop preclinical glioma assay campaign. Reweights competing mechanisms from local observations, scores each typed assay by expected mechanism information, expected effect, feasibility, cost, risk, and replicate ceiling, and returns deterministic next batches with explicit convergence, budget, no-information, and unresolved stops. The caller-owned local executor must run the returned batch and append observations before replanning; this route never dispatches instruments or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ClosedLoopCampaignRequest1@1 with model binding, batch/round bounds, budget, information gate, scoring weights, and posterior convergence threshold."},
+                "mechanisms": {"type": "array", "items": {"type": "object"}, "description": "Competing CampaignMechanism1@1 entries with positive priors summing to 1000."},
+                "actions": {"type": "array", "items": {"type": "object"}, "description": "Typed CampaignAction1@1 entries with predictions for every mechanism, measurement uncertainty, expected effect, feasibility, cost, risk, and replicate ceiling."},
+                "observations": {"type": "array", "items": {"type": "object"}, "description": "Optional local CampaignObservation1@1 entries. Raw payloads remain in local stores and each observation is content-addressed."}
+            },
+            "required": ["request", "mechanisms", "actions"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_combination_synergy",
+        "description": "Analyze a local preclinical glioma two-agent response surface with fixed-point Bliss independence. Requires vehicle and single-agent controls for every combination cell, reports observed/expected responses, synergy, residual noise, antagonism, and unresolved control or replicate gaps; it never selects a clinical dose or dispatches an assay.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "CombinationSynergyRequest1@1 with model binding, replicate/cell floors, synergy threshold, and residual tolerance."},
+                "observations": {"type": "array", "items": {"type": "object"}, "description": "Local CombinationObservation1@1 values with bounded inhibition responses."}
+            },
+            "required": ["request", "observations"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_adaptive_dose_surface",
+        "description": "Plan the next diverse combination cells for an institution-local preclinical glioma response surface. Uses inverse-distance interpolation, replicate debt, residual noise, upper-confidence acquisition, total-dose and uncertainty ceilings, and a dose-space diversity constraint. Returns validation cells and explicit sparse-neighborhood/budget/replicate uncertainty; never recommends a clinical dose or dispatches an assay.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "AdaptiveDoseSurfaceRequest1@1 with local observations, candidate DosePair cells, replicate/budget/cost bounds, target response, exploration weight, uncertainty ceiling, total-dose cap, and separation constraint."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_multimodal_concordance",
+        "description": "Compare typed local glioma modality vectors for one preclinical sample lineage. Aligns shared feature identifiers and computes bounded fixed-point Pearson-style concordance, retaining contradictory, missing-overlap, and zero-variance pairs as explicit negative or unresolved evidence. It never imputes features, moves raw data, or treats correlation as causation.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {
+                    "type": "object",
+                    "description": "Serialized ConcordanceRequest1@1 with study/model bindings, required modalities, shared-feature floor, and minimum correlation."
+                },
+                "vectors": {
+                    "type": "array",
+                    "items": {"type": "object"},
+                    "description": "Local ModalityVector1@1 values with sorted FeatureValue1@1 entries."
+                }
+            },
+            "required": ["request", "vectors"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_multimodal_consensus",
+        "description": "Cluster de-identified local preclinical glioma sample lineages across modality vectors using deterministic per-feature medians and bounded k-medoids. Reports stable cluster medoids, distances, modality/feature coverage, incomparable pairs, missing samples, and partial or unresolved dispositions; it never imputes assays, moves raw data, dispatches an instrument, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {
+                    "type": "object",
+                    "description": "Serialized ConsensusRequest1@1 with study/model bindings, cluster and modality/feature floors, iteration bound, and distance threshold."
+                },
+                "vectors": {
+                    "type": "array",
+                    "items": {"type": "object"},
+                    "description": "Local ModalityVector1@1 values with sorted FeatureValue1@1 entries, grouped by de-identified sample lineage."
+                }
+            },
+            "required": ["request", "vectors"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_multimodal_harmonize",
+        "description": "Robustly median-center local preclinical glioma modality vectors within batches, using a declared reference batch when available. Emits corrected vectors, per-batch correction and residual-spread diagnostics, missing modality/feature coverage, and explicit partial or unresolved gates; it never imputes missing features, moves raw data, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "HarmonizationRequest1@1 with modality/model coverage, reference batch, vector/feature floors, and correction bounds."},
+                "vectors": {"type": "array", "items": {"type": "object"}, "description": "Local HarmonizationVector1@1 values with de-identified sample lineages, batches, feature values, and artifact references."}
+            },
+            "required": ["request", "vectors"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_multimodal_latent_factors",
+        "description": "Extract deterministic latent states from complete-case local preclinical glioma modality vectors using robust median/MAD scaling and bounded fixed-point power iteration. Reports component loadings and sample scores, explained variance, reconstruction error, convergence, omitted features, and modality gaps; it never imputes missing values, moves raw data, dispatches an instrument, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "LatentFactorRequest1@1 with modality/model bindings, complete-sample and feature floors, component/iteration bounds, and release gates."},
+                "vectors": {"type": "array", "items": {"type": "object"}, "description": "Local LatentFactorVector1@1 values with de-identified sample lineages, modalities, feature values, and artifact references."}
+            },
+            "required": ["request", "vectors"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_multimodal_graph_fusion",
+        "description": "Fuse modality-specific neighbourhoods into a deterministic local preclinical glioma graph using reliability-weighted consensus and bounded diffusion. Reports sample states, modality dropout, sparse shared-feature pairs, contradictory cross-modal evidence, neighbour scores, negative evidence, and uncertainty; it never imputes values, moves raw artifacts, dispatches an instrument, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "GraphFusionRequest1@1 with study/model binding, required modalities, sample and shared-feature floors, neighbourhood/diffusion bounds, reliability/disagreement gates, and an optional all-modalities release gate."},
+                "vectors": {"type": "array", "items": {"type": "object"}, "description": "Local GraphFusionVector1@1 values with de-identified sample lineages, modality-specific reliability, sorted feature values, and local artifact references."}
+            },
+            "required": ["request", "vectors"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_temporal_multimodal_fusion",
+        "description": "Infer longitudinal multimodal state transitions from local preclinical glioma summaries joined by sample and timepoint. The bounded algorithm aggregates modality-qualified states, computes comparable-feature distances and emerging/contracting/stable/mixed transitions, ranks follow-up priorities, and preserves missing timepoints, modality dropout, and non-comparable transitions. It never imputes observations, executes assays, moves raw data, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "TemporalFusionRequest1@1 with study/model binding, required modalities, timepoint/modality/feature floors, support and state-change thresholds, and complete-grid policy."},
+                "observations": {"type": "array", "items": {"type": "object"}, "description": "Local TemporalObservation1@1 records with sample/timepoint/modality identity, bounded FeatureValue1@1 values, and local artifact references."}
+            },
+            "required": ["request", "observations"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_clonal_evolution",
+        "description": "Infer a deterministic, marker-aware clonal-evolution graph from local preclinical glioma clone profiles. The bounded algorithm proposes parent-child edges within a declared sample lineage and time window, scores marker overlap and temporal proximity, retains gains, losses, parallel branches, unparented nodes, weak support, and unmeasured markers, and emits stable negative evidence. It is a mechanism-discovery graph proposal only: it never claims a clinical phylogeny, moves raw data, executes an assay, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ClonalEvolutionRequest1@1 with preclinical model binding, marker overlap/support floors, time-gap and abundance bounds, and parallel-branch policy."},
+                "profiles": {"type": "array", "items": {"type": "object"}, "description": "Local CloneProfile1@1 records with sample-lineage/timepoint identity, marker states, abundance, and local artifact references."}
+            },
+            "required": ["request", "profiles"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_clone_perturbation_panel",
+        "description": "Compile a deterministic, clone-aware preclinical perturbation/readout panel from a local GliomaClonalEvolutionGraph1@1. The bounded set-cover planner ranks typed candidate perturbations by marginal evolutionary-branch coverage per declared cost, retains unmeasured targets, uncovered branches, budget shortfalls, and negative evidence, and never executes a perturbation, moves raw data, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ClonePerturbationPanelRequest1@1 with preclinical model binding, budget, coverage floor, selection bound, and uncertainty policy."},
+                "graph": {"type": "object", "description": "Validated GliomaClonalEvolutionGraph1@1 produced by glioma_clonal_evolution."},
+                "candidates": {"type": "array", "items": {"type": "object"}, "description": "Local ClonePerturbationCandidate1@1 records with perturbation kind, sorted target markers, cost, expected effect, purpose, and local artifact reference."}
+            },
+            "required": ["request", "graph", "candidates"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_clone_panel_outcomes",
+        "description": "Adjudicate replicate-level local preclinical outcomes against a selected clone-aware perturbation panel. The deterministic analyzer preserves supported, null, negative, contradictory, and unresolved candidate-by-branch cells, enforces replicate and uncertainty floors, reports negative evidence and next measurement priorities, and never executes an assay, moves raw data, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ClonePanelOutcomeRequest1@1 with study/model binding, replicate floor, effect threshold, uncertainty ceiling, and completeness policy."},
+                "panel": {"type": "object", "description": "Validated ClonePerturbationPanel1@1 produced by glioma_clone_perturbation_panel."},
+                "observations": {"type": "array", "items": {"type": "object"}, "description": "Local ClonePanelObservation1@1 records keyed by candidate, evolutionary branch, and replicate, with state, effect, uncertainty, and local artifact reference."}
+            },
+            "required": ["request", "panel", "observations"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_clone_continuation",
+        "description": "Compile a deterministic, dependency-closed continuation plan from unresolved or contradictory local preclinical glioma clone-panel outcomes. The planner ranks typed measurement, retest, replication, simulation, federation-review, and evidence-release actions by information gain per cost, closes dependencies, enforces budget, selection, risk, instrument, federation, and approval gates, and preserves omissions and negative evidence. It never executes biology, moves raw data, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "CloneContinuationRequest1@1 with study/model binding, budget, selection and risk bounds, approval policy, and instrument/federation permissions."},
+                "outcome": {"type": "object", "description": "Validated ClonePanelOutcomeAnalysis1@1 produced by glioma_clone_panel_outcomes."},
+                "candidates": {"type": "array", "items": {"type": "object"}, "description": "Local CloneContinuationCandidate1@1 records with typed action, target, cost, information gain, dependencies, effects, and artifact provenance."}
+            },
+            "required": ["request", "outcome", "candidates"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_spatial_niches",
+        "description": "Build deterministic spatial neighbourhood graphs for local preclinical glioma observations. Same-lineage connected components become candidate niches; cross-lineage edges are tested against a random-mixing expected-edge null model, while sparse support, isolated cells, and undersized components remain explicit. It never imputes spatial data, moves raw data, dispatches an assay, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "SpatialNicheRequest1@1 with study/model binding, radius, neighbour and niche floors, and interaction enrichment floor."},
+                "cells": {"type": "array", "items": {"type": "object"}, "description": "Local SpatialCell1@1 records with de-identified coordinates, lineage/state values, and local artifact references."}
+            },
+            "required": ["request", "cells"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_spatial_communication",
+        "description": "Infer local ligand-receptor communication enrichments in preclinical glioma spatial data. Builds deterministic sender/receiver neighborhoods, compares observed signal against a lineage-marginal random-mixing null, and retains missing feature coverage, sparse neighborhoods, zero expected signal, non-enrichment, and uncertainty as explicit outcomes. This is an association analysis only: it never claims causal signalling, moves raw data, dispatches an assay, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "SpatialCommunicationRequest1@1 with study/model binding, spatial radius, lineage/neighborhood floors, signal/enrichment gates, and output bound."},
+                "cells": {"type": "array", "items": {"type": "object"}, "description": "Local SpatialCommunicationCell1@1 records with de-identified coordinates, lineage, ligand/receptor scores, and local artifact references."},
+                "pairs": {"type": "array", "items": {"type": "object"}, "description": "Declared LigandReceptorPair1@1 entries binding ligand and receptor feature identifiers."}
+            },
+            "required": ["request", "cells", "pairs"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_spatial_state_propagation",
+        "description": "Run a bounded integer diffusion simulation over same-sample preclinical glioma spatial cells. The model preserves lineage-aware coupling, self-retention, neighborhood radius, convergence, isolated cells, and hotspot ranking so researchers can prioritize spatial follow-up without treating geometry as biological proof; it never moves raw data, dispatches biology, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "SpatialPropagationRequest1@1 with study/model binding, radius, step, retention, lineage-coupling, convergence, and hotspot bounds."},
+                "cells": {"type": "array", "items": {"type": "object"}, "description": "Local SpatialCell1@1 records with de-identified coordinates, lineage/state values, and artifact references."}
+            },
+            "required": ["request", "cells"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_spatial_registration",
+        "description": "Register local preclinical glioma spatial samples into a declared reference frame using repeated lineage landmarks. Estimates a robust translation/isotropic-scale transform, emits aligned cells and landmark residuals, and preserves missing-lineage, residual-spread, rotation/shear, and unregistered-cell uncertainty; it never moves raw images or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "SpatialRegistrationRequest1@1 with study/model binding, reference sample, landmark floors, residual, and spread gates."},
+                "cells": {"type": "array", "items": {"type": "object"}, "description": "Local SpatialRegistrationCell1@1 records with de-identified coordinates, lineage/state values, and local artifact references."}
+            },
+            "required": ["request", "cells"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_causal_sensitivity",
+        "description": "Stress a local preclinical glioma arm contrast against a declared normalized hidden-confounder budget. Sweeps worst-case bias intervals, computes leave-one-unit-out instability, and reports the threshold tipping point and maximum robust strength; it never claims a confounder exists or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "SensitivityRequest1@1 with arm/model binding, expected direction, unit floor, effect threshold, and confounder-strength grid."},
+                "observations": {"type": "array", "items": {"type": "object"}, "description": "Local SensitivityObservation1@1 unit outcomes with normalized confounder scores in [-1000,1000] and artifact references."}
+            },
+            "required": ["request", "observations"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_research_select_actions",
+        "description": "Select the next bounded portfolio of typed preclinical glioma assays, analyses, simulations, or instrument actions. Uses a deterministic beam search over information-gain, novelty, workflow-unlock, reproducibility/safety, federation-value, feasibility, cost, dependency closure, and modality/model diversity, so prerequisite-plus-downstream bundles can beat isolated greedy picks. Returns selected, deferred, and blocked actions with reasons; performs no execution or data movement.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "candidates": {
+                    "type": "array",
+                    "description": "Typed GliomaActionCandidate1@1 records.",
+                    "items": {"type": "object"}
+                },
+                "completed_actions": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "default": []
+                },
+                "config": {
+                    "type": "object",
+                    "description": "Optional GliomaSelectionConfig1@1; defaults to a 100-unit local, approval-gated budget.",
+                    "default": {}
+                }
+            },
+            "required": ["candidates"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_program_catalog",
+        "description": "Return the folder-owned glioma program registry and its 384 generated product feature slots. This is an organization and capability discovery surface; it performs no research execution or data movement.",
+        "inputSchema": {"type": "object", "properties": {}, "required": []}
+    }));
+    definitions.push(json!({
+        "name": "glioma_evidence_qualify",
+        "description": "Qualify caller-supplied local preclinical glioma evidence records with deterministic relevance, quality, reproducibility, modality, and model coverage. Unknown, stale, contradicted, and negative evidence remains visible.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "EvidenceRequest1@1."},
+                "records": {"type": "array", "items": {"type": "object"}, "description": "Local EvidenceRecord1@1 values."}
+            },
+            "required": ["request", "records"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_evidence_surveillance",
+        "description": "Compare two local preclinical glioma evidence snapshots and compile prioritized review or revalidation actions for additions, removals, state transitions, score shifts, and scope changes. Preserves contradictory, negative, stale, unknown, and missing modality/model states; it does not fetch literature, move source bytes, infer causality, or make a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "EvidenceSurveillanceRequest1@1 with objective, required coverage, priority/action bounds, and score-shift threshold."},
+                "previous": {"type": "array", "items": {"type": "object"}, "description": "Prior local EvidenceRecord1@1 snapshot."},
+                "current": {"type": "array", "items": {"type": "object"}, "description": "Current local EvidenceRecord1@1 snapshot."}
+            },
+            "required": ["request", "previous", "current"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_evidence_priority",
+        "description": "Prioritize concrete next actions over a current local preclinical glioma evidence snapshot using deterministic recency decay, evidence-state pressure, quality, relevance, reproducibility, and modality/model coverage debt. Returns refresh, contradiction-resolution, unknown-measurement, negative-revalidation, coverage, and supported-replication actions with bounded selection and explicit uncertainty; it does not fetch sources, move raw data, execute biology, or make a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "EvidencePriorityRequest1@1 with objective, current epoch, recency half-life, required modality/model coverage, action bound, minimum priority, and weights summing to 1,000 milli-units."},
+                "records": {"type": "array", "items": {"type": "object"}, "description": "Current local EvidenceRecord1@1 snapshot; negative, stale, contradictory, unknown, and unmeasured records are valid inputs."}
+            },
+            "required": ["request", "records"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_evidence_calibrate",
+        "description": "Calibrate source-family support scores against resolved local preclinical glioma outcomes with quality-weighted isotonic regression. Returns monotonic reliability curves, Brier/ECE metrics, under-observation and miscalibration review actions, and preserved negative/unknown evidence; it does not retrieve sources, move raw data, execute biology, or make a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "EvidenceCalibrationRequest1@1 with objective, bounded score bins, resolved-observation floors, and calibration-error gate."},
+                "observations": {"type": "array", "items": {"type": "object"}, "description": "Local EvidenceCalibrationObservation1@1 score/outcome records with source family, independent group, quality, and metadata-only artifact reference."}
+            },
+            "required": ["request", "observations"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_evidence_triangulate",
+        "description": "Triangulate scoped preclinical glioma claims across independent evidence families and local artifacts. Computes support, negative and contradiction pressure, source-family diversity, independent-artifact count, leave-one-artifact sensitivity, and explicit qualified, partial, negative, or unresolved verdicts with next evidence actions. It never fetches literature, moves raw data, infers causality, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "EvidenceTriangulationRequest1@1 with source-family/artifact floors, support and contradiction gates, diversity, source-dominance, and claim bounds."},
+                "records": {"type": "array", "items": {"type": "object"}, "description": "Local EvidenceRecord1@1 values grouped by exact claim and scope; stale, negative, contradictory, unknown, and unmeasured records are retained."}
+            },
+            "required": ["request", "records"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_knowledge_compile",
+        "description": "Compile local preclinical glioma evidence into scoped typed claims for an autonomous research workflow. Coalesces exact scoped claims, scores support versus contradiction, preserves negative/unknown/stale evidence, exposes missing modality/model coverage, and never infers causality or clinical action.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "KnowledgeRequest1@1 with objective, coverage floors, support threshold, and claim bound."},
+                "records": {"type": "array", "items": {"type": "object"}, "description": "Local EvidenceRecord1@1 values."}
+            },
+            "required": ["request", "records"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_knowledge_compose",
+        "description": "Compose explicit typed preclinical glioma knowledge relations into deterministic mechanistic evidence paths and connected-component gates. Traverses only caller-declared support and prerequisite edges, detects contradiction edges, reports weakest bottleneck claims and unresolved coverage, and never infers causality, treatment efficacy, or a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "KnowledgeCompositionRequest1@1 with path length/count bounds, strength threshold, contradiction tolerance, and supported-root policy."},
+                "knowledge": {"type": "object", "description": "TypedKnowledge1@1 from glioma_knowledge_compile."},
+                "relations": {"type": "array", "items": {"type": "object"}, "description": "KnowledgeRelation1@1 records with explicit supports, requires, or contradicts direction between claim ids."}
+            },
+            "required": ["request", "knowledge", "relations"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_belief_revision",
+        "description": "Resolve an explicit preclinical glioma claim-conflict graph into a bounded maximal-consistency portfolio. Uses deterministic beam search over typed claim support and confidence, preserves rival claims, negative claims, unresolved coverage, conflict evidence, and a ranked frontier, and never infers contradiction from wording or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "BeliefRevisionRequest1@1 with objective binding, support/conflict thresholds, hypothesis and beam bounds, and contested-claim policy."},
+                "knowledge": {"type": "object", "description": "TypedKnowledge1@1 from glioma_knowledge_compile."},
+                "conflicts": {"type": "array", "items": {"type": "object"}, "description": "BeliefConflict1@1 records supplied by an evidence adjudicator; conflict edges are never inferred from text."}
+            },
+            "required": ["request", "knowledge", "conflicts"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_knowledge_frontier",
+        "description": "Prioritize the next scientific frontier in typed preclinical glioma knowledge. Scores coverage debt, contradiction, unresolved evidence, support, and workflow leverage, returns explicit action modes for the next decision-context cycle, preserves negative findings, and performs no retrieval, biological execution, or clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "KnowledgeFrontierRequest1@1 with objective, selection bound, minimum priority, and 1,000-unit weighting policy."},
+                "knowledge": {"type": "object", "description": "TypedKnowledge1@1 from glioma_knowledge_compile."}
+            },
+            "required": ["request", "knowledge"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_decision_context",
+        "description": "Compile an actionable preclinical glioma decision context from typed knowledge. Generates bounded A1 candidates for coverage closure, contradiction replication, negative-result falsification, evidence resolution, or mechanism validation; candidates feed the action selector and no action is dispatched here.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "DecisionContextRequest1@1 with matching objective, action bound, and cost."},
+                "knowledge": {"type": "object", "description": "TypedKnowledge1@1 from glioma_knowledge_compile."}
+            },
+            "required": ["request", "knowledge"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_decision_action_graph",
+        "description": "Compile composed preclinical glioma knowledge paths and a typed decision context into a dependency-closed action DAG. Adds claim-path prerequisites to action candidates, computes deterministic topological order, parallel execution waves, critical-path cost, bottleneck actions, unresolved paths, and budget blocks; it never executes assays or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "DecisionActionGraphRequest1@1 with objective, node/wave bounds, budget, and qualified-composition policy."},
+                "context": {"type": "object", "description": "DecisionContext1@1 from glioma_decision_context."},
+                "composition": {"type": "object", "description": "KnowledgeComposition1@1 from glioma_knowledge_compose."}
+            },
+            "required": ["request", "context", "composition"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_decision_branch_plan",
+        "description": "Plan robust, dependency-closed alternative preclinical glioma research portfolios across explicit scenario outcomes. Uses bounded beam search and Pareto ranking over expected value, worst-case value, uncertainty, failure risk, and cost; preserves missing and negative outcomes and never executes a scientific or clinical action.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "DecisionBranchPlannerRequest1@1 with typed candidates, completed ids, at least two weighted scenarios, resource bounds, penalties, and selection weights."},
+                "context": {"type": "object", "description": "DecisionContext1@1 from glioma_decision_context used as the immutable scientific context binding."}
+            },
+            "required": ["request", "context"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_decision_action_plan",
+        "description": "Select the next executable preclinical glioma action portfolio from a compiled decision context. Reuses dependency-aware selection, prevents re-running completed actions, preserves evidence omissions and negative findings, and exposes budget or policy holds; the route plans only and never performs an assay, instrument, federation, or clinical action.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "DecisionActionPlanRequest1@1 with matching objective, completed action ids, and GliomaSelectionConfig1@1."},
+                "context": {"type": "object", "description": "DecisionContext1@1 from glioma_decision_context."}
+            },
+            "required": ["request", "context"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_multimodal_qc",
+        "description": "Harmonize local preclinical glioma modality metadata and return comparable cells, missing modality/model coverage, coordinate and unit defects, missingness failures, and an honest QC disposition.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "MultimodalRequest1@1."},
+                "observations": {"type": "array", "items": {"type": "object"}, "description": "Local MultimodalObservation1@1 values."}
+            },
+            "required": ["request", "observations"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_mechanism_explore",
+        "description": "Rank competing preclinical glioma mechanism candidates by support, reproducibility, required modality/model coverage, and discriminating actions while retaining disconfirming evidence and unresolved coverage.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "MechanismRequest1@1."},
+                "candidates": {"type": "array", "items": {"type": "object"}, "description": "MechanismCandidate1@1 values."}
+            },
+            "required": ["request", "candidates"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_mechanism_dynamics",
+        "description": "Simulate a bounded signed delayed-feedback mechanism network for local preclinical glioma research. Ranks typed intervention pulses by sensitivity-per-cost, detects stability, oscillation, divergence, risk and budget blocks, and reports leave-one-out terminal-state sensitivity. The result is a model-backed planning trajectory, not observed efficacy; it never dispatches an assay, selects a clinical treatment, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "MechanismDynamicsRequest1@1 with model system, fixed-point integration bounds, stability/divergence gates, intervention budget, and risk ceiling."},
+                "nodes": {"type": "array", "items": {"type": "object"}, "description": "MechanismDynamicsNode1@1 signed state nodes."},
+                "edges": {"type": "array", "items": {"type": "object"}, "description": "MechanismDynamicsEdge1@1 delayed signed feedback edges with confidence."},
+                "interventions": {"type": "array", "items": {"type": "object"}, "description": "Optional MechanismDynamicsIntervention1@1 local perturbation pulses."}
+            },
+            "required": ["request", "nodes", "edges"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_mechanism_discriminate",
+        "description": "Compare competing preclinical glioma mechanistic predictions against local feature observations and rank the next assay by posterior-weighted information gain. Reports residual likelihood, feature coverage, mechanism posterior, feasibility/cost-adjusted action separation, and explicit missing, diffuse, or information-poor states; it never executes an assay or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "MechanismDiscriminationRequest1@1 with model binding, shared-feature floor, mechanism/action bounds, and information threshold."},
+                "hypotheses": {"type": "array", "items": {"type": "object"}, "description": "MechanismHypothesis1@1 predictions keyed by typed feature identifiers."},
+                "observations": {"type": "array", "items": {"type": "object"}, "description": "MechanismFeatureObservation1@1 local de-identified feature values with artifact references."},
+                "actions": {"type": "array", "items": {"type": "object"}, "description": "MechanismDiscriminatorAction1@1 candidate assays with per-mechanism predictions, cost, feasibility, and uncertainty."}
+            },
+            "required": ["request", "hypotheses", "observations", "actions"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_mechanism_calibrate",
+        "description": "Calibrate competing preclinical glioma mechanism probabilities against typed local observations using fixed reliability bins, Brier loss, calibration error, sharpness, and a prequential final-round holdout. Preserves underpowered mechanisms, discordant negative evidence, and high-uncertainty observations; it never refits a model, executes an assay, moves raw data, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "MechanismCalibrationRequest1@1 with objective, model binding, observation/round bounds, and calibration/Brier gates."},
+                "observations": {"type": "array", "items": {"type": "object"}, "description": "MechanismCalibrationObservation1@1 typed local value-only records with round, feature, prediction, observation, uncertainty, and artifact reference."}
+            },
+            "required": ["request", "observations"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_mechanism_action_plan",
+        "description": "Compile a validated preclinical glioma mechanism-discrimination result into typed A1 local assay candidates for the autonomous campaign controller. Ranks information gain per cost while penalizing measurement uncertainty and preserving mechanism-unlock value, negative evidence, and limitations; this route plans only and never executes an assay or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "discrimination": {"type": "object", "description": "MechanismDiscrimination1@1 output from glioma_mechanism_discriminate."},
+                "config": {"type": "object", "description": "MechanismActionPlannerConfig1@1 with model_system, modality, and max_actions."}
+            },
+            "required": ["discrimination", "config"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_adaptive_mechanism_policy",
+        "description": "Compile a finite-horizon autonomous preclinical glioma mechanism policy from competing model predictions and local observations. It updates an integer posterior, computes Gini information gain over outcome buckets, lower-tail effect robustness, and a budget/feasibility/risk-aware beam-selected assay sequence; posterior scores are not causal claims and this route never executes biology.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "AdaptiveMechanismPolicyRequest1@1 with model priors, action predictions, local observations, horizon, bucket width, utility weights, and hard gates."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_adaptive_mechanism_campaign_execute",
+        "description": "Execute a bounded observation-driven glioma mechanism campaign. Replans the finite-horizon policy after every typed local assay result, preserving posterior uncertainty, information gain, lower-tail robustness, retry/budget/convergence gates, and explicit failure or no-progress states. MCP uses a synthetic worker; production executors remain institution-local and no clinical decision is produced.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "AdaptiveMechanismCampaignRequest1@1 with policy registry, prior observations, round/retry bounds, artifact requirement, and convergence stop policy."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_mechanism_discrimination_campaign_execute",
+        "description": "Run a bounded autonomous P05 mechanism-discrimination campaign for preclinical glioma research. It ranks competing mechanism fits, selects the highest-information discriminator, dispatches one typed local feature measurement, replaces/appends the observation, and recomputes the ranking after every round while preserving diffuse, missing, negative, retry, budget, and no-progress states. MCP is a deterministic dry run with no raw-data movement, instrument effect, or clinical decision; production adapters remain institution-local.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "MechanismDiscriminationCampaignRequest1@1 containing MechanismDiscriminationRequest1@1, hypotheses, discriminator actions, typed local observations, and bounded budget/round/retry limits."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_pathway_activity",
+        "description": "Infer signed activity for declared glioma molecular pathways from local preclinical observations. Reliability- and weight-adjusts node evidence, compares modality-specific activity, ranks mechanism priorities, and exposes missing nodes, bottlenecks, disagreement, confidence, and unresolved gates; it never imputes features, moves raw data, executes an assay, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "PathwayActivityRequest1@1 with study/model binding, observation/modality/confidence floors, and pathway budget."},
+                "definitions": {"type": "array", "items": {"type": "object"}, "description": "PathwayActivityDefinition1@1 declarations with canonical signed nodes and bounded edges."},
+                "observations": {"type": "array", "items": {"type": "object"}, "description": "Local PathwayActivityObservation1@1 value-only records with modality, reliability, and de-identified sample lineage."}
+            },
+            "required": ["request", "definitions", "observations"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_multimodal_mechanism_campaign",
+        "description": "Run one autonomous preclinical glioma mechanism cycle: fuse local multimodal sample graphs, infer signed pathway activity, and select a dependency-safe next action portfolio. The route preserves evidence gaps and only returns plans; policy, approval, instrument, and execution gates remain mandatory and no clinical decision is made.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "MultimodalMechanismCampaignRequest1@1 binding graph fusion, pathway activity, selection policy, objective, model system, and completed actions."},
+                "graph_vectors": {"type": "array", "items": {"type": "object"}, "description": "Local GraphFusionVector1@1 modality vectors."},
+                "pathway_definitions": {"type": "array", "items": {"type": "object"}, "description": "PathwayActivityDefinition1@1 signed pathway node and edge declarations."},
+                "pathway_observations": {"type": "array", "items": {"type": "object"}, "description": "Local PathwayActivityObservation1@1 feature values and reliability."},
+                "candidates": {"type": "array", "items": {"type": "object"}, "description": "Typed GliomaActionCandidate1@1 assay, analysis, simulation, or instrument plans."}
+            },
+            "required": ["request", "graph_vectors", "pathway_definitions", "pathway_observations", "candidates"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_multimodal_mechanism_campaign_execute",
+        "description": "Execute one selected preclinical glioma mechanism portfolio through dependency, retry, local-artifact, policy, and approval gates. The built-in MCP worker is deterministic dry-run only; institution-local callers supply the production executor, and unresolved evidence remains blocked rather than becoming a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "MultimodalMechanismCampaignRequest1@1 binding graph, pathway, selection, objective, model system, and completed actions."},
+                "graph_vectors": {"type": "array", "items": {"type": "object"}, "description": "Local GraphFusionVector1@1 modality vectors."},
+                "pathway_definitions": {"type": "array", "items": {"type": "object"}, "description": "PathwayActivityDefinition1@1 signed pathway node and edge declarations."},
+                "pathway_observations": {"type": "array", "items": {"type": "object"}, "description": "Local PathwayActivityObservation1@1 feature values and reliability."},
+                "candidates": {"type": "array", "items": {"type": "object"}, "description": "Typed GliomaActionCandidate1@1 assay, analysis, simulation, or instrument plans."},
+                "max_retries": {"type": "integer", "minimum": 0, "maximum": 8, "description": "Bounded retries per selected action; defaults to 1."},
+                "require_artifacts": {"type": "boolean", "description": "Require every selected action to return a local artifact; defaults to true."}
+            },
+            "required": ["request", "graph_vectors", "pathway_definitions", "pathway_observations", "candidates"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_mechanism_graph_propagate",
+        "description": "Propagate signed mechanistic support over a local preclinical glioma evidence graph. Activating and inhibiting edges use bounded damped fixed-point diffusion; low-confidence edges, disconnected nodes, contradiction, and non-convergence remain explicit. It never executes an assay, moves raw data, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "MechanismGraphRequest1@1 with model binding, iteration/convergence bounds, damping, confidence floor, and top-k bound."},
+                "nodes": {"type": "array", "items": {"type": "object"}, "description": "MechanismGraphNode1@1 records with modality and direct support/contradiction scores."},
+                "edges": {"type": "array", "items": {"type": "object"}, "description": "MechanismGraphEdge1@1 signed activation/inhibition edges with confidence and evidence ids."}
+            },
+            "required": ["request", "nodes", "edges"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_mechanism_counterfactual",
+        "description": "Simulate signed node perturbations over a preclinical glioma mechanism graph and compare baseline versus intervention fixed points. Ranks downstream changes with activating/inhibiting edge signs, convergence bounds, low-confidence exclusions, and explicit unresolved states; it prioritizes assays but never claims causality, executes a perturbation, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "CounterfactualRequest1@1 with model binding, convergence, edge-confidence, effect, and top-k bounds."},
+                "nodes": {"type": "array", "items": {"type": "object"}, "description": "MechanismGraphNode1@1 records."},
+                "edges": {"type": "array", "items": {"type": "object"}, "description": "MechanismGraphEdge1@1 signed edges."},
+                "interventions": {"type": "array", "items": {"type": "object"}, "description": "CounterfactualIntervention1@1 signed node deltas."}
+            },
+            "required": ["request", "nodes", "edges", "interventions"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_mechanism_ensemble_counterfactual",
+        "description": "Run the same signed node perturbations across a bounded ensemble of preclinical glioma mechanism graphs. Model-prior weighted effects, min/max disagreement envelopes, and direction-agreement gates expose robust assay targets while preserving each model simulation; this route never claims causality, executes biology, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "CounterfactualEnsembleRequest1@1 with convergence, model-agreement, effect, and top-k bounds."},
+                "models": {"type": "array", "items": {"type": "object"}, "description": "CounterfactualModel1@1 local mechanism graphs with positive prior mass."},
+                "interventions": {"type": "array", "items": {"type": "object"}, "description": "CounterfactualIntervention1@1 signed node deltas shared across models."}
+            },
+            "required": ["request", "models", "interventions"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_robust_intervention_portfolio",
+        "description": "Evaluate and greedily select a robust preclinical glioma intervention portfolio across a declared mechanistic model ensemble. Uses prior-weighted expected effects, lower-tail CVaR-style effects, worst-case gates, feasibility, risk ceilings, costs, and redundancy groups to avoid brittle single-model actions; it never dispatches biology or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "RobustInterventionRequest1@1 with model binding, direction, budget, lower-tail/effect weights, agreement/effect gates, risk ceiling, and selection bounds."},
+                "models": {"type": "array", "items": {"type": "object"}, "description": "CounterfactualModel1@1 local mechanism graphs with positive prior mass and a shared node state space."},
+                "candidates": {"type": "array", "items": {"type": "object"}, "description": "RobustInterventionCandidate1@1 signed perturbations with target node, redundancy group, feasibility, cost, and risk declarations."}
+            },
+            "required": ["request", "models", "candidates"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_information_design",
+        "description": "Select a bounded local preclinical glioma assay batch by expected reduction in mechanism uncertainty. Uses integer-only posterior Gini reduction over caller-declared outcome distributions, then applies feasibility, risk, cost, budget, and replicate gates while preserving deferred and unresolved assays; it never executes biology or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "InformationDesignRequest1@1 with objective, model system, budget, selection, information, feasibility, risk, cost, and risk-ceiling bounds."},
+                "mechanisms": {"type": "array", "items": {"type": "object"}, "description": "DesignMechanism1@1 prior masses summing to 1000."},
+                "actions": {"type": "array", "items": {"type": "object"}, "description": "DesignAction1@1 candidate assays with per-mechanism discrete outcome probabilities, feasibility, risk, cost, and replicate bounds."}
+            },
+            "required": ["request", "mechanisms", "actions"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_adaptive_information_campaign",
+        "description": "Replan a bounded adaptive preclinical glioma assay campaign from categorical outcomes already returned by an institution-local executor. Applies integer Bayes posterior updates, replicate/risk/feasibility/cost/budget gates, and explicit convergence or abstention states; MCP compiles the next local batch but never executes biology or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "AdaptiveInformationCampaignRequest1@1 with rounds, batch, budget, information, risk, and concentration bounds."},
+                "mechanisms": {"type": "array", "items": {"type": "object"}, "description": "DesignMechanism1@1 competing mechanism priors."},
+                "actions": {"type": "array", "items": {"type": "object"}, "description": "DesignAction1@1 categorical assay actions with per-mechanism outcome probabilities."},
+                "observations": {"type": "array", "items": {"type": "object"}, "description": "Optional AdaptiveInformationObservation1@1 local artifact-backed outcomes for resumable replanning."}
+            },
+            "required": ["request", "mechanisms", "actions"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_active_learning",
+        "description": "Select the next local preclinical glioma assay with a deterministic mechanism-aware kernel surrogate. Combines same-candidate and nearby-candidate observations, widens uncertainty for sparse or contradictory support, and applies exploitation/exploration, cost, risk, replicate, budget, and redundancy gates. The route compiles a next batch only and never dispatches biology or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ActiveLearningRequest1@1 with model/direction binding, acquisition weights, budget, risk, uncertainty, and selection bounds."},
+                "candidates": {"type": "array", "items": {"type": "object"}, "description": "ActiveLearningCandidate1@1 assay interventions with feature vectors, mechanism ids, cost/risk, replicate ceilings, redundancy groups, and output schemas."},
+                "observations": {"type": "array", "items": {"type": "object"}, "description": "Optional ActiveLearningObservation1@1 local outcomes with content-addressed artifacts."}
+            },
+            "required": ["request", "candidates"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_active_learning_campaign_execute",
+        "description": "Run a bounded autonomous preclinical glioma active-learning campaign in the local deterministic sandbox. It repeatedly calls the P06 uncertainty-aware planner, executes selected assays through a caller-owned executor, validates returned local artifacts, appends observations, and replans until budget, replicate, risk, unresolved, failure, or round limits stop progress. Replace the dry-run executor only in a governed institution-local deployment; this route never contacts hardware or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ActiveLearningCampaignRequest1@1 containing ActiveLearningRequest1@1, candidates, local observations, round/retry bounds, and unresolved-stop policy."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_robust_active_learning",
+        "description": "Compile a conservative next-batch plan for preclinical glioma assays across competing mechanistic surrogate models. Reliability- and prior-weighted predictions produce lower-tail utility, model-disagreement and information scores; contradiction, unsupported models, risk, replicate, cost, budget, and redundancy gates remain explicit. This route never executes biology or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "RobustActiveLearningRequest1@1 with objective, model-system, acquisition weights, budget, reliability, risk, and model ensemble declarations."},
+                "candidates": {"type": "array", "items": {"type": "object"}, "description": "RobustActiveLearningCandidate1@1 interventions with typed vectors, cost/risk, replicate ceilings, redundancy groups, and output schemas."},
+                "observations": {"type": "array", "items": {"type": "object"}, "description": "Optional RobustActiveLearningObservation1@1 local outcomes with uncertainty and content-addressed artifacts."}
+            },
+            "required": ["request", "candidates"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_robust_active_learning_campaign_execute",
+        "description": "Run repeated robust preclinical glioma active-learning rounds in the local deterministic sandbox. Each round invokes the competing-surrogate lower-tail planner, executes selected assays through a caller-owned executor, validates local observations, and replans until budget, replicate, risk, disagreement, unresolved, failure, or round limits stop progress. This route never contacts hardware or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "RobustActiveLearningCampaignRequest1@1 containing RobustActiveLearningRequest1@1, candidates, observations, round/retry bounds, and unresolved-stop policy."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_multi_fidelity_optimize",
+        "description": "Choose a bounded next batch for preclinical glioma experiments across screening, mechanistic, and validation fidelities. Calibrates paired designs, combines transferred and local-neighborhood estimates with uncertainty, and applies cost, risk, replicate, support, and diversity gates; it never executes biology or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "MultiFidelityOptimizationRequest1@1 with direction, budget, acquisition weights, risk ceiling, transfer-reliability floor, and selection bounds."},
+                "candidates": {"type": "array", "items": {"type": "object"}, "description": "FidelityCandidate1@1 conditions with design/fidelity/model bindings, cost/risk, and lower-fidelity parent declarations."},
+                "observations": {"type": "array", "items": {"type": "object"}, "description": "Optional local FidelityObservation1@1 replicate outcomes with uncertainty and de-identified artifact references."}
+            },
+            "required": ["request", "candidates"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_instrument_calibration",
+        "description": "Detect preclinical instrument-control drift before admitting a glioma assay. Uses a robust reference median/MAD and deterministic Theil-Sen slope over local control runs, reports final/max drift and explicit qualified, drifting, negative, or unresolved states, and never executes hardware.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "CalibrationRequest1@1 with instrument/metric/model binding, run/reference floors, control MAD, drift, and slope tolerances."},
+                "runs": {"type": "array", "items": {"type": "object"}, "description": "CalibrationRun1@1 local de-identified control measurements with sequence indices and artifact references."}
+            },
+            "required": ["request", "runs"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_instrument_preflight",
+        "description": "Compile a deterministic preclinical glioma instrument/robotics preflight plan from qualified calibration, live interlock telemetry, typed action parameters, operator authorization, and risk/duration budgets. Orders serialized actions, preserves blocked and unmeasured work with reasons and compensation order, and never dispatches hardware or consumes biological material.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "InstrumentPreflightRequest1@1 containing InstrumentAction1@1 values, InstrumentCalibration1@1, interlocks, authorization, and bounded budgets."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_instrument_fleet_schedule",
+        "description": "Schedule a bounded fleet of preclinical glioma instruments with dependency closure, capability matching, calibration and availability windows, operator slots, deadlines, critical-path analysis, utilization, and a shared risk budget. The schedule is a preflight handoff only: it never admits or dispatches hardware and never consumes biological material.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "InstrumentFleetScheduleRequest1@1 containing typed tasks, candidate instruments, model/operation capabilities, availability/calibration windows, operator capacity, and risk budget."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_instrument_execute",
+        "description": "Execute an admitted preclinical glioma instrument plan through a guarded, caller-owned gateway seam. Rechecks the preflight digest, authorization scope, live safety interlocks, typed action order, bounded retries, local artifact requirements, and emergency-stop behavior before classifying completed, negative, partial, failed, blocked, or unresolved outcomes. MCP uses a deterministic dry-run gateway and creates no hardware or biological effect.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "InstrumentExecutionRequest1@1 containing an admitted InstrumentPreflightPlan1@1, matching InstrumentAction1@1 records, authorization, live interlocks, tick/budget bounds, retry bound, and artifact policy."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_instrument_campaign_execute",
+        "description": "Run a bounded multi-stage preclinical glioma instrument campaign through the guarded local execution seam. It executes admitted plans in declared order, preserves each run's preflight and interlock evidence, and halts the remaining queue after partial, unresolved, blocked, failed, or optionally negative outcomes. MCP uses a deterministic dry-run gateway and creates no hardware or biological effect.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "InstrumentCampaignRequest1@1 containing an objective, bounded run list of run_id plus InstrumentExecutionRequest1@1, and negative-stop policy."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_instrument_assay_adjudicate",
+        "description": "Adjudicate typed, value-only local assay summaries against a guarded preclinical glioma instrument execution. Separates operation completion from biological evidence, applies explicit QC, uncertainty, replicate, effect, and negative-control gates, partitions qualified, negative, and unresolved actions, and emits next actions for missing or failed evidence. It never executes hardware, moves raw data, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "AssayEvidenceRequest1@1 with instrument/modality binding, QC/effect/uncertainty/replicate floors, and negative-control policy."},
+                "execution": {"type": "object", "description": "InstrumentExecution1@1 validated run whose hardware completion is not treated as scientific evidence by itself."},
+                "observations": {"type": "array", "items": {"type": "object"}, "description": "AssayEvidenceObservation1@1 local, de-identified, value-only assay summaries keyed by execution action_id."}
+            },
+            "required": ["request", "execution", "observations"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_experiment_design",
+        "description": "Generate a deterministic fixed-point, power-aware preclinical glioma experiment allocation with replicate requirements, blocking factors, randomization tokens, acceptance gates, and explicit underpowered/null-result handling.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ExperimentRequest1@1."},
+                "arms": {"type": "array", "items": {"type": "object"}, "description": "ExperimentArm1@1 values."}
+            },
+            "required": ["request", "arms"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_contrast_panel_design",
+        "description": "Compile a deterministic balanced factorial preclinical glioma contrast panel from declared perturbation factors. Emits typed conditions, main-effect estimands, interaction coverage, replicate/budget gates, and an explicit limitation that design adequacy is not formal power; it never randomizes material, executes assays, moves raw data, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ContrastDesignRequest1@1 with model system, modality, factor levels/baselines, replicate floor, budget, adequacy gate, and required interactions."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_analysis_run",
+        "description": "Run a local two-arm preclinical glioma analysis with an explicit estimand, uncertainty interval, bounded exact permutation test, batch-overlap warnings, and negative-result classification.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "AnalysisRequest1@1."},
+                "dataset": {"type": "object", "description": "Local AnalysisDataset1@1."}
+            },
+            "required": ["request", "dataset"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_replication_assess",
+        "description": "Assess cross-site preclinical glioma replication with weighted pooled effects, heterogeneity, direction contradictions, site/replicate floors, and explicit replicated, mixed, not-replicated, or unresolved outcomes.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ReplicationRequest1@1."},
+                "studies": {"type": "array", "items": {"type": "object"}, "description": "Local ReplicationStudy1@1 values."}
+            },
+            "required": ["request", "studies"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_replication_meta_analyze",
+        "description": "Pool independent local preclinical glioma replication studies with deterministic fixed-effect and random-effects inverse-uncertainty weights. Reports both pooled effects and uncertainty, estimated between-study variance, Cochran heterogeneity, I2, leave-one-study-out influence, replicate-floor exclusions, and explicit qualified, heterogeneous, negative, or unresolved outcomes; it never makes a clinical recommendation.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "MetaAnalysisRequest1@1 with model/study floors, effect and signal thresholds, heterogeneity tolerance, and influence bound."},
+                "studies": {"type": "array", "items": {"type": "object"}, "description": "Local ReplicationStudy1@1 values with declared effect and uncertainty."}
+            },
+            "required": ["request", "studies"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_replication_campaign_execute",
+        "description": "Run the bounded autonomous preclinical glioma replication/interpretation loop. It recomputes site-level replication, fixed/random-effects pooling, influence, heterogeneity, and model-system transportability; ranks missing coverage, heterogeneity, influential-study, target-model, and negative-result actions; and uses a simulation-only local executor in MCP. No synthetic observation is promoted to biological evidence and no raw data leaves the institution.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "GliomaReplicationCampaignRequest1@1 with bounded study/transport inputs, thresholds, action budget, rounds, and replay identity."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_autonomous_research_mission_execute",
+        "description": "Run a bounded, science-aware autonomous preclinical glioma mission across evidence, mechanism, experiment, computation, and replication actions. The controller adapts priorities using uncovered stage coverage, model/modality diversity, contradiction pressure, information gain, and uncertainty, then replans only from typed local outcomes. It requires explicit qualification gates and preserves negative, failed, partial, blocked, budget, and no-progress states. MCP uses a synthetic worker; production executors and all raw-data access remain institution-local.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "GliomaMissionRequest1@1 with mission objective, bounded typed action candidates, completed actions, selection policy, stage/model/modality/information/uncertainty gates, retry and round limits, and local-artifact policy."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_multi_fidelity_campaign_execute",
+        "description": "Run a bounded closed-loop preclinical glioma campaign across screening, mechanistic, and validation fidelity levels. Recalibrates paired-fidelity bias and reliability from returned typed observations, keeps prior/transfer/neighbourhood estimates distinct from measured results, and admits higher-fidelity candidates only after lower-fidelity support gates. MCP uses a synthetic worker; production assay or analysis executors and raw-data access remain institution-local.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "MultiFidelityCampaignRequest1@1 with optimization policy, FidelityCandidate1@1 registry, prior local observations, round/retry bounds, and artifact policy."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_federated_benchmark_consensus",
+        "description": "Compare aggregate preclinical glioma benchmark outcomes from independent institutions without moving raw traces. Computes deterministic inverse-uncertainty pooled and weighted-median effects, heterogeneity, site spread, leave-one-site-out influence, and explicit qualified, heterogeneous, negative, or unresolved outcomes; underpowered or contradictory sites are never hidden and no clinical recommendation or instrument command is produced.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "FederatedBenchmarkRequest1@1 with capability/world/metric binding, model and site/replicate floors, effect/signal thresholds, heterogeneity, spread, and influence bounds."},
+                "sites": {"type": "array", "items": {"type": "object"}, "description": "FederatedBenchmarkSite1@1 aggregate-only site scores with local artifact references; raw observations remain local."}
+            },
+            "required": ["request", "sites"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_federated_mechanism_transport",
+        "description": "Analyze aggregate preclinical glioma mechanism effects across federated model systems without moving raw observations. The deterministic transport analyzer weights site effects by bounded population similarity, quality, replicates, and uncertainty; reports model-system coverage, direction conflict, heterogeneity, site spread, and leave-one-site-out fragility; and preserves underpowered, distant, low-quality, negative, partial, and unresolved outcomes. It never executes an assay, makes a clinical decision, or exports raw data.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "FederatedMechanismTransportRequest1@1 with mechanism/model binding, target signature, replicate/quality floors, similarity scale, effect and transportability gates."},
+                "sites": {"type": "array", "items": {"type": "object"}, "description": "FederatedMechanismSite1@1 aggregate-only mechanism effects with bounded population signatures and local artifact references."}
+            },
+            "required": ["request", "sites"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_federated_benchmark_site_plan",
+        "description": "Plan a conservative aggregate-only expansion of a preclinical glioma benchmark consortium. Bounded beam search evaluates candidate sites and replicate portfolios against the real consensus analyzer, accounting for budget, privacy risk, independent-study identity, heterogeneity, signal, spread, and leave-one-site-out influence. Projections are scenarios, not observations; no raw data or clinical decision is produced.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "FederatedBenchmarkSitePlannerRequest1@1 with benchmark thresholds, current aggregate sites, candidate site scenarios, budget/privacy bounds, beam width, and conservatism setting."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_federated_benchmark_campaign_execute",
+        "description": "Run a bounded autonomous federated glioma benchmark campaign. Replans deterministic follow-up actions from aggregate-only consensus pressure, executes institution-local synthetic aggregates in MCP, and preserves qualified, heterogeneous, negative, underpowered, failed, budget-blocked, and unresolved outcomes. Raw traces, clinical decisions, and instrument effects remain out of scope.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "FederatedBenchmarkCampaignRequest1@1 with benchmark binding, initial aggregate sites, typed follow-up actions, budget, round/retry bounds, and stop policy."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_replay_campaign_execute",
+        "description": "Run a bounded dependency-aware reproducibility replay campaign for a preclinical glioma research object. Replays declared program tasks through a local executor seam, compares exact content hashes, blocks dependants after mismatches or unavailable outputs, and preserves reproducible, partial, non-reproducible, blocked, and unresolved release-readiness states. MCP uses a synthetic worker; no raw data or clinical decision is produced.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ReplayCampaignRequest1@1 with ResearchObjectRequest1@1, acyclic replay tasks, exact expected artifact hashes, dependency/cost declarations, coverage gate, budget, and retry bounds."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_research_object_release_gate",
+        "description": "Evaluate whether a preclinical glioma research-object replay campaign satisfies the declared release predicates for accountable signing review. Checks exact coverage, hash agreement, manifest status, uncertainty, negative evidence, and independent review attestations while preserving every blocker and remediation. Publishable means ready for human signing review only; MCP never signs, publishes, moves raw data, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ReleaseGateRequest1@1 with coverage/hash/reproducibility thresholds, uncertainty bound, approval quorum, and review attestations."},
+                "campaign": {"type": "object", "description": "Validated GliomaResearchObjectReplayCampaign1@1 produced by glioma_replay_campaign_execute."}
+            },
+            "required": ["request", "campaign"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_research_object_prepare",
+        "description": "Prepare a portable preclinical glioma research-object manifest from local artifacts, plan/execution digests, program outputs, limitations, and negative evidence. The result is never presented as signed without an accountable signer.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"request": {"type": "object", "description": "ResearchObjectRequest1@1."}},
+            "required": ["request"]
+        }
+    }));
     control.extend(definitions);
     control
 }

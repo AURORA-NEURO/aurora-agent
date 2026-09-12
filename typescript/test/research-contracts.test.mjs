@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   PRECLINICAL_BOUNDARY,
   validateEvidenceReceipt,
+  evidenceReceiptDigest,
   validatePolicyReceipt,
   researchArtifactDigest,
   RELEASE_REVIEW_FEATURE_ID,
@@ -488,6 +489,24 @@ test("empty evidence is explicit unknown", () => {
     conclusion_state: "unknown",
     boundary: PRECLINICAL_BOUNDARY,
   }));
+});
+
+test("evidence receipt digest is stable and fail-closed", () => {
+  const receipt = {
+    schema_version: "aurora-research-contract/1.0",
+    receipt_id: "evidence:digest-1",
+    intent: "compare preclinical mechanisms",
+    sources: [{ source_id: "paper-1", source_type: "paper", locator: "doi:1", digest: null, availability: "available" }],
+    derivation: ["extract:claim-1"],
+    uncertainty: [{ kind: "epistemic", statement: "single study" }],
+    omissions: [],
+    competing_explanations: [],
+    negative_evidence: [],
+    conclusion_state: "supported",
+    boundary: PRECLINICAL_BOUNDARY,
+  };
+  assert.equal(evidenceReceiptDigest(receipt), evidenceReceiptDigest({ ...receipt }));
+  assert.throws(() => evidenceReceiptDigest({ ...receipt, derivation: [] }));
 });
 
 test("unresolved policy cannot allow", () => {

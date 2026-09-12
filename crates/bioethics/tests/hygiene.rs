@@ -37,6 +37,30 @@ fn rust_sources(directory: &Path) -> Vec<(String, String)> {
     files
 }
 
+fn remove_string_literals(code: &str) -> String {
+    let mut without_strings = String::with_capacity(code.len());
+    let mut in_string = false;
+    let mut escaped = false;
+    for character in code.chars() {
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if character == '\\' {
+                escaped = true;
+            } else if character == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+        if character == '"' {
+            in_string = true;
+        } else {
+            without_strings.push(character);
+        }
+    }
+    without_strings
+}
+
 /// Every `NN.MM` token a coverage scan would count, with `NN` in the blueprint's section range.
 fn cited_ids(source: &str) -> BTreeSet<String> {
     let bytes = source.as_bytes();
@@ -263,7 +287,10 @@ fn no_source_file_declares_a_numeric_constant() {
             let Some((_, value)) = code.split_once('=') else {
                 continue;
             };
-            if value.chars().any(|character| character.is_ascii_digit()) {
+            if remove_string_literals(value)
+                .chars()
+                .any(|character| character.is_ascii_digit())
+            {
                 offenders.push(format!("src/{file}:{}: {code}", number + 1));
             }
         }

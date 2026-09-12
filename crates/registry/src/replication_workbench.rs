@@ -153,29 +153,40 @@ impl ReplicationRecord5 {
             }
         }
         let all = self.claim_order.iter().cloned().collect::<BTreeSet<_>>();
-        let parts = self
+        let state_parts = self
             .selected_claim_order
             .iter()
             .chain(self.unresolved_claim_order.iter())
             .chain(self.blocked_claim_order.iter())
-            .chain(self.missing_claim_order.iter())
+            .cloned()
+            .collect::<Vec<_>>();
+        let state_part_set = state_parts.iter().cloned().collect::<BTreeSet<_>>();
+        let missing = self
+            .missing_claim_order
+            .iter()
             .cloned()
             .collect::<BTreeSet<_>>();
-        if all.len() != self.claim_order.len() || parts != all {
+        // `claim_order` names claims that were observed. Missing required claims are
+        // intentionally outside that universe, so including them in the state partition
+        // makes every honest unresolved record fail validation. Require a complete,
+        // disjoint partition of observed claims and separately ensure missing IDs do not
+        // overlap or duplicate observed claims.
+        if all.len() != self.claim_order.len()
+            || state_parts.len() != state_part_set.len()
+            || state_part_set != all
+            || missing.len() != self.missing_claim_order.len()
+            || missing.iter().any(|id| all.contains(id))
+        {
             return Err(invalid("claim states do not form a complete partition"));
         }
         if !self
-            .missing_claim_order
+            .selected_protocol_order
             .iter()
-            .all(|id| self.claim_order.contains(id))
-            || !self
-                .selected_protocol_order
-                .iter()
-                .all(|id| self.protocol_order.contains(id))
-            || !self
+            .all(|id| self.protocol_order.contains(id))
+            || self
                 .missing_protocol_order
                 .iter()
-                .all(|id| self.protocol_order.contains(id))
+                .any(|id| self.protocol_order.contains(id))
         {
             return Err(invalid(
                 "replication closure references undeclared claims or protocols",

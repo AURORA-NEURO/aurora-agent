@@ -50,12 +50,13 @@ fn binding_for(step_ids: &[&str]) -> Value {
             .collect::<Vec<_>>()
     });
     let digest = ContentHash::of_value(&plan).unwrap().to_string();
+    let domain_contract_digest = ContentHash::of_value(&json!({})).unwrap().to_string();
     let zeros = "0".repeat(64);
     json!({
         "workflow_id": "wf-adversarial",
         "workflow_digest": zeros,
         "catalog_digest": zeros,
-        "domain_contract_digest": zeros,
+        "domain_contract_digest": domain_contract_digest,
         "domain_contract": {},
         "evidence_plan": plan,
         "evidence_plan_digest": digest,
@@ -68,7 +69,26 @@ fn mission_of(steps: Vec<Value>, binding: Option<Value>) -> Value {
         "goal": "drive the workflow",
         "steps": steps,
     });
-    if let Some(binding) = binding {
+    if let Some(mut binding) = binding {
+        // Keep the compact fixture authoring API while satisfying the stricter binding contract:
+        // every evidence-plan row must carry the mission step's tool and a recomputed plan digest.
+        if let (Some(mission_steps), Some(plan_steps)) = (
+            mission["steps"].as_array(),
+            binding
+                .get_mut("evidence_plan")
+                .and_then(Value::as_object_mut)
+                .and_then(|plan| plan.get_mut("steps"))
+                .and_then(Value::as_array_mut),
+        ) {
+            for (plan_step, mission_step) in plan_steps.iter_mut().zip(mission_steps) {
+                if let Some(tool) = mission_step.get("tool") {
+                    plan_step["tool"] = tool.clone();
+                }
+            }
+            let plan = binding.get("evidence_plan").unwrap();
+            binding["evidence_plan_digest"] =
+                json!(ContentHash::of_value(plan).unwrap().to_string());
+        }
         mission["workflow_binding"] = binding;
     }
     mission
@@ -626,7 +646,10 @@ mod repair_subset_boundary {
         );
         assert_eq!(
             repair["workflow_binding"]["evidence_plan"]["steps"],
-            json!([{ "step_id": "b" }, { "step_id": "c" }]),
+            json!([
+                { "step_id": "b", "tool": "tool_b" },
+                { "step_id": "c", "tool": "tool_c" }
+            ]),
             "the subset-scoped reconciliation contract must name exactly the re-dispatched steps"
         );
     }

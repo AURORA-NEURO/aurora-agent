@@ -374,8 +374,8 @@ pub fn infer_standards_mechanisms(
     };
     let effects = if disposition == "qualified" {
         vec![
-            format!("retain:standards-mechanism-inference:{}", q.request_id),
             format!("exchange:aggregate-mechanism-summary:{}", q.request_id),
+            format!("retain:standards-mechanism-inference:{}", q.request_id),
         ]
     } else {
         vec!["block:unsafe-release".into()]

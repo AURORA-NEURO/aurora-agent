@@ -37,6 +37,7 @@ use bioprism_evalengine::{
 };
 use bioprism_fabric::synth::{Candidate as FabricCandidate, Goal as FabricGoal, RoleGraph};
 use bioprism_factory::{Idempotency, Job, JobStore, ResourceClass, WorkerCapability};
+use bioprism_foundation::PRECLINICAL_BOUNDARY;
 use bioprism_governance::SchemaVersion;
 use bioprism_hub::{
     AccessTier, Board, BoardId, BudgetEnvelope, BuildProvenance, ComparabilityConditions,
@@ -158,6 +159,41 @@ use std::sync::atomic::AtomicBool;
 
 fn repo_root() -> PathBuf {
     [env!("CARGO_MANIFEST_DIR"), "..", ".."].iter().collect()
+}
+
+#[test]
+fn glioma_contrast_panel_design_exposes_factorial_estimands_and_gates() {
+    let mut server = server();
+    let design = call(
+        &mut server,
+        "glioma_contrast_panel_design",
+        json!({
+            "request": {
+                "objective": "design invasion perturbation contrasts",
+                "model_system": "organoid",
+                "modality": "functional_perturbation",
+                "factors": [
+                    {"factor_id":"drug","label":"drug perturbation","level_order":["control","inhibitor"],"baseline_level":"control","perturbation_kind":"small_molecule"},
+                    {"factor_id":"matrix","label":"matrix context","level_order":["control","stiff"],"baseline_level":"control","perturbation_kind":"microenvironment"}
+                ],
+                "replicates_per_condition": 3,
+                "max_conditions": 16,
+                "max_total_units": 32,
+                "min_design_adequacy_milli": 700,
+                "required_interaction_order": ["drug×matrix"]
+            }
+        }),
+    );
+    assert_eq!(design["dispatch"], json!("not_started"));
+    assert_eq!(design["simulation_only"], json!(true));
+    assert_eq!(design["design"]["disposition"], json!("qualified"));
+    assert_eq!(design["design"]["conditions"].as_array().unwrap().len(), 4);
+    assert_eq!(design["design"]["contrasts"].as_array().unwrap().len(), 2);
+    assert!(design["design"]["limitations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| item.as_str().unwrap().contains("not a formal power")));
 }
 
 fn server() -> Server {
@@ -313,8 +349,8 @@ fn hub_review_fixture(id: &str, artifact: &[u8]) -> Value {
 const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
-const CAPABILITY_GROUP_COUNT: usize = 35;
-const TOOL_DEFINITION_COUNT: usize = 332;
+const CAPABILITY_GROUP_COUNT: usize = 58;
+const TOOL_DEFINITION_COUNT: usize = 682;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -376,6 +412,4449 @@ fn tools_call_rejects_non_object_arguments_before_dispatch() {
 }
 
 #[test]
+fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
+    let mut server = server();
+    let catalog = call(&mut server, "glioma_program_catalog", json!({}));
+    assert_eq!(catalog["program_count"], json!(12));
+    assert_eq!(catalog["feature_count"], json!(384));
+    assert_eq!(catalog["features"].as_array().unwrap().len(), 384);
+
+    let replay_identity = ContentHash::of_value(&json!({"replay": "mcp-glioma"})).unwrap();
+    let artifact_hash = ContentHash::of_value(&json!({"artifact": "local"})).unwrap();
+    let intent = json!({
+        "research_id": "mcp-glioma-research",
+        "study_id": "mcp-glioma-study",
+        "objective": "qualify a local preclinical glioma mechanism program",
+        "output_uses": ["cohort_analysis", "method_development"],
+        "model_systems": ["organoid"],
+        "modalities": ["literature", "genomics", "computational", "replication"],
+        "input_artifacts": [{
+            "artifact_id": "local-glioma-input",
+            "content_hash": artifact_hash,
+            "content_type": "application/vnd.aurora.glioma-input+json",
+            "local_only": true,
+            "contains_human_data": false,
+            "contains_direct_identifiers": false
+        }],
+        "requested_autonomy": "a1",
+        "approval_reference": null,
+        "budget_units": 300,
+        "max_retries": 1,
+        "allow_instrument_execution": false,
+        "allow_federation": false,
+        "raw_data_local": true,
+        "aggregate_only": true,
+        "replay_identity": replay_identity,
+        "boundary": PRECLINICAL_BOUNDARY
+    });
+    let dry_run = call(
+        &mut server,
+        "glioma_research_dry_run",
+        json!({"intent": intent.clone()}),
+    );
+    assert_eq!(dry_run["disposition"], json!("succeeded"));
+    assert_eq!(dry_run["completed_order"].as_array().unwrap().len(), 12);
+    assert!(dry_run["negative_evidence"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| item.as_str().unwrap().contains("simulation")));
+
+    let workflow = call(
+        &mut server,
+        "glioma_workflow_plan",
+        json!({
+            "request": {
+                "intent": intent,
+                "mode": "full_program",
+                "completed_stages": [],
+                "evidence": null,
+                "qc_report": null,
+                "mechanism_portfolio": null,
+                "experiment_design": null,
+                "max_parallelism": 2
+            }
+        }),
+    );
+    assert_eq!(workflow["dispatch"], json!("not_started"));
+    assert_eq!(
+        workflow["plan"]["output_schema"],
+        json!("GliomaAdaptiveWorkflow1@1")
+    );
+    assert_eq!(
+        workflow["next_ready_batch"],
+        json!(["intent-normalization"])
+    );
+
+    let protocol = call(
+        &mut server,
+        "glioma_protocol_simulate",
+        json!({
+            "request": {
+                "objective": "schedule a preclinical glioma assay",
+                "model_system": "organoid",
+                "tasks": [
+                    {
+                        "task_id": "prepare",
+                        "label": "prepare organoid controls",
+                        "resource_kind": "culture",
+                        "resource_units": 1,
+                        "duration_ticks": 2,
+                        "depends_on": [],
+                        "model_system": "organoid",
+                        "output_schema": "Setup1@1",
+                        "risk_milli": 10,
+                        "requires_instrument": false
+                    },
+                    {
+                        "task_id": "assay",
+                        "label": "run invasion assay",
+                        "resource_kind": "culture",
+                        "resource_units": 1,
+                        "duration_ticks": 3,
+                        "depends_on": ["prepare"],
+                        "model_system": "organoid",
+                        "output_schema": "Assay1@1",
+                        "risk_milli": 20,
+                        "requires_instrument": false
+                    }
+                ],
+                "resources": [{"resource_id": "culture", "kind": "culture", "capacity_units": 1}],
+                "max_ticks": 20,
+                "max_risk_milli": 100,
+                "allow_instrument_execution": false,
+                "approval_reference": null,
+                "randomization_seed": artifact_hash
+            }
+        }),
+    );
+    assert_eq!(protocol["dispatch"], json!("not_started"));
+    assert_eq!(protocol["simulation"]["disposition"], json!("feasible"));
+    assert_eq!(
+        protocol["simulation"]["schedule"].as_array().unwrap().len(),
+        2
+    );
+
+    let protocol_execution = call(
+        &mut server,
+        "glioma_protocol_execute",
+        json!({
+            "request": {
+                "protocol": {
+                    "objective": "execute a preclinical glioma assay in a sandbox",
+                    "model_system": "organoid",
+                    "tasks": [
+                        {"task_id":"prepare","label":"prepare organoid controls","resource_kind":"culture","resource_units":1,"duration_ticks":2,"depends_on":[],"model_system":"organoid","output_schema":"Setup1@1","risk_milli":10,"requires_instrument":false},
+                        {"task_id":"assay","label":"run invasion assay","resource_kind":"culture","resource_units":1,"duration_ticks":3,"depends_on":["prepare"],"model_system":"organoid","output_schema":"Assay1@1","risk_milli":20,"requires_instrument":false}
+                    ],
+                    "resources": [{"resource_id":"culture","kind":"culture","capacity_units":1}],
+                    "max_ticks": 20,
+                    "max_risk_milli": 100,
+                    "allow_instrument_execution": false,
+                    "approval_reference": null,
+                    "randomization_seed": artifact_hash
+                },
+                "max_retries": 1,
+                "require_artifacts": true
+            }
+        }),
+    );
+    assert_eq!(protocol_execution["dispatch"], json!("not_started"));
+    assert_eq!(protocol_execution["simulation_only"], json!(true));
+    assert_eq!(
+        protocol_execution["execution"]["disposition"],
+        json!("completed")
+    );
+    assert_eq!(
+        protocol_execution["execution"]["completed_order"],
+        json!(["assay", "prepare"])
+    );
+
+    let robustness = call(
+        &mut server,
+        "glioma_robustness_suite",
+        json!({
+            "request": {
+                "objective": "stress-test a preclinical glioma invasion effect",
+                "analysis": {
+                    "objective": "estimate invasion effect",
+                    "control_arm": "control",
+                    "treatment_arm": "treated",
+                    "model_system": "organoid",
+                    "min_replicates_per_arm": 3,
+                    "effect_threshold_milli": 100,
+                    "alpha_milli": 50
+                },
+                "max_cases": 8,
+                "include_row_jackknife": false,
+                "min_eligible_cases": 2,
+                "min_stability_milli": 900
+            },
+            "dataset": {
+                "dataset_id": "mcp-robustness",
+                "artifact": {
+                    "artifact_id": "mcp-robustness-artifact",
+                    "content_hash": artifact_hash,
+                    "content_type": "application/vnd.aurora.glioma-analysis+json",
+                    "local_only": true,
+                    "contains_human_data": false,
+                    "contains_direct_identifiers": false
+                },
+                "rows": [
+                    {"row_id":"r1","arm_id":"control","model_system":"organoid","batch_id":"b1","outcome_milli":100},
+                    {"row_id":"r2","arm_id":"control","model_system":"organoid","batch_id":"b2","outcome_milli":105},
+                    {"row_id":"r3","arm_id":"control","model_system":"organoid","batch_id":"b3","outcome_milli":95},
+                    {"row_id":"r4","arm_id":"control","model_system":"organoid","batch_id":"b4","outcome_milli":102},
+                    {"row_id":"r5","arm_id":"treated","model_system":"organoid","batch_id":"b5","outcome_milli":300},
+                    {"row_id":"r6","arm_id":"treated","model_system":"organoid","batch_id":"b6","outcome_milli":305},
+                    {"row_id":"r7","arm_id":"treated","model_system":"organoid","batch_id":"b7","outcome_milli":295},
+                    {"row_id":"r8","arm_id":"treated","model_system":"organoid","batch_id":"b8","outcome_milli":301}
+                ]
+            }
+        }),
+    );
+    assert_eq!(robustness["dispatch"], json!("not_started"));
+    assert_eq!(robustness["suite"]["disposition"], json!("stable"));
+    assert_eq!(robustness["suite"]["cases"].as_array().unwrap().len(), 8);
+
+    let trajectory = call(
+        &mut server,
+        "glioma_trajectory_analyze",
+        json!({
+            "request": {
+                "objective": "compare longitudinal glioma invasion trajectories",
+                "control_arm": "control",
+                "treatment_arm": "treated",
+                "model_system": "organoid",
+                "min_timepoints_per_unit": 3,
+                "min_units_per_arm": 2,
+                "slope_threshold_milli_per_tick": 2,
+                "max_residual_milli": 0,
+                "max_monotonicity_violations": 0,
+                "require_balanced_timepoints": true
+            },
+            "observations": [
+                {"observation_id":"tc-0-0","unit_id":"control-0","arm_id":"control","model_system":"organoid","batch_id":"batch-0","timepoint":0,"outcome_milli":100},
+                {"observation_id":"tc-0-1","unit_id":"control-0","arm_id":"control","model_system":"organoid","batch_id":"batch-1","timepoint":1,"outcome_milli":101},
+                {"observation_id":"tc-0-2","unit_id":"control-0","arm_id":"control","model_system":"organoid","batch_id":"batch-2","timepoint":2,"outcome_milli":102},
+                {"observation_id":"tc-1-0","unit_id":"control-1","arm_id":"control","model_system":"organoid","batch_id":"batch-0","timepoint":0,"outcome_milli":100},
+                {"observation_id":"tc-1-1","unit_id":"control-1","arm_id":"control","model_system":"organoid","batch_id":"batch-1","timepoint":1,"outcome_milli":101},
+                {"observation_id":"tc-1-2","unit_id":"control-1","arm_id":"control","model_system":"organoid","batch_id":"batch-2","timepoint":2,"outcome_milli":102},
+                {"observation_id":"tt-0-0","unit_id":"treated-0","arm_id":"treated","model_system":"organoid","batch_id":"batch-0","timepoint":0,"outcome_milli":100},
+                {"observation_id":"tt-0-1","unit_id":"treated-0","arm_id":"treated","model_system":"organoid","batch_id":"batch-1","timepoint":1,"outcome_milli":110},
+                {"observation_id":"tt-0-2","unit_id":"treated-0","arm_id":"treated","model_system":"organoid","batch_id":"batch-2","timepoint":2,"outcome_milli":120},
+                {"observation_id":"tt-1-0","unit_id":"treated-1","arm_id":"treated","model_system":"organoid","batch_id":"batch-0","timepoint":0,"outcome_milli":100},
+                {"observation_id":"tt-1-1","unit_id":"treated-1","arm_id":"treated","model_system":"organoid","batch_id":"batch-1","timepoint":1,"outcome_milli":110},
+                {"observation_id":"tt-1-2","unit_id":"treated-1","arm_id":"treated","model_system":"organoid","batch_id":"batch-2","timepoint":2,"outcome_milli":120}
+            ]
+        }),
+    );
+    assert_eq!(trajectory["dispatch"], json!("not_started"));
+    assert_eq!(trajectory["analysis"]["disposition"], json!("qualified"));
+    assert_eq!(
+        trajectory["analysis"]["slope_effect_milli_per_tick"],
+        json!(9)
+    );
+
+    let state_transition = call(
+        &mut server,
+        "glioma_state_transition_analyze",
+        json!({
+            "request": {
+                "objective": "compare longitudinal glioma state transitions",
+                "control_arm": "control",
+                "treatment_arm": "treated",
+                "model_system": "organoid",
+                "state_order": ["low", "high"],
+                "min_units_per_arm": 2,
+                "min_transitions_per_arm": 2,
+                "max_timepoint_gap": 2,
+                "min_contrast_milli": 100
+            },
+            "observations": [
+                {"observation_id":"st-c0-0","unit_id":"st-control-0","arm_id":"control","model_system":"organoid","batch_id":"st-b0","timepoint":0,"state_id":"low","state_score_milli":100,"artifact":{"artifact_id":"st-artifact-c0-0","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-state-transition+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"observation_id":"st-c0-1","unit_id":"st-control-0","arm_id":"control","model_system":"organoid","batch_id":"st-b1","timepoint":1,"state_id":"low","state_score_milli":100,"artifact":{"artifact_id":"st-artifact-c0-1","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-state-transition+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"observation_id":"st-c1-0","unit_id":"st-control-1","arm_id":"control","model_system":"organoid","batch_id":"st-b2","timepoint":0,"state_id":"low","state_score_milli":100,"artifact":{"artifact_id":"st-artifact-c1-0","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-state-transition+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"observation_id":"st-c1-1","unit_id":"st-control-1","arm_id":"control","model_system":"organoid","batch_id":"st-b3","timepoint":1,"state_id":"low","state_score_milli":100,"artifact":{"artifact_id":"st-artifact-c1-1","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-state-transition+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"observation_id":"st-t0-0","unit_id":"st-treated-0","arm_id":"treated","model_system":"organoid","batch_id":"st-b4","timepoint":0,"state_id":"low","state_score_milli":100,"artifact":{"artifact_id":"st-artifact-t0-0","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-state-transition+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"observation_id":"st-t0-1","unit_id":"st-treated-0","arm_id":"treated","model_system":"organoid","batch_id":"st-b5","timepoint":1,"state_id":"high","state_score_milli":900,"artifact":{"artifact_id":"st-artifact-t0-1","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-state-transition+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"observation_id":"st-t1-0","unit_id":"st-treated-1","arm_id":"treated","model_system":"organoid","batch_id":"st-b6","timepoint":0,"state_id":"low","state_score_milli":100,"artifact":{"artifact_id":"st-artifact-t1-0","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-state-transition+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"observation_id":"st-t1-1","unit_id":"st-treated-1","arm_id":"treated","model_system":"organoid","batch_id":"st-b7","timepoint":1,"state_id":"high","state_score_milli":900,"artifact":{"artifact_id":"st-artifact-t1-1","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-state-transition+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}}
+            ]
+        }),
+    );
+    assert_eq!(state_transition["dispatch"], json!("not_started"));
+    assert_eq!(
+        state_transition["analysis"]["disposition"],
+        json!("qualified")
+    );
+    assert!(state_transition["analysis"]["enriched_order"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|entry| entry == "low:high"));
+
+    let causal = call(
+        &mut server,
+        "glioma_causal_contrast",
+        json!({
+            "request": {
+                "objective": "estimate treatment-associated invasion change",
+                "control_arm": "control",
+                "treatment_arm": "treated",
+                "model_system": "organoid",
+                "intervention_timepoint": 1,
+                "min_units_per_arm": 2,
+                "effect_threshold_milli": 5,
+                "alpha_milli": 500
+            },
+            "observations": [
+                {"observation_id":"cc0-pre","unit_id":"cc0","arm_id":"control","model_system":"organoid","batch_id":"b0","timepoint":0,"outcome_milli":100},
+                {"observation_id":"cc0-post","unit_id":"cc0","arm_id":"control","model_system":"organoid","batch_id":"b1","timepoint":1,"outcome_milli":101},
+                {"observation_id":"cc1-pre","unit_id":"cc1","arm_id":"control","model_system":"organoid","batch_id":"b0","timepoint":0,"outcome_milli":100},
+                {"observation_id":"cc1-post","unit_id":"cc1","arm_id":"control","model_system":"organoid","batch_id":"b1","timepoint":1,"outcome_milli":101},
+                {"observation_id":"ct0-pre","unit_id":"ct0","arm_id":"treated","model_system":"organoid","batch_id":"b0","timepoint":0,"outcome_milli":100},
+                {"observation_id":"ct0-post","unit_id":"ct0","arm_id":"treated","model_system":"organoid","batch_id":"b1","timepoint":1,"outcome_milli":120},
+                {"observation_id":"ct1-pre","unit_id":"ct1","arm_id":"treated","model_system":"organoid","batch_id":"b0","timepoint":0,"outcome_milli":100},
+                {"observation_id":"ct1-post","unit_id":"ct1","arm_id":"treated","model_system":"organoid","batch_id":"b1","timepoint":1,"outcome_milli":120}
+            ]
+        }),
+    );
+    assert_eq!(causal["dispatch"], json!("not_started"));
+    assert_eq!(causal["analysis"]["disposition"], json!("qualified"));
+    assert_eq!(
+        causal["analysis"]["difference_in_differences_milli"],
+        json!(19)
+    );
+
+    let mediation = call(
+        &mut server,
+        "glioma_causal_mediation",
+        json!({
+            "request": {
+                "objective": "test invasion mediator decomposition",
+                "control_arm": "control",
+                "treatment_arm": "treated",
+                "model_system": "organoid",
+                "min_units_per_arm": 2,
+                "effect_threshold_milli": 20,
+                "min_signal_to_noise_milli": 100,
+                "max_leave_one_out_shift_milli": 200
+            },
+            "observations": [
+                {"observation_id":"cm-c0","unit_id":"cm-control-0","arm_id":"control","mediator_milli":100,"outcome_milli":120,"uncertainty_milli":5,"artifact":{"artifact_id":"cm-artifact-c0","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-mediation+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"observation_id":"cm-c1","unit_id":"cm-control-1","arm_id":"control","mediator_milli":110,"outcome_milli":130,"uncertainty_milli":5,"artifact":{"artifact_id":"cm-artifact-c1","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-mediation+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"observation_id":"cm-t0","unit_id":"cm-treated-0","arm_id":"treated","mediator_milli":200,"outcome_milli":250,"uncertainty_milli":5,"artifact":{"artifact_id":"cm-artifact-t0","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-mediation+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"observation_id":"cm-t1","unit_id":"cm-treated-1","arm_id":"treated","mediator_milli":210,"outcome_milli":260,"uncertainty_milli":5,"artifact":{"artifact_id":"cm-artifact-t1","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-mediation+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}}
+            ]
+        }),
+    );
+    assert_eq!(mediation["dispatch"], json!("not_started"));
+    assert_eq!(mediation["analysis"]["disposition"], json!("qualified"));
+    assert!(mediation["analysis"]["indirect_effect_milli"]
+        .as_i64()
+        .is_some_and(|effect| effect > 0));
+
+    let multi_fidelity = call(
+        &mut server,
+        "glioma_multi_fidelity_optimize",
+        json!({
+            "request": {
+                "objective": "choose the next invasion assay across fidelity levels",
+                "direction": "maximize",
+                "budget_units": 8,
+                "max_selections": 1,
+                "min_replicates_per_candidate": 1,
+                "exploration_weight_milli": 250,
+                "exploitation_weight_milli": 500,
+                "transfer_weight_milli": 250,
+                "risk_penalty_milli": 100,
+                "cost_penalty_milli": 10,
+                "max_risk_milli": 800,
+                "min_transfer_reliability_milli": 200,
+                "baseline_milli": null
+            },
+            "candidates": [
+                {"candidate_id":"mf-screen-a","design_id":"mf-design-a","fidelity":"screening","model_system":"cell_line","dose_milli":100,"combination_milli":0,"cost_units":1,"risk_milli":100,"parent_candidate_id":null,"max_replicates":4},
+                {"candidate_id":"mf-screen-b","design_id":"mf-design-b","fidelity":"screening","model_system":"cell_line","dose_milli":200,"combination_milli":0,"cost_units":1,"risk_milli":100,"parent_candidate_id":null,"max_replicates":4},
+                {"candidate_id":"mf-valid-a","design_id":"mf-design-a","fidelity":"validation","model_system":"mouse_model","dose_milli":100,"combination_milli":0,"cost_units":4,"risk_milli":200,"parent_candidate_id":"mf-screen-a","max_replicates":4},
+                {"candidate_id":"mf-valid-b","design_id":"mf-design-b","fidelity":"validation","model_system":"mouse_model","dose_milli":200,"combination_milli":0,"cost_units":4,"risk_milli":200,"parent_candidate_id":"mf-screen-b","max_replicates":4}
+            ],
+            "observations": [
+                {"observation_id":"mf-obs-screen-a","candidate_id":"mf-screen-a","replicate_index":0,"outcome_milli":400,"uncertainty_milli":10,"artifact":{"artifact_id":"mf-artifact-screen-a","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-fidelity+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"observation_id":"mf-obs-screen-b","candidate_id":"mf-screen-b","replicate_index":0,"outcome_milli":300,"uncertainty_milli":10,"artifact":{"artifact_id":"mf-artifact-screen-b","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-fidelity+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"observation_id":"mf-obs-valid-b","candidate_id":"mf-valid-b","replicate_index":0,"outcome_milli":500,"uncertainty_milli":10,"artifact":{"artifact_id":"mf-artifact-valid-b","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-fidelity+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}}
+            ]
+        }),
+    );
+    assert_eq!(multi_fidelity["dispatch"], json!("not_started"));
+    assert_eq!(
+        multi_fidelity["optimization"]["selected_order"],
+        json!(["mf-valid-a"])
+    );
+    assert_eq!(
+        multi_fidelity["optimization"]["estimates"][2]["source"],
+        json!("transferred")
+    );
+
+    let stratified_causal = call(
+        &mut server,
+        "glioma_stratified_causal_adjustment",
+        json!({
+            "request": {
+                "objective": "adjust invasion effect by molecular stratum",
+                "control_arm": "control",
+                "treatment_arm": "treated",
+                "model_system": "organoid",
+                "min_units_per_arm_per_stratum": 2,
+                "min_eligible_strata": 2,
+                "effect_threshold_milli": 100,
+                "max_stratum_imbalance_milli": 400,
+                "max_leave_one_stratum_shift_milli": 80
+            },
+            "observations": [
+                {"observation_id":"sc-a-c1","unit_id":"sc-c1","stratum_id":"low","arm_id":"control","model_system":"organoid","batch_id":"sc-b1","outcome_milli":100,"artifact":{"artifact_id":"sc-artifact-a-c1","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-stratified-observation+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"observation_id":"sc-a-c2","unit_id":"sc-c2","stratum_id":"low","arm_id":"control","model_system":"organoid","batch_id":"sc-b2","outcome_milli":110,"artifact":{"artifact_id":"sc-artifact-a-c2","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-stratified-observation+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"observation_id":"sc-a-t1","unit_id":"sc-t1","stratum_id":"low","arm_id":"treated","model_system":"organoid","batch_id":"sc-b3","outcome_milli":260,"artifact":{"artifact_id":"sc-artifact-a-t1","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-stratified-observation+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"observation_id":"sc-a-t2","unit_id":"sc-t2","stratum_id":"low","arm_id":"treated","model_system":"organoid","batch_id":"sc-b4","outcome_milli":270,"artifact":{"artifact_id":"sc-artifact-a-t2","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-stratified-observation+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"observation_id":"sc-b-c1","unit_id":"sc-c3","stratum_id":"high","arm_id":"control","model_system":"organoid","batch_id":"sc-b5","outcome_milli":200,"artifact":{"artifact_id":"sc-artifact-b-c1","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-stratified-observation+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"observation_id":"sc-b-c2","unit_id":"sc-c4","stratum_id":"high","arm_id":"control","model_system":"organoid","batch_id":"sc-b6","outcome_milli":210,"artifact":{"artifact_id":"sc-artifact-b-c2","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-stratified-observation+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"observation_id":"sc-b-t1","unit_id":"sc-t3","stratum_id":"high","arm_id":"treated","model_system":"organoid","batch_id":"sc-b7","outcome_milli":340,"artifact":{"artifact_id":"sc-artifact-b-t1","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-stratified-observation+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"observation_id":"sc-b-t2","unit_id":"sc-t4","stratum_id":"high","arm_id":"treated","model_system":"organoid","batch_id":"sc-b8","outcome_milli":350,"artifact":{"artifact_id":"sc-artifact-b-t2","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-stratified-observation+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}}
+            ]
+        }),
+    );
+    assert_eq!(stratified_causal["dispatch"], json!("not_started"));
+    assert_eq!(
+        stratified_causal["adjustment"]["disposition"],
+        json!("qualified")
+    );
+    assert_eq!(
+        stratified_causal["adjustment"]["adjusted_effect_milli"],
+        json!(150)
+    );
+
+    let dose_response = call(
+        &mut server,
+        "glioma_dose_response",
+        json!({
+            "request": {
+                "objective": "map a preclinical glioma invasion dose response",
+                "model_system": "organoid",
+                "control_dose_milli": 0,
+                "direction": "increasing",
+                "min_observations_per_dose": 1,
+                "min_dose_levels": 3,
+                "effect_threshold_milli": 100,
+                "max_residual_milli": 0,
+                "max_monotonicity_violations": 0
+            },
+            "observations": [
+                {"observation_id":"d0","unit_id":"u0","model_system":"organoid","batch_id":"b0","dose_milli":0,"outcome_milli":100},
+                {"observation_id":"d1","unit_id":"u1","model_system":"organoid","batch_id":"b1","dose_milli":10,"outcome_milli":200},
+                {"observation_id":"d2","unit_id":"u2","model_system":"organoid","batch_id":"b2","dose_milli":20,"outcome_milli":300}
+            ]
+        }),
+    );
+    assert_eq!(dose_response["dispatch"], json!("not_started"));
+    assert_eq!(dose_response["analysis"]["disposition"], json!("qualified"));
+    assert_eq!(
+        dose_response["analysis"]["half_maximal_dose_milli"],
+        json!(10)
+    );
+
+    let adaptive_allocation = call(
+        &mut server,
+        "glioma_adaptive_allocation",
+        json!({
+            "request": {
+                "objective": "allocate organoid invasion replicates",
+                "model_system": "organoid",
+                "control_arm_id": "control",
+                "target_effect_milli": 100,
+                "min_replicates_per_arm": 30,
+                "min_probability_milli": 700,
+                "max_posterior_uncertainty_milli": 60,
+                "exploration_weight_milli": 300,
+                "max_selected_arms": 1,
+                "max_new_replicates": 20,
+                "budget_units": 80,
+                "risk_ceiling_milli": 700
+            },
+            "arms": [
+                {"arm_id":"control","label":"vehicle control","artifact":{"artifact_id":"adaptive-control-artifact","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-adaptive-arm+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"model_system":"organoid","successes":50,"failures":50,"prior_alpha":1,"prior_beta":1,"risk_milli":100,"cost_units":2},
+                {"arm_id":"egfr","label":"EGFR perturbation","artifact":{"artifact_id":"adaptive-egfr-artifact","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-adaptive-arm+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"model_system":"organoid","successes":28,"failures":2,"prior_alpha":1,"prior_beta":1,"risk_milli":100,"cost_units":2},
+                {"arm_id":"matrix","label":"matrix perturbation","artifact":{"artifact_id":"adaptive-matrix-artifact","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-adaptive-arm+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"model_system":"organoid","successes":12,"failures":18,"prior_alpha":1,"prior_beta":1,"risk_milli":100,"cost_units":2}
+            ]
+        }),
+    );
+    assert_eq!(adaptive_allocation["dispatch"], json!("not_started"));
+    assert_eq!(
+        adaptive_allocation["allocation"]["disposition"],
+        json!("qualified")
+    );
+    assert_eq!(
+        adaptive_allocation["allocation"]["selected_order"],
+        json!(["egfr"])
+    );
+
+    let closed_loop_campaign = call(
+        &mut server,
+        "glioma_closed_loop_campaign",
+        json!({
+            "request": {
+                "objective": "discriminate invasion mechanisms in glioma organoids",
+                "model_system": "organoid",
+                "max_rounds": 2,
+                "max_actions_per_round": 1,
+                "budget_units": 8,
+                "min_information_gain_milli": 100,
+                "information_weight_milli": 700,
+                "effect_weight_milli": 100,
+                "feasibility_weight_milli": 200,
+                "risk_penalty_milli": 200,
+                "stop_concentration_milli": 900
+            },
+            "mechanisms": [
+                {"mechanism_id":"integrin","prior_milli":500},
+                {"mechanism_id":"hypoxia","prior_milli":500}
+            ],
+            "actions": [
+                {"action_id":"assay-invasion","feature_id":"invasion-score","label":"organoid invasion assay","predicted_milli_by_mechanism":{"integrin":800,"hypoxia":100},"measurement_uncertainty_milli":50,"feasibility_milli":900,"expected_effect_milli":600,"cost_units":4,"risk_milli":100,"max_replicates":1},
+                {"action_id":"assay-oxygen","feature_id":"oxygen-response","label":"oxygen response assay","predicted_milli_by_mechanism":{"integrin":400,"hypoxia":700},"measurement_uncertainty_milli":50,"feasibility_milli":800,"expected_effect_milli":300,"cost_units":4,"risk_milli":100,"max_replicates":1}
+            ]
+        }),
+    );
+    assert_eq!(closed_loop_campaign["dispatch"], json!("not_started"));
+    assert_eq!(
+        closed_loop_campaign["campaign"]["disposition"],
+        json!("qualified")
+    );
+    assert_eq!(
+        closed_loop_campaign["campaign"]["selected_action_order"],
+        json!(["assay-invasion", "assay-oxygen"])
+    );
+
+    let synergy = call(
+        &mut server,
+        "glioma_combination_synergy",
+        json!({
+            "request": {
+                "objective": "map glioma combination suppression",
+                "model_system": "organoid",
+                "min_replicates_per_cell": 1,
+                "min_combination_cells": 1,
+                "synergy_threshold_milli": 50,
+                "max_residual_milli": 0
+            },
+            "observations": [
+                {"observation_id":"v","unit_id":"v","model_system":"organoid","batch_id":"b0","dose_a_milli":0,"dose_b_milli":0,"response_milli":0},
+                {"observation_id":"a","unit_id":"a","model_system":"organoid","batch_id":"b1","dose_a_milli":10,"dose_b_milli":0,"response_milli":400},
+                {"observation_id":"b","unit_id":"b","model_system":"organoid","batch_id":"b2","dose_a_milli":0,"dose_b_milli":10,"response_milli":400},
+                {"observation_id":"ab","unit_id":"ab","model_system":"organoid","batch_id":"b3","dose_a_milli":10,"dose_b_milli":10,"response_milli":900}
+            ]
+        }),
+    );
+    assert_eq!(synergy["dispatch"], json!("not_started"));
+    assert_eq!(synergy["analysis"]["disposition"], json!("qualified"));
+    assert_eq!(synergy["analysis"]["cells"][0]["synergy_milli"], json!(260));
+
+    let adaptive_dose_surface = call(
+        &mut server,
+        "glioma_adaptive_dose_surface",
+        json!({
+            "request": {
+                "objective": "map an organoid glioma combination response surface",
+                "model_system": "organoid",
+                "observations": [
+                    {"observation_id":"surface-control","unit_id":"surface-u0","batch_id":"surface-b0","model_system":"organoid","dose_a_milli":0,"dose_b_milli":0,"response_milli":0,"uncertainty_milli":20},
+                    {"observation_id":"surface-low","unit_id":"surface-u1","batch_id":"surface-b1","model_system":"organoid","dose_a_milli":100,"dose_b_milli":100,"response_milli":300,"uncertainty_milli":35},
+                    {"observation_id":"surface-high","unit_id":"surface-u2","batch_id":"surface-b2","model_system":"organoid","dose_a_milli":300,"dose_b_milli":300,"response_milli":760,"uncertainty_milli":40}
+                ],
+                "candidate_pairs": [
+                    {"dose_a_milli":100,"dose_b_milli":100},
+                    {"dose_a_milli":200,"dose_b_milli":200},
+                    {"dose_a_milli":400,"dose_b_milli":400}
+                ],
+                "min_replicates_per_cell": 2,
+                "budget_units": 4,
+                "cost_per_pair_units": 2,
+                "max_next_pairs": 2,
+                "target_response_milli": 600,
+                "exploration_weight_milli": 700,
+                "max_estimate_uncertainty_milli": 1000,
+                "max_total_dose_milli": 1000,
+                "min_pair_separation_milli": 100
+            }
+        }),
+    );
+    assert_eq!(adaptive_dose_surface["dispatch"], json!("not_started"));
+    assert_eq!(adaptive_dose_surface["simulation_only"], json!(true));
+    assert_eq!(
+        adaptive_dose_surface["plan"]["disposition"],
+        json!("ready_for_validation")
+    );
+    assert_eq!(
+        adaptive_dose_surface["plan"]["selected_order"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+
+    let concordance = call(
+        &mut server,
+        "glioma_multimodal_concordance",
+        json!({
+            "request": {
+                "study_id": "mcp-study",
+                "model_system": "organoid",
+                "required_modalities": ["genomics", "transcriptomics"],
+                "min_shared_features": 3,
+                "min_correlation_milli": 900
+            },
+            "vectors": [
+                {
+                    "observation_id": "genomics-vector",
+                    "study_id": "mcp-study",
+                    "sample_lineage": "mcp-sample",
+                    "modality": "genomics",
+                    "model_system": "organoid",
+                    "artifact": {"artifact_id":"mcp-genomics-artifact","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-vector+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},
+                    "features": [
+                        {"feature_id":"feature-001","value_milli":1},
+                        {"feature_id":"feature-002","value_milli":2},
+                        {"feature_id":"feature-003","value_milli":3}
+                    ]
+                },
+                {
+                    "observation_id": "transcriptomics-vector",
+                    "study_id": "mcp-study",
+                    "sample_lineage": "mcp-sample",
+                    "modality": "transcriptomics",
+                    "model_system": "organoid",
+                    "artifact": {"artifact_id":"mcp-transcriptomics-artifact","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-vector+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},
+                    "features": [
+                        {"feature_id":"feature-001","value_milli":10},
+                        {"feature_id":"feature-002","value_milli":20},
+                        {"feature_id":"feature-003","value_milli":30}
+                    ]
+                }
+            ]
+        }),
+    );
+    assert_eq!(concordance["dispatch"], json!("not_started"));
+    assert_eq!(
+        concordance["concordance"]["disposition"],
+        json!("qualified")
+    );
+
+    let harmonization = call(
+        &mut server,
+        "glioma_multimodal_harmonize",
+        json!({
+            "request": {
+                "study_id": "mcp-harmonization-study",
+                "model_system": "organoid",
+                "required_modalities": ["genomics"],
+                "reference_batch": "batch-1",
+                "min_vectors_per_batch": 2,
+                "min_shared_features": 2,
+                "max_correction_milli": 100,
+                "max_post_harmonization_spread_milli": 20
+            },
+            "vectors": [
+                {"observation_id":"mh-v1","study_id":"mcp-harmonization-study","sample_lineage":"mh-s1","modality":"genomics","model_system":"organoid","batch_id":"batch-1","artifact":{"artifact_id":"mh-artifact-1","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-vector+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"features":[{"feature_id":"f1","value_milli":100},{"feature_id":"f2","value_milli":200}]},
+                {"observation_id":"mh-v2","study_id":"mcp-harmonization-study","sample_lineage":"mh-s2","modality":"genomics","model_system":"organoid","batch_id":"batch-1","artifact":{"artifact_id":"mh-artifact-2","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-vector+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"features":[{"feature_id":"f1","value_milli":110},{"feature_id":"f2","value_milli":210}]},
+                {"observation_id":"mh-v3","study_id":"mcp-harmonization-study","sample_lineage":"mh-s3","modality":"genomics","model_system":"organoid","batch_id":"batch-2","artifact":{"artifact_id":"mh-artifact-3","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-vector+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"features":[{"feature_id":"f1","value_milli":150},{"feature_id":"f2","value_milli":250}]},
+                {"observation_id":"mh-v4","study_id":"mcp-harmonization-study","sample_lineage":"mh-s4","modality":"genomics","model_system":"organoid","batch_id":"batch-2","artifact":{"artifact_id":"mh-artifact-4","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-vector+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"features":[{"feature_id":"f1","value_milli":160},{"feature_id":"f2","value_milli":260}]}
+            ]
+        }),
+    );
+    assert_eq!(harmonization["dispatch"], json!("not_started"));
+    assert_eq!(
+        harmonization["harmonization"]["disposition"],
+        json!("qualified")
+    );
+    assert_eq!(
+        harmonization["harmonization"]["max_correction_milli"],
+        json!(50)
+    );
+
+    let latent_factors = call(
+        &mut server,
+        "glioma_multimodal_latent_factors",
+        json!({
+            "request": {
+                "study_id": "mcp-latent-study",
+                "model_system": "organoid",
+                "required_modalities": ["genomics", "imaging"],
+                "min_complete_samples": 3,
+                "min_shared_features": 2,
+                "components": 1,
+                "max_iterations": 100,
+                "convergence_tolerance_milli": 1,
+                "min_explained_variance_milli": 500,
+                "max_reconstruction_error_milli": 500,
+                "require_all_modalities": true
+            },
+            "vectors": [
+                {"observation_id":"ml-g1","study_id":"mcp-latent-study","sample_lineage":"ml-s1","modality":"genomics","model_system":"organoid","artifact":{"artifact_id":"ml-artifact-1","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-vector+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"features":[{"feature_id":"x","value_milli":100},{"feature_id":"y","value_milli":10}]},
+                {"observation_id":"ml-i1","study_id":"mcp-latent-study","sample_lineage":"ml-s1","modality":"imaging","model_system":"organoid","artifact":{"artifact_id":"ml-artifact-2","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-vector+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"features":[{"feature_id":"x","value_milli":50},{"feature_id":"y","value_milli":5}]},
+                {"observation_id":"ml-g2","study_id":"mcp-latent-study","sample_lineage":"ml-s2","modality":"genomics","model_system":"organoid","artifact":{"artifact_id":"ml-artifact-3","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-vector+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"features":[{"feature_id":"x","value_milli":200},{"feature_id":"y","value_milli":20}]},
+                {"observation_id":"ml-i2","study_id":"mcp-latent-study","sample_lineage":"ml-s2","modality":"imaging","model_system":"organoid","artifact":{"artifact_id":"ml-artifact-4","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-vector+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"features":[{"feature_id":"x","value_milli":100},{"feature_id":"y","value_milli":10}]},
+                {"observation_id":"ml-g3","study_id":"mcp-latent-study","sample_lineage":"ml-s3","modality":"genomics","model_system":"organoid","artifact":{"artifact_id":"ml-artifact-5","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-vector+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"features":[{"feature_id":"x","value_milli":300},{"feature_id":"y","value_milli":30}]},
+                {"observation_id":"ml-i3","study_id":"mcp-latent-study","sample_lineage":"ml-s3","modality":"imaging","model_system":"organoid","artifact":{"artifact_id":"ml-artifact-6","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-vector+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"features":[{"feature_id":"x","value_milli":150},{"feature_id":"y","value_milli":15}]}
+            ]
+        }),
+    );
+    assert_eq!(latent_factors["dispatch"], json!("not_started"));
+    assert_eq!(
+        latent_factors["analysis"]["disposition"],
+        json!("qualified")
+    );
+    assert_eq!(
+        latent_factors["analysis"]["components"][0]["component_index"],
+        json!(0)
+    );
+
+    let spatial_niches = call(
+        &mut server,
+        "glioma_spatial_niches",
+        json!({
+            "request": {
+                "study_id": "mcp-spatial-study",
+                "model_system": "organoid",
+                "radius_milli": 1_500,
+                "min_neighbors": 1,
+                "min_cells_per_niche": 2,
+                "min_interaction_enrichment_milli": 0
+            },
+            "cells": [
+                {"cell_id":"sn-a1","sample_id":"sn-s1","lineage":"tumour","x_milli":0,"y_milli":0,"state_milli":900,"artifact":{"artifact_id":"sn-artifact-1","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-spatial+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"cell_id":"sn-a2","sample_id":"sn-s1","lineage":"tumour","x_milli":1000,"y_milli":0,"state_milli":800,"artifact":{"artifact_id":"sn-artifact-2","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-spatial+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"cell_id":"sn-a3","sample_id":"sn-s1","lineage":"tumour","x_milli":0,"y_milli":1000,"state_milli":850,"artifact":{"artifact_id":"sn-artifact-3","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-spatial+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"cell_id":"sn-b1","sample_id":"sn-s1","lineage":"myeloid","x_milli":2000,"y_milli":0,"state_milli":200,"artifact":{"artifact_id":"sn-artifact-4","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-spatial+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"cell_id":"sn-b2","sample_id":"sn-s1","lineage":"myeloid","x_milli":3000,"y_milli":0,"state_milli":250,"artifact":{"artifact_id":"sn-artifact-5","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-spatial+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"cell_id":"sn-b3","sample_id":"sn-s1","lineage":"myeloid","x_milli":2000,"y_milli":1000,"state_milli":150,"artifact":{"artifact_id":"sn-artifact-6","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-spatial+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}}
+            ]
+        }),
+    );
+    assert_eq!(spatial_niches["dispatch"], json!("not_started"));
+    assert_eq!(
+        spatial_niches["analysis"]["disposition"],
+        json!("qualified")
+    );
+    assert!(!spatial_niches["analysis"]["interactions"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+
+    let spatial_communication = call(
+        &mut server,
+        "glioma_spatial_communication",
+        json!({
+            "request": {
+                "study_id": "mcp-communication-study",
+                "model_system": "organoid",
+                "radius_milli": 1_500,
+                "min_neighbors": 1,
+                "min_lineage_cells": 1,
+                "min_signal_milli": 100,
+                "min_enrichment_milli": 900,
+                "max_pairs": 10
+            },
+            "cells": [
+                {"cell_id":"sc-t1","sample_id":"sc-s1","lineage":"tumour","x_milli":0,"y_milli":0,"ligand_scores_milli":{"L1":900},"receptor_scores_milli":{},"artifact":{"artifact_id":"sc-artifact-1","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-spatial-communication+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"cell_id":"sc-t2","sample_id":"sc-s1","lineage":"tumour","x_milli":500,"y_milli":0,"ligand_scores_milli":{"L1":800},"receptor_scores_milli":{},"artifact":{"artifact_id":"sc-artifact-2","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-spatial-communication+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"cell_id":"sc-m1","sample_id":"sc-s1","lineage":"myeloid","x_milli":1000,"y_milli":0,"ligand_scores_milli":{},"receptor_scores_milli":{"R1":900},"artifact":{"artifact_id":"sc-artifact-3","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-spatial-communication+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"cell_id":"sc-m2","sample_id":"sc-s1","lineage":"myeloid","x_milli":1000,"y_milli":500,"ligand_scores_milli":{},"receptor_scores_milli":{"R1":800},"artifact":{"artifact_id":"sc-artifact-4","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-spatial-communication+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}}
+            ],
+            "pairs": [{"pair_id":"L1-R1","ligand_feature":"L1","receptor_feature":"R1"}]
+        }),
+    );
+    assert_eq!(spatial_communication["dispatch"], json!("not_started"));
+    assert_eq!(
+        spatial_communication["analysis"]["disposition"],
+        json!("partial")
+    );
+    assert!(!spatial_communication["analysis"]["enriched_order"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+
+    let spatial_state_propagation = call(
+        &mut server,
+        "glioma_spatial_state_propagation",
+        json!({
+            "request": {
+                "study_id": "mcp-propagation-study",
+                "model_system": "organoid",
+                "radius_milli": 1500,
+                "max_steps": 20,
+                "self_retention_milli": 700,
+                "neighbor_weight_milli": 300,
+                "cross_lineage_weight_milli": 500,
+                "convergence_tolerance_milli": 1,
+                "hotspot_threshold_milli": 50
+            },
+            "cells": [
+                {"cell_id":"sp-a","sample_id":"sp-s1","lineage":"tumour","x_milli":0,"y_milli":0,"state_milli":900,"artifact":{"artifact_id":"sp-artifact-1","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-spatial+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"cell_id":"sp-b","sample_id":"sp-s1","lineage":"tumour","x_milli":1000,"y_milli":0,"state_milli":0,"artifact":{"artifact_id":"sp-artifact-2","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-spatial+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}}
+            ]
+        }),
+    );
+    assert_eq!(spatial_state_propagation["dispatch"], json!("not_started"));
+    assert_eq!(
+        spatial_state_propagation["analysis"]["disposition"],
+        json!("qualified")
+    );
+    assert!(spatial_state_propagation["analysis"]["converged"]
+        .as_bool()
+        .unwrap());
+    assert_eq!(
+        spatial_state_propagation["analysis"]["edge_order"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+
+    let spatial_registration = call(
+        &mut server,
+        "glioma_spatial_registration",
+        json!({
+            "request": {
+                "study_id": "mcp-registration-study",
+                "model_system": "organoid",
+                "reference_sample_id": "registration-reference",
+                "min_cells_per_landmark": 1,
+                "min_shared_lineages": 2,
+                "max_residual_milli": 20,
+                "max_landmark_spread_milli": 20
+            },
+            "cells": [
+                {"cell_id":"reg-r-a","sample_id":"registration-reference","lineage":"tumour","x_milli":0,"y_milli":0,"state_milli":500,"artifact":{"artifact_id":"reg-artifact-r-a","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-spatial-registration+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"cell_id":"reg-r-b","sample_id":"registration-reference","lineage":"myeloid","x_milli":1000,"y_milli":0,"state_milli":500,"artifact":{"artifact_id":"reg-artifact-r-b","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-spatial-registration+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"cell_id":"reg-r-c","sample_id":"registration-reference","lineage":"astro","x_milli":0,"y_milli":1000,"state_milli":500,"artifact":{"artifact_id":"reg-artifact-r-c","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-spatial-registration+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"cell_id":"reg-s-a","sample_id":"registration-shifted","lineage":"tumour","x_milli":100,"y_milli":200,"state_milli":500,"artifact":{"artifact_id":"reg-artifact-s-a","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-spatial-registration+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"cell_id":"reg-s-b","sample_id":"registration-shifted","lineage":"myeloid","x_milli":1100,"y_milli":200,"state_milli":500,"artifact":{"artifact_id":"reg-artifact-s-b","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-spatial-registration+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"cell_id":"reg-s-c","sample_id":"registration-shifted","lineage":"astro","x_milli":100,"y_milli":1200,"state_milli":500,"artifact":{"artifact_id":"reg-artifact-s-c","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-spatial-registration+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}}
+            ]
+        }),
+    );
+    assert_eq!(spatial_registration["dispatch"], json!("not_started"));
+    assert_eq!(spatial_registration["simulation_only"], json!(true));
+    assert_eq!(
+        spatial_registration["analysis"]["disposition"],
+        json!("qualified")
+    );
+    assert_eq!(
+        spatial_registration["analysis"]["registered_cell_order"]
+            .as_array()
+            .unwrap()
+            .len(),
+        6
+    );
+
+    let sensitivity = call(
+        &mut server,
+        "glioma_causal_sensitivity",
+        json!({
+            "request": {
+                "objective": "stress the invasion mechanism effect",
+                "control_arm": "control",
+                "treatment_arm": "treated",
+                "model_system": "organoid",
+                "expected_direction": "positive",
+                "min_units_per_arm": 2,
+                "effect_threshold_milli": 100,
+                "max_confounder_strength_milli": 400,
+                "strength_step_milli": 100,
+                "max_leave_one_out_shift_milli": 100
+            },
+            "observations": [
+                {"observation_id":"ms-c1","unit_id":"ms-c1","arm_id":"control","model_system":"organoid","outcome_milli":100,"confounder_score_milli":-500,"artifact":{"artifact_id":"ms-a1","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-sensitivity+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"observation_id":"ms-c2","unit_id":"ms-c2","arm_id":"control","model_system":"organoid","outcome_milli":110,"confounder_score_milli":-400,"artifact":{"artifact_id":"ms-a2","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-sensitivity+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"observation_id":"ms-t1","unit_id":"ms-t1","arm_id":"treated","model_system":"organoid","outcome_milli":300,"confounder_score_milli":400,"artifact":{"artifact_id":"ms-a3","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-sensitivity+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"observation_id":"ms-t2","unit_id":"ms-t2","arm_id":"treated","model_system":"organoid","outcome_milli":310,"confounder_score_milli":500,"artifact":{"artifact_id":"ms-a4","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-sensitivity+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}}
+            ]
+        }),
+    );
+    assert_eq!(sensitivity["dispatch"], json!("not_started"));
+    assert_eq!(
+        sensitivity["analysis"]["tipping_strength_milli"],
+        json!(200)
+    );
+    assert_eq!(sensitivity["analysis"]["disposition"], json!("partial"));
+
+    let consensus = call(
+        &mut server,
+        "glioma_multimodal_consensus",
+        json!({
+            "request": {
+                "study_id": "mcp-consensus-study",
+                "model_system": "organoid",
+                "cluster_count": 2,
+                "min_modalities_per_sample": 2,
+                "min_modalities_per_feature": 1,
+                "min_shared_features": 3,
+                "max_iterations": 8,
+                "max_distance_milli": 100
+            },
+            "vectors": [
+                {"observation_id":"cs1-g","study_id":"mcp-consensus-study","sample_lineage":"cs1","modality":"genomics","model_system":"organoid","artifact":{"artifact_id":"cs1-g-artifact","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-vector+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"features":[{"feature_id":"feature-001","value_milli":1},{"feature_id":"feature-002","value_milli":2},{"feature_id":"feature-003","value_milli":3}]},
+                {"observation_id":"cs1-t","study_id":"mcp-consensus-study","sample_lineage":"cs1","modality":"transcriptomics","model_system":"organoid","artifact":{"artifact_id":"cs1-t-artifact","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-vector+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"features":[{"feature_id":"feature-001","value_milli":1},{"feature_id":"feature-002","value_milli":2},{"feature_id":"feature-003","value_milli":3}]},
+                {"observation_id":"cs2-g","study_id":"mcp-consensus-study","sample_lineage":"cs2","modality":"genomics","model_system":"organoid","artifact":{"artifact_id":"cs2-g-artifact","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-vector+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"features":[{"feature_id":"feature-001","value_milli":2},{"feature_id":"feature-002","value_milli":3},{"feature_id":"feature-003","value_milli":4}]},
+                {"observation_id":"cs2-t","study_id":"mcp-consensus-study","sample_lineage":"cs2","modality":"transcriptomics","model_system":"organoid","artifact":{"artifact_id":"cs2-t-artifact","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-vector+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"features":[{"feature_id":"feature-001","value_milli":2},{"feature_id":"feature-002","value_milli":3},{"feature_id":"feature-003","value_milli":4}]},
+                {"observation_id":"cs3-g","study_id":"mcp-consensus-study","sample_lineage":"cs3","modality":"genomics","model_system":"organoid","artifact":{"artifact_id":"cs3-g-artifact","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-vector+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"features":[{"feature_id":"feature-001","value_milli":900},{"feature_id":"feature-002","value_milli":901},{"feature_id":"feature-003","value_milli":902}]},
+                {"observation_id":"cs3-t","study_id":"mcp-consensus-study","sample_lineage":"cs3","modality":"transcriptomics","model_system":"organoid","artifact":{"artifact_id":"cs3-t-artifact","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-vector+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"features":[{"feature_id":"feature-001","value_milli":900},{"feature_id":"feature-002","value_milli":901},{"feature_id":"feature-003","value_milli":902}]},
+                {"observation_id":"cs4-g","study_id":"mcp-consensus-study","sample_lineage":"cs4","modality":"genomics","model_system":"organoid","artifact":{"artifact_id":"cs4-g-artifact","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-vector+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"features":[{"feature_id":"feature-001","value_milli":901},{"feature_id":"feature-002","value_milli":902},{"feature_id":"feature-003","value_milli":903}]},
+                {"observation_id":"cs4-t","study_id":"mcp-consensus-study","sample_lineage":"cs4","modality":"transcriptomics","model_system":"organoid","artifact":{"artifact_id":"cs4-t-artifact","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-vector+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"features":[{"feature_id":"feature-001","value_milli":901},{"feature_id":"feature-002","value_milli":902},{"feature_id":"feature-003","value_milli":903}]}
+            ]
+        }),
+    );
+    assert_eq!(consensus["dispatch"], json!("not_started"));
+    assert_eq!(consensus["consensus"]["disposition"], json!("qualified"));
+    assert_eq!(
+        consensus["consensus"]["assignments"]
+            .as_array()
+            .unwrap()
+            .len(),
+        4
+    );
+
+    let meta_analysis = call(
+        &mut server,
+        "glioma_replication_meta_analyze",
+        json!({
+            "request": {
+                "objective": "pool independent organoid invasion effects",
+                "model_system": "organoid",
+                "min_studies": 3,
+                "min_replicates_per_study": 3,
+                "effect_threshold_milli": 100,
+                "max_i2_milli": 200,
+                "min_signal_to_noise_milli": 1000,
+                "max_leave_one_out_shift_milli": 60
+            },
+            "studies": [
+                {"study_id":"meta-study-1","site_id":"meta-site-a","model_system":"organoid","artifact":{"artifact_id":"meta-artifact-1","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-meta-study+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"effect_milli":300,"uncertainty_milli":20,"replicate_count":4},
+                {"study_id":"meta-study-2","site_id":"meta-site-b","model_system":"organoid","artifact":{"artifact_id":"meta-artifact-2","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-meta-study+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"effect_milli":310,"uncertainty_milli":25,"replicate_count":4},
+                {"study_id":"meta-study-3","site_id":"meta-site-c","model_system":"organoid","artifact":{"artifact_id":"meta-artifact-3","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-meta-study+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"effect_milli":295,"uncertainty_milli":22,"replicate_count":4}
+            ]
+        }),
+    );
+    assert_eq!(meta_analysis["dispatch"], json!("not_started"));
+    assert_eq!(meta_analysis["analysis"]["disposition"], json!("qualified"));
+    assert_eq!(
+        meta_analysis["analysis"]["included_order"]
+            .as_array()
+            .unwrap()
+            .len(),
+        3
+    );
+
+    let federated_benchmark = call(
+        &mut server,
+        "glioma_federated_benchmark_consensus",
+        json!({
+            "request": {
+                "objective": "compare invasion model improvements across sites",
+                "capability_id": "glioma:invasion-model",
+                "benchmark_world": "glioma-world-v1",
+                "metric_name": "holdout_auc",
+                "model_system": "organoid",
+                "minimum_sites": 3,
+                "minimum_replicates_per_site": 3,
+                "effect_threshold_milli": 50,
+                "max_i2_milli": 250,
+                "min_signal_to_noise_milli": 500,
+                "max_site_spread_milli": 80,
+                "max_leave_one_out_shift_milli": 60
+            },
+            "sites": [
+                {"site_id":"bench-site-a","study_id":"bench-study-a","capability_id":"glioma:invasion-model","benchmark_world":"glioma-world-v1","metric_name":"holdout_auc","model_system":"organoid","artifact":{"artifact_id":"bench-artifact-a","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-benchmark+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"baseline_score_milli":500,"candidate_score_milli":620,"uncertainty_milli":20,"replicate_count":4},
+                {"site_id":"bench-site-b","study_id":"bench-study-b","capability_id":"glioma:invasion-model","benchmark_world":"glioma-world-v1","metric_name":"holdout_auc","model_system":"organoid","artifact":{"artifact_id":"bench-artifact-b","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-benchmark+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"baseline_score_milli":500,"candidate_score_milli":625,"uncertainty_milli":22,"replicate_count":4},
+                {"site_id":"bench-site-c","study_id":"bench-study-c","capability_id":"glioma:invasion-model","benchmark_world":"glioma-world-v1","metric_name":"holdout_auc","model_system":"organoid","artifact":{"artifact_id":"bench-artifact-c","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-benchmark+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"baseline_score_milli":500,"candidate_score_milli":618,"uncertainty_milli":21,"replicate_count":4}
+            ]
+        }),
+    );
+    assert_eq!(federated_benchmark["dispatch"], json!("not_started"));
+    assert_eq!(
+        federated_benchmark["consensus"]["disposition"],
+        json!("qualified")
+    );
+    assert_eq!(
+        federated_benchmark["consensus"]["included_order"]
+            .as_array()
+            .unwrap()
+            .len(),
+        3
+    );
+
+    let federated_site_plan = call(
+        &mut server,
+        "glioma_federated_benchmark_site_plan",
+        json!({
+            "request": {
+                "benchmark": {
+                    "objective": "plan the next invasion benchmark site",
+                    "capability_id": "glioma:invasion-model",
+                    "benchmark_world": "glioma-world-v1",
+                    "metric_name": "holdout_auc",
+                    "model_system": "organoid",
+                    "minimum_sites": 3,
+                    "minimum_replicates_per_site": 3,
+                    "effect_threshold_milli": 50,
+                    "max_i2_milli": 250,
+                    "min_signal_to_noise_milli": 500,
+                    "max_site_spread_milli": 80,
+                    "max_leave_one_out_shift_milli": 60
+                },
+                "current_sites": [
+                    {"site_id":"plan-site-a","study_id":"plan-study-a","capability_id":"glioma:invasion-model","benchmark_world":"glioma-world-v1","metric_name":"holdout_auc","model_system":"organoid","artifact":{"artifact_id":"plan-artifact-a","content_hash":artifact_hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"baseline_score_milli":500,"candidate_score_milli":620,"uncertainty_milli":20,"replicate_count":4},
+                    {"site_id":"plan-site-b","study_id":"plan-study-b","capability_id":"glioma:invasion-model","benchmark_world":"glioma-world-v1","metric_name":"holdout_auc","model_system":"organoid","artifact":{"artifact_id":"plan-artifact-b","content_hash":artifact_hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"baseline_score_milli":500,"candidate_score_milli":625,"uncertainty_milli":22,"replicate_count":4}
+                ],
+                "candidates": [{"candidate_id":"plan-candidate-c","site_id":"plan-site-c","study_id":"plan-study-c","independence_group":"plan-group-c","artifact":{"artifact_id":"plan-artifact-c","content_hash":artifact_hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"baseline_score_milli":500,"expected_candidate_score_milli":625,"uncertainty_milli":20,"replicate_count":4,"cost_units":1,"privacy_risk_milli":100}],
+                "budget_units": 5,
+                "max_new_sites": 2,
+                "beam_width": 4,
+                "privacy_budget_milli": 500,
+                "conservatism_milli": 500
+            }
+        }),
+    );
+    assert_eq!(federated_site_plan["dispatch"], json!("not_started"));
+    assert_eq!(federated_site_plan["simulation_only"], json!(true));
+    assert_eq!(
+        federated_site_plan["site_plan"]["disposition"],
+        json!("ready_to_validate")
+    );
+    assert_eq!(
+        federated_site_plan["site_plan"]["selected_order"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+
+    let mechanism_discrimination = call(
+        &mut server,
+        "glioma_mechanism_discriminate",
+        json!({
+            "request": {
+                "objective": "discriminate invasion mechanisms",
+                "model_system": "organoid",
+                "min_shared_features": 2,
+                "max_mechanisms": 4,
+                "max_actions": 4,
+                "min_information_gain_milli": 10
+            },
+            "hypotheses": [
+                {"mechanism_id":"motility","statement":"motility pathway drives invasion","predictions":[{"feature_id":"f1","predicted_milli":100,"uncertainty_milli":10},{"feature_id":"f2","predicted_milli":200,"uncertainty_milli":10}]},
+                {"mechanism_id":"matrix","statement":"matrix remodeling drives invasion","predictions":[{"feature_id":"f1","predicted_milli":400,"uncertainty_milli":10},{"feature_id":"f2","predicted_milli":500,"uncertainty_milli":10}]}
+            ],
+            "observations": [
+                {"feature_id":"f1","observed_milli":100,"uncertainty_milli":10,"artifact":{"artifact_id":"mechanism-observation","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-feature+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"feature_id":"f2","observed_milli":200,"uncertainty_milli":10,"artifact":{"artifact_id":"mechanism-observation-2","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-feature+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}}
+            ],
+            "actions": [
+                {"action_id":"perturb-f1","feature_id":"f1","predicted_milli_by_mechanism":{"matrix":500,"motility":100},"measurement_uncertainty_milli":20,"feasibility_milli":1000,"cost_units":1}
+            ]
+        }),
+    );
+    assert_eq!(mechanism_discrimination["dispatch"], json!("not_started"));
+    assert_eq!(
+        mechanism_discrimination["discrimination"]["disposition"],
+        json!("qualified")
+    );
+    assert_eq!(
+        mechanism_discrimination["discrimination"]["rankings"][0]["mechanism_id"],
+        json!("motility")
+    );
+    assert_eq!(
+        mechanism_discrimination["discrimination"]["selected_action_order"][0],
+        json!("perturb-f1")
+    );
+
+    let mechanism_action_plan = call(
+        &mut server,
+        "glioma_mechanism_action_plan",
+        json!({
+            "discrimination": mechanism_discrimination["discrimination"].clone(),
+            "config": {
+                "model_system": "organoid",
+                "modality": "transcriptomics",
+                "max_actions": 4
+            }
+        }),
+    );
+    assert_eq!(mechanism_action_plan["dispatch"], json!("not_started"));
+    assert_eq!(mechanism_action_plan["simulation_only"], json!(true));
+    assert_eq!(
+        mechanism_action_plan["plan"]["action_order"][0],
+        json!("mechanism-assay:perturb-f1")
+    );
+
+    let mechanism_graph = call(
+        &mut server,
+        "glioma_mechanism_graph_propagate",
+        json!({
+            "request": {
+                "objective": "propagate invasion mechanism support",
+                "model_system": "organoid",
+                "max_iterations": 100,
+                "convergence_tolerance_milli": 1,
+                "damping_milli": 600,
+                "min_edge_confidence_milli": 500,
+                "top_k": 3
+            },
+            "nodes": [
+                {"node_id":"egfr","label":"EGFR activation","modality":"genomics","prior_milli":100,"support_milli":800,"contradiction_milli":0},
+                {"node_id":"stat3","label":"STAT3 state","modality":"transcriptomics","prior_milli":0,"support_milli":400,"contradiction_milli":0},
+                {"node_id":"invasion","label":"invasion phenotype","modality":"functional_perturbation","prior_milli":0,"support_milli":0,"contradiction_milli":0}
+            ],
+            "edges": [
+                {"edge_id":"e-egfr-stat3","source_node_id":"egfr","target_node_id":"stat3","relation":"activates","confidence_milli":900,"evidence_order":["paper-1"]},
+                {"edge_id":"e-stat3-invasion","source_node_id":"stat3","target_node_id":"invasion","relation":"activates","confidence_milli":900,"evidence_order":["paper-2"]}
+            ]
+        }),
+    );
+    assert_eq!(mechanism_graph["dispatch"], json!("not_started"));
+    assert_eq!(
+        mechanism_graph["propagation"]["disposition"],
+        json!("qualified")
+    );
+    assert_eq!(
+        mechanism_graph["propagation"]["ranking_order"]
+            .as_array()
+            .unwrap()
+            .len(),
+        3
+    );
+
+    let mechanism_counterfactual = call(
+        &mut server,
+        "glioma_mechanism_counterfactual",
+        json!({
+            "request": {
+                "objective": "simulate EGFR inhibition on invasion mechanism",
+                "model_system": "organoid",
+                "max_iterations": 100,
+                "convergence_tolerance_milli": 1,
+                "damping_milli": 600,
+                "min_edge_confidence_milli": 500,
+                "min_effect_milli": 10,
+                "top_k": 3
+            },
+            "nodes": [
+                {"node_id":"egfr","label":"EGFR activation","modality":"genomics","prior_milli":100,"support_milli":800,"contradiction_milli":0},
+                {"node_id":"invasion","label":"invasion phenotype","modality":"functional_perturbation","prior_milli":0,"support_milli":0,"contradiction_milli":0}
+            ],
+            "edges": [
+                {"edge_id":"e-egfr-invasion","source_node_id":"egfr","target_node_id":"invasion","relation":"activates","confidence_milli":900,"evidence_order":["paper-egfr"]}
+            ],
+            "interventions": [
+                {"intervention_id":"inhibit-egfr","node_id":"egfr","delta_milli":-600,"rationale":"test whether EGFR support propagates to invasion","evidence_order":["paper-egfr"]}
+            ]
+        }),
+    );
+    assert_eq!(mechanism_counterfactual["dispatch"], json!("not_started"));
+    assert_eq!(
+        mechanism_counterfactual["counterfactual"]["disposition"],
+        json!("qualified")
+    );
+    assert_eq!(
+        mechanism_counterfactual["counterfactual"]["intervention_order"],
+        json!(["inhibit-egfr"])
+    );
+    assert_eq!(
+        mechanism_counterfactual["counterfactual"]["contrasts"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+
+    let mechanism_ensemble_counterfactual = call(
+        &mut server,
+        "glioma_mechanism_ensemble_counterfactual",
+        json!({
+            "request": {
+                "objective": "rank robust EGFR inhibition targets",
+                "model_system": "organoid",
+                "max_iterations": 100,
+                "convergence_tolerance_milli": 1,
+                "damping_milli": 600,
+                "min_edge_confidence_milli": 500,
+                "min_effect_milli": 10,
+                "min_model_agreement_milli": 750,
+                "top_k": 2
+            },
+            "models": [
+                {"model_id":"model-a","prior_milli":600,"nodes":[{"node_id":"egfr","label":"EGFR activation","modality":"genomics","prior_milli":100,"support_milli":800,"contradiction_milli":0},{"node_id":"invasion","label":"invasion phenotype","modality":"functional_perturbation","prior_milli":0,"support_milli":0,"contradiction_milli":0}],"edges":[{"edge_id":"model-a-edge","source_node_id":"egfr","target_node_id":"invasion","relation":"activates","confidence_milli":900,"evidence_order":["paper-a"]}]},
+                {"model_id":"model-b","prior_milli":400,"nodes":[{"node_id":"egfr","label":"EGFR activation","modality":"genomics","prior_milli":100,"support_milli":700,"contradiction_milli":0},{"node_id":"invasion","label":"invasion phenotype","modality":"functional_perturbation","prior_milli":0,"support_milli":0,"contradiction_milli":0}],"edges":[{"edge_id":"model-b-edge","source_node_id":"egfr","target_node_id":"invasion","relation":"activates","confidence_milli":900,"evidence_order":["paper-b"]}]}
+            ],
+            "interventions": [
+                {"intervention_id":"inhibit-egfr","node_id":"egfr","delta_milli":-600,"rationale":"test whether EGFR support propagates to invasion","evidence_order":["paper-egfr"]}
+            ]
+        }),
+    );
+    assert_eq!(
+        mechanism_ensemble_counterfactual["dispatch"],
+        json!("not_started")
+    );
+    assert_eq!(
+        mechanism_ensemble_counterfactual["ensemble"]["disposition"],
+        json!("qualified")
+    );
+    assert_eq!(
+        mechanism_ensemble_counterfactual["ensemble"]["model_order"],
+        json!(["model-a", "model-b"])
+    );
+    assert_eq!(
+        mechanism_ensemble_counterfactual["ensemble"]["targets"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+
+    let robust_intervention_portfolio = call(
+        &mut server,
+        "glioma_robust_intervention_portfolio",
+        json!({
+            "request": {
+                "objective": "select a robust invasion-suppressing perturbation",
+                "model_system": "organoid",
+                "max_iterations": 100,
+                "convergence_tolerance_milli": 1,
+                "damping_milli": 600,
+                "min_edge_confidence_milli": 500,
+                "direction": "decrease",
+                "budget_units": 2,
+                "max_selected": 1,
+                "min_robust_effect_milli": 10,
+                "min_agreement_milli": 750,
+                "risk_ceiling_milli": 700,
+                "effect_weight_milli": 500,
+                "tail_weight_milli": 300,
+                "worst_case_weight_milli": 200,
+                "feasibility_weight_milli": 1000,
+                "risk_penalty_milli": 1
+            },
+            "models": [
+                {"model_id":"model-a","prior_milli":600,"nodes":[{"node_id":"egfr","label":"EGFR activation","modality":"genomics","prior_milli":100,"support_milli":800,"contradiction_milli":0},{"node_id":"invasion","label":"invasion phenotype","modality":"functional_perturbation","prior_milli":0,"support_milli":0,"contradiction_milli":0}],"edges":[{"edge_id":"model-a-edge","source_node_id":"egfr","target_node_id":"invasion","relation":"activates","confidence_milli":900,"evidence_order":["paper-a"]}]},
+                {"model_id":"model-b","prior_milli":400,"nodes":[{"node_id":"egfr","label":"EGFR activation","modality":"genomics","prior_milli":100,"support_milli":700,"contradiction_milli":0},{"node_id":"invasion","label":"invasion phenotype","modality":"functional_perturbation","prior_milli":0,"support_milli":0,"contradiction_milli":0}],"edges":[{"edge_id":"model-b-edge","source_node_id":"egfr","target_node_id":"invasion","relation":"activates","confidence_milli":900,"evidence_order":["paper-b"]}]}
+            ],
+            "candidates": [
+                {"candidate_id":"inhibit-egfr","label":"inhibit EGFR","intervention":{"intervention_id":"inhibit-egfr","node_id":"egfr","delta_milli":-600,"rationale":"test whether EGFR support propagates to invasion","evidence_order":["paper-egfr"]},"target_node_id":"invasion","redundancy_group":"egfr","feasibility_milli":1000,"cost_units":1,"risk_milli":100}
+            ]
+        }),
+    );
+    assert_eq!(
+        robust_intervention_portfolio["dispatch"],
+        json!("not_started")
+    );
+    assert_eq!(
+        robust_intervention_portfolio["portfolio"]["selected_order"],
+        json!(["inhibit-egfr"])
+    );
+    assert_eq!(
+        robust_intervention_portfolio["portfolio"]["disposition"],
+        json!("qualified")
+    );
+
+    let information_design = call(
+        &mut server,
+        "glioma_information_design",
+        json!({
+            "request": {
+                "objective": "select an assay that separates EGFR and matrix invasion mechanisms",
+                "model_system": "organoid",
+                "budget_units": 4,
+                "max_selected_actions": 1,
+                "min_information_gain_milli": 10,
+                "information_weight_milli": 800,
+                "feasibility_weight_milli": 200,
+                "risk_penalty_milli": 100,
+                "cost_penalty_milli": 0,
+                "risk_ceiling_milli": 700
+            },
+            "mechanisms": [
+                {"mechanism_id":"egfr","prior_milli":500},
+                {"mechanism_id":"matrix","prior_milli":500}
+            ],
+            "actions": [
+                {"action_id":"uninformative","feature_id":"feature-uninformative","label":"uninformative assay","outcomes":[
+                    {"outcome_id":"low","label":"low invasion","probability_milli_by_mechanism":{"egfr":500,"matrix":500}},
+                    {"outcome_id":"high","label":"high invasion","probability_milli_by_mechanism":{"egfr":500,"matrix":500}}
+                ],"feasibility_milli":900,"risk_milli":100,"cost_units":2,"max_replicates":1},
+                {"action_id":"separating","feature_id":"feature-separating","label":"separating assay","outcomes":[
+                    {"outcome_id":"low","label":"low invasion","probability_milli_by_mechanism":{"egfr":900,"matrix":100}},
+                    {"outcome_id":"high","label":"high invasion","probability_milli_by_mechanism":{"egfr":100,"matrix":900}}
+                ],"feasibility_milli":900,"risk_milli":100,"cost_units":2,"max_replicates":1}
+            ]
+        }),
+    );
+    assert_eq!(information_design["dispatch"], json!("not_started"));
+    assert_eq!(
+        information_design["design"]["disposition"],
+        json!("qualified")
+    );
+    assert_eq!(
+        information_design["design"]["selected_order"],
+        json!(["separating"])
+    );
+    assert_eq!(
+        information_design["design"]["scores"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+
+    let adaptive_information_campaign = call(
+        &mut server,
+        "glioma_adaptive_information_campaign",
+        json!({
+            "request": {
+                "objective": "adaptively separate EGFR and matrix invasion mechanisms",
+                "model_system": "organoid",
+                "max_rounds": 3,
+                "max_actions_per_round": 1,
+                "budget_units": 6,
+                "min_information_gain_milli": 10,
+                "information_weight_milli": 800,
+                "feasibility_weight_milli": 200,
+                "risk_penalty_milli": 100,
+                "cost_penalty_milli": 0,
+                "risk_ceiling_milli": 700,
+                "stop_concentration_milli": 900
+            },
+            "mechanisms": [
+                {"mechanism_id":"egfr","prior_milli":500},
+                {"mechanism_id":"matrix","prior_milli":500}
+            ],
+            "actions": [
+                {"action_id":"uninformative","feature_id":"feature-uninformative","label":"uninformative assay","outcomes":[
+                    {"outcome_id":"low","label":"low invasion","probability_milli_by_mechanism":{"egfr":500,"matrix":500}},
+                    {"outcome_id":"high","label":"high invasion","probability_milli_by_mechanism":{"egfr":500,"matrix":500}}
+                ],"feasibility_milli":900,"risk_milli":100,"cost_units":2,"max_replicates":1},
+                {"action_id":"separating","feature_id":"feature-separating","label":"separating assay","outcomes":[
+                    {"outcome_id":"low","label":"low invasion","probability_milli_by_mechanism":{"egfr":900,"matrix":100}},
+                    {"outcome_id":"high","label":"high invasion","probability_milli_by_mechanism":{"egfr":100,"matrix":900}}
+                ],"feasibility_milli":900,"risk_milli":100,"cost_units":2,"max_replicates":1}
+            ]
+        }),
+    );
+    assert_eq!(
+        adaptive_information_campaign["dispatch"],
+        json!("not_started")
+    );
+    assert_eq!(
+        adaptive_information_campaign["campaign"]["disposition"],
+        json!("qualified")
+    );
+    assert_eq!(
+        adaptive_information_campaign["campaign"]["next_action_order"],
+        json!(["separating"])
+    );
+
+    let adaptive_allocation_campaign = call(
+        &mut server,
+        "glioma_adaptive_allocation_campaign_execute",
+        json!({
+            "request": {
+                "allocation": {
+                    "objective": "allocate organoid invasion replicates",
+                    "model_system": "organoid",
+                    "control_arm_id": "control",
+                    "target_effect_milli": 100,
+                    "min_replicates_per_arm": 3,
+                    "min_probability_milli": 700,
+                    "max_posterior_uncertainty_milli": 200,
+                    "exploration_weight_milli": 300,
+                    "max_selected_arms": 1,
+                    "max_new_replicates": 1,
+                    "budget_units": 2,
+                    "risk_ceiling_milli": 700
+                },
+                "arms": [
+                    {"arm_id":"control","label":"vehicle control","model_system":"organoid","successes":1,"failures":1,"prior_alpha":1,"prior_beta":1,"risk_milli":100,"cost_units":1,"artifact":{"artifact_id":"control-seed","content_hash":"0000000000000000000000000000000000000000000000000000000000000000","content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                    {"arm_id":"egfr","label":"EGFR perturbation","model_system":"organoid","successes":1,"failures":1,"prior_alpha":1,"prior_beta":1,"risk_milli":100,"cost_units":1,"artifact":{"artifact_id":"egfr-seed","content_hash":"0000000000000000000000000000000000000000000000000000000000000000","content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}}
+                ],
+                "max_rounds": 3,
+                "max_retries": 1,
+                "stop_on_negative": false
+            }
+        }),
+    );
+    assert_eq!(
+        adaptive_allocation_campaign["dispatch"],
+        json!("not_started")
+    );
+    assert_eq!(adaptive_allocation_campaign["simulation_only"], json!(true));
+    assert!(!adaptive_allocation_campaign["campaign"]["rounds"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+    assert!(!adaptive_allocation_campaign["campaign"]["batches"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+
+    let instrument_calibration = call(
+        &mut server,
+        "glioma_instrument_calibration",
+        json!({
+            "request": {
+                "objective": "qualify imaging control before invasion assay",
+                "instrument_id": "imager-1",
+                "model_system": "organoid",
+                "metric_name": "control_intensity",
+                "minimum_runs": 3,
+                "reference_run_count": 2,
+                "max_reference_mad_milli": 5,
+                "max_drift_milli": 20,
+                "max_slope_milli_per_tick": 10
+            },
+            "runs": [
+                {"run_id":"cal-r1","sequence_index":1,"batch_id":"cal-b1","instrument_id":"imager-1","metric_name":"control_intensity","model_system":"organoid","observed_milli":500,"expected_milli":500,"artifact":{"artifact_id":"cal-artifact-1","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-control+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"run_id":"cal-r2","sequence_index":2,"batch_id":"cal-b2","instrument_id":"imager-1","metric_name":"control_intensity","model_system":"organoid","observed_milli":502,"expected_milli":500,"artifact":{"artifact_id":"cal-artifact-2","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-control+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"run_id":"cal-r3","sequence_index":3,"batch_id":"cal-b3","instrument_id":"imager-1","metric_name":"control_intensity","model_system":"organoid","observed_milli":504,"expected_milli":500,"artifact":{"artifact_id":"cal-artifact-3","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-control+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}}
+            ]
+        }),
+    );
+    assert_eq!(instrument_calibration["dispatch"], json!("not_started"));
+    assert_eq!(
+        instrument_calibration["calibration"]["disposition"],
+        json!("qualified")
+    );
+    assert_eq!(
+        instrument_calibration["calibration"]["reference_order"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+
+    let instrument_preflight = call(
+        &mut server,
+        "glioma_instrument_preflight",
+        json!({
+            "request": {
+                "objective": "preflight organoid imaging and wash",
+                "instrument_id": "imager-1",
+                "model_system": "organoid",
+                "actions": [
+                    {"action_id":"acquire","instrument_id":"imager-1","operation":"acquire_image","model_system":"organoid","requested_start_tick":1,"duration_ticks":2,"risk_milli":100,"requires_operator":false,"output_schema":"Image1@1","parameters":[]},
+                    {"action_id":"wash","instrument_id":"imager-1","operation":"wash","model_system":"organoid","requested_start_tick":3,"duration_ticks":2,"risk_milli":100,"requires_operator":true,"output_schema":"Wash1@1","parameters":[{"name":"volume_microliter","value_milli":10000,"unit":"microliter_milli","minimum_milli":1,"maximum_milli":100000}]}
+                ],
+                "calibration": instrument_calibration["calibration"].clone(),
+                "interlocks": {"observed_tick":1,"emergency_stop_clear":true,"guard_closed":true,"deck_clear":true,"consumables_available":true,"waste_capacity_milli":100000,"temperature_milli":37000,"minimum_temperature_milli":36000,"maximum_temperature_milli":38000,"calibration_valid_until_tick":100,"calibration_sequence_index":3},
+                "authorization": {"authorization_id":"approval-1","operator_id":"operator-1","instrument_scope":"imager-1","approval_digest":artifact_hash,"issued_tick":0,"expires_tick":100,"revoked":false},
+                "current_tick":1,
+                "maximum_total_risk_milli":500,
+                "maximum_duration_ticks":20,
+                "minimum_waste_capacity_milli":100
+            }
+        }),
+    );
+    assert_eq!(instrument_preflight["dispatch"], json!("not_started"));
+    assert_eq!(
+        instrument_preflight["preflight"]["disposition"],
+        json!("admitted")
+    );
+    assert_eq!(
+        instrument_preflight["preflight"]["admitted_order"],
+        json!(["acquire", "wash"])
+    );
+
+    let instrument_execution_request = json!({
+        "objective": "preflight organoid imaging and wash",
+        "plan": instrument_preflight["preflight"].clone(),
+        "actions": [
+            {"action_id":"acquire","instrument_id":"imager-1","operation":"acquire_image","model_system":"organoid","requested_start_tick":1,"duration_ticks":2,"risk_milli":100,"requires_operator":false,"output_schema":"Image1@1","parameters":[]},
+            {"action_id":"wash","instrument_id":"imager-1","operation":"wash","model_system":"organoid","requested_start_tick":3,"duration_ticks":2,"risk_milli":100,"requires_operator":true,"output_schema":"Wash1@1","parameters":[{"name":"volume_microliter","value_milli":10000,"unit":"microliter_milli","minimum_milli":1,"maximum_milli":100000}]}
+        ],
+        "authorization": {"authorization_id":"approval-1","operator_id":"operator-1","instrument_scope":"imager-1","approval_digest":artifact_hash,"issued_tick":0,"expires_tick":100,"revoked":false},
+        "live_interlocks": {"observed_tick":1,"emergency_stop_clear":true,"guard_closed":true,"deck_clear":true,"consumables_available":true,"waste_capacity_milli":100000,"temperature_milli":37000,"minimum_temperature_milli":36000,"maximum_temperature_milli":38000,"calibration_valid_until_tick":100,"calibration_sequence_index":3},
+        "current_tick":1,
+        "minimum_waste_capacity_milli":100,
+        "max_retries":1,
+        "require_artifacts":true
+    });
+    let instrument_execution = call(
+        &mut server,
+        "glioma_instrument_execute",
+        json!({"request": instrument_execution_request.clone()}),
+    );
+    assert_eq!(instrument_execution["dispatch"], json!("not_started"));
+    assert_eq!(instrument_execution["simulation_only"], json!(true));
+    assert_eq!(
+        instrument_execution["execution"]["disposition"],
+        json!("completed")
+    );
+    assert_eq!(
+        instrument_execution["execution"]["completed_order"],
+        json!(["acquire", "wash"])
+    );
+
+    let instrument_assay = call(
+        &mut server,
+        "glioma_instrument_assay_adjudicate",
+        json!({
+            "request": {
+                "objective": "qualify organoid imaging assay",
+                "instrument_id": "imager-1",
+                "modality": "imaging",
+                "min_qc_milli": 900,
+                "min_effect_milli": 500,
+                "max_uncertainty_milli": 100,
+                "min_replicates": 2,
+                "require_negative_control": true,
+                "max_negative_control_milli": 100
+            },
+            "execution": instrument_execution["execution"].clone(),
+            "observations": [
+                {"action_id":"acquire","artifact":{"artifact_id":"assay-acquire","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma.assay+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"signal_milli":900,"baseline_milli":100,"uncertainty_milli":10,"qc_milli":950,"replicate_count":3,"negative_control_milli":0},
+                {"action_id":"wash","artifact":{"artifact_id":"assay-wash","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma.assay+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"signal_milli":850,"baseline_milli":100,"uncertainty_milli":10,"qc_milli":950,"replicate_count":3,"negative_control_milli":0}
+            ]
+        }),
+    );
+    assert_eq!(instrument_assay["dispatch"], json!("not_started"));
+    assert_eq!(instrument_assay["simulation_only"], json!(true));
+    assert_eq!(
+        instrument_assay["assessment"]["disposition"],
+        json!("qualified")
+    );
+    assert_eq!(
+        instrument_assay["assessment"]["evidence_eligible"],
+        json!(true)
+    );
+    assert_eq!(
+        instrument_assay["assessment"]["qualified_order"],
+        json!(["acquire", "wash"])
+    );
+
+    let instrument_campaign = call(
+        &mut server,
+        "glioma_instrument_campaign_execute",
+        json!({
+            "request": {
+                "objective": "two-stage preclinical imaging campaign",
+                "runs": [
+                    {"run_id":"stage-a","execution":instrument_execution_request.clone()},
+                    {"run_id":"stage-b","execution":instrument_execution_request.clone()}
+                ],
+                "max_runs": 2,
+                "stop_on_negative": true
+            }
+        }),
+    );
+    assert_eq!(instrument_campaign["dispatch"], json!("not_started"));
+    assert_eq!(instrument_campaign["simulation_only"], json!(true));
+    assert_eq!(
+        instrument_campaign["campaign"]["disposition"],
+        json!("completed")
+    );
+    assert_eq!(
+        instrument_campaign["campaign"]["completed_run_order"],
+        json!(["stage-a", "stage-b"])
+    );
+
+    let computation_execution = call(
+        &mut server,
+        "glioma_computation_execute",
+        json!({
+            "request": {
+                "objective": "replay a glioma organoid multimodal computation",
+                "model_system": "organoid",
+                "tasks": [
+                    {"task_id":"fit","operation":"model_fit","model_system":"organoid","depends_on":["normalize"],"input_artifact_ids":["input:fit"],"output_schema":"Fit1@1","estimated_cost_units":2,"estimated_duration_ticks":1,"deterministic":true},
+                    {"task_id":"normalize","operation":"normalize","model_system":"organoid","depends_on":[],"input_artifact_ids":["input:normalize"],"output_schema":"Normalize1@1","estimated_cost_units":2,"estimated_duration_ticks":1,"deterministic":true}
+                ],
+                "replay_identity": artifact_hash,
+                "max_budget_units": 10,
+                "max_retries": 1,
+                "allow_cache": true,
+                "require_local_artifacts": true,
+                "cache": []
+            }
+        }),
+    );
+    assert_eq!(computation_execution["dispatch"], json!("not_started"));
+    assert_eq!(
+        computation_execution["execution"]["disposition"],
+        json!("completed")
+    );
+    assert_eq!(
+        computation_execution["execution"]["task_order"],
+        json!(["normalize", "fit"])
+    );
+
+    let evidence_surveillance = call(
+        &mut server,
+        "glioma_evidence_surveillance",
+        json!({
+            "request": {
+                "objective": "monitor invasion evidence",
+                "required_modalities": ["genomics"],
+                "required_model_systems": ["organoid"],
+                "min_priority_milli": 500,
+                "max_actions": 8,
+                "score_shift_threshold_milli": 50
+            },
+            "previous": [{
+                "evidence_id": "mcp-surveillance-1",
+                "source_artifact": {"artifact_id":"mcp-surveillance-artifact-1","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-evidence+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},
+                "source_kind": "dataset",
+                "claim": "EGFR signaling increases invasion",
+                "scope": "preclinical glioma",
+                "modality": "genomics",
+                "model_system": "organoid",
+                "state": "supported",
+                "relevance_milli": 900,
+                "quality_milli": 900,
+                "reproducibility_milli": 900,
+                "release_epoch": 1
+            }],
+            "current": [
+                {
+                    "evidence_id": "mcp-surveillance-1",
+                    "source_artifact": {"artifact_id":"mcp-surveillance-artifact-1","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-evidence+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},
+                    "source_kind": "dataset",
+                    "claim": "EGFR signaling increases invasion",
+                    "scope": "preclinical glioma",
+                    "modality": "genomics",
+                    "model_system": "organoid",
+                    "state": "contradicted",
+                    "relevance_milli": 900,
+                    "quality_milli": 900,
+                    "reproducibility_milli": 900,
+                    "release_epoch": 2
+                },
+                {
+                    "evidence_id": "mcp-surveillance-2",
+                    "source_artifact": {"artifact_id":"mcp-surveillance-artifact-2","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-evidence+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},
+                    "source_kind": "dataset",
+                    "claim": "Matrix remodeling changes invasion",
+                    "scope": "preclinical glioma",
+                    "modality": "genomics",
+                    "model_system": "organoid",
+                    "state": "supported",
+                    "relevance_milli": 850,
+                    "quality_milli": 850,
+                    "reproducibility_milli": 850,
+                    "release_epoch": 2
+                }
+            ]
+        }),
+    );
+    assert_eq!(evidence_surveillance["dispatch"], json!("not_started"));
+    assert_eq!(
+        evidence_surveillance["surveillance"]["disposition"],
+        json!("qualified")
+    );
+    assert_eq!(
+        evidence_surveillance["surveillance"]["actions"][0]["kind"],
+        json!("investigate_contradiction")
+    );
+
+    let evidence_triangulation = call(
+        &mut server,
+        "glioma_evidence_triangulate",
+        json!({
+            "request": {
+                "objective": "triangulate EGFR invasion evidence",
+                "min_source_kinds": 3,
+                "min_independent_artifacts": 3,
+                "min_support_milli": 600,
+                "max_contradiction_milli": 200,
+                "min_diversity_milli": 1000,
+                "max_leave_one_artifact_shift_milli": 100,
+                "max_claims": 8
+            },
+            "records": [
+                {
+                    "evidence_id": "mcp-triangulation-1",
+                    "source_artifact": {"artifact_id":"mcp-triangulation-artifact-1","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-evidence+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},
+                    "source_kind": "literature",
+                    "claim": "EGFR signaling increases organoid invasion",
+                    "scope": "organoid:invasion",
+                    "modality": "functional_perturbation",
+                    "model_system": "organoid",
+                    "state": "supported",
+                    "relevance_milli": 900,
+                    "quality_milli": 900,
+                    "reproducibility_milli": 900,
+                    "release_epoch": 1
+                },
+                {
+                    "evidence_id": "mcp-triangulation-2",
+                    "source_artifact": {"artifact_id":"mcp-triangulation-artifact-2","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-evidence+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},
+                    "source_kind": "assay",
+                    "claim": "EGFR signaling increases organoid invasion",
+                    "scope": "organoid:invasion",
+                    "modality": "functional_perturbation",
+                    "model_system": "organoid",
+                    "state": "supported",
+                    "relevance_milli": 900,
+                    "quality_milli": 900,
+                    "reproducibility_milli": 900,
+                    "release_epoch": 1
+                },
+                {
+                    "evidence_id": "mcp-triangulation-3",
+                    "source_artifact": {"artifact_id":"mcp-triangulation-artifact-3","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-evidence+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},
+                    "source_kind": "replication",
+                    "claim": "EGFR signaling increases organoid invasion",
+                    "scope": "organoid:invasion",
+                    "modality": "functional_perturbation",
+                    "model_system": "organoid",
+                    "state": "supported",
+                    "relevance_milli": 900,
+                    "quality_milli": 900,
+                    "reproducibility_milli": 900,
+                    "release_epoch": 1
+                }
+            ]
+        }),
+    );
+    assert_eq!(evidence_triangulation["dispatch"], json!("not_started"));
+    assert_eq!(
+        evidence_triangulation["triangulation"]["disposition"],
+        json!("qualified")
+    );
+    assert_eq!(
+        evidence_triangulation["triangulation"]["qualified_order"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        evidence_triangulation["triangulation"]["claims"][0]["independent_artifact_count"],
+        json!(3)
+    );
+
+    let evidence_priority = call(
+        &mut server,
+        "glioma_evidence_priority",
+        json!({
+            "request": {
+                "objective": "rank invasion evidence refreshes",
+                "current_epoch": 10,
+                "recency_half_life_epochs": 4,
+                "required_modalities": [],
+                "required_model_systems": [],
+                "max_actions": 8,
+                "min_priority_milli": 0,
+                "weights": {
+                    "recency_milli": 100,
+                    "state_pressure_milli": 300,
+                    "quality_milli": 100,
+                    "relevance_milli": 150,
+                    "reproducibility_milli": 150,
+                    "coverage_debt_milli": 200
+                }
+            },
+            "records": [{
+                "evidence_id": "mcp-priority-1",
+                "source_artifact": {"artifact_id":"mcp-priority-artifact","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-evidence+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},
+                "source_kind": "dataset",
+                "claim": "EGFR signaling increases invasion",
+                "scope": "preclinical glioma",
+                "modality": "genomics",
+                "model_system": "organoid",
+                "state": "stale",
+                "relevance_milli": 900,
+                "quality_milli": 900,
+                "reproducibility_milli": 900,
+                "release_epoch": 1
+            }]
+        }),
+    );
+    assert_eq!(evidence_priority["dispatch"], json!("not_started"));
+    assert_eq!(
+        evidence_priority["priority"]["actions"][0]["kind"],
+        json!("refresh_stale")
+    );
+
+    let priority_action_id = evidence_priority["priority"]["selected_order"][0]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let evidence_campaign = call(
+        &mut server,
+        "glioma_evidence_campaign_execute",
+        json!({
+            "request": {
+                "objective": "rank invasion evidence refreshes",
+                "priority": evidence_priority["priority"].clone(),
+                "candidates": [{
+                    "action_id": priority_action_id,
+                    "stage_kind": "evidence_surveillance",
+                    "modality": "genomics",
+                    "model_system": "organoid",
+                    "depends_on": [],
+                    "cost_units": 1,
+                    "information_gain_milli": 900,
+                    "frontier_novelty_milli": 800,
+                    "workflow_leverage_milli": 800,
+                    "cross_stage_unlock_milli": 800,
+                    "reproducibility_safety_milli": 900,
+                    "federation_value_milli": 500,
+                    "feasibility_milli": 900,
+                    "autonomy_tier": "a1",
+                    "effects": ["read_local_data", "execute_local_computation", "write_local_artifact"]
+                }],
+                "completed_action_order": [],
+                "selection": {
+                    "budget_units": 2,
+                    "max_actions": 1,
+                    "approval_granted": true,
+                    "allow_instrument_execution": false,
+                    "allow_federation": false,
+                    "weights": {
+                        "information_gain": 25,
+                        "frontier_novelty": 20,
+                        "workflow_leverage": 15,
+                        "cross_stage_unlock": 15,
+                        "reproducibility_safety": 10,
+                        "federation_value": 10,
+                        "feasibility": 5
+                    }
+                },
+                "max_retries": 1,
+                "require_artifacts": true
+            }
+        }),
+    );
+    assert_eq!(evidence_campaign["dispatch"], json!("not_started"));
+    assert_eq!(
+        evidence_campaign["campaign"]["disposition"],
+        json!("completed")
+    );
+
+    let knowledge = call(
+        &mut server,
+        "glioma_knowledge_compile",
+        json!({
+            "request": {
+                "objective": "rank invasion mechanisms",
+                "required_modalities": ["genomics"],
+                "required_model_systems": ["organoid"],
+                "min_support_milli": 700,
+                "min_sources_per_claim": 1,
+                "max_claims": 8
+            },
+            "records": [{
+                "evidence_id": "mcp-evidence-1",
+                "source_artifact": {"artifact_id":"mcp-evidence-artifact","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-evidence+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},
+                "source_kind": "dataset",
+                "claim": "EGFR signaling increases invasion",
+                "scope": "preclinical glioma",
+                "modality": "genomics",
+                "model_system": "organoid",
+                "state": "supported",
+                "relevance_milli": 900,
+                "quality_milli": 900,
+                "reproducibility_milli": 900,
+                "release_epoch": 1
+            }]
+        }),
+    );
+    assert_eq!(knowledge["dispatch"], json!("not_started"));
+    assert_eq!(knowledge["knowledge"]["disposition"], json!("qualified"));
+
+    let knowledge_frontier = call(
+        &mut server,
+        "glioma_knowledge_frontier",
+        json!({
+            "request": {
+                "objective": "rank invasion mechanisms",
+                "max_selected_claims": 8,
+                "min_priority_milli": 0,
+                "weights": {
+                    "coverage_debt_milli": 250,
+                    "contradiction_milli": 250,
+                    "uncertainty_milli": 200,
+                    "support_milli": 150,
+                    "workflow_leverage_milli": 150
+                }
+            },
+            "knowledge": knowledge["knowledge"].clone()
+        }),
+    );
+    assert_eq!(knowledge_frontier["dispatch"], json!("not_started"));
+    assert_eq!(
+        knowledge_frontier["frontier"]["selected_order"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+
+    let decision_context = call(
+        &mut server,
+        "glioma_decision_context",
+        json!({
+            "request": {
+                "objective": "rank invasion mechanisms",
+                "max_actions": 8,
+                "default_cost_units": 5
+            },
+            "knowledge": knowledge["knowledge"].clone()
+        }),
+    );
+    assert_eq!(decision_context["dispatch"], json!("not_started"));
+    assert_eq!(
+        decision_context["context"]["actions"][0]["candidate"]["stage_kind"],
+        json!("mechanism_exploration")
+    );
+
+    let decision_action_plan = call(
+        &mut server,
+        "glioma_decision_action_plan",
+        json!({
+            "request": {
+                "objective": "rank invasion mechanisms",
+                "completed_action_order": [],
+                "selection": {
+                    "budget_units": 10,
+                    "max_actions": 1,
+                    "approval_granted": true,
+                    "allow_instrument_execution": false,
+                    "allow_federation": false,
+                    "weights": {
+                        "information_gain": 25,
+                        "frontier_novelty": 20,
+                        "workflow_leverage": 15,
+                        "cross_stage_unlock": 15,
+                        "reproducibility_safety": 10,
+                        "federation_value": 10,
+                        "feasibility": 5
+                    }
+                }
+            },
+            "context": decision_context["context"].clone()
+        }),
+    );
+    assert_eq!(decision_action_plan["dispatch"], json!("not_started"));
+    assert_eq!(
+        decision_action_plan["plan"]["disposition"],
+        json!("qualified")
+    );
+    assert_eq!(
+        decision_action_plan["plan"]["selected_order"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+
+    let autopilot = call(
+        &mut server,
+        "glioma_research_autopilot_execute",
+        json!({
+            "request": {
+                "objective": "rank invasion mechanisms",
+                "context": decision_context["context"].clone(),
+                "completed_action_order": [],
+                "selection": {
+                    "budget_units": 10,
+                    "max_actions": 1,
+                    "approval_granted": true,
+                    "allow_instrument_execution": false,
+                    "allow_federation": false,
+                    "weights": {
+                        "information_gain": 25,
+                        "frontier_novelty": 20,
+                        "workflow_leverage": 15,
+                        "cross_stage_unlock": 15,
+                        "reproducibility_safety": 10,
+                        "federation_value": 10,
+                        "feasibility": 5
+                    }
+                },
+                "max_retries": 1,
+                "require_artifacts": true
+            }
+        }),
+    );
+    assert_eq!(autopilot["dispatch"], json!("not_started"));
+    assert_eq!(autopilot["simulation_only"], json!(true));
+    assert_eq!(autopilot["run"]["disposition"], json!("completed"));
+}
+
+#[test]
+fn glioma_action_portfolio_execution_is_reachable_through_mcp() {
+    let mut server = server();
+    let execution = call(
+        &mut server,
+        "glioma_action_portfolio_execute",
+        json!({
+            "request": {
+                "candidates": [{
+                    "action_id": "local-genomics",
+                    "stage_kind": "experiment_design",
+                    "modality": "genomics",
+                    "model_system": "organoid",
+                    "depends_on": [],
+                    "cost_units": 2,
+                    "information_gain_milli": 800,
+                    "frontier_novelty_milli": 700,
+                    "workflow_leverage_milli": 700,
+                    "cross_stage_unlock_milli": 700,
+                    "reproducibility_safety_milli": 900,
+                    "federation_value_milli": 400,
+                    "feasibility_milli": 900,
+                    "autonomy_tier": "a1",
+                    "effects": ["read_local_data", "execute_local_computation", "write_local_artifact"]
+                }],
+                "completed_actions": [],
+                "selection": {
+                    "budget_units": 5,
+                    "max_actions": 1,
+                    "approval_granted": false,
+                    "allow_instrument_execution": false,
+                    "allow_federation": false,
+                    "weights": {
+                        "information_gain": 25,
+                        "frontier_novelty": 20,
+                        "workflow_leverage": 15,
+                        "cross_stage_unlock": 15,
+                        "reproducibility_safety": 10,
+                        "federation_value": 10,
+                        "feasibility": 5
+                    }
+                },
+                "max_retries": 1,
+                "require_artifacts": true
+            }
+        }),
+    );
+    assert_eq!(execution["dispatch"], json!("not_started"));
+    assert_eq!(execution["simulation_only"], json!(true));
+    assert_eq!(execution["execution"]["disposition"], json!("completed"));
+    assert_eq!(
+        execution["execution"]["completed_order"],
+        json!(["local-genomics"])
+    );
+}
+
+#[test]
+fn glioma_active_learning_selects_an_uncertain_safe_assay() {
+    let mut server = server();
+    let artifact_hash = "0".repeat(64);
+    let plan = call(
+        &mut server,
+        "glioma_active_learning",
+        json!({
+            "request": {
+                "objective": "select the next invasion mechanism assay",
+                "model_system": "organoid",
+                "direction": "maximize",
+                "budget_units": 4,
+                "max_selections": 2,
+                "min_observations_per_candidate": 1,
+                "exploration_weight_milli": 400,
+                "exploitation_weight_milli": 600,
+                "cost_penalty_milli": 1,
+                "risk_penalty_milli": 1,
+                "max_risk_milli": 800,
+                "min_uncertainty_milli": 900
+            },
+            "candidates": [
+                {"candidate_id":"egfr","mechanism_id":"egfr-signaling","feature_vector":[100,0],"cost_units":2,"risk_milli":100,"max_replicates":3,"redundancy_group":"receptor","output_schema":"Assay1@1"},
+                {"candidate_id":"matrix","mechanism_id":"matrix-remodeling","feature_vector":[0,100],"cost_units":2,"risk_milli":100,"max_replicates":3,"redundancy_group":"matrix","output_schema":"Assay1@1"},
+                {"candidate_id":"unsafe","mechanism_id":"unsafe","feature_vector":[50,50],"cost_units":1,"risk_milli":900,"max_replicates":3,"redundancy_group":"unsafe","output_schema":"Assay1@1"}
+            ],
+            "observations": [
+                {"observation_id":"obs-egfr","candidate_id":"egfr","outcome_milli":700,"uncertainty_milli":20,"artifact":{"artifact_id":"obs-egfr","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-active-learning+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}}
+            ]
+        }),
+    );
+    assert_eq!(plan["dispatch"], json!("not_started"));
+    assert_eq!(plan["plan"]["selected_order"], json!(["matrix", "egfr"]));
+    assert_eq!(plan["plan"]["blocked_order"], json!(["unsafe"]));
+    assert_eq!(plan["plan"]["disposition"], json!("partial"));
+}
+
+#[test]
+fn glioma_sequential_design_exposes_stopping_and_negative_evidence() {
+    let mut server = server();
+    let artifact_hash = "0".repeat(64);
+    let plan = call(
+        &mut server,
+        "glioma_sequential_design",
+        json!({
+            "request": {
+                "objective": "select the next invasion assay batch",
+                "model_system": "organoid",
+                "endpoint": "invasion_fraction",
+                "control_arm_id": "control",
+                "target_effect_milli": 150,
+                "success_probability_milli": 750,
+                "futility_probability_milli": 700,
+                "min_replicates_per_arm": 3,
+                "max_new_replicates_per_round": 3,
+                "max_rounds": 4,
+                "max_selected_arms": 2,
+                "budget_units": 20,
+                "risk_ceiling_milli": 800,
+                "exploration_weight_milli": 400
+            },
+            "observations": [
+                {"arm_id":"control","label":"vehicle control","artifact":{"artifact_id":"seq-control","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-sequential+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"model_system":"organoid","successes":3,"failures":7,"prior_alpha":1,"prior_beta":1,"risk_milli":200,"cost_units":2},
+                {"arm_id":"strong","label":"strong perturbation","artifact":{"artifact_id":"seq-strong","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-sequential+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"model_system":"organoid","successes":10,"failures":0,"prior_alpha":1,"prior_beta":1,"risk_milli":200,"cost_units":2},
+                {"arm_id":"weak","label":"weak perturbation","artifact":{"artifact_id":"seq-weak","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-sequential+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"model_system":"organoid","successes":0,"failures":10,"prior_alpha":1,"prior_beta":1,"risk_milli":200,"cost_units":2}
+            ]
+        }),
+    );
+    assert_eq!(plan["dispatch"], json!("not_started"));
+    assert_eq!(plan["simulation_only"], json!(true));
+    assert!(plan["plan"]["success_stop_order"]
+        .as_array()
+        .is_some_and(|arms| arms.iter().any(|arm| arm == "strong")));
+    assert!(plan["plan"]["futility_stop_order"]
+        .as_array()
+        .is_some_and(|arms| arms.iter().any(|arm| arm == "weak")));
+    assert!(plan["plan"]["negative_evidence"]
+        .as_array()
+        .is_some_and(|evidence| evidence
+            .iter()
+            .any(|item| item.as_str().is_some_and(|item| item.contains("weak")))));
+}
+
+#[test]
+fn glioma_sequential_campaign_executes_and_replans_in_sandbox() {
+    let mut server = server();
+    let artifact_hash = "0".repeat(64);
+    let campaign = call(
+        &mut server,
+        "glioma_sequential_campaign_execute",
+        json!({
+            "request": {
+                "design": {
+                    "objective": "close the replicate loop for organoid invasion",
+                    "model_system": "organoid",
+                    "endpoint": "invasion_fraction",
+                    "control_arm_id": "control",
+                    "target_effect_milli": 150,
+                    "success_probability_milli": 750,
+                    "futility_probability_milli": 700,
+                    "min_replicates_per_arm": 3,
+                    "max_new_replicates_per_round": 2,
+                    "max_rounds": 4,
+                    "max_selected_arms": 2,
+                    "budget_units": 12,
+                    "risk_ceiling_milli": 800,
+                    "exploration_weight_milli": 400
+                },
+                "arms": [
+                    {"arm_id":"control","label":"vehicle control","artifact":{"artifact_id":"campaign-control","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-sequential+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"model_system":"organoid","successes":1,"failures":1,"prior_alpha":1,"prior_beta":1,"risk_milli":200,"cost_units":1},
+                    {"arm_id":"candidate","label":"candidate perturbation","artifact":{"artifact_id":"campaign-candidate","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-sequential+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"model_system":"organoid","successes":1,"failures":0,"prior_alpha":1,"prior_beta":1,"risk_milli":200,"cost_units":1}
+                ],
+                "max_retries": 1
+            }
+        }),
+    );
+    assert_eq!(campaign["dispatch"], json!("not_started"));
+    assert_eq!(campaign["simulation_only"], json!(true));
+    assert!(campaign["campaign"]["rounds"]
+        .as_array()
+        .is_some_and(|rounds| !rounds.is_empty()));
+    assert!(campaign["campaign"]["batches"]
+        .as_array()
+        .is_some_and(|batches| !batches.is_empty()));
+    assert!(campaign["campaign"]["final_plan"]["decisions"].is_array());
+}
+
+#[test]
+fn glioma_mechanism_dynamics_exposes_feedback_and_intervention_sensitivity() {
+    let mut server = server();
+    let plan = call(
+        &mut server,
+        "glioma_mechanism_dynamics",
+        json!({
+            "request": {
+                "objective": "simulate hypoxia-driven invasion feedback",
+                "model_system": "organoid",
+                "max_steps": 12,
+                "time_step_milli": 200,
+                "stability_window": 3,
+                "stability_delta_milli": 2,
+                "divergence_abs_milli": 1000,
+                "max_selected_interventions": 1,
+                "budget_units": 4,
+                "risk_ceiling_milli": 800,
+                "sensitivity_delta_milli": 5
+            },
+            "nodes": [
+                {"node_id":"hypoxia","label":"hypoxia state","initial_state_milli":300,"drift_milli":-30,"uncertainty_milli":20},
+                {"node_id":"invasion","label":"invasion state","initial_state_milli":100,"drift_milli":-10,"uncertainty_milli":20}
+            ],
+            "edges": [
+                {"edge_id":"hypoxia-to-invasion","source_node":"hypoxia","target_node":"invasion","weight_milli":500,"lag_steps":0,"confidence_milli":900},
+                {"edge_id":"invasion-to-hypoxia","source_node":"invasion","target_node":"hypoxia","weight_milli":-100,"lag_steps":1,"confidence_milli":800}
+            ],
+            "interventions": [
+                {"intervention_id":"oxygenation","target_node":"hypoxia","delta_milli":-250,"start_step":0,"duration_steps":6,"cost_units":2,"risk_milli":200,"confidence_milli":900}
+            ]
+        }),
+    );
+    assert_eq!(plan["dispatch"], json!("not_started"));
+    assert_eq!(plan["simulation_only"], json!(true));
+    assert_eq!(
+        plan["plan"]["selected_intervention_order"],
+        json!(["oxygenation"])
+    );
+    assert!(plan["plan"]["steps"]
+        .as_array()
+        .is_some_and(|steps| !steps.is_empty()));
+    assert_eq!(plan["plan"]["sensitivities"].as_array().unwrap().len(), 1);
+}
+
+#[test]
+fn glioma_active_learning_campaign_executes_and_replans_in_sandbox() {
+    let mut server = server();
+    let artifact_hash = "0".repeat(64);
+    let campaign = call(
+        &mut server,
+        "glioma_active_learning_campaign_execute",
+        json!({
+            "request": {
+                "active_learning": {
+                    "objective": "refine an organoid invasion mechanism",
+                    "model_system": "organoid",
+                    "direction": "maximize",
+                    "budget_units": 4,
+                    "max_selections": 1,
+                    "min_observations_per_candidate": 1,
+                    "exploration_weight_milli": 500,
+                    "exploitation_weight_milli": 500,
+                    "cost_penalty_milli": 1,
+                    "risk_penalty_milli": 1,
+                    "max_risk_milli": 800,
+                    "min_uncertainty_milli": 900
+                },
+                "candidates": [
+                    {"candidate_id":"egfr","mechanism_id":"egfr-signaling","feature_vector":[100,0],"cost_units":2,"risk_milli":100,"max_replicates":2,"redundancy_group":"receptor","output_schema":"Assay1@1"},
+                    {"candidate_id":"matrix","mechanism_id":"matrix-remodeling","feature_vector":[0,100],"cost_units":2,"risk_milli":100,"max_replicates":2,"redundancy_group":"matrix","output_schema":"Assay1@1"}
+                ],
+                "observations": [{"observation_id":"seed","candidate_id":"egfr","outcome_milli":500,"uncertainty_milli":50,"artifact":{"artifact_id":"seed","content_hash":artifact_hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}}],
+                "max_rounds": 3,
+                "max_retries": 1,
+                "stop_on_unresolved": false
+            }
+        }),
+    );
+    assert_eq!(campaign["dispatch"], json!("not_started"));
+    assert_eq!(campaign["simulation_only"], json!(true));
+    assert!(campaign["campaign"]["rounds"]
+        .as_array()
+        .is_some_and(|rounds| !rounds.is_empty()));
+    assert!(
+        campaign["campaign"]["budget_spent_units"]
+            .as_u64()
+            .unwrap_or_default()
+            > 0
+    );
+}
+
+#[test]
+fn glioma_mechanism_discrimination_campaign_replans_measurement_in_sandbox() {
+    let mut server = server();
+    let hash = "0".repeat(64);
+    let campaign = call(
+        &mut server,
+        "glioma_mechanism_discrimination_campaign_execute",
+        json!({
+            "request": {
+                "discrimination": {
+                    "objective": "resolve glioma invasion mechanisms",
+                    "model_system": "organoid",
+                    "min_shared_features": 2,
+                    "max_mechanisms": 4,
+                    "max_actions": 2,
+                    "min_information_gain_milli": 10
+                },
+                "hypotheses": [
+                    {"mechanism_id":"motility","statement":"motility drives invasion","predictions":[{"feature_id":"f1","predicted_milli":100,"uncertainty_milli":10},{"feature_id":"f2","predicted_milli":200,"uncertainty_milli":10}]},
+                    {"mechanism_id":"matrix","statement":"matrix remodeling drives invasion","predictions":[{"feature_id":"f1","predicted_milli":400,"uncertainty_milli":10},{"feature_id":"f2","predicted_milli":500,"uncertainty_milli":10}]}
+                ],
+                "actions": [{"action_id":"measure-f1","feature_id":"f1","predicted_milli_by_mechanism":{"matrix":500,"motility":100},"measurement_uncertainty_milli":20,"feasibility_milli":1000,"cost_units":1}],
+                "observations": [
+                    {"feature_id":"f1","observed_milli":100,"uncertainty_milli":10,"artifact":{"artifact_id":"campaign-f1","content_hash":hash,"content_type":"application/vnd.aurora.glioma-feature+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                    {"feature_id":"f2","observed_milli":200,"uncertainty_milli":10,"artifact":{"artifact_id":"campaign-f2","content_hash":hash,"content_type":"application/vnd.aurora.glioma-feature+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}}
+                ],
+                "budget_units": 1,
+                "max_rounds": 3,
+                "max_retries": 1,
+                "stop_on_qualified": true
+            }
+        }),
+    );
+    assert_eq!(campaign["dispatch"], json!("dry_run"));
+    assert_eq!(campaign["simulation_only"], json!(true));
+    assert_eq!(campaign["campaign"]["disposition"], json!("qualified"));
+    assert_eq!(
+        campaign["campaign"]["completed_action_order"],
+        json!(["measure-f1"])
+    );
+    assert_eq!(campaign["campaign"]["rounds"].as_array().unwrap().len(), 1);
+}
+
+#[test]
+fn glioma_robust_active_learning_preserves_model_disagreement() {
+    let mut server = server();
+    let plan = call(
+        &mut server,
+        "glioma_robust_active_learning",
+        json!({
+            "request": {
+                "objective": "choose a robust organoid invasion assay",
+                "model_system": "organoid",
+                "direction": "maximize",
+                "budget_units": 4,
+                "max_selections": 2,
+                "min_observations_per_candidate": 1,
+                "lower_tail_weight_milli": 600,
+                "disagreement_weight_milli": 300,
+                "information_weight_milli": 100,
+                "cost_penalty_milli": 1,
+                "risk_penalty_milli": 1,
+                "max_risk_milli": 800,
+                "min_model_reliability_milli": 500,
+                "models": [
+                    {"model_id":"mechanistic","prior_weight_milli":600,"intercept_milli":100,"feature_weights":[4,1],"residual_milli":50,"reliability_milli":900},
+                    {"model_id":"spatial","prior_weight_milli":400,"intercept_milli":50,"feature_weights":[1,4],"residual_milli":80,"reliability_milli":800}
+                ]
+            },
+            "candidates": [
+                {"candidate_id":"egfr","mechanism_id":"egfr","feature_vector":[100,0],"cost_units":2,"risk_milli":100,"max_replicates":2,"redundancy_group":"receptor","output_schema":"Assay1@1"},
+                {"candidate_id":"matrix","mechanism_id":"matrix","feature_vector":[0,100],"cost_units":2,"risk_milli":100,"max_replicates":2,"redundancy_group":"matrix","output_schema":"Assay1@1"}
+            ]
+        }),
+    );
+    assert_eq!(plan["dispatch"], json!("not_started"));
+    assert!(plan["plan"]["selected_order"]
+        .as_array()
+        .is_some_and(|items| !items.is_empty()));
+    assert!(plan["plan"]["scores"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|score| score["model_support_count"].as_u64().unwrap_or_default() == 2));
+}
+
+#[test]
+fn glioma_robust_active_learning_campaign_replans_in_sandbox() {
+    let mut server = server();
+    let campaign = call(
+        &mut server,
+        "glioma_robust_active_learning_campaign_execute",
+        json!({
+            "request": {
+                "robust_active_learning": {
+                    "objective": "execute robust organoid invasion assays",
+                    "model_system": "organoid",
+                    "direction": "maximize",
+                    "budget_units": 4,
+                    "max_selections": 1,
+                    "min_observations_per_candidate": 1,
+                    "lower_tail_weight_milli": 600,
+                    "disagreement_weight_milli": 300,
+                    "information_weight_milli": 100,
+                    "cost_penalty_milli": 1,
+                    "risk_penalty_milli": 1,
+                    "max_risk_milli": 800,
+                    "min_model_reliability_milli": 500,
+                    "models": [{"model_id":"mechanistic","prior_weight_milli":1000,"intercept_milli":0,"feature_weights":[1,2],"residual_milli":40,"reliability_milli":900}]
+                },
+                "candidates": [
+                    {"candidate_id":"egfr","mechanism_id":"egfr","feature_vector":[100,0],"cost_units":2,"risk_milli":100,"max_replicates":2,"redundancy_group":"receptor","output_schema":"Assay1@1"},
+                    {"candidate_id":"matrix","mechanism_id":"matrix","feature_vector":[0,100],"cost_units":2,"risk_milli":100,"max_replicates":2,"redundancy_group":"matrix","output_schema":"Assay1@1"}
+                ],
+                "observations": [],
+                "max_rounds": 3,
+                "max_retries": 1,
+                "stop_on_unresolved": false
+            }
+        }),
+    );
+    assert_eq!(campaign["dispatch"], json!("not_started"));
+    assert_eq!(campaign["simulation_only"], json!(true));
+    assert!(campaign["campaign"]["completed_order"]
+        .as_array()
+        .is_some_and(|items| !items.is_empty()));
+}
+
+#[test]
+fn glioma_transportability_analysis_preserves_model_distance() {
+    let mut server = server();
+    let hash = "0".repeat(64);
+    let analysis = call(
+        &mut server,
+        "glioma_transportability_analyze",
+        json!({
+            "request": {
+                "objective": "transport an invasion effect to organoids",
+                "target_model_system": "organoid",
+                "target_signature": [100,100],
+                "min_studies": 2,
+                "min_replicates_per_study": 3,
+                "min_quality_milli": 700,
+                "distance_scale_milli": 200,
+                "max_transport_gap_milli": 700,
+                "max_heterogeneity_milli": 250,
+                "effect_threshold_milli": 100,
+                "min_signal_to_noise_milli": 500,
+                "max_leave_one_out_shift_milli": 500
+            },
+            "studies": [
+                {"study_id":"a","model_system":"organoid","population_signature":[100,100],"effect_milli":400,"uncertainty_milli":40,"replicates":4,"quality_milli":900,"artifact":{"artifact_id":"a","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"study_id":"b","model_system":"organoid","population_signature":[110,95],"effect_milli":420,"uncertainty_milli":40,"replicates":4,"quality_milli":900,"artifact":{"artifact_id":"b","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}}
+            ]
+        }),
+    );
+    assert_eq!(analysis["dispatch"], json!("not_started"));
+    assert_eq!(analysis["analysis"]["disposition"], json!("qualified"));
+    assert!(
+        analysis["analysis"]["transport_gap_milli"]
+            .as_u64()
+            .unwrap_or_default()
+            < 700
+    );
+}
+
+#[test]
+fn glioma_instrument_fleet_schedule_closes_dependencies_and_requires_preflight() {
+    let mut server = server();
+    let schedule = call(
+        &mut server,
+        "glioma_instrument_fleet_schedule",
+        json!({
+            "request": {
+                "objective": "coordinate organoid imaging and sequencing",
+                "model_system": "organoid",
+                "current_tick": 0,
+                "max_end_tick": 30,
+                "maximum_total_risk_milli": 1000,
+                "operator_capacity": 1,
+                "tasks": [
+                    {"task_id":"image","label":"image","operation":"acquire_image","model_system":"organoid","candidate_instrument_order":["scope-a","scope-b"],"depends_on":[],"release_tick":0,"duration_ticks":5,"risk_milli":100,"information_milli":500,"requires_operator":false,"output_schema":"Image1@1"},
+                    {"task_id":"sequence","label":"sequence","operation":"sequence","model_system":"organoid","candidate_instrument_order":["scope-a","scope-b"],"depends_on":[],"release_tick":0,"duration_ticks":5,"risk_milli":100,"information_milli":500,"requires_operator":false,"output_schema":"Sequence1@1"},
+                    {"task_id":"integrate","label":"integrate","operation":"acquire_image","model_system":"organoid","candidate_instrument_order":["scope-a","scope-b"],"depends_on":["image","sequence"],"release_tick":0,"duration_ticks":5,"risk_milli":100,"information_milli":500,"requires_operator":false,"output_schema":"Integrate1@1"}
+                ],
+                "resources": [
+                    {"instrument_id":"scope-a","model_system_order":["organoid"],"operation_order":["acquire_image","sequence"],"available_from_tick":0,"available_until_tick":30,"calibration_valid_until_tick":30,"enabled":true},
+                    {"instrument_id":"scope-b","model_system_order":["organoid"],"operation_order":["acquire_image","sequence"],"available_from_tick":0,"available_until_tick":30,"calibration_valid_until_tick":30,"enabled":true}
+                ]
+            }
+        }),
+    );
+    assert_eq!(schedule["dispatch"], json!("not_started"));
+    assert_eq!(schedule["preflight_required"], json!(true));
+    assert_eq!(schedule["schedule"]["disposition"], json!("ready"));
+    assert_eq!(
+        schedule["schedule"]["assignments"]
+            .as_array()
+            .unwrap()
+            .len(),
+        3
+    );
+    assert_eq!(schedule["schedule"]["dispatch_permitted"], json!(false));
+    assert!(schedule["schedule"]["critical_path_order"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| item == "integrate"));
+}
+
+#[test]
+fn glioma_decision_branch_plan_ranks_scenario_robust_portfolios() {
+    let mut server = server();
+    let hash = "0".repeat(64);
+    let knowledge = call(
+        &mut server,
+        "glioma_knowledge_compile",
+        json!({
+            "request": {"objective":"rank invasion mechanisms","required_modalities":["genomics"],"required_model_systems":["organoid"],"min_support_milli":700,"min_sources_per_claim":1,"max_claims":8},
+            "records": [{"evidence_id":"branch-e1","source_artifact":{"artifact_id":"branch-a1","content_hash":hash,"content_type":"application/vnd.aurora.glioma-evidence+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"source_kind":"dataset","claim":"EGFR signaling increases invasion","scope":"preclinical glioma","modality":"genomics","model_system":"organoid","state":"supported","relevance_milli":900,"quality_milli":900,"reproducibility_milli":900,"release_epoch":1}]
+        }),
+    );
+    let context_response = call(
+        &mut server,
+        "glioma_decision_context",
+        json!({"request":{"objective":"rank invasion mechanisms","max_actions":8,"default_cost_units":4},"knowledge":knowledge["knowledge"].clone()}),
+    );
+    let context_candidate = context_response["context"]["actions"][0]["candidate"].clone();
+    let context_id = context_candidate["action_id"].as_str().unwrap().to_string();
+    let branch = call(
+        &mut server,
+        "glioma_decision_branch_plan",
+        json!({
+            "request": {
+                "objective":"rank invasion mechanisms",
+                "candidates":[context_candidate, {"action_id":"branch-independent","stage_kind":"mechanism_exploration","modality":"genomics","model_system":"organoid","depends_on":[],"cost_units":3,"information_gain_milli":800,"frontier_novelty_milli":800,"workflow_leverage_milli":800,"cross_stage_unlock_milli":800,"reproducibility_safety_milli":900,"federation_value_milli":500,"feasibility_milli":900,"autonomy_tier":"a1","effects":["read_local_data","execute_local_computation"]}],
+                "completed_action_order":[],
+                "scenarios":[
+                    {"scenario_id":"invasion_high","probability_milli":600,"outcomes":[{"action_id":context_id,"value_milli":700,"uncertainty_milli":100,"failure_probability_milli":50},{"action_id":"branch-independent","value_milli":600,"uncertainty_milli":150,"failure_probability_milli":50}]},
+                    {"scenario_id":"invasion_low","probability_milli":400,"outcomes":[{"action_id":context_id,"value_milli":300,"uncertainty_milli":200,"failure_probability_milli":100},{"action_id":"branch-independent","value_milli":450,"uncertainty_milli":150,"failure_probability_milli":100}]}
+                ],
+                "budget_units":8,"max_actions_per_branch":2,"max_branches":8,"beam_width":16,"minimum_robustness_milli":0,"uncertainty_penalty_milli":300,"failure_penalty_milli":300,
+                "selection_weights":{"information_gain":25,"frontier_novelty":20,"workflow_leverage":15,"cross_stage_unlock":15,"reproducibility_safety":10,"federation_value":10,"feasibility":5}
+            },
+            "context":context_response["context"].clone()
+        }),
+    );
+    assert_eq!(branch["dispatch"], json!("not_started"));
+    assert!(branch["plan"]["selected_branch_id"].is_string());
+    assert!(!branch["plan"]["frontier_order"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+    assert!(branch["plan"]["portfolios"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|portfolio| portfolio["scenario_scores"].as_array().unwrap().len() == 2));
+}
+
+#[test]
+fn glioma_dynamic_policy_evaluation_ranks_supported_workflow_frontier() {
+    let mut server = server();
+    let hash = "0".repeat(64);
+    let evaluation = call(
+        &mut server,
+        "glioma_dynamic_policy_evaluate",
+        json!({
+            "request": {
+                "objective": "rank organoid invasion experiment policies",
+                "model_system": "organoid",
+                "horizon": 3,
+                "reference_policy_id": "reference",
+                "maximize_effect": true,
+                "min_trajectories": 2,
+                "min_coverage_milli": 500,
+                "min_propensity_milli": 100,
+                "max_weight_milli": 20000,
+                "min_effect_milli": 20,
+                "max_leave_one_out_shift_milli": 500
+            },
+            "policies": [
+                {"policy_id":"candidate","label":"candidate","risk_milli":200,"cost_units":2,"rules":[
+                    {"time_step":0,"state_key":"baseline","action_id":"candidate"},
+                    {"time_step":1,"state_key":"baseline","action_id":"candidate"},
+                    {"time_step":2,"state_key":"baseline","action_id":"candidate"}
+                ]},
+                {"policy_id":"reference","label":"reference","risk_milli":100,"cost_units":1,"rules":[
+                    {"time_step":0,"state_key":"baseline","action_id":"reference"},
+                    {"time_step":1,"state_key":"baseline","action_id":"reference"},
+                    {"time_step":2,"state_key":"baseline","action_id":"reference"}
+                ]}
+            ],
+            "trajectories": [
+                {"trajectory_id":"t-0","unit_id":"u-0","model_system":"organoid","artifact":{"artifact_id":"a-0","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"observations":[
+                    {"observation_id":"t-0-0","time_step":0,"state_key":"baseline","action_id":"reference","outcome_milli":10,"propensity_milli":500},
+                    {"observation_id":"t-0-1","time_step":1,"state_key":"baseline","action_id":"reference","outcome_milli":10,"propensity_milli":500},
+                    {"observation_id":"t-0-2","time_step":2,"state_key":"baseline","action_id":"reference","outcome_milli":10,"propensity_milli":500}
+                ]},
+                {"trajectory_id":"t-1","unit_id":"u-1","model_system":"organoid","artifact":{"artifact_id":"a-1","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"observations":[
+                    {"observation_id":"t-1-0","time_step":0,"state_key":"baseline","action_id":"reference","outcome_milli":10,"propensity_milli":500},
+                    {"observation_id":"t-1-1","time_step":1,"state_key":"baseline","action_id":"reference","outcome_milli":10,"propensity_milli":500},
+                    {"observation_id":"t-1-2","time_step":2,"state_key":"baseline","action_id":"reference","outcome_milli":10,"propensity_milli":500}
+                ]},
+                {"trajectory_id":"t-2","unit_id":"u-2","model_system":"organoid","artifact":{"artifact_id":"a-2","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"observations":[
+                    {"observation_id":"t-2-0","time_step":0,"state_key":"baseline","action_id":"candidate","outcome_milli":80,"propensity_milli":500},
+                    {"observation_id":"t-2-1","time_step":1,"state_key":"baseline","action_id":"candidate","outcome_milli":80,"propensity_milli":500},
+                    {"observation_id":"t-2-2","time_step":2,"state_key":"baseline","action_id":"candidate","outcome_milli":80,"propensity_milli":500}
+                ]},
+                {"trajectory_id":"t-3","unit_id":"u-3","model_system":"organoid","artifact":{"artifact_id":"a-3","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"observations":[
+                    {"observation_id":"t-3-0","time_step":0,"state_key":"baseline","action_id":"candidate","outcome_milli":80,"propensity_milli":500},
+                    {"observation_id":"t-3-1","time_step":1,"state_key":"baseline","action_id":"candidate","outcome_milli":80,"propensity_milli":500},
+                    {"observation_id":"t-3-2","time_step":2,"state_key":"baseline","action_id":"candidate","outcome_milli":80,"propensity_milli":500}
+                ]}
+            ]
+        }),
+    );
+    assert_eq!(evaluation["dispatch"], json!("not_started"));
+    assert_eq!(
+        evaluation["evaluation"]["selected_policy_id"],
+        json!("candidate")
+    );
+    assert_eq!(evaluation["evaluation"]["disposition"], json!("qualified"));
+}
+
+#[test]
+fn glioma_computation_portfolio_planner_closes_dependencies() {
+    let mut server = server();
+    let plan = call(
+        &mut server,
+        "glioma_computation_portfolio_plan",
+        json!({
+            "request": {
+                "objective": "choose a reproducible organoid multimodal computation portfolio",
+                "model_system": "organoid",
+                "budget_units": 4,
+                "duration_ticks": 2,
+                "max_tasks": 2,
+                "max_modalities": 2,
+                "min_modalities": 2,
+                "information_weight_milli": 5,
+                "uncertainty_weight_milli": 3,
+                "coverage_weight_milli": 2,
+                "cost_penalty_milli": 1,
+                "duration_penalty_milli": 1,
+                "require_deterministic": true,
+                "completed_order": []
+            },
+            "candidates": [
+                {"candidate_id":"integrate","task":{"task_id":"integrate","operation":"integrate","model_system":"organoid","depends_on":["normalize"],"input_artifact_ids":["input:integrate"],"output_schema":"Integrate1@1","estimated_cost_units":2,"estimated_duration_ticks":1,"deterministic":true},"modality":"spatial","information_gain_milli":900,"uncertainty_reduction_milli":500,"coverage_debt_milli":400,"redundancy_group":"integration","required":false},
+                {"candidate_id":"normalize","task":{"task_id":"normalize","operation":"normalize","model_system":"organoid","depends_on":[],"input_artifact_ids":["input:normalize"],"output_schema":"Normalize1@1","estimated_cost_units":2,"estimated_duration_ticks":1,"deterministic":true},"modality":"transcriptomics","information_gain_milli":400,"uncertainty_reduction_milli":500,"coverage_debt_milli":300,"redundancy_group":"normalization","required":false}
+            ]
+        }),
+    );
+    assert_eq!(plan["dispatch"], json!("not_started"));
+    assert_eq!(
+        plan["plan"]["dependency_order"],
+        json!(["normalize", "integrate"])
+    );
+    assert_eq!(plan["plan"]["disposition"], json!("qualified"));
+}
+
+#[test]
+fn glioma_evidence_refresh_campaign_replans_stale_evidence_in_sandbox() {
+    let mut server = server();
+    let hash = "0".repeat(64);
+    let campaign = call(
+        &mut server,
+        "glioma_evidence_refresh_campaign_execute",
+        json!({
+            "request": {
+                "surveillance": {
+                    "objective": "refresh stale preclinical glioma invasion evidence",
+                    "required_modalities": [],
+                    "required_model_systems": [],
+                    "min_priority_milli": 0,
+                    "max_actions": 4,
+                    "score_shift_threshold_milli": 50
+                },
+                "previous_records": [{
+                    "evidence_id": "refresh-stale-1",
+                    "source_artifact": {"artifact_id":"refresh-artifact","content_hash":hash,"content_type":"application/vnd.aurora.glioma-evidence+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},
+                    "source_kind": "dataset",
+                    "claim": "EGFR signaling increases invasion",
+                    "scope": "preclinical glioma",
+                    "modality": "genomics",
+                    "model_system": "organoid",
+                    "state": "supported",
+                    "relevance_milli": 900,
+                    "quality_milli": 900,
+                    "reproducibility_milli": 900,
+                    "release_epoch": 1
+                }],
+                "current_records": [{
+                    "evidence_id": "refresh-stale-1",
+                    "source_artifact": {"artifact_id":"refresh-artifact","content_hash":hash,"content_type":"application/vnd.aurora.glioma-evidence+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},
+                    "source_kind": "dataset",
+                    "claim": "EGFR signaling increases invasion",
+                    "scope": "preclinical glioma",
+                    "modality": "genomics",
+                    "model_system": "organoid",
+                    "state": "stale",
+                    "relevance_milli": 900,
+                    "quality_milli": 900,
+                    "reproducibility_milli": 900,
+                    "release_epoch": 1
+                }],
+                "budget_units": 1,
+                "cost_per_action_units": 1,
+                "max_rounds": 1,
+                "max_retries": 1,
+                "stop_on_qualified": true
+            }
+        }),
+    );
+    assert_eq!(campaign["dispatch"], json!("dry_run"));
+    assert_eq!(campaign["simulation_only"], json!(true));
+    assert_eq!(campaign["campaign"]["disposition"], json!("qualified"));
+    assert_eq!(
+        campaign["campaign"]["current_records"][0]["state"],
+        json!("supported")
+    );
+    assert_eq!(campaign["campaign"]["rounds"].as_array().unwrap().len(), 1);
+}
+
+#[test]
+fn glioma_knowledge_resolution_campaign_recompiles_frontier_in_sandbox() {
+    let mut server = server();
+    let hash = "0".repeat(64);
+    let campaign = call(
+        &mut server,
+        "glioma_knowledge_resolution_campaign_execute",
+        json!({
+            "request": {
+                "knowledge": {
+                    "objective": "resolve preclinical glioma invasion claims",
+                    "required_modalities": ["genomics"],
+                    "required_model_systems": ["organoid"],
+                    "min_support_milli": 700,
+                    "min_sources_per_claim": 1,
+                    "max_claims": 8
+                },
+                "frontier": {
+                    "objective": "resolve preclinical glioma invasion claims",
+                    "max_selected_claims": 1,
+                    "min_priority_milli": 0,
+                    "weights": {
+                        "coverage_debt_milli": 250,
+                        "contradiction_milli": 250,
+                        "uncertainty_milli": 200,
+                        "support_milli": 150,
+                        "workflow_leverage_milli": 150
+                    }
+                },
+                "records": [{
+                    "evidence_id": "knowledge-campaign-seed",
+                    "source_artifact": {"artifact_id":"knowledge-campaign-artifact","content_hash":hash,"content_type":"application/vnd.aurora.glioma-evidence+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},
+                    "source_kind": "dataset",
+                    "claim": "EGFR signaling increases invasion",
+                    "scope": "preclinical glioma invasion",
+                    "modality": "genomics",
+                    "model_system": "organoid",
+                    "state": "supported",
+                    "relevance_milli": 900,
+                    "quality_milli": 900,
+                    "reproducibility_milli": 900,
+                    "release_epoch": 1
+                }],
+                "budget_units": 1,
+                "cost_per_action_units": 1,
+                "max_rounds": 2,
+                "max_retries": 1,
+                "stop_on_qualified": true
+            }
+        }),
+    );
+    assert_eq!(campaign["dispatch"], json!("dry_run"));
+    assert_eq!(campaign["simulation_only"], json!(true));
+    assert_eq!(campaign["campaign"]["disposition"], json!("qualified"));
+    assert_eq!(
+        campaign["campaign"]["final_knowledge"]["disposition"],
+        json!("qualified")
+    );
+    assert_eq!(campaign["campaign"]["rounds"].as_array().unwrap().len(), 1);
+}
+
+#[test]
+fn glioma_decision_context_campaign_dispatches_claim_scoped_action_in_sandbox() {
+    let mut server = server();
+    let hash = "0".repeat(64);
+    let campaign = call(
+        &mut server,
+        "glioma_decision_context_campaign_execute",
+        json!({
+            "request": {
+                "knowledge": {
+                    "objective": "rank glioma invasion actions",
+                    "required_modalities": ["genomics"],
+                    "required_model_systems": ["organoid"],
+                    "min_support_milli": 700,
+                    "min_sources_per_claim": 1,
+                    "max_claims": 8
+                },
+                "context": {
+                    "objective": "rank glioma invasion actions",
+                    "max_actions": 8,
+                    "default_cost_units": 2
+                },
+                "action_plan": {
+                    "objective": "rank glioma invasion actions",
+                    "completed_action_order": [],
+                    "selection": {
+                        "budget_units": 2,
+                        "max_actions": 1,
+                        "approval_granted": true,
+                        "allow_instrument_execution": false,
+                        "allow_federation": false,
+                        "weights": {
+                            "information_gain": 20,
+                            "frontier_novelty": 15,
+                            "workflow_leverage": 15,
+                            "cross_stage_unlock": 15,
+                            "reproducibility_safety": 15,
+                            "federation_value": 10,
+                            "feasibility": 10
+                        }
+                    }
+                },
+                "records": [{
+                    "evidence_id": "decision-campaign-seed",
+                    "source_artifact": {"artifact_id":"decision-campaign-artifact","content_hash":hash,"content_type":"application/vnd.aurora.glioma-evidence+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},
+                    "source_kind": "dataset",
+                    "claim": "EGFR signaling increases invasion",
+                    "scope": "preclinical glioma",
+                    "modality": "genomics",
+                    "model_system": "organoid",
+                    "state": "supported",
+                    "relevance_milli": 900,
+                    "quality_milli": 900,
+                    "reproducibility_milli": 900,
+                    "release_epoch": 1
+                }],
+                "budget_units": 2,
+                "max_rounds": 2,
+                "max_retries": 1,
+                "stop_on_qualified": true
+            }
+        }),
+    );
+    assert_eq!(campaign["dispatch"], json!("dry_run"));
+    assert_eq!(campaign["simulation_only"], json!(true));
+    assert_eq!(campaign["campaign"]["disposition"], json!("qualified"));
+    assert_eq!(
+        campaign["campaign"]["final_action_plan"]["disposition"],
+        json!("no_runnable_actions")
+    );
+    assert_eq!(campaign["campaign"]["rounds"].as_array().unwrap().len(), 1);
+}
+
+#[test]
+fn glioma_multimodal_ingestion_campaign_replans_missing_modality_in_sandbox() {
+    let mut server = server();
+    let hash = "0".repeat(64);
+    let campaign = call(
+        &mut server,
+        "glioma_multimodal_ingestion_campaign_execute",
+        json!({
+            "request": {
+                "request": {
+                    "study_id": "study-mcp-ingestion",
+                    "required_modalities": ["genomics", "imaging"],
+                    "required_model_systems": ["organoid"],
+                    "expected_coordinate_system": "pixel",
+                    "expected_unit_system": "count",
+                    "max_missing_fraction_milli": 100
+                },
+                "observations": [{
+                    "observation_id": "seed-genomics",
+                    "study_id": "study-mcp-ingestion",
+                    "sample_lineage": "sample-seed",
+                    "modality": "genomics",
+                    "model_system": "organoid",
+                    "batch_id": "batch-1",
+                    "coordinate_system": "pixel",
+                    "unit_system": "count",
+                    "missing_fraction_milli": 0,
+                    "feature_count": 10,
+                    "artifact": {"artifact_id":"ingestion-artifact","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}
+                }],
+                "max_actions_per_round": 4,
+                "budget_units": 2,
+                "cost_per_action_units": 1,
+                "max_rounds": 3,
+                "max_retries": 1,
+                "stop_on_qualified": true
+            }
+        }),
+    );
+    assert_eq!(campaign["dispatch"], json!("dry_run"));
+    assert_eq!(campaign["simulation_only"], json!(true));
+    assert_eq!(campaign["campaign"]["disposition"], json!("qualified"));
+    assert_eq!(
+        campaign["campaign"]["final_report"]["disposition"],
+        json!("qualified")
+    );
+    assert_eq!(campaign["campaign"]["rounds"].as_array().unwrap().len(), 1);
+}
+
+#[test]
+fn glioma_computation_portfolio_executor_runs_selected_dag() {
+    let mut server = server();
+    let execution = call(
+        &mut server,
+        "glioma_computation_portfolio_execute",
+        json!({
+            "request": {
+                "portfolio": {
+                    "objective": "execute a reproducible organoid multimodal computation portfolio",
+                    "model_system": "organoid",
+                    "budget_units": 4,
+                    "duration_ticks": 2,
+                    "max_tasks": 2,
+                    "max_modalities": 2,
+                    "min_modalities": 2,
+                    "information_weight_milli": 5,
+                    "uncertainty_weight_milli": 3,
+                    "coverage_weight_milli": 2,
+                    "cost_penalty_milli": 1,
+                    "duration_penalty_milli": 1,
+                    "require_deterministic": true,
+                    "completed_order": []
+                },
+                "candidates": [
+                    {"candidate_id":"integrate","task":{"task_id":"integrate","operation":"integrate","model_system":"organoid","depends_on":["normalize"],"input_artifact_ids":["input:integrate"],"output_schema":"Integrate1@1","estimated_cost_units":2,"estimated_duration_ticks":1,"deterministic":true},"modality":"spatial","information_gain_milli":900,"uncertainty_reduction_milli":500,"coverage_debt_milli":400,"redundancy_group":"integration","required":false},
+                    {"candidate_id":"normalize","task":{"task_id":"normalize","operation":"normalize","model_system":"organoid","depends_on":[],"input_artifact_ids":["input:normalize"],"output_schema":"Normalize1@1","estimated_cost_units":2,"estimated_duration_ticks":1,"deterministic":true},"modality":"transcriptomics","information_gain_milli":400,"uncertainty_reduction_milli":500,"coverage_debt_milli":300,"redundancy_group":"normalization","required":false}
+                ],
+                "replay_identity": "0000000000000000000000000000000000000000000000000000000000000000",
+                "max_retries": 1,
+                "allow_cache": true,
+                "require_local_artifacts": true,
+                "cache": []
+            }
+        }),
+    );
+    assert_eq!(execution["dispatch"], json!("not_started"));
+    assert_eq!(execution["execution"]["disposition"], json!("completed"));
+    assert_eq!(
+        execution["execution"]["execution"]["task_order"],
+        json!(["normalize", "integrate"])
+    );
+}
+
+#[test]
+fn glioma_replication_campaign_routes_heterogeneity_to_bounded_action() {
+    let mut server = server();
+    let hash = "0".repeat(64);
+    let campaign = call(
+        &mut server,
+        "glioma_replication_campaign_execute",
+        json!({
+            "request": {
+                "objective": "replicate a preclinical glioma invasion effect",
+                "model_system": "organoid",
+                "target_model_system": "organoid",
+                "target_signature": [1, 2],
+                "min_sites": 3,
+                "min_replicates_per_site": 2,
+                "min_studies": 3,
+                "min_replicates_per_study": 2,
+                "effect_threshold_milli": 10,
+                "max_heterogeneity_milli": 500,
+                "max_i2_milli": 500,
+                "min_signal_to_noise_milli": 10,
+                "max_leave_one_out_shift_milli": 1000,
+                "min_quality_milli": 500,
+                "distance_scale_milli": 1000,
+                "max_transport_gap_milli": 500,
+                "max_transport_heterogeneity_milli": 500,
+                "budget_units": 16,
+                "max_rounds": 2,
+                "max_actions_per_round": 1,
+                "max_retries": 1,
+                "initial_studies": [
+                    {"study_id":"s1","site_id":"site-1","model_system":"organoid","effect_milli":250,"uncertainty_milli":100,"replicate_count":3,"artifact":{"artifact_id":"a1","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}}
+                ],
+                "initial_transport_studies": [],
+                "replay_identity": hash
+            }
+        }),
+    );
+    assert_eq!(campaign["dispatch"], json!("dry_run"));
+    assert_eq!(campaign["simulation_only"], json!(true));
+    assert_eq!(
+        campaign["campaign"]["rounds"][0]["candidate_actions"][0]["kind"],
+        json!("replicate_study")
+    );
+    assert_eq!(campaign["campaign"]["disposition"], json!("partial"));
+}
+
+#[test]
+fn glioma_autonomous_research_mission_adapts_frontier_in_sandbox() {
+    let mut server = server();
+    let mission = call(
+        &mut server,
+        "glioma_autonomous_research_mission_execute",
+        json!({
+            "request": {
+                "mission_id": "m-invasion-frontier",
+                "objective": "resolve preclinical glioma invasion mechanism",
+                "candidates": [
+                    {"action_id":"mechanism-organoid","stage_kind":"mechanism_exploration","modality":"transcriptomics","model_system":"organoid","depends_on":[],"cost_units":2,"information_gain_milli":800,"frontier_novelty_milli":700,"workflow_leverage_milli":600,"cross_stage_unlock_milli":700,"reproducibility_safety_milli":900,"federation_value_milli":200,"feasibility_milli":900,"autonomy_tier":"a1","effects":["read_local_data","execute_local_computation","write_local_artifact"]},
+                    {"action_id":"mechanism-mouse","stage_kind":"mechanism_exploration","modality":"imaging","model_system":"mouse_model","depends_on":[],"cost_units":2,"information_gain_milli":500,"frontier_novelty_milli":700,"workflow_leverage_milli":600,"cross_stage_unlock_milli":700,"reproducibility_safety_milli":900,"federation_value_milli":200,"feasibility_milli":900,"autonomy_tier":"a1","effects":["read_local_data","execute_local_computation","write_local_artifact"]}
+                ],
+                "completed_action_order": [],
+                "selection": {"budget_units":4,"max_actions":1,"approval_granted":false,"allow_instrument_execution":false,"allow_federation":false,"weights":{"information_gain":25,"frontier_novelty":20,"workflow_leverage":15,"cross_stage_unlock":15,"reproducibility_safety":10,"federation_value":10,"feasibility":5}},
+                "gates": {"required_stages":["mechanism_exploration"],"min_completed_actions":1,"min_information_gain_milli":500,"max_uncertainty_milli":10000,"min_model_systems":1,"min_modalities":1},
+                "max_rounds":2,
+                "max_retries":1,
+                "require_artifacts":true,
+                "stop_on_negative":false
+            }
+        }),
+    );
+    assert_eq!(mission["dispatch"], json!("dry_run"));
+    assert_eq!(mission["simulation_only"], json!(true));
+    assert_eq!(mission["mission"]["disposition"], json!("qualified"));
+    assert_eq!(mission["mission"]["rounds"].as_array().unwrap().len(), 1);
+}
+
+#[test]
+fn glioma_multi_fidelity_campaign_replans_screening_batches_in_sandbox() {
+    let mut server = server();
+    let campaign = call(
+        &mut server,
+        "glioma_multi_fidelity_campaign_execute",
+        json!({
+            "request": {
+                "optimization": {
+                    "objective": "maximize preclinical glioma invasion suppression",
+                    "direction": "maximize",
+                    "budget_units": 6,
+                    "max_selections": 1,
+                    "min_replicates_per_candidate": 1,
+                    "exploration_weight_milli": 500,
+                    "exploitation_weight_milli": 300,
+                    "transfer_weight_milli": 200,
+                    "risk_penalty_milli": 1,
+                    "cost_penalty_milli": 1,
+                    "max_risk_milli": 800,
+                    "min_transfer_reliability_milli": 250,
+                    "baseline_milli": 0
+                },
+                "candidates": [
+                    {"candidate_id":"screen-egfr","design_id":"egfr","fidelity":"screening","model_system":"organoid","dose_milli":100,"combination_milli":0,"cost_units":2,"risk_milli":100,"parent_candidate_id":null,"max_replicates":2},
+                    {"candidate_id":"screen-matrix","design_id":"matrix","fidelity":"screening","model_system":"organoid","dose_milli":120,"combination_milli":0,"cost_units":2,"risk_milli":100,"parent_candidate_id":null,"max_replicates":2}
+                ],
+                "observations": [],
+                "max_rounds": 4,
+                "max_retries": 1,
+                "require_artifacts": true,
+                "stop_on_qualified": true
+            }
+        }),
+    );
+    assert_eq!(campaign["dispatch"], json!("dry_run"));
+    assert_eq!(campaign["simulation_only"], json!(true));
+    assert_eq!(campaign["campaign"]["disposition"], json!("qualified"));
+    assert!(campaign["campaign"]["rounds"].as_array().unwrap().len() >= 2);
+    assert!(
+        campaign["campaign"]["observations"]
+            .as_array()
+            .unwrap()
+            .len()
+            >= 2
+    );
+}
+
+#[test]
+fn glioma_federated_benchmark_campaign_replans_aggregate_sites_in_sandbox() {
+    let mut server = server();
+    let hash = "0000000000000000000000000000000000000000000000000000000000000000";
+    let campaign = call(
+        &mut server,
+        "glioma_federated_benchmark_campaign_execute",
+        json!({
+            "request": {
+                "benchmark": {
+                    "objective": "compare glioma invasion model improvements",
+                    "capability_id": "glioma:invasion-model",
+                    "benchmark_world": "glioma-world-v1",
+                    "metric_name": "holdout_auc",
+                    "model_system": "organoid",
+                    "minimum_sites": 2,
+                    "minimum_replicates_per_site": 2,
+                    "effect_threshold_milli": 25,
+                    "max_i2_milli": 500,
+                    "min_signal_to_noise_milli": 100,
+                    "max_site_spread_milli": 500,
+                    "max_leave_one_out_shift_milli": 500
+                },
+                "initial_sites": [{
+                    "site_id": "site-seed",
+                    "study_id": "study-seed",
+                    "capability_id": "glioma:invasion-model",
+                    "benchmark_world": "glioma-world-v1",
+                    "metric_name": "holdout_auc",
+                    "model_system": "organoid",
+                    "artifact": {"artifact_id": "artifact-seed", "content_hash": hash, "content_type": "application/json", "local_only": true, "contains_human_data": false, "contains_direct_identifiers": false},
+                    "baseline_score_milli": 500,
+                    "candidate_score_milli": 620,
+                    "uncertainty_milli": 40,
+                    "replicate_count": 3
+                }],
+                "actions": [{
+                    "action_id": "expand-site",
+                    "kind": "expand_coverage",
+                    "target_site_id": null,
+                    "cost_units": 1,
+                    "expected_information_milli": 900,
+                    "expected_effect_milli": 100,
+                    "feasibility_milli": 900,
+                    "risk_milli": 50,
+                    "requested_replicates": 3
+                }],
+                "budget_units": 1,
+                "max_rounds": 2,
+                "max_retries": 1,
+                "stop_on_qualified": false,
+                "stop_on_negative": false
+            }
+        }),
+    );
+    assert_eq!(campaign["dispatch"], json!("dry_run"));
+    assert_eq!(campaign["simulation_only"], json!(true));
+    assert_eq!(campaign["campaign"]["rounds"].as_array().unwrap().len(), 1);
+    assert_eq!(campaign["campaign"]["sites"].as_array().unwrap().len(), 2);
+}
+
+#[test]
+fn glioma_federated_mechanism_transport_preserves_model_and_direction_gates() {
+    let mut server = server();
+    let hash = "0000000000000000000000000000000000000000000000000000000000000000";
+    let analysis = call(
+        &mut server,
+        "glioma_federated_mechanism_transport",
+        json!({
+            "request": {
+                "objective": "transport invasion mechanism across preclinical models",
+                "mechanism_id": "invasion-mechanism",
+                "target_model_system": "organoid",
+                "target_signature": [0, 0, 0],
+                "min_sites": 2,
+                "min_replicates_per_site": 2,
+                "min_quality_milli": 700,
+                "similarity_scale_milli": 1000,
+                "effect_threshold_milli": 500,
+                "min_signal_to_noise_milli": 500,
+                "max_heterogeneity_milli": 250,
+                "max_site_spread_milli": 1000,
+                "max_leave_one_out_shift_milli": 500,
+                "require_target_model": true
+            },
+            "sites": [
+                {"site_id": "organoid-a", "study_id": "study-a", "mechanism_id": "invasion-mechanism", "model_system": "organoid", "effect_milli": 900, "uncertainty_milli": 100, "quality_milli": 900, "replicate_count": 3, "population_signature": [0, 0, 0], "artifact": {"artifact_id": "artifact-a", "content_hash": hash, "content_type": "application/json", "local_only": true, "contains_human_data": false, "contains_direct_identifiers": false}},
+                {"site_id": "mouse-b", "study_id": "study-b", "mechanism_id": "invasion-mechanism", "model_system": "mouse_model", "effect_milli": 850, "uncertainty_milli": 100, "quality_milli": 900, "replicate_count": 3, "population_signature": [1, 0, 0], "artifact": {"artifact_id": "artifact-b", "content_hash": hash, "content_type": "application/json", "local_only": true, "contains_human_data": false, "contains_direct_identifiers": false}}
+            ]
+        }),
+    );
+    assert_eq!(analysis["dispatch"], json!("not_started"));
+    assert_eq!(analysis["analysis"]["disposition"], json!("qualified"));
+    assert_eq!(
+        analysis["analysis"]["included_order"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+    assert!(
+        analysis["analysis"]["model_coverage"]
+            .as_array()
+            .unwrap()
+            .len()
+            >= 2
+    );
+}
+
+#[test]
+fn glioma_replay_campaign_executes_dependency_aware_release_check_in_sandbox() {
+    let mut server = server();
+    let hash = "0000000000000000000000000000000000000000000000000000000000000000";
+    let campaign = call(
+        &mut server,
+        "glioma_replay_campaign_execute",
+        json!({
+            "request": {
+                "release": {
+                    "research_id": "mcp-replay",
+                    "study_id": "mcp-study",
+                    "objective": "replay a glioma mechanism result",
+                    "plan_digest": hash,
+                    "execution_digest": hash,
+                    "replay_identity": hash,
+                    "program_order": ["p05-mechanism"],
+                    "artifacts": [{"artifact_id": "artifact-main", "content_hash": hash, "content_type": "application/json", "local_only": true, "contains_human_data": false, "contains_direct_identifiers": false}],
+                    "negative_evidence": ["null-result-preserved"],
+                    "limitations": ["single-model-system"],
+                    "raw_data_local": true,
+                    "aggregate_only": true
+                },
+                "tasks": [{
+                    "task_id": "mechanism-replay",
+                    "program_id": "p05-mechanism",
+                    "artifact_id": "artifact-main",
+                    "expected_content_hash": hash,
+                    "cost_units": 1,
+                    "required": true,
+                    "deterministic": true,
+                    "depends_on": []
+                }],
+                "budget_units": 1,
+                "max_rounds": 2,
+                "max_retries": 1,
+                "min_coverage_milli": 1000,
+                "require_exact_hash": true
+            }
+        }),
+    );
+    assert_eq!(campaign["dispatch"], json!("dry_run"));
+    assert_eq!(campaign["simulation_only"], json!(true));
+    assert_eq!(campaign["campaign"]["disposition"], json!("reproducible"));
+    assert_eq!(campaign["campaign"]["exact_match"], json!(true));
+}
+
+#[test]
+fn glioma_research_object_release_gate_requires_replay_and_independent_review() {
+    let mut server = server();
+    let hash = "0000000000000000000000000000000000000000000000000000000000000000";
+    let campaign = call(
+        &mut server,
+        "glioma_replay_campaign_execute",
+        json!({
+            "request": {
+                "release": {
+                    "research_id": "gate-mcp-research",
+                    "study_id": "gate-mcp-study",
+                    "objective": "release a reproducible preclinical glioma result",
+                    "plan_digest": hash,
+                    "execution_digest": hash,
+                    "replay_identity": hash,
+                    "program_order": ["p05-mechanism"],
+                    "artifacts": [{"artifact_id": "gate-artifact", "content_hash": hash, "content_type": "application/json", "local_only": true, "contains_human_data": false, "contains_direct_identifiers": false}],
+                    "negative_evidence": ["null-result-preserved"],
+                    "limitations": ["single-model-system"],
+                    "raw_data_local": true,
+                    "aggregate_only": true
+                },
+                "tasks": [{"task_id": "gate-task", "program_id": "p05-mechanism", "artifact_id": "gate-artifact", "expected_content_hash": hash, "cost_units": 1, "required": true, "deterministic": true, "depends_on": []}],
+                "budget_units": 1,
+                "max_rounds": 2,
+                "max_retries": 1,
+                "min_coverage_milli": 1000,
+                "require_exact_hash": true
+            }
+        }),
+    );
+    let gate = call(
+        &mut server,
+        "glioma_research_object_release_gate",
+        json!({
+            "request": {
+                "required_coverage_milli": 1000,
+                "require_exact_hash": true,
+                "require_reproducible": true,
+                "require_accountable_review": true,
+                "min_independent_approvals": 1,
+                "max_uncertainty_items": 8,
+                "reviews": [{"reviewer_id": "reviewer-a", "role": "independent-reproducibility-reviewer", "decision": "approve", "evidence_digest": hash, "independent": true}]
+            },
+            "campaign": campaign["campaign"].clone()
+        }),
+    );
+    assert_eq!(gate["dispatch"], json!("not_started"));
+    assert_eq!(gate["simulation_only"], json!(true));
+    assert_eq!(gate["gate"]["status"], json!("publishable"));
+    assert!(gate["gate"]["blocking_order"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+}
+
+#[test]
+fn glioma_adaptive_mechanism_policy_selects_information_bearing_assay() {
+    let mut server = server();
+    let policy = call(
+        &mut server,
+        "glioma_adaptive_mechanism_policy",
+        json!({
+            "request": {
+                "objective": "discriminate invasion mechanisms in organoids",
+                "model_system": "organoid",
+                "horizon": 2,
+                "budget_units": 2,
+                "max_actions": 4,
+                "outcome_bucket_width_milli": 10,
+                "information_weight_milli": 700,
+                "effect_weight_milli": 100,
+                "robustness_weight_milli": 200,
+                "risk_penalty_milli": 1,
+                "cost_penalty_milli": 1,
+                "redundancy_penalty_milli": 20,
+                "min_feasibility_milli": 500,
+                "stop_entropy_milli": 50,
+                "models": [
+                    {"model_id":"m1","label":"invasion-led","prior_milli":500},
+                    {"model_id":"m2","label":"matrix-led","prior_milli":500}
+                ],
+                "actions": [
+                    {"action_id":"assay-a","label":"measure invasion","target_node_id":"node-a","modality":"functional_perturbation","redundancy_group":"pathway","cost_units":1,"risk_milli":50,"feasibility_milli":950,"predictions":[{"model_id":"m1","outcome_milli":100,"effect_milli":100,"uncertainty_milli":20},{"model_id":"m2","outcome_milli":900,"effect_milli":900,"uncertainty_milli":20}]},
+                    {"action_id":"assay-b","label":"measure matrix","target_node_id":"node-b","modality":"spatial","redundancy_group":"spatial","cost_units":1,"risk_milli":50,"feasibility_milli":950,"predictions":[{"model_id":"m1","outcome_milli":200,"effect_milli":200,"uncertainty_milli":20},{"model_id":"m2","outcome_milli":220,"effect_milli":220,"uncertainty_milli":20}]}
+                ],
+                "observations": []
+            }
+        }),
+    );
+    assert_eq!(policy["dispatch"], json!("not_started"));
+    assert_eq!(policy["simulation_only"], json!(true));
+    assert_eq!(
+        policy["policy"]["selected_action_order"][0],
+        json!("assay-a")
+    );
+    assert!(policy["policy"]["scores"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|score| { score["information_gain_milli"].as_u64().unwrap_or_default() > 0 }));
+}
+
+#[test]
+fn glioma_mechanism_calibration_exposes_prequential_gates() {
+    let mut server = server();
+    let artifact_hash = ContentHash::of_value(&json!({"artifact": "calibration"})).unwrap();
+    let calibration = call(
+        &mut server,
+        "glioma_mechanism_calibrate",
+        json!({
+            "request": {
+                "objective": "calibrate invasion mechanism probabilities",
+                "model_system": "organoid",
+                "min_observations_per_mechanism": 2,
+                "max_mechanisms": 4,
+                "max_rounds": 8,
+                "max_calibration_error_milli": 200000,
+                "max_brier_loss_milli": 200000
+            },
+            "observations": [
+                {"round_index":0,"mechanism_id":"matrix","feature_id":"f1","predicted_milli":200000,"observed_milli":250000,"uncertainty_milli":10000,"artifact":{"artifact_id":"cal-a1","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-calibration+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"round_index":1,"mechanism_id":"matrix","feature_id":"f2","predicted_milli":300000,"observed_milli":350000,"uncertainty_milli":10000,"artifact":{"artifact_id":"cal-a2","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-calibration+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"round_index":0,"mechanism_id":"motility","feature_id":"f1","predicted_milli":800000,"observed_milli":750000,"uncertainty_milli":10000,"artifact":{"artifact_id":"cal-a3","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-calibration+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"round_index":1,"mechanism_id":"motility","feature_id":"f2","predicted_milli":700000,"observed_milli":650000,"uncertainty_milli":10000,"artifact":{"artifact_id":"cal-a4","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-calibration+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}}
+            ]
+        }),
+    );
+    assert_eq!(calibration["dispatch"], json!("not_started"));
+    assert_eq!(
+        calibration["calibration"]["disposition"],
+        json!("qualified")
+    );
+    assert_eq!(
+        calibration["calibration"]["prequential_holdout_round"],
+        json!(1)
+    );
+    assert_eq!(
+        calibration["calibration"]["scores"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+}
+
+#[test]
+fn glioma_adaptive_mechanism_campaign_replans_from_sandbox_observation() {
+    let mut server = server();
+    let campaign = call(
+        &mut server,
+        "glioma_adaptive_mechanism_campaign_execute",
+        json!({
+            "request": {
+                "policy": {
+                    "objective": "discriminate invasion mechanisms in organoids",
+                    "model_system": "organoid",
+                    "horizon": 2,
+                    "budget_units": 2,
+                    "max_actions": 4,
+                    "outcome_bucket_width_milli": 10,
+                    "information_weight_milli": 700,
+                    "effect_weight_milli": 100,
+                    "robustness_weight_milli": 200,
+                    "risk_penalty_milli": 1,
+                    "cost_penalty_milli": 1,
+                    "redundancy_penalty_milli": 20,
+                    "min_feasibility_milli": 500,
+                    "stop_entropy_milli": 50,
+                    "models": [
+                        {"model_id":"m1","label":"invasion-led","prior_milli":500},
+                        {"model_id":"m2","label":"matrix-led","prior_milli":500}
+                    ],
+                    "actions": [
+                        {"action_id":"assay-a","label":"measure invasion","target_node_id":"node-a","modality":"functional_perturbation","redundancy_group":"pathway","cost_units":1,"risk_milli":50,"feasibility_milli":950,"predictions":[{"model_id":"m1","outcome_milli":100,"effect_milli":100,"uncertainty_milli":20},{"model_id":"m2","outcome_milli":900,"effect_milli":900,"uncertainty_milli":20}]},
+                        {"action_id":"assay-b","label":"measure matrix","target_node_id":"node-b","modality":"spatial","redundancy_group":"spatial","cost_units":1,"risk_milli":50,"feasibility_milli":950,"predictions":[{"model_id":"m1","outcome_milli":200,"effect_milli":200,"uncertainty_milli":20},{"model_id":"m2","outcome_milli":220,"effect_milli":220,"uncertainty_milli":20}]}
+                    ],
+                    "observations": []
+                },
+                "max_rounds": 2,
+                "max_retries": 1,
+                "require_artifacts": true,
+                "stop_on_converged": true
+            }
+        }),
+    );
+    assert_eq!(campaign["dispatch"], json!("dry_run"));
+    assert_eq!(campaign["simulation_only"], json!(true));
+    assert!(!campaign["campaign"]["rounds"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+    assert!(!campaign["campaign"]["observations"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+    assert!(campaign["campaign"]["completed_action_order"]
+        .as_array()
+        .is_some_and(|items| !items.is_empty()));
+}
+
+#[test]
+fn glioma_computation_campaign_replans_and_executes_seed_round() {
+    let mut server = server();
+    let campaign = call(
+        &mut server,
+        "glioma_computation_campaign_execute",
+        json!({
+            "request": {
+                "objective": "autonomously execute a reproducible glioma invasion analysis",
+                "model_system": "organoid",
+                "initial_candidates": [
+                    {"candidate_id":"integrate","task":{"task_id":"integrate","operation":"integrate","model_system":"organoid","depends_on":["normalize"],"input_artifact_ids":["input:integrate"],"output_schema":"Integrate1@1","estimated_cost_units":2,"estimated_duration_ticks":1,"deterministic":true},"modality":"spatial","information_gain_milli":900,"uncertainty_reduction_milli":500,"coverage_debt_milli":400,"redundancy_group":"integration","required":false},
+                    {"candidate_id":"normalize","task":{"task_id":"normalize","operation":"normalize","model_system":"organoid","depends_on":[],"input_artifact_ids":["input:normalize"],"output_schema":"Normalize1@1","estimated_cost_units":2,"estimated_duration_ticks":1,"deterministic":true},"modality":"transcriptomics","information_gain_milli":400,"uncertainty_reduction_milli":500,"coverage_debt_milli":300,"redundancy_group":"normalization","required":false}
+                ],
+                "budget_units": 4,
+                "duration_ticks": 2,
+                "max_rounds": 3,
+                "max_retries": 1,
+                "max_tasks": 2,
+                "max_modalities": 2,
+                "min_modalities": 2,
+                "information_weight_milli": 5,
+                "uncertainty_weight_milli": 3,
+                "coverage_weight_milli": 2,
+                "cost_penalty_milli": 1,
+                "duration_penalty_milli": 1,
+                "require_deterministic": true,
+                "allow_cache": true,
+                "require_local_artifacts": true,
+                "cache": [],
+                "replay_identity": "0000000000000000000000000000000000000000000000000000000000000000"
+            }
+        }),
+    );
+    assert_eq!(campaign["dispatch"], json!("dry_run"));
+    assert_eq!(campaign["simulation_only"], json!(true));
+    assert_eq!(campaign["campaign"]["disposition"], json!("completed"));
+    assert_eq!(campaign["campaign"]["stop_reason"], json!("completed"));
+    assert_eq!(campaign["campaign"]["rounds"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        campaign["campaign"]["completed_order"],
+        json!(["integrate", "normalize"])
+    );
+}
+
+#[test]
+fn glioma_computation_workflow_compiles_intent_and_executes_closed_dag() {
+    let mut server = server();
+    let workflow = call(
+        &mut server,
+        "glioma_computation_workflow_execute",
+        json!({
+            "request": {
+                "objective": "profile invasive organoid state across modalities",
+                "study_id": "study-glioma-01",
+                "model_system": "organoid",
+                "modalities": ["transcriptomics", "imaging"],
+                "operations": ["export", "model_fit"],
+                "input_artifact_ids": ["artifact-imaging", "artifact-rna"],
+                "budget_units": 100,
+                "duration_ticks": 500,
+                "max_tasks": 64,
+                "max_modalities": 4,
+                "min_modalities": 2,
+                "information_weight_milli": 5,
+                "uncertainty_weight_milli": 4,
+                "coverage_weight_milli": 3,
+                "cost_penalty_milli": 1,
+                "duration_penalty_milli": 1,
+                "require_deterministic": true,
+                "max_rounds": 4,
+                "max_retries": 1,
+                "allow_cache": true,
+                "require_local_artifacts": true,
+                "cache": [],
+                "replay_identity": "0000000000000000000000000000000000000000000000000000000000000000"
+            }
+        }),
+    );
+    assert_eq!(workflow["dispatch"], json!("dry_run"));
+    assert_eq!(workflow["simulation_only"], json!(true));
+    assert_eq!(
+        workflow["workflow"]["within_declared_resources"],
+        json!(true)
+    );
+    assert_eq!(
+        workflow["workflow"]["requested_terminal_order"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+    assert_eq!(
+        workflow["workflow"]["candidates"].as_array().unwrap().len(),
+        14
+    );
+    assert_eq!(workflow["campaign"]["disposition"], json!("completed"));
+    assert_eq!(workflow["campaign"]["stop_reason"], json!("completed"));
+}
+
+#[test]
+fn glioma_interpretation_synthesis_exposes_cross_family_stability() {
+    let mut server = server();
+    let hash = "0".repeat(64);
+    let response = call(
+        &mut server,
+        "glioma_interpretation_synthesize",
+        json!({
+            "request": {
+                "objective": "decide whether invasion signal is reproducibly supported",
+                "hypothesis": "integrated invasion program is activated",
+                "model_system": "organoid",
+                "min_evidence": 3,
+                "min_independent_groups": 2,
+                "min_families": 2,
+                "min_quality_milli": 700,
+                "effect_threshold_milli": 100,
+                "max_disagreement_milli": 150,
+                "max_leave_one_out_shift_milli": 200,
+                "require_replication_family": true,
+                "replay_identity": hash,
+                "evidence": [
+                    {"evidence_id":"causal-a","family":"causal_contrast","independent_group":"site-a","model_system":"organoid","direction":"positive","effect_milli":300,"uncertainty_milli":50,"quality_milli":900,"sample_count":6,"artifact":{"artifact_id":"causal-a","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"negative_evidence":[]},
+                    {"evidence_id":"meta-b","family":"meta_analysis","independent_group":"site-b","model_system":"organoid","direction":"positive","effect_milli":280,"uncertainty_milli":60,"quality_milli":850,"sample_count":8,"artifact":{"artifact_id":"meta-b","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"negative_evidence":[]},
+                    {"evidence_id":"replication-c","family":"replication","independent_group":"site-c","model_system":"organoid","direction":"positive","effect_milli":320,"uncertainty_milli":55,"quality_milli":900,"sample_count":7,"artifact":{"artifact_id":"replication-c","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"negative_evidence":[]}
+                ]
+            }
+        }),
+    );
+    assert_eq!(response["dispatch"], json!("not_started"));
+    assert_eq!(response["simulation_only"], json!(true));
+    assert_eq!(response["synthesis"]["disposition"], json!("qualified"));
+    assert!(response["synthesis"]["stability_milli"].as_u64().unwrap() > 0);
+    assert_eq!(
+        response["synthesis"]["family_order"]
+            .as_array()
+            .unwrap()
+            .len(),
+        3
+    );
+}
+
+#[test]
+fn glioma_research_director_compiles_and_executes_a_focus_aware_batch() {
+    let mut server = server();
+    let hash = "0".repeat(64);
+    let response = call(
+        &mut server,
+        "glioma_research_director_execute",
+        json!({
+            "request": {
+                "intent": {
+                    "research_id": "director-research",
+                    "study_id": "director-study",
+                    "objective": "identify reproducible invasion mechanisms in organoids",
+                    "output_uses": ["cohort_analysis"],
+                    "model_systems": ["organoid"],
+                    "modalities": ["transcriptomics", "imaging", "spatial"],
+                    "input_artifacts": [{"artifact_id":"input","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}],
+                    "requested_autonomy": "a1",
+                    "approval_reference": null,
+                    "budget_units": 160,
+                    "max_retries": 1,
+                    "allow_instrument_execution": false,
+                    "allow_federation": false,
+                    "raw_data_local": true,
+                    "aggregate_only": true,
+                    "replay_identity": hash,
+                    "boundary": PRECLINICAL_BOUNDARY
+                },
+                "focus": "mechanism_first",
+                "completed_checkpoints": [],
+                "budget_units": 80,
+                "max_actions": 5,
+                "approval_granted": false,
+                "allow_instrument_execution": false,
+                "allow_federation": false,
+                "selection_weights": {"information_gain":25,"frontier_novelty":20,"workflow_leverage":15,"cross_stage_unlock":15,"reproducibility_safety":10,"federation_value":10,"feasibility":5},
+                "max_retries": 1,
+                "require_artifacts": true
+            }
+        }),
+    );
+    assert_eq!(response["dispatch"], json!("dry_run"));
+    assert_eq!(response["simulation_only"], json!(true));
+    assert_eq!(response["director"]["disposition"], json!("partial"));
+    assert!(!response["director"]["next_stage_order"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+    assert!(response["director"]["negative_evidence"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| item.as_str().unwrap().contains("synthetic-dry-run")));
+}
+
+#[test]
+fn glioma_evidence_gate_holds_uncertain_claims_and_admits_qualified_work() {
+    let mut server = server();
+    let hash = "0".repeat(64);
+    let director = json!({
+        "intent": {
+            "research_id": "gated-research",
+            "study_id": "gated-study",
+            "objective": "identify reproducible invasion mechanisms in organoids",
+            "output_uses": ["cohort_analysis"],
+            "model_systems": ["organoid"],
+            "modalities": ["transcriptomics"],
+            "input_artifacts": [{"artifact_id":"input","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}],
+            "requested_autonomy": "a1",
+            "approval_reference": null,
+            "budget_units": 80,
+            "max_retries": 1,
+            "allow_instrument_execution": false,
+            "allow_federation": false,
+            "raw_data_local": true,
+            "aggregate_only": true,
+            "replay_identity": hash,
+            "boundary": PRECLINICAL_BOUNDARY
+        },
+        "focus": "mechanism_first",
+        "completed_checkpoints": [],
+        "budget_units": 80,
+        "max_actions": 2,
+        "approval_granted": false,
+        "allow_instrument_execution": false,
+        "allow_federation": false,
+        "selection_weights": {"information_gain":25,"frontier_novelty":20,"workflow_leverage":15,"cross_stage_unlock":15,"reproducibility_safety":10,"federation_value":10,"feasibility":5},
+        "max_retries": 1,
+        "require_artifacts": true
+    });
+    let triangulated = call(
+        &mut server,
+        "glioma_evidence_triangulate",
+        json!({
+            "request": {"objective":"triangulate invasion evidence","min_source_kinds":3,"min_independent_artifacts":3,"min_support_milli":600,"max_contradiction_milli":200,"min_diversity_milli":1000,"max_leave_one_artifact_shift_milli":100,"max_claims":8},
+            "records": [
+                {"evidence_id":"gate-e1","source_artifact":{"artifact_id":"gate-a1","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"source_kind":"literature","claim":"EGFR signaling increases organoid invasion","scope":"organoid:invasion","modality":"functional_perturbation","model_system":"organoid","state":"supported","relevance_milli":900,"quality_milli":900,"reproducibility_milli":900,"release_epoch":1},
+                {"evidence_id":"gate-e2","source_artifact":{"artifact_id":"gate-a2","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"source_kind":"assay","claim":"EGFR signaling increases organoid invasion","scope":"organoid:invasion","modality":"functional_perturbation","model_system":"organoid","state":"supported","relevance_milli":900,"quality_milli":900,"reproducibility_milli":900,"release_epoch":1},
+                {"evidence_id":"gate-e3","source_artifact":{"artifact_id":"gate-a3","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"source_kind":"replication","claim":"EGFR signaling increases organoid invasion","scope":"organoid:invasion","modality":"functional_perturbation","model_system":"organoid","state":"supported","relevance_milli":900,"quality_milli":900,"reproducibility_milli":900,"release_epoch":1}
+            ]
+        }),
+    );
+    let admitted = call(
+        &mut server,
+        "glioma_evidence_gated_research_execute",
+        json!({"request":{"director":director,"triangulation":triangulated["triangulation"].clone(),"min_qualified_claims":1,"require_global_qualification":true}}),
+    );
+    assert_eq!(admitted["simulation_only"], json!(true));
+    assert!(admitted["gated_research"]["director"].is_object());
+    assert!(matches!(
+        admitted["gated_research"]["disposition"].as_str(),
+        Some("research_executed") | Some("research_planned") | Some("research_blocked")
+    ));
+
+    let mut uncertain = triangulated["triangulation"].clone();
+    uncertain["disposition"] = json!("partial");
+    // The digest is deliberately left unchanged: the gate must reject a tampered or stale
+    // triangulation rather than executing from an unverified verdict.
+    let held = call(
+        &mut server,
+        "glioma_evidence_gated_research_execute",
+        json!({"request":{"director":director,"triangulation":uncertain,"min_qualified_claims":1,"require_global_qualification":true}}),
+    );
+    assert!(held["error"].is_string());
+}
+
+#[test]
+fn glioma_autonomous_research_engine_replans_the_full_stage_graph() {
+    let mut server = server();
+    let hash = "0".repeat(64);
+    let response = call(
+        &mut server,
+        "glioma_autonomous_research_engine_execute",
+        json!({
+            "request": {
+                "mission_id": "engine-protocol",
+                "intent": {
+                    "research_id": "engine-research",
+                    "study_id": "engine-study",
+                    "objective": "identify reproducible invasion mechanisms in organoids",
+                    "output_uses": ["cohort_analysis"],
+                    "model_systems": ["organoid"],
+                    "modalities": ["transcriptomics", "imaging", "spatial"],
+                    "input_artifacts": [{"artifact_id":"input","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}],
+                    "requested_autonomy": "a1",
+                    "approval_reference": null,
+                    "budget_units": 160,
+                    "max_retries": 1,
+                    "allow_instrument_execution": false,
+                    "allow_federation": false,
+                    "raw_data_local": true,
+                    "aggregate_only": true,
+                    "replay_identity": hash,
+                    "boundary": PRECLINICAL_BOUNDARY
+                },
+                "focus": "mechanism_first",
+                "completed_checkpoints": [],
+                "budget_units": 160,
+                "max_actions": 2,
+                "max_cycles": 8,
+                "approval_granted": false,
+                "allow_instrument_execution": false,
+                "allow_federation": false,
+                "selection_weights": {"information_gain":25,"frontier_novelty":20,"workflow_leverage":15,"cross_stage_unlock":15,"reproducibility_safety":10,"federation_value":10,"feasibility":5},
+                "max_retries": 1,
+                "require_artifacts": true
+            }
+        }),
+    );
+    assert_eq!(response["dispatch"], json!("dry_run"));
+    assert_eq!(response["simulation_only"], json!(true));
+    assert!(response["engine"]["cycles"].as_array().unwrap().len() > 1);
+    assert!(!response["engine"]["completed_checkpoints"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+    assert!(response["engine"]["negative_evidence"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| item.as_str().unwrap().contains("synthetic-dry-run")));
+}
+
+#[test]
+fn glioma_adaptive_workflow_plans_dependency_closed_batch() {
+    let mut server = server();
+    let response = call(
+        &mut server,
+        "glioma_adaptive_workflow",
+        json!({
+            "request": {
+                "mission_id": "adaptive-scheduler-protocol",
+                "objective": "identify reproducible invasion mechanisms in organoids",
+                "candidates": [
+                    {"action_id":"pre","stage_kind":"multimodal_ingestion_qc","modality":"spatial","model_system":"organoid","depends_on":[],"cost_units":2,"information_gain_milli":500,"frontier_novelty_milli":500,"workflow_leverage_milli":500,"cross_stage_unlock_milli":500,"reproducibility_safety_milli":900,"federation_value_milli":300,"feasibility_milli":800,"autonomy_tier":"a1","effects":["read_local_data","execute_local_computation"]},
+                    {"action_id":"child","stage_kind":"mechanism_exploration","modality":"computational","model_system":"organoid","depends_on":["pre"],"cost_units":2,"information_gain_milli":950,"frontier_novelty_milli":950,"workflow_leverage_milli":950,"cross_stage_unlock_milli":950,"reproducibility_safety_milli":900,"federation_value_milli":300,"feasibility_milli":800,"autonomy_tier":"a1","effects":["read_local_data","execute_local_computation"]}
+                ],
+                "completed_action_order": [],
+                "observations": [{"action_id":"pre","outcome":"qualified","information_gain_milli":500,"uncertainty_milli":200,"round":1}],
+                "budget_units": 4,
+                "max_actions": 2,
+                "beam_width": 16,
+                "risk_budget_milli": 2000,
+                "approval_granted": false,
+                "allow_instrument_execution": false,
+                "allow_federation": false,
+                "selection_weights": {"information_gain":25,"frontier_novelty":20,"workflow_leverage":15,"cross_stage_unlock":15,"reproducibility_safety":10,"federation_value":10,"feasibility":5}
+            }
+        }),
+    );
+    assert_eq!(response["dispatch"], json!("not_started"));
+    assert_eq!(response["simulation_only"], json!(true));
+    assert_eq!(response["plan"]["selected_order"], json!(["pre", "child"]));
+    assert!(response["plan"]["negative_evidence"].is_array());
+}
+
+#[test]
+fn glioma_knowledge_composition_exposes_supported_paths_and_bottlenecks() {
+    let mut server = server();
+    let hash = "0".repeat(64);
+    let compiled = call(
+        &mut server,
+        "glioma_knowledge_compile",
+        json!({
+            "request": {
+                "objective": "compose invasion mechanism evidence",
+                "required_modalities": [],
+                "required_model_systems": [],
+                "min_support_milli": 700,
+                "min_sources_per_claim": 1,
+                "max_claims": 8
+            },
+            "records": [
+                {"evidence_id":"e1","source_artifact":{"artifact_id":"e1","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"source_kind":"dataset","claim":"EGFR signaling increases invasion","scope":"preclinical glioma","modality":"genomics","model_system":"organoid","state":"supported","relevance_milli":900,"quality_milli":900,"reproducibility_milli":900,"release_epoch":1},
+                {"evidence_id":"e2","source_artifact":{"artifact_id":"e2","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"source_kind":"dataset","claim":"invasion increases dissemination","scope":"preclinical glioma","modality":"genomics","model_system":"organoid","state":"supported","relevance_milli":900,"quality_milli":900,"reproducibility_milli":900,"release_epoch":1}
+            ]
+        }),
+    );
+    let knowledge = compiled["knowledge"].clone();
+    let claims = knowledge["claim_order"].as_array().unwrap();
+    let composed = call(
+        &mut server,
+        "glioma_knowledge_compose",
+        json!({
+            "request": {"objective":"compose invasion mechanism evidence","min_path_length":2,"max_paths":8,"min_strength_milli":500,"max_contradiction_milli":500,"require_supported_root":true},
+            "knowledge": knowledge.clone(),
+            "relations": [{"relation_id":"r1","from_claim_id":claims[0],"to_claim_id":claims[1],"kind":"supports","strength_milli":900}]
+        }),
+    );
+    assert_eq!(composed["dispatch"], json!("not_started"));
+    assert_eq!(composed["composition"]["disposition"], json!("qualified"));
+    assert_eq!(
+        composed["composition"]["selected_path_order"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        composed["composition"]["bottleneck_claim_order"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    let revision = call(
+        &mut server,
+        "glioma_belief_revision",
+        json!({
+            "request": {"objective":"compose invasion mechanism evidence","min_support_milli":700,"min_conflict_milli":500,"max_hypotheses":1,"beam_width":16,"allow_contested":false},
+            "knowledge": knowledge.clone(),
+            "conflicts": [{"conflict_id":"knowledge-conflict","left_claim_id":claims[0],"right_claim_id":claims[1],"contradiction_milli":900,"evidence_order":["e1","e2"]}]
+        }),
+    );
+    assert_eq!(revision["dispatch"], json!("not_started"));
+    assert_eq!(revision["simulation_only"], json!(true));
+    assert_eq!(
+        revision["revision"]["retained_claim_order"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        revision["revision"]["rival_claim_order"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    let context = call(
+        &mut server,
+        "glioma_decision_context",
+        json!({
+            "request": {"objective":"compose invasion mechanism evidence","max_actions":8,"default_cost_units":4},
+            "knowledge": knowledge
+        }),
+    );
+    let graph = call(
+        &mut server,
+        "glioma_decision_action_graph",
+        json!({
+            "request": {"objective":"compose invasion mechanism evidence","max_nodes":8,"max_waves":8,"budget_units":100,"require_qualified_composition":true},
+            "context": context["context"].clone(),
+            "composition": composed["composition"].clone()
+        }),
+    );
+    assert_eq!(graph["dispatch"], json!("not_started"));
+    assert_eq!(graph["graph"]["disposition"], json!("qualified"));
+    assert_eq!(
+        graph["graph"]["parallel_waves"].as_array().unwrap().len(),
+        2
+    );
+}
+
+#[test]
+fn glioma_adaptive_frontier_turns_interpretation_debt_into_next_actions() {
+    let mut server = server();
+    let hash = "0".repeat(64);
+    let synthesis_response = call(
+        &mut server,
+        "glioma_interpretation_synthesize",
+        json!({
+            "request": {
+                "objective": "identify reproducible invasion mechanisms",
+                "hypothesis": "a preclinical invasion mechanism is reproducible",
+                "model_system": "organoid",
+                "min_evidence": 2,
+                "min_independent_groups": 2,
+                "min_families": 3,
+                "min_quality_milli": 700,
+                "effect_threshold_milli": 100,
+                "max_disagreement_milli": 100,
+                "max_leave_one_out_shift_milli": 50,
+                "require_replication_family": true,
+                "replay_identity": hash,
+                "evidence": [
+                    {"evidence_id":"causal-a","family":"causal_contrast","independent_group":"site-a","model_system":"organoid","direction":"positive","effect_milli":300,"uncertainty_milli":50,"quality_milli":900,"sample_count":6,"artifact":{"artifact_id":"causal-a","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"negative_evidence":[]},
+                    {"evidence_id":"sensitivity-b","family":"sensitivity","independent_group":"site-b","model_system":"organoid","direction":"positive","effect_milli":280,"uncertainty_milli":60,"quality_milli":850,"sample_count":8,"artifact":{"artifact_id":"sensitivity-b","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"negative_evidence":[]}
+                ]
+            }
+        }),
+    );
+    let response = call(
+        &mut server,
+        "glioma_adaptive_research_frontier",
+        json!({
+            "request": {
+                "synthesis": synthesis_response["synthesis"].clone(),
+                "completed_actions": [],
+                "budget_units": 80,
+                "max_actions": 3,
+                "approval_granted": true,
+                "allow_instrument_execution": false,
+                "allow_federation": false,
+                "selection_weights": {"information_gain":25,"frontier_novelty":20,"workflow_leverage":15,"cross_stage_unlock":15,"reproducibility_safety":10,"federation_value":10,"feasibility":5}
+            }
+        }),
+    );
+    assert_eq!(response["dispatch"], json!("not_started"));
+    assert_eq!(response["simulation_only"], json!(true));
+    assert_eq!(response["frontier"]["disposition"], json!("partial"));
+    assert!(!response["frontier"]["next_action_order"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+    assert!(response["frontier"]["uncertainty"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| item
+            .as_str()
+            .unwrap()
+            .contains("replication-family-required")));
+}
+
+#[test]
+fn glioma_temporal_multimodal_fusion_replays_longitudinal_state_transitions() {
+    let mut server = server();
+    let hash = "0".repeat(64);
+    let observation = |id: &str, timepoint: u32, modality: &str, x: i64, y: i64| {
+        json!({
+            "observation_id": id,
+            "study_id": "temporal-protocol-study",
+            "sample_id": "sample-a",
+            "timepoint": timepoint,
+            "modality": modality,
+            "model_system": "organoid",
+            "artifact": {"artifact_id": id, "content_hash": hash, "content_type": "application/json", "local_only": true, "contains_human_data": false, "contains_direct_identifiers": false},
+            "features": [
+                {"feature_id": "state_x", "value_milli": x},
+                {"feature_id": "state_y", "value_milli": y}
+            ]
+        })
+    };
+    let response = call(
+        &mut server,
+        "glioma_temporal_multimodal_fusion",
+        json!({
+            "request": {
+                "study_id": "temporal-protocol-study",
+                "model_system": "organoid",
+                "required_modalities": ["transcriptomics", "imaging"],
+                "min_timepoints_per_sample": 2,
+                "min_modalities_per_timepoint": 2,
+                "min_shared_features": 2,
+                "min_transition_support_milli": 800,
+                "max_state_change_milli": 50,
+                "require_complete_time_grid": true
+            },
+            "observations": [
+                observation("a-t0-rna", 0, "transcriptomics", 100, 100),
+                observation("a-t0-img", 0, "imaging", 110, 90),
+                observation("a-t1-rna", 1, "transcriptomics", 300, 100),
+                observation("a-t1-img", 1, "imaging", 290, 110)
+            ]
+        }),
+    );
+    assert_eq!(response["dispatch"], json!("not_started"));
+    assert_eq!(response["simulation_only"], json!(true));
+    assert_eq!(response["analysis"]["disposition"], json!("qualified"));
+    assert_eq!(
+        response["analysis"]["emerging_transition_order"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
+#[test]
+fn glioma_clonal_evolution_reconstructs_preclinical_marker_branch() {
+    let mut server = server();
+    let hash = "0".repeat(64);
+    let profile = |id: &str, clone_id: &str, timepoint: u32, markers: Vec<(&str, &str)>| {
+        json!({
+            "profile_id": id,
+            "study_id": "clonal-protocol-study",
+            "sample_lineage": "lineage-a",
+            "clone_id": clone_id,
+            "timepoint": timepoint,
+            "model_system": "organoid",
+            "abundance_milli": if timepoint == 0 { 400 } else { 700 },
+            "artifact": {"artifact_id": id, "content_hash": hash, "content_type": "application/json", "local_only": true, "contains_human_data": false, "contains_direct_identifiers": false},
+            "markers": markers.into_iter().map(|(marker_id, state)| json!({"marker_id": marker_id, "state": state, "confidence_milli": 900})).collect::<Vec<_>>()
+        })
+    };
+    let response = call(
+        &mut server,
+        "glioma_clonal_evolution",
+        json!({
+            "request": {
+                "study_id": "clonal-protocol-study",
+                "model_system": "organoid",
+                "min_shared_markers": 2,
+                "min_parent_score_milli": 600,
+                "max_time_gap": 5,
+                "min_abundance_milli": 1,
+                "allow_parallel_branches": true,
+                "max_parent_candidates": 2
+            },
+            "profiles": [
+                profile("root", "clone-a", 0, vec![("egfr", "present"), ("tp53", "present")]),
+                profile("child", "clone-b", 1, vec![("egfr", "present"), ("tp53", "present"), ("ecDNA", "present")])
+            ]
+        }),
+    );
+    assert_eq!(response["dispatch"], json!("not_started"));
+    assert_eq!(response["simulation_only"], json!(true));
+    assert_eq!(response["analysis"]["disposition"], json!("qualified"));
+    assert_eq!(
+        response["analysis"]["branch_order"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        response["analysis"]["gained_marker_order"],
+        json!(["ecDNA"])
+    );
+}
+
+#[test]
+fn glioma_clone_perturbation_panel_covers_evolutionary_branches_under_budget() {
+    let mut server = server();
+    let hash = "0".repeat(64);
+    let profile = |id: &str, clone_id: &str, timepoint: u32, markers: Vec<&str>| {
+        json!({
+            "profile_id": id,
+            "study_id": "panel-protocol-study",
+            "sample_lineage": "lineage-a",
+            "clone_id": clone_id,
+            "timepoint": timepoint,
+            "model_system": "organoid",
+            "abundance_milli": if timepoint == 0 { 400 } else { 600 },
+            "artifact": {"artifact_id": id, "content_hash": hash, "content_type": "application/json", "local_only": true, "contains_human_data": false, "contains_direct_identifiers": false},
+            "markers": markers.into_iter().map(|marker_id| json!({"marker_id": marker_id, "state": "present", "confidence_milli": 900})).collect::<Vec<_>>()
+        })
+    };
+    let evolution = call(
+        &mut server,
+        "glioma_clonal_evolution",
+        json!({
+            "request": {"study_id": "panel-protocol-study", "model_system": "organoid", "min_shared_markers": 1, "min_parent_score_milli": 500, "max_time_gap": 5, "min_abundance_milli": 1, "allow_parallel_branches": true, "max_parent_candidates": 2},
+            "profiles": [
+                profile("root", "clone-a", 0, vec!["egfr", "tp53"]),
+                profile("ec", "clone-b", 1, vec!["egfr", "tp53", "ecDNA"]),
+                profile("pt", "clone-c", 1, vec!["egfr", "tp53", "pten"])
+            ]
+        }),
+    );
+    assert_eq!(evolution["analysis"]["disposition"], json!("qualified"));
+    let panel = call(
+        &mut server,
+        "glioma_clone_perturbation_panel",
+        json!({
+            "request": {"study_id": "panel-protocol-study", "model_system": "organoid", "budget_milli": 10, "min_coverage_milli": 500, "max_selected": 2, "require_branch_coverage": true, "allow_uncertain_targets": true},
+            "graph": evolution["analysis"].clone(),
+            "candidates": [
+                {"candidate_id": "ec-panel", "kind": "inhibit", "target_marker_order": ["ecDNA"], "cost_milli": 5, "expected_effect_milli": 900, "purpose": "branch-selective perturbation readout", "artifact": {"artifact_id": "ec-panel", "content_hash": hash, "content_type": "application/json", "local_only": true, "contains_human_data": false, "contains_direct_identifiers": false}},
+                {"candidate_id": "pt-panel", "kind": "inhibit", "target_marker_order": ["pten"], "cost_milli": 5, "expected_effect_milli": 900, "purpose": "branch-selective perturbation readout", "artifact": {"artifact_id": "pt-panel", "content_hash": hash, "content_type": "application/json", "local_only": true, "contains_human_data": false, "contains_direct_identifiers": false}}
+            ]
+        }),
+    );
+    assert_eq!(panel["dispatch"], json!("not_started"));
+    assert_eq!(panel["simulation_only"], json!(true));
+    assert_eq!(panel["panel"]["disposition"], json!("qualified"));
+    assert_eq!(
+        panel["panel"]["selected_order"].as_array().unwrap().len(),
+        2
+    );
+    assert!(panel["panel"]["uncovered_branch_order"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+}
+
+#[test]
+fn glioma_clone_panel_outcomes_requires_replicates_before_qualification() {
+    let mut server = server();
+    let hash = "0".repeat(64);
+    let profile = |id: &str, clone_id: &str, timepoint: u32, markers: Vec<&str>| {
+        json!({
+            "profile_id": id,
+            "study_id": "outcome-protocol-study",
+            "sample_lineage": "lineage-a",
+            "clone_id": clone_id,
+            "timepoint": timepoint,
+            "model_system": "organoid",
+            "abundance_milli": if timepoint == 0 { 400 } else { 600 },
+            "artifact": {"artifact_id": id, "content_hash": hash, "content_type": "application/json", "local_only": true, "contains_human_data": false, "contains_direct_identifiers": false},
+            "markers": markers.into_iter().map(|marker_id| json!({"marker_id": marker_id, "state": "present", "confidence_milli": 900})).collect::<Vec<_>>()
+        })
+    };
+    let evolution = call(
+        &mut server,
+        "glioma_clonal_evolution",
+        json!({
+            "request": {"study_id": "outcome-protocol-study", "model_system": "organoid", "min_shared_markers": 1, "min_parent_score_milli": 500, "max_time_gap": 5, "min_abundance_milli": 1, "allow_parallel_branches": true, "max_parent_candidates": 2},
+            "profiles": [
+                profile("root", "clone-a", 0, vec!["egfr", "tp53"]),
+                profile("ec", "clone-b", 1, vec!["egfr", "tp53", "ecDNA"]),
+                profile("pt", "clone-c", 1, vec!["egfr", "tp53", "pten"])
+            ]
+        }),
+    );
+    let panel = call(
+        &mut server,
+        "glioma_clone_perturbation_panel",
+        json!({
+            "request": {"study_id": "outcome-protocol-study", "model_system": "organoid", "budget_milli": 10, "min_coverage_milli": 500, "max_selected": 2, "require_branch_coverage": true, "allow_uncertain_targets": true},
+            "graph": evolution["analysis"].clone(),
+            "candidates": [
+                {"candidate_id": "ec-panel", "kind": "inhibit", "target_marker_order": ["ecDNA"], "cost_milli": 5, "expected_effect_milli": 900, "purpose": "branch assay", "artifact": {"artifact_id": "ec-panel", "content_hash": hash, "content_type": "application/json", "local_only": true, "contains_human_data": false, "contains_direct_identifiers": false}},
+                {"candidate_id": "pt-panel", "kind": "inhibit", "target_marker_order": ["pten"], "cost_milli": 5, "expected_effect_milli": 900, "purpose": "branch assay", "artifact": {"artifact_id": "pt-panel", "content_hash": hash, "content_type": "application/json", "local_only": true, "contains_human_data": false, "contains_direct_identifiers": false}}
+            ]
+        }),
+    );
+    let mut observations = Vec::new();
+    let mut observation_index = 0_u32;
+    for branch in panel["panel"]["branch_coverage"].as_array().unwrap() {
+        for candidate in branch["selected_candidate_order"].as_array().unwrap() {
+            for replicate in 0..2 {
+                observations.push(json!({
+                    "observation_id": format!("obs{observation_index}"),
+                    "study_id": "outcome-protocol-study",
+                    "model_system": "organoid",
+                    "candidate_id": candidate.as_str().unwrap(),
+                    "branch_id": branch["branch_id"].as_str().unwrap(),
+                    "replicate_id": format!("r{replicate}"),
+                    "state": "measured",
+                    "effect_milli": -800,
+                    "uncertainty_milli": 100,
+                    "artifact": {"artifact_id": format!("artifact{observation_index}"), "content_hash": hash, "content_type": "application/json", "local_only": true, "contains_human_data": false, "contains_direct_identifiers": false}
+                }));
+                observation_index += 1;
+            }
+        }
+    }
+    let analysis = call(
+        &mut server,
+        "glioma_clone_panel_outcomes",
+        json!({
+            "request": {"study_id": "outcome-protocol-study", "model_system": "organoid", "min_replicates": 2, "effect_threshold_milli": 500, "max_uncertainty_milli": 200, "require_all_selected": true, "require_all_branches": true},
+            "panel": panel["panel"].clone(),
+            "observations": observations
+        }),
+    );
+    assert_eq!(analysis["dispatch"], json!("not_started"));
+    assert_eq!(analysis["simulation_only"], json!(true));
+    assert_eq!(analysis["analysis"]["disposition"], json!("qualified"));
+    assert!(analysis["analysis"]["next_action_order"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+
+    // A missing replicate/cell reopens the loop and is compiled into a bounded continuation
+    // plan. The MCP route must remain planning-only and preserve the unresolved target.
+    let mut incomplete_observations = observations;
+    incomplete_observations.pop();
+    let incomplete = call(
+        &mut server,
+        "glioma_clone_panel_outcomes",
+        json!({
+            "request": {"study_id": "outcome-protocol-study", "model_system": "organoid", "min_replicates": 2, "effect_threshold_milli": 500, "max_uncertainty_milli": 200, "require_all_selected": true, "require_all_branches": true},
+            "panel": panel["panel"].clone(),
+            "observations": incomplete_observations
+        }),
+    );
+    let target = incomplete["analysis"]["next_action_order"][0]
+        .as_str()
+        .unwrap();
+    let continuation = call(
+        &mut server,
+        "glioma_clone_continuation",
+        json!({
+            "request": {"study_id": "outcome-protocol-study", "model_system": "organoid", "budget_milli": 10, "max_selected": 3, "max_risk_tier": 2, "require_approval": true, "allow_instrument_actions": false, "allow_federation": false},
+            "outcome": incomplete["analysis"].clone(),
+            "candidates": [
+                {"action_id": "measure-prereq", "target_id": target, "kind": "measure", "cost_milli": 2, "information_gain_milli": 900, "risk_tier": 1, "dependencies": [], "requires_instrument": false, "requires_federation": false, "description": "measure the unresolved clone-panel cell", "artifact": {"artifact_id": "measure-prereq", "content_hash": hash, "content_type": "application/json", "local_only": true, "contains_human_data": false, "contains_direct_identifiers": false}},
+                {"action_id": "replicate-followup", "target_id": target, "kind": "replicate", "cost_milli": 3, "information_gain_milli": 800, "risk_tier": 1, "dependencies": ["measure-prereq"], "requires_instrument": false, "requires_federation": false, "description": "replicate the unresolved clone-panel cell", "artifact": {"artifact_id": "replicate-followup", "content_hash": hash, "content_type": "application/json", "local_only": true, "contains_human_data": false, "contains_direct_identifiers": false}}
+            ]
+        }),
+    );
+    assert_eq!(continuation["dispatch"], json!("not_started"));
+    assert_eq!(continuation["simulation_only"], json!(true));
+    assert_eq!(
+        continuation["plan"]["disposition"],
+        json!("approval_required")
+    );
+    assert_eq!(
+        continuation["plan"]["pending_approval_order"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+}
+
+#[test]
+fn glioma_multimodal_graph_fusion_replays_dropout_and_disagreement() {
+    let mut server = server();
+    let hash = "0".repeat(64);
+    let response = call(
+        &mut server,
+        "glioma_multimodal_graph_fusion",
+        json!({
+            "request": {
+                "study_id": "graph-study",
+                "model_system": "organoid",
+                "required_modalities": ["genomics", "transcriptomics"],
+                "min_samples": 3,
+                "min_modalities_per_sample": 2,
+                "min_shared_features": 2,
+                "neighbours": 2,
+                "diffusion_steps": 3,
+                "max_distance_milli": 1000,
+                "min_consensus_support_milli": 500,
+                "max_disagreement_milli": 200,
+                "require_all_modalities": false
+            },
+            "vectors": [
+                {"observation_id":"a-g","study_id":"graph-study","sample_lineage":"a","modality":"genomics","model_system":"organoid","artifact":{"artifact_id":"a-g","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"reliability_milli":900,"features":[{"feature_id":"x","value_milli":0},{"feature_id":"y","value_milli":0}]},
+                {"observation_id":"a-t","study_id":"graph-study","sample_lineage":"a","modality":"transcriptomics","model_system":"organoid","artifact":{"artifact_id":"a-t","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"reliability_milli":900,"features":[{"feature_id":"x","value_milli":1000},{"feature_id":"y","value_milli":1000}]},
+                {"observation_id":"b-g","study_id":"graph-study","sample_lineage":"b","modality":"genomics","model_system":"organoid","artifact":{"artifact_id":"b-g","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"reliability_milli":900,"features":[{"feature_id":"x","value_milli":0},{"feature_id":"y","value_milli":0}]},
+                {"observation_id":"b-t","study_id":"graph-study","sample_lineage":"b","modality":"transcriptomics","model_system":"organoid","artifact":{"artifact_id":"b-t","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"reliability_milli":900,"features":[{"feature_id":"x","value_milli":0},{"feature_id":"y","value_milli":0}]},
+                {"observation_id":"c-g","study_id":"graph-study","sample_lineage":"c","modality":"genomics","model_system":"organoid","artifact":{"artifact_id":"c-g","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"reliability_milli":900,"features":[{"feature_id":"x","value_milli":0},{"feature_id":"y","value_milli":0}]}
+            ]
+        }),
+    );
+    assert_eq!(response["dispatch"], json!("not_started"));
+    assert_eq!(response["analysis"]["disposition"], json!("partial"));
+    assert_eq!(response["analysis"]["missing_sample_order"], json!(["c"]));
+    assert!(!response["analysis"]["contradictory_pair_order"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+}
+
+#[test]
+fn glioma_pathway_activity_ranks_cross_modal_mechanism_state() {
+    let mut server = server();
+    let hash = "0".repeat(64);
+    let response = call(
+        &mut server,
+        "glioma_pathway_activity",
+        json!({
+            "request": {
+                "objective": "rank invasion pathways",
+                "study_id": "pathway-study",
+                "model_system": "organoid",
+                "min_pathway_nodes": 2,
+                "min_observed_nodes": 2,
+                "min_modalities": 2,
+                "min_confidence_milli": 700,
+                "max_pathways": 4,
+                "require_cross_modal": true
+            },
+            "definitions": [{
+                "pathway_id": "invasion",
+                "label": "invasion programme",
+                "nodes": [
+                    {"node_id":"egfr","label":"EGFR","modality":"genomics","expected_direction":1,"weight_milli":1000},
+                    {"node_id":"vim","label":"VIM","modality":"transcriptomics","expected_direction":1,"weight_milli":1000}
+                ],
+                "edges": [{"source_node_id":"egfr","target_node_id":"vim","relation":1,"confidence_milli":900}]
+            }],
+            "observations": [
+                {"observation_id":"g","study_id":"pathway-study","sample_lineage":"sample-1","modality":"genomics","model_system":"organoid","artifact":{"artifact_id":"g","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"feature_id":"egfr","value_milli":700,"reliability_milli":900},
+                {"observation_id":"t","study_id":"pathway-study","sample_lineage":"sample-1","modality":"transcriptomics","model_system":"organoid","artifact":{"artifact_id":"t","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"feature_id":"vim","value_milli":800,"reliability_milli":900}
+            ]
+        }),
+    );
+    assert_eq!(response["dispatch"], json!("not_started"));
+    assert_eq!(response["analysis"]["disposition"], json!("qualified"));
+    assert_eq!(
+        response["analysis"]["pathways"][0]["direction"],
+        json!("activated")
+    );
+}
+
+#[test]
+fn glioma_multimodal_mechanism_campaign_closes_analysis_to_action() {
+    let mut server = server();
+    let hash = "0".repeat(64);
+    let campaign_input = json!({
+        "request": {
+            "objective": "find an executable invasion follow-up",
+            "study_id": "campaign-study",
+            "model_system": "organoid",
+            "graph": {
+                "study_id": "campaign-study",
+                "model_system": "organoid",
+                "required_modalities": ["genomics", "transcriptomics"],
+                "min_samples": 3,
+                "min_modalities_per_sample": 2,
+                "min_shared_features": 2,
+                "neighbours": 2,
+                "diffusion_steps": 2,
+                "max_distance_milli": 1000,
+                "min_consensus_support_milli": 500,
+                "max_disagreement_milli": 200,
+                "require_all_modalities": false
+            },
+            "pathway": {
+                "objective": "rank invasion pathways",
+                "study_id": "campaign-study",
+                "model_system": "organoid",
+                "min_pathway_nodes": 2,
+                "min_observed_nodes": 2,
+                "min_modalities": 2,
+                "min_confidence_milli": 700,
+                "max_pathways": 4,
+                "require_cross_modal": true
+            },
+            "selection": {"budget_units": 3, "max_actions": 1},
+            "completed_action_order": []
+        },
+        "graph_vectors": [
+            {"observation_id":"a-g","study_id":"campaign-study","sample_lineage":"a","modality":"genomics","model_system":"organoid","artifact":{"artifact_id":"a-g","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"reliability_milli":900,"features":[{"feature_id":"x","value_milli":700},{"feature_id":"y","value_milli":700}]},
+            {"observation_id":"a-t","study_id":"campaign-study","sample_lineage":"a","modality":"transcriptomics","model_system":"organoid","artifact":{"artifact_id":"a-t","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"reliability_milli":900,"features":[{"feature_id":"x","value_milli":700},{"feature_id":"y","value_milli":700}]},
+            {"observation_id":"b-g","study_id":"campaign-study","sample_lineage":"b","modality":"genomics","model_system":"organoid","artifact":{"artifact_id":"b-g","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"reliability_milli":900,"features":[{"feature_id":"x","value_milli":710},{"feature_id":"y","value_milli":690}]},
+            {"observation_id":"b-t","study_id":"campaign-study","sample_lineage":"b","modality":"transcriptomics","model_system":"organoid","artifact":{"artifact_id":"b-t","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"reliability_milli":900,"features":[{"feature_id":"x","value_milli":710},{"feature_id":"y","value_milli":690}]},
+            {"observation_id":"c-g","study_id":"campaign-study","sample_lineage":"c","modality":"genomics","model_system":"organoid","artifact":{"artifact_id":"c-g","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"reliability_milli":900,"features":[{"feature_id":"x","value_milli":680},{"feature_id":"y","value_milli":720}]},
+            {"observation_id":"c-t","study_id":"campaign-study","sample_lineage":"c","modality":"transcriptomics","model_system":"organoid","artifact":{"artifact_id":"c-t","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"reliability_milli":900,"features":[{"feature_id":"x","value_milli":680},{"feature_id":"y","value_milli":720}]}
+        ],
+        "pathway_definitions": [{"pathway_id":"invasion","label":"invasion","nodes":[{"node_id":"egfr","label":"EGFR","modality":"genomics","expected_direction":1,"weight_milli":1000},{"node_id":"vim","label":"VIM","modality":"transcriptomics","expected_direction":1,"weight_milli":1000}],"edges":[{"source_node_id":"egfr","target_node_id":"vim","relation":1,"confidence_milli":900}]}],
+        "pathway_observations": [
+            {"observation_id":"p-g","study_id":"campaign-study","sample_lineage":"a","modality":"genomics","model_system":"organoid","artifact":{"artifact_id":"p-g","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"feature_id":"egfr","value_milli":700,"reliability_milli":900},
+            {"observation_id":"p-t","study_id":"campaign-study","sample_lineage":"a","modality":"transcriptomics","model_system":"organoid","artifact":{"artifact_id":"p-t","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"feature_id":"vim","value_milli":800,"reliability_milli":900}
+        ],
+        "candidates": [{"action_id":"validate-invasion","stage_kind":"experiment_design","modality":"functional_perturbation","model_system":"organoid","depends_on":[],"cost_units":2,"information_gain_milli":900,"frontier_novelty_milli":700,"workflow_leverage_milli":900,"cross_stage_unlock_milli":800,"reproducibility_safety_milli":900,"federation_value_milli":500,"feasibility_milli":900,"autonomy_tier":"a1","effects":["read_local_data","execute_local_computation","write_local_artifact"]}]
+    });
+    let response = call(
+        &mut server,
+        "glioma_multimodal_mechanism_campaign",
+        campaign_input.clone(),
+    );
+    assert_eq!(response["dispatch"], json!("not_started"));
+    assert_eq!(
+        response["campaign"]["disposition"],
+        json!("ready_for_execution")
+    );
+    assert_eq!(
+        response["campaign"]["next_action_order"],
+        json!(["validate-invasion"])
+    );
+
+    let mut execution_input = campaign_input;
+    execution_input["max_retries"] = json!(1);
+    execution_input["require_artifacts"] = json!(true);
+    let execution = call(
+        &mut server,
+        "glioma_multimodal_mechanism_campaign_execute",
+        execution_input,
+    );
+    assert_eq!(execution["dispatch"], json!("dry_run"));
+    assert_eq!(execution["simulation_only"], json!(true));
+    assert_eq!(execution["execution"]["disposition"], json!("completed"));
+    assert_eq!(
+        execution["execution"]["executed_order"],
+        json!(["validate-invasion"])
+    );
+    assert_eq!(
+        execution["execution"]["execution"]["completed_order"],
+        json!(["validate-invasion"])
+    );
+}
+
+#[test]
+fn glioma_autonomous_campaign_execution_is_reachable_through_mcp() {
+    let mut server = server();
+    let artifact_hash = "0".repeat(64);
+    let replay_identity = "1".repeat(64);
+    let campaign = call(
+        &mut server,
+        "glioma_autonomous_campaign_execute",
+        json!({
+            "request": {
+                "intent": {
+                    "research_id": "mcp-autonomous-campaign",
+                    "study_id": "study-001",
+                    "objective": "test preclinical glioma invasion mechanism",
+                    "output_uses": ["method_development"],
+                    "model_systems": ["organoid"],
+                    "modalities": ["genomics", "computational"],
+                    "input_artifacts": [{
+                        "artifact_id": "local:matrix",
+                        "content_hash": artifact_hash,
+                        "content_type": "application/octet-stream",
+                        "local_only": true,
+                        "contains_human_data": false,
+                        "contains_direct_identifiers": false
+                    }],
+                    "requested_autonomy": "a1",
+                    "approval_reference": null,
+                    "budget_units": 4,
+                    "max_retries": 1,
+                    "allow_instrument_execution": false,
+                    "allow_federation": false,
+                    "raw_data_local": true,
+                    "aggregate_only": true,
+                    "replay_identity": replay_identity,
+                    "boundary": "preclinical-research-only; no human-subject or clinical-source data; no diagnosis, treatment, triage, enrollment, or clinical decisions"
+                },
+                "initial_candidates": [{
+                    "action_id": "mcp-seed",
+                    "stage_kind": "experiment_design",
+                    "modality": "genomics",
+                    "model_system": "organoid",
+                    "depends_on": [],
+                    "cost_units": 2,
+                    "information_gain_milli": 800,
+                    "frontier_novelty_milli": 700,
+                    "workflow_leverage_milli": 700,
+                    "cross_stage_unlock_milli": 700,
+                    "reproducibility_safety_milli": 900,
+                    "federation_value_milli": 400,
+                    "feasibility_milli": 900,
+                    "autonomy_tier": "a1",
+                    "effects": ["read_local_data", "execute_local_computation", "write_local_artifact"]
+                }],
+                "selection": {
+                    "budget_units": 4,
+                    "max_actions": 1,
+                    "approval_granted": false,
+                    "allow_instrument_execution": false,
+                    "allow_federation": false,
+                    "weights": {
+                        "information_gain": 25,
+                        "frontier_novelty": 20,
+                        "workflow_leverage": 15,
+                        "cross_stage_unlock": 15,
+                        "reproducibility_safety": 10,
+                        "federation_value": 10,
+                        "feasibility": 5
+                    }
+                },
+                "max_rounds": 2,
+                "max_retries": 1,
+                "require_artifacts": true
+            }
+        }),
+    );
+    assert_eq!(campaign["dispatch"], json!("not_started"));
+    assert_eq!(campaign["simulation_only"], json!(true));
+    assert_eq!(campaign["campaign"]["disposition"], json!("completed"));
+    assert_eq!(campaign["campaign"]["completed_order"], json!(["mcp-seed"]));
+}
+
+#[test]
 fn every_tool_declares_an_input_schema_with_required_fields() {
     // Keep this test source touched when Windows Application Control requires a relink.
     let tools = on_a_dispatch_sized_stack(tool_definitions);
@@ -386,6 +4865,73 @@ fn every_tool_declares_an_input_schema_with_required_fields() {
         assert_eq!(tool["inputSchema"]["type"], json!("object"));
         assert!(tool["inputSchema"]["required"].is_array());
     }
+}
+
+#[test]
+fn glioma_evidence_calibration_preserves_negative_and_unknown_outcomes() {
+    let mut server = server();
+    let artifact_hash = "0".repeat(64);
+    let response = call(
+        &mut server,
+        "glioma_evidence_calibrate",
+        json!({
+            "request": {
+                "objective": "calibrate source families before mechanistic planning",
+                "bin_count": 4,
+                "min_observations_per_family": 1,
+                "min_resolved_per_bin": 1,
+                "max_expected_calibration_error_milli": 800
+            },
+            "observations": [
+                {
+                    "observation_id": "cal-low",
+                    "source_family": "assay",
+                    "predicted_support_milli": 100,
+                    "outcome": "supported",
+                    "quality_milli": 900,
+                    "independent_group": "replicate-a",
+                    "artifact": {"artifact_id":"cal-artifact-low","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-calibration+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}
+                },
+                {
+                    "observation_id": "cal-high",
+                    "source_family": "assay",
+                    "predicted_support_milli": 900,
+                    "outcome": "contradicted",
+                    "quality_milli": 900,
+                    "independent_group": "replicate-b",
+                    "artifact": {"artifact_id":"cal-artifact-high","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-calibration+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}
+                },
+                {
+                    "observation_id": "cal-unknown",
+                    "source_family": "literature",
+                    "predicted_support_milli": 700,
+                    "outcome": "unknown",
+                    "quality_milli": 900,
+                    "independent_group": "review-a",
+                    "artifact": {"artifact_id":"cal-artifact-unknown","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-calibration+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}
+                }
+            ]
+        }),
+    );
+    assert_eq!(response["dispatch"], json!("not_started"));
+    assert_eq!(response["simulation_only"], json!(true));
+    assert!(response["calibration"]["negative_evidence_order"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|value| value == "cal-high"));
+    assert!(response["calibration"]["unknown_order"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|value| value == "cal-unknown"));
+    assert_eq!(
+        response["calibration"]["families"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
 }
 
 #[test]
@@ -9561,7 +14107,7 @@ fn repository_bundle_compiles_a_route_with_progressive_disclosure() {
                 "id": "orientation",
                 "intent": "understand the repository before choosing a domain",
                 "must_read": ["README.md"],
-                "budget": 50000
+                "budget": 60000
             },
             "policy": "normative",
             "include_markdown": true,

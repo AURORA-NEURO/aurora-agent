@@ -7,9 +7,6 @@
 //! only as far into the evidence as it needs, and verify a certificate — without linking the
 //! engine or learning a new SDK.
 
-// The protocol catalogue is intentionally explicit and now includes the six-lane neurosurgical
-// workbench. Keep macro expansion headroom proportional to that versioned schema surface.
-#![recursion_limit = "512"]
 //!
 //! # Not implemented, deliberately
 //!
@@ -30,15 +27,15 @@
 //! * **No state of its own.** Nothing persists across a process except what a tool was
 //!   explicitly asked to write to an explicitly named path inside the root.
 
-#![recursion_limit = "256"]
+#![recursion_limit = "1024"]
 
 mod brain_control;
-mod research_campaign;
 pub mod evolution_assurance;
 pub mod federated_quality_control_assurance;
 pub mod knowledge_representation_contract_model;
 pub mod multimodal_ingestion_assurance;
 pub mod replication_negative_results_assurance;
+mod research_campaign;
 pub mod research_contracts;
 pub mod resource_discovery_contract;
 pub mod rpc;
