@@ -218,6 +218,7 @@ pub use programs::p07_protocol_simulation::{
     GliomaAdaptiveWorkflowSchedulerError, GliomaAdaptiveWorkflowSchedulerPlan,
     GliomaAdaptiveWorkflowSchedulerRequest, SchedulerDecision, SchedulerObservation,
     SchedulerOutcome,
+    plan_glioma_research_director,
     protocol_request_from_experiment_design, simulate_glioma_protocol, ActionExecutionDisposition,
     ActionExecutionFailure, ActionExecutionResult, ActionPortfolioExecution,
     ActionPortfolioExecutionDisposition, ActionPortfolioExecutionError,
