@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 677;
+const TOOL_DEFINITION_COUNT: usize = 678;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -2528,6 +2528,50 @@ fn glioma_sequential_design_exposes_stopping_and_negative_evidence() {
         .is_some_and(|evidence| evidence
             .iter()
             .any(|item| item.as_str().is_some_and(|item| item.contains("weak")))));
+}
+
+#[test]
+fn glioma_sequential_campaign_executes_and_replans_in_sandbox() {
+    let mut server = server();
+    let artifact_hash = "0".repeat(64);
+    let campaign = call(
+        &mut server,
+        "glioma_sequential_campaign_execute",
+        json!({
+            "request": {
+                "design": {
+                    "objective": "close the replicate loop for organoid invasion",
+                    "model_system": "organoid",
+                    "endpoint": "invasion_fraction",
+                    "control_arm_id": "control",
+                    "target_effect_milli": 150,
+                    "success_probability_milli": 750,
+                    "futility_probability_milli": 700,
+                    "min_replicates_per_arm": 3,
+                    "max_new_replicates_per_round": 2,
+                    "max_rounds": 4,
+                    "max_selected_arms": 2,
+                    "budget_units": 12,
+                    "risk_ceiling_milli": 800,
+                    "exploration_weight_milli": 400
+                },
+                "arms": [
+                    {"arm_id":"control","label":"vehicle control","artifact":{"artifact_id":"campaign-control","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-sequential+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"model_system":"organoid","successes":1,"failures":1,"prior_alpha":1,"prior_beta":1,"risk_milli":200,"cost_units":1},
+                    {"arm_id":"candidate","label":"candidate perturbation","artifact":{"artifact_id":"campaign-candidate","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-sequential+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"model_system":"organoid","successes":1,"failures":0,"prior_alpha":1,"prior_beta":1,"risk_milli":200,"cost_units":1}
+                ],
+                "max_retries": 1
+            }
+        }),
+    );
+    assert_eq!(campaign["dispatch"], json!("not_started"));
+    assert_eq!(campaign["simulation_only"], json!(true));
+    assert!(campaign["campaign"]["rounds"]
+        .as_array()
+        .is_some_and(|rounds| !rounds.is_empty()));
+    assert!(campaign["campaign"]["batches"]
+        .as_array()
+        .is_some_and(|batches| !batches.is_empty()));
+    assert!(campaign["campaign"]["final_plan"]["decisions"].is_array());
 }
 
 #[test]

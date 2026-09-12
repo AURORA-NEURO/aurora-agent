@@ -522,8 +522,9 @@ use bioprism_research::{
     execute_glioma_multimodal_mechanism_campaign_with_executor, execute_glioma_protocol,
     execute_glioma_replay_campaign, execute_glioma_replication_campaign,
     execute_glioma_research_autopilot, execute_glioma_research_director,
-    execute_glioma_robust_active_learning_campaign, explore_mechanisms, generate_feature_catalog,
-    glioma_program_catalog, harmonize_glioma_multimodal_batches, harmonize_multimodal_inputs,
+    execute_glioma_robust_active_learning_campaign, execute_glioma_sequential_campaign,
+    explore_mechanisms, generate_feature_catalog, glioma_program_catalog,
+    harmonize_glioma_multimodal_batches, harmonize_multimodal_inputs,
     plan_adaptive_glioma_dose_surface, plan_decision_actions, plan_federated_benchmark_sites,
     plan_glioma_active_learning, plan_glioma_adaptive_information_campaign,
     plan_glioma_adaptive_mechanism_policy, plan_glioma_adaptive_research_frontier,
@@ -563,9 +564,9 @@ use bioprism_research::{
     DryRunKnowledgeResolutionCampaignExecutor, DryRunMechanismDiscriminationCampaignExecutor,
     DryRunMultiFidelityCampaignExecutor, DryRunMultimodalIngestionCampaignExecutor,
     DryRunReplayCampaignExecutor, DryRunRobustActiveLearningCampaignExecutor,
-    EvidenceCalibrationObservation, EvidenceCalibrationRequest, EvidencePriorityRequest,
-    EvidenceRecord, EvidenceRefreshCampaignRequest, EvidenceRequest, EvidenceSurveillanceRequest,
-    EvidenceTriangulationRequest, ExperimentArm, ExperimentRequest,
+    DryRunSequentialCampaignExecutor, EvidenceCalibrationObservation, EvidenceCalibrationRequest,
+    EvidencePriorityRequest, EvidenceRecord, EvidenceRefreshCampaignRequest, EvidenceRequest,
+    EvidenceSurveillanceRequest, EvidenceTriangulationRequest, ExperimentArm, ExperimentRequest,
     FederatedBenchmarkCampaignRequest, FederatedBenchmarkRequest, FederatedBenchmarkSite,
     FederatedBenchmarkSitePlannerRequest, FederatedMechanismSite,
     FederatedMechanismTransportRequest, FidelityCandidate, FidelityObservation,
@@ -593,13 +594,14 @@ use bioprism_research::{
     ReplicationStudy, ResearchObjectRequest, RobustActiveLearningCampaignRequest,
     RobustActiveLearningCandidate, RobustActiveLearningObservation, RobustActiveLearningRequest,
     RobustInterventionCandidate, RobustInterventionRequest, RobustnessRequest,
-    SensitivityObservation, SensitivityRequest, SequentialArmObservation, SequentialDesignRequest,
-    SpatialCell, SpatialCommunicationCell, SpatialCommunicationRequest, SpatialNicheRequest,
-    SpatialPropagationRequest, SpatialRegistrationCell, SpatialRegistrationRequest,
-    StateTransitionObservation, StateTransitionRequest, StaticGliomaActionPlanner,
-    StaticGliomaComputationPlanner, StratifiedCausalRequest, StratifiedObservation,
-    TemporalFusionRequest, TemporalObservation, TrajectoryObservation, TrajectoryRequest,
-    TransportStudy, TransportabilityRequest, TypedKnowledge,
+    SensitivityObservation, SensitivityRequest, SequentialArmObservation,
+    SequentialCampaignRequest, SequentialDesignRequest, SpatialCell, SpatialCommunicationCell,
+    SpatialCommunicationRequest, SpatialNicheRequest, SpatialPropagationRequest,
+    SpatialRegistrationCell, SpatialRegistrationRequest, StateTransitionObservation,
+    StateTransitionRequest, StaticGliomaActionPlanner, StaticGliomaComputationPlanner,
+    StratifiedCausalRequest, StratifiedObservation, TemporalFusionRequest, TemporalObservation,
+    TrajectoryObservation, TrajectoryRequest, TransportStudy, TransportabilityRequest,
+    TypedKnowledge,
 };
 use bioprism_routing::{
     lab::{run as run_routing_lab, LabSettings, Task},
@@ -2268,6 +2270,9 @@ impl Server {
             }
             "glioma_adaptive_allocation_campaign_execute" => {
                 self.glioma_adaptive_allocation_campaign_execute(&arguments)
+            }
+            "glioma_sequential_campaign_execute" => {
+                self.glioma_sequential_campaign_execute(&arguments)
             }
             "glioma_active_learning" => self.glioma_active_learning(&arguments),
             "glioma_active_learning_campaign_execute" => {
@@ -6888,6 +6893,33 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma sequential-design plan: {error}"))
+    }
+
+    /// Execute a bounded sequential preclinical glioma campaign in the deterministic local
+    /// sandbox. Each accepted aggregate batch updates the arm posterior before the next plan;
+    /// a governed institution can replace the executor behind this route without granting MCP
+    /// direct hardware or clinical authority.
+    fn glioma_sequential_campaign_execute(&self, arguments: &Value) -> Result<Value, String> {
+        let request: SequentialCampaignRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_sequential_campaign_execute requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma sequential-campaign request: {error}"))?;
+        let mut executor = DryRunSequentialCampaignExecutor;
+        let campaign = execute_glioma_sequential_campaign(&request, &mut executor)
+            .map_err(|error| format!("glioma sequential campaign refused: {error}"))?;
+        serde_json::to_value(json!({
+            "campaign": campaign,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "the planner is rerun after every accepted aggregate batch",
+                "exact replicate accounting, arm binding, local-only artifacts, retries, and budget debits are validated",
+                "success, futility, risk, budget, no-progress, and executor-failure stops remain explicit",
+                "MCP never contacts hardware, moves raw biology, or makes a clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma sequential campaign: {error}"))
     }
 
     /// Rank and batch mechanism-discriminating preclinical assays for a closed-loop campaign.
@@ -49277,6 +49309,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_adaptive_allocation",
                 "glioma_adaptive_allocation_campaign_execute",
                 "glioma_sequential_design",
+                "glioma_sequential_campaign_execute",
                 "glioma_closed_loop_campaign",
                 "glioma_combination_synergy",
                 "glioma_adaptive_dose_surface",
@@ -58453,6 +58486,17 @@ pub fn tool_definitions() -> Vec<Value> {
                 "observations": {"type": "array", "items": {"type": "object"}, "description": "Local SequentialArmObservation1@1 values containing de-identified binary endpoint counts, priors, model-system binding, risk, cost, and local artifact references."}
             },
             "required": ["request", "observations"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_sequential_campaign_execute",
+        "description": "Execute a bounded sequential preclinical glioma campaign in the deterministic local sandbox. It repeatedly calls the sequential Bayesian interim planner, executes selected aggregate arm batches through a caller-owned adapter, updates successes/failures, and replans until success, futility, risk, budget, no-progress, executor-failure, or round limits stop progress. Returns every plan, batch, retry, posterior update, negative-evidence item, and final stopping rationale; it never contacts hardware, moves raw biology, chooses a clinical dose, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "SequentialCampaignRequest1@1 containing SequentialDesignRequest1@1, local SequentialArmObservation1@1 arms, and bounded retry count."}
+            },
+            "required": ["request"]
         }
     }));
     definitions.push(json!({

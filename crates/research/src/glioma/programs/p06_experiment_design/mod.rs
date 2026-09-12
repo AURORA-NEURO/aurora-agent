@@ -15,6 +15,7 @@ pub mod information_design;
 pub mod multi_fidelity;
 pub mod multi_fidelity_campaign;
 pub mod robust_active_learning;
+pub mod sequential_campaign;
 pub mod sequential_design;
 pub mod synergy;
 
@@ -93,6 +94,12 @@ pub use robust_active_learning::{
     RobustActiveLearningCandidateDisposition, RobustActiveLearningDisposition,
     RobustActiveLearningError, RobustActiveLearningModel, RobustActiveLearningObservation,
     RobustActiveLearningPlan, RobustActiveLearningRequest, RobustActiveLearningScore,
+};
+pub use sequential_campaign::{
+    execute_glioma_sequential_campaign, DryRunSequentialCampaignExecutor,
+    SequentialBatchObservation, SequentialCampaign, SequentialCampaignDisposition,
+    SequentialCampaignError, SequentialCampaignExecutionFailure, SequentialCampaignExecutor,
+    SequentialCampaignRequest, SequentialCampaignRound, SequentialCampaignStopReason,
 };
 pub use sequential_design::{
     plan_glioma_sequential_design, SequentialArmDecision, SequentialArmObservation,
