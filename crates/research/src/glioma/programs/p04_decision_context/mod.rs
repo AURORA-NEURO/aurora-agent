@@ -2,6 +2,7 @@
 
 pub mod action_bridge;
 pub mod action_graph;
+pub mod adaptive_branch_campaign;
 pub mod branch_campaign;
 pub mod branch_planner;
 pub mod campaign;
@@ -15,6 +16,13 @@ pub use action_bridge::{
 pub use action_graph::{
     compile_decision_action_graph, DecisionActionGraph, DecisionActionGraphDisposition,
     DecisionActionGraphError, DecisionActionGraphRequest, DecisionGraphNode,
+};
+pub use adaptive_branch_campaign::{
+    execute_glioma_adaptive_decision_branch_campaign,
+    execute_glioma_adaptive_decision_branch_campaign_dry_run, AdaptiveDecisionBranchCampaign,
+    AdaptiveDecisionBranchCampaignDisposition, AdaptiveDecisionBranchCampaignError,
+    AdaptiveDecisionBranchCampaignRequest, AdaptiveDecisionBranchCampaignRound,
+    AdaptiveDecisionBranchCampaignStopReason,
 };
 pub use branch_campaign::{
     execute_glioma_decision_branch_campaign, BranchExecutionDisposition, DecisionBranchCampaign,

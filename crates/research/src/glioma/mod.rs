@@ -125,8 +125,13 @@ pub use programs::p03_multimodal_ingestion_qc::{
 };
 pub use programs::p04_decision_context::{
     compile_decision_action_graph, compile_decision_context,
+    execute_glioma_adaptive_decision_branch_campaign,
+    execute_glioma_adaptive_decision_branch_campaign_dry_run,
     execute_glioma_decision_branch_campaign, execute_glioma_decision_context_campaign,
     execute_glioma_decision_operating_cycle, plan_decision_actions, plan_glioma_decision_branches,
+    AdaptiveDecisionBranchCampaign, AdaptiveDecisionBranchCampaignDisposition,
+    AdaptiveDecisionBranchCampaignError, AdaptiveDecisionBranchCampaignRequest,
+    AdaptiveDecisionBranchCampaignRound, AdaptiveDecisionBranchCampaignStopReason,
     BranchExecutionDisposition, DecisionAction, DecisionActionGraph,
     DecisionActionGraphDisposition, DecisionActionGraphError, DecisionActionGraphRequest,
     DecisionActionKind, DecisionActionPlan, DecisionActionPlanDisposition, DecisionActionPlanError,

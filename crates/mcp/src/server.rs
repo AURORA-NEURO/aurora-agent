@@ -514,7 +514,8 @@ use bioprism_research::{
     execute_federated_benchmark_campaign, execute_federated_benchmark_operating_cycle_dry_run,
     execute_glioma_action_portfolio, execute_glioma_active_learning_campaign,
     execute_glioma_adaptive_allocation_campaign, execute_glioma_adaptive_clone_campaign_dry_run,
-    execute_glioma_adaptive_frontier, execute_glioma_adaptive_instrument_campaign,
+    execute_glioma_adaptive_decision_branch_campaign_dry_run, execute_glioma_adaptive_frontier,
+    execute_glioma_adaptive_instrument_campaign,
     execute_glioma_adaptive_interpretation_campaign_dry_run,
     execute_glioma_adaptive_mechanism_campaign, execute_glioma_autonomous_campaign,
     execute_glioma_autonomous_gap_cycle, execute_glioma_autonomous_program_cycle,
@@ -561,26 +562,26 @@ use bioprism_research::{
     ActionPortfolioExecutionRequest, ActiveLearningCampaignRequest, ActiveLearningCandidate,
     ActiveLearningObservation, ActiveLearningRequest, AdaptiveAllocationCampaignRequest,
     AdaptiveAllocationRequest, AdaptiveArmObservation, AdaptiveCloneCampaignRequest,
-    AdaptiveDoseSurfaceRequest, AdaptiveFrontierExecutionRequest, AdaptiveFrontierRequest,
-    AdaptiveInformationCampaignRequest, AdaptiveInformationObservation,
-    AdaptiveInstrumentCampaignRequest, AdaptiveInterpretationCampaignRequest,
-    AdaptiveMechanismCampaignRequest, AdaptiveMechanismPolicyRequest, AnalysisDataset,
-    AnalysisRequest, AssayEvidenceObservation, AssayEvidenceRequest, AutonomousGapCycleRequest,
-    AutonomousProgramCycleRequest, BeliefConflict, BeliefRevisionRequest, CalibrationRequest,
-    CalibrationRun, CampaignAction, CampaignMechanism, CampaignObservation, CausalContrastRequest,
-    ClonalEvolutionGraph, ClonalEvolutionRequest, CloneContinuationCandidate,
-    CloneContinuationRequest, ClonePanelObservation, ClonePanelOutcomeAnalysis,
-    ClonePanelOutcomeRequest, ClonePerturbationCandidate, ClonePerturbationPanel,
-    ClonePerturbationPanelRequest, CloneProfile, ClosedLoopCampaignRequest, CombinationObservation,
-    CombinationSynergyRequest, ComputationCandidate, ComputationExecutionMode,
-    ComputationExecutionRequest, ComputationPlacementRequest, ComputationPortfolioExecutionRequest,
-    ComputationPortfolioRequest, ComputationRecoveryRequest, ConcordanceRequest, ConsensusRequest,
-    ContrastDesignRequest, CounterfactualEnsembleRequest, CounterfactualIntervention,
-    CounterfactualModel, CounterfactualRequest, DecisionActionGraphRequest,
-    DecisionActionPlanRequest, DecisionBranchCampaignRequest, DecisionBranchPlannerRequest,
-    DecisionContext, DecisionContextCampaignRequest, DecisionContextRequest,
-    DecisionOperatingCycleRequest, DesignAction, DesignMechanism, DoseResponseObservation,
-    DoseResponseRequest, DryRunActiveLearningCampaignExecutor,
+    AdaptiveDecisionBranchCampaignRequest, AdaptiveDoseSurfaceRequest,
+    AdaptiveFrontierExecutionRequest, AdaptiveFrontierRequest, AdaptiveInformationCampaignRequest,
+    AdaptiveInformationObservation, AdaptiveInstrumentCampaignRequest,
+    AdaptiveInterpretationCampaignRequest, AdaptiveMechanismCampaignRequest,
+    AdaptiveMechanismPolicyRequest, AnalysisDataset, AnalysisRequest, AssayEvidenceObservation,
+    AssayEvidenceRequest, AutonomousGapCycleRequest, AutonomousProgramCycleRequest, BeliefConflict,
+    BeliefRevisionRequest, CalibrationRequest, CalibrationRun, CampaignAction, CampaignMechanism,
+    CampaignObservation, CausalContrastRequest, ClonalEvolutionGraph, ClonalEvolutionRequest,
+    CloneContinuationCandidate, CloneContinuationRequest, ClonePanelObservation,
+    ClonePanelOutcomeAnalysis, ClonePanelOutcomeRequest, ClonePerturbationCandidate,
+    ClonePerturbationPanel, ClonePerturbationPanelRequest, CloneProfile, ClosedLoopCampaignRequest,
+    CombinationObservation, CombinationSynergyRequest, ComputationCandidate,
+    ComputationExecutionMode, ComputationExecutionRequest, ComputationPlacementRequest,
+    ComputationPortfolioExecutionRequest, ComputationPortfolioRequest, ComputationRecoveryRequest,
+    ConcordanceRequest, ConsensusRequest, ContrastDesignRequest, CounterfactualEnsembleRequest,
+    CounterfactualIntervention, CounterfactualModel, CounterfactualRequest,
+    DecisionActionGraphRequest, DecisionActionPlanRequest, DecisionBranchCampaignRequest,
+    DecisionBranchPlannerRequest, DecisionContext, DecisionContextCampaignRequest,
+    DecisionContextRequest, DecisionOperatingCycleRequest, DesignAction, DesignMechanism,
+    DoseResponseObservation, DoseResponseRequest, DryRunActiveLearningCampaignExecutor,
     DryRunAdaptiveAllocationCampaignExecutor, DryRunAdaptiveMechanismPolicyExecutor,
     DryRunDecisionContextCampaignExecutor, DryRunEvidenceAcquisitionExecutor,
     DryRunEvidenceRefreshCampaignExecutor, DryRunExperimentOperatingCycleExecutor,
@@ -2205,6 +2206,9 @@ impl Server {
             }
             "glioma_decision_branch_campaign_execute" => {
                 self.glioma_decision_branch_campaign_execute(&arguments)
+            }
+            "glioma_adaptive_decision_branch_campaign_execute" => {
+                self.glioma_adaptive_decision_branch_campaign_execute(&arguments)
             }
             "glioma_decision_operating_cycle" => self.glioma_decision_operating_cycle(&arguments),
             "glioma_multimodal_ingestion_campaign_execute" => {
@@ -6258,6 +6262,33 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma decision-branch campaign: {error}"))
+    }
+
+    /// Recompile P04 knowledge and decision context after each returned branch-evidence batch.
+    fn glioma_adaptive_decision_branch_campaign_execute(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: AdaptiveDecisionBranchCampaignRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_adaptive_decision_branch_campaign_execute requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma adaptive decision-branch request: {error}"))?;
+        let campaign = execute_glioma_adaptive_decision_branch_campaign_dry_run(&request).map_err(
+            |error| format!("glioma adaptive decision-branch campaign refused: {error}"),
+        )?;
+        serde_json::to_value(json!({
+            "campaign": campaign,
+            "dispatch": "dry_run",
+            "simulation_only": true,
+            "guarantees": [
+                "knowledge, decision context, and robust branch projections are recompiled only from returned typed local evidence",
+                "scenario forecasts remain distinct from observations and are never promoted by the controller",
+                "qualified, partial, budget-blocked, failed, unresolved, and no-progress states remain explicit",
+                "the MCP route performs no raw-data movement, external instrument effect, federation, diagnosis, treatment, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma adaptive decision-branch campaign: {error}"))
     }
 
     /// Run the full P04 evidence-to-decision operating cycle through MCP's deterministic local
@@ -50514,6 +50545,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_knowledge_resolution_campaign_execute",
                 "glioma_decision_context_campaign_execute",
                 "glioma_decision_branch_campaign_execute",
+                "glioma_adaptive_decision_branch_campaign_execute",
                 "glioma_decision_operating_cycle",
                 "glioma_multimodal_ingestion_campaign_execute",
                 "glioma_multimodal_readiness_gate",
@@ -60431,6 +60463,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "DecisionBranchCampaignRequest1@1 containing TypedKnowledge1@1, DecisionContext1@1, DecisionBranchPlan1@1, completed action ids, budget, branch bound, retry bound, and stop policy."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_adaptive_decision_branch_campaign_execute",
+        "description": "Run a bounded adaptive preclinical glioma decision campaign that recompiles typed knowledge and the decision context after every returned evidence batch, replans scenario-robust branch portfolios, and executes only the next dependency-closed frontier. Scenario projections remain forecasts; qualified, partial, budget-blocked, failed, unresolved, and no-progress states remain explicit. MCP uses a deterministic local dry-run executor.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "AdaptiveDecisionBranchCampaignRequest1@1 containing KnowledgeRequest1@1, DecisionContextRequest1@1, DecisionBranchPlannerRequest1@1, initial EvidenceRecord1@1 rows, and bounded budget/round/retry controls."}
             },
             "required": ["request"]
         }
