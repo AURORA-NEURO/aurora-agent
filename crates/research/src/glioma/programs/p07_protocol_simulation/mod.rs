@@ -20,6 +20,7 @@ pub mod director;
 pub mod evidence_campaign;
 pub mod evidence_gate;
 pub mod execution;
+pub mod intent_mission;
 pub mod mechanism_campaign;
 pub mod mission;
 pub mod mission_recovery;
@@ -106,6 +107,12 @@ pub use mission::{
 pub use mission_recovery::{
     execute_glioma_mission_recovery, GliomaMissionRecovery, GliomaMissionRecoveryDisposition,
     GliomaMissionRecoveryError, GliomaMissionRecoveryRequest, GliomaMissionRecoveryStopReason,
+};
+
+pub use intent_mission::{
+    compile_glioma_intent_mission_candidates, execute_glioma_intent_mission,
+    GliomaIntentMissionDisposition, GliomaIntentMissionError, GliomaIntentMissionRequest,
+    GliomaIntentResearchMission,
 };
 
 pub use program_cycle::{

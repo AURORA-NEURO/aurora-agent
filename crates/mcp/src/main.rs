@@ -70,6 +70,7 @@ fn main() {
                      glioma_multimodal_consensus, glioma_replication_meta_analyze, glioma_replication_campaign_execute,\n\
                      glioma_autonomous_research_mission_execute,\n\
                      glioma_autonomous_research_mission_recover,\n\
+                     glioma_intent_mission_execute,\n\
                      glioma_multi_fidelity_campaign_execute,\n\
                      glioma_autonomous_campaign_execute,\n\
                      glioma_research_autopilot_execute,\n\
