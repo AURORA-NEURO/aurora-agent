@@ -2,6 +2,7 @@
 
 use crate::glioma::catalog::{glioma_program_catalog, GliomaProgramDescriptor, GliomaProgramId};
 
+pub mod adaptive_execution;
 pub mod adaptive_frontier;
 pub mod campaign;
 pub mod causal_adjustment;
@@ -17,6 +18,11 @@ pub mod synthesis;
 pub mod trajectory;
 pub mod transportability;
 
+pub use adaptive_execution::{
+    dry_run_glioma_adaptive_frontier_executor, execute_glioma_adaptive_frontier,
+    AdaptiveFrontierExecution, AdaptiveFrontierExecutionDisposition,
+    AdaptiveFrontierExecutionError, AdaptiveFrontierExecutionRequest,
+};
 pub use adaptive_frontier::{
     plan_glioma_adaptive_research_frontier, AdaptiveFrontierCandidate, AdaptiveFrontierDisposition,
     AdaptiveFrontierError, AdaptiveFrontierRequest, AdaptiveResearchFrontier, AdaptiveTarget,

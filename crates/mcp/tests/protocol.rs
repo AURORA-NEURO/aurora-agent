@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 709;
+const TOOL_DEFINITION_COUNT: usize = 710;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -5694,6 +5694,69 @@ fn glioma_adaptive_frontier_turns_interpretation_debt_into_next_actions() {
             .as_str()
             .unwrap()
             .contains("replication-family-required")));
+}
+
+#[test]
+fn glioma_adaptive_frontier_execute_runs_selected_actions_and_replays() {
+    let mut server = server();
+    let hash = "0".repeat(64);
+    let synthesis_response = call(
+        &mut server,
+        "glioma_interpretation_synthesize",
+        json!({
+            "request": {
+                "objective": "execute reproducible invasion followups",
+                "hypothesis": "a preclinical invasion mechanism is reproducible",
+                "model_system": "organoid",
+                "min_evidence": 2,
+                "min_independent_groups": 2,
+                "min_families": 2,
+                "min_quality_milli": 700,
+                "effect_threshold_milli": 100,
+                "max_disagreement_milli": 700,
+                "max_leave_one_out_shift_milli": 700,
+                "require_replication_family": true,
+                "replay_identity": hash,
+                "evidence": [
+                    {"evidence_id":"causal-a","family":"causal_contrast","independent_group":"site-a","model_system":"organoid","direction":"positive","effect_milli":300,"uncertainty_milli":50,"quality_milli":900,"sample_count":6,"artifact":{"artifact_id":"causal-a","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"negative_evidence":[]},
+                    {"evidence_id":"replication-b","family":"replication","independent_group":"site-b","model_system":"organoid","direction":"positive","effect_milli":280,"uncertainty_milli":60,"quality_milli":850,"sample_count":8,"artifact":{"artifact_id":"replication-b","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"negative_evidence":[]}
+                ]
+            }
+        }),
+    );
+    let request = json!({
+        "frontier": {
+            "synthesis": synthesis_response["synthesis"].clone(),
+            "completed_actions": [],
+            "budget_units": 80,
+            "max_actions": 3,
+            "approval_granted": true,
+            "allow_instrument_execution": false,
+            "allow_federation": false,
+            "selection_weights": {"information_gain":25,"frontier_novelty":20,"workflow_leverage":15,"cross_stage_unlock":15,"reproducibility_safety":10,"federation_value":10,"feasibility":5}
+        },
+        "max_retries": 1,
+        "require_artifacts": true,
+        "allow_unresolved_dispatch": false
+    });
+    let first = call(
+        &mut server,
+        "glioma_adaptive_frontier_execute",
+        json!({"request": request}),
+    );
+    let second = call(
+        &mut server,
+        "glioma_adaptive_frontier_execute",
+        json!({"request": request}),
+    );
+    assert_eq!(first["dispatch"], json!("dry_run"));
+    assert_eq!(first["simulation_only"], json!(true));
+    assert_eq!(first["execution"]["disposition"], json!("executed"));
+    assert!(!first["execution"]["dispatched_order"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+    assert_eq!(first["execution"]["digest"], second["execution"]["digest"]);
 }
 
 #[test]

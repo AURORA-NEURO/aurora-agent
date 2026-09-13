@@ -507,12 +507,13 @@ use bioprism_research::{
     compile_decision_context, compile_glioma_computation_workflow, compile_glioma_knowledge_gaps,
     compile_mechanism_action_plan, compile_typed_knowledge, compose_knowledge_graph,
     design_glioma_contrast_panel, design_preclinical_experiment, discriminate_mechanisms,
-    dry_run_adaptive_instrument_executor, dry_run_glioma_research,
-    dry_run_instrument_executor_from_request, dry_run_robustness_guided_computation_executor,
-    evaluate_glioma_dynamic_policies, evaluate_glioma_release_gate,
-    execute_federated_benchmark_campaign, execute_federated_benchmark_operating_cycle_dry_run,
-    execute_glioma_action_portfolio, execute_glioma_active_learning_campaign,
-    execute_glioma_adaptive_allocation_campaign, execute_glioma_adaptive_instrument_campaign,
+    dry_run_adaptive_instrument_executor, dry_run_glioma_adaptive_frontier_executor,
+    dry_run_glioma_research, dry_run_instrument_executor_from_request,
+    dry_run_robustness_guided_computation_executor, evaluate_glioma_dynamic_policies,
+    evaluate_glioma_release_gate, execute_federated_benchmark_campaign,
+    execute_federated_benchmark_operating_cycle_dry_run, execute_glioma_action_portfolio,
+    execute_glioma_active_learning_campaign, execute_glioma_adaptive_allocation_campaign,
+    execute_glioma_adaptive_frontier, execute_glioma_adaptive_instrument_campaign,
     execute_glioma_adaptive_mechanism_campaign, execute_glioma_autonomous_campaign,
     execute_glioma_autonomous_gap_cycle, execute_glioma_autonomous_program_cycle,
     execute_glioma_autonomous_research_engine, execute_glioma_autonomous_research_mission,
@@ -558,24 +559,25 @@ use bioprism_research::{
     ActionPortfolioExecutionRequest, ActiveLearningCampaignRequest, ActiveLearningCandidate,
     ActiveLearningObservation, ActiveLearningRequest, AdaptiveAllocationCampaignRequest,
     AdaptiveAllocationRequest, AdaptiveArmObservation, AdaptiveDoseSurfaceRequest,
-    AdaptiveFrontierRequest, AdaptiveInformationCampaignRequest, AdaptiveInformationObservation,
-    AdaptiveInstrumentCampaignRequest, AdaptiveMechanismCampaignRequest,
-    AdaptiveMechanismPolicyRequest, AnalysisDataset, AnalysisRequest, AssayEvidenceObservation,
-    AssayEvidenceRequest, AutonomousGapCycleRequest, AutonomousProgramCycleRequest, BeliefConflict,
-    BeliefRevisionRequest, CalibrationRequest, CalibrationRun, CampaignAction, CampaignMechanism,
-    CampaignObservation, CausalContrastRequest, ClonalEvolutionGraph, ClonalEvolutionRequest,
-    CloneContinuationCandidate, CloneContinuationRequest, ClonePanelObservation,
-    ClonePanelOutcomeAnalysis, ClonePanelOutcomeRequest, ClonePerturbationCandidate,
-    ClonePerturbationPanel, ClonePerturbationPanelRequest, CloneProfile, ClosedLoopCampaignRequest,
-    CombinationObservation, CombinationSynergyRequest, ComputationCandidate,
-    ComputationExecutionMode, ComputationExecutionRequest, ComputationPlacementRequest,
-    ComputationPortfolioExecutionRequest, ComputationPortfolioRequest, ComputationRecoveryRequest,
-    ConcordanceRequest, ConsensusRequest, ContrastDesignRequest, CounterfactualEnsembleRequest,
-    CounterfactualIntervention, CounterfactualModel, CounterfactualRequest,
-    DecisionActionGraphRequest, DecisionActionPlanRequest, DecisionBranchCampaignRequest,
-    DecisionBranchPlannerRequest, DecisionContext, DecisionContextCampaignRequest,
-    DecisionContextRequest, DecisionOperatingCycleRequest, DesignAction, DesignMechanism,
-    DoseResponseObservation, DoseResponseRequest, DryRunActiveLearningCampaignExecutor,
+    AdaptiveFrontierExecutionRequest, AdaptiveFrontierRequest, AdaptiveInformationCampaignRequest,
+    AdaptiveInformationObservation, AdaptiveInstrumentCampaignRequest,
+    AdaptiveMechanismCampaignRequest, AdaptiveMechanismPolicyRequest, AnalysisDataset,
+    AnalysisRequest, AssayEvidenceObservation, AssayEvidenceRequest, AutonomousGapCycleRequest,
+    AutonomousProgramCycleRequest, BeliefConflict, BeliefRevisionRequest, CalibrationRequest,
+    CalibrationRun, CampaignAction, CampaignMechanism, CampaignObservation, CausalContrastRequest,
+    ClonalEvolutionGraph, ClonalEvolutionRequest, CloneContinuationCandidate,
+    CloneContinuationRequest, ClonePanelObservation, ClonePanelOutcomeAnalysis,
+    ClonePanelOutcomeRequest, ClonePerturbationCandidate, ClonePerturbationPanel,
+    ClonePerturbationPanelRequest, CloneProfile, ClosedLoopCampaignRequest, CombinationObservation,
+    CombinationSynergyRequest, ComputationCandidate, ComputationExecutionMode,
+    ComputationExecutionRequest, ComputationPlacementRequest, ComputationPortfolioExecutionRequest,
+    ComputationPortfolioRequest, ComputationRecoveryRequest, ConcordanceRequest, ConsensusRequest,
+    ContrastDesignRequest, CounterfactualEnsembleRequest, CounterfactualIntervention,
+    CounterfactualModel, CounterfactualRequest, DecisionActionGraphRequest,
+    DecisionActionPlanRequest, DecisionBranchCampaignRequest, DecisionBranchPlannerRequest,
+    DecisionContext, DecisionContextCampaignRequest, DecisionContextRequest,
+    DecisionOperatingCycleRequest, DesignAction, DesignMechanism, DoseResponseObservation,
+    DoseResponseRequest, DryRunActiveLearningCampaignExecutor,
     DryRunAdaptiveAllocationCampaignExecutor, DryRunAdaptiveMechanismPolicyExecutor,
     DryRunDecisionContextCampaignExecutor, DryRunEvidenceAcquisitionExecutor,
     DryRunEvidenceRefreshCampaignExecutor, DryRunExperimentOperatingCycleExecutor,
@@ -2254,6 +2256,7 @@ impl Server {
             "glioma_adaptive_research_frontier" => {
                 self.glioma_adaptive_research_frontier(&arguments)
             }
+            "glioma_adaptive_frontier_execute" => self.glioma_adaptive_frontier_execute(&arguments),
             "glioma_robustness_suite" => self.glioma_robustness_suite(&arguments),
             "glioma_trajectory_analyze" => self.glioma_trajectory_analyze(&arguments),
             "glioma_state_transition_analyze" => self.glioma_state_transition_analyze(&arguments),
@@ -6951,6 +6954,36 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma adaptive frontier: {error}"))
+    }
+
+    /// Compile and execute the selected P10 adaptive frontier through the deterministic local
+    /// action worker. Unresolved synthesis remains held unless the caller explicitly permits
+    /// bounded local dispatch; approval, instrument, federation, dependency, retry, and artifact
+    /// gates remain enforced by the action portfolio executor.
+    fn glioma_adaptive_frontier_execute(&self, arguments: &Value) -> Result<Value, String> {
+        let request: AdaptiveFrontierExecutionRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_adaptive_frontier_execute requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma adaptive frontier execution request: {error}"))?;
+        let mut executor = dry_run_glioma_adaptive_frontier_executor();
+        let output = execute_glioma_adaptive_frontier(&request, &mut executor)
+            .map_err(|error| format!("glioma adaptive frontier execution refused: {error}"))?;
+        serde_json::to_value(json!({
+            "execution": output,
+            "dispatch": "dry_run",
+            "simulation_only": true,
+            "guarantees": [
+                "the typed interpretation frontier is recompiled before execution and selection cannot drift",
+                "unresolved synthesis is held unless the caller explicitly permits bounded local dispatch",
+                "dependency order, approval, effect, retry, artifact, negative, partial, and failure states remain explicit",
+                "the MCP route uses synthetic local artifacts and performs no biological, instrument, network, or clinical effect",
+                "institution-local workers can replace the dry-run executor through the Rust SDK seam"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma adaptive frontier execution: {error}"))
     }
 
     /// Stress-test a local two-arm glioma analysis under deterministic batch and row omissions.
@@ -50404,6 +50437,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_interpretation_synthesize",
                 "glioma_interpretation_operating_cycle",
                 "glioma_adaptive_research_frontier",
+                "glioma_adaptive_frontier_execute",
                 "glioma_robustness_suite",
                 "glioma_trajectory_analyze",
                 "glioma_state_transition_analyze",
@@ -59559,6 +59593,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "AdaptiveFrontierRequest1@1 containing a validated InterpretationSynthesis1@1, completed action ids, budget, authority switches, and GliomaSelectionWeights."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_adaptive_frontier_execute",
+        "description": "Compile and execute the selected preclinical glioma interpretation frontier through a deterministic local action worker. The typed frontier is recompiled and selection-bound before dispatch; unresolved synthesis is held unless explicitly permitted, while approval, effect, dependency, retry, artifact, negative, partial, and failure gates remain visible. MCP uses synthetic local artifacts only and never performs a biological, instrument, network, or clinical effect.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "AdaptiveFrontierExecutionRequest1@1 containing AdaptiveFrontierRequest1@1, max_retries, require_artifacts, and allow_unresolved_dispatch."}
             },
             "required": ["request"]
         }

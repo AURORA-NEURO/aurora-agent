@@ -240,6 +240,8 @@ crates/research/src/glioma/
                                              P10 cross-family interpretation gate with contradiction and leave-one-family-out stability
     p10_interpretation_replication/adaptive_frontier.rs
                                              P10 outcome-conditioned next-action frontier for contradiction, replication, evidence gaps, and negative results
+    p10_interpretation_replication/adaptive_execution.rs
+                                             P10 guarded execution of selected interpretation frontiers with explicit unresolved holds and typed action outcomes
     p10_interpretation_replication/operating_cycle.rs
                                              P10 cross-family interpretation gate to adaptive research frontier and operator handoff
     p12_federated_benchmarking/consensus.rs
@@ -311,7 +313,7 @@ portfolio plan and executable code; it does not promote a planned slot to implem
 | P07 Protocol simulation | lab operations lead | protocol simulation, adaptive workflow planning | critical-path scheduling, outcome-aware dependency scheduling, intent-to-stage-action compilation, bounded modality/model-system portfolio expansion, evidence-gated director admission, evidence-priority execution cycles, context-to-action execution, multimodal mechanism campaigns, stage-gated autonomous program control, failed-frontier recovery with alternate dependency-safe missions, P02/P03-aware scientific frontier admission, utilization, deterministic next batches, and repair/abstain routing before physical effects |
 | P08 Instrument and robotics preflight | instrument operator | instrument preflight | robust control calibration, drift detection, information-per-cost endpoint-diverse campaign selection, multi-instrument dependency scheduling, schedule-bound fleet execution, signed interlocked planning, guarded execution, and fail-closed multi-run campaigns |
 | P09 Reproducible computation | computational scientist | computational execution | checkpointed/replayable computation, intent-to-DAG compilation, locality-aware worker placement, budgeted portfolio execution, robustness-debt-driven re-analysis, selective failed-frontier recovery, and omission-stress robustness suite |
-| P10 Causal interpretation and replication | methods reviewer | statistical interpretation, replication/robustness | uncertainty-aware endpoint, longitudinal, stratified causal, dynamic-policy, causal-contrast, meta-analytic, and cross-site verdicts |
+| P10 Causal interpretation and replication | methods reviewer | statistical interpretation, replication/robustness | uncertainty-aware endpoint, longitudinal, stratified causal, dynamic-policy, causal-contrast, meta-analytic, cross-site verdicts, and guarded adaptive-frontier execution |
 | P11 Research-object release | reproducibility steward | research-object release | portable manifest with limitations and negative evidence, dependency-aware replay, accountable release gating, and operator handoff |
 | P12 Federated benchmarking | consortium administrator | federation benchmarking | aggregate-only cross-site benchmark consensus, influence-aware site portfolio planning, robust pooling, heterogeneity, and site-influence analysis |
 
@@ -507,6 +509,12 @@ weights only quality-qualified local artifacts, preserves negative and unresolve
 cross-family contradiction, and requires leave-one-family-out stability plus declared replication
 floors before returning a qualified interpretation. It is an autonomous research conclusion gate,
 not a clinical decision or an assay dispatcher.
+P10 now also exposes guarded adaptive-frontier execution (`execute_glioma_adaptive_frontier`). It
+recompiles the frontier before dispatch, verifies that the action selector cannot drift, and sends
+the selected replication, stability, evidence-gap, model-transfer, or mechanism-discrimination
+actions through the dependency-safe local action executor. Unresolved synthesis remains held unless
+the caller explicitly permits bounded local dispatch; approval, effect, artifact, retry, negative,
+partial, failed, and blocked outcomes feed the next synthesis round rather than being hidden.
 P06 now includes combination-response analysis (`analyze_glioma_combination_synergy`) with
 vehicle/single-agent control requirements, integer Bliss expectations, residual noise, synergy,
 antagonism, and explicit unresolved cells for missing controls or replicates.
