@@ -511,17 +511,18 @@ use bioprism_research::{
     execute_federated_benchmark_campaign, execute_glioma_action_portfolio,
     execute_glioma_active_learning_campaign, execute_glioma_adaptive_allocation_campaign,
     execute_glioma_adaptive_mechanism_campaign, execute_glioma_autonomous_campaign,
-    execute_glioma_autonomous_gap_cycle, execute_glioma_autonomous_research_engine,
-    execute_glioma_autonomous_research_mission, execute_glioma_computation,
-    execute_glioma_computation_campaign, execute_glioma_computation_portfolio,
-    execute_glioma_decision_context_campaign, execute_glioma_decision_operating_cycle,
-    execute_glioma_evidence_acquisition_campaign, execute_glioma_evidence_campaign,
-    execute_glioma_evidence_gated_research, execute_glioma_evidence_refresh_campaign,
-    execute_glioma_experiment_operating_cycle, execute_glioma_instrument_campaign,
-    execute_glioma_instrument_fleet, execute_glioma_instrument_plan,
-    execute_glioma_knowledge_resolution_campaign, execute_glioma_mechanism_discrimination_campaign,
-    execute_glioma_mechanism_operating_cycle, execute_glioma_multi_fidelity_campaign,
-    execute_glioma_multimodal_ingestion_campaign, execute_glioma_multimodal_mechanism_campaign,
+    execute_glioma_autonomous_gap_cycle, execute_glioma_autonomous_program_cycle,
+    execute_glioma_autonomous_research_engine, execute_glioma_autonomous_research_mission,
+    execute_glioma_computation, execute_glioma_computation_campaign,
+    execute_glioma_computation_portfolio, execute_glioma_decision_context_campaign,
+    execute_glioma_decision_operating_cycle, execute_glioma_evidence_acquisition_campaign,
+    execute_glioma_evidence_campaign, execute_glioma_evidence_gated_research,
+    execute_glioma_evidence_refresh_campaign, execute_glioma_experiment_operating_cycle,
+    execute_glioma_instrument_campaign, execute_glioma_instrument_fleet,
+    execute_glioma_instrument_plan, execute_glioma_knowledge_resolution_campaign,
+    execute_glioma_mechanism_discrimination_campaign, execute_glioma_mechanism_operating_cycle,
+    execute_glioma_multi_fidelity_campaign, execute_glioma_multimodal_ingestion_campaign,
+    execute_glioma_multimodal_mechanism_campaign,
     execute_glioma_multimodal_mechanism_campaign_with_executor,
     execute_glioma_multimodal_readiness_gate, execute_glioma_protocol,
     execute_glioma_replay_campaign, execute_glioma_replication_campaign,
@@ -550,15 +551,15 @@ use bioprism_research::{
     AdaptiveFrontierRequest, AdaptiveInformationCampaignRequest, AdaptiveInformationObservation,
     AdaptiveMechanismCampaignRequest, AdaptiveMechanismPolicyRequest, AnalysisDataset,
     AnalysisRequest, AssayEvidenceObservation, AssayEvidenceRequest, AutonomousGapCycleRequest,
-    BeliefConflict, BeliefRevisionRequest, CalibrationRequest, CalibrationRun, CampaignAction,
-    CampaignMechanism, CampaignObservation, CausalContrastRequest, ClonalEvolutionGraph,
-    ClonalEvolutionRequest, CloneContinuationCandidate, CloneContinuationRequest,
-    ClonePanelObservation, ClonePanelOutcomeAnalysis, ClonePanelOutcomeRequest,
-    ClonePerturbationCandidate, ClonePerturbationPanel, ClonePerturbationPanelRequest,
-    CloneProfile, ClosedLoopCampaignRequest, CombinationObservation, CombinationSynergyRequest,
-    ComputationCandidate, ComputationExecutionRequest, ComputationPlacementRequest,
-    ComputationPortfolioExecutionRequest, ComputationPortfolioRequest, ConcordanceRequest,
-    ConsensusRequest, ContrastDesignRequest, CounterfactualEnsembleRequest,
+    AutonomousProgramCycleRequest, BeliefConflict, BeliefRevisionRequest, CalibrationRequest,
+    CalibrationRun, CampaignAction, CampaignMechanism, CampaignObservation, CausalContrastRequest,
+    ClonalEvolutionGraph, ClonalEvolutionRequest, CloneContinuationCandidate,
+    CloneContinuationRequest, ClonePanelObservation, ClonePanelOutcomeAnalysis,
+    ClonePanelOutcomeRequest, ClonePerturbationCandidate, ClonePerturbationPanel,
+    ClonePerturbationPanelRequest, CloneProfile, ClosedLoopCampaignRequest, CombinationObservation,
+    CombinationSynergyRequest, ComputationCandidate, ComputationExecutionRequest,
+    ComputationPlacementRequest, ComputationPortfolioExecutionRequest, ComputationPortfolioRequest,
+    ConcordanceRequest, ConsensusRequest, ContrastDesignRequest, CounterfactualEnsembleRequest,
     CounterfactualIntervention, CounterfactualModel, CounterfactualRequest,
     DecisionActionGraphRequest, DecisionActionPlanRequest, DecisionBranchPlannerRequest,
     DecisionContext, DecisionContextCampaignRequest, DecisionContextRequest,
@@ -2204,6 +2205,7 @@ impl Server {
             "glioma_autonomous_research_engine_execute" => {
                 self.glioma_autonomous_research_engine_execute(&arguments)
             }
+            "glioma_autonomous_program_cycle" => self.glioma_autonomous_program_cycle(&arguments),
             "glioma_adaptive_workflow" => self.glioma_adaptive_workflow(&arguments),
             "glioma_interpretation_synthesize" => self.glioma_interpretation_synthesize(&arguments),
             "glioma_temporal_multimodal_fusion" => {
@@ -6632,6 +6634,33 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma autonomous research engine run: {error}"))
+    }
+
+    /// Run the autonomous engine and return a stage-gated program handoff for a researcher or
+    /// operator. The sandbox executor remains metadata-only and local.
+    fn glioma_autonomous_program_cycle(&self, arguments: &Value) -> Result<Value, String> {
+        let request: AutonomousProgramCycleRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_autonomous_program_cycle requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma autonomous program-cycle request: {error}"))?;
+        let mut executor = DryRunGliomaActionExecutor;
+        let cycle = execute_glioma_autonomous_program_cycle(&request, &mut executor)
+            .map_err(|error| format!("glioma autonomous program cycle refused: {error}"))?;
+        serde_json::to_value(json!({
+            "cycle": cycle,
+            "dispatch": "dry_run",
+            "simulation_only": true,
+            "guarantees": [
+                "all fourteen preclinical stages receive explicit cleared, active, held, approval, blocked, or pending gates",
+                "active work is derived from the latest engine frontier rather than historical actions",
+                "progress, negative evidence, uncertainty, budget, authority, locality, and operator handoff remain typed and replayable",
+                "the route performs no real assay, instrument effect, raw-data movement, federation, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma autonomous program cycle: {error}"))
     }
 
     /// Plan the next bounded autonomous glioma workflow batch from typed prior outcomes. The
@@ -49808,6 +49837,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_research_director_execute",
                 "glioma_evidence_gated_research_execute",
                 "glioma_autonomous_research_engine_execute",
+                "glioma_autonomous_program_cycle",
                 "glioma_adaptive_workflow",
                 "glioma_interpretation_synthesize",
                 "glioma_adaptive_research_frontier",
@@ -58846,6 +58876,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "GliomaAutonomousResearchEngineRequest1@1 with high-level GliomaResearchIntent, focus, typed starting checkpoints, cycle/action/budget bounds, authority switches, selection weights, retry bound, and local-artifact policy."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_autonomous_program_cycle",
+        "description": "Run the autonomous preclinical glioma engine and compile a researcher-facing program handoff. Every stage is classified as cleared, active, held, approval-required, blocked, or pending; current frontier actions, progress, negative evidence, uncertainty, and the next operator action remain explicit. MCP uses a deterministic local sandbox and never performs real assays, instrument effects, federation, raw-data movement, or clinical decisions.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "AutonomousProgramCycleRequest1@1 containing GliomaAutonomousResearchEngineRequest1@1 and execution_mode (local_simulation or governed_local)."}
             },
             "required": ["request"]
         }

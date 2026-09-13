@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 692;
+const TOOL_DEFINITION_COUNT: usize = 693;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -4637,6 +4637,59 @@ fn glioma_autonomous_research_engine_replans_the_full_stage_graph() {
         .unwrap()
         .iter()
         .any(|item| item.as_str().unwrap().contains("synthetic-dry-run")));
+}
+
+#[test]
+fn glioma_autonomous_program_cycle_exposes_stage_gates_and_handoff() {
+    let mut server = server();
+    let hash = "0".repeat(64);
+    let response = call(
+        &mut server,
+        "glioma_autonomous_program_cycle",
+        json!({
+            "request": {
+                "engine": {
+                    "mission_id": "program-cycle-protocol",
+                    "intent": {
+                        "research_id": "program-cycle-research",
+                        "study_id": "program-cycle-study",
+                        "objective": "identify reproducible invasion mechanisms in organoids",
+                        "output_uses": ["cohort_analysis"],
+                        "model_systems": ["organoid"],
+                        "modalities": ["transcriptomics", "imaging", "spatial"],
+                        "input_artifacts": [{"artifact_id":"input","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}],
+                        "requested_autonomy": "a1",
+                        "approval_reference": null,
+                        "budget_units": 160,
+                        "max_retries": 1,
+                        "allow_instrument_execution": false,
+                        "allow_federation": false,
+                        "raw_data_local": true,
+                        "aggregate_only": true,
+                        "replay_identity": hash,
+                        "boundary": PRECLINICAL_BOUNDARY
+                    },
+                    "focus": "mechanism_first",
+                    "completed_checkpoints": [],
+                    "budget_units": 160,
+                    "max_actions": 2,
+                    "max_cycles": 8,
+                    "approval_granted": false,
+                    "allow_instrument_execution": false,
+                    "allow_federation": false,
+                    "selection_weights": {"information_gain":25,"frontier_novelty":20,"workflow_leverage":15,"cross_stage_unlock":15,"reproducibility_safety":10,"federation_value":10,"feasibility":5},
+                    "max_retries": 1,
+                    "require_artifacts": true
+                },
+                "execution_mode": "local_simulation"
+            }
+        }),
+    );
+    assert_eq!(response["dispatch"], json!("dry_run"));
+    assert_eq!(response["simulation_only"], json!(true));
+    assert_eq!(response["cycle"]["gates"].as_array().unwrap().len(), 14);
+    assert!(response["cycle"]["progress_milli"].as_u64().unwrap() > 0);
+    assert!(response["cycle"]["next_operator_action"].is_string());
 }
 
 #[test]
