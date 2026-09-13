@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 690;
+const TOOL_DEFINITION_COUNT: usize = 691;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -2871,6 +2871,49 @@ fn glioma_mechanism_discrimination_campaign_replans_measurement_in_sandbox() {
         json!(["measure-f1"])
     );
     assert_eq!(campaign["campaign"]["rounds"].as_array().unwrap().len(), 1);
+
+    let cycle = call(
+        &mut server,
+        "glioma_mechanism_operating_cycle",
+        json!({
+            "request": {
+                "campaign": {
+                    "discrimination": {
+                        "objective": "resolve glioma invasion mechanisms",
+                        "model_system": "organoid",
+                        "min_shared_features": 2,
+                        "max_mechanisms": 4,
+                        "max_actions": 2,
+                        "min_information_gain_milli": 10
+                    },
+                    "hypotheses": [
+                        {"mechanism_id":"motility","statement":"motility drives invasion","predictions":[{"feature_id":"f1","predicted_milli":100,"uncertainty_milli":10},{"feature_id":"f2","predicted_milli":200,"uncertainty_milli":10}]},
+                        {"mechanism_id":"matrix","statement":"matrix remodeling drives invasion","predictions":[{"feature_id":"f1","predicted_milli":400,"uncertainty_milli":10},{"feature_id":"f2","predicted_milli":500,"uncertainty_milli":10}]}
+                    ],
+                    "actions": [{"action_id":"measure-f1","feature_id":"f1","predicted_milli_by_mechanism":{"matrix":500,"motility":100},"measurement_uncertainty_milli":20,"feasibility_milli":1000,"cost_units":1}],
+                    "observations": [
+                        {"feature_id":"f1","observed_milli":100,"uncertainty_milli":10,"artifact":{"artifact_id":"cycle-f1","content_hash":hash,"content_type":"application/vnd.aurora.glioma-feature+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                        {"feature_id":"f2","observed_milli":200,"uncertainty_milli":10,"artifact":{"artifact_id":"cycle-f2","content_hash":hash,"content_type":"application/vnd.aurora.glioma-feature+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}}
+                    ],
+                    "budget_units": 1,
+                    "max_rounds": 3,
+                    "max_retries": 1,
+                    "stop_on_qualified": true
+                },
+                "action_plan": {"model_system":"organoid","modality":"transcriptomics","max_actions":2}
+            }
+        }),
+    );
+    assert_eq!(cycle["dispatch"], json!("dry_run"));
+    assert_eq!(cycle["simulation_only"], json!(true));
+    assert_eq!(
+        cycle["cycle"]["campaign"]["disposition"],
+        json!("qualified")
+    );
+    assert_eq!(
+        cycle["cycle"]["action_plan"]["source_discrimination_digest"],
+        cycle["cycle"]["campaign"]["final_discrimination"]["digest"]
+    );
 
     let readiness = call(
         &mut server,

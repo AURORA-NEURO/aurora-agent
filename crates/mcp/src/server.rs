@@ -519,8 +519,9 @@ use bioprism_research::{
     execute_glioma_evidence_gated_research, execute_glioma_evidence_refresh_campaign,
     execute_glioma_instrument_campaign, execute_glioma_instrument_fleet,
     execute_glioma_instrument_plan, execute_glioma_knowledge_resolution_campaign,
-    execute_glioma_mechanism_discrimination_campaign, execute_glioma_multi_fidelity_campaign,
-    execute_glioma_multimodal_ingestion_campaign, execute_glioma_multimodal_mechanism_campaign,
+    execute_glioma_mechanism_discrimination_campaign, execute_glioma_mechanism_operating_cycle,
+    execute_glioma_multi_fidelity_campaign, execute_glioma_multimodal_ingestion_campaign,
+    execute_glioma_multimodal_mechanism_campaign,
     execute_glioma_multimodal_mechanism_campaign_with_executor,
     execute_glioma_multimodal_readiness_gate, execute_glioma_protocol,
     execute_glioma_replay_campaign, execute_glioma_replication_campaign,
@@ -597,8 +598,8 @@ use bioprism_research::{
     MechanismDiscriminationRequest, MechanismDiscriminatorAction, MechanismDynamicsEdge,
     MechanismDynamicsIntervention, MechanismDynamicsNode, MechanismDynamicsRequest,
     MechanismFeatureObservation, MechanismGraphEdge, MechanismGraphNode, MechanismGraphRequest,
-    MechanismHypothesis, MechanismRequest, MediationObservation, MediationRequest,
-    MetaAnalysisRequest, ModalityVector, MultiFidelityCampaignRequest,
+    MechanismHypothesis, MechanismOperatingCycleRequest, MechanismRequest, MediationObservation,
+    MediationRequest, MetaAnalysisRequest, ModalityVector, MultiFidelityCampaignRequest,
     MultiFidelityOptimizationRequest, MultimodalIngestionCampaignRequest,
     MultimodalMechanismCampaignRequest, MultimodalObservation, MultimodalReadinessRequest,
     MultimodalRequest, PathwayActivityDefinition, PathwayActivityObservation,
@@ -2281,6 +2282,7 @@ impl Server {
             "glioma_mechanism_discrimination_campaign_execute" => {
                 self.glioma_mechanism_discrimination_campaign_execute(&arguments)
             }
+            "glioma_mechanism_operating_cycle" => self.glioma_mechanism_operating_cycle(&arguments),
             "glioma_mechanism_graph_propagate" => self.glioma_mechanism_graph_propagate(&arguments),
             "glioma_mechanism_counterfactual" => self.glioma_mechanism_counterfactual(&arguments),
             "glioma_mechanism_ensemble_counterfactual" => {
@@ -8604,6 +8606,33 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma mechanism discrimination campaign: {error}"))
+    }
+
+    /// Run the complete P05 mechanism loop in the deterministic MCP sandbox: discriminate,
+    /// execute a bounded local observation campaign, and compile the next typed assay package.
+    fn glioma_mechanism_operating_cycle(&self, arguments: &Value) -> Result<Value, String> {
+        let request: MechanismOperatingCycleRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_mechanism_operating_cycle requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma mechanism operating-cycle request: {error}"))?;
+        let mut executor = DryRunMechanismDiscriminationCampaignExecutor;
+        let cycle = execute_glioma_mechanism_operating_cycle(&request, &mut executor)
+            .map_err(|error| format!("glioma mechanism operating cycle refused: {error}"))?;
+        serde_json::to_value(json!({
+            "cycle": cycle,
+            "dispatch": "dry_run",
+            "simulation_only": true,
+            "guarantees": [
+                "competing mechanism discrimination is recomputed after every returned local observation",
+                "the final information-gain ranking is compiled into a typed A1 assay work package",
+                "negative evidence, uncertainty, retries, budget exhaustion, no-progress, and diffuse mechanisms remain explicit",
+                "the sandbox emits metadata-only observations and performs no instrument effect, raw-data movement, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma mechanism operating cycle: {error}"))
     }
 
     /// Propagate signed mechanistic support over a local preclinical glioma evidence graph. This
@@ -49810,6 +49839,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_adaptive_mechanism_policy",
                 "glioma_adaptive_mechanism_campaign_execute",
                 "glioma_mechanism_discrimination_campaign_execute",
+                "glioma_mechanism_operating_cycle",
                 "glioma_mechanism_graph_propagate",
                 "glioma_pathway_activity",
                 "glioma_multimodal_mechanism_campaign",
@@ -59587,6 +59617,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "MechanismDiscriminationCampaignRequest1@1 containing MechanismDiscriminationRequest1@1, hypotheses, discriminator actions, typed local observations, and bounded budget/round/retry limits."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_mechanism_operating_cycle",
+        "description": "Run the complete P05 autonomous mechanism loop for preclinical glioma research: discriminate competing mechanisms, execute a bounded local observation campaign, recompute the posterior-weighted information gain, and compile the next typed A1 assay work package. Negative evidence, uncertainty, retries, budget exhaustion, diffuse mechanisms, and no-progress states remain explicit. MCP uses a deterministic metadata-only sandbox; production adapters remain institution-local and the route performs no raw-data movement, instrument effect, or clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "MechanismOperatingCycleRequest1@1 containing a MechanismDiscriminationCampaignRequest1@1 plus a matching MechanismActionPlannerConfig1@1."}
             },
             "required": ["request"]
         }

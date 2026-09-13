@@ -12,6 +12,7 @@ pub mod discrimination_campaign;
 pub mod ensemble_counterfactual;
 pub mod graph_propagation;
 pub mod mechanism_dynamics;
+pub mod operating_cycle;
 pub mod pathway_activity;
 pub mod robust_portfolio;
 
@@ -73,6 +74,11 @@ pub use mechanism_dynamics::{
     MechanismDynamicsError, MechanismDynamicsIntervention, MechanismDynamicsNode,
     MechanismDynamicsPlan, MechanismDynamicsRequest, MechanismDynamicsSensitivity,
     MechanismDynamicsState, MechanismDynamicsStep,
+};
+pub use operating_cycle::{
+    execute_glioma_mechanism_operating_cycle, MechanismOperatingCycle,
+    MechanismOperatingCycleDisposition, MechanismOperatingCycleError,
+    MechanismOperatingCycleRequest,
 };
 pub use pathway_activity::{
     analyze_glioma_pathway_activity, PathwayActivityAnalysis, PathwayActivityDefinition,
