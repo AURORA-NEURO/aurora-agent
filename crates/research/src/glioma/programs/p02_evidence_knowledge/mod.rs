@@ -7,6 +7,7 @@ pub mod claim_frontier;
 pub mod composition;
 pub mod gap_compiler;
 pub mod knowledge_graph;
+pub mod operating_cycle;
 
 pub use gap_compiler::{
     compile_glioma_knowledge_gaps, KnowledgeGapClaimMapping, KnowledgeGapCompilerError,
@@ -47,6 +48,11 @@ pub use composition::{
 pub use knowledge_graph::{
     compile_typed_knowledge, KnowledgeClaim, KnowledgeClaimDisposition, KnowledgeDisposition,
     KnowledgeError, KnowledgeRequest, TypedKnowledge,
+};
+pub use operating_cycle::{
+    execute_glioma_knowledge_synthesis_operating_cycle, KnowledgeSynthesisOperatingCycle,
+    KnowledgeSynthesisOperatingCycleDisposition, KnowledgeSynthesisOperatingCycleError,
+    KnowledgeSynthesisOperatingCycleRequest,
 };
 
 use crate::glioma::catalog::{glioma_program_catalog, GliomaProgramDescriptor, GliomaProgramId};

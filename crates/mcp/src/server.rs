@@ -523,9 +523,11 @@ use bioprism_research::{
     execute_glioma_experiment_operating_cycle, execute_glioma_instrument_campaign,
     execute_glioma_instrument_fleet, execute_glioma_instrument_operating_cycle,
     execute_glioma_instrument_plan, execute_glioma_interpretation_operating_cycle,
-    execute_glioma_knowledge_resolution_campaign, execute_glioma_mechanism_discrimination_campaign,
-    execute_glioma_mechanism_operating_cycle, execute_glioma_multi_fidelity_campaign,
-    execute_glioma_multimodal_ingestion_campaign, execute_glioma_multimodal_mechanism_campaign,
+    execute_glioma_knowledge_resolution_campaign,
+    execute_glioma_knowledge_synthesis_operating_cycle,
+    execute_glioma_mechanism_discrimination_campaign, execute_glioma_mechanism_operating_cycle,
+    execute_glioma_multi_fidelity_campaign, execute_glioma_multimodal_ingestion_campaign,
+    execute_glioma_multimodal_mechanism_campaign,
     execute_glioma_multimodal_mechanism_campaign_with_executor,
     execute_glioma_multimodal_operating_cycle_dry_run, execute_glioma_multimodal_readiness_gate,
     execute_glioma_protocol, execute_glioma_release_operating_cycle_dry_run,
@@ -602,10 +604,10 @@ use bioprism_research::{
     InstrumentInterlockSnapshot, InstrumentOperatingCycleRequest, InstrumentPreflightRequest,
     InterpretationSynthesisRequest, KnowledgeCompositionRequest, KnowledgeFrontier,
     KnowledgeFrontierRequest, KnowledgeGapCompilerRequest, KnowledgeRelation, KnowledgeRequest,
-    KnowledgeResolutionCampaignRequest, LatentFactorRequest, LatentFactorVector,
-    LigandReceptorPair, MechanismActionPlannerConfig, MechanismCalibration,
-    MechanismCalibrationObservation, MechanismCalibrationRequest, MechanismCandidate,
-    MechanismDiscrimination, MechanismDiscriminationCampaignRequest,
+    KnowledgeResolutionCampaignRequest, KnowledgeSynthesisOperatingCycleRequest,
+    LatentFactorRequest, LatentFactorVector, LigandReceptorPair, MechanismActionPlannerConfig,
+    MechanismCalibration, MechanismCalibrationObservation, MechanismCalibrationRequest,
+    MechanismCandidate, MechanismDiscrimination, MechanismDiscriminationCampaignRequest,
     MechanismDiscriminationRequest, MechanismDiscriminatorAction, MechanismDynamicsEdge,
     MechanismDynamicsIntervention, MechanismDynamicsNode, MechanismDynamicsRequest,
     MechanismFeatureObservation, MechanismGraphEdge, MechanismGraphNode, MechanismGraphRequest,
@@ -2290,6 +2292,9 @@ impl Server {
             "glioma_knowledge_frontier" => self.glioma_knowledge_frontier(&arguments),
             "glioma_knowledge_gap_compile" => self.glioma_knowledge_gap_compile(&arguments),
             "glioma_autonomous_gap_cycle" => self.glioma_autonomous_gap_cycle(&arguments),
+            "glioma_knowledge_synthesis_operating_cycle" => {
+                self.glioma_knowledge_synthesis_operating_cycle(&arguments)
+            }
             "glioma_decision_context" => self.glioma_decision_context(&arguments),
             "glioma_decision_action_graph" => self.glioma_decision_action_graph(&arguments),
             "glioma_decision_branch_plan" => self.glioma_decision_branch_plan(&arguments),
@@ -8393,6 +8398,39 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma autonomous gap-cycle: {error}"))
+    }
+
+    /// Execute the complete P02 knowledge synthesis path and return the next P01 handoff.
+    /// MCP keeps this operation local and deterministic; it compiles no external source and
+    /// cannot promote an unresolved or dry-run result into biological evidence.
+    fn glioma_knowledge_synthesis_operating_cycle(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: KnowledgeSynthesisOperatingCycleRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_knowledge_synthesis_operating_cycle requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma knowledge synthesis operating-cycle request: {error}")
+            })?;
+        let cycle =
+            execute_glioma_knowledge_synthesis_operating_cycle(&request).map_err(|error| {
+                format!("glioma knowledge synthesis operating cycle refused: {error}")
+            })?;
+        serde_json::to_value(json!({
+            "cycle": cycle,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "next_route": "glioma_evidence_acquisition_plan",
+            "guarantees": [
+                "P02 compiles typed evidence, explicit claim paths, conflict-aware belief portfolios, and a ranked knowledge frontier",
+                "the emitted P01 candidates are digest-bound to the local knowledge and frontier outputs",
+                "unknown, negative, contradictory, and missing coverage remain explicit and route to a bounded next action",
+                "the route performs no retrieval, assay, instrument execution, protected-data movement, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma knowledge synthesis operating cycle: {error}"))
     }
 
     /// Turn typed glioma knowledge gaps into executable candidates for the bounded action
@@ -50155,6 +50193,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_knowledge_frontier",
                 "glioma_knowledge_gap_compile",
                 "glioma_autonomous_gap_cycle",
+                "glioma_knowledge_synthesis_operating_cycle",
                 "glioma_decision_context",
                 "glioma_decision_action_graph",
                 "glioma_decision_branch_plan",
@@ -59858,6 +59897,17 @@ pub fn tool_definitions() -> Vec<Value> {
                 "frontier": {"type": "object", "description": "KnowledgeFrontier1@1 from glioma_knowledge_frontier, bound to the same knowledge digest and objective."}
             },
             "required": ["request", "knowledge", "frontier"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_knowledge_synthesis_operating_cycle",
+        "description": "Run the complete P02 autonomous knowledge-synthesis workflow for preclinical glioma research: compile local evidence into typed claims, compose explicit claim paths, revise typed conflicts into a bounded competing-belief portfolio, prioritize the research frontier, and emit digest-bound P01 acquisition candidates. Unknown, negative, contradictory, and missing coverage remain explicit; MCP performs no retrieval, assay, protected-data movement, or clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "KnowledgeSynthesisOperatingCycleRequest1@1 containing KnowledgeRequest1@1, local EvidenceRecord1@1 rows, KnowledgeCompositionRequest1@1 plus explicit KnowledgeRelation1@1 edges, BeliefRevisionRequest1@1 plus typed BeliefConflict1@1 edges, KnowledgeFrontierRequest1@1, and KnowledgeGapCompilerRequest1@1 with local source templates."}
+            },
+            "required": ["request"]
         }
     }));
     definitions.push(json!({

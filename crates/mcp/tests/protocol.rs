@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 700;
+const TOOL_DEFINITION_COUNT: usize = 701;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -3119,6 +3119,62 @@ fn glioma_mechanism_discrimination_campaign_replans_measurement_in_sandbox() {
         json!("surface_readiness")
     );
     assert_eq!(multimodal_cycle["cycle"]["disposition"], json!("ready"));
+}
+
+#[test]
+fn glioma_knowledge_synthesis_operating_cycle_emits_typed_p01_handoff() {
+    let mut server = server();
+    let hash = "0".repeat(64);
+    let response = call(
+        &mut server,
+        "glioma_knowledge_synthesis_operating_cycle",
+        json!({
+            "request": {
+                "knowledge": {
+                    "objective": "resolve organoid invasion evidence",
+                    "required_modalities": ["genomics"],
+                    "required_model_systems": ["organoid"],
+                    "min_support_milli": 500,
+                    "min_sources_per_claim": 1,
+                    "max_claims": 8
+                },
+                "records": [{
+                    "evidence_id": "evidence-1",
+                    "source_artifact": {"artifact_id":"evidence-1","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},
+                    "source_kind": "assay",
+                    "claim": "EGFR signaling increases invasion",
+                    "scope": "organoid",
+                    "modality": "genomics",
+                    "model_system": "organoid",
+                    "state": "supported",
+                    "relevance_milli": 900,
+                    "quality_milli": 900,
+                    "reproducibility_milli": 850,
+                    "release_epoch": 1
+                }],
+                "composition": {"objective":"resolve organoid invasion evidence","min_path_length":2,"max_paths":8,"min_strength_milli":0,"max_contradiction_milli":1000,"require_supported_root":false},
+                "relations": [],
+                "revision": {"objective":"resolve organoid invasion evidence","min_support_milli":0,"min_conflict_milli":1,"max_hypotheses":1,"beam_width":8,"allow_contested":true},
+                "conflicts": [],
+                "frontier": {"objective":"resolve organoid invasion evidence","max_selected_claims":4,"min_priority_milli":0,"weights":{"coverage_debt_milli":250,"contradiction_milli":250,"uncertainty_milli":200,"support_milli":150,"workflow_leverage_milli":150}},
+                "gap": {"objective":"resolve organoid invasion evidence","max_claims":8,"max_candidates":8,"max_candidates_per_claim":4,"max_template_cost_units":4,"min_frontier_priority_milli":0,"templates":[{"template_id":"local-assay","source_family":"local-assay","source_kind":"assay","modality":"genomics","model_system":"organoid","cost_units":1,"reproducibility_milli":800,"failure_probability_milli":100,"privacy_risk_milli":0,"local_only":true,"contains_human_data":false}]}
+            }
+        }),
+    );
+    assert_eq!(response["dispatch"], json!("not_started"));
+    assert_eq!(response["simulation_only"], json!(true));
+    assert_eq!(
+        response["cycle"]["phase_order"].as_array().unwrap().len(),
+        5
+    );
+    assert_eq!(
+        response["next_route"],
+        json!("glioma_evidence_acquisition_plan")
+    );
+    assert!(!response["cycle"]["next_action"]
+        .as_str()
+        .unwrap()
+        .is_empty());
 }
 
 #[test]
