@@ -76,6 +76,8 @@ crates/research/src/glioma/
                                              P05 signed delayed-feedback mechanism dynamics with intervention ranking, stability, oscillation, divergence, and sensitivity analysis
   programs/p05_mechanism_exploration/operating_cycle.rs
                                              P05 mechanism-discrimination campaign to typed next-assay operating cycle
+  programs/p05_mechanism_exploration/calibrated_campaign.rs
+                                             P05 calibration-gated adaptive mechanism policy with trust-discounted effects and exploration debt
   programs/p06_experiment_design/clonal_panel.rs
                                              P06 clone-aware perturbation/readout panel selection under cost and branch-coverage gates
   programs/p06_experiment_design/contrast_design.rs
@@ -316,7 +318,7 @@ portfolio plan and executable code; it does not promote a planned slot to implem
 | P02 Evidence-to-typed-knowledge | knowledge engineer | evidence compilation | scoped claims, contradiction-aware maximal-consistency portfolios, ranked rival frontiers, typed frontier-to-acquisition candidate compilation, autonomous P02-to-P01 gap cycles, a complete knowledge-synthesis operating cycle, and competing explanations bound to source artifacts |
 | P03 Multimodal ingestion and QC | data steward | multimodal ingestion/QC | comparable cells, robust batch harmonization, feature-level concordance, consensus clusters, spatial niches, ligand-receptor communication, cross-sample registration, spatial-state diffusion, explicit defects, downstream research-surface admission, and an executable QC-to-handoff operating cycle |
 | P04 Question-to-decision context | principal investigator | intent normalization, context compilation | bounded decision context, dependency-closed action DAGs, scenario-aware Pareto workflow branches, branch execution with forecast-drift failover, evidence-returning adaptive replanning, full operating-cycle execution, selected action batches, and unresolved omissions |
-| P05 Mechanism exploration | mechanism scientist | molecular landscape, mechanism exploration | residual-fit competing mechanisms, posterior-weighted next-assay information gain, signed mechanism-network propagation, delayed-feedback mechanism dynamics, model-averaged counterfactuals, robust lower-tail intervention portfolios, discriminating campaigns, and an end-to-end next-assay operating cycle |
+| P05 Mechanism exploration | mechanism scientist | molecular landscape, mechanism exploration | residual-fit competing mechanisms, calibrated trust-discounted posterior action selection, posterior-weighted next-assay information gain, signed mechanism-network propagation, delayed-feedback mechanism dynamics, model-averaged counterfactuals, robust lower-tail intervention portfolios, discriminating campaigns, and an end-to-end next-assay operating cycle |
 | P06 Power-aware experiment design | experimentalist | experiment design | falsifiable allocation, power, blocking, dose-response, adaptive replicate allocation, sequential Bayesian success/futility stopping, local sequential campaign execution, uncertainty-aware dose-surface acquisition, mechanism-aware closed-loop campaign rounds, an end-to-end plan/execute/replan cycle, combination-synergy fitting, and null-result plan |
 | P07 Protocol simulation | lab operations lead | protocol simulation, adaptive workflow planning | critical-path scheduling, outcome-aware dependency scheduling, intent-to-stage-action compilation, bounded modality/model-system portfolio expansion, evidence-gated director admission, evidence-priority execution cycles, context-to-action execution, multimodal mechanism campaigns, evolution-aware clone campaigns, stage-gated autonomous program control, failed-frontier recovery with alternate dependency-safe missions, P02/P03-aware scientific frontier admission, utilization, deterministic next batches, and repair/abstain routing before physical effects |
 | P08 Instrument and robotics preflight | instrument operator | instrument preflight | robust control calibration, drift detection, information-per-cost endpoint-diverse campaign selection, multi-instrument dependency scheduling, schedule-bound fleet execution, signed interlocked planning, guarded execution, and fail-closed multi-run campaigns |
@@ -668,6 +670,11 @@ observations with fixed reliability bins, Brier loss, sharpness, and a final-rou
 holdout. Underpowered mechanisms, high-uncertainty observations, discordant negative evidence, and
 calibration/Brier gate failures remain explicit; calibration never refits a model or becomes a
 causal claim, and the MCP route never executes an assay or moves raw data.
+The calibration-aware campaign (`execute_glioma_calibrated_mechanism_campaign`) now joins that
+report to adaptive policy selection. It discounts expected effects by model-specific calibration
+trust, gives an explicit exploration bonus to actions that can repair calibration debt, and blocks
+qualification when held-out coverage or Brier/calibration thresholds fail. Each returned local
+observation triggers a fresh policy/trust recomputation; the dry-run route remains synthetic-only.
 
 P06 now also exposes a multi-factor contrast-panel compiler
 (`design_glioma_contrast_panel`). It expands declared preclinical factors into balanced factorial

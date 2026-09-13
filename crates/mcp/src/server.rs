@@ -520,17 +520,17 @@ use bioprism_research::{
     execute_glioma_adaptive_mechanism_campaign, execute_glioma_autonomous_campaign,
     execute_glioma_autonomous_gap_cycle, execute_glioma_autonomous_program_cycle,
     execute_glioma_autonomous_research_engine, execute_glioma_autonomous_research_mission,
-    execute_glioma_computation, execute_glioma_computation_campaign,
-    execute_glioma_computation_operating_cycle_dry_run, execute_glioma_computation_portfolio,
-    execute_glioma_computation_recovery, execute_glioma_decision_branch_campaign,
-    execute_glioma_decision_context_campaign, execute_glioma_decision_operating_cycle,
-    execute_glioma_evidence_acquisition_campaign, execute_glioma_evidence_campaign,
-    execute_glioma_evidence_gated_research, execute_glioma_evidence_operating_cycle_dry_run,
-    execute_glioma_evidence_refresh_campaign, execute_glioma_experiment_operating_cycle,
-    execute_glioma_instrument_campaign, execute_glioma_instrument_fleet,
-    execute_glioma_instrument_operating_cycle, execute_glioma_instrument_plan,
-    execute_glioma_intent_mission, execute_glioma_interpretation_operating_cycle,
-    execute_glioma_knowledge_resolution_campaign,
+    execute_glioma_calibrated_mechanism_campaign_dry_run, execute_glioma_computation,
+    execute_glioma_computation_campaign, execute_glioma_computation_operating_cycle_dry_run,
+    execute_glioma_computation_portfolio, execute_glioma_computation_recovery,
+    execute_glioma_decision_branch_campaign, execute_glioma_decision_context_campaign,
+    execute_glioma_decision_operating_cycle, execute_glioma_evidence_acquisition_campaign,
+    execute_glioma_evidence_campaign, execute_glioma_evidence_gated_research,
+    execute_glioma_evidence_operating_cycle_dry_run, execute_glioma_evidence_refresh_campaign,
+    execute_glioma_experiment_operating_cycle, execute_glioma_instrument_campaign,
+    execute_glioma_instrument_fleet, execute_glioma_instrument_operating_cycle,
+    execute_glioma_instrument_plan, execute_glioma_intent_mission,
+    execute_glioma_interpretation_operating_cycle, execute_glioma_knowledge_resolution_campaign,
     execute_glioma_knowledge_synthesis_operating_cycle,
     execute_glioma_mechanism_discrimination_campaign, execute_glioma_mechanism_operating_cycle,
     execute_glioma_mission_recovery, execute_glioma_multi_fidelity_campaign,
@@ -568,20 +568,21 @@ use bioprism_research::{
     AdaptiveInterpretationCampaignRequest, AdaptiveMechanismCampaignRequest,
     AdaptiveMechanismPolicyRequest, AnalysisDataset, AnalysisRequest, AssayEvidenceObservation,
     AssayEvidenceRequest, AutonomousGapCycleRequest, AutonomousProgramCycleRequest, BeliefConflict,
-    BeliefRevisionRequest, CalibrationRequest, CalibrationRun, CampaignAction, CampaignMechanism,
-    CampaignObservation, CausalContrastRequest, ClonalEvolutionGraph, ClonalEvolutionRequest,
-    CloneContinuationCandidate, CloneContinuationRequest, ClonePanelObservation,
-    ClonePanelOutcomeAnalysis, ClonePanelOutcomeRequest, ClonePerturbationCandidate,
-    ClonePerturbationPanel, ClonePerturbationPanelRequest, CloneProfile, ClosedLoopCampaignRequest,
-    CombinationObservation, CombinationSynergyRequest, ComputationCandidate,
-    ComputationExecutionMode, ComputationExecutionRequest, ComputationPlacementRequest,
-    ComputationPortfolioExecutionRequest, ComputationPortfolioRequest, ComputationRecoveryRequest,
-    ConcordanceRequest, ConsensusRequest, ContrastDesignRequest, CounterfactualEnsembleRequest,
-    CounterfactualIntervention, CounterfactualModel, CounterfactualRequest,
-    DecisionActionGraphRequest, DecisionActionPlanRequest, DecisionBranchCampaignRequest,
-    DecisionBranchPlannerRequest, DecisionContext, DecisionContextCampaignRequest,
-    DecisionContextRequest, DecisionOperatingCycleRequest, DesignAction, DesignMechanism,
-    DoseResponseObservation, DoseResponseRequest, DryRunActiveLearningCampaignExecutor,
+    BeliefRevisionRequest, CalibratedMechanismCampaignRequest, CalibrationRequest, CalibrationRun,
+    CampaignAction, CampaignMechanism, CampaignObservation, CausalContrastRequest,
+    ClonalEvolutionGraph, ClonalEvolutionRequest, CloneContinuationCandidate,
+    CloneContinuationRequest, ClonePanelObservation, ClonePanelOutcomeAnalysis,
+    ClonePanelOutcomeRequest, ClonePerturbationCandidate, ClonePerturbationPanel,
+    ClonePerturbationPanelRequest, CloneProfile, ClosedLoopCampaignRequest, CombinationObservation,
+    CombinationSynergyRequest, ComputationCandidate, ComputationExecutionMode,
+    ComputationExecutionRequest, ComputationPlacementRequest, ComputationPortfolioExecutionRequest,
+    ComputationPortfolioRequest, ComputationRecoveryRequest, ConcordanceRequest, ConsensusRequest,
+    ContrastDesignRequest, CounterfactualEnsembleRequest, CounterfactualIntervention,
+    CounterfactualModel, CounterfactualRequest, DecisionActionGraphRequest,
+    DecisionActionPlanRequest, DecisionBranchCampaignRequest, DecisionBranchPlannerRequest,
+    DecisionContext, DecisionContextCampaignRequest, DecisionContextRequest,
+    DecisionOperatingCycleRequest, DesignAction, DesignMechanism, DoseResponseObservation,
+    DoseResponseRequest, DryRunActiveLearningCampaignExecutor,
     DryRunAdaptiveAllocationCampaignExecutor, DryRunAdaptiveMechanismPolicyExecutor,
     DryRunDecisionContextCampaignExecutor, DryRunEvidenceAcquisitionExecutor,
     DryRunEvidenceRefreshCampaignExecutor, DryRunExperimentOperatingCycleExecutor,
@@ -2342,6 +2343,9 @@ impl Server {
             "glioma_adaptive_mechanism_policy" => self.glioma_adaptive_mechanism_policy(&arguments),
             "glioma_adaptive_mechanism_campaign_execute" => {
                 self.glioma_adaptive_mechanism_campaign_execute(&arguments)
+            }
+            "glioma_calibrated_mechanism_campaign_execute" => {
+                self.glioma_calibrated_mechanism_campaign_execute(&arguments)
             }
             "glioma_mechanism_discrimination_campaign_execute" => {
                 self.glioma_mechanism_discrimination_campaign_execute(&arguments)
@@ -9095,6 +9099,34 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma adaptive mechanism campaign: {error}"))
+    }
+
+    /// Execute calibration-aware adaptive mechanism selection through a deterministic sandbox.
+    fn glioma_calibrated_mechanism_campaign_execute(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: CalibratedMechanismCampaignRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_calibrated_mechanism_campaign_execute requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma calibrated mechanism campaign request: {error}")
+            })?;
+        let campaign = execute_glioma_calibrated_mechanism_campaign_dry_run(&request)
+            .map_err(|error| format!("glioma calibrated mechanism campaign refused: {error}"))?;
+        serde_json::to_value(json!({
+            "campaign": campaign,
+            "dispatch": "dry_run",
+            "simulation_only": true,
+            "guarantees": [
+                "model-specific calibration trust discounts expected effects before adaptive action ranking",
+                "calibration debt can earn an explicit bounded exploration bonus without qualifying an uncalibrated posterior",
+                "held-out coverage, calibration error, Brier loss, posterior entropy, retry, budget, and no-progress gates remain explicit",
+                "the route performs no instrument effect, raw-data movement, federation, diagnosis, treatment, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma calibrated mechanism campaign: {error}"))
     }
 
     /// Execute a bounded mechanism-discrimination loop through a local feature-measurement adapter.
@@ -50631,6 +50663,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_mechanism_action_plan",
                 "glioma_adaptive_mechanism_policy",
                 "glioma_adaptive_mechanism_campaign_execute",
+                "glioma_calibrated_mechanism_campaign_execute",
                 "glioma_mechanism_discrimination_campaign_execute",
                 "glioma_mechanism_operating_cycle",
                 "glioma_mechanism_graph_propagate",
@@ -60572,6 +60605,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "AdaptiveMechanismCampaignRequest1@1 with policy registry, prior observations, round/retry bounds, artifact requirement, and convergence stop policy."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_calibrated_mechanism_campaign_execute",
+        "description": "Execute a calibration-aware adaptive preclinical glioma mechanism campaign. Joins a prequential calibration report to posterior-driven action selection, discounts effects from poorly calibrated models, gives calibration debt an explicit bounded exploration bonus, and requires coverage/error/Brier trust plus posterior gates before qualification. Each typed local observation triggers a fresh trust and policy recomputation; MCP uses a deterministic synthetic worker and performs no biology, raw-data movement, or clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "CalibratedMechanismCampaignRequest1@1 containing AdaptiveMechanismCampaignRequest1@1, MechanismCalibration1@1, calibration thresholds, exploration policy, and bounded round/retry controls."}
             },
             "required": ["request"]
         }

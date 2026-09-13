@@ -89,7 +89,7 @@ fn main() {
                      glioma_mechanism_discriminate, glioma_mechanism_calibrate,\n\
                      glioma_mechanism_dynamics,\n\
                      glioma_mechanism_action_plan,\n\
-                     glioma_adaptive_mechanism_policy, glioma_adaptive_mechanism_campaign_execute,\n\
+                     glioma_adaptive_mechanism_policy, glioma_adaptive_mechanism_campaign_execute, glioma_calibrated_mechanism_campaign_execute,\n\
                      glioma_mechanism_operating_cycle,\n\
                      glioma_mechanism_graph_propagate, glioma_pathway_activity, glioma_multimodal_mechanism_campaign, glioma_multimodal_mechanism_campaign_execute,\n\
                      glioma_mechanism_counterfactual,\n\

@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 714;
+const TOOL_DEFINITION_COUNT: usize = 715;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -4978,6 +4978,68 @@ fn glioma_adaptive_mechanism_campaign_replans_from_sandbox_observation() {
     assert!(campaign["campaign"]["completed_action_order"]
         .as_array()
         .is_some_and(|items| !items.is_empty()));
+}
+
+#[test]
+fn glioma_calibrated_mechanism_campaign_discounts_model_trust() {
+    let mut server = server();
+    let artifact_hash = ContentHash::of_value(&json!({"artifact": "calibrated-campaign"})).unwrap();
+    let calibration = call(
+        &mut server,
+        "glioma_mechanism_calibrate",
+        json!({
+            "request": {"objective":"calibrated invasion policy","model_system":"organoid","min_observations_per_mechanism":2,"max_mechanisms":4,"max_rounds":4,"max_calibration_error_milli":200000,"max_brier_loss_milli":200000},
+            "observations": [
+                {"round_index":0,"mechanism_id":"m1","feature_id":"f1","predicted_milli":800000,"observed_milli":780000,"uncertainty_milli":10000,"artifact":{"artifact_id":"cal-m1-f1","content_hash":artifact_hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"round_index":1,"mechanism_id":"m1","feature_id":"f2","predicted_milli":700000,"observed_milli":680000,"uncertainty_milli":10000,"artifact":{"artifact_id":"cal-m1-f2","content_hash":artifact_hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"round_index":0,"mechanism_id":"m2","feature_id":"f1","predicted_milli":200000,"observed_milli":220000,"uncertainty_milli":10000,"artifact":{"artifact_id":"cal-m2-f1","content_hash":artifact_hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"round_index":1,"mechanism_id":"m2","feature_id":"f2","predicted_milli":300000,"observed_milli":320000,"uncertainty_milli":10000,"artifact":{"artifact_id":"cal-m2-f2","content_hash":artifact_hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}}
+            ]
+        }),
+    );
+    let campaign = call(
+        &mut server,
+        "glioma_calibrated_mechanism_campaign_execute",
+        json!({
+            "request": {
+                "policy": {
+                    "policy": {
+                        "objective":"calibrated invasion policy",
+                        "model_system":"organoid",
+                        "horizon":1,"budget_units":2,"max_actions":4,"outcome_bucket_width_milli":10,
+                        "information_weight_milli":700,"effect_weight_milli":100,"robustness_weight_milli":200,
+                        "risk_penalty_milli":1,"cost_penalty_milli":1,"redundancy_penalty_milli":20,
+                        "min_feasibility_milli":500,"stop_entropy_milli":50,
+                        "models":[{"model_id":"m1","label":"invasion-led","prior_milli":500},{"model_id":"m2","label":"matrix-led","prior_milli":500}],
+                        "actions":[
+                            {"action_id":"assay-a","label":"measure invasion","target_node_id":"node-a","modality":"functional_perturbation","redundancy_group":"pathway","cost_units":1,"risk_milli":50,"feasibility_milli":950,"predictions":[{"model_id":"m1","outcome_milli":100,"effect_milli":100,"uncertainty_milli":20},{"model_id":"m2","outcome_milli":900,"effect_milli":900,"uncertainty_milli":20}]},
+                            {"action_id":"assay-b","label":"measure matrix","target_node_id":"node-b","modality":"spatial","redundancy_group":"spatial","cost_units":1,"risk_milli":50,"feasibility_milli":950,"predictions":[{"model_id":"m1","outcome_milli":200,"effect_milli":200,"uncertainty_milli":20},{"model_id":"m2","outcome_milli":220,"effect_milli":220,"uncertainty_milli":20}]}
+                        ],
+                        "observations":[]
+                    },
+                    "max_rounds":2,"max_retries":1,"require_artifacts":true,"stop_on_converged":false
+                },
+                "calibration": calibration["calibration"].clone(),
+                "min_coverage_milli":1000,"max_calibration_error_milli":200000,"max_brier_loss_milli":200000,"min_trust_milli":500,"calibration_exploration_weight_milli":500,
+                "max_rounds":2,"max_retries":1,"require_artifacts":true,"stop_on_calibrated":false,"allow_uncalibrated_exploration":false
+            }
+        }),
+    );
+    assert_eq!(campaign["dispatch"], json!("dry_run"));
+    assert_eq!(campaign["simulation_only"], json!(true));
+    assert_eq!(campaign["campaign"]["calibration_gate_open"], json!(true));
+    assert!(!campaign["campaign"]["rounds"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+    assert!(campaign["campaign"]["rounds"][0]["action_scores"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|score| score["posterior_model_trust_milli"]
+            .as_u64()
+            .unwrap_or_default()
+            > 0));
 }
 
 #[test]

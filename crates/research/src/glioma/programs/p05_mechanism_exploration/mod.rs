@@ -4,6 +4,7 @@ use crate::glioma::catalog::{glioma_program_catalog, GliomaProgramDescriptor, Gl
 
 pub mod action_planner;
 pub mod adaptive_policy;
+pub mod calibrated_campaign;
 pub mod calibration;
 pub mod clonal_evolution;
 pub mod counterfactual;
@@ -29,6 +30,14 @@ pub use adaptive_policy::{
     AdaptiveMechanismPolicyError, AdaptiveMechanismPolicyExecutor,
     AdaptiveMechanismPolicyPosterior, AdaptiveMechanismPolicyRequest, AdaptiveMechanismPolicyStep,
     AdaptiveMechanismPrediction, DryRunAdaptiveMechanismPolicyExecutor,
+};
+pub use calibrated_campaign::{
+    execute_glioma_calibrated_mechanism_campaign,
+    execute_glioma_calibrated_mechanism_campaign_dry_run, CalibratedMechanismActionScore,
+    CalibratedMechanismCampaign, CalibratedMechanismCampaignDisposition,
+    CalibratedMechanismCampaignError, CalibratedMechanismCampaignRequest,
+    CalibratedMechanismCampaignRound, CalibratedMechanismCampaignStopReason,
+    CalibratedMechanismTrust,
 };
 pub use calibration::{
     calibrate_glioma_mechanisms, MechanismCalibration, MechanismCalibrationBin,
