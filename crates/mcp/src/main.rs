@@ -76,6 +76,7 @@ fn main() {
                      glioma_evidence_refresh_campaign_execute,\n\
                      glioma_knowledge_resolution_campaign_execute,\n\
                      glioma_decision_context_campaign_execute,\n\
+                     glioma_decision_operating_cycle,\n\
                      glioma_multimodal_ingestion_campaign_execute,\n\
                      glioma_multimodal_readiness_gate,\n\
                      glioma_mechanism_discrimination_campaign_execute,\n\

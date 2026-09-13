@@ -5,6 +5,7 @@ pub mod action_graph;
 pub mod branch_planner;
 pub mod campaign;
 pub mod context_compiler;
+pub mod decision_cycle;
 
 pub use action_bridge::{
     plan_decision_actions, DecisionActionPlan, DecisionActionPlanDisposition,
@@ -29,6 +30,10 @@ pub use campaign::{
 pub use context_compiler::{
     compile_decision_context, DecisionAction, DecisionActionKind, DecisionContext,
     DecisionContextDisposition, DecisionContextError, DecisionContextRequest,
+};
+pub use decision_cycle::{
+    execute_glioma_decision_operating_cycle, DecisionOperatingCycle,
+    DecisionOperatingCycleDisposition, DecisionOperatingCycleError, DecisionOperatingCycleRequest,
 };
 
 use crate::glioma::catalog::{glioma_program_catalog, GliomaProgramDescriptor, GliomaProgramId};

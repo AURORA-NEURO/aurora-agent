@@ -514,13 +514,13 @@ use bioprism_research::{
     execute_glioma_autonomous_gap_cycle, execute_glioma_autonomous_research_engine,
     execute_glioma_autonomous_research_mission, execute_glioma_computation,
     execute_glioma_computation_campaign, execute_glioma_computation_portfolio,
-    execute_glioma_decision_context_campaign, execute_glioma_evidence_acquisition_campaign,
-    execute_glioma_evidence_campaign, execute_glioma_evidence_gated_research,
-    execute_glioma_evidence_refresh_campaign, execute_glioma_instrument_campaign,
-    execute_glioma_instrument_fleet, execute_glioma_instrument_plan,
-    execute_glioma_knowledge_resolution_campaign, execute_glioma_mechanism_discrimination_campaign,
-    execute_glioma_multi_fidelity_campaign, execute_glioma_multimodal_ingestion_campaign,
-    execute_glioma_multimodal_mechanism_campaign,
+    execute_glioma_decision_context_campaign, execute_glioma_decision_operating_cycle,
+    execute_glioma_evidence_acquisition_campaign, execute_glioma_evidence_campaign,
+    execute_glioma_evidence_gated_research, execute_glioma_evidence_refresh_campaign,
+    execute_glioma_instrument_campaign, execute_glioma_instrument_fleet,
+    execute_glioma_instrument_plan, execute_glioma_knowledge_resolution_campaign,
+    execute_glioma_mechanism_discrimination_campaign, execute_glioma_multi_fidelity_campaign,
+    execute_glioma_multimodal_ingestion_campaign, execute_glioma_multimodal_mechanism_campaign,
     execute_glioma_multimodal_mechanism_campaign_with_executor,
     execute_glioma_multimodal_readiness_gate, execute_glioma_protocol,
     execute_glioma_replay_campaign, execute_glioma_replication_campaign,
@@ -560,13 +560,13 @@ use bioprism_research::{
     ConsensusRequest, ContrastDesignRequest, CounterfactualEnsembleRequest,
     CounterfactualIntervention, CounterfactualModel, CounterfactualRequest,
     DecisionActionGraphRequest, DecisionActionPlanRequest, DecisionBranchPlannerRequest,
-    DecisionContext, DecisionContextCampaignRequest, DecisionContextRequest, DesignAction,
-    DesignMechanism, DoseResponseObservation, DoseResponseRequest,
-    DryRunActiveLearningCampaignExecutor, DryRunAdaptiveAllocationCampaignExecutor,
-    DryRunAdaptiveMechanismPolicyExecutor, DryRunDecisionContextCampaignExecutor,
-    DryRunEvidenceAcquisitionExecutor, DryRunEvidenceRefreshCampaignExecutor,
-    DryRunFederatedBenchmarkCampaignExecutor, DryRunGliomaActionExecutor,
-    DryRunGliomaComputationExecutor, DryRunGliomaProtocolExecutor,
+    DecisionContext, DecisionContextCampaignRequest, DecisionContextRequest,
+    DecisionOperatingCycleRequest, DesignAction, DesignMechanism, DoseResponseObservation,
+    DoseResponseRequest, DryRunActiveLearningCampaignExecutor,
+    DryRunAdaptiveAllocationCampaignExecutor, DryRunAdaptiveMechanismPolicyExecutor,
+    DryRunDecisionContextCampaignExecutor, DryRunEvidenceAcquisitionExecutor,
+    DryRunEvidenceRefreshCampaignExecutor, DryRunFederatedBenchmarkCampaignExecutor,
+    DryRunGliomaActionExecutor, DryRunGliomaComputationExecutor, DryRunGliomaProtocolExecutor,
     DryRunGliomaReplicationCampaignExecutor, DryRunInstrumentExecutor,
     DryRunKnowledgeResolutionCampaignExecutor, DryRunMechanismDiscriminationCampaignExecutor,
     DryRunMultiFidelityCampaignExecutor, DryRunMultimodalIngestionCampaignExecutor,
@@ -2176,6 +2176,7 @@ impl Server {
             "glioma_decision_context_campaign_execute" => {
                 self.glioma_decision_context_campaign_execute(&arguments)
             }
+            "glioma_decision_operating_cycle" => self.glioma_decision_operating_cycle(&arguments),
             "glioma_multimodal_ingestion_campaign_execute" => {
                 self.glioma_multimodal_ingestion_campaign_execute(&arguments)
             }
@@ -6115,6 +6116,34 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma decision-context campaign: {error}"))
+    }
+
+    /// Run the full P04 evidence-to-decision operating cycle through MCP's deterministic local
+    /// executor: knowledge, context, dependency graph, robust branches, then campaign execution.
+    fn glioma_decision_operating_cycle(&self, arguments: &Value) -> Result<Value, String> {
+        let request: DecisionOperatingCycleRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_decision_operating_cycle requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma decision operating-cycle request: {error}"))?;
+        let mut executor = DryRunDecisionContextCampaignExecutor;
+        let cycle = execute_glioma_decision_operating_cycle(&request, &mut executor)
+            .map_err(|error| format!("glioma decision operating-cycle refused: {error}"))?;
+        serde_json::to_value(json!({
+            "cycle": cycle,
+            "dispatch": "dry_run",
+            "simulation_only": true,
+            "guarantees": [
+                "typed knowledge is compiled into a dependency-closed decision context and action graph",
+                "scenario branches preserve expected value, worst-case value, uncertainty, and failure risk separately",
+                "the selected decision campaign executes only through MCP's synthetic local adapter",
+                "contradictions, negative evidence, omissions, retries, budget limits, and no-progress states remain explicit",
+                "the route performs no raw-data movement, external instrument effect, clinical decision, or treatment recommendation"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma decision operating-cycle: {error}"))
     }
 
     /// Execute a typed multimodal computation DAG through the deterministic synthetic worker.
@@ -49708,6 +49737,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_evidence_refresh_campaign_execute",
                 "glioma_knowledge_resolution_campaign_execute",
                 "glioma_decision_context_campaign_execute",
+                "glioma_decision_operating_cycle",
                 "glioma_multimodal_ingestion_campaign_execute",
                 "glioma_multimodal_readiness_gate",
                 "glioma_computation_execute",
@@ -58655,6 +58685,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "DecisionContextCampaignRequest1@1 containing KnowledgeRequest1@1, DecisionContextRequest1@1, DecisionActionPlanRequest1@1, typed EvidenceRecord1@1 rows, and bounded budget/round/retry limits."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_decision_operating_cycle",
+        "description": "Run the full preclinical glioma P04 evidence-to-decision operating cycle: compile typed knowledge, build a dependency-closed action graph, synthesize robust scenario branches, and execute the bounded decision campaign through MCP's deterministic local adapter. Expected value, worst-case value, uncertainty, failure risk, omissions, negative evidence, and budget stops remain separate; no clinical decision or external effect is performed.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "DecisionOperatingCycleRequest1@1 containing KnowledgeRequest1@1, DecisionContextRequest1@1, DecisionActionGraphRequest1@1, DecisionBranchPlannerRequest1@1, KnowledgeComposition1@1, local EvidenceRecord1@1 rows, selection policy, and bounded campaign limits."}
             },
             "required": ["request"]
         }

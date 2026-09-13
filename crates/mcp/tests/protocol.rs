@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 689;
+const TOOL_DEFINITION_COUNT: usize = 690;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -3526,6 +3526,131 @@ fn glioma_decision_context_campaign_dispatches_claim_scoped_action_in_sandbox() 
         json!("no_runnable_actions")
     );
     assert_eq!(campaign["campaign"]["rounds"].as_array().unwrap().len(), 1);
+}
+
+#[test]
+fn glioma_decision_operating_cycle_runs_full_p04_stack_in_sandbox() {
+    let mut server = server();
+    let hash = "0".repeat(64);
+    let objective = "resolve glioma invasion mechanism";
+    let record = json!({
+        "evidence_id": "p04-cycle-seed",
+        "source_artifact": {"artifact_id":"p04-cycle-artifact","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},
+        "source_kind": "literature",
+        "claim": "EGFR signaling increases invasion",
+        "scope": "organoid invasion",
+        "modality": "genomics",
+        "model_system": "organoid",
+        "state": "supported",
+        "relevance_milli": 900,
+        "quality_milli": 900,
+        "reproducibility_milli": 900,
+        "release_epoch": 1
+    });
+    let knowledge = call(
+        &mut server,
+        "glioma_knowledge_compile",
+        json!({
+            "request": {
+                "objective": objective,
+                "required_modalities": ["genomics"],
+                "required_model_systems": ["organoid"],
+                "min_support_milli": 100,
+                "min_sources_per_claim": 1,
+                "max_claims": 8
+            },
+            "records": [record.clone()]
+        }),
+    );
+    let composition = call(
+        &mut server,
+        "glioma_knowledge_compose",
+        json!({
+            "request": {
+                "objective": objective,
+                "min_path_length": 2,
+                "max_paths": 8,
+                "min_strength_milli": 0,
+                "max_contradiction_milli": 1000,
+                "require_supported_root": false
+            },
+            "knowledge": knowledge["knowledge"].clone(),
+            "relations": []
+        }),
+    );
+    let cycle = call(
+        &mut server,
+        "glioma_decision_operating_cycle",
+        json!({
+            "request": {
+                "knowledge": {
+                    "objective": objective,
+                    "required_modalities": ["genomics"],
+                    "required_model_systems": ["organoid"],
+                    "min_support_milli": 100,
+                    "min_sources_per_claim": 1,
+                    "max_claims": 8
+                },
+                "context": {"objective": objective, "max_actions": 8, "default_cost_units": 2},
+                "graph": {"objective": objective, "max_nodes": 8, "max_waves": 8, "budget_units": 8, "require_qualified_composition": false},
+                "branches": {
+                    "objective": objective,
+                    "candidates": [],
+                    "completed_action_order": [],
+                    "scenarios": [],
+                    "budget_units": 8,
+                    "max_actions_per_branch": 2,
+                    "max_branches": 4,
+                    "beam_width": 8,
+                    "minimum_robustness_milli": -1000000,
+                    "uncertainty_penalty_milli": 100,
+                    "failure_penalty_milli": 100,
+                    "selection_weights": {
+                        "information_gain": 25,
+                        "frontier_novelty": 20,
+                        "workflow_leverage": 15,
+                        "cross_stage_unlock": 15,
+                        "reproducibility_safety": 10,
+                        "federation_value": 10,
+                        "feasibility": 5
+                    }
+                },
+                "composition": composition["composition"].clone(),
+                "records": [record],
+                "action_plan": {
+                    "objective": objective,
+                    "completed_action_order": [],
+                    "selection": {
+                        "budget_units": 8,
+                        "max_actions": 2,
+                        "approval_granted": true,
+                        "allow_instrument_execution": false,
+                        "allow_federation": false,
+                        "weights": {
+                            "information_gain": 25,
+                            "frontier_novelty": 20,
+                            "workflow_leverage": 15,
+                            "cross_stage_unlock": 15,
+                            "reproducibility_safety": 10,
+                            "federation_value": 10,
+                            "feasibility": 5
+                        }
+                    }
+                },
+                "budget_units": 8,
+                "max_rounds": 2,
+                "max_retries": 1,
+                "stop_on_qualified": true
+            }
+        }),
+    );
+    assert_eq!(cycle["dispatch"], json!("dry_run"));
+    assert_eq!(cycle["simulation_only"], json!(true));
+    assert_eq!(cycle["cycle"]["phase_order"].as_array().unwrap().len(), 5);
+    assert_eq!(
+        cycle["cycle"]["action_graph"]["context_digest"],
+        cycle["cycle"]["context"]["digest"]
+    );
 }
 
 #[test]
