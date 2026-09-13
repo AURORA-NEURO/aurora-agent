@@ -513,8 +513,8 @@ use bioprism_research::{
     evaluate_glioma_release_gate, execute_federated_benchmark_adaptive_campaign_dry_run,
     execute_federated_benchmark_campaign, execute_federated_benchmark_operating_cycle_dry_run,
     execute_glioma_action_portfolio, execute_glioma_active_learning_campaign,
-    execute_glioma_adaptive_allocation_campaign, execute_glioma_adaptive_frontier,
-    execute_glioma_adaptive_instrument_campaign,
+    execute_glioma_adaptive_allocation_campaign, execute_glioma_adaptive_clone_campaign_dry_run,
+    execute_glioma_adaptive_frontier, execute_glioma_adaptive_instrument_campaign,
     execute_glioma_adaptive_interpretation_campaign_dry_run,
     execute_glioma_adaptive_mechanism_campaign, execute_glioma_autonomous_campaign,
     execute_glioma_autonomous_gap_cycle, execute_glioma_autonomous_program_cycle,
@@ -560,26 +560,27 @@ use bioprism_research::{
     synthesize_glioma_interpretation, triangulate_glioma_evidence, validate_feature_catalog,
     ActionPortfolioExecutionRequest, ActiveLearningCampaignRequest, ActiveLearningCandidate,
     ActiveLearningObservation, ActiveLearningRequest, AdaptiveAllocationCampaignRequest,
-    AdaptiveAllocationRequest, AdaptiveArmObservation, AdaptiveDoseSurfaceRequest,
-    AdaptiveFrontierExecutionRequest, AdaptiveFrontierRequest, AdaptiveInformationCampaignRequest,
-    AdaptiveInformationObservation, AdaptiveInstrumentCampaignRequest,
-    AdaptiveInterpretationCampaignRequest, AdaptiveMechanismCampaignRequest,
-    AdaptiveMechanismPolicyRequest, AnalysisDataset, AnalysisRequest, AssayEvidenceObservation,
-    AssayEvidenceRequest, AutonomousGapCycleRequest, AutonomousProgramCycleRequest, BeliefConflict,
-    BeliefRevisionRequest, CalibrationRequest, CalibrationRun, CampaignAction, CampaignMechanism,
-    CampaignObservation, CausalContrastRequest, ClonalEvolutionGraph, ClonalEvolutionRequest,
-    CloneContinuationCandidate, CloneContinuationRequest, ClonePanelObservation,
-    ClonePanelOutcomeAnalysis, ClonePanelOutcomeRequest, ClonePerturbationCandidate,
-    ClonePerturbationPanel, ClonePerturbationPanelRequest, CloneProfile, ClosedLoopCampaignRequest,
-    CombinationObservation, CombinationSynergyRequest, ComputationCandidate,
-    ComputationExecutionMode, ComputationExecutionRequest, ComputationPlacementRequest,
-    ComputationPortfolioExecutionRequest, ComputationPortfolioRequest, ComputationRecoveryRequest,
-    ConcordanceRequest, ConsensusRequest, ContrastDesignRequest, CounterfactualEnsembleRequest,
-    CounterfactualIntervention, CounterfactualModel, CounterfactualRequest,
-    DecisionActionGraphRequest, DecisionActionPlanRequest, DecisionBranchCampaignRequest,
-    DecisionBranchPlannerRequest, DecisionContext, DecisionContextCampaignRequest,
-    DecisionContextRequest, DecisionOperatingCycleRequest, DesignAction, DesignMechanism,
-    DoseResponseObservation, DoseResponseRequest, DryRunActiveLearningCampaignExecutor,
+    AdaptiveAllocationRequest, AdaptiveArmObservation, AdaptiveCloneCampaignRequest,
+    AdaptiveDoseSurfaceRequest, AdaptiveFrontierExecutionRequest, AdaptiveFrontierRequest,
+    AdaptiveInformationCampaignRequest, AdaptiveInformationObservation,
+    AdaptiveInstrumentCampaignRequest, AdaptiveInterpretationCampaignRequest,
+    AdaptiveMechanismCampaignRequest, AdaptiveMechanismPolicyRequest, AnalysisDataset,
+    AnalysisRequest, AssayEvidenceObservation, AssayEvidenceRequest, AutonomousGapCycleRequest,
+    AutonomousProgramCycleRequest, BeliefConflict, BeliefRevisionRequest, CalibrationRequest,
+    CalibrationRun, CampaignAction, CampaignMechanism, CampaignObservation, CausalContrastRequest,
+    ClonalEvolutionGraph, ClonalEvolutionRequest, CloneContinuationCandidate,
+    CloneContinuationRequest, ClonePanelObservation, ClonePanelOutcomeAnalysis,
+    ClonePanelOutcomeRequest, ClonePerturbationCandidate, ClonePerturbationPanel,
+    ClonePerturbationPanelRequest, CloneProfile, ClosedLoopCampaignRequest, CombinationObservation,
+    CombinationSynergyRequest, ComputationCandidate, ComputationExecutionMode,
+    ComputationExecutionRequest, ComputationPlacementRequest, ComputationPortfolioExecutionRequest,
+    ComputationPortfolioRequest, ComputationRecoveryRequest, ConcordanceRequest, ConsensusRequest,
+    ContrastDesignRequest, CounterfactualEnsembleRequest, CounterfactualIntervention,
+    CounterfactualModel, CounterfactualRequest, DecisionActionGraphRequest,
+    DecisionActionPlanRequest, DecisionBranchCampaignRequest, DecisionBranchPlannerRequest,
+    DecisionContext, DecisionContextCampaignRequest, DecisionContextRequest,
+    DecisionOperatingCycleRequest, DesignAction, DesignMechanism, DoseResponseObservation,
+    DoseResponseRequest, DryRunActiveLearningCampaignExecutor,
     DryRunAdaptiveAllocationCampaignExecutor, DryRunAdaptiveMechanismPolicyExecutor,
     DryRunDecisionContextCampaignExecutor, DryRunEvidenceAcquisitionExecutor,
     DryRunEvidenceRefreshCampaignExecutor, DryRunExperimentOperatingCycleExecutor,
@@ -2256,6 +2257,9 @@ impl Server {
             "glioma_clone_perturbation_panel" => self.glioma_clone_perturbation_panel(&arguments),
             "glioma_clone_panel_outcomes" => self.glioma_clone_panel_outcomes(&arguments),
             "glioma_clone_continuation" => self.glioma_clone_continuation(&arguments),
+            "glioma_adaptive_clone_campaign_execute" => {
+                self.glioma_adaptive_clone_campaign_execute(&arguments)
+            }
             "glioma_adaptive_research_frontier" => {
                 self.glioma_adaptive_research_frontier(&arguments)
             }
@@ -6791,6 +6795,30 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma clone continuation plan: {error}"))
+    }
+
+    /// Execute the bounded evolution-aware clone campaign in a deterministic local sandbox.
+    /// Production hosts replace the synthetic panel worker with an institution-owned executor.
+    fn glioma_adaptive_clone_campaign_execute(&self, arguments: &Value) -> Result<Value, String> {
+        let request: AdaptiveCloneCampaignRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_adaptive_clone_campaign_execute requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma adaptive clone campaign request: {error}"))?;
+        let campaign = execute_glioma_adaptive_clone_campaign_dry_run(&request)
+            .map_err(|error| format!("glioma adaptive clone campaign refused: {error}"))?;
+        serde_json::to_value(json!({
+            "campaign": campaign,
+            "dispatch": "dry_run",
+            "simulation_only": true,
+            "guarantees": [
+                "clonal graph inference, branch-covering panel design, replicate adjudication, and continuation planning run as one bounded workflow",
+                "only caller-returned typed local observations can change the outcome; missing or contradictory cells are never imputed",
+                "qualified, negative, partial, unresolved, budget-blocked, and executor-failed states remain explicit",
+                "MCP executes no assay, moves no raw data, and makes no diagnosis, treatment, triage, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma adaptive clone campaign: {error}"))
     }
 
     /// Direct one bounded, dependency-closed glioma research batch from a high-level intent.
@@ -50536,6 +50564,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_clone_perturbation_panel",
                 "glioma_clone_panel_outcomes",
                 "glioma_clone_continuation",
+                "glioma_adaptive_clone_campaign_execute",
                 "glioma_spatial_niches",
                 "glioma_spatial_communication",
                 "glioma_spatial_state_propagation",
@@ -60049,6 +60078,17 @@ pub fn tool_definitions() -> Vec<Value> {
                 "candidates": {"type": "array", "items": {"type": "object"}, "description": "Local CloneContinuationCandidate1@1 records with typed action, target, cost, information gain, dependencies, effects, and artifact provenance."}
             },
             "required": ["request", "outcome", "candidates"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_adaptive_clone_campaign_execute",
+        "description": "Run the bounded autonomous preclinical glioma clone loop: infer an ambiguity-preserving evolutionary graph, design a branch-covering perturbation panel, execute it through a deterministic local worker, accumulate replicate observations, adjudicate supported/null/negative/contradictory cells, and route unresolved branches into dependency-closed continuation actions. Synthetic MCP observations are simulation-only; institutions retain assay authority and raw data.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "AdaptiveCloneCampaignRequest1@1 containing evolution profiles, perturbation candidates, outcome/replicate gates, continuation candidates, round/retry bounds, and artifact policy."}
+            },
+            "required": ["request"]
         }
     }));
     definitions.push(json!({

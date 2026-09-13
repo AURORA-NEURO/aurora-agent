@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 712;
+const TOOL_DEFINITION_COUNT: usize = 713;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -6163,6 +6163,78 @@ fn glioma_clone_panel_outcomes_requires_replicates_before_qualification() {
             .unwrap()
             .len(),
         2
+    );
+}
+
+#[test]
+fn glioma_adaptive_clone_campaign_closes_evolution_to_observed_outcomes() {
+    let mut server = server();
+    let hash = "0".repeat(64);
+    let artifact = |id: &str| {
+        json!({
+            "artifact_id": id,
+            "content_hash": hash,
+            "content_type": "application/json",
+            "local_only": true,
+            "contains_human_data": false,
+            "contains_direct_identifiers": false
+        })
+    };
+    let profile = |id: &str, clone_id: &str, timepoint: u32, markers: Vec<&str>| {
+        json!({
+            "profile_id": id,
+            "study_id": "adaptive-clone-study",
+            "sample_lineage": "lineage-a",
+            "clone_id": clone_id,
+            "timepoint": timepoint,
+            "model_system": "organoid",
+            "abundance_milli": if timepoint == 0 { 400 } else { 700 },
+            "artifact": artifact(id),
+            "markers": markers.into_iter().map(|marker_id| json!({"marker_id": marker_id, "state": "present", "confidence_milli": 900})).collect::<Vec<_>>()
+        })
+    };
+    let campaign = call(
+        &mut server,
+        "glioma_adaptive_clone_campaign_execute",
+        json!({
+            "request": {
+                "evolution": {"study_id":"adaptive-clone-study","model_system":"organoid","min_shared_markers":1,"min_parent_score_milli":500,"max_time_gap":5,"min_abundance_milli":1,"allow_parallel_branches":true,"max_parent_candidates":2},
+                "profiles": [
+                    profile("root", "clone-a", 0, vec!["egfr", "tp53"]),
+                    profile("ec", "clone-b", 1, vec!["egfr", "tp53", "ecDNA"]),
+                    profile("pt", "clone-c", 1, vec!["egfr", "tp53", "pten"])
+                ],
+                "panel": {"study_id":"adaptive-clone-study","model_system":"organoid","budget_milli":10,"min_coverage_milli":500,"max_selected":2,"require_branch_coverage":true,"allow_uncertain_targets":true},
+                "perturbations": [
+                    {"candidate_id":"ec-panel","kind":"inhibit","target_marker_order":["ecDNA"],"cost_milli":5,"expected_effect_milli":900,"purpose":"test ecDNA branch dependency","artifact":artifact("ec-panel")},
+                    {"candidate_id":"pt-panel","kind":"inhibit","target_marker_order":["pten"],"cost_milli":5,"expected_effect_milli":900,"purpose":"test PTEN branch dependency","artifact":artifact("pt-panel")}
+                ],
+                "outcome": {"study_id":"adaptive-clone-study","model_system":"organoid","min_replicates":1,"effect_threshold_milli":500,"max_uncertainty_milli":200,"require_all_selected":true,"require_all_branches":true},
+                "continuation": {"study_id":"adaptive-clone-study","model_system":"organoid","budget_milli":10,"max_selected":2,"max_risk_tier":2,"require_approval":false,"allow_instrument_actions":false,"allow_federation":false},
+                "continuation_candidates": [{"action_id":"measure-unresolved","target_id":"measure:ec-panel@branch","kind":"measure","cost_milli":2,"information_gain_milli":900,"risk_tier":1,"dependencies":[],"requires_instrument":false,"requires_federation":false,"description":"measure an unresolved clone branch","artifact":artifact("measure-unresolved")}],
+                "max_rounds":2,
+                "max_retries":1,
+                "stop_on_qualified":true,
+                "stop_on_negative":true,
+                "require_artifacts":true
+            }
+        }),
+    );
+    assert_eq!(campaign["dispatch"], json!("dry_run"));
+    assert_eq!(campaign["simulation_only"], json!(true));
+    assert_eq!(campaign["campaign"]["disposition"], json!("qualified"));
+    assert_eq!(campaign["campaign"]["stop_reason"], json!("qualified"));
+    assert_eq!(
+        campaign["campaign"]["final_outcome"]["disposition"],
+        json!("qualified")
+    );
+    assert_eq!(campaign["campaign"]["rounds"].as_array().unwrap().len(), 1);
+    assert!(
+        campaign["campaign"]["observations"]
+            .as_array()
+            .unwrap()
+            .len()
+            >= 2
     );
 }
 

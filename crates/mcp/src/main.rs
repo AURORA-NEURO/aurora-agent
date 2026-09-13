@@ -147,6 +147,7 @@ fn main() {
                      glioma_clone_perturbation_panel,\n\
                      glioma_clone_panel_outcomes,\n\
                      glioma_clone_continuation,\n\
+                     glioma_adaptive_clone_campaign_execute,\n\
                      glioma_federated_benchmark_consensus,\n\
                      glioma_federated_benchmark_site_plan,\n\
                      glioma_federated_mechanism_transport,\n\

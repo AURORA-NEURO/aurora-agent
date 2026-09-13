@@ -15,6 +15,7 @@ pub mod active_learning_campaign;
 pub mod adaptive_scheduler;
 pub mod autonomous_campaign;
 pub mod autonomous_engine;
+pub mod clone_campaign;
 pub mod clone_continuation;
 pub mod director;
 pub mod evidence_campaign;
@@ -71,6 +72,14 @@ pub use clone_continuation::{
     plan_glioma_clone_continuation, CloneContinuationActionKind, CloneContinuationActionStatus,
     CloneContinuationCandidate, CloneContinuationDecision, CloneContinuationDisposition,
     CloneContinuationError, CloneContinuationPlan, CloneContinuationRequest,
+};
+
+pub use clone_campaign::{
+    execute_glioma_adaptive_clone_campaign, execute_glioma_adaptive_clone_campaign_dry_run,
+    AdaptiveCloneCampaign, AdaptiveCloneCampaignDisposition, AdaptiveCloneCampaignError,
+    AdaptiveCloneCampaignExecutor, AdaptiveCloneCampaignRequest, AdaptiveCloneCampaignRound,
+    AdaptiveCloneCampaignStopReason, AdaptiveCloneExecutionFailure,
+    DryRunAdaptiveCloneCampaignExecutor,
 };
 
 pub use director::{

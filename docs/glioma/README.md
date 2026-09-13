@@ -187,6 +187,8 @@ crates/research/src/glioma/
                                              P07 evidence-gated director admission from P01 cross-family triangulation
     p07_protocol_simulation/clone_continuation.rs
                                              P07 clone-outcome-driven continuation planning with dependency closure and policy gates
+    p07_protocol_simulation/clone_campaign.rs
+                                             P07 autonomous evolution-to-perturbation-to-replicate-outcome clone campaign
     p08_instrument_robotics/preflight.rs   P08 typed instrument/robotics interlock planning
     p08_instrument_robotics/execution.rs   P08 guarded execution with live rechecks and emergency stop
     p08_instrument_robotics/campaign.rs   P08 ordered multi-run instrument campaign with fail-closed safety halts
@@ -314,7 +316,7 @@ portfolio plan and executable code; it does not promote a planned slot to implem
 | P04 Question-to-decision context | principal investigator | intent normalization, context compilation | bounded decision context, dependency-closed action DAGs, scenario-aware Pareto workflow branches, branch execution with forecast-drift failover, full operating-cycle execution, selected action batches, and unresolved omissions |
 | P05 Mechanism exploration | mechanism scientist | molecular landscape, mechanism exploration | residual-fit competing mechanisms, posterior-weighted next-assay information gain, signed mechanism-network propagation, delayed-feedback mechanism dynamics, model-averaged counterfactuals, robust lower-tail intervention portfolios, discriminating campaigns, and an end-to-end next-assay operating cycle |
 | P06 Power-aware experiment design | experimentalist | experiment design | falsifiable allocation, power, blocking, dose-response, adaptive replicate allocation, sequential Bayesian success/futility stopping, local sequential campaign execution, uncertainty-aware dose-surface acquisition, mechanism-aware closed-loop campaign rounds, an end-to-end plan/execute/replan cycle, combination-synergy fitting, and null-result plan |
-| P07 Protocol simulation | lab operations lead | protocol simulation, adaptive workflow planning | critical-path scheduling, outcome-aware dependency scheduling, intent-to-stage-action compilation, bounded modality/model-system portfolio expansion, evidence-gated director admission, evidence-priority execution cycles, context-to-action execution, multimodal mechanism campaigns, stage-gated autonomous program control, failed-frontier recovery with alternate dependency-safe missions, P02/P03-aware scientific frontier admission, utilization, deterministic next batches, and repair/abstain routing before physical effects |
+| P07 Protocol simulation | lab operations lead | protocol simulation, adaptive workflow planning | critical-path scheduling, outcome-aware dependency scheduling, intent-to-stage-action compilation, bounded modality/model-system portfolio expansion, evidence-gated director admission, evidence-priority execution cycles, context-to-action execution, multimodal mechanism campaigns, evolution-aware clone campaigns, stage-gated autonomous program control, failed-frontier recovery with alternate dependency-safe missions, P02/P03-aware scientific frontier admission, utilization, deterministic next batches, and repair/abstain routing before physical effects |
 | P08 Instrument and robotics preflight | instrument operator | instrument preflight | robust control calibration, drift detection, information-per-cost endpoint-diverse campaign selection, multi-instrument dependency scheduling, schedule-bound fleet execution, signed interlocked planning, guarded execution, and fail-closed multi-run campaigns |
 | P09 Reproducible computation | computational scientist | computational execution | checkpointed/replayable computation, intent-to-DAG compilation, locality-aware worker placement, budgeted portfolio execution, robustness-debt-driven re-analysis, selective failed-frontier recovery, and omission-stress robustness suite |
 | P10 Causal interpretation and replication | methods reviewer | statistical interpretation, replication/robustness | uncertainty-aware endpoint, longitudinal, stratified causal, dynamic-policy, causal-contrast, meta-analytic, cross-site verdicts, guarded adaptive-frontier execution, and bounded resynthesis campaigns |
@@ -577,6 +579,12 @@ handoff: it accepts the content-addressed priority plan, admits only typed local
 for selected evidence work, computes dependency closure, executes through the same portfolio
 executor, and reports missing adapters, policy blocks, partial effects, negative outcomes, and
 requeue instructions as first-class states.
+The evolution-aware clone campaign (`execute_glioma_adaptive_clone_campaign`) now closes the
+P05→P06→P10→P07 loop in one bounded workflow: it infers an ambiguity-preserving clonal graph,
+selects a branch-covering perturbation panel, executes only through a caller-owned local worker,
+accumulates replicate observations, adjudicates supported/null/negative/contradictory cells, and
+routes unresolved branches into dependency-closed continuation actions. Qualified and negative
+stops are explicit, missing cells are never imputed, and the MCP worker is simulation-only.
 P07 now also includes the multimodal mechanism campaign
 (`execute_glioma_multimodal_mechanism_campaign`). It runs graph fusion and signed pathway activity
 before invoking the dependency-aware action selector, so a local research engine can move from
