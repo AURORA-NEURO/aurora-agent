@@ -121,6 +121,7 @@ fn main() {
                      glioma_instrument_fleet_execute,\n\
                      glioma_instrument_execute,\n\
                      glioma_instrument_campaign_execute,\n\
+                     glioma_adaptive_instrument_campaign_execute,\n\
                      glioma_instrument_operating_cycle,\n\
                      glioma_instrument_assay_adjudicate,\n\
                      glioma_computation_execute,\n\

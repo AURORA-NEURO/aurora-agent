@@ -507,11 +507,12 @@ use bioprism_research::{
     compile_decision_context, compile_glioma_computation_workflow, compile_glioma_knowledge_gaps,
     compile_mechanism_action_plan, compile_typed_knowledge, compose_knowledge_graph,
     design_glioma_contrast_panel, design_preclinical_experiment, discriminate_mechanisms,
-    dry_run_glioma_research, dry_run_instrument_executor_from_request,
-    evaluate_glioma_dynamic_policies, evaluate_glioma_release_gate,
-    execute_federated_benchmark_campaign, execute_federated_benchmark_operating_cycle_dry_run,
-    execute_glioma_action_portfolio, execute_glioma_active_learning_campaign,
-    execute_glioma_adaptive_allocation_campaign, execute_glioma_adaptive_mechanism_campaign,
+    dry_run_adaptive_instrument_executor, dry_run_glioma_research,
+    dry_run_instrument_executor_from_request, evaluate_glioma_dynamic_policies,
+    evaluate_glioma_release_gate, execute_federated_benchmark_campaign,
+    execute_federated_benchmark_operating_cycle_dry_run, execute_glioma_action_portfolio,
+    execute_glioma_active_learning_campaign, execute_glioma_adaptive_allocation_campaign,
+    execute_glioma_adaptive_instrument_campaign, execute_glioma_adaptive_mechanism_campaign,
     execute_glioma_autonomous_campaign, execute_glioma_autonomous_gap_cycle,
     execute_glioma_autonomous_program_cycle, execute_glioma_autonomous_research_engine,
     execute_glioma_autonomous_research_mission, execute_glioma_computation,
@@ -557,23 +558,23 @@ use bioprism_research::{
     ActiveLearningObservation, ActiveLearningRequest, AdaptiveAllocationCampaignRequest,
     AdaptiveAllocationRequest, AdaptiveArmObservation, AdaptiveDoseSurfaceRequest,
     AdaptiveFrontierRequest, AdaptiveInformationCampaignRequest, AdaptiveInformationObservation,
-    AdaptiveMechanismCampaignRequest, AdaptiveMechanismPolicyRequest, AnalysisDataset,
-    AnalysisRequest, AssayEvidenceObservation, AssayEvidenceRequest, AutonomousGapCycleRequest,
-    AutonomousProgramCycleRequest, BeliefConflict, BeliefRevisionRequest, CalibrationRequest,
-    CalibrationRun, CampaignAction, CampaignMechanism, CampaignObservation, CausalContrastRequest,
-    ClonalEvolutionGraph, ClonalEvolutionRequest, CloneContinuationCandidate,
-    CloneContinuationRequest, ClonePanelObservation, ClonePanelOutcomeAnalysis,
-    ClonePanelOutcomeRequest, ClonePerturbationCandidate, ClonePerturbationPanel,
-    ClonePerturbationPanelRequest, CloneProfile, ClosedLoopCampaignRequest, CombinationObservation,
-    CombinationSynergyRequest, ComputationCandidate, ComputationExecutionMode,
-    ComputationExecutionRequest, ComputationPlacementRequest, ComputationPortfolioExecutionRequest,
-    ComputationPortfolioRequest, ComputationRecoveryRequest, ConcordanceRequest, ConsensusRequest,
-    ContrastDesignRequest, CounterfactualEnsembleRequest, CounterfactualIntervention,
-    CounterfactualModel, CounterfactualRequest, DecisionActionGraphRequest,
-    DecisionActionPlanRequest, DecisionBranchCampaignRequest, DecisionBranchPlannerRequest,
-    DecisionContext, DecisionContextCampaignRequest, DecisionContextRequest,
-    DecisionOperatingCycleRequest, DesignAction, DesignMechanism, DoseResponseObservation,
-    DoseResponseRequest, DryRunActiveLearningCampaignExecutor,
+    AdaptiveInstrumentCampaignRequest, AdaptiveMechanismCampaignRequest,
+    AdaptiveMechanismPolicyRequest, AnalysisDataset, AnalysisRequest, AssayEvidenceObservation,
+    AssayEvidenceRequest, AutonomousGapCycleRequest, AutonomousProgramCycleRequest, BeliefConflict,
+    BeliefRevisionRequest, CalibrationRequest, CalibrationRun, CampaignAction, CampaignMechanism,
+    CampaignObservation, CausalContrastRequest, ClonalEvolutionGraph, ClonalEvolutionRequest,
+    CloneContinuationCandidate, CloneContinuationRequest, ClonePanelObservation,
+    ClonePanelOutcomeAnalysis, ClonePanelOutcomeRequest, ClonePerturbationCandidate,
+    ClonePerturbationPanel, ClonePerturbationPanelRequest, CloneProfile, ClosedLoopCampaignRequest,
+    CombinationObservation, CombinationSynergyRequest, ComputationCandidate,
+    ComputationExecutionMode, ComputationExecutionRequest, ComputationPlacementRequest,
+    ComputationPortfolioExecutionRequest, ComputationPortfolioRequest, ComputationRecoveryRequest,
+    ConcordanceRequest, ConsensusRequest, ContrastDesignRequest, CounterfactualEnsembleRequest,
+    CounterfactualIntervention, CounterfactualModel, CounterfactualRequest,
+    DecisionActionGraphRequest, DecisionActionPlanRequest, DecisionBranchCampaignRequest,
+    DecisionBranchPlannerRequest, DecisionContext, DecisionContextCampaignRequest,
+    DecisionContextRequest, DecisionOperatingCycleRequest, DesignAction, DesignMechanism,
+    DoseResponseObservation, DoseResponseRequest, DryRunActiveLearningCampaignExecutor,
     DryRunAdaptiveAllocationCampaignExecutor, DryRunAdaptiveMechanismPolicyExecutor,
     DryRunDecisionContextCampaignExecutor, DryRunEvidenceAcquisitionExecutor,
     DryRunEvidenceRefreshCampaignExecutor, DryRunExperimentOperatingCycleExecutor,
@@ -2359,6 +2360,9 @@ impl Server {
             "glioma_instrument_execute" => self.glioma_instrument_execute(&arguments),
             "glioma_instrument_campaign_execute" => {
                 self.glioma_instrument_campaign_execute(&arguments)
+            }
+            "glioma_adaptive_instrument_campaign_execute" => {
+                self.glioma_adaptive_instrument_campaign_execute(&arguments)
             }
             "glioma_instrument_operating_cycle" => {
                 self.glioma_instrument_operating_cycle(&arguments)
@@ -9624,6 +9628,39 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma instrument campaign: {error}"))
+    }
+
+    /// Select and execute a dependency-closed, information-aware instrument subset. MCP uses a
+    /// deterministic dry-run gateway; an institution-local caller can reuse the research
+    /// algorithm with its own guarded InstrumentExecutor.
+    fn glioma_adaptive_instrument_campaign_execute(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: AdaptiveInstrumentCampaignRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_adaptive_instrument_campaign_execute requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma adaptive instrument campaign request: {error}")
+            })?;
+        let mut executor = dry_run_adaptive_instrument_executor(&request)
+            .map_err(|error| format!("glioma adaptive instrument campaign refused: {error}"))?;
+        let campaign = execute_glioma_adaptive_instrument_campaign(&request, &mut executor)
+            .map_err(|error| format!("glioma adaptive instrument campaign refused: {error}"))?;
+        serde_json::to_value(json!({
+            "campaign": campaign,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "integer scoring combines expected information, frontier novelty, reproducibility, instrument cost, and physical risk",
+                "selected work is dependency-closed, endpoint-diverse, and bounded by explicit time and risk budgets",
+                "only selected admitted plans enter the existing guarded instrument campaign executor",
+                "information and endpoint floors remain explicit no-feasible-plan holds rather than being fabricated",
+                "MCP emits synthetic local artifacts only; no hardware, raw-data, or clinical effect occurs"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma adaptive instrument campaign: {error}"))
     }
 
     /// Apply the all-runs preflight barrier before dispatching a local instrument campaign.
@@ -50415,6 +50452,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_instrument_fleet_execute",
                 "glioma_instrument_execute",
                 "glioma_instrument_campaign_execute",
+                "glioma_adaptive_instrument_campaign_execute",
                 "glioma_instrument_operating_cycle",
                 "glioma_instrument_assay_adjudicate",
                 "glioma_experiment_design",
@@ -60551,6 +60589,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "InstrumentCampaignRequest1@1 containing an objective, bounded run list of run_id plus InstrumentExecutionRequest1@1, and negative-stop policy."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_adaptive_instrument_campaign_execute",
+        "description": "Select and execute a dependency-closed preclinical glioma instrument portfolio under explicit time, physical-risk, information, and endpoint-diversity gates. The deterministic selector scores expected information, frontier novelty, reproducibility, cost, and risk, then sends only selected admitted plans through the guarded campaign executor. MCP uses a dry-run gateway and creates no hardware, raw-data, or clinical effect.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "AdaptiveInstrumentCampaignRequest1@1 containing bounded preflighted candidates, dependency edges, endpoint labels, information/novelty/reproducibility scores, cost and risk estimates, selection budgets, and negative-stop policy."}
             },
             "required": ["request"]
         }

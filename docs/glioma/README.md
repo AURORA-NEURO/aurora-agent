@@ -196,6 +196,8 @@ crates/research/src/glioma/
                                              P08 typed assay/QC adjudication that separates hardware completion from biological evidence
     p08_instrument_robotics/operating_cycle.rs
                                              P08 fail-closed preflight barrier, instrument campaign execution, and operator handoff
+    p08_instrument_robotics/adaptive_campaign.rs
+                                             P08 information-per-cost, endpoint-diverse instrument portfolio selection with dependency-closed guarded execution
     p09_reproducible_computation/robustness.rs
                                              P09 leave-one-batch/row-out robustness battery
     p09_reproducible_computation/execution.rs
@@ -305,7 +307,7 @@ portfolio plan and executable code; it does not promote a planned slot to implem
 | P05 Mechanism exploration | mechanism scientist | molecular landscape, mechanism exploration | residual-fit competing mechanisms, posterior-weighted next-assay information gain, signed mechanism-network propagation, delayed-feedback mechanism dynamics, model-averaged counterfactuals, robust lower-tail intervention portfolios, discriminating campaigns, and an end-to-end next-assay operating cycle |
 | P06 Power-aware experiment design | experimentalist | experiment design | falsifiable allocation, power, blocking, dose-response, adaptive replicate allocation, sequential Bayesian success/futility stopping, local sequential campaign execution, uncertainty-aware dose-surface acquisition, mechanism-aware closed-loop campaign rounds, an end-to-end plan/execute/replan cycle, combination-synergy fitting, and null-result plan |
 | P07 Protocol simulation | lab operations lead | protocol simulation, adaptive workflow planning | critical-path scheduling, outcome-aware dependency scheduling, intent-to-stage-action compilation, bounded modality/model-system portfolio expansion, evidence-gated director admission, evidence-priority execution cycles, context-to-action execution, multimodal mechanism campaigns, stage-gated autonomous program control, failed-frontier recovery with alternate dependency-safe missions, P02/P03-aware scientific frontier admission, utilization, deterministic next batches, and repair/abstain routing before physical effects |
-| P08 Instrument and robotics preflight | instrument operator | instrument preflight | robust control calibration, drift detection, multi-instrument dependency scheduling, schedule-bound fleet execution, signed interlocked planning, guarded execution, and fail-closed multi-run campaigns |
+| P08 Instrument and robotics preflight | instrument operator | instrument preflight | robust control calibration, drift detection, information-per-cost endpoint-diverse campaign selection, multi-instrument dependency scheduling, schedule-bound fleet execution, signed interlocked planning, guarded execution, and fail-closed multi-run campaigns |
 | P09 Reproducible computation | computational scientist | computational execution | checkpointed/replayable computation, intent-to-DAG compilation, locality-aware worker placement, budgeted portfolio execution, selective failed-frontier recovery, and omission-stress robustness suite |
 | P10 Causal interpretation and replication | methods reviewer | statistical interpretation, replication/robustness | uncertainty-aware endpoint, longitudinal, stratified causal, dynamic-policy, causal-contrast, meta-analytic, and cross-site verdicts |
 | P11 Research-object release | reproducibility steward | research-object release | portable manifest with limitations and negative evidence, dependency-aware replay, accountable release gating, and operator handoff |
@@ -684,7 +686,13 @@ gate. Hardware completion never qualifies biology by itself; qualified, negative
 actions remain partitioned with explicit next actions for missing observations, repeat work, or
 instrument recalibration. The MCP route only consumes value summaries and never moves raw data,
 executes hardware, or makes a clinical decision.
-P08 now also exposes schedule-bound fleet execution (`glioma_instrument_fleet_execute`). It
+P08 now also exposes adaptive instrument campaign selection (`execute_glioma_adaptive_instrument_campaign`). It
+scores already-preflighted assay candidates by expected information, frontier novelty,
+reproducibility, instrument time, and physical risk, then chooses a dependency-closed,
+endpoint-diverse subset under explicit budgets before entering the guarded campaign executor.
+Information and endpoint floors remain no-feasible-plan holds; instrument completion is never
+promoted to biological evidence. The MCP route uses only synthetic local artifacts.
+P08 also exposes schedule-bound fleet execution (`glioma_instrument_fleet_execute`). It
 consumes the validated multi-instrument schedule, requires one admitted preflight plan per
 assigned task, executes dependency-safe work through the guarded gateway, and records exact
 instrument/time bindings. Schedule blocks, dependency blocks, negative results, partial effects,

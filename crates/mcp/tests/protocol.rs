@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 707;
+const TOOL_DEFINITION_COUNT: usize = 708;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -2005,6 +2005,40 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
     assert_eq!(
         instrument_campaign["campaign"]["completed_run_order"],
         json!(["stage-a", "stage-b"])
+    );
+
+    let adaptive_instrument_campaign = call(
+        &mut server,
+        "glioma_adaptive_instrument_campaign_execute",
+        json!({
+            "request": {
+                "objective": "adaptive preclinical imaging campaign",
+                "candidates": [
+                    {"candidate_id":"adaptive-a","run_id":"adaptive-run-a","endpoint":"viability","execution":instrument_execution_request.clone(),"expected_information_milli":700,"frontier_novelty_milli":500,"reproducibility_milli":900,"estimated_cost_ticks":2,"risk_milli":10,"depends_on":[]},
+                    {"candidate_id":"adaptive-b","run_id":"adaptive-run-b","endpoint":"invasion","execution":instrument_execution_request.clone(),"expected_information_milli":700,"frontier_novelty_milli":500,"reproducibility_milli":900,"estimated_cost_ticks":2,"risk_milli":10,"depends_on":["adaptive-a"]},
+                    {"candidate_id":"adaptive-c","run_id":"adaptive-run-c","endpoint":"state","execution":instrument_execution_request.clone(),"expected_information_milli":700,"frontier_novelty_milli":500,"reproducibility_milli":900,"estimated_cost_ticks":2,"risk_milli":10,"depends_on":[]}
+                ],
+                "cost_budget_ticks":8,
+                "risk_budget_milli":100,
+                "minimum_information_milli":1000,
+                "minimum_endpoint_count":2,
+                "max_selected":3,
+                "stop_on_negative":true
+            }
+        }),
+    );
+    assert_eq!(
+        adaptive_instrument_campaign["dispatch"],
+        json!("not_started")
+    );
+    assert_eq!(adaptive_instrument_campaign["simulation_only"], json!(true));
+    assert_eq!(
+        adaptive_instrument_campaign["campaign"]["disposition"],
+        json!("executed")
+    );
+    assert_eq!(
+        adaptive_instrument_campaign["campaign"]["selected_order"],
+        json!(["adaptive-a", "adaptive-b", "adaptive-c"])
     );
 
     let instrument_operating_cycle = call(

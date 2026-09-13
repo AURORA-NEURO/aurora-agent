@@ -2,6 +2,7 @@
 
 use crate::glioma::catalog::{glioma_program_catalog, GliomaProgramDescriptor, GliomaProgramId};
 
+pub mod adaptive_campaign;
 pub mod assay_adjudication;
 pub mod calibration;
 pub mod campaign;
@@ -15,6 +16,13 @@ pub use assay_adjudication::{
     adjudicate_glioma_assay_evidence, AssayEvidenceDisposition, AssayEvidenceError,
     AssayEvidenceObservation, AssayEvidenceRecord, AssayEvidenceRequest,
     InstrumentAssayEvidenceAssessment,
+};
+
+pub use adaptive_campaign::{
+    dry_run_adaptive_instrument_executor, execute_glioma_adaptive_instrument_campaign,
+    AdaptiveInstrumentCampaign, AdaptiveInstrumentCampaignDisposition,
+    AdaptiveInstrumentCampaignError, AdaptiveInstrumentCampaignRequest,
+    AdaptiveInstrumentCandidate, AdaptiveInstrumentDecision,
 };
 
 pub use calibration::{
