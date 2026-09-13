@@ -14,6 +14,7 @@ pub mod dose_response;
 pub mod information_design;
 pub mod multi_fidelity;
 pub mod multi_fidelity_campaign;
+pub mod operating_cycle;
 pub mod robust_active_learning;
 pub mod sequential_campaign;
 pub mod sequential_design;
@@ -87,6 +88,11 @@ pub use multi_fidelity_campaign::{
     MultiFidelityCampaign, MultiFidelityCampaignDisposition, MultiFidelityCampaignError,
     MultiFidelityCampaignExecutor, MultiFidelityCampaignRequest, MultiFidelityCampaignRound,
     MultiFidelityCampaignStopReason, MultiFidelityExecutionFailure,
+};
+pub use operating_cycle::{
+    execute_glioma_experiment_operating_cycle, DryRunExperimentOperatingCycleExecutor,
+    ExperimentOperatingCycle, ExperimentOperatingCycleDisposition, ExperimentOperatingCycleError,
+    ExperimentOperatingCycleRequest,
 };
 
 pub use robust_active_learning::{

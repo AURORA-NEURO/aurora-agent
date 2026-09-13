@@ -517,11 +517,11 @@ use bioprism_research::{
     execute_glioma_decision_context_campaign, execute_glioma_decision_operating_cycle,
     execute_glioma_evidence_acquisition_campaign, execute_glioma_evidence_campaign,
     execute_glioma_evidence_gated_research, execute_glioma_evidence_refresh_campaign,
-    execute_glioma_instrument_campaign, execute_glioma_instrument_fleet,
-    execute_glioma_instrument_plan, execute_glioma_knowledge_resolution_campaign,
-    execute_glioma_mechanism_discrimination_campaign, execute_glioma_mechanism_operating_cycle,
-    execute_glioma_multi_fidelity_campaign, execute_glioma_multimodal_ingestion_campaign,
-    execute_glioma_multimodal_mechanism_campaign,
+    execute_glioma_experiment_operating_cycle, execute_glioma_instrument_campaign,
+    execute_glioma_instrument_fleet, execute_glioma_instrument_plan,
+    execute_glioma_knowledge_resolution_campaign, execute_glioma_mechanism_discrimination_campaign,
+    execute_glioma_mechanism_operating_cycle, execute_glioma_multi_fidelity_campaign,
+    execute_glioma_multimodal_ingestion_campaign, execute_glioma_multimodal_mechanism_campaign,
     execute_glioma_multimodal_mechanism_campaign_with_executor,
     execute_glioma_multimodal_readiness_gate, execute_glioma_protocol,
     execute_glioma_replay_campaign, execute_glioma_replication_campaign,
@@ -566,8 +566,9 @@ use bioprism_research::{
     DoseResponseRequest, DryRunActiveLearningCampaignExecutor,
     DryRunAdaptiveAllocationCampaignExecutor, DryRunAdaptiveMechanismPolicyExecutor,
     DryRunDecisionContextCampaignExecutor, DryRunEvidenceAcquisitionExecutor,
-    DryRunEvidenceRefreshCampaignExecutor, DryRunFederatedBenchmarkCampaignExecutor,
-    DryRunGliomaActionExecutor, DryRunGliomaComputationExecutor, DryRunGliomaProtocolExecutor,
+    DryRunEvidenceRefreshCampaignExecutor, DryRunExperimentOperatingCycleExecutor,
+    DryRunFederatedBenchmarkCampaignExecutor, DryRunGliomaActionExecutor,
+    DryRunGliomaComputationExecutor, DryRunGliomaProtocolExecutor,
     DryRunGliomaReplicationCampaignExecutor, DryRunInstrumentExecutor,
     DryRunKnowledgeResolutionCampaignExecutor, DryRunMechanismDiscriminationCampaignExecutor,
     DryRunMultiFidelityCampaignExecutor, DryRunMultimodalIngestionCampaignExecutor,
@@ -576,22 +577,22 @@ use bioprism_research::{
     DynamicPolicyTrajectory, EvidenceAcquisitionCampaignRequest, EvidenceAcquisitionCandidate,
     EvidenceAcquisitionRequest, EvidenceCalibrationObservation, EvidenceCalibrationRequest,
     EvidencePriorityRequest, EvidenceRecord, EvidenceRefreshCampaignRequest, EvidenceRequest,
-    EvidenceSurveillanceRequest, EvidenceTriangulationRequest, ExperimentArm, ExperimentRequest,
-    FederatedBenchmarkCampaignRequest, FederatedBenchmarkRequest, FederatedBenchmarkSite,
-    FederatedBenchmarkSitePlannerRequest, FederatedMechanismSite,
-    FederatedMechanismTransportRequest, FidelityCandidate, FidelityObservation,
-    GliomaActionCandidate, GliomaAdaptiveWorkflowSchedulerRequest, GliomaAutonomousCampaignRequest,
-    GliomaAutonomousResearchEngineRequest, GliomaComputationCampaignRequest,
-    GliomaComputationWorkflowRequest, GliomaEvidenceCampaignRequest,
-    GliomaEvidenceGatedResearchRequest, GliomaMissionRequest, GliomaReplicationCampaignRequest,
-    GliomaResearchAutopilotRequest, GliomaResearchDirectorRequest, GliomaResearchIntent,
-    GliomaWorkflowRequest, GraphFusionRequest, GraphFusionVector, HarmonizationRequest,
-    HarmonizationVector, InformationDesignRequest, InstrumentCampaignRequest,
-    InstrumentExecutionRequest, InstrumentExecutionRun, InstrumentFleetExecutionRequest,
-    InstrumentFleetScheduleRequest, InstrumentInterlockSnapshot, InstrumentPreflightRequest,
-    InterpretationSynthesisRequest, KnowledgeCompositionRequest, KnowledgeFrontier,
-    KnowledgeFrontierRequest, KnowledgeGapCompilerRequest, KnowledgeRelation, KnowledgeRequest,
-    KnowledgeResolutionCampaignRequest, LatentFactorRequest, LatentFactorVector,
+    EvidenceSurveillanceRequest, EvidenceTriangulationRequest, ExperimentArm,
+    ExperimentOperatingCycleRequest, ExperimentRequest, FederatedBenchmarkCampaignRequest,
+    FederatedBenchmarkRequest, FederatedBenchmarkSite, FederatedBenchmarkSitePlannerRequest,
+    FederatedMechanismSite, FederatedMechanismTransportRequest, FidelityCandidate,
+    FidelityObservation, GliomaActionCandidate, GliomaAdaptiveWorkflowSchedulerRequest,
+    GliomaAutonomousCampaignRequest, GliomaAutonomousResearchEngineRequest,
+    GliomaComputationCampaignRequest, GliomaComputationWorkflowRequest,
+    GliomaEvidenceCampaignRequest, GliomaEvidenceGatedResearchRequest, GliomaMissionRequest,
+    GliomaReplicationCampaignRequest, GliomaResearchAutopilotRequest,
+    GliomaResearchDirectorRequest, GliomaResearchIntent, GliomaWorkflowRequest, GraphFusionRequest,
+    GraphFusionVector, HarmonizationRequest, HarmonizationVector, InformationDesignRequest,
+    InstrumentCampaignRequest, InstrumentExecutionRequest, InstrumentExecutionRun,
+    InstrumentFleetExecutionRequest, InstrumentFleetScheduleRequest, InstrumentInterlockSnapshot,
+    InstrumentPreflightRequest, InterpretationSynthesisRequest, KnowledgeCompositionRequest,
+    KnowledgeFrontier, KnowledgeFrontierRequest, KnowledgeGapCompilerRequest, KnowledgeRelation,
+    KnowledgeRequest, KnowledgeResolutionCampaignRequest, LatentFactorRequest, LatentFactorVector,
     LigandReceptorPair, MechanismActionPlannerConfig, MechanismCalibration,
     MechanismCalibrationObservation, MechanismCalibrationRequest, MechanismCandidate,
     MechanismDiscrimination, MechanismDiscriminationCampaignRequest,
@@ -2229,6 +2230,9 @@ impl Server {
             "glioma_adaptive_allocation" => self.glioma_adaptive_allocation(&arguments),
             "glioma_sequential_design" => self.glioma_sequential_design(&arguments),
             "glioma_closed_loop_campaign" => self.glioma_closed_loop_campaign(&arguments),
+            "glioma_experiment_operating_cycle" => {
+                self.glioma_experiment_operating_cycle(&arguments)
+            }
             "glioma_combination_synergy" => self.glioma_combination_synergy(&arguments),
             "glioma_adaptive_dose_surface" => self.glioma_adaptive_dose_surface(&arguments),
             "glioma_multimodal_concordance" => self.glioma_multimodal_concordance(&arguments),
@@ -7120,6 +7124,32 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma closed-loop campaign: {error}"))
+    }
+
+    /// Run the complete P06 experiment-design loop through the deterministic local sandbox.
+    fn glioma_experiment_operating_cycle(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ExperimentOperatingCycleRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_experiment_operating_cycle requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma experiment operating-cycle request: {error}"))?;
+        let mut executor = DryRunExperimentOperatingCycleExecutor;
+        let cycle = execute_glioma_experiment_operating_cycle(&request, &mut executor)
+            .map_err(|error| format!("glioma experiment operating cycle refused: {error}"))?;
+        serde_json::to_value(json!({
+            "cycle": cycle,
+            "dispatch": "dry_run",
+            "simulation_only": true,
+            "guarantees": [
+                "the initial experiment plan is computed from typed mechanisms, action costs, feasibility, risk, and information value",
+                "each returned local observation is incorporated before the next plan is generated",
+                "posterior convergence, null observations, budget exhaustion, and unresolved states remain explicit",
+                "the sandbox emits metadata-only observations and performs no instrument effect, raw-data movement, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma experiment operating cycle: {error}"))
     }
 
     /// Analyze a two-agent preclinical glioma response surface with fixed-point Bliss synergy.
@@ -49795,6 +49825,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_sequential_design",
                 "glioma_sequential_campaign_execute",
                 "glioma_closed_loop_campaign",
+                "glioma_experiment_operating_cycle",
                 "glioma_combination_synergy",
                 "glioma_adaptive_dose_surface",
                 "glioma_multimodal_concordance",
@@ -59050,6 +59081,17 @@ pub fn tool_definitions() -> Vec<Value> {
                 "observations": {"type": "array", "items": {"type": "object"}, "description": "Optional local CampaignObservation1@1 entries. Raw payloads remain in local stores and each observation is content-addressed."}
             },
             "required": ["request", "mechanisms", "actions"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_experiment_operating_cycle",
+        "description": "Run the complete P06 autonomous experiment-design loop for preclinical glioma research: plan a mechanism-aware assay batch, execute it through a local sandbox adapter, incorporate returned observations, and replan until convergence, budget, no-information, or unresolved limits. The output keeps null observations, posterior uncertainty, cost, feasibility, risk, and replicate ceilings explicit. MCP is metadata-only and performs no instrument effect, raw-data movement, or clinical decision; production executors remain institution-local.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ExperimentOperatingCycleRequest1@1 containing ClosedLoopCampaignRequest1@1, mechanisms, actions, optional local observations, and a simulation_only declaration."}
+            },
+            "required": ["request"]
         }
     }));
     definitions.push(json!({

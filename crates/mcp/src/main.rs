@@ -104,6 +104,7 @@ fn main() {
                      glioma_sequential_design,\n\
                      glioma_sequential_campaign_execute,\n\
                      glioma_closed_loop_campaign,\n\
+                     glioma_experiment_operating_cycle,\n\
                      glioma_evidence_surveillance,\n\
                      glioma_evidence_priority,\n\
                      glioma_evidence_acquisition_plan,\n\
