@@ -131,6 +131,7 @@ fn main() {
                      glioma_autonomous_program_cycle,\n\
                      glioma_adaptive_workflow,\n\
                      glioma_interpretation_synthesize,\n\
+                     glioma_interpretation_operating_cycle,\n\
                      glioma_adaptive_research_frontier,\n\
                      glioma_temporal_multimodal_fusion,\n\
                      glioma_clonal_evolution,\n\

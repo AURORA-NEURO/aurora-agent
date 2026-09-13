@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 695;
+const TOOL_DEFINITION_COUNT: usize = 696;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -4554,6 +4554,61 @@ fn glioma_interpretation_synthesis_exposes_cross_family_stability() {
             .len(),
         3
     );
+}
+
+#[test]
+fn glioma_interpretation_operating_cycle_gates_and_routes_next_actions() {
+    let mut server = server();
+    let hash = "0".repeat(64);
+    let response = call(
+        &mut server,
+        "glioma_interpretation_operating_cycle",
+        json!({
+            "request": {
+                "synthesis": {
+                    "objective": "decide whether invasion signal is reproducibly supported",
+                    "hypothesis": "integrated invasion program is activated",
+                    "model_system": "organoid",
+                    "min_evidence": 3,
+                    "min_independent_groups": 2,
+                    "min_families": 2,
+                    "min_quality_milli": 700,
+                    "effect_threshold_milli": 100,
+                    "max_disagreement_milli": 150,
+                    "max_leave_one_out_shift_milli": 200,
+                    "require_replication_family": true,
+                    "replay_identity": hash,
+                    "evidence": [
+                        {"evidence_id":"causal-a","family":"causal_contrast","independent_group":"site-a","model_system":"organoid","direction":"positive","effect_milli":300,"uncertainty_milli":50,"quality_milli":900,"sample_count":6,"artifact":{"artifact_id":"causal-a","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"negative_evidence":[]},
+                        {"evidence_id":"meta-b","family":"meta_analysis","independent_group":"site-b","model_system":"organoid","direction":"positive","effect_milli":280,"uncertainty_milli":60,"quality_milli":850,"sample_count":8,"artifact":{"artifact_id":"meta-b","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"negative_evidence":[]},
+                        {"evidence_id":"replication-c","family":"replication","independent_group":"site-c","model_system":"organoid","direction":"positive","effect_milli":320,"uncertainty_milli":55,"quality_milli":900,"sample_count":7,"artifact":{"artifact_id":"replication-c","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"negative_evidence":[]}
+                    ]
+                },
+                "completed_actions": [],
+                "budget_units": 80,
+                "max_actions": 3,
+                "approval_granted": true,
+                "allow_instrument_execution": false,
+                "allow_federation": false,
+                "selection_weights": {"information_gain":25,"frontier_novelty":20,"workflow_leverage":15,"cross_stage_unlock":15,"reproducibility_safety":10,"federation_value":10,"feasibility":5}
+            }
+        }),
+    );
+    assert_eq!(response["dispatch"], json!("not_started"));
+    assert_eq!(response["simulation_only"], json!(true));
+    assert_eq!(response["cycle"]["disposition"], json!("ready"));
+    assert_eq!(
+        response["cycle"]["phase_order"],
+        json!([
+            "interpretation_gate",
+            "adaptive_frontier",
+            "operator_handoff"
+        ])
+    );
+    assert!(!response["cycle"]["frontier"]["next_action_order"]
+        .as_array()
+        .unwrap()
+        .is_empty());
 }
 
 #[test]

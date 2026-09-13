@@ -521,10 +521,10 @@ use bioprism_research::{
     execute_glioma_evidence_gated_research, execute_glioma_evidence_refresh_campaign,
     execute_glioma_experiment_operating_cycle, execute_glioma_instrument_campaign,
     execute_glioma_instrument_fleet, execute_glioma_instrument_operating_cycle,
-    execute_glioma_instrument_plan, execute_glioma_knowledge_resolution_campaign,
-    execute_glioma_mechanism_discrimination_campaign, execute_glioma_mechanism_operating_cycle,
-    execute_glioma_multi_fidelity_campaign, execute_glioma_multimodal_ingestion_campaign,
-    execute_glioma_multimodal_mechanism_campaign,
+    execute_glioma_instrument_plan, execute_glioma_interpretation_operating_cycle,
+    execute_glioma_knowledge_resolution_campaign, execute_glioma_mechanism_discrimination_campaign,
+    execute_glioma_mechanism_operating_cycle, execute_glioma_multi_fidelity_campaign,
+    execute_glioma_multimodal_ingestion_campaign, execute_glioma_multimodal_mechanism_campaign,
     execute_glioma_multimodal_mechanism_campaign_with_executor,
     execute_glioma_multimodal_readiness_gate, execute_glioma_protocol,
     execute_glioma_replay_campaign, execute_glioma_replication_campaign,
@@ -588,15 +588,15 @@ use bioprism_research::{
     GliomaAutonomousCampaignRequest, GliomaAutonomousResearchEngineRequest,
     GliomaComputationCampaignRequest, GliomaComputationOperatingCycleRequest,
     GliomaComputationWorkflowRequest, GliomaEvidenceCampaignRequest,
-    GliomaEvidenceGatedResearchRequest, GliomaMissionRequest, GliomaReplicationCampaignRequest,
-    GliomaResearchAutopilotRequest, GliomaResearchDirectorRequest, GliomaResearchIntent,
-    GliomaWorkflowRequest, GraphFusionRequest, GraphFusionVector, HarmonizationRequest,
-    HarmonizationVector, InformationDesignRequest, InstrumentCampaignRequest,
-    InstrumentExecutionMode, InstrumentExecutionRequest, InstrumentExecutionRun,
-    InstrumentFleetExecutionRequest, InstrumentFleetScheduleRequest, InstrumentInterlockSnapshot,
-    InstrumentOperatingCycleRequest, InstrumentPreflightRequest, InterpretationSynthesisRequest,
-    KnowledgeCompositionRequest, KnowledgeFrontier, KnowledgeFrontierRequest,
-    KnowledgeGapCompilerRequest, KnowledgeRelation, KnowledgeRequest,
+    GliomaEvidenceGatedResearchRequest, GliomaInterpretationOperatingCycleRequest,
+    GliomaMissionRequest, GliomaReplicationCampaignRequest, GliomaResearchAutopilotRequest,
+    GliomaResearchDirectorRequest, GliomaResearchIntent, GliomaWorkflowRequest, GraphFusionRequest,
+    GraphFusionVector, HarmonizationRequest, HarmonizationVector, InformationDesignRequest,
+    InstrumentCampaignRequest, InstrumentExecutionMode, InstrumentExecutionRequest,
+    InstrumentExecutionRun, InstrumentFleetExecutionRequest, InstrumentFleetScheduleRequest,
+    InstrumentInterlockSnapshot, InstrumentOperatingCycleRequest, InstrumentPreflightRequest,
+    InterpretationSynthesisRequest, KnowledgeCompositionRequest, KnowledgeFrontier,
+    KnowledgeFrontierRequest, KnowledgeGapCompilerRequest, KnowledgeRelation, KnowledgeRequest,
     KnowledgeResolutionCampaignRequest, LatentFactorRequest, LatentFactorVector,
     LigandReceptorPair, MechanismActionPlannerConfig, MechanismCalibration,
     MechanismCalibrationObservation, MechanismCalibrationRequest, MechanismCandidate,
@@ -2215,6 +2215,9 @@ impl Server {
             "glioma_autonomous_program_cycle" => self.glioma_autonomous_program_cycle(&arguments),
             "glioma_adaptive_workflow" => self.glioma_adaptive_workflow(&arguments),
             "glioma_interpretation_synthesize" => self.glioma_interpretation_synthesize(&arguments),
+            "glioma_interpretation_operating_cycle" => {
+                self.glioma_interpretation_operating_cycle(&arguments)
+            }
             "glioma_temporal_multimodal_fusion" => {
                 self.glioma_temporal_multimodal_fusion(&arguments)
             }
@@ -6400,6 +6403,32 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma interpretation synthesis: {error}"))
+    }
+
+    /// Compile the interpretation gate and adaptive next-action frontier as one bounded
+    /// researcher handoff. It plans only; selected actions remain behind their typed executors.
+    fn glioma_interpretation_operating_cycle(&self, arguments: &Value) -> Result<Value, String> {
+        let request: GliomaInterpretationOperatingCycleRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_interpretation_operating_cycle requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma interpretation operating-cycle request: {error}")
+            })?;
+        let cycle = execute_glioma_interpretation_operating_cycle(&request)
+            .map_err(|error| format!("glioma interpretation operating cycle refused: {error}"))?;
+        serde_json::to_value(json!({
+            "cycle": cycle,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "cross-family interpretation and leave-one-family-out stability gates run before frontier selection",
+                "contradiction, missing replication, negative, and unresolved evidence remain explicit",
+                "frontier actions are typed bounded handoffs and require their own institution-local executor",
+                "MCP executes no assays, moves no raw data, and makes no clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma interpretation operating cycle: {error}"))
     }
 
     /// Infer longitudinal multimodal state transitions from caller-supplied local preclinical
@@ -49922,6 +49951,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_autonomous_program_cycle",
                 "glioma_adaptive_workflow",
                 "glioma_interpretation_synthesize",
+                "glioma_interpretation_operating_cycle",
                 "glioma_adaptive_research_frontier",
                 "glioma_robustness_suite",
                 "glioma_trajectory_analyze",
@@ -59014,6 +59044,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "InterpretationSynthesisRequest1@1 with hypothesis, model system, evidence-family records, quality/floor thresholds, replication requirement, and replay identity."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_interpretation_operating_cycle",
+        "description": "Run the complete preclinical glioma interpretation operating cycle: synthesize independent evidence families, gate contradiction/negative/replication/stability state, compile a bounded adaptive frontier, and return the next operator handoff. Frontier actions are typed research-program work that still require their own local executor; MCP performs no assays, moves no raw data, and makes no clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "GliomaInterpretationOperatingCycleRequest1@1 containing InterpretationSynthesisRequest1@1, completed action ids, budget/authority gates, and GliomaSelectionWeights."}
             },
             "required": ["request"]
         }

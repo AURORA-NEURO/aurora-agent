@@ -214,6 +214,8 @@ crates/research/src/glioma/
                                              P10 cross-family interpretation gate with contradiction and leave-one-family-out stability
     p10_interpretation_replication/adaptive_frontier.rs
                                              P10 outcome-conditioned next-action frontier for contradiction, replication, evidence gaps, and negative results
+    p10_interpretation_replication/operating_cycle.rs
+                                             P10 cross-family interpretation gate to adaptive research frontier and operator handoff
     p12_federated_benchmarking/consensus.rs
                                              P12 aggregate-only multi-site benchmark consensus with robust pooling and influence bounds
     p12_federated_benchmarking/campaign.rs

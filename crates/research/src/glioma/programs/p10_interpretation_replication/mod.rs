@@ -10,6 +10,7 @@ pub mod clone_outcomes;
 pub mod dynamic_policy;
 pub mod mediation;
 pub mod meta_analysis;
+pub mod operating_cycle;
 pub mod sensitivity;
 pub mod state_transition;
 pub mod synthesis;
@@ -57,6 +58,11 @@ pub use mediation::{
 pub use meta_analysis::{
     analyze_replication_meta_analysis, MetaAnalysisDisposition, MetaAnalysisError,
     MetaAnalysisRequest, MetaStudyContribution, ReplicationMetaAnalysis,
+};
+pub use operating_cycle::{
+    execute_glioma_interpretation_operating_cycle, GliomaInterpretationOperatingCycle,
+    GliomaInterpretationOperatingCycleError, GliomaInterpretationOperatingCycleRequest,
+    InterpretationOperatingCycleDisposition,
 };
 pub use sensitivity::{
     analyze_causal_sensitivity, CausalSensitivityAnalysis, SensitivityDirection,
