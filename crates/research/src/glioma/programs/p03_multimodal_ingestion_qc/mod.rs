@@ -8,6 +8,7 @@ pub mod consensus;
 pub mod graph_fusion;
 pub mod harmonization;
 pub mod latent_factors;
+pub mod readiness_gate;
 pub mod spatial_communication;
 pub mod spatial_niche;
 pub mod spatial_propagation;
@@ -45,6 +46,11 @@ pub use latent_factors::{
     analyze_glioma_latent_factors, LatentFactorAnalysis, LatentFactorComponent,
     LatentFactorDisposition, LatentFactorError, LatentFactorRequest, LatentFactorVector,
     LatentLoading, LatentScore,
+};
+pub use readiness_gate::{
+    execute_glioma_multimodal_readiness_gate, MultimodalReadinessError, MultimodalReadinessRequest,
+    MultimodalResearchReadiness, MultimodalResearchReadinessDisposition, MultimodalResearchSurface,
+    MultimodalSurfaceDecision, MultimodalSurfaceReadiness,
 };
 pub use spatial_communication::{
     analyze_glioma_spatial_communication, LigandReceptorPair, SpatialCommunicationAnalysis,

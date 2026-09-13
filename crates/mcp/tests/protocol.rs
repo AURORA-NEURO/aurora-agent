@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 688;
+const TOOL_DEFINITION_COUNT: usize = 689;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -2871,6 +2871,60 @@ fn glioma_mechanism_discrimination_campaign_replans_measurement_in_sandbox() {
         json!(["measure-f1"])
     );
     assert_eq!(campaign["campaign"]["rounds"].as_array().unwrap().len(), 1);
+
+    let readiness = call(
+        &mut server,
+        "glioma_multimodal_readiness_gate",
+        json!({
+            "request": {
+                "campaign": {
+                    "request": {
+                        "study_id": "study-mcp-ingestion",
+                        "required_modalities": ["genomics", "imaging"],
+                        "required_model_systems": ["organoid"],
+                        "expected_coordinate_system": "pixel",
+                        "expected_unit_system": "count",
+                        "max_missing_fraction_milli": 100
+                    },
+                    "observations": [{
+                        "observation_id": "seed-genomics",
+                        "study_id": "study-mcp-ingestion",
+                        "sample_lineage": "sample-seed",
+                        "modality": "genomics",
+                        "model_system": "organoid",
+                        "batch_id": "batch-1",
+                        "coordinate_system": "pixel",
+                        "unit_system": "count",
+                        "missing_fraction_milli": 0,
+                        "feature_count": 10,
+                        "artifact": {"artifact_id":"ingestion-artifact","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}
+                    }],
+                    "max_actions_per_round": 4,
+                    "budget_units": 2,
+                    "cost_per_action_units": 1,
+                    "max_rounds": 3,
+                    "max_retries": 1,
+                    "stop_on_qualified": true
+                },
+                "min_comparable_observations": 1,
+                "min_coverage_milli": 1000,
+                "min_quality_milli": 800,
+                "require_complete_report": true,
+                "required_surfaces": ["analysis", "mechanism", "experiment_design", "replication"]
+            }
+        }),
+    );
+    assert_eq!(readiness["dispatch"], json!("dry_run"));
+    assert_eq!(readiness["simulation_only"], json!(true));
+    assert_eq!(readiness["readiness"]["coverage_milli"], json!(1000));
+    assert!(readiness["readiness"]["admitted_surface_order"]
+        .as_array()
+        .unwrap()
+        .contains(&json!("analysis")));
+    assert!(readiness["readiness"]["conditional_surface_order"]
+        .as_array()
+        .unwrap()
+        .contains(&json!("replication")));
 }
 
 #[test]

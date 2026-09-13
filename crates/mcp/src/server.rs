@@ -521,7 +521,8 @@ use bioprism_research::{
     execute_glioma_knowledge_resolution_campaign, execute_glioma_mechanism_discrimination_campaign,
     execute_glioma_multi_fidelity_campaign, execute_glioma_multimodal_ingestion_campaign,
     execute_glioma_multimodal_mechanism_campaign,
-    execute_glioma_multimodal_mechanism_campaign_with_executor, execute_glioma_protocol,
+    execute_glioma_multimodal_mechanism_campaign_with_executor,
+    execute_glioma_multimodal_readiness_gate, execute_glioma_protocol,
     execute_glioma_replay_campaign, execute_glioma_replication_campaign,
     execute_glioma_research_autopilot, execute_glioma_research_director,
     execute_glioma_robust_active_learning_campaign, execute_glioma_sequential_campaign,
@@ -599,20 +600,21 @@ use bioprism_research::{
     MechanismHypothesis, MechanismRequest, MediationObservation, MediationRequest,
     MetaAnalysisRequest, ModalityVector, MultiFidelityCampaignRequest,
     MultiFidelityOptimizationRequest, MultimodalIngestionCampaignRequest,
-    MultimodalMechanismCampaignRequest, MultimodalObservation, MultimodalRequest,
-    PathwayActivityDefinition, PathwayActivityObservation, PathwayActivityRequest,
-    ProtocolExecutionRequest, ProtocolSimulationRequest, ReleaseGateRequest, ReplayCampaign,
-    ReplayCampaignRequest, ReplicationRequest, ReplicationStudy, ResearchObjectRequest,
-    RobustActiveLearningCampaignRequest, RobustActiveLearningCandidate,
-    RobustActiveLearningObservation, RobustActiveLearningRequest, RobustInterventionCandidate,
-    RobustInterventionRequest, RobustnessRequest, SensitivityObservation, SensitivityRequest,
-    SequentialArmObservation, SequentialCampaignRequest, SequentialDesignRequest, SpatialCell,
-    SpatialCommunicationCell, SpatialCommunicationRequest, SpatialNicheRequest,
-    SpatialPropagationRequest, SpatialRegistrationCell, SpatialRegistrationRequest,
-    StateTransitionObservation, StateTransitionRequest, StaticGliomaActionPlanner,
-    StaticGliomaComputationPlanner, StratifiedCausalRequest, StratifiedObservation,
-    TemporalFusionRequest, TemporalObservation, TrajectoryObservation, TrajectoryRequest,
-    TransportStudy, TransportabilityRequest, TypedKnowledge,
+    MultimodalMechanismCampaignRequest, MultimodalObservation, MultimodalReadinessRequest,
+    MultimodalRequest, PathwayActivityDefinition, PathwayActivityObservation,
+    PathwayActivityRequest, ProtocolExecutionRequest, ProtocolSimulationRequest,
+    ReleaseGateRequest, ReplayCampaign, ReplayCampaignRequest, ReplicationRequest,
+    ReplicationStudy, ResearchObjectRequest, RobustActiveLearningCampaignRequest,
+    RobustActiveLearningCandidate, RobustActiveLearningObservation, RobustActiveLearningRequest,
+    RobustInterventionCandidate, RobustInterventionRequest, RobustnessRequest,
+    SensitivityObservation, SensitivityRequest, SequentialArmObservation,
+    SequentialCampaignRequest, SequentialDesignRequest, SpatialCell, SpatialCommunicationCell,
+    SpatialCommunicationRequest, SpatialNicheRequest, SpatialPropagationRequest,
+    SpatialRegistrationCell, SpatialRegistrationRequest, StateTransitionObservation,
+    StateTransitionRequest, StaticGliomaActionPlanner, StaticGliomaComputationPlanner,
+    StratifiedCausalRequest, StratifiedObservation, TemporalFusionRequest, TemporalObservation,
+    TrajectoryObservation, TrajectoryRequest, TransportStudy, TransportabilityRequest,
+    TypedKnowledge,
 };
 use bioprism_routing::{
     lab::{run as run_routing_lab, LabSettings, Task},
@@ -2177,6 +2179,7 @@ impl Server {
             "glioma_multimodal_ingestion_campaign_execute" => {
                 self.glioma_multimodal_ingestion_campaign_execute(&arguments)
             }
+            "glioma_multimodal_readiness_gate" => self.glioma_multimodal_readiness_gate(&arguments),
             "glioma_computation_execute" => self.glioma_computation_execute(&arguments),
             "glioma_computation_portfolio_plan" => {
                 self.glioma_computation_portfolio_plan(&arguments)
@@ -6059,6 +6062,33 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma multimodal ingestion campaign: {error}"))
+    }
+
+    /// Admit downstream preclinical research surfaces from the final multimodal QC state. MCP
+    /// uses a deterministic metadata-only dry run; production callers provide the local adapter.
+    fn glioma_multimodal_readiness_gate(&self, arguments: &Value) -> Result<Value, String> {
+        let request: MultimodalReadinessRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_multimodal_readiness_gate requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma multimodal readiness request: {error}"))?;
+        let mut executor = DryRunMultimodalIngestionCampaignExecutor;
+        let readiness = execute_glioma_multimodal_readiness_gate(&request, &mut executor)
+            .map_err(|error| format!("glioma multimodal readiness gate refused: {error}"))?;
+        serde_json::to_value(json!({
+            "readiness": readiness,
+            "dispatch": "dry_run",
+            "simulation_only": true,
+            "guarantees": [
+                "modality/model coverage and comparable-observation quality are quantified from the executed QC campaign",
+                "analysis, mechanism, experiment-design, replication, and publication surfaces are admitted independently",
+                "partial, blocked, unresolved, missing-modality, defect, and negative-result actions remain explicit",
+                "MCP performs no raw-data movement, external instrument effect, clinical decision, or treatment recommendation"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma multimodal readiness: {error}"))
     }
 
     /// Compile and dispatch a bounded P04 question-to-action campaign through a local adapter.
@@ -49679,6 +49709,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_knowledge_resolution_campaign_execute",
                 "glioma_decision_context_campaign_execute",
                 "glioma_multimodal_ingestion_campaign_execute",
+                "glioma_multimodal_readiness_gate",
                 "glioma_computation_execute",
                 "glioma_computation_portfolio_plan",
                 "glioma_computation_placement",
@@ -58602,6 +58633,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "MultimodalIngestionCampaignRequest1@1 containing MultimodalRequest1@1, metadata-only observations, and bounded budget/round/retry limits."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_multimodal_readiness_gate",
+        "description": "Execute a bounded P03 multimodal ingestion/QC campaign and admit downstream preclinical research surfaces independently. It quantifies modality/model coverage and comparable-observation quality, then gates analysis, mechanism exploration, experiment design, replication, and publication with explicit remediation actions. MCP uses a deterministic dry-run adapter; production adapters remain institution-local and no clinical decision is produced.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "MultimodalReadinessRequest1@1 with a MultimodalIngestionCampaignRequest1@1, coverage/quality floors, complete-report policy, and required research surfaces."}
             },
             "required": ["request"]
         }
