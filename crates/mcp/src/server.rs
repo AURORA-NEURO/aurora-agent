@@ -519,20 +519,21 @@ use bioprism_research::{
     execute_glioma_computation_portfolio, execute_glioma_decision_context_campaign,
     execute_glioma_decision_operating_cycle, execute_glioma_evidence_acquisition_campaign,
     execute_glioma_evidence_campaign, execute_glioma_evidence_gated_research,
-    execute_glioma_evidence_refresh_campaign, execute_glioma_experiment_operating_cycle,
-    execute_glioma_instrument_campaign, execute_glioma_instrument_fleet,
-    execute_glioma_instrument_operating_cycle, execute_glioma_instrument_plan,
-    execute_glioma_interpretation_operating_cycle, execute_glioma_knowledge_resolution_campaign,
-    execute_glioma_mechanism_discrimination_campaign, execute_glioma_mechanism_operating_cycle,
-    execute_glioma_multi_fidelity_campaign, execute_glioma_multimodal_ingestion_campaign,
-    execute_glioma_multimodal_mechanism_campaign,
+    execute_glioma_evidence_operating_cycle_dry_run, execute_glioma_evidence_refresh_campaign,
+    execute_glioma_experiment_operating_cycle, execute_glioma_instrument_campaign,
+    execute_glioma_instrument_fleet, execute_glioma_instrument_operating_cycle,
+    execute_glioma_instrument_plan, execute_glioma_interpretation_operating_cycle,
+    execute_glioma_knowledge_resolution_campaign, execute_glioma_mechanism_discrimination_campaign,
+    execute_glioma_mechanism_operating_cycle, execute_glioma_multi_fidelity_campaign,
+    execute_glioma_multimodal_ingestion_campaign, execute_glioma_multimodal_mechanism_campaign,
     execute_glioma_multimodal_mechanism_campaign_with_executor,
-    execute_glioma_multimodal_readiness_gate, execute_glioma_protocol,
-    execute_glioma_release_operating_cycle_dry_run, execute_glioma_replay_campaign,
-    execute_glioma_replication_campaign, execute_glioma_research_autopilot,
-    execute_glioma_research_director, execute_glioma_robust_active_learning_campaign,
-    execute_glioma_sequential_campaign, explore_mechanisms, generate_feature_catalog,
-    glioma_program_catalog, harmonize_glioma_multimodal_batches, harmonize_multimodal_inputs,
+    execute_glioma_multimodal_operating_cycle_dry_run, execute_glioma_multimodal_readiness_gate,
+    execute_glioma_protocol, execute_glioma_release_operating_cycle_dry_run,
+    execute_glioma_replay_campaign, execute_glioma_replication_campaign,
+    execute_glioma_research_autopilot, execute_glioma_research_director,
+    execute_glioma_robust_active_learning_campaign, execute_glioma_sequential_campaign,
+    explore_mechanisms, generate_feature_catalog, glioma_program_catalog,
+    harmonize_glioma_multimodal_batches, harmonize_multimodal_inputs,
     plan_adaptive_glioma_dose_surface, plan_decision_actions, plan_federated_benchmark_sites,
     plan_glioma_active_learning, plan_glioma_adaptive_information_campaign,
     plan_glioma_adaptive_mechanism_policy, plan_glioma_adaptive_research_frontier,
@@ -580,8 +581,8 @@ use bioprism_research::{
     DryRunSequentialCampaignExecutor, DynamicPolicyCandidate, DynamicPolicyRequest,
     DynamicPolicyTrajectory, EvidenceAcquisitionCampaignRequest, EvidenceAcquisitionCandidate,
     EvidenceAcquisitionRequest, EvidenceCalibrationObservation, EvidenceCalibrationRequest,
-    EvidencePriorityRequest, EvidenceRecord, EvidenceRefreshCampaignRequest, EvidenceRequest,
-    EvidenceSurveillanceRequest, EvidenceTriangulationRequest, ExperimentArm,
+    EvidenceExecutionMode, EvidencePriorityRequest, EvidenceRecord, EvidenceRefreshCampaignRequest,
+    EvidenceRequest, EvidenceSurveillanceRequest, EvidenceTriangulationRequest, ExperimentArm,
     ExperimentOperatingCycleRequest, ExperimentRequest, FederatedBenchmarkCampaignRequest,
     FederatedBenchmarkExecutionMode, FederatedBenchmarkOperatingCycleRequest,
     FederatedBenchmarkRequest, FederatedBenchmarkSite, FederatedBenchmarkSitePlannerRequest,
@@ -590,16 +591,17 @@ use bioprism_research::{
     GliomaAutonomousCampaignRequest, GliomaAutonomousResearchEngineRequest,
     GliomaComputationCampaignRequest, GliomaComputationOperatingCycleRequest,
     GliomaComputationWorkflowRequest, GliomaEvidenceCampaignRequest,
-    GliomaEvidenceGatedResearchRequest, GliomaInterpretationOperatingCycleRequest,
-    GliomaMissionRequest, GliomaReleaseOperatingCycleRequest, GliomaReplicationCampaignRequest,
-    GliomaResearchAutopilotRequest, GliomaResearchDirectorRequest, GliomaResearchIntent,
-    GliomaWorkflowRequest, GraphFusionRequest, GraphFusionVector, HarmonizationRequest,
-    HarmonizationVector, InformationDesignRequest, InstrumentCampaignRequest,
-    InstrumentExecutionMode, InstrumentExecutionRequest, InstrumentExecutionRun,
-    InstrumentFleetExecutionRequest, InstrumentFleetScheduleRequest, InstrumentInterlockSnapshot,
-    InstrumentOperatingCycleRequest, InstrumentPreflightRequest, InterpretationSynthesisRequest,
-    KnowledgeCompositionRequest, KnowledgeFrontier, KnowledgeFrontierRequest,
-    KnowledgeGapCompilerRequest, KnowledgeRelation, KnowledgeRequest,
+    GliomaEvidenceGatedResearchRequest, GliomaEvidenceOperatingCycleRequest,
+    GliomaInterpretationOperatingCycleRequest, GliomaMissionRequest,
+    GliomaMultimodalOperatingCycleRequest, GliomaReleaseOperatingCycleRequest,
+    GliomaReplicationCampaignRequest, GliomaResearchAutopilotRequest,
+    GliomaResearchDirectorRequest, GliomaResearchIntent, GliomaWorkflowRequest, GraphFusionRequest,
+    GraphFusionVector, HarmonizationRequest, HarmonizationVector, InformationDesignRequest,
+    InstrumentCampaignRequest, InstrumentExecutionMode, InstrumentExecutionRequest,
+    InstrumentExecutionRun, InstrumentFleetExecutionRequest, InstrumentFleetScheduleRequest,
+    InstrumentInterlockSnapshot, InstrumentOperatingCycleRequest, InstrumentPreflightRequest,
+    InterpretationSynthesisRequest, KnowledgeCompositionRequest, KnowledgeFrontier,
+    KnowledgeFrontierRequest, KnowledgeGapCompilerRequest, KnowledgeRelation, KnowledgeRequest,
     KnowledgeResolutionCampaignRequest, LatentFactorRequest, LatentFactorVector,
     LigandReceptorPair, MechanismActionPlannerConfig, MechanismCalibration,
     MechanismCalibrationObservation, MechanismCalibrationRequest, MechanismCandidate,
@@ -609,7 +611,7 @@ use bioprism_research::{
     MechanismFeatureObservation, MechanismGraphEdge, MechanismGraphNode, MechanismGraphRequest,
     MechanismHypothesis, MechanismOperatingCycleRequest, MechanismRequest, MediationObservation,
     MediationRequest, MetaAnalysisRequest, ModalityVector, MultiFidelityCampaignRequest,
-    MultiFidelityOptimizationRequest, MultimodalIngestionCampaignRequest,
+    MultiFidelityOptimizationRequest, MultimodalExecutionMode, MultimodalIngestionCampaignRequest,
     MultimodalMechanismCampaignRequest, MultimodalObservation, MultimodalReadinessRequest,
     MultimodalRequest, PathwayActivityDefinition, PathwayActivityObservation,
     PathwayActivityRequest, ProtocolExecutionRequest, ProtocolSimulationRequest,
@@ -2191,6 +2193,9 @@ impl Server {
                 self.glioma_multimodal_ingestion_campaign_execute(&arguments)
             }
             "glioma_multimodal_readiness_gate" => self.glioma_multimodal_readiness_gate(&arguments),
+            "glioma_multimodal_operating_cycle" => {
+                self.glioma_multimodal_operating_cycle(&arguments)
+            }
             "glioma_computation_execute" => self.glioma_computation_execute(&arguments),
             "glioma_computation_portfolio_plan" => {
                 self.glioma_computation_portfolio_plan(&arguments)
@@ -2276,6 +2281,7 @@ impl Server {
             "glioma_evidence_acquisition_campaign_execute" => {
                 self.glioma_evidence_acquisition_campaign_execute(&arguments)
             }
+            "glioma_evidence_operating_cycle" => self.glioma_evidence_operating_cycle(&arguments),
             "glioma_evidence_calibrate" => self.glioma_evidence_calibrate(&arguments),
             "glioma_evidence_triangulate" => self.glioma_evidence_triangulate(&arguments),
             "glioma_knowledge_compile" => self.glioma_knowledge_compile(&arguments),
@@ -6120,6 +6126,41 @@ impl Server {
         .map_err(|error| format!("cannot encode glioma multimodal readiness: {error}"))
     }
 
+    /// Run the complete P03 ingestion-to-readiness operating cycle in the deterministic metadata
+    /// sandbox. Governed-local execution remains behind an institution-owned adapter.
+    fn glioma_multimodal_operating_cycle(&self, arguments: &Value) -> Result<Value, String> {
+        let request: GliomaMultimodalOperatingCycleRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_multimodal_operating_cycle requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma multimodal operating-cycle request: {error}"))?;
+        if matches!(
+            request.execution_mode,
+            MultimodalExecutionMode::GovernedLocal
+        ) {
+            return Err(
+                "glioma_multimodal_operating_cycle MCP route is simulation-only; governed_local requires an institution-owned metadata adapter"
+                    .to_string(),
+            );
+        }
+        let cycle = execute_glioma_multimodal_operating_cycle_dry_run(&request)
+            .map_err(|error| format!("glioma multimodal operating cycle refused: {error}"))?;
+        serde_json::to_value(json!({
+            "cycle": cycle,
+            "dispatch": "dry_run",
+            "simulation_only": true,
+            "guarantees": [
+                "metadata-only ingestion and QC run before downstream surface admission",
+                "missing modalities, quality defects, conditional surfaces, and remediation actions remain explicit",
+                "admitted surfaces are typed handoffs and never become biological conclusions by themselves",
+                "MCP moves no raw payloads, executes no instruments, and makes no clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma multimodal operating cycle: {error}"))
+    }
+
     /// Compile and dispatch a bounded P04 question-to-action campaign through a local adapter.
     fn glioma_decision_context_campaign_execute(&self, arguments: &Value) -> Result<Value, String> {
         let request: DecisionContextCampaignRequest =
@@ -8024,6 +8065,38 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma evidence-acquisition campaign: {error}"))
+    }
+
+    /// Run the complete P01 evidence operating cycle in the deterministic local sandbox. The
+    /// synthetic adapter returns unknown outcomes so portfolio execution cannot fabricate support.
+    fn glioma_evidence_operating_cycle(&self, arguments: &Value) -> Result<Value, String> {
+        let request: GliomaEvidenceOperatingCycleRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_evidence_operating_cycle requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma evidence operating-cycle request: {error}"))?;
+        if matches!(request.execution_mode, EvidenceExecutionMode::GovernedLocal) {
+            return Err(
+                "glioma_evidence_operating_cycle MCP route is simulation-only; governed_local requires an institution-owned evidence adapter"
+                    .to_string(),
+            );
+        }
+        let cycle = execute_glioma_evidence_operating_cycle_dry_run(&request)
+            .map_err(|error| format!("glioma evidence operating cycle refused: {error}"))?;
+        serde_json::to_value(json!({
+            "cycle": cycle,
+            "dispatch": "dry_run",
+            "simulation_only": true,
+            "guarantees": [
+                "source-diverse evidence selection runs before acquisition",
+                "dependency, privacy, budget, retry, unknown, negative, and blocked states remain explicit",
+                "dry-run acquisition artifacts never count as biological support",
+                "MCP fetches no sources, moves no protected bytes, and makes no clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma evidence operating cycle: {error}"))
     }
 
     /// Calibrate source-family support scores against resolved local preclinical outcomes. The
@@ -50018,6 +50091,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_decision_operating_cycle",
                 "glioma_multimodal_ingestion_campaign_execute",
                 "glioma_multimodal_readiness_gate",
+                "glioma_multimodal_operating_cycle",
                 "glioma_computation_execute",
                 "glioma_computation_portfolio_plan",
                 "glioma_computation_placement",
@@ -50072,6 +50146,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_evidence_priority",
                 "glioma_evidence_acquisition_plan",
                 "glioma_evidence_acquisition_campaign_execute",
+                "glioma_evidence_operating_cycle",
                 "glioma_evidence_calibrate",
                 "glioma_evidence_triangulate",
                 "glioma_knowledge_compile",
@@ -58965,6 +59040,17 @@ pub fn tool_definitions() -> Vec<Value> {
         }
     }));
     definitions.push(json!({
+        "name": "glioma_multimodal_operating_cycle",
+        "description": "Run the complete P03 preclinical glioma ingestion-to-readiness operating cycle: execute metadata-only QC, admit downstream surfaces independently, and return the next remediation or research handoff. Missingness, defects, conditional readiness, and negative evidence remain explicit; MCP never moves raw payloads or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "GliomaMultimodalOperatingCycleRequest1@1 containing MultimodalReadinessRequest1@1 and execution_mode local_simulation or governed_local."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
         "name": "glioma_decision_context_campaign_execute",
         "description": "Run a bounded autonomous P04 question-to-action campaign for preclinical glioma research. It compiles typed knowledge into a decision context, selects a dependency-safe local action portfolio, dispatches claim-scoped actions through a local executor, recompiles from returned evidence after each round, and preserves unresolved, negative, contradictory, omission, retry, budget, and no-progress states. MCP is a deterministic dry run with no raw-data movement, instrument effect, or clinical decision; production adapters remain institution-local.",
         "inputSchema": {
@@ -59659,6 +59745,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "EvidenceAcquisitionCampaignRequest1@1 containing the validated acquisition plan, matching candidate records, budget, retry policy, negative-result policy, and artifact requirement."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_evidence_operating_cycle",
+        "description": "Run the complete P01 preclinical glioma evidence operating cycle: select a source-diverse dependency-closed portfolio, execute it through the local adapter seam, and return an explicit unknown/negative/partial/blocked continuation. MCP uses a synthetic adapter that never fabricates biological support or fetches sources.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "GliomaEvidenceOperatingCycleRequest1@1 containing EvidenceAcquisitionRequest1@1, candidate records, retry/negative/artifact policy, and execution_mode local_simulation or governed_local."}
             },
             "required": ["request"]
         }

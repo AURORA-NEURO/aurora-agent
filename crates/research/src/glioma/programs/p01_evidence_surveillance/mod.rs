@@ -6,6 +6,7 @@ pub mod acquisition;
 pub mod acquisition_campaign;
 pub mod calibration;
 pub mod campaign;
+pub mod operating_cycle;
 pub mod priority;
 pub mod surveillance;
 pub mod triangulation;
@@ -40,6 +41,11 @@ pub use acquisition_campaign::{
     EvidenceAcquisitionCampaignError, EvidenceAcquisitionCampaignRequest,
     EvidenceAcquisitionCampaignStopReason, EvidenceAcquisitionExecutionFailure,
     EvidenceAcquisitionExecutor, EvidenceAcquisitionResult, EvidenceAcquisitionResultDisposition,
+};
+pub use operating_cycle::{
+    execute_glioma_evidence_operating_cycle, execute_glioma_evidence_operating_cycle_dry_run,
+    EvidenceExecutionMode, GliomaEvidenceOperatingCycle, GliomaEvidenceOperatingCycleDisposition,
+    GliomaEvidenceOperatingCycleError, GliomaEvidenceOperatingCycleRequest,
 };
 pub use priority::{
     prioritize_glioma_evidence, EvidencePriorityAction, EvidencePriorityActionKind,

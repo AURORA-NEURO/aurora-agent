@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 698;
+const TOOL_DEFINITION_COUNT: usize = 700;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -3047,6 +3047,78 @@ fn glioma_mechanism_discrimination_campaign_replans_measurement_in_sandbox() {
         .as_array()
         .unwrap()
         .contains(&json!("replication")));
+
+    let evidence_cycle = call(
+        &mut server,
+        "glioma_evidence_operating_cycle",
+        json!({
+            "request": {
+                "planning": {
+                    "objective": "map reproducible preclinical glioma invasion evidence",
+                    "budget_units": 2,
+                    "max_candidates": 8,
+                    "max_selected": 1,
+                    "beam_width": 8,
+                    "min_source_families": 1,
+                    "max_per_independence_group": 1,
+                    "max_privacy_risk_milli": 200,
+                    "min_portfolio_score_milli": 0,
+                    "required_modalities": ["literature"],
+                    "required_model_systems": ["organoid"],
+                    "weights": {"support_milli": 180, "uncertainty_reduction_milli": 180, "contradiction_resolution_milli": 160, "freshness_milli": 90, "workflow_leverage_milli": 150, "reproducibility_milli": 120, "failure_penalty_milli": 70, "cost_penalty_milli": 50}
+                },
+                "candidates": [{"candidate_id":"literature-invasion", "target_claim":"invasion program is reproducible", "source_family":"preclinical-literature", "source_kind":"literature", "modality":"literature", "model_system":"organoid", "independence_group":"source-a", "depends_on":[], "cost_units":1, "expected_support_milli":800, "expected_uncertainty_reduction_milli":700, "contradiction_resolution_milli":500, "freshness_milli":800, "workflow_leverage_milli":700, "reproducibility_milli":800, "failure_probability_milli":50, "privacy_risk_milli":10, "local_only":true, "contains_human_data":false}],
+                "max_retries": 1,
+                "stop_on_negative": false,
+                "require_artifacts": true,
+                "execution_mode": "local_simulation"
+            }
+        }),
+    );
+    assert_eq!(evidence_cycle["dispatch"], json!("dry_run"));
+    assert_eq!(evidence_cycle["simulation_only"], json!(true));
+    assert_eq!(
+        evidence_cycle["cycle"]["phase_order"][0],
+        json!("portfolio_selection")
+    );
+    assert!(!evidence_cycle["cycle"]["campaign"]["unknown_order"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+
+    let multimodal_cycle = call(
+        &mut server,
+        "glioma_multimodal_operating_cycle",
+        json!({
+            "request": {
+                "readiness": {
+                    "campaign": {
+                        "request": {"study_id":"cycle-study", "required_modalities":["genomics"], "required_model_systems":["organoid"], "expected_coordinate_system":"sample-local", "expected_unit_system":"normalized", "max_missing_fraction_milli":100},
+                        "observations": [{"observation_id":"cycle-observation", "study_id":"cycle-study", "sample_lineage":"sample-1", "modality":"genomics", "model_system":"organoid", "batch_id":"batch-1", "coordinate_system":"sample-local", "unit_system":"normalized", "missing_fraction_milli":10, "feature_count":100, "artifact":{"artifact_id":"cycle-artifact", "content_hash":hash, "content_type":"application/json", "local_only":true, "contains_human_data":false, "contains_direct_identifiers":false}}],
+                        "max_actions_per_round": 2,
+                        "budget_units": 2,
+                        "cost_per_action_units": 1,
+                        "max_rounds": 2,
+                        "max_retries": 1,
+                        "stop_on_qualified": true
+                    },
+                    "min_comparable_observations": 1,
+                    "min_coverage_milli": 1000,
+                    "min_quality_milli": 800,
+                    "require_complete_report": true,
+                    "required_surfaces": ["analysis"]
+                },
+                "execution_mode": "local_simulation"
+            }
+        }),
+    );
+    assert_eq!(multimodal_cycle["dispatch"], json!("dry_run"));
+    assert_eq!(multimodal_cycle["simulation_only"], json!(true));
+    assert_eq!(
+        multimodal_cycle["cycle"]["phase_order"][1],
+        json!("surface_readiness")
+    );
+    assert_eq!(multimodal_cycle["cycle"]["disposition"], json!("ready"));
 }
 
 #[test]
