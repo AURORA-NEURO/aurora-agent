@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 697;
+const TOOL_DEFINITION_COUNT: usize = 698;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -4052,6 +4052,58 @@ fn glioma_federated_benchmark_campaign_replans_aggregate_sites_in_sandbox() {
     assert_eq!(campaign["simulation_only"], json!(true));
     assert_eq!(campaign["campaign"]["rounds"].as_array().unwrap().len(), 1);
     assert_eq!(campaign["campaign"]["sites"].as_array().unwrap().len(), 2);
+}
+
+#[test]
+fn glioma_federated_benchmark_operating_cycle_runs_boundary_consensus_and_campaign() {
+    let mut server = server();
+    let hash = "0000000000000000000000000000000000000000000000000000000000000000";
+    let cycle = call(
+        &mut server,
+        "glioma_federated_benchmark_operating_cycle",
+        json!({
+            "request": {
+                "campaign": {
+                    "benchmark": {
+                        "objective": "compare glioma invasion model improvements",
+                        "capability_id": "glioma:invasion-model",
+                        "benchmark_world": "glioma-world-v1",
+                        "metric_name": "holdout_auc",
+                        "model_system": "organoid",
+                        "minimum_sites": 2,
+                        "minimum_replicates_per_site": 2,
+                        "effect_threshold_milli": 25,
+                        "max_i2_milli": 500,
+                        "min_signal_to_noise_milli": 100,
+                        "max_site_spread_milli": 500,
+                        "max_leave_one_out_shift_milli": 500
+                    },
+                    "initial_sites": [{"site_id": "site-seed-cycle", "study_id": "study-seed-cycle", "capability_id": "glioma:invasion-model", "benchmark_world": "glioma-world-v1", "metric_name": "holdout_auc", "model_system": "organoid", "artifact": {"artifact_id": "artifact-seed-cycle", "content_hash": hash, "content_type": "application/json", "local_only": true, "contains_human_data": false, "contains_direct_identifiers": false}, "baseline_score_milli": 500, "candidate_score_milli": 620, "uncertainty_milli": 40, "replicate_count": 3}],
+                    "actions": [{"action_id": "expand-site-cycle", "kind": "expand_coverage", "target_site_id": null, "cost_units": 1, "expected_information_milli": 900, "expected_effect_milli": 100, "feasibility_milli": 900, "risk_milli": 50, "requested_replicates": 3}],
+                    "budget_units": 1,
+                    "max_rounds": 2,
+                    "max_retries": 1,
+                    "stop_on_qualified": false,
+                    "stop_on_negative": false
+                },
+                "execution_mode": "local_simulation",
+                "require_aggregate_only": true
+            }
+        }),
+    );
+    assert_eq!(cycle["dispatch"], json!("dry_run"));
+    assert_eq!(cycle["simulation_only"], json!(true));
+    assert_eq!(
+        cycle["cycle"]["phase_order"][0],
+        json!("aggregate_boundary")
+    );
+    assert_eq!(
+        cycle["cycle"]["campaign"]["sites"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
 }
 
 #[test]

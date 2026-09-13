@@ -398,7 +398,8 @@ pub use programs::p11_research_object_release::{
 };
 pub use programs::p12_federated_benchmarking::{
     analyze_federated_benchmark, analyze_federated_mechanism_transport,
-    execute_federated_benchmark_campaign, plan_federated_benchmark_sites,
+    execute_federated_benchmark_campaign, execute_federated_benchmark_operating_cycle,
+    execute_federated_benchmark_operating_cycle_dry_run, plan_federated_benchmark_sites,
     DryRunFederatedBenchmarkCampaignExecutor, FederatedBenchmarkAction,
     FederatedBenchmarkActionKind, FederatedBenchmarkCampaign,
     FederatedBenchmarkCampaignDisposition, FederatedBenchmarkCampaignError,
@@ -406,12 +407,15 @@ pub use programs::p12_federated_benchmarking::{
     FederatedBenchmarkCampaignRound, FederatedBenchmarkCampaignStopReason,
     FederatedBenchmarkCandidate, FederatedBenchmarkCandidateScore, FederatedBenchmarkConsensus,
     FederatedBenchmarkContribution, FederatedBenchmarkDisposition, FederatedBenchmarkError,
-    FederatedBenchmarkExecutionFailure, FederatedBenchmarkPlanDisposition,
-    FederatedBenchmarkRequest, FederatedBenchmarkSite, FederatedBenchmarkSiteDisposition,
-    FederatedBenchmarkSitePlan, FederatedBenchmarkSitePlannerError,
-    FederatedBenchmarkSitePlannerRequest, FederatedMechanismContribution, FederatedMechanismSite,
-    FederatedMechanismTransportAnalysis, FederatedMechanismTransportDisposition,
-    FederatedMechanismTransportError, FederatedMechanismTransportRequest, FederatedModelCoverage,
+    FederatedBenchmarkExecutionFailure, FederatedBenchmarkExecutionMode,
+    FederatedBenchmarkOperatingCycle, FederatedBenchmarkOperatingCycleDisposition,
+    FederatedBenchmarkOperatingCycleError, FederatedBenchmarkOperatingCycleRequest,
+    FederatedBenchmarkPlanDisposition, FederatedBenchmarkRequest, FederatedBenchmarkSite,
+    FederatedBenchmarkSiteDisposition, FederatedBenchmarkSitePlan,
+    FederatedBenchmarkSitePlannerError, FederatedBenchmarkSitePlannerRequest,
+    FederatedMechanismContribution, FederatedMechanismSite, FederatedMechanismTransportAnalysis,
+    FederatedMechanismTransportDisposition, FederatedMechanismTransportError,
+    FederatedMechanismTransportRequest, FederatedModelCoverage,
 };
 pub use release::{build_research_object_manifest, ResearchObjectManifest, ResearchObjectRequest};
 pub use replication::{

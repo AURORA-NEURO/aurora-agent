@@ -509,22 +509,23 @@ use bioprism_research::{
     design_glioma_contrast_panel, design_preclinical_experiment, discriminate_mechanisms,
     dry_run_glioma_research, dry_run_instrument_executor_from_request,
     evaluate_glioma_dynamic_policies, evaluate_glioma_release_gate,
-    execute_federated_benchmark_campaign, execute_glioma_action_portfolio,
-    execute_glioma_active_learning_campaign, execute_glioma_adaptive_allocation_campaign,
-    execute_glioma_adaptive_mechanism_campaign, execute_glioma_autonomous_campaign,
-    execute_glioma_autonomous_gap_cycle, execute_glioma_autonomous_program_cycle,
-    execute_glioma_autonomous_research_engine, execute_glioma_autonomous_research_mission,
-    execute_glioma_computation, execute_glioma_computation_campaign,
-    execute_glioma_computation_operating_cycle_dry_run, execute_glioma_computation_portfolio,
-    execute_glioma_decision_context_campaign, execute_glioma_decision_operating_cycle,
-    execute_glioma_evidence_acquisition_campaign, execute_glioma_evidence_campaign,
-    execute_glioma_evidence_gated_research, execute_glioma_evidence_refresh_campaign,
-    execute_glioma_experiment_operating_cycle, execute_glioma_instrument_campaign,
-    execute_glioma_instrument_fleet, execute_glioma_instrument_operating_cycle,
-    execute_glioma_instrument_plan, execute_glioma_interpretation_operating_cycle,
-    execute_glioma_knowledge_resolution_campaign, execute_glioma_mechanism_discrimination_campaign,
-    execute_glioma_mechanism_operating_cycle, execute_glioma_multi_fidelity_campaign,
-    execute_glioma_multimodal_ingestion_campaign, execute_glioma_multimodal_mechanism_campaign,
+    execute_federated_benchmark_campaign, execute_federated_benchmark_operating_cycle_dry_run,
+    execute_glioma_action_portfolio, execute_glioma_active_learning_campaign,
+    execute_glioma_adaptive_allocation_campaign, execute_glioma_adaptive_mechanism_campaign,
+    execute_glioma_autonomous_campaign, execute_glioma_autonomous_gap_cycle,
+    execute_glioma_autonomous_program_cycle, execute_glioma_autonomous_research_engine,
+    execute_glioma_autonomous_research_mission, execute_glioma_computation,
+    execute_glioma_computation_campaign, execute_glioma_computation_operating_cycle_dry_run,
+    execute_glioma_computation_portfolio, execute_glioma_decision_context_campaign,
+    execute_glioma_decision_operating_cycle, execute_glioma_evidence_acquisition_campaign,
+    execute_glioma_evidence_campaign, execute_glioma_evidence_gated_research,
+    execute_glioma_evidence_refresh_campaign, execute_glioma_experiment_operating_cycle,
+    execute_glioma_instrument_campaign, execute_glioma_instrument_fleet,
+    execute_glioma_instrument_operating_cycle, execute_glioma_instrument_plan,
+    execute_glioma_interpretation_operating_cycle, execute_glioma_knowledge_resolution_campaign,
+    execute_glioma_mechanism_discrimination_campaign, execute_glioma_mechanism_operating_cycle,
+    execute_glioma_multi_fidelity_campaign, execute_glioma_multimodal_ingestion_campaign,
+    execute_glioma_multimodal_mechanism_campaign,
     execute_glioma_multimodal_mechanism_campaign_with_executor,
     execute_glioma_multimodal_readiness_gate, execute_glioma_protocol,
     execute_glioma_release_operating_cycle_dry_run, execute_glioma_replay_campaign,
@@ -582,6 +583,7 @@ use bioprism_research::{
     EvidencePriorityRequest, EvidenceRecord, EvidenceRefreshCampaignRequest, EvidenceRequest,
     EvidenceSurveillanceRequest, EvidenceTriangulationRequest, ExperimentArm,
     ExperimentOperatingCycleRequest, ExperimentRequest, FederatedBenchmarkCampaignRequest,
+    FederatedBenchmarkExecutionMode, FederatedBenchmarkOperatingCycleRequest,
     FederatedBenchmarkRequest, FederatedBenchmarkSite, FederatedBenchmarkSitePlannerRequest,
     FederatedMechanismSite, FederatedMechanismTransportRequest, FidelityCandidate,
     FidelityObservation, GliomaActionCandidate, GliomaAdaptiveWorkflowSchedulerRequest,
@@ -2366,6 +2368,9 @@ impl Server {
             }
             "glioma_federated_benchmark_campaign_execute" => {
                 self.glioma_federated_benchmark_campaign_execute(&arguments)
+            }
+            "glioma_federated_benchmark_operating_cycle" => {
+                self.glioma_federated_benchmark_operating_cycle(&arguments)
             }
             "glioma_replay_campaign_execute" => self.glioma_replay_campaign_execute(&arguments),
             "glioma_research_object_release_gate" => {
@@ -9808,6 +9813,46 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma federated benchmark campaign: {error}"))
+    }
+
+    /// Run the aggregate-only federated benchmark operating cycle in the deterministic local
+    /// sandbox. Governed-local execution remains behind an institution-owned executor.
+    fn glioma_federated_benchmark_operating_cycle(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: FederatedBenchmarkOperatingCycleRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_federated_benchmark_operating_cycle requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma federated benchmark operating-cycle request: {error}")
+            })?;
+        if matches!(
+            request.execution_mode,
+            FederatedBenchmarkExecutionMode::GovernedLocal
+        ) {
+            return Err(
+                "glioma_federated_benchmark_operating_cycle MCP route is simulation-only; governed_local requires an institution-owned aggregate executor"
+                    .to_string(),
+            );
+        }
+        let cycle =
+            execute_federated_benchmark_operating_cycle_dry_run(&request).map_err(|error| {
+                format!("glioma federated benchmark operating cycle refused: {error}")
+            })?;
+        serde_json::to_value(json!({
+            "cycle": cycle,
+            "dispatch": "dry_run",
+            "simulation_only": true,
+            "guarantees": [
+                "aggregate-only boundary and site identity checks run before the campaign",
+                "cross-site consensus is recomputed after each bounded follow-up action",
+                "qualified, negative, heterogeneous, partial, blocked, and unresolved states remain explicit",
+                "MCP moves no raw traces, executes no instruments, and makes no clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma federated benchmark operating cycle: {error}"))
     }
 
     /// Execute a local reproducibility replay campaign for a preclinical glioma release
@@ -50083,6 +50128,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_federated_benchmark_site_plan",
                 "glioma_federated_mechanism_transport",
                 "glioma_federated_benchmark_campaign_execute",
+                "glioma_federated_benchmark_operating_cycle",
                 "glioma_replay_campaign_execute",
                 "glioma_research_object_release_gate",
                 "glioma_release_operating_cycle",
@@ -60297,6 +60343,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "FederatedBenchmarkCampaignRequest1@1 with benchmark binding, initial aggregate sites, typed follow-up actions, budget, round/retry bounds, and stop policy."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_federated_benchmark_operating_cycle",
+        "description": "Run the complete aggregate-only federated glioma benchmark operating cycle: enforce local aggregate boundaries, compute consensus, execute bounded follow-up actions, and return a governance handoff. MCP uses synthetic site aggregates and never moves raw traces, executes instruments, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "FederatedBenchmarkOperatingCycleRequest1@1 containing FederatedBenchmarkCampaignRequest1@1, aggregate-only boundary policy, and execution_mode local_simulation or governed_local."}
             },
             "required": ["request"]
         }

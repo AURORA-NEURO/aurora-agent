@@ -136,6 +136,8 @@ crates/research/src/glioma/
                                              P12 aggregate-only cross-model mechanism transport and fragility analysis
     p12_federated_benchmarking/site_planner.rs
                                              P12 conservative influence-aware consortium expansion and site portfolio planning
+    p12_federated_benchmarking/operating_cycle.rs
+                                             P12 aggregate boundary, consensus, campaign, and governance handoff
   workflow.rs                               P07 adaptive campaign planner and guarded execution
     p07_protocol_simulation/simulator.rs    P07 deterministic resource-constrained scheduling
     p07_protocol_simulation/execution.rs   P07 guarded local protocol execution with retries
@@ -222,6 +224,8 @@ crates/research/src/glioma/
                                              P12 aggregate-only multi-site benchmark consensus with robust pooling and influence bounds
     p12_federated_benchmarking/campaign.rs
                                              P12 autonomous aggregate-only benchmark follow-up campaign with deterministic replanning
+    p12_federated_benchmarking/operating_cycle.rs
+                                             P12 aggregate-only consensus preflight, follow-up execution, and governance handoff
     p11_research_object_release/replay.rs
                                              P11 dependency-aware reproducibility replay campaign and release-readiness gate
     p06_experiment_design/dose_response.rs   P06 monotone dose-response curve analysis

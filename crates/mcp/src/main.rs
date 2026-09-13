@@ -142,6 +142,7 @@ fn main() {
                      glioma_federated_benchmark_site_plan,\n\
                      glioma_federated_mechanism_transport,\n\
                      glioma_federated_benchmark_campaign_execute,\n\
+                     glioma_federated_benchmark_operating_cycle,\n\
                      glioma_replay_campaign_execute,\n\
                      glioma_research_object_release_gate,\n\
                      glioma_release_operating_cycle,\n\

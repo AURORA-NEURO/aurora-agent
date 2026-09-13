@@ -426,6 +426,7 @@ pub fn implemented_feature_ids() -> Vec<&'static str> {
         crate::glioma::programs::p12_federated_benchmarking::mechanism_transport::FEATURE_ID,
         crate::glioma::programs::p12_federated_benchmarking::campaign::FEATURE_ID,
         crate::glioma::programs::p12_federated_benchmarking::site_planner::FEATURE_ID,
+        crate::glioma::programs::p12_federated_benchmarking::operating_cycle::FEATURE_ID,
     ]
 }
 
