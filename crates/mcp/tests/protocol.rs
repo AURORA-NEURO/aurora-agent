@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 718;
+const TOOL_DEFINITION_COUNT: usize = 719;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -6742,6 +6742,67 @@ fn glioma_mechanism_autopilot_replans_and_retires_local_outcomes() {
         response["autopilot"]["completed_action_order"],
         json!(["assay-invasion"])
     );
+}
+
+#[test]
+fn glioma_mechanism_discovery_engine_composes_scientific_gates_before_execution() {
+    let mut server = server();
+    let hash = "0".repeat(64);
+    let response = call(
+        &mut server,
+        "glioma_mechanism_discovery_engine_execute",
+        json!({
+            "request": {
+                "objective": "discover invasion mechanism",
+                "study_id": "discovery-study",
+                "model_system": "organoid",
+                "campaign": {
+                    "objective": "discover invasion mechanism",
+                    "study_id": "discovery-study",
+                    "model_system": "organoid",
+                    "graph": {"study_id":"discovery-study","model_system":"organoid","required_modalities":["proteomics"],"min_samples":2,"min_modalities_per_sample":1,"min_shared_features":1,"neighbours":1,"diffusion_steps":1,"max_distance_milli":1000,"min_consensus_support_milli":500,"max_disagreement_milli":200,"require_all_modalities":false},
+                    "pathway": {"objective":"discover invasion mechanism","study_id":"discovery-study","model_system":"organoid","min_pathway_nodes":1,"min_observed_nodes":1,"min_modalities":1,"min_confidence_milli":100,"max_pathways":4,"require_cross_modal":false},
+                    "selection": {"budget_units":2,"max_actions":1},
+                    "completed_action_order": []
+                },
+                "graph_vectors": [
+                    {"observation_id":"v1","study_id":"discovery-study","sample_lineage":"a","modality":"proteomics","model_system":"organoid","artifact":{"artifact_id":"a","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"reliability_milli":900,"features":[{"feature_id":"egfr","value_milli":800}]},
+                    {"observation_id":"v2","study_id":"discovery-study","sample_lineage":"b","modality":"proteomics","model_system":"organoid","artifact":{"artifact_id":"b","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"reliability_milli":900,"features":[{"feature_id":"egfr","value_milli":700}]}
+                ],
+                "pathway_definitions": [{"pathway_id":"invasion","label":"invasion","nodes":[{"node_id":"egfr","label":"EGFR","modality":"proteomics","expected_direction":1,"weight_milli":1000}],"edges":[]}],
+                "pathway_observations": [{"observation_id":"p1","study_id":"discovery-study","sample_lineage":"a","modality":"proteomics","model_system":"organoid","artifact":{"artifact_id":"p","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"feature_id":"egfr","value_milli":800,"reliability_milli":900}],
+                "dynamics": {"objective":"discover invasion mechanism","model_system":"organoid","max_steps":12,"time_step_milli":200,"stability_window":2,"stability_delta_milli":20,"divergence_abs_milli":1000,"max_selected_interventions":1,"budget_units":8,"risk_ceiling_milli":800,"sensitivity_delta_milli":5},
+                "dynamics_nodes": [{"node_id":"invasion","label":"invasion","initial_state_milli":100,"drift_milli":-10,"uncertainty_milli":10}],
+                "dynamics_edges": [],
+                "dynamics_interventions": [{"intervention_id":"suppress-invasion","target_node":"invasion","delta_milli":-100,"start_step":0,"duration_steps":4,"cost_units":1,"risk_milli":100,"confidence_milli":900}],
+                "robust": {"objective":"discover invasion mechanism","model_system":"organoid","max_iterations":64,"convergence_tolerance_milli":1,"damping_milli":600,"min_edge_confidence_milli":500,"direction":"decrease","budget_units":2,"max_selected":1,"min_robust_effect_milli":1,"min_agreement_milli":750,"risk_ceiling_milli":800,"effect_weight_milli":500,"tail_weight_milli":300,"worst_case_weight_milli":200,"feasibility_weight_milli":1000,"risk_penalty_milli":1},
+                "robust_models": [{"model_id":"model-a","prior_milli":1000,"nodes":[{"node_id":"egfr","label":"EGFR","modality":"proteomics","prior_milli":0,"support_milli":900,"contradiction_milli":0},{"node_id":"invasion","label":"invasion","modality":"proteomics","prior_milli":0,"support_milli":0,"contradiction_milli":0}],"edges":[{"edge_id":"egfr-invasion","source_node_id":"egfr","target_node_id":"invasion","relation":"activates","confidence_milli":900,"evidence_order":["local-evidence"]}]}],
+                "robust_candidates": [{"candidate_id":"egfr-invasion","label":"EGFR inhibition","intervention":{"intervention_id":"inhibit-egfr","node_id":"egfr","delta_milli":-600,"rationale":"test EGFR-to-invasion propagation","evidence_order":["local-evidence"]},"target_node_id":"invasion","redundancy_group":"egfr","feasibility_milli":1000,"cost_units":1,"risk_milli":100}],
+                "action_candidates": [{"action_id":"assay-invasion","stage_kind":"mechanism_exploration","modality":"functional_perturbation","model_system":"organoid","depends_on":[],"cost_units":1,"information_gain_milli":900,"frontier_novelty_milli":800,"workflow_leverage_milli":800,"cross_stage_unlock_milli":700,"reproducibility_safety_milli":900,"federation_value_milli":400,"feasibility_milli":950,"autonomy_tier":"a0","effects":["read_local_data","execute_local_computation","write_local_artifact"]}],
+                "selection": {"budget_units":2,"max_actions":1,"approval_granted":false,"allow_instrument_execution":false,"allow_federation":false,"weights":{"information_gain":25,"frontier_novelty":20,"workflow_leverage":15,"cross_stage_unlock":15,"reproducibility_safety":10,"federation_value":10,"feasibility":5}},
+                "completed_action_order": [],
+                "budget_units": 2,
+                "max_actions": 1,
+                "max_rounds": 2,
+                "max_retries": 1,
+                "require_artifacts": true,
+                "require_qualified_multimodal": true,
+                "require_stable_dynamics": false
+            }
+        }),
+    );
+    assert_eq!(response["dispatch"], json!("dry_run"));
+    assert_eq!(response["simulation_only"], json!(true));
+    assert_eq!(
+        response["discovery"]["feature_id"],
+        json!("GAF-GLIOMA-P07-F16")
+    );
+    assert_eq!(response["discovery"]["stop_reason"], json!("qualified"));
+    assert_eq!(
+        response["discovery"]["completed_action_order"],
+        json!(["assay-invasion"])
+    );
+    assert_eq!(response["discovery"]["rounds"].as_array().unwrap().len(), 1);
 }
 
 #[test]

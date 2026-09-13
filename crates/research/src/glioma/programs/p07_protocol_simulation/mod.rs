@@ -24,6 +24,7 @@ pub mod execution;
 pub mod intent_mission;
 pub mod mechanism_autopilot;
 pub mod mechanism_campaign;
+pub mod mechanism_discovery_engine;
 pub mod mission;
 pub mod mission_recovery;
 pub mod multimodal_mission;
@@ -114,6 +115,12 @@ pub use mechanism_autopilot::{
     execute_glioma_mechanism_autopilot, GliomaMechanismAutopilotDisposition,
     GliomaMechanismAutopilotError, GliomaMechanismAutopilotRequest, GliomaMechanismAutopilotRound,
     GliomaMechanismAutopilotRun, GliomaMechanismAutopilotStopReason,
+};
+
+pub use mechanism_discovery_engine::{
+    execute_glioma_mechanism_discovery_engine, GliomaMechanismDiscoveryDisposition,
+    GliomaMechanismDiscoveryError, GliomaMechanismDiscoveryRequest, GliomaMechanismDiscoveryRound,
+    GliomaMechanismDiscoveryRun, GliomaMechanismDiscoveryStopReason,
 };
 
 pub use mission::{

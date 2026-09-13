@@ -533,9 +533,10 @@ use bioprism_research::{
     execute_glioma_instrument_plan, execute_glioma_intent_mission,
     execute_glioma_interpretation_operating_cycle, execute_glioma_knowledge_resolution_campaign,
     execute_glioma_knowledge_synthesis_operating_cycle, execute_glioma_mechanism_autopilot,
-    execute_glioma_mechanism_discrimination_campaign, execute_glioma_mechanism_operating_cycle,
-    execute_glioma_mission_recovery, execute_glioma_multi_fidelity_campaign,
-    execute_glioma_multimodal_ingestion_campaign, execute_glioma_multimodal_mechanism_campaign,
+    execute_glioma_mechanism_discovery_engine, execute_glioma_mechanism_discrimination_campaign,
+    execute_glioma_mechanism_operating_cycle, execute_glioma_mission_recovery,
+    execute_glioma_multi_fidelity_campaign, execute_glioma_multimodal_ingestion_campaign,
+    execute_glioma_multimodal_mechanism_campaign,
     execute_glioma_multimodal_mechanism_campaign_with_executor, execute_glioma_multimodal_mission,
     execute_glioma_multimodal_operating_cycle_dry_run, execute_glioma_multimodal_readiness_gate,
     execute_glioma_program_scheduler_dry_run, execute_glioma_protocol,
@@ -611,17 +612,17 @@ use bioprism_research::{
     GliomaEvidenceCampaignRequest, GliomaEvidenceGatedResearchRequest,
     GliomaEvidenceOperatingCycleRequest, GliomaIntentMissionRequest,
     GliomaInterpretationOperatingCycleRequest, GliomaMechanismAutopilotRequest,
-    GliomaMissionRecoveryRequest, GliomaMissionRequest, GliomaMultimodalMissionRequest,
-    GliomaMultimodalOperatingCycleRequest, GliomaProgramSchedulerRequest,
-    GliomaReleaseOperatingCycleRequest, GliomaReplicationCampaignRequest,
-    GliomaResearchAutopilotRequest, GliomaResearchDirectorRequest, GliomaResearchIntent,
-    GliomaWorkflowRequest, GraphFusionRequest, GraphFusionVector, HarmonizationRequest,
-    HarmonizationVector, InformationDesignRequest, InstrumentCampaignRequest,
-    InstrumentExecutionMode, InstrumentExecutionRequest, InstrumentExecutionRun,
-    InstrumentFleetExecutionRequest, InstrumentFleetScheduleRequest, InstrumentInterlockSnapshot,
-    InstrumentOperatingCycleRequest, InstrumentPreflightRequest, InterpretationSynthesisRequest,
-    KnowledgeCompositionRequest, KnowledgeFrontier, KnowledgeFrontierRequest,
-    KnowledgeGapCompilerRequest, KnowledgeRelation, KnowledgeRequest,
+    GliomaMechanismDiscoveryRequest, GliomaMissionRecoveryRequest, GliomaMissionRequest,
+    GliomaMultimodalMissionRequest, GliomaMultimodalOperatingCycleRequest,
+    GliomaProgramSchedulerRequest, GliomaReleaseOperatingCycleRequest,
+    GliomaReplicationCampaignRequest, GliomaResearchAutopilotRequest,
+    GliomaResearchDirectorRequest, GliomaResearchIntent, GliomaWorkflowRequest, GraphFusionRequest,
+    GraphFusionVector, HarmonizationRequest, HarmonizationVector, InformationDesignRequest,
+    InstrumentCampaignRequest, InstrumentExecutionMode, InstrumentExecutionRequest,
+    InstrumentExecutionRun, InstrumentFleetExecutionRequest, InstrumentFleetScheduleRequest,
+    InstrumentInterlockSnapshot, InstrumentOperatingCycleRequest, InstrumentPreflightRequest,
+    InterpretationSynthesisRequest, KnowledgeCompositionRequest, KnowledgeFrontier,
+    KnowledgeFrontierRequest, KnowledgeGapCompilerRequest, KnowledgeRelation, KnowledgeRequest,
     KnowledgeResolutionCampaignRequest, KnowledgeSynthesisOperatingCycleRequest,
     LatentFactorRequest, LatentFactorVector, LigandReceptorPair, MechanismActionPlannerConfig,
     MechanismCalibration, MechanismCalibrationObservation, MechanismCalibrationRequest,
@@ -2248,6 +2249,9 @@ impl Server {
             }
             "glioma_research_director_execute" => self.glioma_research_director_execute(&arguments),
             "glioma_program_scheduler_execute" => self.glioma_program_scheduler_execute(&arguments),
+            "glioma_mechanism_discovery_engine_execute" => {
+                self.glioma_mechanism_discovery_engine_execute(&arguments)
+            }
             "glioma_evidence_gated_research_execute" => {
                 self.glioma_evidence_gated_research_execute(&arguments)
             }
@@ -6921,6 +6925,37 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma program scheduler run: {error}"))
+    }
+
+    /// Run the mechanism-specific autonomous vertical in a deterministic local sandbox. The
+    /// route composes multimodal fusion, pathway activity, feedback dynamics, robust ensemble
+    /// intervention ranking, and gated local assay execution; it never performs a real assay or
+    /// treats simulation output as biological evidence.
+    fn glioma_mechanism_discovery_engine_execute(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: GliomaMechanismDiscoveryRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_mechanism_discovery_engine_execute requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma mechanism discovery request: {error}"))?;
+        let mut executor = DryRunGliomaActionExecutor;
+        let run = execute_glioma_mechanism_discovery_engine(&request, &mut executor)
+            .map_err(|error| format!("glioma mechanism discovery engine refused: {error}"))?;
+        serde_json::to_value(json!({
+            "discovery": run,
+            "dispatch": "dry_run",
+            "simulation_only": true,
+            "guarantees": [
+                "multimodal graph fusion and pathway activity remain separate evidence gates",
+                "signed feedback dynamics and model-ensemble lower-tail intervention ranking are recomputed before each action batch",
+                "only a qualified, dependency-safe local action portfolio can dispatch",
+                "completed, negative, failed, partial, unresolved, budget, and no-progress outcomes remain explicit for replanning",
+                "MCP performs no real assay, instrument effect, raw-data movement, federation export, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma mechanism discovery run: {error}"))
     }
 
     /// Admit the director only after local P01 evidence triangulation clears the caller's gate.
@@ -50693,6 +50728,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_computation_operating_cycle",
                 "glioma_research_director_execute",
                 "glioma_program_scheduler_execute",
+                "glioma_mechanism_discovery_engine_execute",
                 "glioma_evidence_gated_research_execute",
                 "glioma_autonomous_research_engine_execute",
                 "glioma_autonomous_program_cycle",
@@ -59796,6 +59832,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "GliomaProgramSchedulerRequest1@1 containing bounded GliomaProgramScheduleJob1@1 intents, local model/modality capacities, global budget, per-round width, fairness debt, and replay identity."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_mechanism_discovery_engine_execute",
+        "description": "Run the autonomous preclinical glioma mechanism-discovery vertical in a deterministic local sandbox. It composes multimodal graph fusion, pathway activity inference, signed feedback dynamics, model-ensemble lower-tail intervention ranking, and gated dependency-safe assay execution, then replans from completed, negative, failed, and partial outcomes. The route never performs a real assay, moves raw data, exports federation data, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "GliomaMechanismDiscoveryRequest1@1 containing bound graph/pathway observations, mechanism dynamics, ensemble models and robust candidates, local action candidates, budgets, and evidence gates."}
             },
             "required": ["request"]
         }

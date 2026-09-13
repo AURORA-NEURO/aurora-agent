@@ -82,6 +82,8 @@ crates/research/src/glioma/
                                              P07 graph/pathway-gated mechanism execution loop with bounded replanning and outcome retirement
   programs/p07_protocol_simulation/program_scheduler.rs
                                              P07 high-throughput multi-intent scheduler with scientific utility, fairness debt, and resource-capacity admission
+  programs/p07_protocol_simulation/mechanism_discovery_engine.rs
+                                             P07 autonomous multimodal-to-dynamics-to-robust-intervention mechanism discovery and gated assay execution
   programs/p12_federated_benchmarking/transport_campaign.rs
                                              P12 aggregate-only mechanism transport campaign with heterogeneity-aware site follow-up and recomputation
   programs/p06_experiment_design/clonal_panel.rs

@@ -134,6 +134,7 @@ fn main() {
                      glioma_computation_operating_cycle,\n\
                      glioma_research_director_execute,\n\
                      glioma_program_scheduler_execute,\n\
+                     glioma_mechanism_discovery_engine_execute,\n\
                      glioma_evidence_gated_research_execute,\n\
                      glioma_autonomous_research_engine_execute,\n\
                      glioma_autonomous_program_cycle,\n\
