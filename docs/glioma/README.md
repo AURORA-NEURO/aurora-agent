@@ -146,6 +146,8 @@ crates/research/src/glioma/
                                              P12 aggregate-only cross-model mechanism transport and fragility analysis
     p12_federated_benchmarking/site_planner.rs
                                              P12 conservative influence-aware consortium expansion and site portfolio planning
+    p12_federated_benchmarking/adaptive_campaign.rs
+                                             P12 planner-to-campaign bridge preserving projected versus observed federated outcomes
     p12_federated_benchmarking/operating_cycle.rs
                                              P12 aggregate boundary, consensus, campaign, and governance handoff
   workflow.rs                               P07 adaptive campaign planner and guarded execution
@@ -317,7 +319,7 @@ portfolio plan and executable code; it does not promote a planned slot to implem
 | P09 Reproducible computation | computational scientist | computational execution | checkpointed/replayable computation, intent-to-DAG compilation, locality-aware worker placement, budgeted portfolio execution, robustness-debt-driven re-analysis, selective failed-frontier recovery, and omission-stress robustness suite |
 | P10 Causal interpretation and replication | methods reviewer | statistical interpretation, replication/robustness | uncertainty-aware endpoint, longitudinal, stratified causal, dynamic-policy, causal-contrast, meta-analytic, cross-site verdicts, guarded adaptive-frontier execution, and bounded resynthesis campaigns |
 | P11 Research-object release | reproducibility steward | research-object release | portable manifest with limitations and negative evidence, dependency-aware replay, accountable release gating, and operator handoff |
-| P12 Federated benchmarking | consortium administrator | federation benchmarking | aggregate-only cross-site benchmark consensus, influence-aware site portfolio planning, robust pooling, heterogeneity, and site-influence analysis |
+| P12 Federated benchmarking | consortium administrator | federation benchmarking | aggregate-only cross-site benchmark consensus, influence-aware site portfolio planning, planner-to-campaign adaptive execution, robust pooling, heterogeneity, and site-influence analysis |
 
 ## Feature expansion
 
@@ -677,6 +679,12 @@ scores by declared uncertainty, and replays the real consensus analyzer for ever
 portfolio. Budget, privacy risk, replicate floors, heterogeneity, spread, and leave-one-site-out
 influence are optimized together; a ready plan is still a scenario requiring future validation,
 never a fabricated benchmark observation.
+The adaptive federated campaign (`execute_federated_benchmark_adaptive_campaign`) closes that
+planner-to-execution gap. It validates aggregate-only site and artifact boundaries, converts the
+selected portfolio into typed follow-up actions, runs the bounded campaign through a local executor
+seam, and reports projected consensus separately from observed consensus. Qualified, negative,
+heterogeneous, partial, blocked, and no-admissible-plan outcomes remain explicit, so a favorable
+projection can never masquerade as a measured consortium result.
 P11 now adds a dependency-aware reproducibility replay campaign
 (`execute_glioma_replay_campaign`). It schedules declared program replays, compares exact artifact
 hashes, blocks downstream tasks after mismatch or unavailable outputs, and only emits a

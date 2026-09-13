@@ -510,10 +510,11 @@ use bioprism_research::{
     dry_run_adaptive_instrument_executor, dry_run_glioma_adaptive_frontier_executor,
     dry_run_glioma_research, dry_run_instrument_executor_from_request,
     dry_run_robustness_guided_computation_executor, evaluate_glioma_dynamic_policies,
-    evaluate_glioma_release_gate, execute_federated_benchmark_campaign,
-    execute_federated_benchmark_operating_cycle_dry_run, execute_glioma_action_portfolio,
-    execute_glioma_active_learning_campaign, execute_glioma_adaptive_allocation_campaign,
-    execute_glioma_adaptive_frontier, execute_glioma_adaptive_instrument_campaign,
+    evaluate_glioma_release_gate, execute_federated_benchmark_adaptive_campaign_dry_run,
+    execute_federated_benchmark_campaign, execute_federated_benchmark_operating_cycle_dry_run,
+    execute_glioma_action_portfolio, execute_glioma_active_learning_campaign,
+    execute_glioma_adaptive_allocation_campaign, execute_glioma_adaptive_frontier,
+    execute_glioma_adaptive_instrument_campaign,
     execute_glioma_adaptive_interpretation_campaign_dry_run,
     execute_glioma_adaptive_mechanism_campaign, execute_glioma_autonomous_campaign,
     execute_glioma_autonomous_gap_cycle, execute_glioma_autonomous_program_cycle,
@@ -593,26 +594,27 @@ use bioprism_research::{
     EvidenceAcquisitionRequest, EvidenceCalibrationObservation, EvidenceCalibrationRequest,
     EvidenceExecutionMode, EvidencePriorityRequest, EvidenceRecord, EvidenceRefreshCampaignRequest,
     EvidenceRequest, EvidenceSurveillanceRequest, EvidenceTriangulationRequest, ExperimentArm,
-    ExperimentOperatingCycleRequest, ExperimentRequest, FederatedBenchmarkCampaignRequest,
-    FederatedBenchmarkExecutionMode, FederatedBenchmarkOperatingCycleRequest,
-    FederatedBenchmarkRequest, FederatedBenchmarkSite, FederatedBenchmarkSitePlannerRequest,
-    FederatedMechanismSite, FederatedMechanismTransportRequest, FidelityCandidate,
-    FidelityObservation, GliomaActionCandidate, GliomaAdaptiveWorkflowSchedulerRequest,
-    GliomaAutonomousCampaignRequest, GliomaAutonomousResearchEngineRequest,
-    GliomaComputationCampaignRequest, GliomaComputationOperatingCycleRequest,
-    GliomaComputationWorkflowRequest, GliomaEvidenceCampaignRequest,
-    GliomaEvidenceGatedResearchRequest, GliomaEvidenceOperatingCycleRequest,
-    GliomaIntentMissionRequest, GliomaInterpretationOperatingCycleRequest,
-    GliomaMissionRecoveryRequest, GliomaMissionRequest, GliomaMultimodalMissionRequest,
-    GliomaMultimodalOperatingCycleRequest, GliomaReleaseOperatingCycleRequest,
-    GliomaReplicationCampaignRequest, GliomaResearchAutopilotRequest,
-    GliomaResearchDirectorRequest, GliomaResearchIntent, GliomaWorkflowRequest, GraphFusionRequest,
-    GraphFusionVector, HarmonizationRequest, HarmonizationVector, InformationDesignRequest,
-    InstrumentCampaignRequest, InstrumentExecutionMode, InstrumentExecutionRequest,
-    InstrumentExecutionRun, InstrumentFleetExecutionRequest, InstrumentFleetScheduleRequest,
-    InstrumentInterlockSnapshot, InstrumentOperatingCycleRequest, InstrumentPreflightRequest,
-    InterpretationSynthesisRequest, KnowledgeCompositionRequest, KnowledgeFrontier,
-    KnowledgeFrontierRequest, KnowledgeGapCompilerRequest, KnowledgeRelation, KnowledgeRequest,
+    ExperimentOperatingCycleRequest, ExperimentRequest, FederatedBenchmarkAdaptiveCampaignRequest,
+    FederatedBenchmarkCampaignRequest, FederatedBenchmarkExecutionMode,
+    FederatedBenchmarkOperatingCycleRequest, FederatedBenchmarkRequest, FederatedBenchmarkSite,
+    FederatedBenchmarkSitePlannerRequest, FederatedMechanismSite,
+    FederatedMechanismTransportRequest, FidelityCandidate, FidelityObservation,
+    GliomaActionCandidate, GliomaAdaptiveWorkflowSchedulerRequest, GliomaAutonomousCampaignRequest,
+    GliomaAutonomousResearchEngineRequest, GliomaComputationCampaignRequest,
+    GliomaComputationOperatingCycleRequest, GliomaComputationWorkflowRequest,
+    GliomaEvidenceCampaignRequest, GliomaEvidenceGatedResearchRequest,
+    GliomaEvidenceOperatingCycleRequest, GliomaIntentMissionRequest,
+    GliomaInterpretationOperatingCycleRequest, GliomaMissionRecoveryRequest, GliomaMissionRequest,
+    GliomaMultimodalMissionRequest, GliomaMultimodalOperatingCycleRequest,
+    GliomaReleaseOperatingCycleRequest, GliomaReplicationCampaignRequest,
+    GliomaResearchAutopilotRequest, GliomaResearchDirectorRequest, GliomaResearchIntent,
+    GliomaWorkflowRequest, GraphFusionRequest, GraphFusionVector, HarmonizationRequest,
+    HarmonizationVector, InformationDesignRequest, InstrumentCampaignRequest,
+    InstrumentExecutionMode, InstrumentExecutionRequest, InstrumentExecutionRun,
+    InstrumentFleetExecutionRequest, InstrumentFleetScheduleRequest, InstrumentInterlockSnapshot,
+    InstrumentOperatingCycleRequest, InstrumentPreflightRequest, InterpretationSynthesisRequest,
+    KnowledgeCompositionRequest, KnowledgeFrontier, KnowledgeFrontierRequest,
+    KnowledgeGapCompilerRequest, KnowledgeRelation, KnowledgeRequest,
     KnowledgeResolutionCampaignRequest, KnowledgeSynthesisOperatingCycleRequest,
     LatentFactorRequest, LatentFactorVector, LigandReceptorPair, MechanismActionPlannerConfig,
     MechanismCalibration, MechanismCalibrationObservation, MechanismCalibrationRequest,
@@ -2416,6 +2418,9 @@ impl Server {
             }
             "glioma_federated_benchmark_operating_cycle" => {
                 self.glioma_federated_benchmark_operating_cycle(&arguments)
+            }
+            "glioma_federated_adaptive_campaign_execute" => {
+                self.glioma_federated_adaptive_campaign_execute(&arguments)
             }
             "glioma_replay_campaign_execute" => self.glioma_replay_campaign_execute(&arguments),
             "glioma_research_object_release_gate" => {
@@ -10288,6 +10293,36 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma federated benchmark operating cycle: {error}"))
+    }
+
+    /// Compile a conservative federated site projection directly into an aggregate-only
+    /// benchmark campaign. The MCP worker remains synthetic; institutions own execution.
+    fn glioma_federated_adaptive_campaign_execute(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: FederatedBenchmarkAdaptiveCampaignRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_federated_adaptive_campaign_execute requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma federated adaptive campaign request: {error}")
+            })?;
+        let campaign = execute_federated_benchmark_adaptive_campaign_dry_run(&request)
+            .map_err(|error| format!("glioma federated adaptive campaign refused: {error}"))?;
+        serde_json::to_value(json!({
+            "campaign": campaign,
+            "dispatch": "dry_run",
+            "simulation_only": true,
+            "guarantees": [
+                "planner projections remain separate from observed aggregate campaign results",
+                "only local-only non-human non-identifying aggregates cross the federation boundary",
+                "the selected site portfolio is executed through a caller-owned aggregate-only seam",
+                "heterogeneous, negative, partial, blocked, and no-admissible-plan states remain explicit",
+                "the MCP route performs no raw-data movement, instrument effect, network effect, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma federated adaptive campaign: {error}"))
     }
 
     /// Execute a local reproducibility replay campaign for a preclinical glioma release
@@ -50577,6 +50612,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_federated_mechanism_transport",
                 "glioma_federated_benchmark_campaign_execute",
                 "glioma_federated_benchmark_operating_cycle",
+                "glioma_federated_adaptive_campaign_execute",
                 "glioma_replay_campaign_execute",
                 "glioma_research_object_release_gate",
                 "glioma_release_operating_cycle",
@@ -60945,6 +60981,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "FederatedBenchmarkOperatingCycleRequest1@1 containing FederatedBenchmarkCampaignRequest1@1, aggregate-only boundary policy, and execution_mode local_simulation or governed_local."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_federated_adaptive_campaign_execute",
+        "description": "Compile a conservative aggregate-only federated glioma site portfolio into an executable benchmark campaign. The controller turns influence-aware planner scenarios into typed follow-up actions, executes them through a deterministic synthetic aggregate worker, and keeps projected versus observed qualification, heterogeneity, negative, partial, blocked, and no-plan states distinct. Institutions retain raw data and execution authority; MCP never moves raw traces, executes instruments, or makes clinical decisions.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "FederatedBenchmarkAdaptiveCampaignRequest1@1 with benchmark/site-planner inputs, round/retry bounds, aggregate-only policy, and stop controls."}
             },
             "required": ["request"]
         }

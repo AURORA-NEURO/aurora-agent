@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 711;
+const TOOL_DEFINITION_COUNT: usize = 712;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -4495,6 +4495,68 @@ fn glioma_federated_benchmark_operating_cycle_runs_boundary_consensus_and_campai
             .len(),
         2
     );
+}
+
+#[test]
+fn glioma_federated_adaptive_campaign_bridges_projection_to_observed_aggregates() {
+    let mut server = server();
+    let hash = "0000000000000000000000000000000000000000000000000000000000000000";
+    let campaign = call(
+        &mut server,
+        "glioma_federated_adaptive_campaign_execute",
+        json!({
+            "request": {
+                "planning": {
+                    "benchmark": {
+                        "objective": "validate an organoid invasion model across sites",
+                        "capability_id": "glioma:invasion-model",
+                        "benchmark_world": "glioma-world-v1",
+                        "metric_name": "holdout_auc",
+                        "model_system": "organoid",
+                        "minimum_sites": 3,
+                        "minimum_replicates_per_site": 3,
+                        "effect_threshold_milli": 80,
+                        "max_i2_milli": 250,
+                        "min_signal_to_noise_milli": 500,
+                        "max_site_spread_milli": 160,
+                        "max_leave_one_out_shift_milli": 100
+                    },
+                    "current_sites": [
+                        {"site_id":"site-a","study_id":"study-a","capability_id":"glioma:invasion-model","benchmark_world":"glioma-world-v1","metric_name":"holdout_auc","model_system":"organoid","artifact":{"artifact_id":"artifact-a","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"baseline_score_milli":500,"candidate_score_milli":600,"uncertainty_milli":45,"replicate_count":4},
+                        {"site_id":"site-b","study_id":"study-b","capability_id":"glioma:invasion-model","benchmark_world":"glioma-world-v1","metric_name":"holdout_auc","model_system":"organoid","artifact":{"artifact_id":"artifact-b","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"baseline_score_milli":500,"candidate_score_milli":615,"uncertainty_milli":45,"replicate_count":4}
+                    ],
+                    "candidates": [
+                        {"candidate_id":"candidate-c","site_id":"candidate-site-c","study_id":"candidate-study-c","independence_group":"group-c","artifact":{"artifact_id":"candidate-artifact-c","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"baseline_score_milli":500,"expected_candidate_score_milli":625,"uncertainty_milli":30,"replicate_count":4,"cost_units":4,"privacy_risk_milli":100},
+                        {"candidate_id":"candidate-d","site_id":"candidate-site-d","study_id":"candidate-study-d","independence_group":"group-d","artifact":{"artifact_id":"candidate-artifact-d","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"baseline_score_milli":500,"expected_candidate_score_milli":900,"uncertainty_milli":30,"replicate_count":4,"cost_units":9,"privacy_risk_milli":100}
+                    ],
+                    "budget_units": 12,
+                    "max_new_sites": 2,
+                    "beam_width": 8,
+                    "privacy_budget_milli": 500,
+                    "conservatism_milli": 500
+                },
+                "max_rounds": 2,
+                "max_retries": 1,
+                "stop_on_qualified": false,
+                "stop_on_negative": false,
+                "require_aggregate_only": true
+            }
+        }),
+    );
+    assert_eq!(campaign["dispatch"], json!("dry_run"));
+    assert_eq!(campaign["simulation_only"], json!(true));
+    assert_eq!(campaign["campaign"]["simulation_only"], json!(true));
+    assert!(!campaign["campaign"]["planned_site_order"].is_null());
+    assert!(campaign["campaign"]["campaign"].is_object());
+    assert_eq!(
+        campaign["campaign"]["projected_disposition"],
+        json!("qualified")
+    );
+    assert!(campaign["campaign"]["uncertainty"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| item.as_str().unwrap_or_default().contains("scenario")));
 }
 
 #[test]

@@ -2,12 +2,19 @@
 
 use crate::glioma::catalog::{glioma_program_catalog, GliomaProgramDescriptor, GliomaProgramId};
 
+pub mod adaptive_campaign;
 pub mod campaign;
 pub mod consensus;
 pub mod mechanism_transport;
 pub mod operating_cycle;
 pub mod site_planner;
 
+pub use adaptive_campaign::{
+    execute_federated_benchmark_adaptive_campaign,
+    execute_federated_benchmark_adaptive_campaign_dry_run, FederatedBenchmarkAdaptiveCampaign,
+    FederatedBenchmarkAdaptiveCampaignError, FederatedBenchmarkAdaptiveCampaignRequest,
+    FederatedBenchmarkAdaptiveDisposition, FederatedBenchmarkAdaptiveStopReason,
+};
 pub use campaign::{
     execute_federated_benchmark_campaign, DryRunFederatedBenchmarkCampaignExecutor,
     FederatedBenchmarkAction, FederatedBenchmarkActionKind, FederatedBenchmarkCampaign,
