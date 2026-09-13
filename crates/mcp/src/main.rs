@@ -146,7 +146,7 @@ fn main() {
                      glioma_adaptive_research_frontier,\n\
                      glioma_adaptive_frontier_execute,\n\
                      glioma_adaptive_interpretation_campaign_execute,\n\
-                     glioma_temporal_multimodal_fusion,\n\
+                     glioma_temporal_multimodal_fusion, glioma_temporal_spatial_alignment,\n\
                      glioma_clonal_evolution,\n\
                      glioma_clone_perturbation_panel,\n\
                      glioma_clone_panel_outcomes,\n\

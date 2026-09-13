@@ -306,6 +306,8 @@ crates/research/src/glioma/
                                              P03 robust cross-sample lineage-landmark registration with residual and coverage gates
   p03_multimodal_ingestion_qc/temporal_fusion.rs
                                              P03 longitudinal multimodal state-transition inference with explicit missing-timepoint and modality gates
+  p03_multimodal_ingestion_qc/temporal_spatial_alignment.rs
+                                             P03 declared temporal-to-spatial state alignment with coverage, gap, and follow-up gates
     p05_mechanism_exploration/pathway_activity.rs
                                              P05 signed pathway activity inference with cross-modal confidence and bottleneck gates
     p05_mechanism_exploration/adaptive_policy.rs

@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 721;
+const TOOL_DEFINITION_COUNT: usize = 722;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -6202,6 +6202,81 @@ fn glioma_temporal_multimodal_fusion_replays_longitudinal_state_transitions() {
             .len(),
         1
     );
+}
+
+#[test]
+fn glioma_temporal_spatial_alignment_emits_gap_aware_follow_up() {
+    let mut server = server();
+    let hash = "0".repeat(64);
+    let observation = |id: &str, timepoint: u32| {
+        json!({
+            "observation_id": id,
+            "study_id": "alignment-protocol-study",
+            "sample_id": "sample-a",
+            "timepoint": timepoint,
+            "modality": "imaging",
+            "model_system": "organoid",
+            "artifact": {"artifact_id": id, "content_hash": hash, "content_type": "application/json", "local_only": true, "contains_human_data": false, "contains_direct_identifiers": false},
+            "features": [{"feature_id": "state", "value_milli": 500}]
+        })
+    };
+    let response = call(
+        &mut server,
+        "glioma_temporal_spatial_alignment",
+        json!({
+            "request": {
+                "study_id": "alignment-protocol-study",
+                "model_system": "organoid",
+                "temporal_request": {
+                    "study_id": "alignment-protocol-study",
+                    "model_system": "organoid",
+                    "required_modalities": ["imaging"],
+                    "min_timepoints_per_sample": 2,
+                    "min_modalities_per_timepoint": 1,
+                    "min_shared_features": 1,
+                    "min_transition_support_milli": 500,
+                    "max_state_change_milli": 500,
+                    "require_complete_time_grid": false
+                },
+                "registration_request": {
+                    "study_id": "alignment-protocol-study",
+                    "model_system": "organoid",
+                    "reference_sample_id": "sample-a",
+                    "min_cells_per_landmark": 1,
+                    "min_shared_lineages": 1,
+                    "max_residual_milli": 100,
+                    "max_landmark_spread_milli": 100
+                },
+                "propagation_request": {
+                    "study_id": "alignment-protocol-study",
+                    "model_system": "organoid",
+                    "radius_milli": 2000,
+                    "max_steps": 4,
+                    "self_retention_milli": 800,
+                    "neighbor_weight_milli": 200,
+                    "cross_lineage_weight_milli": 1000,
+                    "convergence_tolerance_milli": 10,
+                    "hotspot_threshold_milli": 100
+                },
+                "sample_timepoints": [{"sample_id": "sample-a", "timepoint": 0}],
+                "min_spatial_coverage_milli": 800,
+                "max_state_gap_milli": 1000
+            },
+            "observations": [observation("obs-a-t0", 0), observation("obs-a-t1", 1)],
+            "cells": [
+                {"cell_id":"cell-a","sample_id":"sample-a","lineage":"tumour","x_milli":0,"y_milli":0,"state_milli":500,"artifact":{"artifact_id":"cell-a","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"cell_id":"cell-b","sample_id":"sample-a","lineage":"tumour","x_milli":1000,"y_milli":0,"state_milli":500,"artifact":{"artifact_id":"cell-b","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}}
+            ]
+        }),
+    );
+    assert_eq!(response["dispatch"], json!("local_analysis"));
+    assert_eq!(response["simulation_only"], json!(false));
+    assert_eq!(response["analysis"]["disposition"], json!("qualified"));
+    assert!(response["analysis"]["priority_action_order"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|action| action == "publish_aligned_state_map"));
 }
 
 #[test]

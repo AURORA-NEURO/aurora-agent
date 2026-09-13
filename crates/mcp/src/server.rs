@@ -498,8 +498,8 @@ use bioprism_research::{
     analyze_glioma_multimodal_graph_fusion, analyze_glioma_pathway_activity,
     analyze_glioma_spatial_communication, analyze_glioma_spatial_niches,
     analyze_glioma_spatial_state_propagation, analyze_glioma_state_transitions,
-    analyze_glioma_temporal_multimodal_fusion, analyze_glioma_trajectories,
-    analyze_glioma_transportability, analyze_instrument_calibration,
+    analyze_glioma_temporal_multimodal_fusion, analyze_glioma_temporal_spatial_alignment,
+    analyze_glioma_trajectories, analyze_glioma_transportability, analyze_instrument_calibration,
     analyze_multimodal_concordance, analyze_multimodal_consensus, analyze_preclinical_outcomes,
     analyze_replication_meta_analysis, analyze_stratified_causal_adjustment,
     assess_glioma_robustness, assess_replication, build_research_object_manifest,
@@ -650,8 +650,9 @@ use bioprism_research::{
     SpatialPropagationRequest, SpatialRegistrationCell, SpatialRegistrationRequest,
     StateTransitionObservation, StateTransitionRequest, StaticGliomaActionPlanner,
     StaticGliomaComputationPlanner, StratifiedCausalRequest, StratifiedObservation,
-    TemporalFusionRequest, TemporalObservation, TrajectoryObservation, TrajectoryRequest,
-    TransportStudy, TransportabilityRequest, TypedKnowledge,
+    TemporalFusionRequest, TemporalObservation, TemporalSpatialAlignmentRequest,
+    TrajectoryObservation, TrajectoryRequest, TransportStudy, TransportabilityRequest,
+    TypedKnowledge,
 };
 use bioprism_routing::{
     lab::{run as run_routing_lab, LabSettings, Task},
@@ -2275,6 +2276,9 @@ impl Server {
             }
             "glioma_temporal_multimodal_fusion" => {
                 self.glioma_temporal_multimodal_fusion(&arguments)
+            }
+            "glioma_temporal_spatial_alignment" => {
+                self.glioma_temporal_spatial_alignment(&arguments)
             }
             "glioma_clonal_evolution" => self.glioma_clonal_evolution(&arguments),
             "glioma_clone_perturbation_panel" => self.glioma_clone_perturbation_panel(&arguments),
@@ -6698,6 +6702,46 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma temporal fusion: {error}"))
+    }
+
+    /// Align a declared temporal multimodal state to registered spatial cells and a bounded
+    /// propagation simulation. The route emits per-sample gaps and typed follow-up actions; it
+    /// never infers an unobserved timepoint, executes an assay, moves raw data, or makes a
+    /// clinical decision.
+    fn glioma_temporal_spatial_alignment(&self, arguments: &Value) -> Result<Value, String> {
+        let request: TemporalSpatialAlignmentRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_temporal_spatial_alignment requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma temporal-spatial alignment request: {error}"))?;
+        let observations: Vec<TemporalObservation> =
+            serde_json::from_value(arguments.get("observations").cloned().ok_or_else(|| {
+                "glioma_temporal_spatial_alignment requires observations".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma temporal-spatial observations: {error}"))?;
+        let cells: Vec<SpatialRegistrationCell> = serde_json::from_value(
+            arguments
+                .get("cells")
+                .cloned()
+                .ok_or_else(|| "glioma_temporal_spatial_alignment requires cells".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma temporal-spatial cells: {error}"))?;
+        let output = analyze_glioma_temporal_spatial_alignment(&request, &observations, &cells)
+            .map_err(|error| format!("glioma temporal-spatial alignment refused: {error}"))?;
+        serde_json::to_value(json!({
+            "analysis": output,
+            "dispatch": "local_analysis",
+            "simulation_only": false,
+            "guarantees": [
+                "sample-to-timepoint mappings are caller-declared and never inferred",
+                "registration, propagation, and temporal evidence retain separate gates and negative evidence",
+                "state gaps, spatial coverage shortfalls, missing timepoints, and non-convergent trajectories become typed follow-up actions",
+                "raw artifacts remain institution-local; the route performs preclinical research analysis only and makes no clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma temporal-spatial alignment: {error}"))
     }
 
     /// Infer a bounded marker-aware clonal-evolution graph from caller-supplied local
@@ -50826,6 +50870,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_multimodal_latent_factors",
                 "glioma_multimodal_graph_fusion",
                 "glioma_temporal_multimodal_fusion",
+                "glioma_temporal_spatial_alignment",
                 "glioma_clonal_evolution",
                 "glioma_clone_perturbation_panel",
                 "glioma_clone_panel_outcomes",
@@ -60340,6 +60385,19 @@ pub fn tool_definitions() -> Vec<Value> {
                 "observations": {"type": "array", "items": {"type": "object"}, "description": "Local TemporalObservation1@1 records with sample/timepoint/modality identity, bounded FeatureValue1@1 values, and local artifact references."}
             },
             "required": ["request", "observations"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_temporal_spatial_alignment",
+        "description": "Align caller-declared longitudinal multimodal glioma states to robustly registered spatial cells and a bounded lineage-aware propagation simulation. The product reports separate temporal, registration, propagation, and alignment gates; quantifies spatial coverage and temporal/spatial state gaps; and emits typed follow-up actions for missing timepoints, registration shortfalls, non-convergent propagation, and mismatches. It never invents an unobserved timepoint, moves raw artifacts, executes an assay, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "TemporalSpatialAlignmentRequest1@1 with study/model bindings, nested temporal/registration/propagation policies, explicit sample-to-timepoint mappings, coverage floor, and state-gap bound."},
+                "observations": {"type": "array", "items": {"type": "object"}, "description": "Local TemporalObservation1@1 records joined by declared sample/timepoint/modality identity."},
+                "cells": {"type": "array", "items": {"type": "object"}, "description": "Local SpatialRegistrationCell1@1 records used for robust registration and downstream propagation."}
+            },
+            "required": ["request", "observations", "cells"]
         }
     }));
     definitions.push(json!({

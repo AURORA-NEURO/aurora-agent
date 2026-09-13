@@ -15,6 +15,7 @@ pub mod spatial_niche;
 pub mod spatial_propagation;
 pub mod spatial_registration;
 pub mod temporal_fusion;
+pub mod temporal_spatial_alignment;
 
 pub use campaign::{
     execute_glioma_multimodal_ingestion_campaign, DryRunMultimodalIngestionCampaignExecutor,
@@ -83,6 +84,11 @@ pub use temporal_fusion::{
     analyze_glioma_temporal_multimodal_fusion, TemporalFusionAnalysis, TemporalFusionDisposition,
     TemporalFusionError, TemporalFusionRequest, TemporalObservation, TemporalState,
     TemporalStateFeature, TemporalTransition, TemporalTransitionDirection,
+};
+pub use temporal_spatial_alignment::{
+    analyze_glioma_temporal_spatial_alignment, AlignedSampleState, AlignmentGate, SampleTimepoint,
+    TemporalSpatialAction, TemporalSpatialAlignment, TemporalSpatialAlignmentError,
+    TemporalSpatialAlignmentRequest, TemporalSpatialDisposition,
 };
 
 pub const PROGRAM_ID: GliomaProgramId = GliomaProgramId::MultimodalIngestionQc;
