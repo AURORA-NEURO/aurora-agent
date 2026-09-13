@@ -8,12 +8,19 @@ pub mod operating_cycle;
 pub mod placement;
 pub mod planning;
 pub mod portfolio_execution;
+pub mod recovery_campaign;
 pub mod robustness;
 pub mod workflow;
 
 pub use robustness::{
     assess_glioma_robustness, RobustnessCase, RobustnessCaseKind, RobustnessDisposition,
     RobustnessError, RobustnessRequest, RobustnessSuite,
+};
+
+pub use recovery_campaign::{
+    execute_glioma_computation_recovery, ComputationRecoveryCampaign,
+    ComputationRecoveryDisposition, ComputationRecoveryError, ComputationRecoveryRequest,
+    ComputationRecoveryStopReason,
 };
 
 pub use execution::{

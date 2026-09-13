@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 703;
+const TOOL_DEFINITION_COUNT: usize = 704;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -4731,6 +4731,40 @@ fn glioma_computation_campaign_replans_and_executes_seed_round() {
         campaign["campaign"]["completed_order"],
         json!(["integrate", "normalize"])
     );
+}
+
+#[test]
+fn glioma_computation_recovery_keeps_clean_initial_campaign_without_recovery_dispatch() {
+    let mut server = server();
+    let campaign = call(
+        &mut server,
+        "glioma_computation_recovery_execute",
+        json!({
+            "request": {
+                "initial": {
+                    "objective": "recover a reproducible glioma computation",
+                    "model_system": "organoid",
+                    "initial_candidates": [{"candidate_id":"normalize","task":{"task_id":"normalize","operation":"normalize","model_system":"organoid","depends_on":[],"input_artifact_ids":["input:normalize"],"output_schema":"Normalize1@1","estimated_cost_units":2,"estimated_duration_ticks":1,"deterministic":true},"modality":"transcriptomics","information_gain_milli":700,"uncertainty_reduction_milli":600,"coverage_debt_milli":400,"redundancy_group":"normalization","required":true}],
+                    "budget_units":4,"duration_ticks":2,"max_rounds":2,"max_retries":1,"max_tasks":1,"max_modalities":1,"min_modalities":1,
+                    "information_weight_milli":5,"uncertainty_weight_milli":3,"coverage_weight_milli":2,"cost_penalty_milli":1,"duration_penalty_milli":1,
+                    "require_deterministic":true,"allow_cache":true,"require_local_artifacts":true,"cache":[],"replay_identity":"0000000000000000000000000000000000000000000000000000000000000000"
+                },
+                "recovery_budget_units":4,"recovery_duration_ticks":2,"max_recovery_rounds":2,"require_clean_completion":true
+            }
+        }),
+    );
+    assert_eq!(campaign["dispatch"], json!("dry_run"));
+    assert_eq!(campaign["simulation_only"], json!(true));
+    assert_eq!(campaign["campaign"]["disposition"], json!("completed"));
+    assert_eq!(
+        campaign["campaign"]["stop_reason"],
+        json!("initial_completed")
+    );
+    assert!(campaign["campaign"]["recovery"].is_null());
+    assert!(campaign["campaign"]["invalidated_cache_order"]
+        .as_array()
+        .unwrap()
+        .is_empty());
 }
 
 #[test]

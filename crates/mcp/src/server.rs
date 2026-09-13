@@ -516,14 +516,15 @@ use bioprism_research::{
     execute_glioma_autonomous_program_cycle, execute_glioma_autonomous_research_engine,
     execute_glioma_autonomous_research_mission, execute_glioma_computation,
     execute_glioma_computation_campaign, execute_glioma_computation_operating_cycle_dry_run,
-    execute_glioma_computation_portfolio, execute_glioma_decision_branch_campaign,
-    execute_glioma_decision_context_campaign, execute_glioma_decision_operating_cycle,
-    execute_glioma_evidence_acquisition_campaign, execute_glioma_evidence_campaign,
-    execute_glioma_evidence_gated_research, execute_glioma_evidence_operating_cycle_dry_run,
-    execute_glioma_evidence_refresh_campaign, execute_glioma_experiment_operating_cycle,
-    execute_glioma_instrument_campaign, execute_glioma_instrument_fleet,
-    execute_glioma_instrument_operating_cycle, execute_glioma_instrument_plan,
-    execute_glioma_interpretation_operating_cycle, execute_glioma_knowledge_resolution_campaign,
+    execute_glioma_computation_portfolio, execute_glioma_computation_recovery,
+    execute_glioma_decision_branch_campaign, execute_glioma_decision_context_campaign,
+    execute_glioma_decision_operating_cycle, execute_glioma_evidence_acquisition_campaign,
+    execute_glioma_evidence_campaign, execute_glioma_evidence_gated_research,
+    execute_glioma_evidence_operating_cycle_dry_run, execute_glioma_evidence_refresh_campaign,
+    execute_glioma_experiment_operating_cycle, execute_glioma_instrument_campaign,
+    execute_glioma_instrument_fleet, execute_glioma_instrument_operating_cycle,
+    execute_glioma_instrument_plan, execute_glioma_interpretation_operating_cycle,
+    execute_glioma_knowledge_resolution_campaign,
     execute_glioma_knowledge_synthesis_operating_cycle,
     execute_glioma_mechanism_discrimination_campaign, execute_glioma_mechanism_operating_cycle,
     execute_glioma_multi_fidelity_campaign, execute_glioma_multimodal_ingestion_campaign,
@@ -566,17 +567,18 @@ use bioprism_research::{
     ClonePerturbationPanelRequest, CloneProfile, ClosedLoopCampaignRequest, CombinationObservation,
     CombinationSynergyRequest, ComputationCandidate, ComputationExecutionMode,
     ComputationExecutionRequest, ComputationPlacementRequest, ComputationPortfolioExecutionRequest,
-    ComputationPortfolioRequest, ConcordanceRequest, ConsensusRequest, ContrastDesignRequest,
-    CounterfactualEnsembleRequest, CounterfactualIntervention, CounterfactualModel,
-    CounterfactualRequest, DecisionActionGraphRequest, DecisionActionPlanRequest,
-    DecisionBranchCampaignRequest, DecisionBranchPlannerRequest, DecisionContext,
-    DecisionContextCampaignRequest, DecisionContextRequest, DecisionOperatingCycleRequest,
-    DesignAction, DesignMechanism, DoseResponseObservation, DoseResponseRequest,
-    DryRunActiveLearningCampaignExecutor, DryRunAdaptiveAllocationCampaignExecutor,
-    DryRunAdaptiveMechanismPolicyExecutor, DryRunDecisionContextCampaignExecutor,
-    DryRunEvidenceAcquisitionExecutor, DryRunEvidenceRefreshCampaignExecutor,
-    DryRunExperimentOperatingCycleExecutor, DryRunFederatedBenchmarkCampaignExecutor,
-    DryRunGliomaActionExecutor, DryRunGliomaComputationExecutor, DryRunGliomaProtocolExecutor,
+    ComputationPortfolioRequest, ComputationRecoveryRequest, ConcordanceRequest, ConsensusRequest,
+    ContrastDesignRequest, CounterfactualEnsembleRequest, CounterfactualIntervention,
+    CounterfactualModel, CounterfactualRequest, DecisionActionGraphRequest,
+    DecisionActionPlanRequest, DecisionBranchCampaignRequest, DecisionBranchPlannerRequest,
+    DecisionContext, DecisionContextCampaignRequest, DecisionContextRequest,
+    DecisionOperatingCycleRequest, DesignAction, DesignMechanism, DoseResponseObservation,
+    DoseResponseRequest, DryRunActiveLearningCampaignExecutor,
+    DryRunAdaptiveAllocationCampaignExecutor, DryRunAdaptiveMechanismPolicyExecutor,
+    DryRunDecisionContextCampaignExecutor, DryRunEvidenceAcquisitionExecutor,
+    DryRunEvidenceRefreshCampaignExecutor, DryRunExperimentOperatingCycleExecutor,
+    DryRunFederatedBenchmarkCampaignExecutor, DryRunGliomaActionExecutor,
+    DryRunGliomaComputationExecutor, DryRunGliomaProtocolExecutor,
     DryRunGliomaReplicationCampaignExecutor, DryRunInstrumentExecutor,
     DryRunKnowledgeResolutionCampaignExecutor, DryRunMechanismDiscriminationCampaignExecutor,
     DryRunMultiFidelityCampaignExecutor, DryRunMultimodalIngestionCampaignExecutor,
@@ -2213,6 +2215,9 @@ impl Server {
             }
             "glioma_computation_campaign_execute" => {
                 self.glioma_computation_campaign_execute(&arguments)
+            }
+            "glioma_computation_recovery_execute" => {
+                self.glioma_computation_recovery_execute(&arguments)
             }
             "glioma_computation_workflow_execute" => {
                 self.glioma_computation_workflow_execute(&arguments)
@@ -6389,6 +6394,32 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma computation campaign: {error}"))
+    }
+
+    /// Recover failed, partial, or skipped computation tasks without replaying suspect cache
+    /// entries. The MCP route uses the deterministic local planner and worker.
+    fn glioma_computation_recovery_execute(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ComputationRecoveryRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_computation_recovery_execute requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma computation recovery request: {error}"))?;
+        let mut planner = StaticGliomaComputationPlanner;
+        let mut executor = DryRunGliomaComputationExecutor;
+        let campaign = execute_glioma_computation_recovery(&request, &mut planner, &mut executor)
+            .map_err(|error| format!("glioma computation recovery refused: {error}"))?;
+        serde_json::to_value(json!({
+            "campaign": campaign,
+            "dispatch": "dry_run",
+            "simulation_only": true,
+            "guarantees": [
+                "failed, partial, and skipped task frontiers are closed over their typed prerequisites before recovery",
+                "suspect cache entries are invalidated and recovery receives a fresh replay identity",
+                "initial and recovery campaigns remain separately replayable with independent budgets, durations, and outcomes",
+                "the MCP route performs no external computation, raw-data movement, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma computation recovery: {error}"))
     }
 
     /// Compile a high-level glioma computation intent into a closed DAG and run it through the
@@ -50195,6 +50226,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_computation_placement",
                 "glioma_computation_portfolio_execute",
                 "glioma_computation_campaign_execute",
+                "glioma_computation_recovery_execute",
                 "glioma_computation_workflow_execute",
                 "glioma_computation_operating_cycle",
                 "glioma_research_director_execute",
@@ -59224,6 +59256,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "GliomaComputationCampaignRequest1@1 with typed seed candidates, model binding, budget/time bounds, utility weights, modality coverage, replay identity, retry/cache policy, and local-artifact requirement."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_computation_recovery_execute",
+        "description": "Recover failed, partial, or skipped preclinical glioma computation tasks without replaying suspect cache entries. Closes the prerequisite DAG, invalidates affected cache keys, starts a fresh replay identity, and runs a bounded recovery campaign through MCP's synthetic worker while preserving initial and recovery outcomes separately.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ComputationRecoveryRequest1@1 containing the initial GliomaComputationCampaignRequest1@1, independent recovery budget and duration, recovery-round bound, and clean-completion policy."}
             },
             "required": ["request"]
         }
