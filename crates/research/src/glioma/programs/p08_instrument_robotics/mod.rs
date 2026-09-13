@@ -8,6 +8,7 @@ pub mod campaign;
 pub mod execution;
 pub mod fleet_execution;
 pub mod fleet_scheduler;
+pub mod operating_cycle;
 pub mod preflight;
 
 pub use assay_adjudication::{
@@ -53,6 +54,12 @@ pub use campaign::{
     execute_glioma_instrument_campaign, InstrumentCampaign, InstrumentCampaignDisposition,
     InstrumentCampaignError, InstrumentCampaignFailure, InstrumentCampaignRequest,
     InstrumentCampaignRunRequest, InstrumentCampaignRunResult, InstrumentCampaignStopReason,
+};
+
+pub use operating_cycle::{
+    dry_run_instrument_executor_from_request, execute_glioma_instrument_operating_cycle,
+    InstrumentExecutionMode, InstrumentOperatingCycle, InstrumentOperatingCycleDisposition,
+    InstrumentOperatingCycleError, InstrumentOperatingCycleRequest, InstrumentPreflightSummary,
 };
 
 pub const PROGRAM_ID: GliomaProgramId = GliomaProgramId::InstrumentRobotics;

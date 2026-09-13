@@ -174,6 +174,8 @@ crates/research/src/glioma/
                                              P08 schedule-bound fleet execution with dependency-safe guarded gateway handoff
     p08_instrument_robotics/assay_adjudication.rs
                                              P08 typed assay/QC adjudication that separates hardware completion from biological evidence
+    p08_instrument_robotics/operating_cycle.rs
+                                             P08 fail-closed preflight barrier, instrument campaign execution, and operator handoff
     p09_reproducible_computation/robustness.rs
                                              P09 leave-one-batch/row-out robustness battery
     p09_reproducible_computation/execution.rs

@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 693;
+const TOOL_DEFINITION_COUNT: usize = 694;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -2005,6 +2005,43 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
     assert_eq!(
         instrument_campaign["campaign"]["completed_run_order"],
         json!(["stage-a", "stage-b"])
+    );
+
+    let instrument_operating_cycle = call(
+        &mut server,
+        "glioma_instrument_operating_cycle",
+        json!({
+            "request": {
+                "campaign": {
+                    "objective": "two-stage preclinical imaging campaign",
+                    "runs": [
+                        {"run_id":"stage-a","execution":instrument_execution_request.clone()},
+                        {"run_id":"stage-b","execution":instrument_execution_request.clone()}
+                    ],
+                    "max_runs": 2,
+                    "stop_on_negative": true
+                },
+                "require_all_admitted": true,
+                "execution_mode": "local_simulation"
+            }
+        }),
+    );
+    assert_eq!(instrument_operating_cycle["dispatch"], json!("not_started"));
+    assert_eq!(instrument_operating_cycle["simulation_only"], json!(true));
+    assert_eq!(
+        instrument_operating_cycle["cycle"]["disposition"],
+        json!("executed")
+    );
+    assert_eq!(
+        instrument_operating_cycle["cycle"]["campaign"]["completed_run_order"],
+        json!(["stage-a", "stage-b"])
+    );
+    assert_eq!(
+        instrument_operating_cycle["cycle"]["preflight"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
     );
 
     let computation_execution = call(

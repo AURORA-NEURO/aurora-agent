@@ -507,7 +507,8 @@ use bioprism_research::{
     compile_decision_context, compile_glioma_computation_workflow, compile_glioma_knowledge_gaps,
     compile_mechanism_action_plan, compile_typed_knowledge, compose_knowledge_graph,
     design_glioma_contrast_panel, design_preclinical_experiment, discriminate_mechanisms,
-    dry_run_glioma_research, evaluate_glioma_dynamic_policies, evaluate_glioma_release_gate,
+    dry_run_glioma_research, dry_run_instrument_executor_from_request,
+    evaluate_glioma_dynamic_policies, evaluate_glioma_release_gate,
     execute_federated_benchmark_campaign, execute_glioma_action_portfolio,
     execute_glioma_active_learning_campaign, execute_glioma_adaptive_allocation_campaign,
     execute_glioma_adaptive_mechanism_campaign, execute_glioma_autonomous_campaign,
@@ -519,10 +520,10 @@ use bioprism_research::{
     execute_glioma_evidence_campaign, execute_glioma_evidence_gated_research,
     execute_glioma_evidence_refresh_campaign, execute_glioma_experiment_operating_cycle,
     execute_glioma_instrument_campaign, execute_glioma_instrument_fleet,
-    execute_glioma_instrument_plan, execute_glioma_knowledge_resolution_campaign,
-    execute_glioma_mechanism_discrimination_campaign, execute_glioma_mechanism_operating_cycle,
-    execute_glioma_multi_fidelity_campaign, execute_glioma_multimodal_ingestion_campaign,
-    execute_glioma_multimodal_mechanism_campaign,
+    execute_glioma_instrument_operating_cycle, execute_glioma_instrument_plan,
+    execute_glioma_knowledge_resolution_campaign, execute_glioma_mechanism_discrimination_campaign,
+    execute_glioma_mechanism_operating_cycle, execute_glioma_multi_fidelity_campaign,
+    execute_glioma_multimodal_ingestion_campaign, execute_glioma_multimodal_mechanism_campaign,
     execute_glioma_multimodal_mechanism_campaign_with_executor,
     execute_glioma_multimodal_readiness_gate, execute_glioma_protocol,
     execute_glioma_replay_campaign, execute_glioma_replication_campaign,
@@ -589,11 +590,12 @@ use bioprism_research::{
     GliomaReplicationCampaignRequest, GliomaResearchAutopilotRequest,
     GliomaResearchDirectorRequest, GliomaResearchIntent, GliomaWorkflowRequest, GraphFusionRequest,
     GraphFusionVector, HarmonizationRequest, HarmonizationVector, InformationDesignRequest,
-    InstrumentCampaignRequest, InstrumentExecutionRequest, InstrumentExecutionRun,
-    InstrumentFleetExecutionRequest, InstrumentFleetScheduleRequest, InstrumentInterlockSnapshot,
-    InstrumentPreflightRequest, InterpretationSynthesisRequest, KnowledgeCompositionRequest,
-    KnowledgeFrontier, KnowledgeFrontierRequest, KnowledgeGapCompilerRequest, KnowledgeRelation,
-    KnowledgeRequest, KnowledgeResolutionCampaignRequest, LatentFactorRequest, LatentFactorVector,
+    InstrumentCampaignRequest, InstrumentExecutionMode, InstrumentExecutionRequest,
+    InstrumentExecutionRun, InstrumentFleetExecutionRequest, InstrumentFleetScheduleRequest,
+    InstrumentInterlockSnapshot, InstrumentOperatingCycleRequest, InstrumentPreflightRequest,
+    InterpretationSynthesisRequest, KnowledgeCompositionRequest, KnowledgeFrontier,
+    KnowledgeFrontierRequest, KnowledgeGapCompilerRequest, KnowledgeRelation, KnowledgeRequest,
+    KnowledgeResolutionCampaignRequest, LatentFactorRequest, LatentFactorVector,
     LigandReceptorPair, MechanismActionPlannerConfig, MechanismCalibration,
     MechanismCalibrationObservation, MechanismCalibrationRequest, MechanismCandidate,
     MechanismDiscrimination, MechanismDiscriminationCampaignRequest,
@@ -2323,6 +2325,9 @@ impl Server {
             "glioma_instrument_execute" => self.glioma_instrument_execute(&arguments),
             "glioma_instrument_campaign_execute" => {
                 self.glioma_instrument_campaign_execute(&arguments)
+            }
+            "glioma_instrument_operating_cycle" => {
+                self.glioma_instrument_operating_cycle(&arguments)
             }
             "glioma_instrument_assay_adjudicate" => {
                 self.glioma_instrument_assay_adjudicate(&arguments)
@@ -9334,6 +9339,42 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma instrument campaign: {error}"))
+    }
+
+    /// Apply the all-runs preflight barrier before dispatching a local instrument campaign.
+    fn glioma_instrument_operating_cycle(&self, arguments: &Value) -> Result<Value, String> {
+        let request: InstrumentOperatingCycleRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_instrument_operating_cycle requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma instrument operating-cycle request: {error}"))?;
+        if matches!(
+            request.execution_mode,
+            InstrumentExecutionMode::GovernedLocal
+        ) {
+            return Err(
+                "glioma_instrument_operating_cycle MCP route is simulation-only; governed_local requires an institution-owned gateway"
+                    .to_string(),
+            );
+        }
+        let mut executor = dry_run_instrument_executor_from_request(&request)
+            .map_err(|error| format!("glioma instrument operating cycle refused: {error}"))?;
+        let cycle = execute_glioma_instrument_operating_cycle(&request, &mut executor)
+            .map_err(|error| format!("glioma instrument operating cycle refused: {error}"))?;
+        serde_json::to_value(json!({
+            "cycle": cycle,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "every run is preflight-validated before any dispatch",
+                "any blocked or unresolved run holds the whole queue when require_all_admitted is true",
+                "authorization, interlocks, retries, emergency stop, artifact, and negative states remain explicit",
+                "MCP emits no hardware effect, raw-data movement, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma instrument operating cycle: {error}"))
     }
 
     /// Adjudicate typed local assay summaries after an instrument run. Hardware completion is
@@ -49922,6 +49963,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_instrument_fleet_execute",
                 "glioma_instrument_execute",
                 "glioma_instrument_campaign_execute",
+                "glioma_instrument_operating_cycle",
                 "glioma_instrument_assay_adjudicate",
                 "glioma_experiment_design",
                 "glioma_contrast_panel_design",
@@ -59964,6 +60006,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "InstrumentCampaignRequest1@1 containing an objective, bounded run list of run_id plus InstrumentExecutionRequest1@1, and negative-stop policy."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_instrument_operating_cycle",
+        "description": "Run the production-boundary glioma instrument operating cycle in a deterministic local sandbox. It validates every run's preflight plan before dispatch, fail-closes the whole queue when require_all_admitted is true, executes only the admitted campaign through the guarded executor, and returns explicit safety, negative-evidence, uncertainty, and operator-handoff state. MCP creates no hardware effect, raw-data movement, or clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "InstrumentOperatingCycleRequest1@1 containing InstrumentCampaignRequest1@1, require_all_admitted barrier policy, and local_simulation or governed_local mode."}
             },
             "required": ["request"]
         }
