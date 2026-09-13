@@ -2,6 +2,7 @@
 
 use crate::glioma::catalog::{glioma_program_catalog, GliomaProgramDescriptor, GliomaProgramId};
 
+pub mod adaptive_campaign;
 pub mod adaptive_execution;
 pub mod adaptive_frontier;
 pub mod campaign;
@@ -18,6 +19,14 @@ pub mod synthesis;
 pub mod trajectory;
 pub mod transportability;
 
+pub use adaptive_campaign::{
+    execute_glioma_adaptive_interpretation_campaign,
+    execute_glioma_adaptive_interpretation_campaign_dry_run, AdaptiveInterpretationCampaign,
+    AdaptiveInterpretationCampaignDisposition, AdaptiveInterpretationCampaignError,
+    AdaptiveInterpretationCampaignRequest, AdaptiveInterpretationCampaignRound,
+    AdaptiveInterpretationCampaignStopReason, AdaptiveInterpretationPlanner,
+    AdaptiveInterpretationPlanningFailure, DryRunAdaptiveInterpretationPlanner,
+};
 pub use adaptive_execution::{
     dry_run_glioma_adaptive_frontier_executor, execute_glioma_adaptive_frontier,
     AdaptiveFrontierExecution, AdaptiveFrontierExecutionDisposition,

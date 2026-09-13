@@ -514,6 +514,7 @@ use bioprism_research::{
     execute_federated_benchmark_operating_cycle_dry_run, execute_glioma_action_portfolio,
     execute_glioma_active_learning_campaign, execute_glioma_adaptive_allocation_campaign,
     execute_glioma_adaptive_frontier, execute_glioma_adaptive_instrument_campaign,
+    execute_glioma_adaptive_interpretation_campaign_dry_run,
     execute_glioma_adaptive_mechanism_campaign, execute_glioma_autonomous_campaign,
     execute_glioma_autonomous_gap_cycle, execute_glioma_autonomous_program_cycle,
     execute_glioma_autonomous_research_engine, execute_glioma_autonomous_research_mission,
@@ -561,23 +562,23 @@ use bioprism_research::{
     AdaptiveAllocationRequest, AdaptiveArmObservation, AdaptiveDoseSurfaceRequest,
     AdaptiveFrontierExecutionRequest, AdaptiveFrontierRequest, AdaptiveInformationCampaignRequest,
     AdaptiveInformationObservation, AdaptiveInstrumentCampaignRequest,
-    AdaptiveMechanismCampaignRequest, AdaptiveMechanismPolicyRequest, AnalysisDataset,
-    AnalysisRequest, AssayEvidenceObservation, AssayEvidenceRequest, AutonomousGapCycleRequest,
-    AutonomousProgramCycleRequest, BeliefConflict, BeliefRevisionRequest, CalibrationRequest,
-    CalibrationRun, CampaignAction, CampaignMechanism, CampaignObservation, CausalContrastRequest,
-    ClonalEvolutionGraph, ClonalEvolutionRequest, CloneContinuationCandidate,
-    CloneContinuationRequest, ClonePanelObservation, ClonePanelOutcomeAnalysis,
-    ClonePanelOutcomeRequest, ClonePerturbationCandidate, ClonePerturbationPanel,
-    ClonePerturbationPanelRequest, CloneProfile, ClosedLoopCampaignRequest, CombinationObservation,
-    CombinationSynergyRequest, ComputationCandidate, ComputationExecutionMode,
-    ComputationExecutionRequest, ComputationPlacementRequest, ComputationPortfolioExecutionRequest,
-    ComputationPortfolioRequest, ComputationRecoveryRequest, ConcordanceRequest, ConsensusRequest,
-    ContrastDesignRequest, CounterfactualEnsembleRequest, CounterfactualIntervention,
-    CounterfactualModel, CounterfactualRequest, DecisionActionGraphRequest,
-    DecisionActionPlanRequest, DecisionBranchCampaignRequest, DecisionBranchPlannerRequest,
-    DecisionContext, DecisionContextCampaignRequest, DecisionContextRequest,
-    DecisionOperatingCycleRequest, DesignAction, DesignMechanism, DoseResponseObservation,
-    DoseResponseRequest, DryRunActiveLearningCampaignExecutor,
+    AdaptiveInterpretationCampaignRequest, AdaptiveMechanismCampaignRequest,
+    AdaptiveMechanismPolicyRequest, AnalysisDataset, AnalysisRequest, AssayEvidenceObservation,
+    AssayEvidenceRequest, AutonomousGapCycleRequest, AutonomousProgramCycleRequest, BeliefConflict,
+    BeliefRevisionRequest, CalibrationRequest, CalibrationRun, CampaignAction, CampaignMechanism,
+    CampaignObservation, CausalContrastRequest, ClonalEvolutionGraph, ClonalEvolutionRequest,
+    CloneContinuationCandidate, CloneContinuationRequest, ClonePanelObservation,
+    ClonePanelOutcomeAnalysis, ClonePanelOutcomeRequest, ClonePerturbationCandidate,
+    ClonePerturbationPanel, ClonePerturbationPanelRequest, CloneProfile, ClosedLoopCampaignRequest,
+    CombinationObservation, CombinationSynergyRequest, ComputationCandidate,
+    ComputationExecutionMode, ComputationExecutionRequest, ComputationPlacementRequest,
+    ComputationPortfolioExecutionRequest, ComputationPortfolioRequest, ComputationRecoveryRequest,
+    ConcordanceRequest, ConsensusRequest, ContrastDesignRequest, CounterfactualEnsembleRequest,
+    CounterfactualIntervention, CounterfactualModel, CounterfactualRequest,
+    DecisionActionGraphRequest, DecisionActionPlanRequest, DecisionBranchCampaignRequest,
+    DecisionBranchPlannerRequest, DecisionContext, DecisionContextCampaignRequest,
+    DecisionContextRequest, DecisionOperatingCycleRequest, DesignAction, DesignMechanism,
+    DoseResponseObservation, DoseResponseRequest, DryRunActiveLearningCampaignExecutor,
     DryRunAdaptiveAllocationCampaignExecutor, DryRunAdaptiveMechanismPolicyExecutor,
     DryRunDecisionContextCampaignExecutor, DryRunEvidenceAcquisitionExecutor,
     DryRunEvidenceRefreshCampaignExecutor, DryRunExperimentOperatingCycleExecutor,
@@ -2257,6 +2258,9 @@ impl Server {
                 self.glioma_adaptive_research_frontier(&arguments)
             }
             "glioma_adaptive_frontier_execute" => self.glioma_adaptive_frontier_execute(&arguments),
+            "glioma_adaptive_interpretation_campaign_execute" => {
+                self.glioma_adaptive_interpretation_campaign_execute(&arguments)
+            }
             "glioma_robustness_suite" => self.glioma_robustness_suite(&arguments),
             "glioma_trajectory_analyze" => self.glioma_trajectory_analyze(&arguments),
             "glioma_state_transition_analyze" => self.glioma_state_transition_analyze(&arguments),
@@ -6984,6 +6988,37 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma adaptive frontier execution: {error}"))
+    }
+
+    /// Run bounded synthesis -> adaptive frontier -> local execution rounds. The MCP worker and
+    /// planner are deliberately synthetic; institution-local deployments replace both seams to
+    /// return validated preclinical artifacts for the next synthesis round.
+    fn glioma_adaptive_interpretation_campaign_execute(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: AdaptiveInterpretationCampaignRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_adaptive_interpretation_campaign_execute requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma adaptive interpretation campaign request: {error}")
+            })?;
+        let campaign = execute_glioma_adaptive_interpretation_campaign_dry_run(&request)
+            .map_err(|error| format!("glioma adaptive interpretation campaign refused: {error}"))?;
+        serde_json::to_value(json!({
+            "campaign": campaign,
+            "dispatch": "dry_run",
+            "simulation_only": true,
+            "guarantees": [
+                "each round resynthesizes only the typed evidence request supplied by the caller",
+                "the adaptive frontier is recompiled and selection-bound before every local action batch",
+                "dry-run artifacts are retained as limitations and cannot become biological evidence",
+                "budget, approval, effect, artifact, negative, partial, failure, hold, and no-progress stops remain explicit",
+                "institution-local planner and executor seams can feed validated aggregate artifacts into later rounds"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma adaptive interpretation campaign: {error}"))
     }
 
     /// Stress-test a local two-arm glioma analysis under deterministic batch and row omissions.
@@ -50438,6 +50473,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_interpretation_operating_cycle",
                 "glioma_adaptive_research_frontier",
                 "glioma_adaptive_frontier_execute",
+                "glioma_adaptive_interpretation_campaign_execute",
                 "glioma_robustness_suite",
                 "glioma_trajectory_analyze",
                 "glioma_state_transition_analyze",
@@ -59604,6 +59640,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "AdaptiveFrontierExecutionRequest1@1 containing AdaptiveFrontierRequest1@1, max_retries, require_artifacts, and allow_unresolved_dispatch."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_adaptive_interpretation_campaign_execute",
+        "description": "Run bounded synthesis-to-frontier-to-execution rounds for a preclinical glioma interpretation program. Each round is recompiled from typed evidence, unresolved synthesis holds unless explicitly permitted, and the dry-run planner refuses to fabricate re-analysis evidence; institution-local planners can return validated evidence requests for later rounds. Budget, approval, artifact, negative, partial, failure, hold, and no-progress states remain explicit.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "AdaptiveInterpretationCampaignRequest1@1 containing the initial InterpretationSynthesisRequest1@1, bounded round/action/budget controls, authority switches, and explicit stop policy."}
             },
             "required": ["request"]
         }

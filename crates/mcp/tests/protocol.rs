@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 710;
+const TOOL_DEFINITION_COUNT: usize = 711;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -5757,6 +5757,67 @@ fn glioma_adaptive_frontier_execute_runs_selected_actions_and_replays() {
         .unwrap()
         .is_empty());
     assert_eq!(first["execution"]["digest"], second["execution"]["digest"]);
+}
+
+#[test]
+fn glioma_adaptive_interpretation_campaign_executes_and_stops_without_fabricating_reanalysis() {
+    let mut server = server();
+    let hash = "0".repeat(64);
+    let response = call(
+        &mut server,
+        "glioma_adaptive_interpretation_campaign_execute",
+        json!({
+            "request": {
+                "initial_synthesis": {
+                    "objective": "run adaptive invasion interpretation",
+                    "hypothesis": "a preclinical invasion mechanism is reproducible",
+                    "model_system": "organoid",
+                    "min_evidence": 2,
+                    "min_independent_groups": 2,
+                    "min_families": 2,
+                    "min_quality_milli": 700,
+                    "effect_threshold_milli": 100,
+                    "max_disagreement_milli": 700,
+                    "max_leave_one_out_shift_milli": 700,
+                    "require_replication_family": true,
+                    "replay_identity": hash,
+                    "evidence": [
+                        {"evidence_id":"causal-a","family":"causal_contrast","independent_group":"site-a","model_system":"organoid","direction":"positive","effect_milli":300,"uncertainty_milli":50,"quality_milli":900,"sample_count":6,"artifact":{"artifact_id":"causal-a","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"negative_evidence":[]},
+                        {"evidence_id":"replication-b","family":"replication","independent_group":"site-b","model_system":"organoid","direction":"positive","effect_milli":280,"uncertainty_milli":60,"quality_milli":850,"sample_count":8,"artifact":{"artifact_id":"replication-b","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"negative_evidence":[]}
+                    ]
+                },
+                "completed_actions": [],
+                "budget_units": 80,
+                "max_rounds": 3,
+                "max_actions_per_round": 3,
+                "max_retries": 1,
+                "require_artifacts": true,
+                "allow_unresolved_dispatch": false,
+                "stop_on_qualified": false,
+                "stop_on_negative": true,
+                "approval_granted": true,
+                "allow_instrument_execution": false,
+                "allow_federation": false,
+                "selection_weights": {"information_gain":25,"frontier_novelty":20,"workflow_leverage":15,"cross_stage_unlock":15,"reproducibility_safety":10,"federation_value":10,"feasibility":5}
+            }
+        }),
+    );
+    assert_eq!(response["dispatch"], json!("dry_run"));
+    assert_eq!(response["simulation_only"], json!(true));
+    assert_eq!(response["campaign"]["rounds"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        response["campaign"]["stop_reason"],
+        json!("planner_no_progress")
+    );
+    assert_eq!(
+        response["campaign"]["rounds"][0]["execution"]["disposition"],
+        json!("executed")
+    );
+    assert!(response["campaign"]["negative_evidence"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| item.as_str().unwrap().contains("synthetic-dry-run")));
 }
 
 #[test]

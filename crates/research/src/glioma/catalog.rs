@@ -431,6 +431,7 @@ pub fn implemented_feature_ids() -> Vec<&'static str> {
         crate::glioma::programs::p10_interpretation_replication::synthesis::FEATURE_ID,
         crate::glioma::programs::p10_interpretation_replication::adaptive_frontier::FEATURE_ID,
         crate::glioma::programs::p10_interpretation_replication::adaptive_execution::FEATURE_ID,
+        crate::glioma::programs::p10_interpretation_replication::adaptive_campaign::FEATURE_ID,
         crate::glioma::programs::p10_interpretation_replication::clone_outcomes::FEATURE_ID,
         crate::glioma::programs::p10_interpretation_replication::operating_cycle::FEATURE_ID,
         crate::glioma::programs::p11_research_object_release::release_gate::FEATURE_ID,
