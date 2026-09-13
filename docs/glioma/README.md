@@ -218,6 +218,8 @@ crates/research/src/glioma/
                                              P08 fail-closed preflight barrier, instrument campaign execution, and operator handoff
     p08_instrument_robotics/adaptive_campaign.rs
                                              P08 information-per-cost, endpoint-diverse instrument portfolio selection with dependency-closed guarded execution
+    p08_instrument_robotics/science_loop.rs
+                                             P08 governed instrument-to-science loop with assay evidence adjudication and next research actions
     p09_reproducible_computation/robustness.rs
                                              P09 leave-one-batch/row-out robustness battery
     p09_reproducible_computation/execution.rs

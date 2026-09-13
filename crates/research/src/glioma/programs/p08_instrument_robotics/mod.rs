@@ -11,6 +11,7 @@ pub mod fleet_execution;
 pub mod fleet_scheduler;
 pub mod operating_cycle;
 pub mod preflight;
+pub mod science_loop;
 
 pub use assay_adjudication::{
     adjudicate_glioma_assay_evidence, AssayEvidenceDisposition, AssayEvidenceError,
@@ -68,6 +69,11 @@ pub use operating_cycle::{
     dry_run_instrument_executor_from_request, execute_glioma_instrument_operating_cycle,
     InstrumentExecutionMode, InstrumentOperatingCycle, InstrumentOperatingCycleDisposition,
     InstrumentOperatingCycleError, InstrumentOperatingCycleRequest, InstrumentPreflightSummary,
+};
+
+pub use science_loop::{
+    execute_glioma_instrument_science_loop, InstrumentScienceLoop,
+    InstrumentScienceLoopDisposition, InstrumentScienceLoopError, InstrumentScienceLoopRequest,
 };
 
 pub const PROGRAM_ID: GliomaProgramId = GliomaProgramId::InstrumentRobotics;
