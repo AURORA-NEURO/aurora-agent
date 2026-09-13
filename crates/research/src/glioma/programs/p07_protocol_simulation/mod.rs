@@ -24,6 +24,7 @@ pub mod intent_mission;
 pub mod mechanism_campaign;
 pub mod mission;
 pub mod mission_recovery;
+pub mod multimodal_mission;
 pub mod program_cycle;
 pub mod research_autopilot;
 pub mod robust_active_learning_campaign;
@@ -107,6 +108,12 @@ pub use mission::{
 pub use mission_recovery::{
     execute_glioma_mission_recovery, GliomaMissionRecovery, GliomaMissionRecoveryDisposition,
     GliomaMissionRecoveryError, GliomaMissionRecoveryRequest, GliomaMissionRecoveryStopReason,
+};
+
+pub use multimodal_mission::{
+    compile_glioma_multimodal_mission_candidates, execute_glioma_multimodal_mission,
+    GliomaMultimodalMissionDisposition, GliomaMultimodalMissionError,
+    GliomaMultimodalMissionRequest, GliomaMultimodalResearchMission,
 };
 
 pub use intent_mission::{

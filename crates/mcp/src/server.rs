@@ -529,7 +529,7 @@ use bioprism_research::{
     execute_glioma_mechanism_discrimination_campaign, execute_glioma_mechanism_operating_cycle,
     execute_glioma_mission_recovery, execute_glioma_multi_fidelity_campaign,
     execute_glioma_multimodal_ingestion_campaign, execute_glioma_multimodal_mechanism_campaign,
-    execute_glioma_multimodal_mechanism_campaign_with_executor,
+    execute_glioma_multimodal_mechanism_campaign_with_executor, execute_glioma_multimodal_mission,
     execute_glioma_multimodal_operating_cycle_dry_run, execute_glioma_multimodal_readiness_gate,
     execute_glioma_protocol, execute_glioma_release_operating_cycle_dry_run,
     execute_glioma_replay_campaign, execute_glioma_replication_campaign,
@@ -598,16 +598,16 @@ use bioprism_research::{
     GliomaComputationWorkflowRequest, GliomaEvidenceCampaignRequest,
     GliomaEvidenceGatedResearchRequest, GliomaEvidenceOperatingCycleRequest,
     GliomaIntentMissionRequest, GliomaInterpretationOperatingCycleRequest,
-    GliomaMissionRecoveryRequest, GliomaMissionRequest, GliomaMultimodalOperatingCycleRequest,
-    GliomaReleaseOperatingCycleRequest, GliomaReplicationCampaignRequest,
-    GliomaResearchAutopilotRequest, GliomaResearchDirectorRequest, GliomaResearchIntent,
-    GliomaWorkflowRequest, GraphFusionRequest, GraphFusionVector, HarmonizationRequest,
-    HarmonizationVector, InformationDesignRequest, InstrumentCampaignRequest,
-    InstrumentExecutionMode, InstrumentExecutionRequest, InstrumentExecutionRun,
-    InstrumentFleetExecutionRequest, InstrumentFleetScheduleRequest, InstrumentInterlockSnapshot,
-    InstrumentOperatingCycleRequest, InstrumentPreflightRequest, InterpretationSynthesisRequest,
-    KnowledgeCompositionRequest, KnowledgeFrontier, KnowledgeFrontierRequest,
-    KnowledgeGapCompilerRequest, KnowledgeRelation, KnowledgeRequest,
+    GliomaMissionRecoveryRequest, GliomaMissionRequest, GliomaMultimodalMissionRequest,
+    GliomaMultimodalOperatingCycleRequest, GliomaReleaseOperatingCycleRequest,
+    GliomaReplicationCampaignRequest, GliomaResearchAutopilotRequest,
+    GliomaResearchDirectorRequest, GliomaResearchIntent, GliomaWorkflowRequest, GraphFusionRequest,
+    GraphFusionVector, HarmonizationRequest, HarmonizationVector, InformationDesignRequest,
+    InstrumentCampaignRequest, InstrumentExecutionMode, InstrumentExecutionRequest,
+    InstrumentExecutionRun, InstrumentFleetExecutionRequest, InstrumentFleetScheduleRequest,
+    InstrumentInterlockSnapshot, InstrumentOperatingCycleRequest, InstrumentPreflightRequest,
+    InterpretationSynthesisRequest, KnowledgeCompositionRequest, KnowledgeFrontier,
+    KnowledgeFrontierRequest, KnowledgeGapCompilerRequest, KnowledgeRelation, KnowledgeRequest,
     KnowledgeResolutionCampaignRequest, KnowledgeSynthesisOperatingCycleRequest,
     LatentFactorRequest, LatentFactorVector, LigandReceptorPair, MechanismActionPlannerConfig,
     MechanismCalibration, MechanismCalibrationObservation, MechanismCalibrationRequest,
@@ -2381,6 +2381,9 @@ impl Server {
                 self.glioma_autonomous_research_mission_recover(&arguments)
             }
             "glioma_intent_mission_execute" => self.glioma_intent_mission_execute(&arguments),
+            "glioma_multimodal_mission_execute" => {
+                self.glioma_multimodal_mission_execute(&arguments)
+            }
             "glioma_multi_fidelity_campaign_execute" => {
                 self.glioma_multi_fidelity_campaign_execute(&arguments)
             }
@@ -9931,6 +9934,34 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma intent mission: {error}"))
+    }
+
+    /// Expand an admitted intent into a bounded multimodal/model-system action portfolio and run
+    /// it through the local mission controller. The MCP worker remains simulation-only.
+    fn glioma_multimodal_mission_execute(&self, arguments: &Value) -> Result<Value, String> {
+        let request: GliomaMultimodalMissionRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_multimodal_mission_execute requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma multimodal mission request: {error}"))?;
+        let mut executor = DryRunGliomaActionExecutor;
+        let campaign = execute_glioma_multimodal_mission(&request, &mut executor)
+            .map_err(|error| format!("glioma multimodal mission refused: {error}"))?;
+        serde_json::to_value(json!({
+            "campaign": campaign,
+            "dispatch": "dry_run",
+            "simulation_only": true,
+            "guarantees": [
+                "each admitted research stage expands into deterministic modality/model-system variants under a bounded portfolio limit",
+                "every variant retains canonical dependency handoffs and cannot bypass upstream stage qualification",
+                "mission selection can trade information gain against cross-modal coverage, model diversity, cost, and reproducibility",
+                "missing inputs, approvals, locality violations, negative evidence, and recovery frontiers remain explicit",
+                "the MCP route performs no instrument execution, clinical decision, or raw-data movement"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma multimodal mission: {error}"))
     }
 
     /// Run the P06 closed-loop multi-fidelity optimizer with a deterministic local worker. The
@@ -50395,6 +50426,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_autonomous_research_mission_execute",
                 "glioma_autonomous_research_mission_recover",
                 "glioma_intent_mission_execute",
+                "glioma_multimodal_mission_execute",
                 "glioma_multi_fidelity_campaign_execute",
                 "glioma_federated_benchmark_consensus",
                 "glioma_federated_benchmark_site_plan",
@@ -60646,6 +60678,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "GliomaIntentMissionRequest1@1 with GliomaResearchIntent, mission selection/gates, bounded rounds/retries, artifact policy, and separate recovery budget."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_multimodal_mission_execute",
+        "description": "Expand an admitted preclinical glioma intent into a bounded modality/model-system action portfolio and run the autonomous mission controller. Deterministic variants preserve canonical stage dependencies while optimizing information gain, cross-modal coverage, model diversity, cost, and reproducibility; missing inputs and approvals hold before dispatch, and initial/recovery outcomes retain negative evidence. MCP uses a synthetic worker without instrument execution, clinical decisions, or raw-data movement.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "GliomaMultimodalMissionRequest1@1 with intent, mission selection/gates, recovery bounds, and max_variants_per_stage."}
             },
             "required": ["request"]
         }

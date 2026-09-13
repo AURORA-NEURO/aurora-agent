@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 706;
+const TOOL_DEFINITION_COUNT: usize = 707;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -5258,6 +5258,74 @@ fn glioma_intent_mission_compiles_and_executes_the_full_stage_action_graph() {
             >= 10
     );
     assert!(response["campaign"]["campaign"].is_object());
+}
+
+#[test]
+fn glioma_multimodal_mission_expands_model_and_modality_coverage() {
+    let mut server = server();
+    let hash = "0".repeat(64);
+    let response = call(
+        &mut server,
+        "glioma_multimodal_mission_execute",
+        json!({
+            "request": {
+                "intent": {
+                    "research_id": "multimodal-mission-research",
+                    "study_id": "multimodal-mission-study",
+                    "objective": "map invasion mechanisms across glioma organoid and cell-line systems",
+                    "output_uses": ["cohort_analysis"],
+                    "model_systems": ["organoid", "cell_line"],
+                    "modalities": ["literature", "transcriptomics", "imaging", "computational", "organoid_assay", "replication"],
+                    "input_artifacts": [{"artifact_id":"input","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}],
+                    "requested_autonomy": "a1",
+                    "approval_reference": null,
+                    "budget_units": 2000,
+                    "max_retries": 1,
+                    "allow_instrument_execution": false,
+                    "allow_federation": false,
+                    "raw_data_local": true,
+                    "aggregate_only": true,
+                    "replay_identity": hash,
+                    "boundary": PRECLINICAL_BOUNDARY
+                },
+                "mission_id": "multimodal-mission",
+                "selection": {"budget_units":2000,"max_actions":32,"approval_granted":false,"allow_instrument_execution":false,"allow_federation":false,"weights":{"information_gain":25,"frontier_novelty":20,"workflow_leverage":15,"cross_stage_unlock":15,"reproducibility_safety":10,"federation_value":10,"feasibility":5}},
+                "gates": {"required_stages":["mechanism_exploration"],"min_completed_actions":2,"min_information_gain_milli":500,"max_uncertainty_milli":20000,"min_model_systems":2,"min_modalities":3},
+                "max_rounds":16,
+                "max_retries":1,
+                "require_artifacts":true,
+                "stop_on_negative":false,
+                "recovery_budget_units":512,
+                "recovery_max_rounds":4,
+                "require_clean_recovery":false,
+                "max_variants_per_stage":8
+            }
+        }),
+    );
+    assert_eq!(response["dispatch"], json!("dry_run"));
+    assert_eq!(response["simulation_only"], json!(true));
+    assert_eq!(response["campaign"]["disposition"], json!("executed"));
+    assert!(
+        response["campaign"]["candidate_order"]
+            .as_array()
+            .unwrap()
+            .len()
+            > 14
+    );
+    assert!(
+        response["campaign"]["modality_order"]
+            .as_array()
+            .unwrap()
+            .len()
+            >= 3
+    );
+    assert!(
+        response["campaign"]["model_system_order"]
+            .as_array()
+            .unwrap()
+            .len()
+            >= 2
+    );
 }
 
 #[test]
