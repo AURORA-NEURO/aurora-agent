@@ -22,6 +22,7 @@ pub mod evidence_gate;
 pub mod execution;
 pub mod mechanism_campaign;
 pub mod mission;
+pub mod mission_recovery;
 pub mod program_cycle;
 pub mod research_autopilot;
 pub mod robust_active_learning_campaign;
@@ -100,6 +101,11 @@ pub use mission::{
     execute_glioma_autonomous_research_mission, GliomaAutonomousResearchMission,
     GliomaMissionDisposition, GliomaMissionError, GliomaMissionGates, GliomaMissionRequest,
     GliomaMissionRound, GliomaMissionStopReason,
+};
+
+pub use mission_recovery::{
+    execute_glioma_mission_recovery, GliomaMissionRecovery, GliomaMissionRecoveryDisposition,
+    GliomaMissionRecoveryError, GliomaMissionRecoveryRequest, GliomaMissionRecoveryStopReason,
 };
 
 pub use program_cycle::{

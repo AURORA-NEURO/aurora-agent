@@ -527,8 +527,8 @@ use bioprism_research::{
     execute_glioma_knowledge_resolution_campaign,
     execute_glioma_knowledge_synthesis_operating_cycle,
     execute_glioma_mechanism_discrimination_campaign, execute_glioma_mechanism_operating_cycle,
-    execute_glioma_multi_fidelity_campaign, execute_glioma_multimodal_ingestion_campaign,
-    execute_glioma_multimodal_mechanism_campaign,
+    execute_glioma_mission_recovery, execute_glioma_multi_fidelity_campaign,
+    execute_glioma_multimodal_ingestion_campaign, execute_glioma_multimodal_mechanism_campaign,
     execute_glioma_multimodal_mechanism_campaign_with_executor,
     execute_glioma_multimodal_operating_cycle_dry_run, execute_glioma_multimodal_readiness_gate,
     execute_glioma_protocol, execute_glioma_release_operating_cycle_dry_run,
@@ -597,7 +597,7 @@ use bioprism_research::{
     GliomaComputationCampaignRequest, GliomaComputationOperatingCycleRequest,
     GliomaComputationWorkflowRequest, GliomaEvidenceCampaignRequest,
     GliomaEvidenceGatedResearchRequest, GliomaEvidenceOperatingCycleRequest,
-    GliomaInterpretationOperatingCycleRequest, GliomaMissionRequest,
+    GliomaInterpretationOperatingCycleRequest, GliomaMissionRecoveryRequest, GliomaMissionRequest,
     GliomaMultimodalOperatingCycleRequest, GliomaReleaseOperatingCycleRequest,
     GliomaReplicationCampaignRequest, GliomaResearchAutopilotRequest,
     GliomaResearchDirectorRequest, GliomaResearchIntent, GliomaWorkflowRequest, GraphFusionRequest,
@@ -2375,6 +2375,9 @@ impl Server {
             }
             "glioma_autonomous_research_mission_execute" => {
                 self.glioma_autonomous_research_mission_execute(&arguments)
+            }
+            "glioma_autonomous_research_mission_recover" => {
+                self.glioma_autonomous_research_mission_recover(&arguments)
             }
             "glioma_multi_fidelity_campaign_execute" => {
                 self.glioma_multi_fidelity_campaign_execute(&arguments)
@@ -9868,6 +9871,36 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma autonomous research mission: {error}"))
+    }
+
+    /// Recover a failed or partial autonomous glioma mission by closing the failed dependency
+    /// cone and running a separate bounded mission over alternate typed actions. MCP remains a
+    /// dry-run rehearsal; institutions provide the production-local executor.
+    fn glioma_autonomous_research_mission_recover(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: GliomaMissionRecoveryRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_autonomous_research_mission_recover requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma mission recovery request: {error}"))?;
+        let mut executor = DryRunGliomaActionExecutor;
+        let campaign = execute_glioma_mission_recovery(&request, &mut executor)
+            .map_err(|error| format!("glioma mission recovery refused: {error}"))?;
+        serde_json::to_value(json!({
+            "campaign": campaign,
+            "dispatch": "dry_run",
+            "simulation_only": true,
+            "guarantees": [
+                "failed, partial, and skipped action frontiers are closed through their dependency cones before recovery",
+                "initial and recovery missions remain separately addressable and replayable",
+                "alternate candidates are selected under a fresh bounded budget and never silently replay invalidated actions",
+                "negative evidence and uncertainty from both attempts remain first-class",
+                "the MCP route performs no instrument execution, clinical decision, or raw-data movement"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma mission recovery: {error}"))
     }
 
     /// Run the P06 closed-loop multi-fidelity optimizer with a deterministic local worker. The
@@ -50330,6 +50363,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_replication_meta_analyze",
                 "glioma_replication_campaign_execute",
                 "glioma_autonomous_research_mission_execute",
+                "glioma_autonomous_research_mission_recover",
                 "glioma_multi_fidelity_campaign_execute",
                 "glioma_federated_benchmark_consensus",
                 "glioma_federated_benchmark_site_plan",
@@ -60559,6 +60593,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "GliomaMissionRequest1@1 with mission objective, bounded typed action candidates, completed actions, selection policy, stage/model/modality/information/uncertainty gates, retry and round limits, and local-artifact policy."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_autonomous_research_mission_recover",
+        "description": "Recover a failed or partial autonomous preclinical glioma mission by identifying failed, partial, and skipped action frontiers, closing their downstream dependency cones, and executing a separate bounded recovery mission over alternate typed actions. Initial and recovery results remain separately replayable, negative evidence is retained, and MCP uses a synthetic worker without instrument execution, clinical decisions, or raw-data movement.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "GliomaMissionRecoveryRequest1@1 with the initial mission, separate recovery budget/round bounds, and qualification policy."}
             },
             "required": ["request"]
         }

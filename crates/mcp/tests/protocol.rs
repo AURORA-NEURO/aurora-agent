@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 704;
+const TOOL_DEFINITION_COUNT: usize = 705;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -4175,6 +4175,43 @@ fn glioma_autonomous_research_mission_adapts_frontier_in_sandbox() {
     assert_eq!(mission["simulation_only"], json!(true));
     assert_eq!(mission["mission"]["disposition"], json!("qualified"));
     assert_eq!(mission["mission"]["rounds"].as_array().unwrap().len(), 1);
+}
+
+#[test]
+fn glioma_autonomous_research_mission_recovery_keeps_clean_run_without_retry() {
+    let mut server = server();
+    let campaign = call(
+        &mut server,
+        "glioma_autonomous_research_mission_recover",
+        json!({
+            "request": {
+                "initial": {
+                    "mission_id": "m-invasion-recovery",
+                    "objective": "resolve preclinical glioma invasion mechanism",
+                    "candidates": [
+                        {"action_id":"mechanism-organoid","stage_kind":"mechanism_exploration","modality":"transcriptomics","model_system":"organoid","depends_on":[],"cost_units":2,"information_gain_milli":800,"frontier_novelty_milli":700,"workflow_leverage_milli":600,"cross_stage_unlock_milli":700,"reproducibility_safety_milli":900,"federation_value_milli":200,"feasibility_milli":900,"autonomy_tier":"a1","effects":["read_local_data","execute_local_computation","write_local_artifact"]}
+                    ],
+                    "completed_action_order": [],
+                    "selection": {"budget_units":2,"max_actions":1,"approval_granted":false,"allow_instrument_execution":false,"allow_federation":false,"weights":{"information_gain":25,"frontier_novelty":20,"workflow_leverage":15,"cross_stage_unlock":15,"reproducibility_safety":10,"federation_value":10,"feasibility":5}},
+                    "gates": {"required_stages":["mechanism_exploration"],"min_completed_actions":1,"min_information_gain_milli":500,"max_uncertainty_milli":10000,"min_model_systems":1,"min_modalities":1},
+                    "max_rounds":1,
+                    "max_retries":1,
+                    "require_artifacts":true,
+                    "stop_on_negative":false
+                },
+                "recovery_budget_units": 2,
+                "recovery_max_rounds": 1,
+                "require_clean_qualification": true
+            }
+        }),
+    );
+    assert_eq!(campaign["dispatch"], json!("dry_run"));
+    assert_eq!(campaign["simulation_only"], json!(true));
+    assert_eq!(
+        campaign["campaign"]["disposition"],
+        json!("no_recovery_needed")
+    );
+    assert!(campaign["campaign"]["recovery"].is_null());
 }
 
 #[test]
