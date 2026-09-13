@@ -11,6 +11,7 @@ pub mod campaign;
 pub mod clonal_panel;
 pub mod contrast_design;
 pub mod dose_response;
+pub mod frontier_controller;
 pub mod information_design;
 pub mod multi_fidelity;
 pub mod multi_fidelity_campaign;
@@ -71,6 +72,14 @@ pub use contrast_design::{
 pub use dose_response::{
     analyze_glioma_dose_response, DoseDirection, DoseResponseAnalysis, DoseResponseDisposition,
     DoseResponseError, DoseResponseObservation, DoseResponsePoint, DoseResponseRequest,
+};
+pub use frontier_controller::{
+    execute_glioma_experiment_frontier_controller, DryRunGliomaExperimentFrontierExecutor,
+    GliomaExperimentFrontierError, GliomaExperimentFrontierExecutor,
+    GliomaExperimentFrontierRequest, GliomaExperimentFrontierRun, GliomaFrontierCandidate,
+    GliomaFrontierDisposition, GliomaFrontierExecutionFailure, GliomaFrontierMechanism,
+    GliomaFrontierObservation, GliomaFrontierOutcome, GliomaFrontierRound, GliomaFrontierScore,
+    GliomaFrontierStopReason,
 };
 pub use information_design::{
     plan_glioma_information_design, DesignAction, DesignMechanism, DesignOutcome,

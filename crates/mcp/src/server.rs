@@ -528,10 +528,11 @@ use bioprism_research::{
     execute_glioma_decision_operating_cycle, execute_glioma_evidence_acquisition_campaign,
     execute_glioma_evidence_campaign, execute_glioma_evidence_gated_research,
     execute_glioma_evidence_operating_cycle_dry_run, execute_glioma_evidence_refresh_campaign,
-    execute_glioma_experiment_operating_cycle, execute_glioma_instrument_campaign,
-    execute_glioma_instrument_fleet, execute_glioma_instrument_operating_cycle,
-    execute_glioma_instrument_plan, execute_glioma_intent_mission,
-    execute_glioma_interpretation_operating_cycle, execute_glioma_knowledge_resolution_campaign,
+    execute_glioma_experiment_frontier_controller, execute_glioma_experiment_operating_cycle,
+    execute_glioma_instrument_campaign, execute_glioma_instrument_fleet,
+    execute_glioma_instrument_operating_cycle, execute_glioma_instrument_plan,
+    execute_glioma_intent_mission, execute_glioma_interpretation_operating_cycle,
+    execute_glioma_knowledge_resolution_campaign,
     execute_glioma_knowledge_synthesis_operating_cycle, execute_glioma_mechanism_autopilot,
     execute_glioma_mechanism_discovery_engine, execute_glioma_mechanism_discrimination_campaign,
     execute_glioma_mechanism_operating_cycle, execute_glioma_mission_recovery,
@@ -590,16 +591,17 @@ use bioprism_research::{
     DryRunDecisionContextCampaignExecutor, DryRunEvidenceAcquisitionExecutor,
     DryRunEvidenceRefreshCampaignExecutor, DryRunExperimentOperatingCycleExecutor,
     DryRunFederatedBenchmarkCampaignExecutor, DryRunGliomaActionExecutor,
-    DryRunGliomaComputationExecutor, DryRunGliomaProtocolExecutor,
-    DryRunGliomaReplicationCampaignExecutor, DryRunInstrumentExecutor,
-    DryRunKnowledgeResolutionCampaignExecutor, DryRunMechanismDiscriminationCampaignExecutor,
-    DryRunMultiFidelityCampaignExecutor, DryRunMultimodalIngestionCampaignExecutor,
-    DryRunReplayCampaignExecutor, DryRunRobustActiveLearningCampaignExecutor,
-    DryRunSequentialCampaignExecutor, DynamicPolicyCandidate, DynamicPolicyRequest,
-    DynamicPolicyTrajectory, EvidenceAcquisitionCampaignRequest, EvidenceAcquisitionCandidate,
-    EvidenceAcquisitionRequest, EvidenceCalibrationObservation, EvidenceCalibrationRequest,
-    EvidenceExecutionMode, EvidencePriorityRequest, EvidenceRecord, EvidenceRefreshCampaignRequest,
-    EvidenceRequest, EvidenceSurveillanceRequest, EvidenceTriangulationRequest, ExperimentArm,
+    DryRunGliomaComputationExecutor, DryRunGliomaExperimentFrontierExecutor,
+    DryRunGliomaProtocolExecutor, DryRunGliomaReplicationCampaignExecutor,
+    DryRunInstrumentExecutor, DryRunKnowledgeResolutionCampaignExecutor,
+    DryRunMechanismDiscriminationCampaignExecutor, DryRunMultiFidelityCampaignExecutor,
+    DryRunMultimodalIngestionCampaignExecutor, DryRunReplayCampaignExecutor,
+    DryRunRobustActiveLearningCampaignExecutor, DryRunSequentialCampaignExecutor,
+    DynamicPolicyCandidate, DynamicPolicyRequest, DynamicPolicyTrajectory,
+    EvidenceAcquisitionCampaignRequest, EvidenceAcquisitionCandidate, EvidenceAcquisitionRequest,
+    EvidenceCalibrationObservation, EvidenceCalibrationRequest, EvidenceExecutionMode,
+    EvidencePriorityRequest, EvidenceRecord, EvidenceRefreshCampaignRequest, EvidenceRequest,
+    EvidenceSurveillanceRequest, EvidenceTriangulationRequest, ExperimentArm,
     ExperimentOperatingCycleRequest, ExperimentRequest, FederatedBenchmarkAdaptiveCampaignRequest,
     FederatedBenchmarkCampaignRequest, FederatedBenchmarkExecutionMode,
     FederatedBenchmarkOperatingCycleRequest, FederatedBenchmarkRequest, FederatedBenchmarkSite,
@@ -610,10 +612,10 @@ use bioprism_research::{
     GliomaAutonomousResearchEngineRequest, GliomaComputationCampaignRequest,
     GliomaComputationOperatingCycleRequest, GliomaComputationWorkflowRequest,
     GliomaEvidenceCampaignRequest, GliomaEvidenceGatedResearchRequest,
-    GliomaEvidenceOperatingCycleRequest, GliomaIntentMissionRequest,
-    GliomaInterpretationOperatingCycleRequest, GliomaMechanismAutopilotRequest,
-    GliomaMechanismDiscoveryRequest, GliomaMissionRecoveryRequest, GliomaMissionRequest,
-    GliomaMultimodalMissionRequest, GliomaMultimodalOperatingCycleRequest,
+    GliomaEvidenceOperatingCycleRequest, GliomaExperimentFrontierRequest,
+    GliomaIntentMissionRequest, GliomaInterpretationOperatingCycleRequest,
+    GliomaMechanismAutopilotRequest, GliomaMechanismDiscoveryRequest, GliomaMissionRecoveryRequest,
+    GliomaMissionRequest, GliomaMultimodalMissionRequest, GliomaMultimodalOperatingCycleRequest,
     GliomaProgramSchedulerRequest, GliomaReleaseOperatingCycleRequest,
     GliomaReplicationCampaignRequest, GliomaResearchAutopilotRequest,
     GliomaResearchDirectorRequest, GliomaResearchIntent, GliomaWorkflowRequest, GraphFusionRequest,
@@ -2249,6 +2251,9 @@ impl Server {
             }
             "glioma_research_director_execute" => self.glioma_research_director_execute(&arguments),
             "glioma_program_scheduler_execute" => self.glioma_program_scheduler_execute(&arguments),
+            "glioma_experiment_frontier_controller_execute" => {
+                self.glioma_experiment_frontier_controller_execute(&arguments)
+            }
             "glioma_mechanism_discovery_engine_execute" => {
                 self.glioma_mechanism_discovery_engine_execute(&arguments)
             }
@@ -6925,6 +6930,35 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma program scheduler run: {error}"))
+    }
+
+    /// Run the multi-objective P06 experiment frontier in a deterministic local sandbox. The
+    /// controller combines mechanism information gain, power, clone/modality coverage, fidelity
+    /// escalation, risk, cost, prerequisites, and bounded local observation/replanning.
+    fn glioma_experiment_frontier_controller_execute(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: GliomaExperimentFrontierRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_experiment_frontier_controller_execute requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma experiment frontier request: {error}"))?;
+        let mut executor = DryRunGliomaExperimentFrontierExecutor;
+        let run = execute_glioma_experiment_frontier_controller(&request, &mut executor)
+            .map_err(|error| format!("glioma experiment frontier controller refused: {error}"))?;
+        serde_json::to_value(json!({
+            "frontier": run,
+            "dispatch": "dry_run",
+            "simulation_only": true,
+            "guarantees": [
+                "declared mechanism likelihoods are recalculated after every local observation",
+                "power, risk, budget, prerequisites, fidelity, clone, modality, and replication gates remain explicit",
+                "null, negative, failed, retryable, unresolved, and budget outcomes remain visible",
+                "MCP performs no real assay, instrument effect, raw-data movement, federation export, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma experiment frontier run: {error}"))
     }
 
     /// Run the mechanism-specific autonomous vertical in a deterministic local sandbox. The
@@ -50728,6 +50762,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_computation_operating_cycle",
                 "glioma_research_director_execute",
                 "glioma_program_scheduler_execute",
+                "glioma_experiment_frontier_controller_execute",
                 "glioma_mechanism_discovery_engine_execute",
                 "glioma_evidence_gated_research_execute",
                 "glioma_autonomous_research_engine_execute",
@@ -59832,6 +59867,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "GliomaProgramSchedulerRequest1@1 containing bounded GliomaProgramScheduleJob1@1 intents, local model/modality capacities, global budget, per-round width, fairness debt, and replay identity."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_experiment_frontier_controller_execute",
+        "description": "Run the autonomous preclinical glioma experiment frontier in a deterministic local sandbox. It jointly optimizes mechanism information gain, power, clone and modality coverage, fidelity escalation, prerequisites, risk, cost, replication value, and bounded local observations, then replans from posterior updates. Null, negative, failed, retryable, unresolved, and budget outcomes remain explicit. MCP performs no real assay, instrument effect, raw-data movement, federation export, or clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "GliomaExperimentFrontierRequest1@1 containing competing mechanisms, typed assay candidates and likelihoods, preclinical model system, gates, budget, fidelity policy, and bounded retries."}
             },
             "required": ["request"]
         }

@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 719;
+const TOOL_DEFINITION_COUNT: usize = 720;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -6803,6 +6803,83 @@ fn glioma_mechanism_discovery_engine_composes_scientific_gates_before_execution(
         json!(["assay-invasion"])
     );
     assert_eq!(response["discovery"]["rounds"].as_array().unwrap().len(), 1);
+}
+
+#[test]
+fn glioma_experiment_frontier_controller_escalates_and_replans_from_local_observations() {
+    let mut server = server();
+    let response = call(
+        &mut server,
+        "glioma_experiment_frontier_controller_execute",
+        json!({
+            "request": {
+                "objective": "select discriminating invasion assays",
+                "model_system": "organoid",
+                "mechanisms": [
+                    {"mechanism_id":"invasion","prior_milli":600},
+                    {"mechanism_id":"repair","prior_milli":400}
+                ],
+                "candidates": [
+                    {
+                        "candidate_id":"low-fidelity-imaging",
+                        "action_family":"imaging",
+                        "label":"low fidelity invasion imaging",
+                        "model_system":"organoid",
+                        "modality":"imaging",
+                        "fidelity_level":1,
+                        "clone_ids":["clone-a"],
+                        "outcomes":[
+                            {"outcome_id":"signal","label":"invasion signal","probability_milli_by_mechanism":{"invasion":800,"repair":200},"effect_milli":400},
+                            {"outcome_id":"null","label":"null","probability_milli_by_mechanism":{"invasion":200,"repair":800},"effect_milli":-100}
+                        ],
+                        "prerequisites":[],"cost_units":1,"risk_milli":100,"power_milli":900,"feasibility_milli":900,"supports_replication":true
+                    },
+                    {
+                        "candidate_id":"high-fidelity-spatial",
+                        "action_family":"spatial",
+                        "label":"high fidelity spatial assay",
+                        "model_system":"organoid",
+                        "modality":"spatial",
+                        "fidelity_level":2,
+                        "clone_ids":["clone-b"],
+                        "outcomes":[
+                            {"outcome_id":"signal","label":"invasion signal","probability_milli_by_mechanism":{"invasion":900,"repair":100},"effect_milli":500},
+                            {"outcome_id":"null","label":"null","probability_milli_by_mechanism":{"invasion":100,"repair":900},"effect_milli":-100}
+                        ],
+                        "prerequisites":["low-fidelity-imaging"],"cost_units":2,"risk_milli":100,"power_milli":950,"feasibility_milli":700,"supports_replication":true
+                    }
+                ],
+                "initial_observations":[],
+                "budget_units":4,
+                "max_rounds":3,
+                "max_actions_per_round":1,
+                "max_retries":1,
+                "min_information_gain_milli":1,
+                "min_power_milli":500,
+                "risk_ceiling_milli":500,
+                "require_fidelity_escalation":true,
+                "information_weight_milli":500,
+                "power_weight_milli":100,
+                "diversity_weight_milli":100,
+                "feasibility_weight_milli":100,
+                "replication_weight_milli":100,
+                "risk_penalty_milli":10,
+                "cost_penalty_milli":5
+            }
+        }),
+    );
+    assert_eq!(response["dispatch"], json!("dry_run"));
+    assert_eq!(response["simulation_only"], json!(true));
+    assert_eq!(
+        response["frontier"]["feature_id"],
+        json!("GAF-GLIOMA-P06-F08")
+    );
+    assert_eq!(response["frontier"]["disposition"], json!("qualified"));
+    assert_eq!(
+        response["frontier"]["completed_order"],
+        json!(["high-fidelity-spatial", "low-fidelity-imaging"])
+    );
+    assert_eq!(response["frontier"]["rounds"].as_array().unwrap().len(), 2);
 }
 
 #[test]

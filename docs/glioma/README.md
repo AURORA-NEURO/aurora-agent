@@ -96,6 +96,8 @@ crates/research/src/glioma/
                                              P06 sequential Bayesian interim stopping and bounded next-round allocation with success/futility gates
   programs/p06_experiment_design/sequential_campaign.rs
                                              P06 autonomous sequential campaign execution with local aggregate batches and posterior replanning
+  programs/p06_experiment_design/frontier_controller.rs
+                                             P06 multi-objective frontier controller for information gain, power, diversity, fidelity, risk, cost, and bounded replanning
   programs/p06_experiment_design/operating_cycle.rs
                                              P06 plan-to-local-execution-to-replan experiment operating cycle
   programs/p10_interpretation_replication/clone_outcomes.rs
