@@ -20,3 +20,5 @@ bioprism-worldgen = { workspace = true }
 bioprism-mutation = { workspace = true }
 bioprism-prism = { workspace = true }
 bioprism-figures = { workspace = true }
+bioprism-foundation = { workspace = true }
+bioprism-onco = { workspace = true }

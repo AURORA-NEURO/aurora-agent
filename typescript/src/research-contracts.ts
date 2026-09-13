@@ -4459,6 +4459,12 @@ export function validateEvidenceReceipt(receipt: EvidenceReceipt): void {
   if (receipt.conclusion_state === "proven" && receipt.omissions.some((omission) => omission.could_change_decision !== "no_known_impact")) throw new Error("protected omission blocks proven conclusion");
 }
 
+/** Hashes the complete receipt envelope without exporting protected source bytes. */
+export function evidenceReceiptDigest(receipt: EvidenceReceipt): string {
+  validateEvidenceReceipt(receipt);
+  return digestJsonSync(receipt);
+}
+
 /** Hashes the same JSON payload that the Rust `TypedResearchArtifact` seals. */
 export function researchArtifactDigest(payload: unknown): string {
   return digestJsonSync(payload);

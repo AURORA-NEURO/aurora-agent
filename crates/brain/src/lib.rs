@@ -4460,6 +4460,6 @@ mod tests {
         assert!(duplicate_dependency
             .errors
             .iter()
-            .any(|error| error.contains("more than once")));
+            .any(|error| error.contains("repeats dependency")));
     }
 }

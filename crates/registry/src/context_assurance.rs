@@ -110,6 +110,7 @@ pub struct ContextAssuranceReceipt {
     pub boundary: String,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn context_payload(
     context_id: &str,
     disposition: ContextDisposition,

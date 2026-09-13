@@ -184,9 +184,9 @@ pub fn operate_retrieval_synthesis(
         .map_err(|error| RetrievalOperationsError::Synthesis(error.to_string()))?;
     let operation_order = vec![
         "admit".into(),
+        "checkpoint".into(),
         "retrieve-local".into(),
         "synthesize".into(),
-        "checkpoint".into(),
     ];
     let mut selected = Vec::new();
     let mut unresolved = Vec::new();

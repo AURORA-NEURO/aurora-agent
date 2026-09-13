@@ -67,12 +67,13 @@ fn binding_for(step_ids: &[&str]) -> Value {
             .collect::<Vec<_>>()
     });
     let digest = ContentHash::of_value(&plan).unwrap().to_string();
+    let domain_contract_digest = ContentHash::of_value(&json!({})).unwrap().to_string();
     let zeros = "0".repeat(64);
     json!({
         "workflow_id": "wf-1",
         "workflow_digest": zeros,
         "catalog_digest": zeros,
-        "domain_contract_digest": zeros,
+        "domain_contract_digest": domain_contract_digest,
         "domain_contract": {},
         "evidence_plan": plan,
         "evidence_plan_digest": digest,
@@ -85,7 +86,26 @@ fn mission_of(steps: Vec<Value>, binding: Option<Value>) -> Value {
         "goal": "drive the workflow",
         "steps": steps,
     });
-    if let Some(binding) = binding {
+    if let Some(mut binding) = binding {
+        // Keep compact fixture authoring while satisfying the strict binding contract: evidence
+        // rows carry the corresponding mission tool and a digest over the resulting plan.
+        if let (Some(mission_steps), Some(plan_steps)) = (
+            mission["steps"].as_array(),
+            binding
+                .get_mut("evidence_plan")
+                .and_then(Value::as_object_mut)
+                .and_then(|plan| plan.get_mut("steps"))
+                .and_then(Value::as_array_mut),
+        ) {
+            for (plan_step, mission_step) in plan_steps.iter_mut().zip(mission_steps) {
+                if let Some(tool) = mission_step.get("tool") {
+                    plan_step["tool"] = tool.clone();
+                }
+            }
+            let plan = binding.get("evidence_plan").unwrap();
+            binding["evidence_plan_digest"] =
+                json!(ContentHash::of_value(plan).unwrap().to_string());
+        }
         mission["workflow_binding"] = binding;
     }
     mission

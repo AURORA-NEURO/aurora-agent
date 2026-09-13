@@ -163,6 +163,24 @@ fn partition(
     Ok(())
 }
 
+fn partition_with_missing(
+    universe: &[String],
+    parts: &[&[String]],
+    missing: &[String],
+    label: &str,
+) -> Result<(), ResourceDiscoveryError> {
+    partition(universe, parts, label)?;
+    if !canonical(missing)
+        || missing.iter().any(|id| universe.binary_search(id).is_ok())
+        || missing.iter().collect::<BTreeSet<_>>().len() != missing.len()
+    {
+        return Err(invalid(format!(
+            "{label} missing state is not disjoint or canonical"
+        )));
+    }
+    Ok(())
+}
+
 impl QualifiedResourceSet6 {
     pub fn validate(&self) -> Result<(), ResourceDiscoveryError> {
         if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION
@@ -214,14 +232,14 @@ impl QualifiedResourceSet6 {
                 return Err(invalid("resource receipt ordering is not canonical"));
             }
         }
-        partition(
+        partition_with_missing(
             &self.ranked_resource_order,
             &[
                 &self.selected_resource_order,
                 &self.unresolved_resource_order,
                 &self.blocked_resource_order,
-                &self.missing_resource_order,
             ],
+            &self.missing_resource_order,
             "resource",
         )?;
         partition(
@@ -519,6 +537,10 @@ pub fn qualify_resources(
         && request.raw_data_local
         && request.aggregate_only
         && request.adversarial_event_order.is_empty();
+    let resource_floor_blocked =
+        selected.len() < request.minimum_resource_count as usize && unresolved.is_empty();
+    let site_floor_blocked =
+        selected_sites.len() < request.minimum_site_count as usize && unresolved_sites.is_empty();
     let disposition = if !globally_open
         || !blocked.is_empty()
         || !missing.is_empty()
@@ -526,8 +548,8 @@ pub fn qualify_resources(
         || !missing_capabilities.is_empty()
         || !blocked_sites.is_empty()
         || !missing_sites.is_empty()
-        || selected.len() < request.minimum_resource_count as usize
-        || selected_sites.len() < request.minimum_site_count as usize
+        || resource_floor_blocked
+        || site_floor_blocked
     {
         ResourceDiscoveryDisposition::Blocked
     } else if !unresolved.is_empty()
