@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 720;
+const TOOL_DEFINITION_COUNT: usize = 721;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -6880,6 +6880,78 @@ fn glioma_experiment_frontier_controller_escalates_and_replans_from_local_observ
         json!(["high-fidelity-spatial", "low-fidelity-imaging"])
     );
     assert_eq!(response["frontier"]["rounds"].as_array().unwrap().len(), 2);
+}
+
+#[test]
+fn glioma_causal_claim_adjudication_keeps_missing_timepoints_as_a_hold() {
+    let mut server = server();
+    let hash = "0".repeat(64);
+    let artifact = |id: &str| {
+        json!({
+            "artifact_id": id,
+            "content_hash": hash,
+            "content_type": "application/json",
+            "local_only": true,
+            "contains_human_data": false,
+            "contains_direct_identifiers": false
+        })
+    };
+    let response = call(
+        &mut server,
+        "glioma_causal_claim_adjudication_execute",
+        json!({
+            "request": {
+                "objective":"test invasion mechanism claim",
+                "hypothesis":"perturbing invasion reduces the invasion endpoint",
+                "model_system":"organoid",
+                "contrast_request":{"objective":"test invasion mechanism claim","control_arm":"control","treatment_arm":"perturbation","model_system":"organoid","intervention_timepoint":2,"min_units_per_arm":2,"effect_threshold_milli":10,"alpha_milli":1000},
+                "contrast_observations":[
+                    {"observation_id":"c1-baseline","unit_id":"c1","arm_id":"control","model_system":"organoid","batch_id":"batch","timepoint":1,"outcome_milli":100},
+                    {"observation_id":"c1-post","unit_id":"c1","arm_id":"control","model_system":"organoid","batch_id":"batch","timepoint":2,"outcome_milli":110},
+                    {"observation_id":"c2-baseline","unit_id":"c2","arm_id":"control","model_system":"organoid","batch_id":"batch","timepoint":1,"outcome_milli":90},
+                    {"observation_id":"c2-post","unit_id":"c2","arm_id":"control","model_system":"organoid","batch_id":"batch","timepoint":2,"outcome_milli":100},
+                    {"observation_id":"t1-baseline","unit_id":"t1","arm_id":"perturbation","model_system":"organoid","batch_id":"batch","timepoint":1,"outcome_milli":100},
+                    {"observation_id":"t1-post","unit_id":"t1","arm_id":"perturbation","model_system":"organoid","batch_id":"batch","timepoint":2,"outcome_milli":160},
+                    {"observation_id":"t2-baseline","unit_id":"t2","arm_id":"perturbation","model_system":"organoid","batch_id":"batch","timepoint":1,"outcome_milli":90}
+                ],
+                "sensitivity_request":{"objective":"test invasion mechanism claim","control_arm":"control","treatment_arm":"perturbation","model_system":"organoid","expected_direction":"positive","min_units_per_arm":2,"effect_threshold_milli":10,"max_confounder_strength_milli":100,"strength_step_milli":100,"max_leave_one_out_shift_milli":1000},
+                "sensitivity_observations":[
+                    {"observation_id":"s-c1","unit_id":"c1","arm_id":"control","model_system":"organoid","outcome_milli":100,"confounder_score_milli":0,"artifact":artifact("a-c1")},
+                    {"observation_id":"s-c2","unit_id":"c2","arm_id":"control","model_system":"organoid","outcome_milli":90,"confounder_score_milli":0,"artifact":artifact("a-c2")},
+                    {"observation_id":"s-c3","unit_id":"c3","arm_id":"control","model_system":"organoid","outcome_milli":95,"confounder_score_milli":0,"artifact":artifact("a-c3")},
+                    {"observation_id":"s-t1","unit_id":"t1","arm_id":"perturbation","model_system":"organoid","outcome_milli":160,"confounder_score_milli":0,"artifact":artifact("a-t1")},
+                    {"observation_id":"s-t2","unit_id":"t2","arm_id":"perturbation","model_system":"organoid","outcome_milli":150,"confounder_score_milli":0,"artifact":artifact("a-t2")},
+                    {"observation_id":"s-t3","unit_id":"t3","arm_id":"perturbation","model_system":"organoid","outcome_milli":155,"confounder_score_milli":0,"artifact":artifact("a-t3")}
+                ],
+                "replication_request":{"objective":"test invasion mechanism claim","model_system":"organoid","min_sites":2,"min_replicates_per_site":3,"effect_threshold_milli":10,"heterogeneity_tolerance_milli":100},
+                "meta_request":{"objective":"test invasion mechanism claim","model_system":"organoid","min_studies":2,"min_replicates_per_study":3,"effect_threshold_milli":10,"max_i2_milli":1000,"min_signal_to_noise_milli":1,"max_leave_one_out_shift_milli":1000},
+                "studies":[
+                    {"study_id":"study-a","site_id":"site-a","model_system":"organoid","artifact":artifact("study-a"),"effect_milli":50,"uncertainty_milli":20,"replicate_count":3},
+                    {"study_id":"study-b","site_id":"site-b","model_system":"organoid","artifact":artifact("study-b"),"effect_milli":55,"uncertainty_milli":20,"replicate_count":3}
+                ],
+                "min_robust_strength_milli":100,
+                "max_i2_milli":1000,
+                "min_claim_confidence_milli":500,
+                "max_actions":8
+            }
+        }),
+    );
+    assert_eq!(response["dispatch"], json!("local_analysis"));
+    assert_eq!(response["simulation_only"], json!(false));
+    assert_eq!(
+        response["adjudication"]["feature_id"],
+        json!("GAF-GLIOMA-P10-F07")
+    );
+    assert_eq!(response["adjudication"]["disposition"], json!("unresolved"));
+    assert_eq!(
+        response["adjudication"]["gates"][0]["disposition"],
+        json!("hold")
+    );
+    assert!(response["adjudication"]["action_order"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|value| value == "collect_timepoints"));
 }
 
 #[test]

@@ -521,18 +521,18 @@ use bioprism_research::{
     execute_glioma_adaptive_mechanism_campaign, execute_glioma_autonomous_campaign,
     execute_glioma_autonomous_gap_cycle, execute_glioma_autonomous_program_cycle,
     execute_glioma_autonomous_research_engine, execute_glioma_autonomous_research_mission,
-    execute_glioma_calibrated_mechanism_campaign_dry_run, execute_glioma_computation,
-    execute_glioma_computation_campaign, execute_glioma_computation_operating_cycle_dry_run,
-    execute_glioma_computation_portfolio, execute_glioma_computation_recovery,
-    execute_glioma_decision_branch_campaign, execute_glioma_decision_context_campaign,
-    execute_glioma_decision_operating_cycle, execute_glioma_evidence_acquisition_campaign,
-    execute_glioma_evidence_campaign, execute_glioma_evidence_gated_research,
-    execute_glioma_evidence_operating_cycle_dry_run, execute_glioma_evidence_refresh_campaign,
-    execute_glioma_experiment_frontier_controller, execute_glioma_experiment_operating_cycle,
-    execute_glioma_instrument_campaign, execute_glioma_instrument_fleet,
-    execute_glioma_instrument_operating_cycle, execute_glioma_instrument_plan,
-    execute_glioma_intent_mission, execute_glioma_interpretation_operating_cycle,
-    execute_glioma_knowledge_resolution_campaign,
+    execute_glioma_calibrated_mechanism_campaign_dry_run, execute_glioma_causal_claim_adjudication,
+    execute_glioma_computation, execute_glioma_computation_campaign,
+    execute_glioma_computation_operating_cycle_dry_run, execute_glioma_computation_portfolio,
+    execute_glioma_computation_recovery, execute_glioma_decision_branch_campaign,
+    execute_glioma_decision_context_campaign, execute_glioma_decision_operating_cycle,
+    execute_glioma_evidence_acquisition_campaign, execute_glioma_evidence_campaign,
+    execute_glioma_evidence_gated_research, execute_glioma_evidence_operating_cycle_dry_run,
+    execute_glioma_evidence_refresh_campaign, execute_glioma_experiment_frontier_controller,
+    execute_glioma_experiment_operating_cycle, execute_glioma_instrument_campaign,
+    execute_glioma_instrument_fleet, execute_glioma_instrument_operating_cycle,
+    execute_glioma_instrument_plan, execute_glioma_intent_mission,
+    execute_glioma_interpretation_operating_cycle, execute_glioma_knowledge_resolution_campaign,
     execute_glioma_knowledge_synthesis_operating_cycle, execute_glioma_mechanism_autopilot,
     execute_glioma_mechanism_discovery_engine, execute_glioma_mechanism_discrimination_campaign,
     execute_glioma_mechanism_operating_cycle, execute_glioma_mission_recovery,
@@ -609,13 +609,14 @@ use bioprism_research::{
     FederatedMechanismTransportCampaignRequest, FederatedMechanismTransportRequest,
     FidelityCandidate, FidelityObservation, GliomaActionCandidate,
     GliomaAdaptiveWorkflowSchedulerRequest, GliomaAutonomousCampaignRequest,
-    GliomaAutonomousResearchEngineRequest, GliomaComputationCampaignRequest,
-    GliomaComputationOperatingCycleRequest, GliomaComputationWorkflowRequest,
-    GliomaEvidenceCampaignRequest, GliomaEvidenceGatedResearchRequest,
-    GliomaEvidenceOperatingCycleRequest, GliomaExperimentFrontierRequest,
-    GliomaIntentMissionRequest, GliomaInterpretationOperatingCycleRequest,
-    GliomaMechanismAutopilotRequest, GliomaMechanismDiscoveryRequest, GliomaMissionRecoveryRequest,
-    GliomaMissionRequest, GliomaMultimodalMissionRequest, GliomaMultimodalOperatingCycleRequest,
+    GliomaAutonomousResearchEngineRequest, GliomaCausalClaimAdjudicationRequest,
+    GliomaComputationCampaignRequest, GliomaComputationOperatingCycleRequest,
+    GliomaComputationWorkflowRequest, GliomaEvidenceCampaignRequest,
+    GliomaEvidenceGatedResearchRequest, GliomaEvidenceOperatingCycleRequest,
+    GliomaExperimentFrontierRequest, GliomaIntentMissionRequest,
+    GliomaInterpretationOperatingCycleRequest, GliomaMechanismAutopilotRequest,
+    GliomaMechanismDiscoveryRequest, GliomaMissionRecoveryRequest, GliomaMissionRequest,
+    GliomaMultimodalMissionRequest, GliomaMultimodalOperatingCycleRequest,
     GliomaProgramSchedulerRequest, GliomaReleaseOperatingCycleRequest,
     GliomaReplicationCampaignRequest, GliomaResearchAutopilotRequest,
     GliomaResearchDirectorRequest, GliomaResearchIntent, GliomaWorkflowRequest, GraphFusionRequest,
@@ -2253,6 +2254,9 @@ impl Server {
             "glioma_program_scheduler_execute" => self.glioma_program_scheduler_execute(&arguments),
             "glioma_experiment_frontier_controller_execute" => {
                 self.glioma_experiment_frontier_controller_execute(&arguments)
+            }
+            "glioma_causal_claim_adjudication_execute" => {
+                self.glioma_causal_claim_adjudication_execute(&arguments)
             }
             "glioma_mechanism_discovery_engine_execute" => {
                 self.glioma_mechanism_discovery_engine_execute(&arguments)
@@ -6959,6 +6963,31 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma experiment frontier run: {error}"))
+    }
+
+    /// Adjudicate a preclinical glioma causal claim by composing causal contrast, confounding
+    /// sensitivity, independent-site replication, and meta-analysis gates. The route returns
+    /// evidence-driven next actions and never emits a clinical conclusion.
+    fn glioma_causal_claim_adjudication_execute(&self, arguments: &Value) -> Result<Value, String> {
+        let request: GliomaCausalClaimAdjudicationRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_causal_claim_adjudication_execute requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma causal claim request: {error}"))?;
+        let adjudication = execute_glioma_causal_claim_adjudication(&request)
+            .map_err(|error| format!("glioma causal claim adjudication refused: {error}"))?;
+        serde_json::to_value(json!({
+            "adjudication": adjudication,
+            "dispatch": "local_analysis",
+            "simulation_only": false,
+            "guarantees": [
+                "causal, confounding, independent-replication, and meta-analysis gates remain separate",
+                "heterogeneity, null effects, underpowered units, and negative evidence remain visible",
+                "next actions are derived from failed gates rather than invented confidence",
+                "the result is preclinical research interpretation only and never a diagnosis, treatment, triage, or enrollment decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma causal claim adjudication: {error}"))
     }
 
     /// Run the mechanism-specific autonomous vertical in a deterministic local sandbox. The
@@ -50763,6 +50792,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_research_director_execute",
                 "glioma_program_scheduler_execute",
                 "glioma_experiment_frontier_controller_execute",
+                "glioma_causal_claim_adjudication_execute",
                 "glioma_mechanism_discovery_engine_execute",
                 "glioma_evidence_gated_research_execute",
                 "glioma_autonomous_research_engine_execute",
@@ -59878,6 +59908,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "GliomaExperimentFrontierRequest1@1 containing competing mechanisms, typed assay candidates and likelihoods, preclinical model system, gates, budget, fidelity policy, and bounded retries."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_causal_claim_adjudication_execute",
+        "description": "Adjudicate a preclinical glioma causal claim by composing causal contrast, unmeasured-confounding sensitivity, independent-site replication, and fixed/random-effects meta-analysis. The route emits separate gate verdicts and evidence-driven next actions; heterogeneous, null, underpowered, negative, and unresolved states remain explicit and no clinical conclusion is produced.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "GliomaCausalClaimAdjudicationRequest1@1 containing bound contrast/sensitivity/replication/meta-analysis requests, local preclinical observations and studies, robustness and confidence thresholds, and next-action bound."}
             },
             "required": ["request"]
         }

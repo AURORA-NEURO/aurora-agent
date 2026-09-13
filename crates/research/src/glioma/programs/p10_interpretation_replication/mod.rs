@@ -8,6 +8,7 @@ pub mod adaptive_frontier;
 pub mod campaign;
 pub mod causal_adjustment;
 pub mod causal_contrast;
+pub mod claim_adjudication;
 pub mod clone_outcomes;
 pub mod dynamic_policy;
 pub mod mediation;
@@ -52,6 +53,11 @@ pub use causal_adjustment::{
 pub use causal_contrast::{
     analyze_glioma_causal_contrast, CausalContrastAnalysis, CausalContrastDisposition,
     CausalContrastError, CausalContrastRequest, UnitContrast,
+};
+pub use claim_adjudication::{
+    execute_glioma_causal_claim_adjudication, CausalClaimDisposition, ClaimActionKind, ClaimGate,
+    ClaimGateDisposition, ClaimNextAction, GliomaCausalClaimAdjudication,
+    GliomaCausalClaimAdjudicationError, GliomaCausalClaimAdjudicationRequest,
 };
 pub use clone_outcomes::{
     analyze_glioma_clone_panel_outcomes, ClonePanelBranchAnalysis, ClonePanelCandidateAnalysis,

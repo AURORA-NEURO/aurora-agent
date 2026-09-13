@@ -100,6 +100,8 @@ crates/research/src/glioma/
                                              P06 multi-objective frontier controller for information gain, power, diversity, fidelity, risk, cost, and bounded replanning
   programs/p06_experiment_design/operating_cycle.rs
                                              P06 plan-to-local-execution-to-replan experiment operating cycle
+  programs/p10_interpretation_replication/claim_adjudication.rs
+                                             P10 four-gate causal claim adjudication with confounding, replication, heterogeneity, and next-evidence actions
   programs/p10_interpretation_replication/clone_outcomes.rs
                                              P10 replicate-level clone-panel outcome adjudication with explicit null/contradictory evidence
   programs/p10_interpretation_replication/dynamic_policy.rs
