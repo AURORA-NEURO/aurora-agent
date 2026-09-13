@@ -531,7 +531,7 @@ use bioprism_research::{
     execute_glioma_instrument_fleet, execute_glioma_instrument_operating_cycle,
     execute_glioma_instrument_plan, execute_glioma_intent_mission,
     execute_glioma_interpretation_operating_cycle, execute_glioma_knowledge_resolution_campaign,
-    execute_glioma_knowledge_synthesis_operating_cycle,
+    execute_glioma_knowledge_synthesis_operating_cycle, execute_glioma_mechanism_autopilot,
     execute_glioma_mechanism_discrimination_campaign, execute_glioma_mechanism_operating_cycle,
     execute_glioma_mission_recovery, execute_glioma_multi_fidelity_campaign,
     execute_glioma_multimodal_ingestion_campaign, execute_glioma_multimodal_mechanism_campaign,
@@ -607,17 +607,17 @@ use bioprism_research::{
     GliomaComputationOperatingCycleRequest, GliomaComputationWorkflowRequest,
     GliomaEvidenceCampaignRequest, GliomaEvidenceGatedResearchRequest,
     GliomaEvidenceOperatingCycleRequest, GliomaIntentMissionRequest,
-    GliomaInterpretationOperatingCycleRequest, GliomaMissionRecoveryRequest, GliomaMissionRequest,
-    GliomaMultimodalMissionRequest, GliomaMultimodalOperatingCycleRequest,
-    GliomaReleaseOperatingCycleRequest, GliomaReplicationCampaignRequest,
-    GliomaResearchAutopilotRequest, GliomaResearchDirectorRequest, GliomaResearchIntent,
-    GliomaWorkflowRequest, GraphFusionRequest, GraphFusionVector, HarmonizationRequest,
-    HarmonizationVector, InformationDesignRequest, InstrumentCampaignRequest,
-    InstrumentExecutionMode, InstrumentExecutionRequest, InstrumentExecutionRun,
-    InstrumentFleetExecutionRequest, InstrumentFleetScheduleRequest, InstrumentInterlockSnapshot,
-    InstrumentOperatingCycleRequest, InstrumentPreflightRequest, InterpretationSynthesisRequest,
-    KnowledgeCompositionRequest, KnowledgeFrontier, KnowledgeFrontierRequest,
-    KnowledgeGapCompilerRequest, KnowledgeRelation, KnowledgeRequest,
+    GliomaInterpretationOperatingCycleRequest, GliomaMechanismAutopilotRequest,
+    GliomaMissionRecoveryRequest, GliomaMissionRequest, GliomaMultimodalMissionRequest,
+    GliomaMultimodalOperatingCycleRequest, GliomaReleaseOperatingCycleRequest,
+    GliomaReplicationCampaignRequest, GliomaResearchAutopilotRequest,
+    GliomaResearchDirectorRequest, GliomaResearchIntent, GliomaWorkflowRequest, GraphFusionRequest,
+    GraphFusionVector, HarmonizationRequest, HarmonizationVector, InformationDesignRequest,
+    InstrumentCampaignRequest, InstrumentExecutionMode, InstrumentExecutionRequest,
+    InstrumentExecutionRun, InstrumentFleetExecutionRequest, InstrumentFleetScheduleRequest,
+    InstrumentInterlockSnapshot, InstrumentOperatingCycleRequest, InstrumentPreflightRequest,
+    InterpretationSynthesisRequest, KnowledgeCompositionRequest, KnowledgeFrontier,
+    KnowledgeFrontierRequest, KnowledgeGapCompilerRequest, KnowledgeRelation, KnowledgeRequest,
     KnowledgeResolutionCampaignRequest, KnowledgeSynthesisOperatingCycleRequest,
     LatentFactorRequest, LatentFactorVector, LigandReceptorPair, MechanismActionPlannerConfig,
     MechanismCalibration, MechanismCalibrationObservation, MechanismCalibrationRequest,
@@ -2302,6 +2302,9 @@ impl Server {
             }
             "glioma_multimodal_mechanism_campaign_execute" => {
                 self.glioma_multimodal_mechanism_campaign_execute(&arguments)
+            }
+            "glioma_mechanism_autopilot_execute" => {
+                self.glioma_mechanism_autopilot_execute(&arguments)
             }
             "glioma_spatial_niches" => self.glioma_spatial_niches(&arguments),
             "glioma_spatial_communication" => self.glioma_spatial_communication(&arguments),
@@ -7943,6 +7946,32 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma multimodal mechanism campaign execution: {error}"))
+    }
+
+    /// Run the multimodal mechanism vertical as a bounded autonomous loop in the deterministic
+    /// MCP sandbox. Each round gates evidence, executes one local batch, retires all outcomes,
+    /// and replans the remaining frontier.
+    fn glioma_mechanism_autopilot_execute(&self, arguments: &Value) -> Result<Value, String> {
+        let request: GliomaMechanismAutopilotRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_mechanism_autopilot_execute requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma mechanism autopilot request: {error}"))?;
+        let mut executor = DryRunGliomaActionExecutor;
+        let output = execute_glioma_mechanism_autopilot(&request, &mut executor)
+            .map_err(|error| format!("glioma mechanism autopilot refused: {error}"))?;
+        serde_json::to_value(json!({
+            "autopilot": output,
+            "dispatch": "dry_run",
+            "simulation_only": true,
+            "guarantees": [
+                "graph and pathway evidence are recompiled before every execution round",
+                "only dependency-safe local batches are dispatched and every completion, negative, partial, failed, skipped, and blocked outcome is retired",
+                "budget, retry, artifact, evidence-readiness, and no-progress stops remain explicit",
+                "the MCP worker creates synthetic local artifacts and never touches instruments, raw data, biology, or clinical decisions"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma mechanism autopilot: {error}"))
     }
 
     /// Build spatially connected same-lineage niches and retain cross-lineage interaction
@@ -50670,6 +50699,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_pathway_activity",
                 "glioma_multimodal_mechanism_campaign",
                 "glioma_multimodal_mechanism_campaign_execute",
+                "glioma_mechanism_autopilot_execute",
                 "glioma_mechanism_dynamics",
                 "glioma_mechanism_counterfactual",
                 "glioma_mechanism_ensemble_counterfactual",
@@ -60685,6 +60715,17 @@ pub fn tool_definitions() -> Vec<Value> {
                 "require_artifacts": {"type": "boolean", "description": "Require every selected action to return a local artifact; defaults to true."}
             },
             "required": ["request", "graph_vectors", "pathway_definitions", "pathway_observations", "candidates"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_mechanism_autopilot_execute",
+        "description": "Run an autonomous preclinical glioma mechanism loop over local multimodal graph and pathway evidence. Each round recompiles evidence, applies readiness and dependency gates, executes at most one deterministic local batch, retires completed/negative/partial/failed outcomes, and replans until a bounded budget, evidence, failure, negative, or no-progress stop. This route is simulation-only and never moves raw data, touches instruments, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "GliomaMechanismAutopilotRequest1@1 containing MultimodalMechanismCampaignRequest1@1, local graph vectors, pathway definitions/observations, typed action candidates, round/retry bounds, artifact policy, and evidence/negative-stop policy."}
+            },
+            "required": ["request"]
         }
     }));
     definitions.push(json!({

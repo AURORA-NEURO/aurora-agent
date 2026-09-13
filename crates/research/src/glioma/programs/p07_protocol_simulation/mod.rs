@@ -22,6 +22,7 @@ pub mod evidence_campaign;
 pub mod evidence_gate;
 pub mod execution;
 pub mod intent_mission;
+pub mod mechanism_autopilot;
 pub mod mechanism_campaign;
 pub mod mission;
 pub mod mission_recovery;
@@ -106,6 +107,12 @@ pub use mechanism_campaign::{
     execute_glioma_multimodal_mechanism_campaign_with_executor, MechanismCampaignDisposition,
     MechanismCampaignError, MechanismCampaignExecutionDisposition, MultimodalMechanismCampaign,
     MultimodalMechanismCampaignExecution, MultimodalMechanismCampaignRequest,
+};
+
+pub use mechanism_autopilot::{
+    execute_glioma_mechanism_autopilot, GliomaMechanismAutopilotDisposition,
+    GliomaMechanismAutopilotError, GliomaMechanismAutopilotRequest, GliomaMechanismAutopilotRound,
+    GliomaMechanismAutopilotRun, GliomaMechanismAutopilotStopReason,
 };
 
 pub use mission::{

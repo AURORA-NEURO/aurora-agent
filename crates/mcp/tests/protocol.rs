@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 715;
+const TOOL_DEFINITION_COUNT: usize = 716;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -6538,6 +6538,74 @@ fn glioma_multimodal_mechanism_campaign_closes_analysis_to_action() {
     assert_eq!(
         execution["execution"]["execution"]["completed_order"],
         json!(["validate-invasion"])
+    );
+}
+
+#[test]
+fn glioma_mechanism_autopilot_replans_and_retires_local_outcomes() {
+    let mut server = server();
+    let hash = "0".repeat(64);
+    let request = json!({
+        "campaign": {
+            "objective": "autonomous invasion follow-up",
+            "study_id": "autopilot-study",
+            "model_system": "organoid",
+            "graph": {
+                "study_id": "autopilot-study",
+                "model_system": "organoid",
+                "required_modalities": ["proteomics"],
+                "min_samples": 2,
+                "min_modalities_per_sample": 1,
+                "min_shared_features": 1,
+                "neighbours": 1,
+                "diffusion_steps": 1,
+                "max_distance_milli": 1000,
+                "min_consensus_support_milli": 500,
+                "max_disagreement_milli": 200,
+                "require_all_modalities": false
+            },
+            "pathway": {
+                "objective": "rank invasion pathways",
+                "study_id": "autopilot-study",
+                "model_system": "organoid",
+                "min_pathway_nodes": 1,
+                "min_observed_nodes": 1,
+                "min_modalities": 1,
+                "min_confidence_milli": 700,
+                "max_pathways": 4,
+                "require_cross_modal": false
+            },
+            "selection": {"budget_units": 3, "max_actions": 1},
+            "completed_action_order": []
+        },
+        "graph_vectors": [
+            {"observation_id":"a","study_id":"autopilot-study","sample_lineage":"a","modality":"proteomics","model_system":"organoid","artifact":{"artifact_id":"a","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"reliability_milli":900,"features":[{"feature_id":"vimentin","value_milli":800}]},
+            {"observation_id":"b","study_id":"autopilot-study","sample_lineage":"b","modality":"proteomics","model_system":"organoid","artifact":{"artifact_id":"b","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"reliability_milli":900,"features":[{"feature_id":"vimentin","value_milli":700}]}
+        ],
+        "pathway_definitions": [{"pathway_id":"invasion","label":"invasion","nodes":[{"node_id":"vimentin","label":"VIM","modality":"proteomics","expected_direction":1,"weight_milli":1000}],"edges":[]}],
+        "pathway_observations": [{"observation_id":"p-a","study_id":"autopilot-study","sample_lineage":"a","modality":"proteomics","model_system":"organoid","artifact":{"artifact_id":"p-a","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"feature_id":"vimentin","value_milli":800,"reliability_milli":900}],
+        "candidates": [{"action_id":"assay-invasion","stage_kind":"mechanism_exploration","modality":"functional_perturbation","model_system":"organoid","depends_on":[],"cost_units":1,"information_gain_milli":900,"frontier_novelty_milli":800,"workflow_leverage_milli":800,"cross_stage_unlock_milli":700,"reproducibility_safety_milli":900,"federation_value_milli":400,"feasibility_milli":950,"autonomy_tier":"a0","effects":["read_local_data","execute_local_computation","write_local_artifact"]}],
+        "max_rounds": 2,
+        "max_retries": 1,
+        "require_artifacts": true,
+        "require_ready_for_execution": false,
+        "stop_on_negative": false
+    });
+    let response = call(
+        &mut server,
+        "glioma_mechanism_autopilot_execute",
+        json!({"request": request}),
+    );
+    assert_eq!(response["dispatch"], json!("dry_run"));
+    assert_eq!(response["simulation_only"], json!(true));
+    assert_eq!(
+        response["autopilot"]["feature_id"],
+        json!("GAF-GLIOMA-P07-F30")
+    );
+    assert_eq!(response["autopilot"]["rounds"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        response["autopilot"]["completed_action_order"],
+        json!(["assay-invasion"])
     );
 }
 

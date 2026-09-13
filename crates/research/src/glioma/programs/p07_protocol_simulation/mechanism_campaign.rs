@@ -305,7 +305,9 @@ pub fn execute_glioma_multimodal_mechanism_campaign(
 /// Unresolved evidence never dispatches an action; successful execution still inherits the
 /// portfolio executor's dependency, retry, artifact, and policy gates.
 #[allow(clippy::too_many_arguments)]
-pub fn execute_glioma_multimodal_mechanism_campaign_with_executor<E: GliomaActionExecutor>(
+pub fn execute_glioma_multimodal_mechanism_campaign_with_executor<
+    E: GliomaActionExecutor + ?Sized,
+>(
     request: &MultimodalMechanismCampaignRequest,
     graph_vectors: &[GraphFusionVector],
     pathway_definitions: &[PathwayActivityDefinition],
