@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 696;
+const TOOL_DEFINITION_COUNT: usize = 697;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -4204,6 +4204,59 @@ fn glioma_research_object_release_gate_requires_replay_and_independent_review() 
         .as_array()
         .unwrap()
         .is_empty());
+}
+
+#[test]
+fn glioma_release_operating_cycle_composes_replay_and_signing_handoff() {
+    let mut server = server();
+    let hash = "0000000000000000000000000000000000000000000000000000000000000000";
+    let cycle = call(
+        &mut server,
+        "glioma_release_operating_cycle",
+        json!({
+            "request": {
+                "replay": {
+                    "release": {
+                        "research_id": "cycle-mcp-research",
+                        "study_id": "cycle-mcp-study",
+                        "objective": "release a reproducible preclinical glioma result",
+                        "plan_digest": hash,
+                        "execution_digest": hash,
+                        "replay_identity": hash,
+                        "program_order": ["p09-computation"],
+                        "artifacts": [{"artifact_id": "cycle-artifact", "content_hash": hash, "content_type": "application/json", "local_only": true, "contains_human_data": false, "contains_direct_identifiers": false}],
+                        "negative_evidence": ["null-result-preserved"],
+                        "limitations": ["synthetic-fixture"],
+                        "raw_data_local": true,
+                        "aggregate_only": true
+                    },
+                    "tasks": [{"task_id": "cycle-task", "program_id": "p09-computation", "artifact_id": "cycle-artifact", "expected_content_hash": hash, "cost_units": 1, "required": true, "deterministic": true, "depends_on": []}],
+                    "budget_units": 1,
+                    "max_rounds": 2,
+                    "max_retries": 1,
+                    "min_coverage_milli": 1000,
+                    "require_exact_hash": true
+                },
+                "gate": {
+                    "required_coverage_milli": 1000,
+                    "require_exact_hash": true,
+                    "require_reproducible": true,
+                    "require_accountable_review": true,
+                    "min_independent_approvals": 1,
+                    "max_uncertainty_items": 8,
+                    "reviews": [{"reviewer_id": "reviewer-cycle", "role": "independent-reproducibility-reviewer", "decision": "approve", "evidence_digest": hash, "independent": true}]
+                },
+                "execution_mode": "local_simulation"
+            }
+        }),
+    );
+    assert_eq!(cycle["dispatch"], json!("dry_run"));
+    assert_eq!(cycle["simulation_only"], json!(true));
+    assert_eq!(cycle["cycle"]["disposition"], json!("publishable"));
+    assert!(cycle["cycle"]["next_operator_action"]
+        .as_str()
+        .unwrap()
+        .contains("accountable signature"));
 }
 
 #[test]

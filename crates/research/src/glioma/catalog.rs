@@ -310,6 +310,7 @@ pub fn implemented_feature_ids() -> Vec<&'static str> {
         crate::glioma::workflow::FEATURE_ID,
         crate::glioma::release::FEATURE_ID,
         crate::glioma::programs::p11_research_object_release::replay::FEATURE_ID,
+        crate::glioma::programs::p11_research_object_release::operating_cycle::FEATURE_ID,
         crate::glioma::replication::FEATURE_ID,
         crate::glioma::programs::p01_evidence_surveillance::surveillance::FEATURE_ID,
         crate::glioma::programs::p01_evidence_surveillance::priority::FEATURE_ID,

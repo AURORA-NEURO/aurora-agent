@@ -527,11 +527,11 @@ use bioprism_research::{
     execute_glioma_multimodal_ingestion_campaign, execute_glioma_multimodal_mechanism_campaign,
     execute_glioma_multimodal_mechanism_campaign_with_executor,
     execute_glioma_multimodal_readiness_gate, execute_glioma_protocol,
-    execute_glioma_replay_campaign, execute_glioma_replication_campaign,
-    execute_glioma_research_autopilot, execute_glioma_research_director,
-    execute_glioma_robust_active_learning_campaign, execute_glioma_sequential_campaign,
-    explore_mechanisms, generate_feature_catalog, glioma_program_catalog,
-    harmonize_glioma_multimodal_batches, harmonize_multimodal_inputs,
+    execute_glioma_release_operating_cycle_dry_run, execute_glioma_replay_campaign,
+    execute_glioma_replication_campaign, execute_glioma_research_autopilot,
+    execute_glioma_research_director, execute_glioma_robust_active_learning_campaign,
+    execute_glioma_sequential_campaign, explore_mechanisms, generate_feature_catalog,
+    glioma_program_catalog, harmonize_glioma_multimodal_batches, harmonize_multimodal_inputs,
     plan_adaptive_glioma_dose_surface, plan_decision_actions, plan_federated_benchmark_sites,
     plan_glioma_active_learning, plan_glioma_adaptive_information_campaign,
     plan_glioma_adaptive_mechanism_policy, plan_glioma_adaptive_research_frontier,
@@ -589,14 +589,15 @@ use bioprism_research::{
     GliomaComputationCampaignRequest, GliomaComputationOperatingCycleRequest,
     GliomaComputationWorkflowRequest, GliomaEvidenceCampaignRequest,
     GliomaEvidenceGatedResearchRequest, GliomaInterpretationOperatingCycleRequest,
-    GliomaMissionRequest, GliomaReplicationCampaignRequest, GliomaResearchAutopilotRequest,
-    GliomaResearchDirectorRequest, GliomaResearchIntent, GliomaWorkflowRequest, GraphFusionRequest,
-    GraphFusionVector, HarmonizationRequest, HarmonizationVector, InformationDesignRequest,
-    InstrumentCampaignRequest, InstrumentExecutionMode, InstrumentExecutionRequest,
-    InstrumentExecutionRun, InstrumentFleetExecutionRequest, InstrumentFleetScheduleRequest,
-    InstrumentInterlockSnapshot, InstrumentOperatingCycleRequest, InstrumentPreflightRequest,
-    InterpretationSynthesisRequest, KnowledgeCompositionRequest, KnowledgeFrontier,
-    KnowledgeFrontierRequest, KnowledgeGapCompilerRequest, KnowledgeRelation, KnowledgeRequest,
+    GliomaMissionRequest, GliomaReleaseOperatingCycleRequest, GliomaReplicationCampaignRequest,
+    GliomaResearchAutopilotRequest, GliomaResearchDirectorRequest, GliomaResearchIntent,
+    GliomaWorkflowRequest, GraphFusionRequest, GraphFusionVector, HarmonizationRequest,
+    HarmonizationVector, InformationDesignRequest, InstrumentCampaignRequest,
+    InstrumentExecutionMode, InstrumentExecutionRequest, InstrumentExecutionRun,
+    InstrumentFleetExecutionRequest, InstrumentFleetScheduleRequest, InstrumentInterlockSnapshot,
+    InstrumentOperatingCycleRequest, InstrumentPreflightRequest, InterpretationSynthesisRequest,
+    KnowledgeCompositionRequest, KnowledgeFrontier, KnowledgeFrontierRequest,
+    KnowledgeGapCompilerRequest, KnowledgeRelation, KnowledgeRequest,
     KnowledgeResolutionCampaignRequest, LatentFactorRequest, LatentFactorVector,
     LigandReceptorPair, MechanismActionPlannerConfig, MechanismCalibration,
     MechanismCalibrationObservation, MechanismCalibrationRequest, MechanismCandidate,
@@ -610,18 +611,18 @@ use bioprism_research::{
     MultimodalMechanismCampaignRequest, MultimodalObservation, MultimodalReadinessRequest,
     MultimodalRequest, PathwayActivityDefinition, PathwayActivityObservation,
     PathwayActivityRequest, ProtocolExecutionRequest, ProtocolSimulationRequest,
-    ReleaseGateRequest, ReplayCampaign, ReplayCampaignRequest, ReplicationRequest,
-    ReplicationStudy, ResearchObjectRequest, RobustActiveLearningCampaignRequest,
-    RobustActiveLearningCandidate, RobustActiveLearningObservation, RobustActiveLearningRequest,
-    RobustInterventionCandidate, RobustInterventionRequest, RobustnessRequest,
-    SensitivityObservation, SensitivityRequest, SequentialArmObservation,
-    SequentialCampaignRequest, SequentialDesignRequest, SpatialCell, SpatialCommunicationCell,
-    SpatialCommunicationRequest, SpatialNicheRequest, SpatialPropagationRequest,
-    SpatialRegistrationCell, SpatialRegistrationRequest, StateTransitionObservation,
-    StateTransitionRequest, StaticGliomaActionPlanner, StaticGliomaComputationPlanner,
-    StratifiedCausalRequest, StratifiedObservation, TemporalFusionRequest, TemporalObservation,
-    TrajectoryObservation, TrajectoryRequest, TransportStudy, TransportabilityRequest,
-    TypedKnowledge,
+    ReleaseExecutionMode, ReleaseGateRequest, ReplayCampaign, ReplayCampaignRequest,
+    ReplicationRequest, ReplicationStudy, ResearchObjectRequest,
+    RobustActiveLearningCampaignRequest, RobustActiveLearningCandidate,
+    RobustActiveLearningObservation, RobustActiveLearningRequest, RobustInterventionCandidate,
+    RobustInterventionRequest, RobustnessRequest, SensitivityObservation, SensitivityRequest,
+    SequentialArmObservation, SequentialCampaignRequest, SequentialDesignRequest, SpatialCell,
+    SpatialCommunicationCell, SpatialCommunicationRequest, SpatialNicheRequest,
+    SpatialPropagationRequest, SpatialRegistrationCell, SpatialRegistrationRequest,
+    StateTransitionObservation, StateTransitionRequest, StaticGliomaActionPlanner,
+    StaticGliomaComputationPlanner, StratifiedCausalRequest, StratifiedObservation,
+    TemporalFusionRequest, TemporalObservation, TrajectoryObservation, TrajectoryRequest,
+    TransportStudy, TransportabilityRequest, TypedKnowledge,
 };
 use bioprism_routing::{
     lab::{run as run_routing_lab, LabSettings, Task},
@@ -2370,6 +2371,7 @@ impl Server {
             "glioma_research_object_release_gate" => {
                 self.glioma_research_object_release_gate(&arguments)
             }
+            "glioma_release_operating_cycle" => self.glioma_release_operating_cycle(&arguments),
             "glioma_research_object_prepare" => self.glioma_research_object_prepare(&arguments),
             "domain_evidence_harmonization_coverage" => {
                 self.domain_evidence_harmonization_coverage(&arguments)
@@ -9878,6 +9880,39 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma research-object release gate: {error}"))
+    }
+
+    /// Run the complete replay-to-release handoff in the deterministic local sandbox. A
+    /// publishable result is only ready for accountable signing; MCP never signs, uploads, or
+    /// moves raw data.
+    fn glioma_release_operating_cycle(&self, arguments: &Value) -> Result<Value, String> {
+        let request: GliomaReleaseOperatingCycleRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_release_operating_cycle requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma release operating-cycle request: {error}"))?;
+        if matches!(request.execution_mode, ReleaseExecutionMode::GovernedLocal) {
+            return Err(
+                "glioma_release_operating_cycle MCP route is simulation-only; governed_local requires an institution-owned replay executor"
+                    .to_string(),
+            );
+        }
+        let cycle = execute_glioma_release_operating_cycle_dry_run(&request)
+            .map_err(|error| format!("glioma release operating cycle refused: {error}"))?;
+        serde_json::to_value(json!({
+            "cycle": cycle,
+            "dispatch": "dry_run",
+            "simulation_only": true,
+            "guarantees": [
+                "the research-object manifest is built before dependency-aware replay",
+                "exact hashes, coverage, negative evidence, uncertainty, and independent review gates remain explicit",
+                "publishable means ready for accountable signing and never claims a signature or upload",
+                "MCP moves no raw data, executes no instruments, and makes no clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma release operating cycle: {error}"))
     }
 
     fn compiled(
@@ -50050,6 +50085,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_federated_benchmark_campaign_execute",
                 "glioma_replay_campaign_execute",
                 "glioma_research_object_release_gate",
+                "glioma_release_operating_cycle",
                 "glioma_research_object_prepare"
             ],
             "cli_entrypoints": [],
@@ -60286,6 +60322,17 @@ pub fn tool_definitions() -> Vec<Value> {
                 "campaign": {"type": "object", "description": "Validated GliomaResearchObjectReplayCampaign1@1 produced by glioma_replay_campaign_execute."}
             },
             "required": ["request", "campaign"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_release_operating_cycle",
+        "description": "Run the complete preclinical glioma release operating cycle: build the research-object manifest, execute a dependency-aware reproducibility replay, evaluate exact-hash/coverage/review gates, and return the next accountable operator handoff. MCP uses a synthetic worker and never signs, uploads, moves raw data, executes instruments, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "GliomaReleaseOperatingCycleRequest1@1 containing ReplayCampaignRequest1@1, ReleaseGateRequest1@1, and execution_mode local_simulation or governed_local."}
+            },
+            "required": ["request"]
         }
     }));
     definitions.push(json!({

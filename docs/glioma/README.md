@@ -129,6 +129,8 @@ crates/research/src/glioma/
     p11_research_object_release/
     p11_research_object_release/release_gate.rs
                                              P11 replay-, provenance-, and review-aware release gate for accountable signing
+    p11_research_object_release/operating_cycle.rs
+                                             P11 manifest replay, release gating, and accountable operator handoff
     p12_federated_benchmarking/
     p12_federated_benchmarking/mechanism_transport.rs
                                              P12 aggregate-only cross-model mechanism transport and fragility analysis
@@ -284,7 +286,7 @@ portfolio plan and executable code; it does not promote a planned slot to implem
 | P08 Instrument and robotics preflight | instrument operator | instrument preflight | robust control calibration, drift detection, multi-instrument dependency scheduling, schedule-bound fleet execution, signed interlocked planning, guarded execution, and fail-closed multi-run campaigns |
 | P09 Reproducible computation | computational scientist | computational execution | checkpointed/replayable computation, intent-to-DAG compilation, locality-aware worker placement, budgeted portfolio execution, and omission-stress robustness suite |
 | P10 Causal interpretation and replication | methods reviewer | statistical interpretation, replication/robustness | uncertainty-aware endpoint, longitudinal, stratified causal, dynamic-policy, causal-contrast, meta-analytic, and cross-site verdicts |
-| P11 Research-object release | reproducibility steward | research-object release | portable manifest with limitations and negative evidence |
+| P11 Research-object release | reproducibility steward | research-object release | portable manifest with limitations and negative evidence, dependency-aware replay, accountable release gating, and operator handoff |
 | P12 Federated benchmarking | consortium administrator | federation benchmarking | aggregate-only cross-site benchmark consensus, influence-aware site portfolio planning, robust pooling, heterogeneity, and site-influence analysis |
 
 ## Feature expansion

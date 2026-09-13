@@ -2,6 +2,7 @@
 
 use crate::glioma::catalog::{glioma_program_catalog, GliomaProgramDescriptor, GliomaProgramId};
 
+pub mod operating_cycle;
 pub mod release_gate;
 pub mod replay;
 
@@ -15,6 +16,12 @@ pub use replay::{
 pub use release_gate::{
     evaluate_glioma_release_gate, ReleaseGateError, ReleaseGateEvaluation, ReleaseGateRequest,
     ReleaseGateStatus, ReleaseReviewAttestation, ReleaseReviewDecision,
+};
+
+pub use operating_cycle::{
+    execute_glioma_release_operating_cycle, execute_glioma_release_operating_cycle_dry_run,
+    GliomaReleaseOperatingCycle, GliomaReleaseOperatingCycleDisposition,
+    GliomaReleaseOperatingCycleError, GliomaReleaseOperatingCycleRequest, ReleaseExecutionMode,
 };
 
 pub const PROGRAM_ID: GliomaProgramId = GliomaProgramId::ResearchObjectRelease;
