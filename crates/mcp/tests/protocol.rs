@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 702;
+const TOOL_DEFINITION_COUNT: usize = 703;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -3492,6 +3492,55 @@ fn glioma_decision_branch_plan_ranks_scenario_robust_portfolios() {
         .unwrap()
         .iter()
         .all(|portfolio| portfolio["scenario_scores"].as_array().unwrap().len() == 2));
+}
+
+#[test]
+fn glioma_decision_branch_campaign_executes_and_scores_local_evidence() {
+    let mut server = server();
+    let hash = "0".repeat(64);
+    let knowledge = call(
+        &mut server,
+        "glioma_knowledge_compile",
+        json!({
+            "request": {"objective":"rank invasion mechanisms","required_modalities":["genomics"],"required_model_systems":["organoid"],"min_support_milli":700,"min_sources_per_claim":1,"max_claims":8},
+            "records": [{"evidence_id":"branch-exec-e1","source_artifact":{"artifact_id":"branch-exec-a1","content_hash":hash,"content_type":"application/vnd.aurora.glioma-evidence+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"source_kind":"dataset","claim":"EGFR signaling increases invasion","scope":"preclinical glioma","modality":"genomics","model_system":"organoid","state":"supported","relevance_milli":900,"quality_milli":900,"reproducibility_milli":900,"release_epoch":1}]
+        }),
+    );
+    let context = call(
+        &mut server,
+        "glioma_decision_context",
+        json!({"request":{"objective":"rank invasion mechanisms","max_actions":8,"default_cost_units":1},"knowledge":knowledge["knowledge"].clone()}),
+    );
+    let candidate = context["context"]["actions"][0]["candidate"].clone();
+    let action_id = candidate["action_id"].as_str().unwrap().to_string();
+    let branch = call(
+        &mut server,
+        "glioma_decision_branch_plan",
+        json!({
+            "request": {
+                "objective":"rank invasion mechanisms",
+                "candidates":[candidate],
+                "completed_action_order":[],
+                "scenarios":[
+                    {"scenario_id":"high","probability_milli":600,"outcomes":[{"action_id":action_id,"value_milli":900,"uncertainty_milli":100,"failure_probability_milli":50}]},
+                    {"scenario_id":"low","probability_milli":400,"outcomes":[{"action_id":action_id,"value_milli":700,"uncertainty_milli":200,"failure_probability_milli":100}]}
+                ],
+                "budget_units":2,"max_actions_per_branch":2,"max_branches":4,"beam_width":8,"minimum_robustness_milli":0,"uncertainty_penalty_milli":100,"failure_penalty_milli":100,
+                "selection_weights":{"information_gain":25,"frontier_novelty":20,"workflow_leverage":15,"cross_stage_unlock":15,"reproducibility_safety":10,"federation_value":10,"feasibility":5}
+            },
+            "context":context["context"].clone()
+        }),
+    );
+    let campaign = call(
+        &mut server,
+        "glioma_decision_branch_campaign_execute",
+        json!({"request":{"objective":"rank invasion mechanisms","knowledge":knowledge["knowledge"].clone(),"context":context["context"].clone(),"branch_plan":branch["plan"].clone(),"completed_action_order":[],"budget_units":2,"max_branches":2,"max_retries":1,"stop_on_completed":true}}),
+    );
+    assert_eq!(campaign["dispatch"], json!("dry_run"));
+    assert_eq!(campaign["simulation_only"], json!(true));
+    assert_eq!(campaign["campaign"]["disposition"], json!("completed"));
+    assert!(campaign["campaign"]["completed_branch_id"].is_string());
+    assert_eq!(campaign["campaign"]["records"].as_array().unwrap().len(), 1);
 }
 
 #[test]

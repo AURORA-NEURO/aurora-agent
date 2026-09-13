@@ -44,6 +44,8 @@ crates/research/src/glioma/
                                              P04 claim-path to dependency-closed action DAG and parallel waves
   programs/p04_decision_context/branch_planner.rs
                                              P04 scenario-aware branch-and-bound portfolio planning with Pareto frontier and uncertainty gates
+  programs/p04_decision_context/branch_campaign.rs
+                                             P04 bounded robust-branch execution, forecast-vs-observation drift scoring, and Pareto failover
   programs/p04_decision_context/action_bridge.rs
                                              P04 compiler-to-executable action portfolio bridge
   programs/p04_decision_context/campaign.rs
@@ -291,7 +293,7 @@ portfolio plan and executable code; it does not promote a planned slot to implem
 | P01 Evidence surveillance | evidence curator | evidence surveillance | snapshot deltas, recency/state/coverage action queues, dependency-closed evidence-acquisition portfolios, source calibration, cross-family claim triangulation, review/revalidation actions, autonomous intent-to-evidence execution cycles, and stale/unknown/contradictory coverage |
 | P02 Evidence-to-typed-knowledge | knowledge engineer | evidence compilation | scoped claims, contradiction-aware maximal-consistency portfolios, ranked rival frontiers, typed frontier-to-acquisition candidate compilation, autonomous P02-to-P01 gap cycles, a complete knowledge-synthesis operating cycle, and competing explanations bound to source artifacts |
 | P03 Multimodal ingestion and QC | data steward | multimodal ingestion/QC | comparable cells, robust batch harmonization, feature-level concordance, consensus clusters, spatial niches, ligand-receptor communication, cross-sample registration, spatial-state diffusion, explicit defects, downstream research-surface admission, and an executable QC-to-handoff operating cycle |
-| P04 Question-to-decision context | principal investigator | intent normalization, context compilation | bounded decision context, dependency-closed action DAGs, scenario-aware Pareto workflow branches, full operating-cycle execution, selected action batches, and unresolved omissions |
+| P04 Question-to-decision context | principal investigator | intent normalization, context compilation | bounded decision context, dependency-closed action DAGs, scenario-aware Pareto workflow branches, branch execution with forecast-drift failover, full operating-cycle execution, selected action batches, and unresolved omissions |
 | P05 Mechanism exploration | mechanism scientist | molecular landscape, mechanism exploration | residual-fit competing mechanisms, posterior-weighted next-assay information gain, signed mechanism-network propagation, delayed-feedback mechanism dynamics, model-averaged counterfactuals, robust lower-tail intervention portfolios, discriminating campaigns, and an end-to-end next-assay operating cycle |
 | P06 Power-aware experiment design | experimentalist | experiment design | falsifiable allocation, power, blocking, dose-response, adaptive replicate allocation, sequential Bayesian success/futility stopping, local sequential campaign execution, uncertainty-aware dose-surface acquisition, mechanism-aware closed-loop campaign rounds, an end-to-end plan/execute/replan cycle, combination-synergy fitting, and null-result plan |
 | P07 Protocol simulation | lab operations lead | protocol simulation, adaptive workflow planning | critical-path scheduling, outcome-aware dependency scheduling, evidence-gated director admission, evidence-priority execution cycles, context-to-action execution, multimodal mechanism campaigns, stage-gated autonomous program control, P02/P03-aware scientific frontier admission, utilization, deterministic next batches, and repair/abstain routing before physical effects |
@@ -336,7 +338,12 @@ bridges compiled evidence gaps into the dependency-aware action selector, so a r
 the returned `selected_order` directly to the local portfolio executor. P04 also includes a bounded
 question-to-action campaign that dispatches claim-scoped local actions, recompiles typed knowledge
 and decision context from returned evidence, and retains negative, contradictory, unresolved,
-omission, retry, and budget outcomes. P07 now also has an
+omission, retry, and budget outcomes. The P04 branch campaign now executes the selected
+scenario-robust portfolio through the same claim-scoped local executor, scores observed evidence
+against the branch forecast, and fails over to the next Pareto branch on forecast drift, action
+failure, or budget exhaustion. It preserves supported, negative, contradictory, unknown, stale,
+and unmeasured evidence as typed outcomes; no drift is converted into a confident conclusion.
+P07 now also has an
 adaptive campaign planner (`plan_glioma_workflow`) and a guarded full-program executor that
 chooses deterministic next batches, closes over dependencies, and routes unresolved evidence,
 QC defects, contradictory mechanisms, underpowered designs, budget exhaustion, and approval gaps
