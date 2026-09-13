@@ -4,6 +4,7 @@ use crate::glioma::catalog::{glioma_program_catalog, GliomaProgramDescriptor, Gl
 
 pub mod campaign;
 pub mod execution;
+pub mod operating_cycle;
 pub mod placement;
 pub mod planning;
 pub mod portfolio_execution;
@@ -53,6 +54,13 @@ pub use placement::{
 pub use workflow::{
     compile_glioma_computation_workflow, GliomaComputationWorkflow, GliomaComputationWorkflowError,
     GliomaComputationWorkflowRequest,
+};
+
+pub use operating_cycle::{
+    execute_glioma_computation_operating_cycle, execute_glioma_computation_operating_cycle_dry_run,
+    ComputationExecutionMode, GliomaComputationOperatingCycle,
+    GliomaComputationOperatingCycleDisposition, GliomaComputationOperatingCycleError,
+    GliomaComputationOperatingCycleRequest,
 };
 
 pub const PROGRAM_ID: GliomaProgramId = GliomaProgramId::ReproducibleComputation;

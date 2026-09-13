@@ -190,6 +190,8 @@ crates/research/src/glioma/
                                              P09 intent-to-DAG compiler for modality-aware autonomous computation
     p09_reproducible_computation/placement.rs
                                              P09 locality-aware worker placement with replay-valid cache and transfer gates
+    p09_reproducible_computation/operating_cycle.rs
+                                             P09 intent-to-DAG compilation, resource gating, local computation campaign, and operator handoff
     p10_interpretation_replication/trajectory.rs
                                              P10 longitudinal per-unit trajectory analysis
     p10_interpretation_replication/transportability.rs

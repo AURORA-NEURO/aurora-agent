@@ -515,15 +515,16 @@ use bioprism_research::{
     execute_glioma_autonomous_gap_cycle, execute_glioma_autonomous_program_cycle,
     execute_glioma_autonomous_research_engine, execute_glioma_autonomous_research_mission,
     execute_glioma_computation, execute_glioma_computation_campaign,
-    execute_glioma_computation_portfolio, execute_glioma_decision_context_campaign,
-    execute_glioma_decision_operating_cycle, execute_glioma_evidence_acquisition_campaign,
-    execute_glioma_evidence_campaign, execute_glioma_evidence_gated_research,
-    execute_glioma_evidence_refresh_campaign, execute_glioma_experiment_operating_cycle,
-    execute_glioma_instrument_campaign, execute_glioma_instrument_fleet,
-    execute_glioma_instrument_operating_cycle, execute_glioma_instrument_plan,
-    execute_glioma_knowledge_resolution_campaign, execute_glioma_mechanism_discrimination_campaign,
-    execute_glioma_mechanism_operating_cycle, execute_glioma_multi_fidelity_campaign,
-    execute_glioma_multimodal_ingestion_campaign, execute_glioma_multimodal_mechanism_campaign,
+    execute_glioma_computation_operating_cycle_dry_run, execute_glioma_computation_portfolio,
+    execute_glioma_decision_context_campaign, execute_glioma_decision_operating_cycle,
+    execute_glioma_evidence_acquisition_campaign, execute_glioma_evidence_campaign,
+    execute_glioma_evidence_gated_research, execute_glioma_evidence_refresh_campaign,
+    execute_glioma_experiment_operating_cycle, execute_glioma_instrument_campaign,
+    execute_glioma_instrument_fleet, execute_glioma_instrument_operating_cycle,
+    execute_glioma_instrument_plan, execute_glioma_knowledge_resolution_campaign,
+    execute_glioma_mechanism_discrimination_campaign, execute_glioma_mechanism_operating_cycle,
+    execute_glioma_multi_fidelity_campaign, execute_glioma_multimodal_ingestion_campaign,
+    execute_glioma_multimodal_mechanism_campaign,
     execute_glioma_multimodal_mechanism_campaign_with_executor,
     execute_glioma_multimodal_readiness_gate, execute_glioma_protocol,
     execute_glioma_replay_campaign, execute_glioma_replication_campaign,
@@ -558,14 +559,14 @@ use bioprism_research::{
     CloneContinuationRequest, ClonePanelObservation, ClonePanelOutcomeAnalysis,
     ClonePanelOutcomeRequest, ClonePerturbationCandidate, ClonePerturbationPanel,
     ClonePerturbationPanelRequest, CloneProfile, ClosedLoopCampaignRequest, CombinationObservation,
-    CombinationSynergyRequest, ComputationCandidate, ComputationExecutionRequest,
-    ComputationPlacementRequest, ComputationPortfolioExecutionRequest, ComputationPortfolioRequest,
-    ConcordanceRequest, ConsensusRequest, ContrastDesignRequest, CounterfactualEnsembleRequest,
-    CounterfactualIntervention, CounterfactualModel, CounterfactualRequest,
-    DecisionActionGraphRequest, DecisionActionPlanRequest, DecisionBranchPlannerRequest,
-    DecisionContext, DecisionContextCampaignRequest, DecisionContextRequest,
-    DecisionOperatingCycleRequest, DesignAction, DesignMechanism, DoseResponseObservation,
-    DoseResponseRequest, DryRunActiveLearningCampaignExecutor,
+    CombinationSynergyRequest, ComputationCandidate, ComputationExecutionMode,
+    ComputationExecutionRequest, ComputationPlacementRequest, ComputationPortfolioExecutionRequest,
+    ComputationPortfolioRequest, ConcordanceRequest, ConsensusRequest, ContrastDesignRequest,
+    CounterfactualEnsembleRequest, CounterfactualIntervention, CounterfactualModel,
+    CounterfactualRequest, DecisionActionGraphRequest, DecisionActionPlanRequest,
+    DecisionBranchPlannerRequest, DecisionContext, DecisionContextCampaignRequest,
+    DecisionContextRequest, DecisionOperatingCycleRequest, DesignAction, DesignMechanism,
+    DoseResponseObservation, DoseResponseRequest, DryRunActiveLearningCampaignExecutor,
     DryRunAdaptiveAllocationCampaignExecutor, DryRunAdaptiveMechanismPolicyExecutor,
     DryRunDecisionContextCampaignExecutor, DryRunEvidenceAcquisitionExecutor,
     DryRunEvidenceRefreshCampaignExecutor, DryRunExperimentOperatingCycleExecutor,
@@ -585,16 +586,17 @@ use bioprism_research::{
     FederatedMechanismSite, FederatedMechanismTransportRequest, FidelityCandidate,
     FidelityObservation, GliomaActionCandidate, GliomaAdaptiveWorkflowSchedulerRequest,
     GliomaAutonomousCampaignRequest, GliomaAutonomousResearchEngineRequest,
-    GliomaComputationCampaignRequest, GliomaComputationWorkflowRequest,
-    GliomaEvidenceCampaignRequest, GliomaEvidenceGatedResearchRequest, GliomaMissionRequest,
-    GliomaReplicationCampaignRequest, GliomaResearchAutopilotRequest,
-    GliomaResearchDirectorRequest, GliomaResearchIntent, GliomaWorkflowRequest, GraphFusionRequest,
-    GraphFusionVector, HarmonizationRequest, HarmonizationVector, InformationDesignRequest,
-    InstrumentCampaignRequest, InstrumentExecutionMode, InstrumentExecutionRequest,
-    InstrumentExecutionRun, InstrumentFleetExecutionRequest, InstrumentFleetScheduleRequest,
-    InstrumentInterlockSnapshot, InstrumentOperatingCycleRequest, InstrumentPreflightRequest,
-    InterpretationSynthesisRequest, KnowledgeCompositionRequest, KnowledgeFrontier,
-    KnowledgeFrontierRequest, KnowledgeGapCompilerRequest, KnowledgeRelation, KnowledgeRequest,
+    GliomaComputationCampaignRequest, GliomaComputationOperatingCycleRequest,
+    GliomaComputationWorkflowRequest, GliomaEvidenceCampaignRequest,
+    GliomaEvidenceGatedResearchRequest, GliomaMissionRequest, GliomaReplicationCampaignRequest,
+    GliomaResearchAutopilotRequest, GliomaResearchDirectorRequest, GliomaResearchIntent,
+    GliomaWorkflowRequest, GraphFusionRequest, GraphFusionVector, HarmonizationRequest,
+    HarmonizationVector, InformationDesignRequest, InstrumentCampaignRequest,
+    InstrumentExecutionMode, InstrumentExecutionRequest, InstrumentExecutionRun,
+    InstrumentFleetExecutionRequest, InstrumentFleetScheduleRequest, InstrumentInterlockSnapshot,
+    InstrumentOperatingCycleRequest, InstrumentPreflightRequest, InterpretationSynthesisRequest,
+    KnowledgeCompositionRequest, KnowledgeFrontier, KnowledgeFrontierRequest,
+    KnowledgeGapCompilerRequest, KnowledgeRelation, KnowledgeRequest,
     KnowledgeResolutionCampaignRequest, LatentFactorRequest, LatentFactorVector,
     LigandReceptorPair, MechanismActionPlannerConfig, MechanismCalibration,
     MechanismCalibrationObservation, MechanismCalibrationRequest, MechanismCandidate,
@@ -2199,6 +2201,9 @@ impl Server {
             }
             "glioma_computation_workflow_execute" => {
                 self.glioma_computation_workflow_execute(&arguments)
+            }
+            "glioma_computation_operating_cycle" => {
+                self.glioma_computation_operating_cycle(&arguments)
             }
             "glioma_research_director_execute" => self.glioma_research_director_execute(&arguments),
             "glioma_evidence_gated_research_execute" => {
@@ -6333,6 +6338,41 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma computation workflow: {error}"))
+    }
+
+    /// Run the complete intent-to-computation operating cycle in the deterministic local
+    /// sandbox. Governed-local execution is reserved for an institution-owned worker gateway.
+    fn glioma_computation_operating_cycle(&self, arguments: &Value) -> Result<Value, String> {
+        let request: GliomaComputationOperatingCycleRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_computation_operating_cycle requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma computation operating-cycle request: {error}")
+            })?;
+        if matches!(
+            request.execution_mode,
+            ComputationExecutionMode::GovernedLocal
+        ) {
+            return Err(
+                "glioma_computation_operating_cycle MCP route is simulation-only; governed_local requires an institution-owned worker"
+                    .to_string(),
+            );
+        }
+        let cycle = execute_glioma_computation_operating_cycle_dry_run(&request)
+            .map_err(|error| format!("glioma computation operating cycle refused: {error}"))?;
+        serde_json::to_value(json!({
+            "cycle": cycle,
+            "dispatch": "dry_run",
+            "simulation_only": true,
+            "guarantees": [
+                "typed researcher intent compiles into a dependency-closed multimodal DAG before execution",
+                "resource shortfalls hold the cycle before any worker task is dispatched when require_within_resources is true",
+                "local execution preserves deterministic replay identity, cache, artifact, retry, negative, and partial-result gates",
+                "MCP performs no external computation, raw-data movement, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma computation operating cycle: {error}"))
     }
 
     /// Synthesize independent preclinical interpretation families into a bounded research
@@ -49875,6 +49915,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_computation_portfolio_execute",
                 "glioma_computation_campaign_execute",
                 "glioma_computation_workflow_execute",
+                "glioma_computation_operating_cycle",
                 "glioma_research_director_execute",
                 "glioma_evidence_gated_research_execute",
                 "glioma_autonomous_research_engine_execute",
@@ -58896,6 +58937,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "GliomaComputationWorkflowRequest1@1 with study/model identity, modalities, terminal ComputationOperation values, local artifact identifiers, resource/policy bounds, cache policy, and replay identity."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_computation_operating_cycle",
+        "description": "Run the complete autonomous preclinical glioma computation operating cycle in a deterministic local sandbox. It compiles researcher intent into a dependency-closed multimodal DAG, enforces the declared resource gate before dispatch, executes the bounded replayable campaign, and returns explicit negative, partial, failed, uncertainty, and operator-handoff state. Governed-local execution requires an institution-owned worker; MCP performs no external computation, raw-data movement, or clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "GliomaComputationOperatingCycleRequest1@1 containing GliomaComputationWorkflowRequest1@1, require_within_resources, and local_simulation or governed_local execution mode."}
             },
             "required": ["request"]
         }

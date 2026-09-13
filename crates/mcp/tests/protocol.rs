@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 694;
+const TOOL_DEFINITION_COUNT: usize = 695;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -4449,6 +4449,69 @@ fn glioma_computation_workflow_compiles_intent_and_executes_closed_dag() {
     );
     assert_eq!(workflow["campaign"]["disposition"], json!("completed"));
     assert_eq!(workflow["campaign"]["stop_reason"], json!("completed"));
+}
+
+#[test]
+fn glioma_computation_operating_cycle_compiles_gates_and_executes_replayable_campaign() {
+    let mut server = server();
+    let cycle = call(
+        &mut server,
+        "glioma_computation_operating_cycle",
+        json!({
+            "request": {
+                "workflow": {
+                    "objective": "profile invasive organoid state across modalities",
+                    "study_id": "study-glioma-01",
+                    "model_system": "organoid",
+                    "modalities": ["transcriptomics", "imaging"],
+                    "operations": ["export", "model_fit"],
+                    "input_artifact_ids": ["artifact-imaging", "artifact-rna"],
+                    "budget_units": 100,
+                    "duration_ticks": 500,
+                    "max_tasks": 64,
+                    "max_modalities": 4,
+                    "min_modalities": 2,
+                    "information_weight_milli": 5,
+                    "uncertainty_weight_milli": 4,
+                    "coverage_weight_milli": 3,
+                    "cost_penalty_milli": 1,
+                    "duration_penalty_milli": 1,
+                    "require_deterministic": true,
+                    "max_rounds": 4,
+                    "max_retries": 1,
+                    "allow_cache": true,
+                    "require_local_artifacts": true,
+                    "cache": [],
+                    "replay_identity": "0000000000000000000000000000000000000000000000000000000000000000"
+                },
+                "require_within_resources": true,
+                "execution_mode": "local_simulation"
+            }
+        }),
+    );
+    assert_eq!(cycle["dispatch"], json!("dry_run"));
+    assert_eq!(cycle["simulation_only"], json!(true));
+    assert_eq!(cycle["cycle"]["disposition"], json!("executed"));
+    assert_eq!(
+        cycle["cycle"]["phase_order"],
+        json!([
+            "workflow_compile",
+            "resource_gate",
+            "computation_campaign",
+            "operator_handoff"
+        ])
+    );
+    assert_eq!(
+        cycle["cycle"]["workflow"]["within_declared_resources"],
+        json!(true)
+    );
+    assert_eq!(
+        cycle["cycle"]["campaign"]["completed_order"]
+            .as_array()
+            .unwrap()
+            .len(),
+        14
+    );
 }
 
 #[test]
