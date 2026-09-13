@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 716;
+const TOOL_DEFINITION_COUNT: usize = 717;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -4676,6 +4676,66 @@ fn glioma_federated_mechanism_transport_preserves_model_and_direction_gates() {
             .len()
             >= 2
     );
+}
+
+#[test]
+fn glioma_federated_mechanism_transport_campaign_replays_aggregate_follow_up() {
+    let mut server = server();
+    let hash = "0000000000000000000000000000000000000000000000000000000000000000";
+    let campaign = call(
+        &mut server,
+        "glioma_federated_mechanism_transport_campaign_execute",
+        json!({
+            "request": {
+                "transport": {
+                    "objective": "transport invasion mechanism across organoid sites",
+                    "mechanism_id": "invasion-mechanism",
+                    "target_model_system": "organoid",
+                    "target_signature": [0, 0],
+                    "min_sites": 2,
+                    "min_replicates_per_site": 1,
+                    "min_quality_milli": 500,
+                    "similarity_scale_milli": 1000,
+                    "effect_threshold_milli": 100,
+                    "min_signal_to_noise_milli": 1,
+                    "max_heterogeneity_milli": 800,
+                    "max_site_spread_milli": 1000,
+                    "max_leave_one_out_shift_milli": 1000,
+                    "require_target_model": true
+                },
+                "initial_sites": [
+                    {"site_id": "organoid-a", "study_id": "study-a", "mechanism_id": "invasion-mechanism", "model_system": "organoid", "effect_milli": 500, "uncertainty_milli": 100, "quality_milli": 900, "replicate_count": 2, "population_signature": [0, 0], "artifact": {"artifact_id": "artifact-a", "content_hash": hash, "content_type": "application/json", "local_only": true, "contains_human_data": false, "contains_direct_identifiers": false}},
+                    {"site_id": "organoid-b", "study_id": "study-b", "mechanism_id": "invasion-mechanism", "model_system": "organoid", "effect_milli": 520, "uncertainty_milli": 100, "quality_milli": 900, "replicate_count": 2, "population_signature": [0, 0], "artifact": {"artifact_id": "artifact-b", "content_hash": hash, "content_type": "application/json", "local_only": true, "contains_human_data": false, "contains_direct_identifiers": false}}
+                ],
+                "actions": [{
+                    "action_id": "replicate-organoid-c",
+                    "target_site_id": "organoid-c",
+                    "model_system": "organoid",
+                    "population_signature": [0, 0],
+                    "cost_units": 1,
+                    "expected_information_milli": 900,
+                    "expected_effect_milli": 510,
+                    "expected_heterogeneity_reduction_milli": 500,
+                    "feasibility_milli": 900,
+                    "risk_milli": 20,
+                    "requested_replicates": 2
+                }],
+                "budget_units": 2,
+                "max_rounds": 2,
+                "max_retries": 1,
+                "stop_on_qualified": false,
+                "stop_on_negative": false
+            }
+        }),
+    );
+    assert_eq!(campaign["dispatch"], json!("dry_run"));
+    assert_eq!(campaign["simulation_only"], json!(true));
+    assert_eq!(
+        campaign["campaign"]["feature_id"],
+        json!("GAF-GLIOMA-P12-F28")
+    );
+    assert_eq!(campaign["campaign"]["sites"].as_array().unwrap().len(), 3);
+    assert_eq!(campaign["campaign"]["rounds"].as_array().unwrap().len(), 1);
 }
 
 #[test]

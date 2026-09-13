@@ -8,6 +8,7 @@ pub mod consensus;
 pub mod mechanism_transport;
 pub mod operating_cycle;
 pub mod site_planner;
+pub mod transport_campaign;
 
 pub use adaptive_campaign::{
     execute_federated_benchmark_adaptive_campaign,
@@ -34,6 +35,16 @@ pub use mechanism_transport::{
     analyze_federated_mechanism_transport, FederatedMechanismContribution, FederatedMechanismSite,
     FederatedMechanismTransportAnalysis, FederatedMechanismTransportDisposition,
     FederatedMechanismTransportError, FederatedMechanismTransportRequest, FederatedModelCoverage,
+};
+
+pub use transport_campaign::{
+    execute_federated_mechanism_transport_campaign,
+    execute_federated_mechanism_transport_campaign_dry_run,
+    DryRunFederatedMechanismTransportExecutor, FederatedMechanismTransportAction,
+    FederatedMechanismTransportCampaign, FederatedMechanismTransportCampaignDisposition,
+    FederatedMechanismTransportCampaignError, FederatedMechanismTransportCampaignRequest,
+    FederatedMechanismTransportCampaignRound, FederatedMechanismTransportCampaignStopReason,
+    FederatedMechanismTransportExecutionFailure, FederatedMechanismTransportExecutor,
 };
 
 pub use site_planner::{

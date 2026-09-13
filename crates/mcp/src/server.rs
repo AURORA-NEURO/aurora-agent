@@ -512,8 +512,9 @@ use bioprism_research::{
     dry_run_robustness_guided_computation_executor, evaluate_glioma_dynamic_policies,
     evaluate_glioma_release_gate, execute_federated_benchmark_adaptive_campaign_dry_run,
     execute_federated_benchmark_campaign, execute_federated_benchmark_operating_cycle_dry_run,
-    execute_glioma_action_portfolio, execute_glioma_active_learning_campaign,
-    execute_glioma_adaptive_allocation_campaign, execute_glioma_adaptive_clone_campaign_dry_run,
+    execute_federated_mechanism_transport_campaign_dry_run, execute_glioma_action_portfolio,
+    execute_glioma_active_learning_campaign, execute_glioma_adaptive_allocation_campaign,
+    execute_glioma_adaptive_clone_campaign_dry_run,
     execute_glioma_adaptive_decision_branch_campaign_dry_run, execute_glioma_adaptive_frontier,
     execute_glioma_adaptive_instrument_campaign,
     execute_glioma_adaptive_interpretation_campaign_dry_run,
@@ -601,8 +602,9 @@ use bioprism_research::{
     FederatedBenchmarkCampaignRequest, FederatedBenchmarkExecutionMode,
     FederatedBenchmarkOperatingCycleRequest, FederatedBenchmarkRequest, FederatedBenchmarkSite,
     FederatedBenchmarkSitePlannerRequest, FederatedMechanismSite,
-    FederatedMechanismTransportRequest, FidelityCandidate, FidelityObservation,
-    GliomaActionCandidate, GliomaAdaptiveWorkflowSchedulerRequest, GliomaAutonomousCampaignRequest,
+    FederatedMechanismTransportCampaignRequest, FederatedMechanismTransportRequest,
+    FidelityCandidate, FidelityObservation, GliomaActionCandidate,
+    GliomaAdaptiveWorkflowSchedulerRequest, GliomaAutonomousCampaignRequest,
     GliomaAutonomousResearchEngineRequest, GliomaComputationCampaignRequest,
     GliomaComputationOperatingCycleRequest, GliomaComputationWorkflowRequest,
     GliomaEvidenceCampaignRequest, GliomaEvidenceGatedResearchRequest,
@@ -2427,6 +2429,9 @@ impl Server {
             }
             "glioma_federated_mechanism_transport" => {
                 self.glioma_federated_mechanism_transport(&arguments)
+            }
+            "glioma_federated_mechanism_transport_campaign_execute" => {
+                self.glioma_federated_mechanism_transport_campaign_execute(&arguments)
             }
             "glioma_federated_benchmark_campaign_execute" => {
                 self.glioma_federated_benchmark_campaign_execute(&arguments)
@@ -10342,6 +10347,41 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma federated mechanism transport: {error}"))
+    }
+
+    /// Run a bounded adaptive aggregate-only mechanism transport campaign. The MCP route uses
+    /// the deterministic local sandbox; institution-owned executors remain outside the server.
+    fn glioma_federated_mechanism_transport_campaign_execute(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: FederatedMechanismTransportCampaignRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_federated_mechanism_transport_campaign_execute requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma federated mechanism transport campaign request: {error}")
+            })?;
+        let campaign =
+            execute_federated_mechanism_transport_campaign_dry_run(&request).map_err(|error| {
+                format!("glioma federated mechanism transport campaign refused: {error}")
+            })?;
+        serde_json::to_value(json!({
+            "campaign": campaign,
+            "dispatch": "dry_run",
+            "simulation_only": true,
+            "guarantees": [
+                "only local, aggregate-only federated mechanism summaries are accepted",
+                "transport analysis is recomputed after every successful follow-up site",
+                "heterogeneous, negative, underpowered, failed, retry, budget, and no-progress outcomes remain explicit",
+                "the MCP route moves no raw traces, human data, instrument effect, or clinical decision"
+            ]
+        }))
+        .map_err(|error| {
+            format!(
+                "cannot encode glioma federated mechanism transport campaign: {error}"
+            )
+        })
     }
 
     /// Run a bounded autonomous federated benchmark campaign. Only typed aggregate sites are
@@ -50734,6 +50774,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_federated_benchmark_consensus",
                 "glioma_federated_benchmark_site_plan",
                 "glioma_federated_mechanism_transport",
+                "glioma_federated_mechanism_transport_campaign_execute",
                 "glioma_federated_benchmark_campaign_execute",
                 "glioma_federated_benchmark_operating_cycle",
                 "glioma_federated_adaptive_campaign_execute",
@@ -61118,6 +61159,17 @@ pub fn tool_definitions() -> Vec<Value> {
                 "sites": {"type": "array", "items": {"type": "object"}, "description": "FederatedMechanismSite1@1 aggregate-only mechanism effects with bounded population signatures and local artifact references."}
             },
             "required": ["request", "sites"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_federated_mechanism_transport_campaign_execute",
+        "description": "Run a bounded adaptive aggregate-only preclinical glioma mechanism-transport campaign. Re-ranks institution-local follow-up site actions from current transport heterogeneity, executes deterministic synthetic aggregate summaries in MCP, and replays the transport analyzer after each accepted site. Qualified, heterogeneous, negative, underpowered, failed, budget-blocked, and unresolved states remain explicit; raw traces, human data, instrument commands, and clinical decisions are never moved or produced.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "FederatedMechanismTransportCampaignRequest1@1 with aggregate transport binding, initial sites, typed follow-up actions, budget, round/retry bounds, and stop policy."}
+            },
+            "required": ["request"]
         }
     }));
     definitions.push(json!({

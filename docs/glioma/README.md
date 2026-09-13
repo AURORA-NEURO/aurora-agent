@@ -80,6 +80,8 @@ crates/research/src/glioma/
                                              P05 calibration-gated adaptive mechanism policy with trust-discounted effects and exploration debt
   programs/p07_protocol_simulation/mechanism_autopilot.rs
                                              P07 graph/pathway-gated mechanism execution loop with bounded replanning and outcome retirement
+  programs/p12_federated_benchmarking/transport_campaign.rs
+                                             P12 aggregate-only mechanism transport campaign with heterogeneity-aware site follow-up and recomputation
   programs/p06_experiment_design/clonal_panel.rs
                                              P06 clone-aware perturbation/readout panel selection under cost and branch-coverage gates
   programs/p06_experiment_design/contrast_design.rs

@@ -151,6 +151,7 @@ fn main() {
                      glioma_federated_benchmark_consensus,\n\
                      glioma_federated_benchmark_site_plan,\n\
                      glioma_federated_mechanism_transport,\n\
+                     glioma_federated_mechanism_transport_campaign_execute,\n\
                      glioma_federated_benchmark_campaign_execute,\n\
                      glioma_federated_benchmark_operating_cycle,\n\
                      glioma_federated_adaptive_campaign_execute,\n\
