@@ -10,11 +10,19 @@ pub mod planning;
 pub mod portfolio_execution;
 pub mod recovery_campaign;
 pub mod robustness;
+pub mod robustness_guided;
 pub mod workflow;
 
 pub use robustness::{
     assess_glioma_robustness, RobustnessCase, RobustnessCaseKind, RobustnessDisposition,
     RobustnessError, RobustnessRequest, RobustnessSuite,
+};
+
+pub use robustness_guided::{
+    dry_run_robustness_guided_computation_executor, execute_glioma_robustness_guided_computation,
+    RobustnessGuidedCandidate, RobustnessGuidedCandidateScore, RobustnessGuidedComputation,
+    RobustnessGuidedComputationDisposition, RobustnessGuidedComputationError,
+    RobustnessGuidedComputationRequest,
 };
 
 pub use recovery_campaign::{

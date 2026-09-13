@@ -409,6 +409,7 @@ pub fn implemented_feature_ids() -> Vec<&'static str> {
         crate::glioma::programs::p08_instrument_robotics::fleet_execution::FEATURE_ID,
         crate::glioma::programs::p08_instrument_robotics::operating_cycle::FEATURE_ID,
         crate::glioma::programs::p09_reproducible_computation::robustness::FEATURE_ID,
+        crate::glioma::programs::p09_reproducible_computation::robustness_guided::FEATURE_ID,
         crate::glioma::programs::p09_reproducible_computation::execution::FEATURE_ID,
         crate::glioma::programs::p09_reproducible_computation::planning::FEATURE_ID,
         crate::glioma::programs::p09_reproducible_computation::portfolio_execution::FEATURE_ID,

@@ -216,6 +216,8 @@ crates/research/src/glioma/
                                              P09 intent-to-DAG compilation, resource gating, local computation campaign, and operator handoff
     p09_reproducible_computation/recovery_campaign.rs
                                              P09 failed-frontier DAG closure, selective cache invalidation, and fresh-identity recovery execution
+    p09_reproducible_computation/robustness_guided.rs
+                                             P09 robustness-debt-driven re-analysis frontier with typed omission targeting and dependency-safe execution
     p10_interpretation_replication/trajectory.rs
                                              P10 longitudinal per-unit trajectory analysis
     p10_interpretation_replication/transportability.rs
@@ -308,7 +310,7 @@ portfolio plan and executable code; it does not promote a planned slot to implem
 | P06 Power-aware experiment design | experimentalist | experiment design | falsifiable allocation, power, blocking, dose-response, adaptive replicate allocation, sequential Bayesian success/futility stopping, local sequential campaign execution, uncertainty-aware dose-surface acquisition, mechanism-aware closed-loop campaign rounds, an end-to-end plan/execute/replan cycle, combination-synergy fitting, and null-result plan |
 | P07 Protocol simulation | lab operations lead | protocol simulation, adaptive workflow planning | critical-path scheduling, outcome-aware dependency scheduling, intent-to-stage-action compilation, bounded modality/model-system portfolio expansion, evidence-gated director admission, evidence-priority execution cycles, context-to-action execution, multimodal mechanism campaigns, stage-gated autonomous program control, failed-frontier recovery with alternate dependency-safe missions, P02/P03-aware scientific frontier admission, utilization, deterministic next batches, and repair/abstain routing before physical effects |
 | P08 Instrument and robotics preflight | instrument operator | instrument preflight | robust control calibration, drift detection, information-per-cost endpoint-diverse campaign selection, multi-instrument dependency scheduling, schedule-bound fleet execution, signed interlocked planning, guarded execution, and fail-closed multi-run campaigns |
-| P09 Reproducible computation | computational scientist | computational execution | checkpointed/replayable computation, intent-to-DAG compilation, locality-aware worker placement, budgeted portfolio execution, selective failed-frontier recovery, and omission-stress robustness suite |
+| P09 Reproducible computation | computational scientist | computational execution | checkpointed/replayable computation, intent-to-DAG compilation, locality-aware worker placement, budgeted portfolio execution, robustness-debt-driven re-analysis, selective failed-frontier recovery, and omission-stress robustness suite |
 | P10 Causal interpretation and replication | methods reviewer | statistical interpretation, replication/robustness | uncertainty-aware endpoint, longitudinal, stratified causal, dynamic-policy, causal-contrast, meta-analytic, and cross-site verdicts |
 | P11 Research-object release | reproducibility steward | research-object release | portable manifest with limitations and negative evidence, dependency-aware replay, accountable release gating, and operator handoff |
 | P12 Federated benchmarking | consortium administrator | federation benchmarking | aggregate-only cross-site benchmark consensus, influence-aware site portfolio planning, robust pooling, heterogeneity, and site-influence analysis |
@@ -731,6 +733,12 @@ from ingest through integration, model fitting, validation, and export into a de
 It reports estimated cost/time shortfalls before execution and then reuses the same autonomous
 campaign gates, so a high-level glioma question can become an executable local computation plan
 without hand-authoring task plumbing or fabricating evidence.
+P09 now also exposes robustness-guided computation (`glioma_robustness_guided_computation_execute`).
+It converts leave-one-batch/row-out instability, negative cases, direction reversals, and
+unresolved omissions into explicit case-targeted priority signals, reweights only the declared
+typed candidates, and executes the resulting prerequisite-closed DAG under the existing resource,
+determinism, replay, cache, and artifact gates. Stable robustness may hold without dispatch;
+fragility and no-feasible-plan states remain visible instead of being promoted to a conclusion.
 P09 now also exposes deterministic computation placement (`glioma_computation_placement`). It
 maps the compiled DAG onto compatible institution-local workers, accounts for artifact locality,
 transfer cost, availability windows, critical-path timing, and utilization, and reuses only

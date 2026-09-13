@@ -129,6 +129,7 @@ fn main() {
                      glioma_computation_placement,\n\
                      glioma_computation_portfolio_execute,\n\
                      glioma_computation_campaign_execute, glioma_computation_recovery_execute,\n\
+                     glioma_robustness_guided_computation_execute,\n\
                      glioma_computation_workflow_execute,\n\
                      glioma_computation_operating_cycle,\n\
                      glioma_research_director_execute,\n\

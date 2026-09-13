@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 708;
+const TOOL_DEFINITION_COUNT: usize = 709;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -4130,6 +4130,94 @@ fn glioma_computation_portfolio_executor_runs_selected_dag() {
     assert_eq!(execution["execution"]["disposition"], json!("completed"));
     assert_eq!(
         execution["execution"]["execution"]["task_order"],
+        json!(["normalize", "integrate"])
+    );
+}
+
+#[test]
+fn glioma_robustness_guided_computation_executes_a_replayable_frontier() {
+    let mut server = server();
+    let hash = "0".repeat(64);
+    let robustness = call(
+        &mut server,
+        "glioma_robustness_suite",
+        json!({
+            "request": {
+                "objective": "stress-test a preclinical glioma invasion effect",
+                "analysis": {
+                    "objective": "estimate invasion effect",
+                    "control_arm": "control",
+                    "treatment_arm": "treated",
+                    "model_system": "organoid",
+                    "min_replicates_per_arm": 3,
+                    "effect_threshold_milli": 100,
+                    "alpha_milli": 50
+                },
+                "max_cases": 8,
+                "include_row_jackknife": false,
+                "min_eligible_cases": 2,
+                "min_stability_milli": 900
+            },
+            "dataset": {
+                "dataset_id": "guided-computation-robustness",
+                "artifact": {"artifact_id":"guided-robustness-artifact","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},
+                "rows": [
+                    {"row_id":"r1","arm_id":"control","model_system":"organoid","batch_id":"b1","outcome_milli":100},
+                    {"row_id":"r2","arm_id":"control","model_system":"organoid","batch_id":"b2","outcome_milli":105},
+                    {"row_id":"r3","arm_id":"control","model_system":"organoid","batch_id":"b3","outcome_milli":95},
+                    {"row_id":"r4","arm_id":"control","model_system":"organoid","batch_id":"b4","outcome_milli":102},
+                    {"row_id":"r5","arm_id":"treated","model_system":"organoid","batch_id":"b5","outcome_milli":300},
+                    {"row_id":"r6","arm_id":"treated","model_system":"organoid","batch_id":"b6","outcome_milli":305},
+                    {"row_id":"r7","arm_id":"treated","model_system":"organoid","batch_id":"b7","outcome_milli":295},
+                    {"row_id":"r8","arm_id":"treated","model_system":"organoid","batch_id":"b8","outcome_milli":301}
+                ]
+            }
+        }),
+    );
+    let guided = call(
+        &mut server,
+        "glioma_robustness_guided_computation_execute",
+        json!({
+            "request": {
+                "objective": "stress-test a preclinical glioma invasion effect",
+                "model_system": "organoid",
+                "robustness": robustness["suite"].clone(),
+                "portfolio": {
+                    "objective": "stress-test a preclinical glioma invasion effect",
+                    "model_system": "organoid",
+                    "budget_units": 4,
+                    "duration_ticks": 2,
+                    "max_tasks": 2,
+                    "max_modalities": 2,
+                    "min_modalities": 1,
+                    "information_weight_milli": 5,
+                    "uncertainty_weight_milli": 3,
+                    "coverage_weight_milli": 4,
+                    "cost_penalty_milli": 1,
+                    "duration_penalty_milli": 1,
+                    "require_deterministic": true,
+                    "completed_order": []
+                },
+                "candidates": [
+                    {"candidate":{"candidate_id":"normalize","task":{"task_id":"normalize","operation":"normalize","model_system":"organoid","depends_on":[],"input_artifact_ids":["input:normalize"],"output_schema":"Normalize1@1","estimated_cost_units":2,"estimated_duration_ticks":1,"deterministic":true},"modality":"transcriptomics","information_gain_milli":400,"uncertainty_reduction_milli":500,"coverage_debt_milli":300,"redundancy_group":"normalization","required":false},"target_case_ids":[],"scientific_role":"normalization re-analysis"},
+                    {"candidate":{"candidate_id":"integrate","task":{"task_id":"integrate","operation":"integrate","model_system":"organoid","depends_on":["normalize"],"input_artifact_ids":["input:integrate"],"output_schema":"Integrate1@1","estimated_cost_units":2,"estimated_duration_ticks":1,"deterministic":true},"modality":"spatial","information_gain_milli":900,"uncertainty_reduction_milli":500,"coverage_debt_milli":400,"redundancy_group":"integration","required":false},"target_case_ids":[],"scientific_role":"multimodal integration re-analysis"}
+                ],
+                "replay_identity": hash,
+                "max_retries": 1,
+                "allow_cache": true,
+                "require_local_artifacts": true,
+                "cache": [],
+                "minimum_case_coverage": 0,
+                "minimum_fragile_case_coverage": 0,
+                "stop_if_stable": false
+            }
+        }),
+    );
+    assert_eq!(guided["dispatch"], json!("dry_run"));
+    assert_eq!(guided["simulation_only"], json!(true));
+    assert_eq!(guided["computation"]["disposition"], json!("executed"));
+    assert_eq!(
+        guided["computation"]["portfolio_execution"]["planned_task_order"],
         json!(["normalize", "integrate"])
     );
 }

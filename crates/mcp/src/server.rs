@@ -508,24 +508,25 @@ use bioprism_research::{
     compile_mechanism_action_plan, compile_typed_knowledge, compose_knowledge_graph,
     design_glioma_contrast_panel, design_preclinical_experiment, discriminate_mechanisms,
     dry_run_adaptive_instrument_executor, dry_run_glioma_research,
-    dry_run_instrument_executor_from_request, evaluate_glioma_dynamic_policies,
-    evaluate_glioma_release_gate, execute_federated_benchmark_campaign,
-    execute_federated_benchmark_operating_cycle_dry_run, execute_glioma_action_portfolio,
-    execute_glioma_active_learning_campaign, execute_glioma_adaptive_allocation_campaign,
-    execute_glioma_adaptive_instrument_campaign, execute_glioma_adaptive_mechanism_campaign,
-    execute_glioma_autonomous_campaign, execute_glioma_autonomous_gap_cycle,
-    execute_glioma_autonomous_program_cycle, execute_glioma_autonomous_research_engine,
-    execute_glioma_autonomous_research_mission, execute_glioma_computation,
-    execute_glioma_computation_campaign, execute_glioma_computation_operating_cycle_dry_run,
-    execute_glioma_computation_portfolio, execute_glioma_computation_recovery,
-    execute_glioma_decision_branch_campaign, execute_glioma_decision_context_campaign,
-    execute_glioma_decision_operating_cycle, execute_glioma_evidence_acquisition_campaign,
-    execute_glioma_evidence_campaign, execute_glioma_evidence_gated_research,
-    execute_glioma_evidence_operating_cycle_dry_run, execute_glioma_evidence_refresh_campaign,
-    execute_glioma_experiment_operating_cycle, execute_glioma_instrument_campaign,
-    execute_glioma_instrument_fleet, execute_glioma_instrument_operating_cycle,
-    execute_glioma_instrument_plan, execute_glioma_intent_mission,
-    execute_glioma_interpretation_operating_cycle, execute_glioma_knowledge_resolution_campaign,
+    dry_run_instrument_executor_from_request, dry_run_robustness_guided_computation_executor,
+    evaluate_glioma_dynamic_policies, evaluate_glioma_release_gate,
+    execute_federated_benchmark_campaign, execute_federated_benchmark_operating_cycle_dry_run,
+    execute_glioma_action_portfolio, execute_glioma_active_learning_campaign,
+    execute_glioma_adaptive_allocation_campaign, execute_glioma_adaptive_instrument_campaign,
+    execute_glioma_adaptive_mechanism_campaign, execute_glioma_autonomous_campaign,
+    execute_glioma_autonomous_gap_cycle, execute_glioma_autonomous_program_cycle,
+    execute_glioma_autonomous_research_engine, execute_glioma_autonomous_research_mission,
+    execute_glioma_computation, execute_glioma_computation_campaign,
+    execute_glioma_computation_operating_cycle_dry_run, execute_glioma_computation_portfolio,
+    execute_glioma_computation_recovery, execute_glioma_decision_branch_campaign,
+    execute_glioma_decision_context_campaign, execute_glioma_decision_operating_cycle,
+    execute_glioma_evidence_acquisition_campaign, execute_glioma_evidence_campaign,
+    execute_glioma_evidence_gated_research, execute_glioma_evidence_operating_cycle_dry_run,
+    execute_glioma_evidence_refresh_campaign, execute_glioma_experiment_operating_cycle,
+    execute_glioma_instrument_campaign, execute_glioma_instrument_fleet,
+    execute_glioma_instrument_operating_cycle, execute_glioma_instrument_plan,
+    execute_glioma_intent_mission, execute_glioma_interpretation_operating_cycle,
+    execute_glioma_knowledge_resolution_campaign,
     execute_glioma_knowledge_synthesis_operating_cycle,
     execute_glioma_mechanism_discrimination_campaign, execute_glioma_mechanism_operating_cycle,
     execute_glioma_mission_recovery, execute_glioma_multi_fidelity_campaign,
@@ -535,9 +536,9 @@ use bioprism_research::{
     execute_glioma_protocol, execute_glioma_release_operating_cycle_dry_run,
     execute_glioma_replay_campaign, execute_glioma_replication_campaign,
     execute_glioma_research_autopilot, execute_glioma_research_director,
-    execute_glioma_robust_active_learning_campaign, execute_glioma_sequential_campaign,
-    explore_mechanisms, generate_feature_catalog, glioma_program_catalog,
-    harmonize_glioma_multimodal_batches, harmonize_multimodal_inputs,
+    execute_glioma_robust_active_learning_campaign, execute_glioma_robustness_guided_computation,
+    execute_glioma_sequential_campaign, explore_mechanisms, generate_feature_catalog,
+    glioma_program_catalog, harmonize_glioma_multimodal_batches, harmonize_multimodal_inputs,
     plan_adaptive_glioma_dose_surface, plan_decision_actions, plan_federated_benchmark_sites,
     plan_glioma_active_learning, plan_glioma_adaptive_information_campaign,
     plan_glioma_adaptive_mechanism_policy, plan_glioma_adaptive_research_frontier,
@@ -626,15 +627,15 @@ use bioprism_research::{
     ReplicationRequest, ReplicationStudy, ResearchObjectRequest,
     RobustActiveLearningCampaignRequest, RobustActiveLearningCandidate,
     RobustActiveLearningObservation, RobustActiveLearningRequest, RobustInterventionCandidate,
-    RobustInterventionRequest, RobustnessRequest, ScientificFrontierRequest,
-    SensitivityObservation, SensitivityRequest, SequentialArmObservation,
-    SequentialCampaignRequest, SequentialDesignRequest, SpatialCell, SpatialCommunicationCell,
-    SpatialCommunicationRequest, SpatialNicheRequest, SpatialPropagationRequest,
-    SpatialRegistrationCell, SpatialRegistrationRequest, StateTransitionObservation,
-    StateTransitionRequest, StaticGliomaActionPlanner, StaticGliomaComputationPlanner,
-    StratifiedCausalRequest, StratifiedObservation, TemporalFusionRequest, TemporalObservation,
-    TrajectoryObservation, TrajectoryRequest, TransportStudy, TransportabilityRequest,
-    TypedKnowledge,
+    RobustInterventionRequest, RobustnessGuidedComputationRequest, RobustnessRequest,
+    ScientificFrontierRequest, SensitivityObservation, SensitivityRequest,
+    SequentialArmObservation, SequentialCampaignRequest, SequentialDesignRequest, SpatialCell,
+    SpatialCommunicationCell, SpatialCommunicationRequest, SpatialNicheRequest,
+    SpatialPropagationRequest, SpatialRegistrationCell, SpatialRegistrationRequest,
+    StateTransitionObservation, StateTransitionRequest, StaticGliomaActionPlanner,
+    StaticGliomaComputationPlanner, StratifiedCausalRequest, StratifiedObservation,
+    TemporalFusionRequest, TemporalObservation, TrajectoryObservation, TrajectoryRequest,
+    TransportStudy, TransportabilityRequest, TypedKnowledge,
 };
 use bioprism_routing::{
     lab::{run as run_routing_lab, LabSettings, Task},
@@ -2220,6 +2221,9 @@ impl Server {
             }
             "glioma_computation_recovery_execute" => {
                 self.glioma_computation_recovery_execute(&arguments)
+            }
+            "glioma_robustness_guided_computation_execute" => {
+                self.glioma_robustness_guided_computation_execute(&arguments)
             }
             "glioma_computation_workflow_execute" => {
                 self.glioma_computation_workflow_execute(&arguments)
@@ -6432,6 +6436,37 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma computation recovery: {error}"))
+    }
+
+    /// Reweight a typed computation portfolio from observed robustness debt, then execute the
+    /// dependency-closed re-analysis through the deterministic local worker.
+    fn glioma_robustness_guided_computation_execute(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: RobustnessGuidedComputationRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_robustness_guided_computation_execute requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma robustness-guided computation request: {error}")
+            })?;
+        let mut executor = dry_run_robustness_guided_computation_executor();
+        let computation = execute_glioma_robustness_guided_computation(&request, &mut executor)
+            .map_err(|error| format!("glioma robustness-guided computation refused: {error}"))?;
+        serde_json::to_value(json!({
+            "computation": computation,
+            "dispatch": "dry_run",
+            "simulation_only": true,
+            "guarantees": [
+                "leave-out fragility, negative cases, direction reversals, and unresolved omissions become explicit re-analysis priority signals",
+                "candidate weights are adjusted without changing task identity, model-system binding, or typed DAG dependencies",
+                "the existing portfolio planner enforces prerequisite closure, cost, duration, modality, and deterministic-task gates",
+                "stable robustness can hold without dispatch; infeasible coverage remains an explicit no-feasible-plan state",
+                "the MCP route emits synthetic local computation artifacts only and never promotes them to biological evidence"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma robustness-guided computation: {error}"))
     }
 
     /// Compile a high-level glioma computation intent into a closed DAG and run it through the
@@ -50358,6 +50393,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_computation_portfolio_execute",
                 "glioma_computation_campaign_execute",
                 "glioma_computation_recovery_execute",
+                "glioma_robustness_guided_computation_execute",
                 "glioma_computation_workflow_execute",
                 "glioma_computation_operating_cycle",
                 "glioma_research_director_execute",
@@ -59402,6 +59438,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "ComputationRecoveryRequest1@1 containing the initial GliomaComputationCampaignRequest1@1, independent recovery budget and duration, recovery-round bound, and clean-completion policy."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_robustness_guided_computation_execute",
+        "description": "Turn a preclinical glioma robustness battery into a targeted reproducible-computation frontier. The deterministic controller ranks typed analyses against unresolved omission cases, fragile directions, negative outcomes, and uncertainty, reweights them without changing task identities, closes prerequisites, and executes only the bounded dependency-safe DAG through a dry-run worker. Stable robustness may hold without dispatch; no-feasible coverage remains explicit; no synthetic artifact becomes biological evidence.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "RobustnessGuidedComputationRequest1@1 containing a validated RobustnessSuite1@1, matching ComputationPortfolioRequest1@1, typed candidate/task DAGs with target omission cases and scientific roles, replay identity, local cache policy, and robustness coverage floors."}
             },
             "required": ["request"]
         }
