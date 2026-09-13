@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 701;
+const TOOL_DEFINITION_COUNT: usize = 702;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -3175,6 +3175,61 @@ fn glioma_knowledge_synthesis_operating_cycle_emits_typed_p01_handoff() {
         .as_str()
         .unwrap()
         .is_empty());
+}
+
+#[test]
+fn glioma_scientific_frontier_admits_only_ready_next_batch() {
+    let mut server = server();
+    let hash = "0".repeat(64);
+    let knowledge = call(
+        &mut server,
+        "glioma_knowledge_compile",
+        json!({
+            "request": {"objective":"rank invasion mechanisms","required_modalities":["genomics"],"required_model_systems":["organoid"],"min_support_milli":700,"min_sources_per_claim":1,"max_claims":8},
+            "records": [{"evidence_id":"frontier-e1","source_artifact":{"artifact_id":"frontier-a1","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"source_kind":"dataset","claim":"EGFR signaling increases invasion","scope":"preclinical glioma","modality":"genomics","model_system":"organoid","state":"supported","relevance_milli":900,"quality_milli":900,"reproducibility_milli":900,"release_epoch":1}]
+        }),
+    );
+    let knowledge_frontier = call(
+        &mut server,
+        "glioma_knowledge_frontier",
+        json!({"request":{"objective":"rank invasion mechanisms","max_selected_claims":4,"min_priority_milli":0,"weights":{"coverage_debt_milli":250,"contradiction_milli":250,"uncertainty_milli":200,"support_milli":150,"workflow_leverage_milli":150}},"knowledge":knowledge["knowledge"].clone()}),
+    );
+    let readiness = call(
+        &mut server,
+        "glioma_multimodal_readiness_gate",
+        json!({
+            "request": {
+                "campaign": {"request":{"study_id":"frontier-study","required_modalities":["genomics","imaging"],"required_model_systems":["organoid"],"expected_coordinate_system":"sample-local","expected_unit_system":"count","max_missing_fraction_milli":100},"observations":[{"observation_id":"frontier-observation-genomics","study_id":"frontier-study","sample_lineage":"sample-1","modality":"genomics","model_system":"organoid","batch_id":"batch-1","coordinate_system":"sample-local","unit_system":"count","missing_fraction_milli":0,"feature_count":10,"artifact":{"artifact_id":"frontier-artifact-genomics","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},{"observation_id":"frontier-observation-imaging","study_id":"frontier-study","sample_lineage":"sample-1","modality":"imaging","model_system":"organoid","batch_id":"batch-1","coordinate_system":"sample-local","unit_system":"count","missing_fraction_milli":0,"feature_count":10,"artifact":{"artifact_id":"frontier-artifact-imaging","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}}],"max_actions_per_round":2,"budget_units":2,"cost_per_action_units":1,"max_rounds":2,"max_retries":1,"stop_on_qualified":true},
+                "min_comparable_observations":1,"min_coverage_milli":1000,"min_quality_milli":800,"require_complete_report":true,"required_surfaces":["mechanism"]
+            }
+        }),
+    );
+    let plan = call(
+        &mut server,
+        "glioma_scientific_frontier",
+        json!({
+            "request": {
+                "objective":"rank invasion mechanisms",
+                "knowledge":knowledge["knowledge"].clone(),
+                "frontier":knowledge_frontier["frontier"].clone(),
+                "readiness":readiness["readiness"].clone(),
+                "candidates":[{"action_id":"frontier-mechanism","stage_kind":"mechanism_exploration","modality":"genomics","model_system":"organoid","depends_on":[],"cost_units":1,"information_gain_milli":900,"frontier_novelty_milli":800,"workflow_leverage_milli":800,"cross_stage_unlock_milli":900,"reproducibility_safety_milli":900,"federation_value_milli":200,"feasibility_milli":900,"autonomy_tier":"a1","effects":["read_local_data","execute_local_computation"]}],
+                "completed_action_order":[],
+                "selection":{"budget_units":2,"max_actions":1,"approval_granted":true,"allow_instrument_execution":false,"allow_federation":false,"weights":{"information_gain":25,"frontier_novelty":20,"workflow_leverage":15,"cross_stage_unlock":15,"reproducibility_safety":10,"federation_value":10,"feasibility":5}}
+            }
+        }),
+    );
+    assert_eq!(plan["dispatch"], json!("not_started"));
+    assert_eq!(plan["simulation_only"], json!(true));
+    assert_eq!(
+        plan["plan"]["admitted_order"],
+        json!(["frontier-mechanism"])
+    );
+    assert_eq!(
+        plan["plan"]["selection"]["selected_order"],
+        json!(["frontier-mechanism"])
+    );
+    assert_eq!(plan["next_route"], json!("glioma_autonomous_program_cycle"));
 }
 
 #[test]

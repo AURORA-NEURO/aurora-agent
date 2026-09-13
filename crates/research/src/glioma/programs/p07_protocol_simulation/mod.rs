@@ -25,6 +25,7 @@ pub mod mission;
 pub mod program_cycle;
 pub mod research_autopilot;
 pub mod robust_active_learning_campaign;
+pub mod scientific_frontier;
 pub mod simulator;
 
 pub use action_execution::{
@@ -118,6 +119,12 @@ pub use robust_active_learning_campaign::{
     RobustActiveLearningCampaignError, RobustActiveLearningCampaignExecutor,
     RobustActiveLearningCampaignRequest, RobustActiveLearningCampaignRound,
     RobustActiveLearningCampaignStopReason, RobustActiveLearningExecutionFailure,
+};
+
+pub use scientific_frontier::{
+    plan_glioma_scientific_frontier, FrontierCandidateGate, FrontierCandidateStatus,
+    ScientificFrontierDisposition, ScientificFrontierError, ScientificFrontierPlan,
+    ScientificFrontierRequest,
 };
 
 pub use evidence_campaign::{
