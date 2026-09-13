@@ -538,12 +538,13 @@ use bioprism_research::{
     execute_glioma_multimodal_ingestion_campaign, execute_glioma_multimodal_mechanism_campaign,
     execute_glioma_multimodal_mechanism_campaign_with_executor, execute_glioma_multimodal_mission,
     execute_glioma_multimodal_operating_cycle_dry_run, execute_glioma_multimodal_readiness_gate,
-    execute_glioma_protocol, execute_glioma_release_operating_cycle_dry_run,
-    execute_glioma_replay_campaign, execute_glioma_replication_campaign,
-    execute_glioma_research_autopilot, execute_glioma_research_director,
-    execute_glioma_robust_active_learning_campaign, execute_glioma_robustness_guided_computation,
-    execute_glioma_sequential_campaign, explore_mechanisms, generate_feature_catalog,
-    glioma_program_catalog, harmonize_glioma_multimodal_batches, harmonize_multimodal_inputs,
+    execute_glioma_program_scheduler_dry_run, execute_glioma_protocol,
+    execute_glioma_release_operating_cycle_dry_run, execute_glioma_replay_campaign,
+    execute_glioma_replication_campaign, execute_glioma_research_autopilot,
+    execute_glioma_research_director, execute_glioma_robust_active_learning_campaign,
+    execute_glioma_robustness_guided_computation, execute_glioma_sequential_campaign,
+    explore_mechanisms, generate_feature_catalog, glioma_program_catalog,
+    harmonize_glioma_multimodal_batches, harmonize_multimodal_inputs,
     plan_adaptive_glioma_dose_surface, plan_decision_actions, plan_federated_benchmark_sites,
     plan_glioma_active_learning, plan_glioma_adaptive_information_campaign,
     plan_glioma_adaptive_mechanism_policy, plan_glioma_adaptive_research_frontier,
@@ -611,15 +612,16 @@ use bioprism_research::{
     GliomaEvidenceOperatingCycleRequest, GliomaIntentMissionRequest,
     GliomaInterpretationOperatingCycleRequest, GliomaMechanismAutopilotRequest,
     GliomaMissionRecoveryRequest, GliomaMissionRequest, GliomaMultimodalMissionRequest,
-    GliomaMultimodalOperatingCycleRequest, GliomaReleaseOperatingCycleRequest,
-    GliomaReplicationCampaignRequest, GliomaResearchAutopilotRequest,
-    GliomaResearchDirectorRequest, GliomaResearchIntent, GliomaWorkflowRequest, GraphFusionRequest,
-    GraphFusionVector, HarmonizationRequest, HarmonizationVector, InformationDesignRequest,
-    InstrumentCampaignRequest, InstrumentExecutionMode, InstrumentExecutionRequest,
-    InstrumentExecutionRun, InstrumentFleetExecutionRequest, InstrumentFleetScheduleRequest,
-    InstrumentInterlockSnapshot, InstrumentOperatingCycleRequest, InstrumentPreflightRequest,
-    InterpretationSynthesisRequest, KnowledgeCompositionRequest, KnowledgeFrontier,
-    KnowledgeFrontierRequest, KnowledgeGapCompilerRequest, KnowledgeRelation, KnowledgeRequest,
+    GliomaMultimodalOperatingCycleRequest, GliomaProgramSchedulerRequest,
+    GliomaReleaseOperatingCycleRequest, GliomaReplicationCampaignRequest,
+    GliomaResearchAutopilotRequest, GliomaResearchDirectorRequest, GliomaResearchIntent,
+    GliomaWorkflowRequest, GraphFusionRequest, GraphFusionVector, HarmonizationRequest,
+    HarmonizationVector, InformationDesignRequest, InstrumentCampaignRequest,
+    InstrumentExecutionMode, InstrumentExecutionRequest, InstrumentExecutionRun,
+    InstrumentFleetExecutionRequest, InstrumentFleetScheduleRequest, InstrumentInterlockSnapshot,
+    InstrumentOperatingCycleRequest, InstrumentPreflightRequest, InterpretationSynthesisRequest,
+    KnowledgeCompositionRequest, KnowledgeFrontier, KnowledgeFrontierRequest,
+    KnowledgeGapCompilerRequest, KnowledgeRelation, KnowledgeRequest,
     KnowledgeResolutionCampaignRequest, KnowledgeSynthesisOperatingCycleRequest,
     LatentFactorRequest, LatentFactorVector, LigandReceptorPair, MechanismActionPlannerConfig,
     MechanismCalibration, MechanismCalibrationObservation, MechanismCalibrationRequest,
@@ -2245,6 +2247,7 @@ impl Server {
                 self.glioma_computation_operating_cycle(&arguments)
             }
             "glioma_research_director_execute" => self.glioma_research_director_execute(&arguments),
+            "glioma_program_scheduler_execute" => self.glioma_program_scheduler_execute(&arguments),
             "glioma_evidence_gated_research_execute" => {
                 self.glioma_evidence_gated_research_execute(&arguments)
             }
@@ -6890,6 +6893,34 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma research director run: {error}"))
+    }
+
+    /// Schedule multiple independent preclinical glioma research intents as one bounded local
+    /// program. The MCP adapter deliberately uses the deterministic synthetic worker; governed
+    /// deployments provide their own institution-local executor to the research crate.
+    fn glioma_program_scheduler_execute(&self, arguments: &Value) -> Result<Value, String> {
+        let request: GliomaProgramSchedulerRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_program_scheduler_execute requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma program scheduler request: {error}"))?;
+        let schedule = execute_glioma_program_scheduler_dry_run(&request)
+            .map_err(|error| format!("glioma program scheduler refused: {error}"))?;
+        serde_json::to_value(json!({
+            "schedule": schedule,
+            "dispatch": "dry_run",
+            "simulation_only": true,
+            "guarantees": [
+                "multiple independent preclinical glioma intents are ranked by frontier utility, fairness debt, feasibility, and cost",
+                "model and modality capacity admission prevents conflicting local batches and preserves explicit holds",
+                "each job retains its own checkpoints and is replanned from returned typed local artifacts",
+                "failed jobs, negative outcomes, budget limits, no-progress states, and operator holds remain explicit",
+                "MCP produces no raw data, human data, instrument effect, clinical decision, or federation export"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma program scheduler run: {error}"))
     }
 
     /// Admit the director only after local P01 evidence triangulation clears the caller's gate.
@@ -50661,6 +50692,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_computation_workflow_execute",
                 "glioma_computation_operating_cycle",
                 "glioma_research_director_execute",
+                "glioma_program_scheduler_execute",
                 "glioma_evidence_gated_research_execute",
                 "glioma_autonomous_research_engine_execute",
                 "glioma_autonomous_program_cycle",
@@ -59753,6 +59785,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "GliomaResearchDirectorRequest1@1 with GliomaResearchIntent, focus, local typed checkpoints, budget, policy switches, selection weights, retry bound, and artifact requirement."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_program_scheduler_execute",
+        "description": "Schedule and execute a bounded batch of independent preclinical glioma research intents in a deterministic local sandbox. The scheduler ranks frontier utility, fairness debt, feasibility, and cost; admits only resource-capacity-compatible local batches; preserves per-job checkpoints; and replans each job from returned typed artifacts. Holds, failed jobs, negative outcomes, budget exhaustion, and no-progress states remain explicit. MCP performs no real assay, instrument effect, raw-data movement, federation export, or clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "GliomaProgramSchedulerRequest1@1 containing bounded GliomaProgramScheduleJob1@1 intents, local model/modality capacities, global budget, per-round width, fairness debt, and replay identity."}
             },
             "required": ["request"]
         }

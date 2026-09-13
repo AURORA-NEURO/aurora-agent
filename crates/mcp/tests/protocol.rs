@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 717;
+const TOOL_DEFINITION_COUNT: usize = 718;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -5449,6 +5449,81 @@ fn glioma_research_director_compiles_and_executes_a_focus_aware_batch() {
         .unwrap()
         .iter()
         .any(|item| item.as_str().unwrap().contains("synthetic-dry-run")));
+}
+
+#[test]
+fn glioma_program_scheduler_batches_independent_intents_and_preserves_job_state() {
+    let mut server = server();
+    let hash = "0".repeat(64);
+    let director = |job_id: &str, research_id: &str, study_id: &str, objective: &str| {
+        json!({
+            "intent": {
+                "research_id": research_id,
+                "study_id": study_id,
+                "objective": objective,
+                "output_uses": ["cohort_analysis"],
+                "model_systems": ["organoid"],
+                "modalities": ["transcriptomics", "imaging", "spatial"],
+                "input_artifacts": [{"artifact_id":format!("input-{job_id}"),"content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}],
+                "requested_autonomy": "a1",
+                "approval_reference": null,
+                "budget_units": 160,
+                "max_retries": 1,
+                "allow_instrument_execution": false,
+                "allow_federation": false,
+                "raw_data_local": true,
+                "aggregate_only": true,
+                "replay_identity": hash,
+                "boundary": PRECLINICAL_BOUNDARY
+            },
+            "focus": "mechanism_first",
+            "completed_checkpoints": [],
+            "budget_units": 80,
+            "max_actions": 2,
+            "approval_granted": false,
+            "allow_instrument_execution": false,
+            "allow_federation": false,
+            "selection_weights": {"information_gain":25,"frontier_novelty":20,"workflow_leverage":15,"cross_stage_unlock":15,"reproducibility_safety":10,"federation_value":10,"feasibility":5},
+            "max_retries": 1,
+            "require_artifacts": true
+        })
+    };
+    let response = call(
+        &mut server,
+        "glioma_program_scheduler_execute",
+        json!({
+            "request": {
+                "objective": "schedule independent glioma invasion and stemness programs",
+                "jobs": [
+                    {"job_id":"invasion","director":director("invasion","scheduler-invasion","study-invasion","identify reproducible invasion mechanisms"),"priority_milli":900,"fairness_weight_milli":400},
+                    {"job_id":"stemness","director":director("stemness","scheduler-stemness","study-stemness","identify reproducible stemness mechanisms"),"priority_milli":500,"fairness_weight_milli":900}
+                ],
+                "global_budget_units": 80,
+                "max_rounds": 2,
+                "max_jobs_per_round": 2,
+                "resource_capacities": [
+                    {"model_system":"organoid","modality":"literature","capacity_units":4},
+                    {"model_system":"organoid","modality":"spatial","capacity_units":4}
+                ]
+            }
+        }),
+    );
+    assert_eq!(response["dispatch"], json!("dry_run"));
+    assert_eq!(response["simulation_only"], json!(true));
+    assert_eq!(
+        response["schedule"]["feature_id"],
+        json!("GAF-GLIOMA-P07-F15")
+    );
+    assert_eq!(response["schedule"]["jobs"].as_array().unwrap().len(), 2);
+    assert!(!response["schedule"]["rounds"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+    assert!(response["schedule"]["jobs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|job| job["job_id"].is_string() && job["pending_action_order"].is_array()));
 }
 
 #[test]

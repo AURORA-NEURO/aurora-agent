@@ -28,6 +28,7 @@ pub mod mission;
 pub mod mission_recovery;
 pub mod multimodal_mission;
 pub mod program_cycle;
+pub mod program_scheduler;
 pub mod research_autopilot;
 pub mod robust_active_learning_campaign;
 pub mod scientific_frontier;
@@ -142,6 +143,15 @@ pub use program_cycle::{
     execute_glioma_autonomous_program_cycle, AutonomousProgramCycle,
     AutonomousProgramCycleDisposition, AutonomousProgramCycleError, AutonomousProgramCycleRequest,
     ProgramExecutionMode, ProgramGate, ProgramGateStatus,
+};
+
+pub use program_scheduler::{
+    execute_glioma_program_scheduler, execute_glioma_program_scheduler_dry_run,
+    GliomaProgramResourceCapacity, GliomaProgramResourceUsage, GliomaProgramScheduleExecution,
+    GliomaProgramScheduleHold, GliomaProgramScheduleJob, GliomaProgramScheduleJobDisposition,
+    GliomaProgramScheduleJobState, GliomaProgramSchedulerDisposition, GliomaProgramSchedulerError,
+    GliomaProgramSchedulerRequest, GliomaProgramSchedulerRound, GliomaProgramSchedulerRun,
+    GliomaProgramSchedulerStopReason,
 };
 
 pub use research_autopilot::{
