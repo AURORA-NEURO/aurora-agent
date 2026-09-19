@@ -504,14 +504,15 @@ use bioprism_research::{
     analyze_replication_meta_analysis, analyze_stratified_causal_adjustment,
     assess_glioma_robustness, assess_replication, build_research_object_manifest,
     calibrate_glioma_evidence, calibrate_glioma_mechanisms, compile_decision_action_graph,
-    compile_decision_context, compile_glioma_computation_workflow, compile_glioma_knowledge_gaps,
-    compile_mechanism_action_plan, compile_typed_knowledge, compose_knowledge_graph,
-    design_glioma_contrast_panel, design_preclinical_experiment, discriminate_mechanisms,
-    dry_run_adaptive_instrument_executor, dry_run_glioma_adaptive_frontier_executor,
-    dry_run_glioma_research, dry_run_instrument_executor_from_request,
-    dry_run_robustness_guided_computation_executor, evaluate_glioma_dynamic_policies,
-    evaluate_glioma_release_gate, execute_federated_benchmark_adaptive_campaign_dry_run,
-    execute_federated_benchmark_campaign, execute_federated_benchmark_operating_cycle_dry_run,
+    compile_decision_context, compile_glioma_computation_workflow,
+    compile_glioma_knowledge_actions, compile_glioma_knowledge_gaps, compile_mechanism_action_plan,
+    compile_typed_knowledge, compose_knowledge_graph, design_glioma_contrast_panel,
+    design_preclinical_experiment, discriminate_mechanisms, dry_run_adaptive_instrument_executor,
+    dry_run_glioma_adaptive_frontier_executor, dry_run_glioma_research,
+    dry_run_instrument_executor_from_request, dry_run_robustness_guided_computation_executor,
+    evaluate_glioma_dynamic_policies, evaluate_glioma_release_gate,
+    execute_federated_benchmark_adaptive_campaign_dry_run, execute_federated_benchmark_campaign,
+    execute_federated_benchmark_operating_cycle_dry_run,
     execute_federated_mechanism_transport_campaign_dry_run, execute_glioma_action_portfolio,
     execute_glioma_active_learning_campaign, execute_glioma_adaptive_allocation_campaign,
     execute_glioma_adaptive_clone_campaign_dry_run,
@@ -625,9 +626,10 @@ use bioprism_research::{
     InstrumentCampaignRequest, InstrumentExecutionMode, InstrumentExecutionRequest,
     InstrumentExecutionRun, InstrumentFleetExecutionRequest, InstrumentFleetScheduleRequest,
     InstrumentInterlockSnapshot, InstrumentOperatingCycleRequest, InstrumentPreflightRequest,
-    InstrumentScienceLoopRequest, InterpretationSynthesisRequest, KnowledgeCompositionRequest,
-    KnowledgeFrontier, KnowledgeFrontierRequest, KnowledgeGapCompilerRequest, KnowledgeRelation,
-    KnowledgeRequest, KnowledgeResolutionCampaignRequest, KnowledgeSynthesisOperatingCycleRequest,
+    InstrumentScienceLoopRequest, InterpretationSynthesisRequest, KnowledgeActionCompilerRequest,
+    KnowledgeActionTemplate, KnowledgeCompositionRequest, KnowledgeFrontier,
+    KnowledgeFrontierRequest, KnowledgeGapCompilerRequest, KnowledgeRelation, KnowledgeRequest,
+    KnowledgeResolutionCampaignRequest, KnowledgeSynthesisOperatingCycleRequest,
     LatentFactorRequest, LatentFactorVector, LigandReceptorPair, MechanismActionPlannerConfig,
     MechanismCalibration, MechanismCalibrationObservation, MechanismCalibrationRequest,
     MechanismCandidate, MechanismDiscrimination, MechanismDiscriminationCampaignRequest,
@@ -2352,6 +2354,7 @@ impl Server {
             "glioma_belief_revision" => self.glioma_belief_revision(&arguments),
             "glioma_knowledge_frontier" => self.glioma_knowledge_frontier(&arguments),
             "glioma_knowledge_gap_compile" => self.glioma_knowledge_gap_compile(&arguments),
+            "glioma_knowledge_action_compile" => self.glioma_knowledge_action_compile(&arguments),
             "glioma_autonomous_gap_cycle" => self.glioma_autonomous_gap_cycle(&arguments),
             "glioma_knowledge_synthesis_operating_cycle" => {
                 self.glioma_knowledge_synthesis_operating_cycle(&arguments)
@@ -8837,6 +8840,55 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma knowledge-gap portfolio: {error}"))
+    }
+
+    /// Compile typed knowledge-frontier claims into dependency-closed research actions. This
+    /// route plans validation, replication, coverage, contradiction, and negative-result work;
+    /// it does not execute biology or promote evidence.
+    fn glioma_knowledge_action_compile(&self, arguments: &Value) -> Result<Value, String> {
+        let request: KnowledgeActionCompilerRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_knowledge_action_compile requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma knowledge-action request: {error}"))?;
+        let knowledge: TypedKnowledge = serde_json::from_value(
+            arguments
+                .get("knowledge")
+                .cloned()
+                .ok_or_else(|| "glioma_knowledge_action_compile requires knowledge".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma typed knowledge: {error}"))?;
+        let frontier: KnowledgeFrontier = serde_json::from_value(
+            arguments
+                .get("frontier")
+                .cloned()
+                .ok_or_else(|| "glioma_knowledge_action_compile requires frontier".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma knowledge frontier: {error}"))?;
+        let templates: Vec<KnowledgeActionTemplate> = serde_json::from_value(
+            arguments
+                .get("templates")
+                .cloned()
+                .ok_or_else(|| "glioma_knowledge_action_compile requires templates".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma knowledge-action templates: {error}"))?;
+        let plan = compile_glioma_knowledge_actions(&request, &knowledge, &frontier, &templates)
+            .map_err(|error| format!("glioma knowledge-action compilation refused: {error}"))?;
+        serde_json::to_value(json!({
+            "plan": plan,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "next_route": "glioma_research_select_actions",
+            "guarantees": [
+                "every selected action remains bound to a validated TypedKnowledge claim and frontier score",
+                "dependencies, budget, risk, information floors, missing dependencies, and cycles remain explicit",
+                "deferred and blocked work is never counted as executed evidence",
+                "the route plans preclinical research only and moves no raw data or makes no clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma knowledge-action plan: {error}"))
     }
 
     /// Run the bounded P02-to-P01 autonomous research cycle with MCP's deterministic local
@@ -50943,6 +50995,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_belief_revision",
                 "glioma_knowledge_frontier",
                 "glioma_knowledge_gap_compile",
+                "glioma_knowledge_action_compile",
                 "glioma_autonomous_gap_cycle",
                 "glioma_knowledge_synthesis_operating_cycle",
                 "glioma_decision_context",
@@ -60767,6 +60820,20 @@ pub fn tool_definitions() -> Vec<Value> {
                 "frontier": {"type": "object", "description": "KnowledgeFrontier1@1 from glioma_knowledge_frontier, bound to the same knowledge digest and objective."}
             },
             "required": ["request", "knowledge", "frontier"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_knowledge_action_compile",
+        "description": "Compile typed preclinical glioma knowledge-frontier claims into dependency-closed validation, replication, coverage, contradiction-resolution, and negative-result research actions. Applies explicit information, budget, risk, action-count, dependency, cycle, and missing-dependency gates; returns selected, deferred, and blocked work bound to both TypedKnowledge and KnowledgeFrontier digests. It does not execute biology, move raw data, or make a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "KnowledgeActionCompilerRequest1@1 with objective, cost/risk budgets, action cap, and information floor."},
+                "knowledge": {"type": "object", "description": "TypedKnowledge1@1 from glioma_knowledge_compile."},
+                "frontier": {"type": "object", "description": "KnowledgeFrontier1@1 from glioma_knowledge_frontier, bound to the same knowledge digest and objective."},
+                "templates": {"type": "array", "items": {"type": "object"}, "description": "KnowledgeActionTemplate1@1 records binding claims to frontier action modes, modalities/models, expected information, cost, risk, rationale, and dependencies."}
+            },
+            "required": ["request", "knowledge", "frontier", "templates"]
         }
     }));
     definitions.push(json!({
