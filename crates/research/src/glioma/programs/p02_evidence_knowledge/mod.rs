@@ -10,6 +10,7 @@ pub mod composition;
 pub mod gap_compiler;
 pub mod knowledge_graph;
 pub mod operating_cycle;
+pub mod selection_cycle;
 
 pub use gap_compiler::{
     compile_glioma_knowledge_gaps, KnowledgeGapClaimMapping, KnowledgeGapCompilerError,
@@ -31,6 +32,11 @@ pub use action_compiler::{
 pub use action_bridge::{
     bridge_glioma_knowledge_actions, BridgedKnowledgeCandidate, KnowledgeActionBridge,
     KnowledgeActionBridgeError, KnowledgeActionBridgeRequest,
+};
+
+pub use selection_cycle::{
+    execute_glioma_knowledge_selection_cycle, KnowledgeActionSelectionCycle,
+    KnowledgeActionSelectionCycleError, KnowledgeActionSelectionCycleRequest,
 };
 
 pub use campaign::{

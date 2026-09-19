@@ -534,7 +534,7 @@ use bioprism_research::{
     execute_glioma_instrument_fleet, execute_glioma_instrument_operating_cycle,
     execute_glioma_instrument_plan, execute_glioma_instrument_science_loop,
     execute_glioma_intent_mission, execute_glioma_interpretation_operating_cycle,
-    execute_glioma_knowledge_resolution_campaign,
+    execute_glioma_knowledge_resolution_campaign, execute_glioma_knowledge_selection_cycle,
     execute_glioma_knowledge_synthesis_operating_cycle, execute_glioma_mechanism_autopilot,
     execute_glioma_mechanism_discovery_engine, execute_glioma_mechanism_discrimination_campaign,
     execute_glioma_mechanism_operating_cycle, execute_glioma_mission_recovery,
@@ -627,9 +627,9 @@ use bioprism_research::{
     InstrumentExecutionRun, InstrumentFleetExecutionRequest, InstrumentFleetScheduleRequest,
     InstrumentInterlockSnapshot, InstrumentOperatingCycleRequest, InstrumentPreflightRequest,
     InstrumentScienceLoopRequest, InterpretationSynthesisRequest, KnowledgeActionBridgeRequest,
-    KnowledgeActionCompilerRequest, KnowledgeActionPlan, KnowledgeActionTemplate,
-    KnowledgeCompositionRequest, KnowledgeFrontier, KnowledgeFrontierRequest,
-    KnowledgeGapCompilerRequest, KnowledgeRelation, KnowledgeRequest,
+    KnowledgeActionCompilerRequest, KnowledgeActionPlan, KnowledgeActionSelectionCycleRequest,
+    KnowledgeActionTemplate, KnowledgeCompositionRequest, KnowledgeFrontier,
+    KnowledgeFrontierRequest, KnowledgeGapCompilerRequest, KnowledgeRelation, KnowledgeRequest,
     KnowledgeResolutionCampaignRequest, KnowledgeSynthesisOperatingCycleRequest,
     LatentFactorRequest, LatentFactorVector, LigandReceptorPair, MechanismActionPlannerConfig,
     MechanismCalibration, MechanismCalibrationObservation, MechanismCalibrationRequest,
@@ -2357,6 +2357,7 @@ impl Server {
             "glioma_knowledge_gap_compile" => self.glioma_knowledge_gap_compile(&arguments),
             "glioma_knowledge_action_compile" => self.glioma_knowledge_action_compile(&arguments),
             "glioma_knowledge_action_bridge" => self.glioma_knowledge_action_bridge(&arguments),
+            "glioma_knowledge_selection_cycle" => self.glioma_knowledge_selection_cycle(&arguments),
             "glioma_autonomous_gap_cycle" => self.glioma_autonomous_gap_cycle(&arguments),
             "glioma_knowledge_synthesis_operating_cycle" => {
                 self.glioma_knowledge_synthesis_operating_cycle(&arguments)
@@ -8925,6 +8926,41 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma knowledge-action bridge: {error}"))
+    }
+
+    /// Run the P02 knowledge-action bridge and the bounded glioma portfolio selector as one
+    /// planning cycle. The returned selected ids are ready for a caller-owned local executor;
+    /// MCP itself performs no assay, instrument, federation, or clinical effect.
+    fn glioma_knowledge_selection_cycle(&self, arguments: &Value) -> Result<Value, String> {
+        let request: KnowledgeActionSelectionCycleRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_knowledge_selection_cycle requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma knowledge selection-cycle request: {error}"))?;
+        let plan: KnowledgeActionPlan = serde_json::from_value(
+            arguments
+                .get("plan")
+                .cloned()
+                .ok_or_else(|| "glioma_knowledge_selection_cycle requires plan".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma knowledge-action plan: {error}"))?;
+        let cycle = execute_glioma_knowledge_selection_cycle(&request, &plan)
+            .map_err(|error| format!("glioma knowledge selection-cycle refused: {error}"))?;
+        serde_json::to_value(json!({
+            "cycle": cycle,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "next_route": "glioma_action_portfolio_execute",
+            "guarantees": [
+                "knowledge action dependencies are preserved through bridge and selector namespaces",
+                "completed source actions are excluded before beam selection",
+                "the selector's budget, autonomy, diversity, and dependency gates remain authoritative",
+                "selected work is a local preclinical plan and is not counted as executed evidence"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma knowledge selection-cycle: {error}"))
     }
 
     /// Run the bounded P02-to-P01 autonomous research cycle with MCP's deterministic local
@@ -51033,6 +51069,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_knowledge_gap_compile",
                 "glioma_knowledge_action_compile",
                 "glioma_knowledge_action_bridge",
+                "glioma_knowledge_selection_cycle",
                 "glioma_autonomous_gap_cycle",
                 "glioma_knowledge_synthesis_operating_cycle",
                 "glioma_decision_context",
@@ -60880,6 +60917,18 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "KnowledgeActionBridgeRequest1@1 with objective, plan digest, and bounded candidate cap."},
+                "plan": {"type": "object", "description": "KnowledgeActionPlan1@1 from glioma_knowledge_action_compile."}
+            },
+            "required": ["request", "plan"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_knowledge_selection_cycle",
+        "description": "Run the P02 preclinical glioma knowledge-action bridge and dependency-aware portfolio selector as one deterministic next-batch cycle. Excludes completed source actions, preserves selector order and blocked/deferred reasons, and returns local A1 candidates for a caller-owned executor without executing biology, instruments, federation, raw-data movement, or clinical decisions.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "KnowledgeActionSelectionCycleRequest1@1 with objective, plan digest, candidate cap, completed source ids, and GliomaSelectionConfig1@1."},
                 "plan": {"type": "object", "description": "KnowledgeActionPlan1@1 from glioma_knowledge_action_compile."}
             },
             "required": ["request", "plan"]
