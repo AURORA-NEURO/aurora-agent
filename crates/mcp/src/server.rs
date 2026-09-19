@@ -502,9 +502,9 @@ use bioprism_research::{
     analyze_glioma_trajectories, analyze_glioma_transportability, analyze_instrument_calibration,
     analyze_multimodal_concordance, analyze_multimodal_consensus, analyze_preclinical_outcomes,
     analyze_replication_meta_analysis, analyze_stratified_causal_adjustment,
-    assess_glioma_robustness, assess_replication, build_research_object_manifest,
-    calibrate_glioma_evidence, calibrate_glioma_mechanisms, compile_decision_action_graph,
-    compile_decision_context, compile_glioma_computation_workflow,
+    assess_glioma_robustness, assess_replication, bridge_glioma_knowledge_actions,
+    build_research_object_manifest, calibrate_glioma_evidence, calibrate_glioma_mechanisms,
+    compile_decision_action_graph, compile_decision_context, compile_glioma_computation_workflow,
     compile_glioma_knowledge_actions, compile_glioma_knowledge_gaps, compile_mechanism_action_plan,
     compile_typed_knowledge, compose_knowledge_graph, design_glioma_contrast_panel,
     design_preclinical_experiment, discriminate_mechanisms, dry_run_adaptive_instrument_executor,
@@ -626,9 +626,10 @@ use bioprism_research::{
     InstrumentCampaignRequest, InstrumentExecutionMode, InstrumentExecutionRequest,
     InstrumentExecutionRun, InstrumentFleetExecutionRequest, InstrumentFleetScheduleRequest,
     InstrumentInterlockSnapshot, InstrumentOperatingCycleRequest, InstrumentPreflightRequest,
-    InstrumentScienceLoopRequest, InterpretationSynthesisRequest, KnowledgeActionCompilerRequest,
-    KnowledgeActionTemplate, KnowledgeCompositionRequest, KnowledgeFrontier,
-    KnowledgeFrontierRequest, KnowledgeGapCompilerRequest, KnowledgeRelation, KnowledgeRequest,
+    InstrumentScienceLoopRequest, InterpretationSynthesisRequest, KnowledgeActionBridgeRequest,
+    KnowledgeActionCompilerRequest, KnowledgeActionPlan, KnowledgeActionTemplate,
+    KnowledgeCompositionRequest, KnowledgeFrontier, KnowledgeFrontierRequest,
+    KnowledgeGapCompilerRequest, KnowledgeRelation, KnowledgeRequest,
     KnowledgeResolutionCampaignRequest, KnowledgeSynthesisOperatingCycleRequest,
     LatentFactorRequest, LatentFactorVector, LigandReceptorPair, MechanismActionPlannerConfig,
     MechanismCalibration, MechanismCalibrationObservation, MechanismCalibrationRequest,
@@ -2355,6 +2356,7 @@ impl Server {
             "glioma_knowledge_frontier" => self.glioma_knowledge_frontier(&arguments),
             "glioma_knowledge_gap_compile" => self.glioma_knowledge_gap_compile(&arguments),
             "glioma_knowledge_action_compile" => self.glioma_knowledge_action_compile(&arguments),
+            "glioma_knowledge_action_bridge" => self.glioma_knowledge_action_bridge(&arguments),
             "glioma_autonomous_gap_cycle" => self.glioma_autonomous_gap_cycle(&arguments),
             "glioma_knowledge_synthesis_operating_cycle" => {
                 self.glioma_knowledge_synthesis_operating_cycle(&arguments)
@@ -8889,6 +8891,40 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma knowledge-action plan: {error}"))
+    }
+
+    /// Bridge a validated P02 action plan into local candidates for the dependency-aware glioma
+    /// selector. This never dispatches work or widens the plan's preclinical authority.
+    fn glioma_knowledge_action_bridge(&self, arguments: &Value) -> Result<Value, String> {
+        let request: KnowledgeActionBridgeRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_knowledge_action_bridge requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma knowledge-action bridge request: {error}"))?;
+        let plan: KnowledgeActionPlan = serde_json::from_value(
+            arguments
+                .get("plan")
+                .cloned()
+                .ok_or_else(|| "glioma_knowledge_action_bridge requires plan".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma knowledge-action plan: {error}"))?;
+        let bridge = bridge_glioma_knowledge_actions(&request, &plan)
+            .map_err(|error| format!("glioma knowledge-action bridge refused: {error}"))?;
+        serde_json::to_value(json!({
+            "bridge": bridge,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "next_route": "glioma_research_select_actions",
+            "guarantees": [
+                "every emitted candidate remains bound to a validated knowledge-action plan digest",
+                "candidate dependencies are preserved for the existing selector and shared prerequisites are not duplicated",
+                "only local read/compute/write effects at autonomy A1 are emitted",
+                "instrument, federation, raw-data movement, and clinical effects remain unavailable"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma knowledge-action bridge: {error}"))
     }
 
     /// Run the bounded P02-to-P01 autonomous research cycle with MCP's deterministic local
@@ -50996,6 +51032,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_knowledge_frontier",
                 "glioma_knowledge_gap_compile",
                 "glioma_knowledge_action_compile",
+                "glioma_knowledge_action_bridge",
                 "glioma_autonomous_gap_cycle",
                 "glioma_knowledge_synthesis_operating_cycle",
                 "glioma_decision_context",
@@ -60834,6 +60871,18 @@ pub fn tool_definitions() -> Vec<Value> {
                 "templates": {"type": "array", "items": {"type": "object"}, "description": "KnowledgeActionTemplate1@1 records binding claims to frontier action modes, modalities/models, expected information, cost, risk, rationale, and dependencies."}
             },
             "required": ["request", "knowledge", "frontier", "templates"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_knowledge_action_bridge",
+        "description": "Bridge a validated dependency-closed preclinical glioma knowledge-action plan into typed local candidates for the existing autonomous selector. Preserves action dependencies, maps frontier modes to closed glioma stages, emits only A1 local read/compute/write effects, and never dispatches instruments, federation, raw-data movement, or clinical decisions.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "KnowledgeActionBridgeRequest1@1 with objective, plan digest, and bounded candidate cap."},
+                "plan": {"type": "object", "description": "KnowledgeActionPlan1@1 from glioma_knowledge_action_compile."}
+            },
+            "required": ["request", "plan"]
         }
     }));
     definitions.push(json!({

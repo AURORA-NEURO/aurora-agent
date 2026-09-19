@@ -118,7 +118,7 @@ fn frontier_kind_matches(left: FrontierActionKind, right: FrontierActionKind) ->
     left == right
 }
 
-fn digest_input(output: &KnowledgeActionPlan) -> serde_json::Value {
+pub(crate) fn digest_input(output: &KnowledgeActionPlan) -> serde_json::Value {
     serde_json::json!({
         "feature_id": output.feature_id,
         "output_schema": output.output_schema,
@@ -257,6 +257,8 @@ fn validate_request(
         if template.template_id.trim().is_empty()
             || !ids.insert(template.template_id.clone())
             || template.claim_id.trim().is_empty()
+            || template.modality_order.is_empty()
+            || template.model_system_order.is_empty()
             || !canonical(&template.modality_order)
             || !canonical(&template.model_system_order)
             || !canonical(&template.dependency_order)
@@ -409,7 +411,10 @@ pub fn compile_glioma_knowledge_actions(
             blocked.insert(id);
             continue;
         }
-        let new_actions = closure.difference(&selected).cloned().collect::<BTreeSet<_>>();
+        let new_actions = closure
+            .difference(&selected)
+            .cloned()
+            .collect::<BTreeSet<_>>();
         let closure_cost = new_actions
             .iter()
             .filter_map(|action_id| templates.get(action_id).map(|template| template.cost_milli))

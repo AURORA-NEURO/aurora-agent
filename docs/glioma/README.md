@@ -30,6 +30,8 @@ crates/research/src/glioma/
                                              P02 typed-knowledge frontier to P01 acquisition-candidate compiler
   programs/p02_evidence_knowledge/action_compiler.rs
                                              P02 typed-knowledge frontier to dependency-closed research-action compiler
+  programs/p02_evidence_knowledge/action_bridge.rs
+                                             P02 dependency-closed knowledge actions to local glioma selector candidates
   programs/p02_evidence_knowledge/autonomous_cycle.rs
                                              P02-to-P01 autonomous gap compilation, portfolio planning, and local execution cycle
   programs/p02_evidence_knowledge/operating_cycle.rs

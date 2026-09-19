@@ -1,5 +1,6 @@
 //! Evidence-to-typed-knowledge program ownership.
 
+pub mod action_bridge;
 pub mod action_compiler;
 pub mod autonomous_cycle;
 pub mod belief_revision;
@@ -25,6 +26,11 @@ pub use action_compiler::{
     compile_glioma_knowledge_actions, CompiledActionDisposition, CompiledResearchAction,
     KnowledgeActionCompilerError, KnowledgeActionCompilerRequest, KnowledgeActionPlan,
     KnowledgeActionPlanDisposition, KnowledgeActionTemplate,
+};
+
+pub use action_bridge::{
+    bridge_glioma_knowledge_actions, BridgedKnowledgeCandidate, KnowledgeActionBridge,
+    KnowledgeActionBridgeError, KnowledgeActionBridgeRequest,
 };
 
 pub use campaign::{
