@@ -548,16 +548,17 @@ use bioprism_research::{
     execute_glioma_mission_recovery, execute_glioma_multi_fidelity_campaign,
     execute_glioma_multimodal_ingestion_campaign, execute_glioma_multimodal_mechanism_campaign,
     execute_glioma_multimodal_mechanism_campaign_with_executor, execute_glioma_multimodal_mission,
-    execute_glioma_multimodal_operating_cycle_dry_run, execute_glioma_multimodal_quality_schedule,
-    execute_glioma_multimodal_readiness_gate, execute_glioma_program_scheduler_dry_run,
-    execute_glioma_protocol, execute_glioma_release_operating_cycle_dry_run,
-    execute_glioma_replay_campaign, execute_glioma_replication_campaign,
-    execute_glioma_research_autopilot, execute_glioma_research_director,
-    execute_glioma_robust_active_learning_campaign, execute_glioma_robustness_guided_computation,
-    execute_glioma_scientific_frontier, execute_glioma_sequential_campaign, explore_mechanisms,
-    forecast_glioma_multimodal_quality, fuse_glioma_protocol_evidence,
-    gate_glioma_protocol_transport, generate_feature_catalog, glioma_program_catalog,
-    harmonize_glioma_multimodal_batches, harmonize_multimodal_inputs,
+    execute_glioma_multimodal_operating_cycle_dry_run,
+    execute_glioma_multimodal_quality_adaptive_campaign,
+    execute_glioma_multimodal_quality_schedule, execute_glioma_multimodal_readiness_gate,
+    execute_glioma_program_scheduler_dry_run, execute_glioma_protocol,
+    execute_glioma_release_operating_cycle_dry_run, execute_glioma_replay_campaign,
+    execute_glioma_replication_campaign, execute_glioma_research_autopilot,
+    execute_glioma_research_director, execute_glioma_robust_active_learning_campaign,
+    execute_glioma_robustness_guided_computation, execute_glioma_scientific_frontier,
+    execute_glioma_sequential_campaign, explore_mechanisms, forecast_glioma_multimodal_quality,
+    fuse_glioma_protocol_evidence, gate_glioma_protocol_transport, generate_feature_catalog,
+    glioma_program_catalog, harmonize_glioma_multimodal_batches, harmonize_multimodal_inputs,
     optimize_glioma_protocol_branches, plan_adaptive_glioma_dose_surface, plan_decision_actions,
     plan_federated_benchmark_sites, plan_glioma_active_learning,
     plan_glioma_adaptive_information_campaign, plan_glioma_adaptive_mechanism_policy,
@@ -664,22 +665,22 @@ use bioprism_research::{
     PathwayActivityRequest, PowerArmObservation, PowerReestimationRequest,
     ProspectiveQualityRequest, ProtocolBranchOptimizationRequest, ProtocolCompensationRequest,
     ProtocolEvidenceFusionRequest, ProtocolEvidenceSurfaceRequest, ProtocolExecutionRequest,
-    ProtocolSimulationRequest, ProtocolTransportGateRequest, QualityExecutionMode,
-    QualityExecutionRequest, QualityScheduleRequest, ReleaseExecutionMode, ReleaseGateRequest,
-    ReliabilityCalibrationRequest, ReplayCampaign, ReplayCampaignRequest, ReplicationRequest,
-    ReplicationStudy, ResearchObjectRequest, RobustActiveLearningCampaignRequest,
-    RobustActiveLearningCandidate, RobustActiveLearningObservation, RobustActiveLearningRequest,
-    RobustExperimentDesignRequest, RobustInterventionCandidate, RobustInterventionRequest,
-    RobustnessGuidedComputationRequest, RobustnessRequest, ScientificFrontierExecutionRequest,
-    ScientificFrontierRequest, SensitivityObservation, SensitivityRequest,
-    SequentialArmObservation, SequentialCampaignRequest, SequentialDesignRequest, SpatialCell,
-    SpatialCommunicationCell, SpatialCommunicationRequest, SpatialNicheRequest,
-    SpatialPropagationRequest, SpatialRegistrationCell, SpatialRegistrationRequest,
-    StateTransitionObservation, StateTransitionRequest, StaticGliomaActionPlanner,
-    StaticGliomaComputationPlanner, StratifiedCausalRequest, StratifiedObservation,
-    TemporalFusionRequest, TemporalObservation, TemporalSpatialAlignmentRequest,
-    TrajectoryObservation, TrajectoryRequest, TransportStudy, TransportabilityRequest,
-    TypedKnowledge,
+    ProtocolSimulationRequest, ProtocolTransportGateRequest, QualityAdaptiveCampaignRequest,
+    QualityExecutionMode, QualityExecutionRequest, QualityScheduleRequest, ReleaseExecutionMode,
+    ReleaseGateRequest, ReliabilityCalibrationRequest, ReplayCampaign, ReplayCampaignRequest,
+    ReplicationRequest, ReplicationStudy, ResearchObjectRequest,
+    RobustActiveLearningCampaignRequest, RobustActiveLearningCandidate,
+    RobustActiveLearningObservation, RobustActiveLearningRequest, RobustExperimentDesignRequest,
+    RobustInterventionCandidate, RobustInterventionRequest, RobustnessGuidedComputationRequest,
+    RobustnessRequest, ScientificFrontierExecutionRequest, ScientificFrontierRequest,
+    SensitivityObservation, SensitivityRequest, SequentialArmObservation,
+    SequentialCampaignRequest, SequentialDesignRequest, SpatialCell, SpatialCommunicationCell,
+    SpatialCommunicationRequest, SpatialNicheRequest, SpatialPropagationRequest,
+    SpatialRegistrationCell, SpatialRegistrationRequest, StateTransitionObservation,
+    StateTransitionRequest, StaticGliomaActionPlanner, StaticGliomaComputationPlanner,
+    StratifiedCausalRequest, StratifiedObservation, TemporalFusionRequest, TemporalObservation,
+    TemporalSpatialAlignmentRequest, TrajectoryObservation, TrajectoryRequest, TransportStudy,
+    TransportabilityRequest, TypedKnowledge,
 };
 use bioprism_routing::{
     lab::{run as run_routing_lab, LabSettings, Task},
@@ -2370,6 +2371,9 @@ impl Server {
             }
             "glioma_multimodal_quality_execute" => {
                 self.glioma_multimodal_quality_execute(&arguments)
+            }
+            "glioma_multimodal_quality_adaptive_campaign" => {
+                self.glioma_multimodal_quality_adaptive_campaign(&arguments)
             }
             "glioma_multimodal_missingness" => self.glioma_multimodal_missingness(&arguments),
             "glioma_multimodal_reliability" => self.glioma_multimodal_reliability(&arguments),
@@ -8412,6 +8416,37 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma quality schedule execution: {error}"))
+    }
+
+    /// Run bounded adaptive quality rounds using only returned local QC metadata.
+    fn glioma_multimodal_quality_adaptive_campaign(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let mut request: QualityAdaptiveCampaignRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_multimodal_quality_adaptive_campaign requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma adaptive quality campaign request: {error}")
+            })?;
+        request.execution_mode = QualityExecutionMode::DryRun;
+        let mut executor = DryRunQualityScheduleExecutor;
+        let campaign = execute_glioma_multimodal_quality_adaptive_campaign(&request, &mut executor)
+            .map_err(|error| format!("glioma adaptive quality campaign refused: {error}"))?;
+        serde_json::to_value(json!({
+            "campaign": campaign,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "next_routes": ["glioma_multimodal_quality_forecast", "glioma_multimodal_quality_scheduler", "glioma_multimodal_quality_execute", "glioma_multimodal_readiness"],
+            "guarantees": [
+                "each round is budgeted, approval-bound, and planned from typed local QC observations only",
+                "satisfied modalities leave the pending frontier while below-floor, failed, and unresolved modalities remain explicit",
+                "required quality failure and resource exhaustion stop the campaign rather than creating an unconstrained loop",
+                "MCP dry-run performs no assay, instrument, federation, raw-data, or clinical action"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma adaptive quality campaign: {error}"))
     }
 
     /// Cluster de-identified preclinical glioma sample lineages from multiple modality vectors.
@@ -51842,6 +51877,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_multimodal_quality_forecast",
                 "glioma_multimodal_quality_scheduler",
                 "glioma_multimodal_quality_execute",
+                "glioma_multimodal_quality_adaptive_campaign",
                 "glioma_multimodal_consensus",
                 "glioma_multimodal_harmonize",
                 "glioma_multimodal_latent_factors",
@@ -61513,6 +61549,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "QualityExecutionRequest1@1 containing a validated QualitySchedulePlan1@1, content-bound study approval, epoch/retry policy, quality floor, and execution mode."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_multimodal_quality_adaptive_campaign",
+        "description": "Run bounded adaptive preclinical glioma quality-acquisition rounds. Each round executes the current approved schedule, assimilates only typed local QC metadata, removes satisfied modalities from the pending frontier, and replans unresolved risk; required failures, expired approvals, and budget exhaustion remain explicit and MCP never performs a physical or clinical action.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "QualityAdaptiveCampaignRequest1@1 with study/model, ordered epochs, forecast-risk candidates, active approval, budget/horizon, quality/retry gates, and bounded round count."}
             },
             "required": ["request"]
         }

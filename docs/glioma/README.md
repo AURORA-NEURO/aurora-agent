@@ -353,6 +353,8 @@ crates/research/src/glioma/
                                              P03 budget-, duration-, deadline-, and forecast-risk-aware modality acquisition scheduling
   p03_multimodal_ingestion_qc/quality_execution.rs
                                              P03 approval-bound execution of the selected quality schedule with retries and quality-floor gates
+  p03_multimodal_ingestion_qc/quality_adaptive_campaign.rs
+                                             P03 closed-loop quality campaign that assimilates QC outcomes and replans bounded acquisition rounds
   p03_multimodal_ingestion_qc/spatial_niche.rs
                                              P03 spatial neighbourhood graph, same-lineage niche components, and cross-lineage enrichment
   p03_multimodal_ingestion_qc/spatial_communication.rs
@@ -560,6 +562,11 @@ only the selected modality order through an institution-owned executor seam, ret
 transient failures, preserves below-floor QC and blocked work, and refuses downstream continuation
 when required quality gates fail. MCP uses a deterministic dry-run executor; no hardware, raw
 payload, or clinical decision is produced by the route.
+The adaptive campaign (`execute_glioma_multimodal_quality_adaptive_campaign`) closes the loop
+without becoming an unconstrained self-modifying agent: each round has a bounded budget and
+approval window, only typed QC observations update risk, satisfied modalities are removed from the
+pending frontier, and required failures or budget exhaustion stop the campaign with explicit
+negative evidence. This is the P03 handoff into readiness and endpoint analysis.
 P05 now also includes signed pathway activity inference (`analyze_glioma_pathway_activity`) that
 maps declared modality-specific molecular nodes to reliability-weighted pathway activity, compares
 cross-modal direction, and ranks mechanism priorities. Missing nodes, low-confidence bottlenecks,

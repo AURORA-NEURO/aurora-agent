@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 751;
+const TOOL_DEFINITION_COUNT: usize = 752;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -1525,6 +1525,56 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
     assert_eq!(
         quality_execution["execution"]["completed_order"][0],
         json!("genomics")
+    );
+
+    let quality_adaptive_campaign = call(
+        &mut server,
+        "glioma_multimodal_quality_adaptive_campaign",
+        json!({
+            "request": {
+                "objective": "adaptively resolve QC risk before endpoint fusion",
+                "study_id": "mcp-quality-schedule-study",
+                "model_system": "organoid",
+                "epoch_order": ["epoch-0", "epoch-1", "epoch-2"],
+                "candidates": [
+                    {"modality":"genomics","forecast_quality_milli":600,"quality_risk_milli":700,"scientific_value_milli":800,"cost_units":2,"duration_units":1,"deadline_epoch_index":0,"required":true,"fallback_modality":null},
+                    {"modality":"imaging","forecast_quality_milli":900,"quality_risk_milli":200,"scientific_value_milli":700,"cost_units":2,"duration_units":1,"deadline_epoch_index":1,"required":false,"fallback_modality":null}
+                ],
+                "approval": {
+                    "approval_id": "mcp-quality-approval",
+                    "approver_id": "mcp-researcher",
+                    "scope": "mcp-quality-schedule-study",
+                    "issued_epoch": 10,
+                    "expires_epoch": 20,
+                    "revoked": false,
+                    "approval_digest": approval_digest
+                },
+                "current_epoch": 12,
+                "budget_units": 12,
+                "horizon_units": 3,
+                "min_forecast_quality_milli": 700,
+                "max_selected": 2,
+                "max_alternatives": 2,
+                "max_rounds": 2,
+                "max_retries": 0,
+                "stop_on_quality_floor": false,
+                "require_all_required": true,
+                "execution_mode": "dry_run"
+            }
+        }),
+    );
+    assert_eq!(quality_adaptive_campaign["dispatch"], json!("not_started"));
+    assert_eq!(quality_adaptive_campaign["simulation_only"], json!(true));
+    assert_eq!(
+        quality_adaptive_campaign["campaign"]["disposition"],
+        json!("blocked")
+    );
+    assert_eq!(
+        quality_adaptive_campaign["campaign"]["rounds"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
     );
 
     let harmonization = call(

@@ -17,6 +17,7 @@ pub mod missingness_audit;
 pub mod modality_portfolio;
 pub mod operating_cycle;
 pub mod prospective_quality;
+pub mod quality_adaptive_campaign;
 pub mod quality_execution;
 pub mod quality_scheduler;
 pub mod readiness_gate;
@@ -105,6 +106,12 @@ pub use prospective_quality::{
     forecast_glioma_multimodal_quality, ModalityQualityForecast, ProspectiveQualityError,
     ProspectiveQualityForecast, ProspectiveQualityRequest, QualityForecastDisposition,
     QualityForecastObservation,
+};
+pub use quality_adaptive_campaign::{
+    execute_glioma_multimodal_quality_adaptive_campaign, QualityAdaptiveCampaign,
+    QualityAdaptiveCampaignDisposition, QualityAdaptiveCampaignError,
+    QualityAdaptiveCampaignRequest, QualityAdaptiveCampaignRound,
+    QualityAdaptiveCampaignStopReason,
 };
 pub use quality_execution::{
     execute_glioma_multimodal_quality_schedule, DryRunQualityScheduleExecutor,
