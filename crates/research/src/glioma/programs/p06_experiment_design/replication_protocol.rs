@@ -207,20 +207,17 @@ fn validate_output(
             "compiled task order exceeds the bounded product limit".into(),
         ));
     }
-    match output.disposition {
-        ReplicationProtocolCompilationDisposition::Compiled => {
-            if output.protocol.is_none()
-                || output.preflight.is_none()
-                || output.preflight.as_ref().is_some_and(|simulation| {
-                    simulation.disposition != ProtocolDisposition::Feasible
-                })
-            {
-                return Err(ReplicationProtocolCompilationError::InvalidOutput(
-                    "compiled output requires a feasible protocol preflight".into(),
-                ));
-            }
-        }
-        _ => {}
+    if output.disposition == ReplicationProtocolCompilationDisposition::Compiled
+        && (output.protocol.is_none()
+            || output.preflight.is_none()
+            || output
+                .preflight
+                .as_ref()
+                .is_some_and(|simulation| simulation.disposition != ProtocolDisposition::Feasible))
+    {
+        return Err(ReplicationProtocolCompilationError::InvalidOutput(
+            "compiled output requires a feasible protocol preflight".into(),
+        ));
     }
     let expected = ContentHash::of_value(&digest_input(output))
         .map_err(|error| ReplicationProtocolCompilationError::Digest(error.to_string()))?;

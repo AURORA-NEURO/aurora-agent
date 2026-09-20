@@ -112,8 +112,10 @@ crates/research/src/glioma/
                                              P06 multi-site replication topology with pooled effects, heterogeneity, power proxy, leave-one-site-out sensitivity, and budget/risk allocation
     programs/p06_experiment_design/replication_continuation.rs
                                              P06 observation-driven replication-wave continuation with quality, stopping, and negative-result gates
-    programs/p06_experiment_design/replication_protocol.rs
+  programs/p06_experiment_design/replication_protocol.rs
                                              P06-to-P07 compiler for site setup, arm, QC, and deterministic protocol preflight
+  programs/p06_experiment_design/mechanism_validation.rs
+                                             P05 robust intervention portfolio to P06 power-aware sequential validation compiler
   programs/p05_mechanism_exploration/operating_cycle.rs
                                              P05 mechanism-discrimination campaign to typed next-assay operating cycle
   programs/p05_mechanism_exploration/calibrated_campaign.rs

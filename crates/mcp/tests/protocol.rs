@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 769;
+const TOOL_DEFINITION_COUNT: usize = 770;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -2541,6 +2541,48 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
         robust_intervention_portfolio["portfolio"]["disposition"],
         json!("qualified")
     );
+
+    let mechanism_validation_plan = call(
+        &mut server,
+        "glioma_mechanism_validation_plan",
+        json!({
+            "request": {
+                "objective": "select a robust invasion-suppressing perturbation",
+                "portfolio": robust_intervention_portfolio["portfolio"].clone(),
+                "power": {
+                    "objective": "select a robust invasion-suppressing perturbation",
+                    "model_system": "organoid",
+                    "endpoint": "invasion-index",
+                    "control_arm_id": "control",
+                    "target_effect_milli": 10,
+                    "alpha_total_milli": 100,
+                    "power_target_milli": 500,
+                    "current_look": 1,
+                    "max_looks": 2,
+                    "min_replicates_per_arm": 1,
+                    "max_replicates_per_arm": 16,
+                    "max_new_replicates_per_arm": 4,
+                    "budget_units": 16,
+                    "risk_ceiling_milli": 700
+                },
+                "arms": [
+                    {"arm_id":"control","candidate_id":null,"label":"vehicle control","target_node_id":"invasion","protocol_id":"invasion-v1","role":"control","artifact":{"artifact_id":"validation-control-arm","content_hash":artifact_hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                    {"arm_id":"egfr-arm","candidate_id":"inhibit-egfr","label":"EGFR perturbation","target_node_id":"invasion","protocol_id":"invasion-v1","role":"intervention","artifact":{"artifact_id":"validation-egfr-arm","content_hash":artifact_hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}}
+                ],
+                "observations": [
+                    {"arm_id":"control","label":"vehicle control","artifact":{"artifact_id":"validation-control-observation","content_hash":artifact_hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"model_system":"organoid","mean_response_milli":100,"variance_milli2":100,"observations":2,"risk_milli":100,"cost_units":1},
+                    {"arm_id":"egfr-arm","label":"EGFR perturbation","artifact":{"artifact_id":"validation-egfr-observation","content_hash":artifact_hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"model_system":"organoid","mean_response_milli":160,"variance_milli2":100,"observations":2,"risk_milli":100,"cost_units":1}
+                ],
+                "require_qualified_portfolio": true
+            }
+        }),
+    );
+    assert_eq!(mechanism_validation_plan["dispatch"], json!("not_started"));
+    assert_eq!(
+        mechanism_validation_plan["validation"]["disposition"],
+        json!("qualified")
+    );
+    assert!(mechanism_validation_plan["validation"]["power_plan"].is_object());
 
     let information_design = call(
         &mut server,

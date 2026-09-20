@@ -573,9 +573,10 @@ use bioprism_research::{
     plan_glioma_closed_loop_campaign, plan_glioma_computation_portfolio,
     plan_glioma_decision_branches, plan_glioma_evidence_acquisition,
     plan_glioma_evidence_contradiction_cut, plan_glioma_information_design,
-    plan_glioma_multi_fidelity_optimization, plan_glioma_multimodal_portfolio,
-    plan_glioma_multimodal_quality_remediation, plan_glioma_multimodal_quality_schedule,
-    plan_glioma_power_reestimation, plan_glioma_protocol_compensation, plan_glioma_replication,
+    plan_glioma_mechanism_validation, plan_glioma_multi_fidelity_optimization,
+    plan_glioma_multimodal_portfolio, plan_glioma_multimodal_quality_remediation,
+    plan_glioma_multimodal_quality_schedule, plan_glioma_power_reestimation,
+    plan_glioma_protocol_compensation, plan_glioma_replication,
     plan_glioma_replication_continuation, plan_glioma_robust_active_learning,
     plan_glioma_robust_intervention_portfolio, plan_glioma_scientific_frontier,
     plan_glioma_sequential_design, plan_glioma_workflow, preflight_glioma_instrument,
@@ -669,10 +670,10 @@ use bioprism_research::{
     MechanismDynamicsNode, MechanismDynamicsRequest, MechanismFeatureObservation,
     MechanismGraphEdge, MechanismGraphNode, MechanismGraphRequest, MechanismHypothesis,
     MechanismOperatingCycleRequest, MechanismRequest, MechanismStateFilterRequest,
-    MechanismStateSmootherRequest, MediationObservation, MediationRequest, MetaAnalysisRequest,
-    MissingnessAuditRequest, ModalityPortfolioRequest, ModalityVector,
-    MultiFidelityCampaignRequest, MultiFidelityOptimizationRequest, MultimodalDecisionGateRequest,
-    MultimodalExecutionMode, MultimodalIngestionCampaignRequest,
+    MechanismStateSmootherRequest, MechanismValidationPlanRequest, MediationObservation,
+    MediationRequest, MetaAnalysisRequest, MissingnessAuditRequest, ModalityPortfolioRequest,
+    ModalityVector, MultiFidelityCampaignRequest, MultiFidelityOptimizationRequest,
+    MultimodalDecisionGateRequest, MultimodalExecutionMode, MultimodalIngestionCampaignRequest,
     MultimodalMechanismCampaignRequest, MultimodalObservation, MultimodalReadinessRequest,
     MultimodalRequest, PathwayActivityDefinition, PathwayActivityObservation,
     PathwayActivityRequest, PowerArmObservation, PowerReestimationRequest,
@@ -2503,6 +2504,7 @@ impl Server {
             "glioma_robust_intervention_portfolio" => {
                 self.glioma_robust_intervention_portfolio(&arguments)
             }
+            "glioma_mechanism_validation_plan" => self.glioma_mechanism_validation_plan(&arguments),
             "glioma_information_design" => self.glioma_information_design(&arguments),
             "glioma_adaptive_panel" => self.glioma_adaptive_panel(&arguments),
             "glioma_replication_plan" => self.glioma_replication_plan(&arguments),
@@ -10874,6 +10876,39 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma robust intervention portfolio: {error}"))
+    }
+
+    /// Bridge a robust mechanistic intervention portfolio into a power-aware validation queue.
+    /// This route is still planning-only: it composes P05 model uncertainty with P06 interim
+    /// boundaries and returns the exact missing bindings or next local batch for a researcher.
+    fn glioma_mechanism_validation_plan(&self, arguments: &Value) -> Result<Value, String> {
+        let request: MechanismValidationPlanRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_mechanism_validation_plan requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma mechanism-validation request: {error}"))?;
+        let output = plan_glioma_mechanism_validation(&request)
+            .map_err(|error| format!("glioma mechanism validation refused: {error}"))?;
+        serde_json::to_value(json!({
+            "validation": output,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "next_routes": [
+                "glioma_replication_plan",
+                "glioma_replication_protocol_compile",
+                "glioma_analysis_run"
+            ],
+            "guarantees": [
+                "only robustly selected mechanism candidates can enter the validation queue",
+                "power, interim efficacy, futility, risk, budget, and replicate gates remain typed and explicit",
+                "missing local observations never become fabricated null results or confidence",
+                "negative and underpowered validation outcomes remain first-class research evidence",
+                "the route never dispatches an assay, instrument, federation, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma mechanism validation plan: {error}"))
     }
 
     /// Select a bounded local glioma assay batch by expected reduction in mechanism uncertainty.
@@ -52476,6 +52511,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_mechanism_counterfactual",
                 "glioma_mechanism_ensemble_counterfactual",
                 "glioma_robust_intervention_portfolio",
+                "glioma_mechanism_validation_plan",
                 "glioma_information_design",
                 "glioma_adaptive_panel",
                 "glioma_replication_plan",
@@ -63097,6 +63133,17 @@ pub fn tool_definitions() -> Vec<Value> {
                 "actions": {"type": "array", "items": {"type": "object"}, "description": "DesignAction1@1 candidate assays with per-mechanism discrete outcome probabilities, feasibility, risk, cost, and replicate bounds."}
             },
             "required": ["request", "mechanisms", "actions"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_mechanism_validation_plan",
+        "description": "Compile robust preclinical glioma mechanism interventions into a power-aware sequential validation queue. Selected candidates must bind to local control/intervention arms and observations; interim efficacy, futility, risk, budget, replicate, and negative-result gates remain explicit. This route never dispatches an assay, instrument, federation, or clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "MechanismValidationPlanRequest1@1 containing a P05 RobustInterventionPortfolio1@1, P06 PowerReestimationRequest1@1, typed validation arms, and local aggregate observations."}
+            },
+            "required": ["request"]
         }
     }));
     definitions.push(json!({

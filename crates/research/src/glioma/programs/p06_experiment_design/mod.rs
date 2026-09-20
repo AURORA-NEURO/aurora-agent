@@ -14,6 +14,7 @@ pub mod contrast_design;
 pub mod dose_response;
 pub mod frontier_controller;
 pub mod information_design;
+pub mod mechanism_validation;
 pub mod multi_fidelity;
 pub mod multi_fidelity_campaign;
 pub mod operating_cycle;
@@ -108,6 +109,12 @@ pub use multi_fidelity_campaign::{
     MultiFidelityCampaign, MultiFidelityCampaignDisposition, MultiFidelityCampaignError,
     MultiFidelityCampaignExecutor, MultiFidelityCampaignRequest, MultiFidelityCampaignRound,
     MultiFidelityCampaignStopReason, MultiFidelityExecutionFailure,
+};
+
+pub use mechanism_validation::{
+    plan_glioma_mechanism_validation, MechanismValidationArm, MechanismValidationDisposition,
+    MechanismValidationError, MechanismValidationPlan, MechanismValidationPlanRequest,
+    ValidationAction, ValidationActionKind, ValidationArmRole,
 };
 pub use operating_cycle::{
     execute_glioma_experiment_operating_cycle, DryRunExperimentOperatingCycleExecutor,
