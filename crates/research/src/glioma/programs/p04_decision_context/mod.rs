@@ -8,6 +8,7 @@ pub mod branch_planner;
 pub mod campaign;
 pub mod context_compiler;
 pub mod decision_cycle;
+pub mod omission_certificate;
 
 pub use action_bridge::{
     plan_decision_actions, DecisionActionPlan, DecisionActionPlanDisposition,
@@ -48,6 +49,11 @@ pub use context_compiler::{
 pub use decision_cycle::{
     execute_glioma_decision_operating_cycle, DecisionOperatingCycle,
     DecisionOperatingCycleDisposition, DecisionOperatingCycleError, DecisionOperatingCycleRequest,
+};
+pub use omission_certificate::{
+    certify_decision_omissions, DecisionCoverageState, DecisionOmissionCertificate,
+    DecisionOmissionCertificateError, DecisionOmissionCertificateRequest,
+    DecisionOmissionDisposition, DecisionOmissionEntry,
 };
 
 use crate::glioma::catalog::{glioma_program_catalog, GliomaProgramDescriptor, GliomaProgramId};

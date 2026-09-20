@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 730;
+const TOOL_DEFINITION_COUNT: usize = 731;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -6012,6 +6012,25 @@ fn glioma_knowledge_composition_exposes_supported_paths_and_bottlenecks() {
         graph["graph"]["parallel_waves"].as_array().unwrap().len(),
         2
     );
+    let omission = call(
+        &mut server,
+        "glioma_decision_omission_certificate",
+        json!({
+            "request": {
+                "objective": "compose invasion mechanism evidence",
+                "required_claim_order": [claims[0].as_str().unwrap(), claims[1].as_str().unwrap()],
+                "required_modality_order": ["genomics"],
+                "required_model_system_order": ["organoid"],
+                "require_dependency_closed": true,
+                "max_next_actions": 8
+            },
+            "context": context["context"].clone(),
+            "graph": graph["graph"].clone()
+        }),
+    );
+    assert_eq!(omission["dispatch"], json!("not_started"));
+    assert_eq!(omission["certificate"]["disposition"], json!("qualified"));
+    assert_eq!(omission["certificate"]["completeness_milli"], json!(1000));
 }
 
 #[test]

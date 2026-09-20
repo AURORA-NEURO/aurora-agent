@@ -52,6 +52,8 @@ crates/research/src/glioma/
                                              P04 evidence-gap to typed next-action compilation
   programs/p04_decision_context/action_graph.rs
                                              P04 claim-path to dependency-closed action DAG and parallel waves
+  programs/p04_decision_context/omission_certificate.rs
+                                             P04 claim/modality/model closure certificate with explicit omissions and next actions
   programs/p04_decision_context/branch_planner.rs
                                              P04 scenario-aware branch-and-bound portfolio planning with Pareto frontier and uncertainty gates
   programs/p04_decision_context/branch_campaign.rs

@@ -350,6 +350,7 @@ pub fn implemented_feature_ids() -> Vec<&'static str> {
         crate::glioma::programs::p04_decision_context::context_compiler::FEATURE_ID,
         crate::glioma::programs::p04_decision_context::action_bridge::FEATURE_ID,
         crate::glioma::programs::p04_decision_context::action_graph::FEATURE_ID,
+        crate::glioma::programs::p04_decision_context::omission_certificate::FEATURE_ID,
         crate::glioma::programs::p04_decision_context::branch_planner::FEATURE_ID,
         crate::glioma::programs::p04_decision_context::branch_campaign::FEATURE_ID,
         crate::glioma::programs::p04_decision_context::adaptive_branch_campaign::FEATURE_ID,

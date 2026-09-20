@@ -141,7 +141,7 @@ pub use programs::p03_multimodal_ingestion_qc::{
     TemporalState, TemporalStateFeature, TemporalTransition, TemporalTransitionDirection,
 };
 pub use programs::p04_decision_context::{
-    compile_decision_action_graph, compile_decision_context,
+    certify_decision_omissions, compile_decision_action_graph, compile_decision_context,
     execute_glioma_adaptive_decision_branch_campaign,
     execute_glioma_adaptive_decision_branch_campaign_dry_run,
     execute_glioma_decision_branch_campaign, execute_glioma_decision_context_campaign,
@@ -160,7 +160,9 @@ pub use programs::p04_decision_context::{
     DecisionContextCampaignError, DecisionContextCampaignExecutionFailure,
     DecisionContextCampaignExecutor, DecisionContextCampaignRequest, DecisionContextCampaignRound,
     DecisionContextCampaignStopReason, DecisionContextDisposition, DecisionContextError,
-    DecisionContextRequest, DecisionGraphNode, DecisionOperatingCycle,
+    DecisionContextRequest, DecisionCoverageState, DecisionGraphNode, DecisionOmissionCertificate,
+    DecisionOmissionCertificateError, DecisionOmissionCertificateRequest,
+    DecisionOmissionDisposition, DecisionOmissionEntry, DecisionOperatingCycle,
     DecisionOperatingCycleDisposition, DecisionOperatingCycleError, DecisionOperatingCycleRequest,
     DecisionScenario, DecisionScenarioOutcome, DecisionScenarioScore,
     DryRunDecisionContextCampaignExecutor,
