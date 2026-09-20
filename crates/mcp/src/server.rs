@@ -491,11 +491,11 @@ use bioprism_repair::{
 };
 use bioprism_research::{
     adjudicate_glioma_assay_evidence, adjudicate_glioma_multimodal_contradictions,
-    allocate_glioma_assays, analyze_causal_sensitivity, analyze_federated_benchmark,
-    analyze_federated_mechanism_transport, analyze_glioma_causal_contrast,
-    analyze_glioma_clonal_evolution, analyze_glioma_clone_panel_outcomes,
-    analyze_glioma_combination_synergy, analyze_glioma_dose_response,
-    analyze_glioma_latent_factors, analyze_glioma_mediation,
+    admit_glioma_decision_actions, allocate_glioma_assays, analyze_causal_sensitivity,
+    analyze_federated_benchmark, analyze_federated_mechanism_transport,
+    analyze_glioma_causal_contrast, analyze_glioma_clonal_evolution,
+    analyze_glioma_clone_panel_outcomes, analyze_glioma_combination_synergy,
+    analyze_glioma_dose_response, analyze_glioma_latent_factors, analyze_glioma_mediation,
     analyze_glioma_multimodal_decision_gate, analyze_glioma_multimodal_dropout_stress,
     analyze_glioma_multimodal_evidence_fusion, analyze_glioma_multimodal_graph_fusion,
     analyze_glioma_multimodal_missingness, analyze_glioma_multimodal_sensitivity,
@@ -603,11 +603,11 @@ use bioprism_research::{
     ContradictionAdjudicationRequest, ContradictionCutRequest, ContradictionEvidence,
     ContrastDesignRequest, CounterfactualEnsembleRequest, CounterfactualIntervention,
     CounterfactualModel, CounterfactualRequest, DecisionActionGraphRequest,
-    DecisionActionPlanRequest, DecisionBranchCampaignRequest, DecisionBranchPlannerRequest,
-    DecisionContext, DecisionContextCampaignRequest, DecisionContextRequest,
-    DecisionOmissionCertificateRequest, DecisionOperatingCycleRequest, DesignAction,
-    DesignMechanism, DoseResponseObservation, DoseResponseRequest, DriftSurveillanceRequest,
-    DropoutStressRequest, DryRunActiveLearningCampaignExecutor,
+    DecisionActionPlanRequest, DecisionAdmissionRequest, DecisionBranchCampaignRequest,
+    DecisionBranchPlannerRequest, DecisionContext, DecisionContextCampaignRequest,
+    DecisionContextRequest, DecisionOmissionCertificateRequest, DecisionOperatingCycleRequest,
+    DesignAction, DesignMechanism, DoseResponseObservation, DoseResponseRequest,
+    DriftSurveillanceRequest, DropoutStressRequest, DryRunActiveLearningCampaignExecutor,
     DryRunAdaptiveAllocationCampaignExecutor, DryRunAdaptiveMechanismPolicyExecutor,
     DryRunDecisionContextCampaignExecutor, DryRunEvidenceAcquisitionExecutor,
     DryRunEvidenceRefreshCampaignExecutor, DryRunExperimentOperatingCycleExecutor,
@@ -2446,6 +2446,7 @@ impl Server {
                 self.glioma_knowledge_synthesis_operating_cycle(&arguments)
             }
             "glioma_decision_context" => self.glioma_decision_context(&arguments),
+            "glioma_decision_admission_gate" => self.glioma_decision_admission_gate(&arguments),
             "glioma_decision_action_graph" => self.glioma_decision_action_graph(&arguments),
             "glioma_decision_omission_certificate" => {
                 self.glioma_decision_omission_certificate(&arguments)
@@ -9908,6 +9909,32 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma decision context: {error}"))
+    }
+
+    /// Gate generated research actions before autonomous execution.
+    fn glioma_decision_admission_gate(&self, arguments: &Value) -> Result<Value, String> {
+        let request: DecisionAdmissionRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_decision_admission_gate requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma decision-admission request: {error}"))?;
+        let admission = admit_glioma_decision_actions(&request)
+            .map_err(|error| format!("glioma decision admission refused: {error}"))?;
+        serde_json::to_value(json!({
+            "admission": admission,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "next_routes": ["glioma_decision_action_graph", "glioma_decision_action_plan", "glioma_decision_context_campaign_execute"],
+            "guarantees": [
+                "evidence, freshness, coverage, contradiction, reproducibility, dependency, effect, approval, preflight, and budget gates remain explicit",
+                "admitted actions are only local typed candidates and are not executed by this route",
+                "blocked, approval-required, and denied actions cannot be silently promoted",
+                "route performs no assay, instrument, federation, raw-data, or clinical action"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma decision admission: {error}"))
     }
 
     /// Compile composed knowledge paths into dependency-closed, parallelizable decision actions.
@@ -52035,6 +52062,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_autonomous_gap_cycle",
                 "glioma_knowledge_synthesis_operating_cycle",
                 "glioma_decision_context",
+                "glioma_decision_admission_gate",
                 "glioma_decision_action_graph",
                 "glioma_decision_omission_certificate",
                 "glioma_decision_branch_plan",
@@ -62235,6 +62263,17 @@ pub fn tool_definitions() -> Vec<Value> {
                 "knowledge": {"type": "object", "description": "TypedKnowledge1@1 from glioma_knowledge_compile."}
             },
             "required": ["request", "knowledge"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_decision_admission_gate",
+        "description": "Gate generated preclinical glioma research actions before autonomous execution. Evaluates evidence strength, freshness, modality coverage, contradiction, reproducibility, dependency closure, effect permissions, autonomy approval, signed preflight, and budget, returning admitted, approval-required, blocked, and denied partitions without executing any action.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "DecisionAdmissionRequest1@1 with typed action candidates, ordered dependencies, evidence gates, effect permissions, autonomy approval/preflight state, and bounded budget."}
+            },
+            "required": ["request"]
         }
     }));
     definitions.push(json!({

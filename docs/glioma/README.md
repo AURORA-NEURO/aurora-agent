@@ -50,6 +50,8 @@ crates/research/src/glioma/
                                              P07 admission-bound execution of only the scientifically runnable frontier batch
   programs/p04_decision_context/context_compiler.rs
                                              P04 evidence-gap to typed next-action compilation
+  programs/p04_decision_context/admission_gate.rs
+                                             P04 evidence, freshness, contradiction, effect, dependency, approval, preflight, and budget admission gate
   programs/p04_decision_context/action_graph.rs
                                              P04 claim-path to dependency-closed action DAG and parallel waves
   programs/p04_decision_context/omission_certificate.rs
@@ -453,6 +455,12 @@ returns evidence, it recompiles typed knowledge and decision context, removes co
 replans the robust frontier, and continues only while bounded budget and progress gates hold. No
 scenario forecast is promoted to an observation; no-progress, executor failure, budget exhaustion,
 and unresolved branch frontiers remain explicit terminal states for the researcher.
+The P04 admission gate (`admit_glioma_decision_actions`) is the execution boundary after context
+compilation: it evaluates every generated action against evidence strength, freshness, modality
+coverage, contradiction, reproducibility, dependency closure, effect permissions, autonomy
+approval, signed preflight, and budget. It emits admitted, approval-required, blocked, and denied
+partitions with stable reason codes, so autonomous research can advance only through typed actions
+that are currently supportable and authorized.
 P07 now also has an
 adaptive campaign planner (`plan_glioma_workflow`) and a guarded full-program executor that
 chooses deterministic next batches, closes over dependencies, and routes unresolved evidence,

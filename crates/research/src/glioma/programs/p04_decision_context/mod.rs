@@ -3,6 +3,7 @@
 pub mod action_bridge;
 pub mod action_graph;
 pub mod adaptive_branch_campaign;
+pub mod admission_gate;
 pub mod branch_campaign;
 pub mod branch_planner;
 pub mod campaign;
@@ -24,6 +25,11 @@ pub use adaptive_branch_campaign::{
     AdaptiveDecisionBranchCampaignDisposition, AdaptiveDecisionBranchCampaignError,
     AdaptiveDecisionBranchCampaignRequest, AdaptiveDecisionBranchCampaignRound,
     AdaptiveDecisionBranchCampaignStopReason,
+};
+pub use admission_gate::{
+    admit_glioma_decision_actions, DecisionAdmissionAction, DecisionAdmissionCampaignDisposition,
+    DecisionAdmissionDisposition, DecisionAdmissionError, DecisionAdmissionRecord,
+    DecisionAdmissionRequest, DecisionAdmissionResult,
 };
 pub use branch_campaign::{
     execute_glioma_decision_branch_campaign, BranchExecutionDisposition, DecisionBranchCampaign,

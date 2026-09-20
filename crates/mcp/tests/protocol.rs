@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 756;
+const TOOL_DEFINITION_COUNT: usize = 757;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -3256,6 +3256,54 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
     assert_eq!(
         decision_context["context"]["actions"][0]["candidate"]["stage_kind"],
         json!("mechanism_exploration")
+    );
+
+    let decision_admission = call(
+        &mut server,
+        "glioma_decision_admission_gate",
+        json!({
+            "request": {
+                "objective": "admit a bounded glioma computation",
+                "actions": [{
+                    "action_id":"compute-glioma-state",
+                    "stage_kind":"computational_execution",
+                    "modality":"genomics",
+                    "model_system":"organoid",
+                    "depends_on":[],
+                    "cost_units":3,
+                    "autonomy_tier":"a1",
+                    "effects":["execute_local_computation"],
+                    "evidence_milli":900,
+                    "freshness_milli":900,
+                    "coverage_milli":900,
+                    "contradiction_milli":50,
+                    "reproducibility_milli":900,
+                    "approval_granted":false,
+                    "signed_preflight":true,
+                    "local_only":true
+                }],
+                "budget_units":10,
+                "max_admitted_actions":4,
+                "require_dependency_closure":true,
+                "min_evidence_milli":700,
+                "min_freshness_milli":700,
+                "min_coverage_milli":700,
+                "max_contradiction_milli":200,
+                "min_reproducibility_milli":700,
+                "allow_instrument_execution":false,
+                "allow_federation_export":false
+            }
+        }),
+    );
+    assert_eq!(decision_admission["dispatch"], json!("not_started"));
+    assert_eq!(decision_admission["simulation_only"], json!(true));
+    assert_eq!(
+        decision_admission["admission"]["disposition"],
+        json!("ready")
+    );
+    assert_eq!(
+        decision_admission["admission"]["admitted_order"],
+        json!(["compute-glioma-state"])
     );
 
     let decision_action_plan = call(
