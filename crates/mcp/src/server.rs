@@ -550,23 +550,24 @@ use bioprism_research::{
     execute_glioma_research_director, execute_glioma_robust_active_learning_campaign,
     execute_glioma_robustness_guided_computation, execute_glioma_scientific_frontier,
     execute_glioma_sequential_campaign, explore_mechanisms, fuse_glioma_protocol_evidence,
-    generate_feature_catalog, glioma_program_catalog, harmonize_glioma_multimodal_batches,
-    harmonize_multimodal_inputs, optimize_glioma_protocol_branches,
-    plan_adaptive_glioma_dose_surface, plan_decision_actions, plan_federated_benchmark_sites,
-    plan_glioma_active_learning, plan_glioma_adaptive_information_campaign,
-    plan_glioma_adaptive_mechanism_policy, plan_glioma_adaptive_research_frontier,
-    plan_glioma_adaptive_workflow, plan_glioma_clone_continuation,
-    plan_glioma_clone_perturbation_panel, plan_glioma_closed_loop_campaign,
-    plan_glioma_computation_portfolio, plan_glioma_decision_branches,
-    plan_glioma_evidence_acquisition, plan_glioma_evidence_contradiction_cut,
-    plan_glioma_information_design, plan_glioma_multi_fidelity_optimization,
-    plan_glioma_power_reestimation, plan_glioma_protocol_compensation,
-    plan_glioma_robust_active_learning, plan_glioma_robust_intervention_portfolio,
-    plan_glioma_scientific_frontier, plan_glioma_sequential_design, plan_glioma_workflow,
-    preflight_glioma_instrument, prioritize_glioma_evidence, prioritize_knowledge_frontier,
-    propagate_glioma_mechanism_graph, qualify_evidence, register_glioma_spatial_samples,
-    revise_glioma_beliefs, schedule_glioma_computation_placement, schedule_glioma_instrument_fleet,
-    select_glioma_actions, simulate_glioma_counterfactual, simulate_glioma_counterfactual_ensemble,
+    gate_glioma_protocol_transport, generate_feature_catalog, glioma_program_catalog,
+    harmonize_glioma_multimodal_batches, harmonize_multimodal_inputs,
+    optimize_glioma_protocol_branches, plan_adaptive_glioma_dose_surface, plan_decision_actions,
+    plan_federated_benchmark_sites, plan_glioma_active_learning,
+    plan_glioma_adaptive_information_campaign, plan_glioma_adaptive_mechanism_policy,
+    plan_glioma_adaptive_research_frontier, plan_glioma_adaptive_workflow,
+    plan_glioma_clone_continuation, plan_glioma_clone_perturbation_panel,
+    plan_glioma_closed_loop_campaign, plan_glioma_computation_portfolio,
+    plan_glioma_decision_branches, plan_glioma_evidence_acquisition,
+    plan_glioma_evidence_contradiction_cut, plan_glioma_information_design,
+    plan_glioma_multi_fidelity_optimization, plan_glioma_power_reestimation,
+    plan_glioma_protocol_compensation, plan_glioma_robust_active_learning,
+    plan_glioma_robust_intervention_portfolio, plan_glioma_scientific_frontier,
+    plan_glioma_sequential_design, plan_glioma_workflow, preflight_glioma_instrument,
+    prioritize_glioma_evidence, prioritize_knowledge_frontier, propagate_glioma_mechanism_graph,
+    qualify_evidence, register_glioma_spatial_samples, revise_glioma_beliefs,
+    schedule_glioma_computation_placement, schedule_glioma_instrument_fleet, select_glioma_actions,
+    simulate_glioma_counterfactual, simulate_glioma_counterfactual_ensemble,
     simulate_glioma_mechanism_dynamics, simulate_glioma_protocol, surveil_glioma_evidence,
     synthesize_glioma_interpretation, triangulate_glioma_evidence,
     update_glioma_mechanism_posterior, validate_feature_catalog, ActionPortfolioExecutionRequest,
@@ -653,8 +654,8 @@ use bioprism_research::{
     PathwayActivityRequest, PowerArmObservation, PowerReestimationRequest,
     ProtocolBranchOptimizationRequest, ProtocolCompensationRequest, ProtocolEvidenceFusionRequest,
     ProtocolEvidenceSurfaceRequest, ProtocolExecutionRequest, ProtocolSimulationRequest,
-    ReleaseExecutionMode, ReleaseGateRequest, ReplayCampaign, ReplayCampaignRequest,
-    ReplicationRequest, ReplicationStudy, ResearchObjectRequest,
+    ProtocolTransportGateRequest, ReleaseExecutionMode, ReleaseGateRequest, ReplayCampaign,
+    ReplayCampaignRequest, ReplicationRequest, ReplicationStudy, ResearchObjectRequest,
     RobustActiveLearningCampaignRequest, RobustActiveLearningCandidate,
     RobustActiveLearningObservation, RobustActiveLearningRequest, RobustInterventionCandidate,
     RobustInterventionRequest, RobustnessGuidedComputationRequest, RobustnessRequest,
@@ -2218,6 +2219,7 @@ impl Server {
             "glioma_protocol_multistudy_fusion" => {
                 self.glioma_protocol_multistudy_fusion(&arguments)
             }
+            "glioma_protocol_transport_gate" => self.glioma_protocol_transport_gate(&arguments),
             "glioma_protocol_execute" => self.glioma_protocol_execute(&arguments),
             "glioma_protocol_compensation" => self.glioma_protocol_compensation(&arguments),
             "glioma_action_portfolio_execute" => self.glioma_action_portfolio_execute(&arguments),
@@ -6103,6 +6105,32 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma protocol multistudy fusion: {error}"))
+    }
+
+    /// Decide which fused preclinical endpoints can cross a target-model workflow boundary.
+    /// The gate preserves negative and blocked findings and never performs a biological effect.
+    fn glioma_protocol_transport_gate(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ProtocolTransportGateRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_protocol_transport_gate requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma protocol transport gate request: {error}"))?;
+        let gate = gate_glioma_protocol_transport(&request)
+            .map_err(|error| format!("glioma protocol transport gate refused: {error}"))?;
+        serde_json::to_value(json!({
+            "gate": gate,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "next_routes": ["glioma_mechanism_explore", "glioma_experiment_design"],
+            "guarantees": [
+                "target-model, independent-study, site-diversity, information, and heterogeneity gates are explicit",
+                "negative, contradictory, heterogeneous, unresolved, and under-supported endpoints cannot be promoted",
+                "the route performs no assay, instrument, federation, or clinical action"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma protocol transport gate: {error}"))
     }
 
     /// Execute a feasible protocol through the deterministic synthetic executor. Production
@@ -51362,6 +51390,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_protocol_autonomous_execute",
                 "glioma_protocol_evidence_surface",
                 "glioma_protocol_multistudy_fusion",
+                "glioma_protocol_transport_gate",
                 "glioma_protocol_execute",
                 "glioma_protocol_compensation",
                 "glioma_action_portfolio_execute",
@@ -60295,6 +60324,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "ProtocolEvidenceFusionRequest1@1 containing an objective, bounded study-local ProtocolEvidenceSurface1@1 records, support and quality gates, heterogeneity gate, and contradiction threshold."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_protocol_transport_gate",
+        "description": "Gate fused preclinical glioma evidence before it crosses into a target-model research workflow. Checks independent-study support, site and model diversity, information, heterogeneity, target-model observation, and positive-signal requirements; preserves ready, negative, replicate, heterogeneous, contradictory, and unresolved endpoint decisions. This route is analysis-only and performs no assay, instrument, federation, or clinical effect.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ProtocolTransportGateRequest1@1 containing a validated ProtocolEvidenceFusion1@1, target model system, study/site/model floors, information and heterogeneity gates, and positive-signal policy."}
             },
             "required": ["request"]
         }

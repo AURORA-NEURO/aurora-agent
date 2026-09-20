@@ -50,6 +50,7 @@ pub enum ProtocolFusionDisposition {
 pub struct ProtocolFusionCell {
     pub endpoint_id: String,
     pub study_order: Vec<String>,
+    pub site_order: Vec<String>,
     pub model_order: Vec<GliomaModelSystem>,
     pub modality_order: Vec<String>,
     pub measured_study_count: u16,
@@ -191,9 +192,11 @@ fn validate_fusion(fusion: &ProtocolEvidenceFusion) -> Result<(), ProtocolEviden
         || fusion.cells.iter().any(|cell| {
             cell.endpoint_id.trim().is_empty()
                 || !canonical(&cell.study_order)
+                || !canonical(&cell.site_order)
                 || !canonical(&cell.model_order)
                 || !canonical(&cell.modality_order)
                 || cell.measured_study_count == 0
+                || cell.site_order.is_empty()
                 || cell.quality_milli > 1_000
                 || cell.sign_consistency_milli > 1_000
                 || cell.information_milli > 1_000_000
@@ -287,6 +290,12 @@ pub fn fuse_glioma_protocol_evidence(
         let model_order = entries
             .iter()
             .map(|(study, _)| study.model_system)
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>();
+        let site_order = entries
+            .iter()
+            .map(|(study, _)| study.site_id.clone())
             .collect::<BTreeSet<_>>()
             .into_iter()
             .collect::<Vec<_>>();
@@ -430,6 +439,7 @@ pub fn fuse_glioma_protocol_evidence(
         cells.push(ProtocolFusionCell {
             endpoint_id,
             study_order,
+            site_order,
             model_order,
             modality_order,
             measured_study_count,
@@ -606,6 +616,7 @@ mod tests {
         );
         assert_eq!(fusion.qualified_endpoint_order, vec!["invasion"]);
         assert_eq!(fusion.cells[0].robust_value_milli, Some(415));
+        assert_eq!(fusion.cells[0].site_order, vec!["site-a", "site-b"]);
         fusion.validate().unwrap();
     }
 

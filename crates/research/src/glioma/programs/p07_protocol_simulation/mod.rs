@@ -40,6 +40,7 @@ pub mod research_autopilot;
 pub mod robust_active_learning_campaign;
 pub mod scientific_frontier;
 pub mod simulator;
+pub mod transport_gate;
 
 pub use action_execution::{
     execute_glioma_action_portfolio, ActionExecutionDisposition, ActionExecutionFailure,
@@ -140,6 +141,12 @@ pub use multistudy_fusion::{
     fuse_glioma_protocol_evidence, ProtocolEvidenceFusion, ProtocolEvidenceFusionDisposition,
     ProtocolEvidenceFusionError, ProtocolEvidenceFusionRequest, ProtocolEvidenceStudySurface,
     ProtocolFusionCell, ProtocolFusionDisposition,
+};
+
+pub use transport_gate::{
+    gate_glioma_protocol_transport, ProtocolTransportEndpoint,
+    ProtocolTransportEndpointDisposition, ProtocolTransportGate, ProtocolTransportGateDisposition,
+    ProtocolTransportGateError, ProtocolTransportGateRequest,
 };
 
 pub use mechanism_campaign::{

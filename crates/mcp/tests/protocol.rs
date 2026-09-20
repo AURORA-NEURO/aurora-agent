@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 737;
+const TOOL_DEFINITION_COUNT: usize = 738;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -15919,6 +15919,89 @@ fn glioma_protocol_multistudy_fusion_fuses_local_surfaces() {
         result["fusion"]["qualified_endpoint_order"],
         json!(["invasion"])
     );
+}
+
+#[test]
+fn glioma_protocol_transport_gate_releases_supported_target_model_endpoint() {
+    let mut server = server();
+    let protocol = json!({
+        "objective": "transport invasion evidence",
+        "model_system": "organoid",
+        "tasks": [{"task_id":"assay","label":"run invasion assay","resource_kind":"imaging","resource_units":1,"duration_ticks":2,"depends_on":[],"model_system":"organoid","output_schema":"Assay1@1","risk_milli":100,"requires_instrument":false}],
+        "resources": [{"resource_id":"imaging","kind":"imaging","capacity_units":1}],
+        "max_ticks": 10,
+        "max_risk_milli": 500,
+        "allow_instrument_execution": false,
+        "approval_reference": null,
+        "randomization_seed": ContentHash::of_bytes(b"transport-gate-mcp")
+    });
+    let execution = call(
+        &mut server,
+        "glioma_protocol_execute",
+        json!({"request":{"protocol":protocol.clone(),"max_retries":0,"require_artifacts":true}}),
+    );
+    assert_eq!(execution["execution"]["disposition"], json!("completed"));
+    let surface = |server: &mut Server, first: i32, second: i32, prefix: &str| {
+        call(
+            server,
+            "glioma_protocol_evidence_surface",
+            json!({
+                "request": {
+                    "objective": "transport invasion evidence",
+                    "protocol": protocol.clone(),
+                    "execution": execution["execution"].clone(),
+                    "measurements": [
+                        {"measurement_id":format!("{prefix}-m1"),"task_id":"assay","output_schema":"Assay1@1","endpoint_id":"invasion","modality":"imaging","value_milli":first,"uncertainty_milli":50,"quality_milli":900,"replicate_index":1},
+                        {"measurement_id":format!("{prefix}-m2"),"task_id":"assay","output_schema":"Assay1@1","endpoint_id":"invasion","modality":"imaging","value_milli":second,"uncertainty_milli":50,"quality_milli":900,"replicate_index":2}
+                    ],
+                    "min_replicates":2,
+                    "min_quality_milli":700,
+                    "max_uncertainty_milli":200,
+                    "contradiction_threshold_milli":100
+                }
+            }),
+        )
+    };
+    let surface_a = surface(&mut server, 400, 420, "site-a");
+    let surface_b = surface(&mut server, 430, 440, "site-b");
+    let fusion = call(
+        &mut server,
+        "glioma_protocol_multistudy_fusion",
+        json!({
+            "request": {
+                "objective": "transport invasion evidence",
+                "studies": [
+                    {"study_id":"study-a","site_id":"site-a","model_system":"organoid","surface":surface_a["surface"].clone()},
+                    {"study_id":"study-b","site_id":"site-b","model_system":"mouse_model","surface":surface_b["surface"].clone()}
+                ],
+                "min_studies":2,
+                "min_quality_milli":700,
+                "max_heterogeneity_milli":100,
+                "contradiction_threshold_milli":100
+            }
+        }),
+    );
+    let result = call(
+        &mut server,
+        "glioma_protocol_transport_gate",
+        json!({
+            "request": {
+                "objective": "transport invasion evidence",
+                "fusion": fusion["fusion"].clone(),
+                "target_model_system": "mouse_model",
+                "min_studies":2,
+                "min_sites":2,
+                "min_model_systems":2,
+                "min_information_milli":700,
+                "max_heterogeneity_milli":100,
+                "require_positive_signal":true
+            }
+        }),
+    );
+    assert_eq!(result["dispatch"], json!("not_started"));
+    assert_eq!(result["simulation_only"], json!(true));
+    assert_eq!(result["gate"]["disposition"], json!("ready"));
+    assert_eq!(result["gate"]["ready_endpoint_order"], json!(["invasion"]));
 }
 
 #[test]

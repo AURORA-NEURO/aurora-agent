@@ -197,6 +197,8 @@ crates/research/src/glioma/
                                              P07 robust endpoint evidence compilation with quality, uncertainty, negative, and contradiction gates
     p07_protocol_simulation/multistudy_fusion.rs
                                              P07 cross-study, model-system, and modality evidence fusion with heterogeneity and contradiction routing
+    p07_protocol_simulation/transport_gate.rs
+                                             P07 target-model transport gate with site/model support, information, heterogeneity, and negative-result preservation
     p07_protocol_simulation/action_execution.rs
                                              P07 dependency-safe action-portfolio execution
     p07_protocol_simulation/autonomous_campaign.rs
