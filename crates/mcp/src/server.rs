@@ -581,11 +581,11 @@ use bioprism_research::{
     plan_glioma_protocol_compensation, plan_glioma_replication,
     plan_glioma_replication_continuation, plan_glioma_robust_active_learning,
     plan_glioma_robust_intervention_portfolio, plan_glioma_scientific_frontier,
-    plan_glioma_sequential_design, plan_glioma_workflow, preflight_glioma_instrument,
-    prioritize_glioma_evidence, prioritize_knowledge_frontier, propagate_glioma_mechanism_graph,
-    qualify_evidence, register_glioma_spatial_samples, revise_glioma_beliefs,
-    schedule_glioma_computation_placement, schedule_glioma_instrument_fleet, select_glioma_actions,
-    simulate_glioma_counterfactual, simulate_glioma_counterfactual_ensemble,
+    plan_glioma_sequential_design, plan_glioma_validation_replication_gate, plan_glioma_workflow,
+    preflight_glioma_instrument, prioritize_glioma_evidence, prioritize_knowledge_frontier,
+    propagate_glioma_mechanism_graph, qualify_evidence, register_glioma_spatial_samples,
+    revise_glioma_beliefs, schedule_glioma_computation_placement, schedule_glioma_instrument_fleet,
+    select_glioma_actions, simulate_glioma_counterfactual, simulate_glioma_counterfactual_ensemble,
     simulate_glioma_mechanism_dynamics, simulate_glioma_protocol,
     simulate_glioma_protocol_scenario_ensemble, smooth_glioma_mechanism_states,
     surveil_glioma_evidence, surveil_glioma_multimodal_drift, synthesize_glioma_interpretation,
@@ -701,7 +701,7 @@ use bioprism_research::{
     StratifiedCausalRequest, StratifiedObservation, TemporalFusionRequest, TemporalObservation,
     TemporalSpatialAlignmentRequest, TrajectoryObservation, TrajectoryRequest, TransportStudy,
     TransportabilityRequest, TypedKnowledge, ValidationBatchAssessmentRequest,
-    ValidationCampaignRequest,
+    ValidationCampaignRequest, ValidationReplicationGateRequest,
 };
 use bioprism_routing::{
     lab::{run as run_routing_lab, LabSettings, Task},
@@ -2512,6 +2512,9 @@ impl Server {
             "glioma_validation_batch_assess" => self.glioma_validation_batch_assess(&arguments),
             "glioma_validation_campaign_execute" => {
                 self.glioma_validation_campaign_execute(&arguments)
+            }
+            "glioma_validation_replication_gate" => {
+                self.glioma_validation_replication_gate(&arguments)
             }
             "glioma_mechanism_validation_protocol_compile" => {
                 self.glioma_mechanism_validation_protocol_compile(&arguments)
@@ -10989,6 +10992,42 @@ impl Server {
         .map_err(|error| format!("cannot encode glioma validation campaign: {error}"))
     }
 
+    /// Admit a completed local validation result to independent-site replication only when the
+    /// typed validation controller stopped for efficacy. The route plans the cross-site topology,
+    /// continuation wave, and deterministic local preflight; it never treats a local signal as a
+    /// preclinical conclusion or dispatches a physical effect.
+    fn glioma_validation_replication_gate(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ValidationReplicationGateRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_validation_replication_gate requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma validation-replication gate request: {error}")
+            })?;
+        let gate = plan_glioma_validation_replication_gate(&request)
+            .map_err(|error| format!("glioma validation-replication gate refused: {error}"))?;
+        serde_json::to_value(json!({
+            "gate": gate,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "physical_dispatch": false,
+            "next_routes": [
+                "glioma_replication_continuation",
+                "glioma_replication_protocol_compile",
+                "glioma_replication_campaign_execute",
+                "glioma_replication_meta_analyze"
+            ],
+            "guarantees": [
+                "only a typed local efficacy stop can enter the independent-site replication workflow",
+                "origin-site observations are rejected as independent evidence",
+                "site heterogeneity, quality, leave-one-site-out influence, risk, budget, and protocol holds remain explicit",
+                "negative or null replication evidence remains first-class and cannot be promoted",
+                "the route never dispatches an assay, instrument, federation, raw data movement, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma validation-replication gate: {error}"))
+    }
+
     /// Compile the still-open mechanism validation decisions into a deterministic local P07
     /// protocol and preflight it against caller-declared culture/compute resources. This route
     /// never executes an assay, instrument, federation, or clinical decision.
@@ -11051,6 +11090,7 @@ impl Server {
                 "glioma_mechanism_validation_plan",
                 "glioma_validation_batch_assess",
                 "glioma_validation_campaign_execute",
+                "glioma_validation_replication_gate",
                 "glioma_mechanism_validation_protocol_compile",
                 "glioma_protocol_execute"
             ],
@@ -52666,6 +52706,9 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_mechanism_ensemble_counterfactual",
                 "glioma_robust_intervention_portfolio",
                 "glioma_mechanism_validation_plan",
+                "glioma_validation_batch_assess",
+                "glioma_validation_campaign_execute",
+                "glioma_validation_replication_gate",
                 "glioma_mechanism_validation_protocol_compile",
                 "glioma_mechanism_validation_protocol_execute",
                 "glioma_information_design",
@@ -63320,6 +63363,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "ValidationCampaignRequest1@1 containing a MechanismValidationPlanRequest1@1, local protocol resources, execution bounds, round/retry limits, and optional measured observation batches."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_validation_replication_gate",
+        "description": "Gate a completed local preclinical glioma validation campaign into independent-site replication. Only a typed local efficacy stop is eligible; origin-site observations are rejected, and the route composes cross-site topology, quality/heterogeneity continuation, and deterministic protocol preflight while preserving negative, null, underpowered, risk, budget, and unresolved outcomes. No physical, federated, raw-data, or clinical action is dispatched.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ValidationReplicationGateRequest1@1 containing a validated ValidationCampaignRun1@1, originating site id, independent-site ReplicationContinuationObservation1@1 entries, topology/quality/round bounds, local protocol resources, and deterministic preflight settings."}
             },
             "required": ["request"]
         }

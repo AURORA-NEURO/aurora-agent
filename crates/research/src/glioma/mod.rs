@@ -568,8 +568,9 @@ pub use programs::p10_interpretation_replication::{
     execute_glioma_adaptive_interpretation_campaign_dry_run,
     execute_glioma_causal_claim_adjudication, execute_glioma_interpretation_operating_cycle,
     execute_glioma_replication_campaign, plan_glioma_adaptive_research_frontier,
-    synthesize_glioma_interpretation, AdaptiveFrontierCandidate, AdaptiveFrontierDisposition,
-    AdaptiveFrontierError, AdaptiveFrontierExecution, AdaptiveFrontierExecutionDisposition,
+    plan_glioma_validation_replication_gate, synthesize_glioma_interpretation,
+    AdaptiveFrontierCandidate, AdaptiveFrontierDisposition, AdaptiveFrontierError,
+    AdaptiveFrontierExecution, AdaptiveFrontierExecutionDisposition,
     AdaptiveFrontierExecutionError, AdaptiveFrontierExecutionRequest, AdaptiveFrontierRequest,
     AdaptiveInterpretationCampaign, AdaptiveInterpretationCampaignDisposition,
     AdaptiveInterpretationCampaignError, AdaptiveInterpretationCampaignRequest,
@@ -609,6 +610,8 @@ pub use programs::p10_interpretation_replication::{
     TransitionContrastDisposition, TransitionDirection, TransportStudy, TransportStudyContribution,
     TransportabilityAnalysis, TransportabilityDisposition, TransportabilityError,
     TransportabilityRequest, UnitContrast, UnitTrajectory, UnitTrajectoryDisposition,
+    ValidationReplicationGate, ValidationReplicationGateDisposition,
+    ValidationReplicationGateError, ValidationReplicationGateRequest,
 };
 pub use programs::p11_research_object_release::{
     evaluate_glioma_release_gate, execute_glioma_release_operating_cycle,

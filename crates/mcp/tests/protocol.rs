@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 774;
+const TOOL_DEFINITION_COUNT: usize = 775;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -2778,6 +2778,61 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
         1
     );
     assert!(validation_campaign["campaign"]["rounds"][0]["assessment"].is_object());
+
+    let validation_replication_gate = call(
+        &mut server,
+        "glioma_validation_replication_gate",
+        json!({
+            "request": {
+                "validation_campaign": validation_campaign["campaign"].clone(),
+                "local_site_id": "origin-site",
+                "replication_plan": {
+                    "objective": "replicate the validated invasion effect across independent organoid sites",
+                    "model_system": "organoid",
+                    "endpoint": "invasion-index",
+                    "control_arm_id": "control",
+                    "treatment_arm_id": "treated",
+                    "target_effect_milli": 100,
+                    "alpha_total_milli": 50,
+                    "power_target_milli": 700,
+                    "min_sites": 2,
+                    "max_sites": 4,
+                    "min_replicates_per_site": 2,
+                    "max_replicates_per_site": 20,
+                    "budget_units": 100,
+                    "max_total_replicates": 80,
+                    "max_site_heterogeneity_milli": 200,
+                    "risk_ceiling_milli": 500
+                },
+                "observations": [],
+                "minimum_quality_milli": 800,
+                "negative_effect_threshold_milli": 50,
+                "current_round": 1,
+                "max_rounds": 4,
+                "protocol_resources": [],
+                "max_ticks": 200,
+                "max_risk_milli": 500,
+                "allow_instrument_execution": false,
+                "approval_reference": null,
+                "randomization_seed": artifact_hash,
+                "ticks_per_replicate": 2,
+                "include_quality_task": true
+            }
+        }),
+    );
+    assert_eq!(
+        validation_replication_gate["dispatch"],
+        json!("not_started")
+    );
+    assert_eq!(
+        validation_replication_gate["gate"]["disposition"],
+        json!("hold_sites")
+    );
+    assert_eq!(
+        validation_replication_gate["gate"]["validation_eligible"],
+        json!(true)
+    );
+    assert!(validation_replication_gate["gate"]["replication_plan"].is_null());
 
     let information_design = call(
         &mut server,

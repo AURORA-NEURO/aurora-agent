@@ -122,6 +122,8 @@ crates/research/src/glioma/
                                              P06 measured validation batch pooling and next-look power/stopping reassessment
   programs/p06_experiment_design/validation_campaign.rs
                                              P05→P06→P07 closed-loop validation campaign with observation-driven replanning
+  programs/p10_interpretation_replication/validation_replication_gate.rs
+                                             P10 efficacy-gated handoff from local validation to independent-site replication planning and protocol preflight
   programs/p07_protocol_simulation/mechanism_validation_execution.rs
                                              P07 compiled validation protocol execution through a bounded institution-local worker seam
   programs/p05_mechanism_exploration/operating_cycle.rs
