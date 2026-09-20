@@ -9,6 +9,7 @@ pub mod dropout_stress;
 pub mod graph_fusion;
 pub mod harmonization;
 pub mod latent_factors;
+pub mod missingness_audit;
 pub mod operating_cycle;
 pub mod readiness_gate;
 pub mod spatial_communication;
@@ -54,6 +55,12 @@ pub use latent_factors::{
     analyze_glioma_latent_factors, LatentFactorAnalysis, LatentFactorComponent,
     LatentFactorDisposition, LatentFactorError, LatentFactorRequest, LatentFactorVector,
     LatentLoading, LatentScore,
+};
+pub use missingness_audit::{
+    analyze_glioma_multimodal_missingness, MissingnessAudit, MissingnessAuditDisposition,
+    MissingnessAuditError, MissingnessAuditRequest, MissingnessModalitySummary,
+    MissingnessObservation, MissingnessPairSummary, MissingnessPattern,
+    MissingnessPatternDisposition, MissingnessState,
 };
 pub use operating_cycle::{
     execute_glioma_multimodal_operating_cycle, execute_glioma_multimodal_operating_cycle_dry_run,

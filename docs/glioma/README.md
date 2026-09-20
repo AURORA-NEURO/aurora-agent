@@ -331,6 +331,8 @@ crates/research/src/glioma/
                                              P03 reliability-weighted multimodal sample graph fusion with dropout, contradiction, and bounded diffusion gates
   p03_multimodal_ingestion_qc/dropout_stress.rs
                                              P03 modality-dropout stress analysis with no-imputation stability, contradiction, and acquisition routing
+  p03_multimodal_ingestion_qc/missingness_audit.rs
+                                             P03 sample-by-modality missingness topology, correlated dropout detection, and deterministic reacquisition planning
   p03_multimodal_ingestion_qc/spatial_niche.rs
                                              P03 spatial neighbourhood graph, same-lineage niche components, and cross-lineage enrichment
   p03_multimodal_ingestion_qc/spatial_communication.rs

@@ -496,11 +496,11 @@ use bioprism_research::{
     analyze_glioma_clone_panel_outcomes, analyze_glioma_combination_synergy,
     analyze_glioma_dose_response, analyze_glioma_latent_factors, analyze_glioma_mediation,
     analyze_glioma_multimodal_dropout_stress, analyze_glioma_multimodal_graph_fusion,
-    analyze_glioma_pathway_activity, analyze_glioma_spatial_communication,
-    analyze_glioma_spatial_niches, analyze_glioma_spatial_state_propagation,
-    analyze_glioma_state_transitions, analyze_glioma_temporal_multimodal_fusion,
-    analyze_glioma_temporal_spatial_alignment, analyze_glioma_trajectories,
-    analyze_glioma_transportability, analyze_instrument_calibration,
+    analyze_glioma_multimodal_missingness, analyze_glioma_pathway_activity,
+    analyze_glioma_spatial_communication, analyze_glioma_spatial_niches,
+    analyze_glioma_spatial_state_propagation, analyze_glioma_state_transitions,
+    analyze_glioma_temporal_multimodal_fusion, analyze_glioma_temporal_spatial_alignment,
+    analyze_glioma_trajectories, analyze_glioma_transportability, analyze_instrument_calibration,
     analyze_multimodal_concordance, analyze_multimodal_consensus, analyze_preclinical_outcomes,
     analyze_replication_meta_analysis, analyze_stratified_causal_adjustment,
     assess_glioma_robustness, assess_replication, bridge_glioma_knowledge_actions,
@@ -649,27 +649,28 @@ use bioprism_research::{
     MechanismDynamicsIntervention, MechanismDynamicsNode, MechanismDynamicsRequest,
     MechanismFeatureObservation, MechanismGraphEdge, MechanismGraphNode, MechanismGraphRequest,
     MechanismHypothesis, MechanismOperatingCycleRequest, MechanismRequest, MediationObservation,
-    MediationRequest, MetaAnalysisRequest, ModalityVector, MultiFidelityCampaignRequest,
-    MultiFidelityOptimizationRequest, MultimodalExecutionMode, MultimodalIngestionCampaignRequest,
-    MultimodalMechanismCampaignRequest, MultimodalObservation, MultimodalReadinessRequest,
-    MultimodalRequest, PathwayActivityDefinition, PathwayActivityObservation,
-    PathwayActivityRequest, PowerArmObservation, PowerReestimationRequest,
-    ProtocolBranchOptimizationRequest, ProtocolCompensationRequest, ProtocolEvidenceFusionRequest,
-    ProtocolEvidenceSurfaceRequest, ProtocolExecutionRequest, ProtocolSimulationRequest,
-    ProtocolTransportGateRequest, ReleaseExecutionMode, ReleaseGateRequest, ReplayCampaign,
-    ReplayCampaignRequest, ReplicationRequest, ReplicationStudy, ResearchObjectRequest,
-    RobustActiveLearningCampaignRequest, RobustActiveLearningCandidate,
-    RobustActiveLearningObservation, RobustActiveLearningRequest, RobustExperimentDesignRequest,
-    RobustInterventionCandidate, RobustInterventionRequest, RobustnessGuidedComputationRequest,
-    RobustnessRequest, ScientificFrontierExecutionRequest, ScientificFrontierRequest,
-    SensitivityObservation, SensitivityRequest, SequentialArmObservation,
-    SequentialCampaignRequest, SequentialDesignRequest, SpatialCell, SpatialCommunicationCell,
-    SpatialCommunicationRequest, SpatialNicheRequest, SpatialPropagationRequest,
-    SpatialRegistrationCell, SpatialRegistrationRequest, StateTransitionObservation,
-    StateTransitionRequest, StaticGliomaActionPlanner, StaticGliomaComputationPlanner,
-    StratifiedCausalRequest, StratifiedObservation, TemporalFusionRequest, TemporalObservation,
-    TemporalSpatialAlignmentRequest, TrajectoryObservation, TrajectoryRequest, TransportStudy,
-    TransportabilityRequest, TypedKnowledge,
+    MediationRequest, MetaAnalysisRequest, MissingnessAuditRequest, ModalityVector,
+    MultiFidelityCampaignRequest, MultiFidelityOptimizationRequest, MultimodalExecutionMode,
+    MultimodalIngestionCampaignRequest, MultimodalMechanismCampaignRequest, MultimodalObservation,
+    MultimodalReadinessRequest, MultimodalRequest, PathwayActivityDefinition,
+    PathwayActivityObservation, PathwayActivityRequest, PowerArmObservation,
+    PowerReestimationRequest, ProtocolBranchOptimizationRequest, ProtocolCompensationRequest,
+    ProtocolEvidenceFusionRequest, ProtocolEvidenceSurfaceRequest, ProtocolExecutionRequest,
+    ProtocolSimulationRequest, ProtocolTransportGateRequest, ReleaseExecutionMode,
+    ReleaseGateRequest, ReplayCampaign, ReplayCampaignRequest, ReplicationRequest,
+    ReplicationStudy, ResearchObjectRequest, RobustActiveLearningCampaignRequest,
+    RobustActiveLearningCandidate, RobustActiveLearningObservation, RobustActiveLearningRequest,
+    RobustExperimentDesignRequest, RobustInterventionCandidate, RobustInterventionRequest,
+    RobustnessGuidedComputationRequest, RobustnessRequest, ScientificFrontierExecutionRequest,
+    ScientificFrontierRequest, SensitivityObservation, SensitivityRequest,
+    SequentialArmObservation, SequentialCampaignRequest, SequentialDesignRequest, SpatialCell,
+    SpatialCommunicationCell, SpatialCommunicationRequest, SpatialNicheRequest,
+    SpatialPropagationRequest, SpatialRegistrationCell, SpatialRegistrationRequest,
+    StateTransitionObservation, StateTransitionRequest, StaticGliomaActionPlanner,
+    StaticGliomaComputationPlanner, StratifiedCausalRequest, StratifiedObservation,
+    TemporalFusionRequest, TemporalObservation, TemporalSpatialAlignmentRequest,
+    TrajectoryObservation, TrajectoryRequest, TransportStudy, TransportabilityRequest,
+    TypedKnowledge,
 };
 use bioprism_routing::{
     lab::{run as run_routing_lab, LabSettings, Task},
@@ -2343,6 +2344,7 @@ impl Server {
             "glioma_adaptive_dose_surface" => self.glioma_adaptive_dose_surface(&arguments),
             "glioma_multimodal_concordance" => self.glioma_multimodal_concordance(&arguments),
             "glioma_multimodal_dropout_stress" => self.glioma_multimodal_dropout_stress(&arguments),
+            "glioma_multimodal_missingness" => self.glioma_multimodal_missingness(&arguments),
             "glioma_multimodal_consensus" => self.glioma_multimodal_consensus(&arguments),
             "glioma_multimodal_harmonize" => self.glioma_multimodal_harmonize(&arguments),
             "glioma_multimodal_latent_factors" => self.glioma_multimodal_latent_factors(&arguments),
@@ -8088,6 +8090,33 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma multimodal dropout stress: {error}"))
+    }
+
+    /// Audit the local preclinical glioma sample-by-modality missingness topology. This route
+    /// distinguishes absent, partial, and quality-failed assays, then returns reacquisition
+    /// priorities without imputing values or dispatching an instrument.
+    fn glioma_multimodal_missingness(&self, arguments: &Value) -> Result<Value, String> {
+        let request: MissingnessAuditRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_multimodal_missingness requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma multimodal missingness request: {error}"))?;
+        let audit = analyze_glioma_multimodal_missingness(&request)
+            .map_err(|error| format!("glioma multimodal missingness audit refused: {error}"))?;
+        serde_json::to_value(json!({
+            "audit": audit,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "next_routes": ["glioma_multimodal_qc", "glioma_multimodal_dropout_stress", "glioma_robust_experiment_design"],
+            "guarantees": [
+                "absent, partial, and quality-failed cells remain distinct",
+                "correlated dropout and rare patterns are explicit uncertainty or blocking evidence",
+                "reacquisition order is deterministic and no assay, instrument, federation, or clinical action is performed"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma multimodal missingness audit: {error}"))
     }
 
     /// Cluster de-identified preclinical glioma sample lineages from multiple modality vectors.
@@ -51507,6 +51536,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_adaptive_dose_surface",
                 "glioma_multimodal_concordance",
                 "glioma_multimodal_dropout_stress",
+                "glioma_multimodal_missingness",
                 "glioma_multimodal_consensus",
                 "glioma_multimodal_harmonize",
                 "glioma_multimodal_latent_factors",
@@ -61057,6 +61087,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "DropoutStressRequest1@1 with glioma model binding, quality/stability/shift gates, modality signals, and weighted dropout scenarios."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_multimodal_missingness",
+        "description": "Audit the local preclinical glioma sample-by-modality missingness topology. Distinguishes absent, partial, and quality-failed cells; detects correlated dropout and rare patterns; computes complete-case coverage and deterministic reacquisition priorities. The route never imputes values, moves raw data, dispatches an instrument, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "MissingnessAuditRequest1@1 with explicit sample IDs, required modalities, per-cell feature/QC observations, complete-case and dropout gates."}
             },
             "required": ["request"]
         }

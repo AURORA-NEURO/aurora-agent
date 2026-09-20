@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 740;
+const TOOL_DEFINITION_COUNT: usize = 741;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -1131,6 +1131,45 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
     assert_eq!(
         dropout_stress["analysis"]["scenarios"][1]["disposition"],
         json!("unresolved")
+    );
+
+    let missingness = call(
+        &mut server,
+        "glioma_multimodal_missingness",
+        json!({
+            "request": {
+                "objective": "audit multimodal missingness before invasion analysis",
+                "study_id": "mcp-missingness-study",
+                "model_system": "organoid",
+                "sample_ids": ["sample-a", "sample-b", "sample-c"],
+                "required_modalities": ["genomics", "imaging"],
+                "observations": [
+                    {"sample_id":"sample-a","modality":"genomics","expected_feature_count":100,"observed_feature_count":100,"quality_milli":900},
+                    {"sample_id":"sample-a","modality":"imaging","expected_feature_count":100,"observed_feature_count":100,"quality_milli":900},
+                    {"sample_id":"sample-b","modality":"genomics","expected_feature_count":100,"observed_feature_count":100,"quality_milli":600},
+                    {"sample_id":"sample-b","modality":"imaging","expected_feature_count":100,"observed_feature_count":100,"quality_milli":900},
+                    {"sample_id":"sample-c","modality":"genomics","expected_feature_count":100,"observed_feature_count":0,"quality_milli":900},
+                    {"sample_id":"sample-c","modality":"imaging","expected_feature_count":100,"observed_feature_count":0,"quality_milli":900}
+                ],
+                "min_quality_milli": 700,
+                "min_complete_fraction_milli": 500,
+                "max_missing_fraction_milli": 700,
+                "min_samples_per_pattern": 1,
+                "max_patterns": 8,
+                "max_pairwise_dropout_milli": 300
+            }
+        }),
+    );
+    assert_eq!(missingness["dispatch"], json!("not_started"));
+    assert_eq!(missingness["simulation_only"], json!(true));
+    assert_eq!(missingness["audit"]["disposition"], json!("blocked"));
+    assert_eq!(
+        missingness["audit"]["acquisition_order"],
+        json!(["genomics", "imaging"])
+    );
+    assert_eq!(
+        missingness["audit"]["pairs"][0]["disposition"],
+        json!("missing_required")
     );
 
     let harmonization = call(
