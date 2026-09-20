@@ -506,17 +506,18 @@ use bioprism_research::{
     analyze_glioma_transportability, analyze_instrument_calibration,
     analyze_multimodal_concordance, analyze_multimodal_consensus, analyze_preclinical_outcomes,
     analyze_replication_meta_analysis, analyze_stratified_causal_adjustment,
-    assess_glioma_robustness, assess_replication, attribute_glioma_multimodal_quality_root_cause,
-    bridge_glioma_knowledge_actions, build_research_object_manifest,
-    calibrate_glioma_decision_value, calibrate_glioma_evidence, calibrate_glioma_mechanisms,
-    calibrate_glioma_multimodal_quality_transport, calibrate_glioma_multimodal_reliability,
-    certify_decision_omissions, compile_decision_action_graph, compile_decision_context,
-    compile_glioma_computation_workflow, compile_glioma_knowledge_actions,
-    compile_glioma_knowledge_gaps, compile_glioma_mechanism_consensus,
-    compile_glioma_mechanism_validation_protocol, compile_glioma_protocol_evidence_surface,
-    compile_glioma_replication_protocol, compile_mechanism_action_plan, compile_typed_knowledge,
-    compose_knowledge_graph, design_glioma_contrast_panel, design_glioma_robust_experiment,
-    design_preclinical_experiment, discriminate_mechanisms, dry_run_adaptive_instrument_executor,
+    assess_glioma_robustness, assess_glioma_validation_batch, assess_replication,
+    attribute_glioma_multimodal_quality_root_cause, bridge_glioma_knowledge_actions,
+    build_research_object_manifest, calibrate_glioma_decision_value, calibrate_glioma_evidence,
+    calibrate_glioma_mechanisms, calibrate_glioma_multimodal_quality_transport,
+    calibrate_glioma_multimodal_reliability, certify_decision_omissions,
+    compile_decision_action_graph, compile_decision_context, compile_glioma_computation_workflow,
+    compile_glioma_knowledge_actions, compile_glioma_knowledge_gaps,
+    compile_glioma_mechanism_consensus, compile_glioma_mechanism_validation_protocol,
+    compile_glioma_protocol_evidence_surface, compile_glioma_replication_protocol,
+    compile_mechanism_action_plan, compile_typed_knowledge, compose_knowledge_graph,
+    design_glioma_contrast_panel, design_glioma_robust_experiment, design_preclinical_experiment,
+    discriminate_mechanisms, dry_run_adaptive_instrument_executor,
     dry_run_glioma_adaptive_frontier_executor, dry_run_glioma_research,
     dry_run_instrument_executor_from_request, dry_run_robustness_guided_computation_executor,
     evaluate_glioma_dynamic_policies, evaluate_glioma_release_gate,
@@ -699,7 +700,7 @@ use bioprism_research::{
     StateTransitionRequest, StaticGliomaActionPlanner, StaticGliomaComputationPlanner,
     StratifiedCausalRequest, StratifiedObservation, TemporalFusionRequest, TemporalObservation,
     TemporalSpatialAlignmentRequest, TrajectoryObservation, TrajectoryRequest, TransportStudy,
-    TransportabilityRequest, TypedKnowledge,
+    TransportabilityRequest, TypedKnowledge, ValidationBatchAssessmentRequest,
 };
 use bioprism_routing::{
     lab::{run as run_routing_lab, LabSettings, Task},
@@ -2507,6 +2508,7 @@ impl Server {
                 self.glioma_robust_intervention_portfolio(&arguments)
             }
             "glioma_mechanism_validation_plan" => self.glioma_mechanism_validation_plan(&arguments),
+            "glioma_validation_batch_assess" => self.glioma_validation_batch_assess(&arguments),
             "glioma_mechanism_validation_protocol_compile" => {
                 self.glioma_mechanism_validation_protocol_compile(&arguments)
             }
@@ -10919,6 +10921,38 @@ impl Server {
         .map_err(|error| format!("cannot encode glioma mechanism validation plan: {error}"))
     }
 
+    /// Pool measured arm summaries from a completed validation batch and advance the bounded P06
+    /// interim controller. Task artifacts alone are never treated as measurements.
+    fn glioma_validation_batch_assess(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ValidationBatchAssessmentRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_validation_batch_assess requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma validation-batch assessment request: {error}"))?;
+        let assessment = assess_glioma_validation_batch(&request)
+            .map_err(|error| format!("glioma validation batch assessment refused: {error}"))?;
+        serde_json::to_value(json!({
+            "assessment": assessment,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "next_routes": [
+                "glioma_mechanism_validation_protocol_compile",
+                "glioma_replication_plan",
+                "glioma_mechanism_validation_plan"
+            ],
+            "guarantees": [
+                "new summaries must bind to scheduled and non-withheld validation arms",
+                "prior and new arm summaries are pooled with bounded integer arithmetic before re-estimation",
+                "partial execution and withheld arms cannot silently become scientific observations",
+                "efficacy, futility, risk, budget, and underpowered decisions remain explicit",
+                "the route never makes a clinical decision or dispatches a physical effect"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma validation batch assessment: {error}"))
+    }
+
     /// Compile the still-open mechanism validation decisions into a deterministic local P07
     /// protocol and preflight it against caller-declared culture/compute resources. This route
     /// never executes an assay, instrument, federation, or clinical decision.
@@ -10979,6 +11013,7 @@ impl Server {
             "simulation_only": true,
             "next_routes": [
                 "glioma_mechanism_validation_plan",
+                "glioma_validation_batch_assess",
                 "glioma_mechanism_validation_protocol_compile",
                 "glioma_protocol_execute"
             ],
@@ -63226,6 +63261,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "MechanismValidationPlanRequest1@1 containing a P05 RobustInterventionPortfolio1@1, P06 PowerReestimationRequest1@1, typed validation arms, and local aggregate observations."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_validation_batch_assess",
+        "description": "Pool measured local glioma arm summaries from a completed validation execution and advance the bounded P06 interim controller. The route checks that every new observation belongs to a scheduled, non-withheld arm, combines batches with deterministic integer variance pooling, and preserves efficacy, futility, risk, budget, and underpowered decisions without treating task artifacts as measurements.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ValidationBatchAssessmentRequest1@1 containing PowerReestimationRequest1@1, MechanismValidationExecution1@1, prior arm summaries, new measured arm summaries, look advancement, and completeness policy."}
             },
             "required": ["request"]
         }

@@ -28,6 +28,7 @@ pub mod robust_design;
 pub mod sequential_campaign;
 pub mod sequential_design;
 pub mod synergy;
+pub mod validation_batch_assessment;
 
 pub use active_learning::{
     plan_glioma_active_learning, ActiveLearningCandidate, ActiveLearningCandidateDisposition,
@@ -131,6 +132,11 @@ pub use power_reestimation::{
     plan_glioma_power_reestimation, PowerArmDecision, PowerArmObservation, PowerDecisionKind,
     PowerReestimationDisposition, PowerReestimationError, PowerReestimationPlan,
     PowerReestimationRequest,
+};
+pub use validation_batch_assessment::{
+    assess_glioma_validation_batch, ValidationBatchAssessment,
+    ValidationBatchAssessmentDisposition, ValidationBatchAssessmentError,
+    ValidationBatchAssessmentRequest,
 };
 
 pub use replication_plan::{

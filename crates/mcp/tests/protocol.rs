@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 772;
+const TOOL_DEFINITION_COUNT: usize = 773;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -2658,6 +2658,58 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
             .unwrap()
             .iter()
             .all(|task| task["artifact"].is_object())
+    );
+
+    let validation_batch_assessment = call(
+        &mut server,
+        "glioma_validation_batch_assess",
+        json!({
+            "request": {
+                "power_request": {
+                    "objective": "select a robust invasion-suppressing perturbation",
+                    "model_system": "organoid",
+                    "endpoint": "invasion-index",
+                    "control_arm_id": "control",
+                    "target_effect_milli": 10,
+                    "alpha_total_milli": 100,
+                    "power_target_milli": 500,
+                    "current_look": 1,
+                    "max_looks": 2,
+                    "min_replicates_per_arm": 1,
+                    "max_replicates_per_arm": 16,
+                    "max_new_replicates_per_arm": 4,
+                    "budget_units": 16,
+                    "risk_ceiling_milli": 700
+                },
+                "execution": mechanism_validation_execution["execution"].clone(),
+                "prior_observations": [
+                    {"arm_id":"control","label":"vehicle control","artifact":{"artifact_id":"validation-control-observation","content_hash":artifact_hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"model_system":"organoid","mean_response_milli":100,"variance_milli2":100,"observations":2,"risk_milli":100,"cost_units":1},
+                    {"arm_id":"egfr-arm","label":"EGFR perturbation","artifact":{"artifact_id":"validation-egfr-observation","content_hash":artifact_hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"model_system":"organoid","mean_response_milli":160,"variance_milli2":100,"observations":2,"risk_milli":100,"cost_units":1}
+                ],
+                "new_observations": [
+                    {"arm_id":"control","label":"vehicle control","artifact":{"artifact_id":"validation-control-observation-new","content_hash":artifact_hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"model_system":"organoid","mean_response_milli":102,"variance_milli2":100,"observations":2,"risk_milli":100,"cost_units":1}
+                ],
+                "advance_look": true,
+                "require_complete_execution": true
+            }
+        }),
+    );
+    assert_eq!(
+        validation_batch_assessment["assessment"]["disposition"],
+        json!("evaluated")
+    );
+    assert_eq!(
+        validation_batch_assessment["assessment"]["next_power_plan"]["current_look"],
+        json!(2)
+    );
+    assert_eq!(
+        validation_batch_assessment["assessment"]["merged_observations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|observation| observation["arm_id"] == "control")
+            .unwrap()["observations"],
+        json!(4)
     );
 
     let information_design = call(
