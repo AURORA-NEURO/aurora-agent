@@ -130,6 +130,8 @@ crates/research/src/glioma/
                                              P12 replication-to-federation bridge that admits only validated aggregate site summaries into mechanism transport
   programs/p10_interpretation_replication/replication_closure_frontier.rs
                                              P10 ranked scientific closure frontier after independent-site replication with explicit negative and qualified holds
+  programs/p10_interpretation_replication/replication_closure_execution.rs
+                                             P10 selected closure-frontier execution through a bounded replication campaign worker seam
   programs/p07_protocol_simulation/mechanism_validation_execution.rs
                                              P07 compiled validation protocol execution through a bounded institution-local worker seam
   programs/p05_mechanism_exploration/operating_cycle.rs
@@ -937,6 +939,12 @@ site extension, heterogeneity reconciliation, target-model acquisition, influent
 testing, negative-result confirmation, and methods review. Qualified and negative outcomes are
 holds with operator actions rather than automatic permission to spend or claims of efficacy; each
 selected route remains an institution-owned workflow with its own execution gate.
+The closure execution seam (`execute_glioma_replication_closure`) now consumes that frontier and
+dispatches only explicitly selected candidates whose route names the guarded replication campaign.
+It validates objective/model parity, preserves frontier and campaign content digests, and returns
+typed qualified, negative, partial, unresolved, or blocked outcomes. A held or unrunnable frontier
+never reaches the executor; the MCP worker is deterministic and simulation-only, while institution
+gateways retain all physical, protected-data, federation, and release authority.
 P11 now adds a dependency-aware reproducibility replay campaign
 (`execute_glioma_replay_campaign`). It schedules declared program replays, compares exact artifact
 hashes, blocks downstream tasks after mismatch or unavailable outputs, and only emits a
