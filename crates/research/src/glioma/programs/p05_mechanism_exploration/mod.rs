@@ -8,6 +8,7 @@ pub mod bayesian_update;
 pub mod calibrated_campaign;
 pub mod calibration;
 pub mod clonal_evolution;
+pub mod consensus;
 pub mod counterfactual;
 pub mod discrimination;
 pub mod discrimination_campaign;
@@ -56,6 +57,11 @@ pub use clonal_evolution::{
     analyze_glioma_clonal_evolution, ClonalEdge, ClonalEvolutionDisposition, ClonalEvolutionError,
     ClonalEvolutionGraph, ClonalEvolutionRequest, ClonalNode, ClonalRelation, CloneMarker,
     CloneMarkerState, CloneProfile,
+};
+pub use consensus::{
+    compile_glioma_mechanism_consensus, MechanismConsensus, MechanismConsensusDisposition,
+    MechanismConsensusError, MechanismConsensusRecord, MechanismConsensusRequest,
+    MechanismEvidencePacket, MechanismSourceAgreement,
 };
 pub use counterfactual::{
     simulate_glioma_counterfactual, CounterfactualContrast, CounterfactualDirection,

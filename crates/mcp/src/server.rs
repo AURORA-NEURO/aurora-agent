@@ -512,15 +512,15 @@ use bioprism_research::{
     calibrate_glioma_multimodal_quality_transport, calibrate_glioma_multimodal_reliability,
     certify_decision_omissions, compile_decision_action_graph, compile_decision_context,
     compile_glioma_computation_workflow, compile_glioma_knowledge_actions,
-    compile_glioma_knowledge_gaps, compile_glioma_protocol_evidence_surface,
-    compile_mechanism_action_plan, compile_typed_knowledge, compose_knowledge_graph,
-    design_glioma_contrast_panel, design_glioma_robust_experiment, design_preclinical_experiment,
-    discriminate_mechanisms, dry_run_adaptive_instrument_executor,
-    dry_run_glioma_adaptive_frontier_executor, dry_run_glioma_research,
-    dry_run_instrument_executor_from_request, dry_run_robustness_guided_computation_executor,
-    evaluate_glioma_dynamic_policies, evaluate_glioma_release_gate,
-    execute_federated_benchmark_adaptive_campaign_dry_run, execute_federated_benchmark_campaign,
-    execute_federated_benchmark_operating_cycle_dry_run,
+    compile_glioma_knowledge_gaps, compile_glioma_mechanism_consensus,
+    compile_glioma_protocol_evidence_surface, compile_mechanism_action_plan,
+    compile_typed_knowledge, compose_knowledge_graph, design_glioma_contrast_panel,
+    design_glioma_robust_experiment, design_preclinical_experiment, discriminate_mechanisms,
+    dry_run_adaptive_instrument_executor, dry_run_glioma_adaptive_frontier_executor,
+    dry_run_glioma_research, dry_run_instrument_executor_from_request,
+    dry_run_robustness_guided_computation_executor, evaluate_glioma_dynamic_policies,
+    evaluate_glioma_release_gate, execute_federated_benchmark_adaptive_campaign_dry_run,
+    execute_federated_benchmark_campaign, execute_federated_benchmark_operating_cycle_dry_run,
     execute_federated_mechanism_transport_campaign_dry_run, execute_glioma_action_portfolio,
     execute_glioma_active_learning_campaign, execute_glioma_adaptive_allocation_campaign,
     execute_glioma_adaptive_clone_campaign_dry_run,
@@ -660,15 +660,16 @@ use bioprism_research::{
     KnowledgeRequest, KnowledgeResolutionCampaignRequest, KnowledgeSynthesisOperatingCycleRequest,
     LatentFactorRequest, LatentFactorVector, LigandReceptorPair, MechanismActionPlannerConfig,
     MechanismCalibration, MechanismCalibrationObservation, MechanismCalibrationRequest,
-    MechanismCandidate, MechanismDiscrimination, MechanismDiscriminationCampaignRequest,
-    MechanismDiscriminationRequest, MechanismDiscriminatorAction, MechanismDynamicsEdge,
-    MechanismDynamicsIntervention, MechanismDynamicsNode, MechanismDynamicsRequest,
-    MechanismFeatureObservation, MechanismGraphEdge, MechanismGraphNode, MechanismGraphRequest,
-    MechanismHypothesis, MechanismOperatingCycleRequest, MechanismRequest,
-    MechanismStateFilterRequest, MechanismStateSmootherRequest, MediationObservation,
-    MediationRequest, MetaAnalysisRequest, MissingnessAuditRequest, ModalityPortfolioRequest,
-    ModalityVector, MultiFidelityCampaignRequest, MultiFidelityOptimizationRequest,
-    MultimodalDecisionGateRequest, MultimodalExecutionMode, MultimodalIngestionCampaignRequest,
+    MechanismCandidate, MechanismConsensusRequest, MechanismDiscrimination,
+    MechanismDiscriminationCampaignRequest, MechanismDiscriminationRequest,
+    MechanismDiscriminatorAction, MechanismDynamicsEdge, MechanismDynamicsIntervention,
+    MechanismDynamicsNode, MechanismDynamicsRequest, MechanismFeatureObservation,
+    MechanismGraphEdge, MechanismGraphNode, MechanismGraphRequest, MechanismHypothesis,
+    MechanismOperatingCycleRequest, MechanismRequest, MechanismStateFilterRequest,
+    MechanismStateSmootherRequest, MediationObservation, MediationRequest, MetaAnalysisRequest,
+    MissingnessAuditRequest, ModalityPortfolioRequest, ModalityVector,
+    MultiFidelityCampaignRequest, MultiFidelityOptimizationRequest, MultimodalDecisionGateRequest,
+    MultimodalExecutionMode, MultimodalIngestionCampaignRequest,
     MultimodalMechanismCampaignRequest, MultimodalObservation, MultimodalReadinessRequest,
     MultimodalRequest, PathwayActivityDefinition, PathwayActivityObservation,
     PathwayActivityRequest, PowerArmObservation, PowerReestimationRequest,
@@ -2473,6 +2474,7 @@ impl Server {
             "glioma_mechanism_bayesian_update" => self.glioma_mechanism_bayesian_update(&arguments),
             "glioma_mechanism_state_filter" => self.glioma_mechanism_state_filter(&arguments),
             "glioma_mechanism_state_smoother" => self.glioma_mechanism_state_smoother(&arguments),
+            "glioma_mechanism_consensus" => self.glioma_mechanism_consensus(&arguments),
             "glioma_mechanism_calibrate" => self.glioma_mechanism_calibrate(&arguments),
             "glioma_mechanism_action_plan" => self.glioma_mechanism_action_plan(&arguments),
             "glioma_adaptive_mechanism_policy" => self.glioma_adaptive_mechanism_policy(&arguments),
@@ -10426,6 +10428,49 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma mechanism state smoother: {error}"))
+    }
+
+    /// Reconcile independent typed mechanism evidence streams while preserving source conflict
+    /// and leave-one-source-out sensitivity; this route never executes an assay or clinical action.
+    fn glioma_mechanism_consensus(&self, arguments: &Value) -> Result<Value, String> {
+        let request: MechanismConsensusRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_mechanism_consensus requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma mechanism consensus request: {error}"))?;
+        let evidence = serde_json::from_value(
+            arguments
+                .get("evidence")
+                .cloned()
+                .ok_or_else(|| "glioma_mechanism_consensus requires evidence".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma mechanism consensus evidence: {error}"))?;
+        let request = MechanismConsensusRequest {
+            evidence,
+            ..request
+        };
+        let consensus = compile_glioma_mechanism_consensus(&request)
+            .map_err(|error| format!("glioma mechanism consensus refused: {error}"))?;
+        serde_json::to_value(json!({
+            "consensus": consensus,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "next_routes": [
+                "glioma_mechanism_state_filter",
+                "glioma_mechanism_state_smoother",
+                "glioma_mechanism_discriminate",
+                "glioma_mechanism_action_plan"
+            ],
+            "guarantees": [
+                "evidence is aggregated by source rather than double-counted by record",
+                "source reliability, coverage, conflict pairs, negative evidence, and leave-one-source-out sensitivity remain explicit",
+                "consensus posteriors are planning evidence and are never emitted as causal or clinical conclusions",
+                "the route performs no assay, instrument, federation, raw-data, or clinical action"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma mechanism consensus: {error}"))
     }
 
     /// Calibrate mechanism probabilities against future local observations using deterministic
@@ -52255,6 +52300,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_mechanism_bayesian_update",
                 "glioma_mechanism_state_filter",
                 "glioma_mechanism_state_smoother",
+                "glioma_mechanism_consensus",
                 "glioma_mechanism_calibrate",
                 "glioma_mechanism_action_plan",
                 "glioma_adaptive_mechanism_policy",
@@ -62661,6 +62707,18 @@ pub fn tool_definitions() -> Vec<Value> {
                 "request": {"type": "object", "description": "MechanismStateSmootherRequest1@1 with model system, transition-complete mechanism models, ordered local observations, artifact references, and coverage/entropy/transition gates."}
             },
             "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_mechanism_consensus",
+        "description": "Reconcile independent preclinical glioma mechanism evidence from imaging, pathway, clonal, and computational sources without double-counting records. The route reports reliability-weighted consensus, source conflict, coverage, negative evidence, and leave-one-source-out sensitivity; it never executes an assay or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "MechanismConsensusRequest1@1 with model system, mechanism identifiers, source floors, and conflict/sensitivity bounds."},
+                "evidence": {"type": "array", "items": {"type": "object"}, "description": "MechanismEvidencePacket1@1 local de-identified source evidence with reliability and independence-group declarations."}
+            },
+            "required": ["request", "evidence"]
         }
     }));
     definitions.push(json!({

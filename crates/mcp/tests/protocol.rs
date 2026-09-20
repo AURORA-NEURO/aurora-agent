@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 763;
+const TOOL_DEFINITION_COUNT: usize = 764;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -2251,6 +2251,42 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
             .unwrap()
             .len(),
         1
+    );
+
+    let mechanism_consensus = call(
+        &mut server,
+        "glioma_mechanism_consensus",
+        json!({
+            "request": {
+                "objective": "reconcile glioma invasion mechanism evidence",
+                "model_system": "organoid",
+                "mechanisms": ["growth", "stress"],
+                "min_sources_per_mechanism": 2,
+                "max_conflict_milli": 500,
+                "max_leave_one_out_milli": 500
+            },
+            "evidence": [
+                {"source_id":"imaging","evidence_id":"imaging-growth","mechanism_id":"growth","posterior_milli":900,"reliability_milli":900,"independence_group":"imaging","artifact":{"artifact_id":"consensus-i-growth","content_hash":artifact_hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"source_id":"imaging","evidence_id":"imaging-stress","mechanism_id":"stress","posterior_milli":100,"reliability_milli":900,"independence_group":"imaging","artifact":{"artifact_id":"consensus-i-stress","content_hash":artifact_hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"source_id":"pathway","evidence_id":"pathway-growth","mechanism_id":"growth","posterior_milli":800,"reliability_milli":900,"independence_group":"pathway","artifact":{"artifact_id":"consensus-p-growth","content_hash":artifact_hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"source_id":"pathway","evidence_id":"pathway-stress","mechanism_id":"stress","posterior_milli":200,"reliability_milli":900,"independence_group":"pathway","artifact":{"artifact_id":"consensus-p-stress","content_hash":artifact_hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}}
+            ]
+        }),
+    );
+    assert_eq!(mechanism_consensus["dispatch"], json!("not_started"));
+    assert_eq!(mechanism_consensus["simulation_only"], json!(true));
+    assert_eq!(
+        mechanism_consensus["consensus"]["disposition"],
+        json!("qualified")
+    );
+    assert_eq!(
+        mechanism_consensus["consensus"]["records"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|record| record["posterior_milli"].as_u64().unwrap())
+            .sum::<u64>(),
+        1_000
     );
 
     let mechanism_action_plan = call(
