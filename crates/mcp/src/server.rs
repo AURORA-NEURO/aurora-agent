@@ -571,7 +571,7 @@ use bioprism_research::{
     revise_glioma_beliefs, schedule_glioma_computation_placement, schedule_glioma_instrument_fleet,
     select_glioma_actions, simulate_glioma_counterfactual, simulate_glioma_counterfactual_ensemble,
     simulate_glioma_mechanism_dynamics, simulate_glioma_protocol, surveil_glioma_evidence,
-    synthesize_glioma_interpretation, triangulate_glioma_evidence,
+    surveil_glioma_multimodal_drift, synthesize_glioma_interpretation, triangulate_glioma_evidence,
     update_glioma_mechanism_posterior, validate_feature_catalog, ActionPortfolioExecutionRequest,
     ActiveLearningCampaignRequest, ActiveLearningCandidate, ActiveLearningObservation,
     ActiveLearningRequest, AdaptiveAllocationCampaignRequest, AdaptiveAllocationRequest,
@@ -598,22 +598,23 @@ use bioprism_research::{
     DecisionBranchCampaignRequest, DecisionBranchPlannerRequest, DecisionContext,
     DecisionContextCampaignRequest, DecisionContextRequest, DecisionOmissionCertificateRequest,
     DecisionOperatingCycleRequest, DesignAction, DesignMechanism, DoseResponseObservation,
-    DoseResponseRequest, DropoutStressRequest, DryRunActiveLearningCampaignExecutor,
-    DryRunAdaptiveAllocationCampaignExecutor, DryRunAdaptiveMechanismPolicyExecutor,
-    DryRunDecisionContextCampaignExecutor, DryRunEvidenceAcquisitionExecutor,
-    DryRunEvidenceRefreshCampaignExecutor, DryRunExperimentOperatingCycleExecutor,
-    DryRunFederatedBenchmarkCampaignExecutor, DryRunGliomaActionExecutor,
-    DryRunGliomaComputationExecutor, DryRunGliomaExperimentFrontierExecutor,
-    DryRunGliomaProtocolExecutor, DryRunGliomaReplicationCampaignExecutor,
-    DryRunInstrumentExecutor, DryRunKnowledgeActionExecutor,
-    DryRunKnowledgeResolutionCampaignExecutor, DryRunMechanismDiscriminationCampaignExecutor,
-    DryRunMultiFidelityCampaignExecutor, DryRunMultimodalIngestionCampaignExecutor,
-    DryRunReplayCampaignExecutor, DryRunRobustActiveLearningCampaignExecutor,
-    DryRunSequentialCampaignExecutor, DynamicPolicyCandidate, DynamicPolicyRequest,
-    DynamicPolicyTrajectory, EvidenceAcquisitionCampaignRequest, EvidenceAcquisitionCandidate,
-    EvidenceAcquisitionRequest, EvidenceCalibrationObservation, EvidenceCalibrationRequest,
-    EvidenceExecutionMode, EvidencePriorityRequest, EvidenceRecord, EvidenceRefreshCampaignRequest,
-    EvidenceRequest, EvidenceSurveillanceRequest, EvidenceTriangulationRequest, ExperimentArm,
+    DoseResponseRequest, DriftSurveillanceRequest, DropoutStressRequest,
+    DryRunActiveLearningCampaignExecutor, DryRunAdaptiveAllocationCampaignExecutor,
+    DryRunAdaptiveMechanismPolicyExecutor, DryRunDecisionContextCampaignExecutor,
+    DryRunEvidenceAcquisitionExecutor, DryRunEvidenceRefreshCampaignExecutor,
+    DryRunExperimentOperatingCycleExecutor, DryRunFederatedBenchmarkCampaignExecutor,
+    DryRunGliomaActionExecutor, DryRunGliomaComputationExecutor,
+    DryRunGliomaExperimentFrontierExecutor, DryRunGliomaProtocolExecutor,
+    DryRunGliomaReplicationCampaignExecutor, DryRunInstrumentExecutor,
+    DryRunKnowledgeActionExecutor, DryRunKnowledgeResolutionCampaignExecutor,
+    DryRunMechanismDiscriminationCampaignExecutor, DryRunMultiFidelityCampaignExecutor,
+    DryRunMultimodalIngestionCampaignExecutor, DryRunReplayCampaignExecutor,
+    DryRunRobustActiveLearningCampaignExecutor, DryRunSequentialCampaignExecutor,
+    DynamicPolicyCandidate, DynamicPolicyRequest, DynamicPolicyTrajectory,
+    EvidenceAcquisitionCampaignRequest, EvidenceAcquisitionCandidate, EvidenceAcquisitionRequest,
+    EvidenceCalibrationObservation, EvidenceCalibrationRequest, EvidenceExecutionMode,
+    EvidencePriorityRequest, EvidenceRecord, EvidenceRefreshCampaignRequest, EvidenceRequest,
+    EvidenceSurveillanceRequest, EvidenceTriangulationRequest, ExperimentArm,
     ExperimentOperatingCycleRequest, ExperimentRequest, FederatedBenchmarkAdaptiveCampaignRequest,
     FederatedBenchmarkCampaignRequest, FederatedBenchmarkExecutionMode,
     FederatedBenchmarkOperatingCycleRequest, FederatedBenchmarkRequest, FederatedBenchmarkSite,
@@ -2345,6 +2346,7 @@ impl Server {
             "glioma_adaptive_dose_surface" => self.glioma_adaptive_dose_surface(&arguments),
             "glioma_multimodal_concordance" => self.glioma_multimodal_concordance(&arguments),
             "glioma_multimodal_dropout_stress" => self.glioma_multimodal_dropout_stress(&arguments),
+            "glioma_multimodal_drift" => self.glioma_multimodal_drift(&arguments),
             "glioma_multimodal_missingness" => self.glioma_multimodal_missingness(&arguments),
             "glioma_multimodal_reliability" => self.glioma_multimodal_reliability(&arguments),
             "glioma_multimodal_portfolio" => self.glioma_multimodal_portfolio(&arguments),
@@ -8173,6 +8175,32 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma multimodal portfolio plan: {error}"))
+    }
+
+    /// Monitor ordered local preclinical glioma QC epochs for sustained modality/metric drift.
+    /// Drift alerts are recalibration gates, never biological or clinical conclusions.
+    fn glioma_multimodal_drift(&self, arguments: &Value) -> Result<Value, String> {
+        let request: DriftSurveillanceRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_multimodal_drift requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma multimodal drift request: {error}"))?;
+        let surveillance = surveil_glioma_multimodal_drift(&request)
+            .map_err(|error| format!("glioma multimodal drift surveillance refused: {error}"))?;
+        serde_json::to_value(json!({
+            "surveillance": surveillance,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "next_routes": ["glioma_multimodal_reliability", "glioma_multimodal_missingness", "glioma_multimodal_portfolio"],
+            "guarantees": [
+                "baseline, terminal, excursion, signed slope, quality attrition, and missing epochs remain explicit",
+                "drift gates route to recalibration and never become biological evidence",
+                "route performs no assay, instrument, federation, or clinical action"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma multimodal drift surveillance: {error}"))
     }
 
     /// Cluster de-identified preclinical glioma sample lineages from multiple modality vectors.
@@ -51595,6 +51623,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_multimodal_missingness",
                 "glioma_multimodal_reliability",
                 "glioma_multimodal_portfolio",
+                "glioma_multimodal_drift",
                 "glioma_multimodal_consensus",
                 "glioma_multimodal_harmonize",
                 "glioma_multimodal_latent_factors",
@@ -61178,6 +61207,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "ModalityPortfolioRequest1@1 with endpoint dimensions, modality capabilities, cost/throughput/reliability, required modalities, and selection gates."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_multimodal_drift",
+        "description": "Monitor ordered local preclinical glioma QC epochs for sustained modality/metric drift. Computes robust baseline and terminal values, maximum excursion, signed drift slope, quality attrition, missing epochs, drift score, and deterministic recalibration order; alerts never become biological or clinical conclusions.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "DriftSurveillanceRequest1@1 with ordered epochs, modalities, metrics, QC observations, baseline/eligibility bounds, quality floor, and drift gates."}
             },
             "required": ["request"]
         }

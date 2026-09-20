@@ -337,6 +337,8 @@ crates/research/src/glioma/
                                              P03 replicate-aware modality reliability, leave-one-out instability, and QC admission gating
   p03_multimodal_ingestion_qc/modality_portfolio.rs
                                              P03 bounded reliability- and budget-aware endpoint modality portfolio selection with explicit coverage debt
+  p03_multimodal_ingestion_qc/drift_surveillance.rs
+                                             P03 continuous modality/metric QC drift surveillance with recalibration gates and ordered follow-up
   p03_multimodal_ingestion_qc/spatial_niche.rs
                                              P03 spatial neighbourhood graph, same-lineage niche components, and cross-lineage enrichment
   p03_multimodal_ingestion_qc/spatial_communication.rs

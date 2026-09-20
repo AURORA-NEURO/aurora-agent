@@ -5,6 +5,7 @@ use crate::glioma::catalog::{glioma_program_catalog, GliomaProgramDescriptor, Gl
 pub mod campaign;
 pub mod concordance;
 pub mod consensus;
+pub mod drift_surveillance;
 pub mod dropout_stress;
 pub mod graph_fusion;
 pub mod harmonization;
@@ -37,6 +38,10 @@ pub use concordance::{
 pub use consensus::{
     analyze_multimodal_consensus, ConsensusAssignment, ConsensusCluster, ConsensusDisposition,
     ConsensusError, ConsensusRequest, MultimodalConsensus,
+};
+pub use drift_surveillance::{
+    surveil_glioma_multimodal_drift, DriftDisposition, DriftMetricSummary, DriftObservation,
+    DriftSurveillance, DriftSurveillanceError, DriftSurveillanceRequest,
 };
 pub use dropout_stress::{
     analyze_glioma_multimodal_dropout_stress, DropoutModalitySignal, DropoutScenario,

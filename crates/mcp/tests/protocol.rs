@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 743;
+const TOOL_DEFINITION_COUNT: usize = 744;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -1240,6 +1240,41 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
     assert_eq!(
         portfolio["plan"]["selected_dimension_coverage_milli"],
         json!(1000)
+    );
+
+    let drift = call(
+        &mut server,
+        "glioma_multimodal_drift",
+        json!({
+            "request": {
+                "objective": "surveil multimodal QC drift before mechanism analysis",
+                "study_id": "mcp-drift-study",
+                "model_system": "organoid",
+                "epoch_order": ["epoch-0", "epoch-1", "epoch-2"],
+                "required_modalities": ["genomics", "imaging"],
+                "metric_order": ["signal"],
+                "observations": [
+                    {"epoch_id":"epoch-0","epoch_index":0,"modality":"genomics","metric_id":"signal","value_milli":100,"expected_center_milli":100,"expected_spread_milli":20,"quality_milli":900},
+                    {"epoch_id":"epoch-1","epoch_index":1,"modality":"genomics","metric_id":"signal","value_milli":101,"expected_center_milli":100,"expected_spread_milli":20,"quality_milli":900},
+                    {"epoch_id":"epoch-2","epoch_index":2,"modality":"genomics","metric_id":"signal","value_milli":102,"expected_center_milli":100,"expected_spread_milli":20,"quality_milli":900},
+                    {"epoch_id":"epoch-0","epoch_index":0,"modality":"imaging","metric_id":"signal","value_milli":100,"expected_center_milli":100,"expected_spread_milli":20,"quality_milli":900},
+                    {"epoch_id":"epoch-1","epoch_index":1,"modality":"imaging","metric_id":"signal","value_milli":101,"expected_center_milli":100,"expected_spread_milli":20,"quality_milli":900},
+                    {"epoch_id":"epoch-2","epoch_index":2,"modality":"imaging","metric_id":"signal","value_milli":102,"expected_center_milli":100,"expected_spread_milli":20,"quality_milli":900}
+                ],
+                "baseline_epoch_count": 1,
+                "min_eligible_epochs": 3,
+                "min_quality_milli": 700,
+                "max_allowed_drift_milli": 20,
+                "max_allowed_slope_milli_per_epoch": 20
+            }
+        }),
+    );
+    assert_eq!(drift["dispatch"], json!("not_started"));
+    assert_eq!(drift["simulation_only"], json!(true));
+    assert_eq!(drift["surveillance"]["disposition"], json!("stable"));
+    assert_eq!(
+        drift["surveillance"]["summaries"].as_array().unwrap().len(),
+        2
     );
 
     let harmonization = call(
