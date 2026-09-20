@@ -549,24 +549,24 @@ use bioprism_research::{
     execute_glioma_replication_campaign, execute_glioma_research_autopilot,
     execute_glioma_research_director, execute_glioma_robust_active_learning_campaign,
     execute_glioma_robustness_guided_computation, execute_glioma_scientific_frontier,
-    execute_glioma_sequential_campaign, explore_mechanisms, generate_feature_catalog,
-    glioma_program_catalog, harmonize_glioma_multimodal_batches, harmonize_multimodal_inputs,
-    optimize_glioma_protocol_branches, plan_adaptive_glioma_dose_surface, plan_decision_actions,
-    plan_federated_benchmark_sites, plan_glioma_active_learning,
-    plan_glioma_adaptive_information_campaign, plan_glioma_adaptive_mechanism_policy,
-    plan_glioma_adaptive_research_frontier, plan_glioma_adaptive_workflow,
-    plan_glioma_clone_continuation, plan_glioma_clone_perturbation_panel,
-    plan_glioma_closed_loop_campaign, plan_glioma_computation_portfolio,
-    plan_glioma_decision_branches, plan_glioma_evidence_acquisition,
-    plan_glioma_evidence_contradiction_cut, plan_glioma_information_design,
-    plan_glioma_multi_fidelity_optimization, plan_glioma_power_reestimation,
-    plan_glioma_protocol_compensation, plan_glioma_robust_active_learning,
-    plan_glioma_robust_intervention_portfolio, plan_glioma_scientific_frontier,
-    plan_glioma_sequential_design, plan_glioma_workflow, preflight_glioma_instrument,
-    prioritize_glioma_evidence, prioritize_knowledge_frontier, propagate_glioma_mechanism_graph,
-    qualify_evidence, register_glioma_spatial_samples, revise_glioma_beliefs,
-    schedule_glioma_computation_placement, schedule_glioma_instrument_fleet, select_glioma_actions,
-    simulate_glioma_counterfactual, simulate_glioma_counterfactual_ensemble,
+    execute_glioma_sequential_campaign, explore_mechanisms, fuse_glioma_protocol_evidence,
+    generate_feature_catalog, glioma_program_catalog, harmonize_glioma_multimodal_batches,
+    harmonize_multimodal_inputs, optimize_glioma_protocol_branches,
+    plan_adaptive_glioma_dose_surface, plan_decision_actions, plan_federated_benchmark_sites,
+    plan_glioma_active_learning, plan_glioma_adaptive_information_campaign,
+    plan_glioma_adaptive_mechanism_policy, plan_glioma_adaptive_research_frontier,
+    plan_glioma_adaptive_workflow, plan_glioma_clone_continuation,
+    plan_glioma_clone_perturbation_panel, plan_glioma_closed_loop_campaign,
+    plan_glioma_computation_portfolio, plan_glioma_decision_branches,
+    plan_glioma_evidence_acquisition, plan_glioma_evidence_contradiction_cut,
+    plan_glioma_information_design, plan_glioma_multi_fidelity_optimization,
+    plan_glioma_power_reestimation, plan_glioma_protocol_compensation,
+    plan_glioma_robust_active_learning, plan_glioma_robust_intervention_portfolio,
+    plan_glioma_scientific_frontier, plan_glioma_sequential_design, plan_glioma_workflow,
+    preflight_glioma_instrument, prioritize_glioma_evidence, prioritize_knowledge_frontier,
+    propagate_glioma_mechanism_graph, qualify_evidence, register_glioma_spatial_samples,
+    revise_glioma_beliefs, schedule_glioma_computation_placement, schedule_glioma_instrument_fleet,
+    select_glioma_actions, simulate_glioma_counterfactual, simulate_glioma_counterfactual_ensemble,
     simulate_glioma_mechanism_dynamics, simulate_glioma_protocol, surveil_glioma_evidence,
     synthesize_glioma_interpretation, triangulate_glioma_evidence,
     update_glioma_mechanism_posterior, validate_feature_catalog, ActionPortfolioExecutionRequest,
@@ -651,10 +651,11 @@ use bioprism_research::{
     MultimodalMechanismCampaignRequest, MultimodalObservation, MultimodalReadinessRequest,
     MultimodalRequest, PathwayActivityDefinition, PathwayActivityObservation,
     PathwayActivityRequest, PowerArmObservation, PowerReestimationRequest,
-    ProtocolBranchOptimizationRequest, ProtocolCompensationRequest, ProtocolEvidenceSurfaceRequest,
-    ProtocolExecutionRequest, ProtocolSimulationRequest, ReleaseExecutionMode, ReleaseGateRequest,
-    ReplayCampaign, ReplayCampaignRequest, ReplicationRequest, ReplicationStudy,
-    ResearchObjectRequest, RobustActiveLearningCampaignRequest, RobustActiveLearningCandidate,
+    ProtocolBranchOptimizationRequest, ProtocolCompensationRequest, ProtocolEvidenceFusionRequest,
+    ProtocolEvidenceSurfaceRequest, ProtocolExecutionRequest, ProtocolSimulationRequest,
+    ReleaseExecutionMode, ReleaseGateRequest, ReplayCampaign, ReplayCampaignRequest,
+    ReplicationRequest, ReplicationStudy, ResearchObjectRequest,
+    RobustActiveLearningCampaignRequest, RobustActiveLearningCandidate,
     RobustActiveLearningObservation, RobustActiveLearningRequest, RobustInterventionCandidate,
     RobustInterventionRequest, RobustnessGuidedComputationRequest, RobustnessRequest,
     ScientificFrontierExecutionRequest, ScientificFrontierRequest, SensitivityObservation,
@@ -2214,6 +2215,9 @@ impl Server {
                 self.glioma_protocol_autonomous_execute(&arguments)
             }
             "glioma_protocol_evidence_surface" => self.glioma_protocol_evidence_surface(&arguments),
+            "glioma_protocol_multistudy_fusion" => {
+                self.glioma_protocol_multistudy_fusion(&arguments)
+            }
             "glioma_protocol_execute" => self.glioma_protocol_execute(&arguments),
             "glioma_protocol_compensation" => self.glioma_protocol_compensation(&arguments),
             "glioma_action_portfolio_execute" => self.glioma_action_portfolio_execute(&arguments),
@@ -6073,6 +6077,32 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma protocol evidence surface: {error}"))
+    }
+
+    /// Fuse study-local protocol evidence surfaces while retaining transport boundaries.
+    /// Raw experimental data never leaves the institution-local surface boundary.
+    fn glioma_protocol_multistudy_fusion(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ProtocolEvidenceFusionRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_protocol_multistudy_fusion requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma protocol multistudy fusion request: {error}"))?;
+        let fusion = fuse_glioma_protocol_evidence(&request)
+            .map_err(|error| format!("glioma protocol multistudy fusion refused: {error}"))?;
+        serde_json::to_value(json!({
+            "fusion": fusion,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "next_routes": ["glioma_mechanism_explore", "glioma_analysis_run"],
+            "guarantees": [
+                "raw experimental data remains local and only typed surface summaries are fused",
+                "heterogeneity, contradiction, negative, and under-supported endpoints remain explicit",
+                "the route performs no assay, instrument, federation, or clinical action"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma protocol multistudy fusion: {error}"))
     }
 
     /// Execute a feasible protocol through the deterministic synthetic executor. Production
@@ -51331,6 +51361,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_protocol_branch_optimize",
                 "glioma_protocol_autonomous_execute",
                 "glioma_protocol_evidence_surface",
+                "glioma_protocol_multistudy_fusion",
                 "glioma_protocol_execute",
                 "glioma_protocol_compensation",
                 "glioma_action_portfolio_execute",
@@ -60253,6 +60284,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "ProtocolEvidenceSurfaceRequest1@1 containing a ProtocolSimulationRequest1@1, validated ProtocolExecution1@1, endpoint measurements, replicate/quality/uncertainty thresholds, and contradiction threshold."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_protocol_multistudy_fusion",
+        "description": "Fuse institution-local preclinical glioma protocol evidence surfaces across studies, model systems, and modalities without moving raw data. Returns robust pooled values, quality/information support, heterogeneity, sign consistency, explicit negative/contradictory/under-supported dispositions, and next actions. This route is analysis-only and performs no assay, instrument, federation, or clinical effect.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ProtocolEvidenceFusionRequest1@1 containing an objective, bounded study-local ProtocolEvidenceSurface1@1 records, support and quality gates, heterogeneity gate, and contradiction threshold."}
             },
             "required": ["request"]
         }

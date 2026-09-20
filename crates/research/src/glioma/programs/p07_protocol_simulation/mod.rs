@@ -33,6 +33,7 @@ pub mod mechanism_discovery_engine;
 pub mod mission;
 pub mod mission_recovery;
 pub mod multimodal_mission;
+pub mod multistudy_fusion;
 pub mod program_cycle;
 pub mod program_scheduler;
 pub mod research_autopilot;
@@ -133,6 +134,12 @@ pub use evidence_surface::{
     compile_glioma_protocol_evidence_surface, ProtocolEvidenceCell, ProtocolEvidenceDisposition,
     ProtocolEvidenceSurface, ProtocolEvidenceSurfaceDisposition, ProtocolEvidenceSurfaceError,
     ProtocolEvidenceSurfaceRequest, ProtocolMeasurement,
+};
+
+pub use multistudy_fusion::{
+    fuse_glioma_protocol_evidence, ProtocolEvidenceFusion, ProtocolEvidenceFusionDisposition,
+    ProtocolEvidenceFusionError, ProtocolEvidenceFusionRequest, ProtocolEvidenceStudySurface,
+    ProtocolFusionCell, ProtocolFusionDisposition,
 };
 
 pub use mechanism_campaign::{

@@ -195,6 +195,8 @@ crates/research/src/glioma/
                                              P07 bounded branch-select/execute/compensate autonomous protocol controller
     p07_protocol_simulation/evidence_surface.rs
                                              P07 robust endpoint evidence compilation with quality, uncertainty, negative, and contradiction gates
+    p07_protocol_simulation/multistudy_fusion.rs
+                                             P07 cross-study, model-system, and modality evidence fusion with heterogeneity and contradiction routing
     p07_protocol_simulation/action_execution.rs
                                              P07 dependency-safe action-portfolio execution
     p07_protocol_simulation/autonomous_campaign.rs
