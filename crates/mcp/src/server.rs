@@ -564,18 +564,19 @@ use bioprism_research::{
     schedule_glioma_computation_placement, schedule_glioma_instrument_fleet, select_glioma_actions,
     simulate_glioma_counterfactual, simulate_glioma_counterfactual_ensemble,
     simulate_glioma_mechanism_dynamics, simulate_glioma_protocol, surveil_glioma_evidence,
-    synthesize_glioma_interpretation, triangulate_glioma_evidence, validate_feature_catalog,
-    ActionPortfolioExecutionRequest, ActiveLearningCampaignRequest, ActiveLearningCandidate,
-    ActiveLearningObservation, ActiveLearningRequest, AdaptiveAllocationCampaignRequest,
-    AdaptiveAllocationRequest, AdaptiveArmObservation, AdaptiveCloneCampaignRequest,
-    AdaptiveDecisionBranchCampaignRequest, AdaptiveDoseSurfaceRequest,
-    AdaptiveFrontierExecutionRequest, AdaptiveFrontierRequest, AdaptiveInformationCampaignRequest,
-    AdaptiveInformationObservation, AdaptiveInstrumentCampaignRequest,
-    AdaptiveInterpretationCampaignRequest, AdaptiveMechanismCampaignRequest,
-    AdaptiveMechanismPolicyRequest, AnalysisDataset, AnalysisRequest, AssayEvidenceObservation,
-    AssayEvidenceRequest, AutonomousGapCycleRequest, AutonomousProgramCycleRequest, BeliefConflict,
-    BeliefRevisionRequest, CalibratedMechanismCampaignRequest, CalibrationRequest, CalibrationRun,
-    CampaignAction, CampaignMechanism, CampaignObservation, CausalContrastRequest,
+    synthesize_glioma_interpretation, triangulate_glioma_evidence,
+    update_glioma_mechanism_posterior, validate_feature_catalog, ActionPortfolioExecutionRequest,
+    ActiveLearningCampaignRequest, ActiveLearningCandidate, ActiveLearningObservation,
+    ActiveLearningRequest, AdaptiveAllocationCampaignRequest, AdaptiveAllocationRequest,
+    AdaptiveArmObservation, AdaptiveCloneCampaignRequest, AdaptiveDecisionBranchCampaignRequest,
+    AdaptiveDoseSurfaceRequest, AdaptiveFrontierExecutionRequest, AdaptiveFrontierRequest,
+    AdaptiveInformationCampaignRequest, AdaptiveInformationObservation,
+    AdaptiveInstrumentCampaignRequest, AdaptiveInterpretationCampaignRequest,
+    AdaptiveMechanismCampaignRequest, AdaptiveMechanismPolicyRequest, AnalysisDataset,
+    AnalysisRequest, AssayEvidenceObservation, AssayEvidenceRequest, AutonomousGapCycleRequest,
+    AutonomousProgramCycleRequest, BayesianMechanismHypothesis, BayesianMechanismUpdateRequest,
+    BeliefConflict, BeliefRevisionRequest, CalibratedMechanismCampaignRequest, CalibrationRequest,
+    CalibrationRun, CampaignAction, CampaignMechanism, CampaignObservation, CausalContrastRequest,
     ClonalEvolutionGraph, ClonalEvolutionRequest, CloneContinuationCandidate,
     CloneContinuationRequest, ClonePanelObservation, ClonePanelOutcomeAnalysis,
     ClonePanelOutcomeRequest, ClonePerturbationCandidate, ClonePerturbationPanel,
@@ -2375,6 +2376,7 @@ impl Server {
             "glioma_mechanism_explore" => self.glioma_mechanism_explore(&arguments),
             "glioma_mechanism_dynamics" => self.glioma_mechanism_dynamics(&arguments),
             "glioma_mechanism_discriminate" => self.glioma_mechanism_discriminate(&arguments),
+            "glioma_mechanism_bayesian_update" => self.glioma_mechanism_bayesian_update(&arguments),
             "glioma_mechanism_calibrate" => self.glioma_mechanism_calibrate(&arguments),
             "glioma_mechanism_action_plan" => self.glioma_mechanism_action_plan(&arguments),
             "glioma_adaptive_mechanism_policy" => self.glioma_adaptive_mechanism_policy(&arguments),
@@ -9395,6 +9397,43 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma mechanism discrimination: {error}"))
+    }
+
+    /// Update competing mechanism posteriors from typed local preclinical observations. This
+    /// is a bounded scientific computation; it never dispatches an assay or makes a clinical
+    /// decision.
+    fn glioma_mechanism_bayesian_update(&self, arguments: &Value) -> Result<Value, String> {
+        let request: BayesianMechanismUpdateRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_mechanism_bayesian_update requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma Bayesian mechanism request: {error}"))?;
+        let hypotheses: Vec<BayesianMechanismHypothesis> =
+            serde_json::from_value(arguments.get("hypotheses").cloned().ok_or_else(|| {
+                "glioma_mechanism_bayesian_update requires hypotheses".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma Bayesian mechanism hypotheses: {error}"))?;
+        let observations: Vec<MechanismFeatureObservation> =
+            serde_json::from_value(arguments.get("observations").cloned().ok_or_else(|| {
+                "glioma_mechanism_bayesian_update requires observations".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma Bayesian mechanism observations: {error}"))?;
+        let update = update_glioma_mechanism_posterior(&request, &hypotheses, &observations)
+            .map_err(|error| format!("glioma Bayesian mechanism update refused: {error}"))?;
+        serde_json::to_value(json!({
+            "update": update,
+            "dispatch": "not_started",
+            "next_route": "glioma_adaptive_mechanism_policy",
+            "guarantees": [
+                "posterior mass is integer-normalized and replay-stable",
+                "missing shared features remain unresolved rather than being imputed",
+                "low-posterior mechanisms and contradictory fits remain explicit negative evidence",
+                "the route performs no assay, instrument, federation, raw-data, or clinical effect"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma Bayesian mechanism update: {error}"))
     }
 
     /// Calibrate mechanism probabilities against future local observations using deterministic
@@ -51163,6 +51202,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_multimodal_qc",
                 "glioma_mechanism_explore",
                 "glioma_mechanism_discriminate",
+                "glioma_mechanism_bayesian_update",
                 "glioma_mechanism_calibrate",
                 "glioma_mechanism_action_plan",
                 "glioma_adaptive_mechanism_policy",
@@ -61188,6 +61228,19 @@ pub fn tool_definitions() -> Vec<Value> {
                 "actions": {"type": "array", "items": {"type": "object"}, "description": "MechanismDiscriminatorAction1@1 candidate assays with per-mechanism predictions, cost, feasibility, and uncertainty."}
             },
             "required": ["request", "hypotheses", "observations", "actions"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_mechanism_bayesian_update",
+        "description": "Update competing preclinical glioma mechanism posteriors from typed local observations using deterministic integer likelihoods. The route preserves shared-feature coverage, uncertainty, contradiction, negative evidence, and replay-stable posterior mass, then hands the result to adaptive mechanism policy; it never executes an assay or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "BayesianMechanismUpdateRequest1@1 with model system, shared-feature floor, posterior thresholds, and likelihood scale."},
+                "hypotheses": {"type": "array", "items": {"type": "object"}, "description": "BayesianMechanismHypothesis1@1 records with explicit prior mass and typed predictions."},
+                "observations": {"type": "array", "items": {"type": "object"}, "description": "MechanismFeatureObservation1@1 local preclinical feature observations with artifact references."}
+            },
+            "required": ["request", "hypotheses", "observations"]
         }
     }));
     definitions.push(json!({

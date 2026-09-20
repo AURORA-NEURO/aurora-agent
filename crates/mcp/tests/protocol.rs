@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 728;
+const TOOL_DEFINITION_COUNT: usize = 729;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -1518,6 +1518,38 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
     assert_eq!(
         mechanism_discrimination["discrimination"]["selected_action_order"][0],
         json!("perturb-f1")
+    );
+
+    let mechanism_bayesian_update = call(
+        &mut server,
+        "glioma_mechanism_bayesian_update",
+        json!({
+            "request": {
+                "objective": "update invasion mechanism posterior",
+                "model_system": "organoid",
+                "min_shared_features": 1,
+                "max_hypotheses": 4,
+                "likelihood_scale_milli": 100,
+                "supported_posterior_floor_milli": 600,
+                "contradicted_posterior_ceiling_milli": 100
+            },
+            "hypotheses": [
+                {"mechanism_id":"motility","statement":"motility pathway drives invasion","prior_milli":500,"predictions":[{"feature_id":"f1","predicted_milli":100,"uncertainty_milli":10}]},
+                {"mechanism_id":"matrix","statement":"matrix remodeling drives invasion","prior_milli":500,"predictions":[{"feature_id":"f1","predicted_milli":500,"uncertainty_milli":10}]}
+            ],
+            "observations": [
+                {"feature_id":"f1","observed_milli":105,"uncertainty_milli":10,"artifact":{"artifact_id":"bayesian-observation","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-feature+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}}
+            ]
+        }),
+    );
+    assert_eq!(mechanism_bayesian_update["dispatch"], json!("not_started"));
+    assert_eq!(
+        mechanism_bayesian_update["update"]["records"][0]["mechanism_id"],
+        json!("motility")
+    );
+    assert_eq!(
+        mechanism_bayesian_update["update"]["disposition"],
+        json!("qualified")
     );
 
     let mechanism_action_plan = call(

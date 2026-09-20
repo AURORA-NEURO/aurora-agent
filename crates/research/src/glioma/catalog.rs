@@ -363,6 +363,7 @@ pub fn implemented_feature_ids() -> Vec<&'static str> {
         crate::glioma::programs::p05_mechanism_exploration::ensemble_counterfactual::FEATURE_ID,
         crate::glioma::programs::p05_mechanism_exploration::robust_portfolio::FEATURE_ID,
         crate::glioma::programs::p05_mechanism_exploration::action_planner::FEATURE_ID,
+        crate::glioma::programs::p05_mechanism_exploration::bayesian_update::FEATURE_ID,
         crate::glioma::programs::p05_mechanism_exploration::pathway_activity::FEATURE_ID,
         crate::glioma::programs::p05_mechanism_exploration::adaptive_policy::FEATURE_ID,
         crate::glioma::programs::p05_mechanism_exploration::clonal_evolution::FEATURE_ID,
