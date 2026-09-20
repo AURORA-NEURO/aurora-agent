@@ -128,6 +128,8 @@ crates/research/src/glioma/
                                              P10 guarded execution handoff into site replication, meta-analysis, transportability, and next-action control
   programs/p12_federated_benchmarking/replication_transport.rs
                                              P12 replication-to-federation bridge that admits only validated aggregate site summaries into mechanism transport
+  programs/p10_interpretation_replication/replication_closure_frontier.rs
+                                             P10 ranked scientific closure frontier after independent-site replication with explicit negative and qualified holds
   programs/p07_protocol_simulation/mechanism_validation_execution.rs
                                              P07 compiled validation protocol execution through a bounded institution-local worker seam
   programs/p05_mechanism_exploration/operating_cycle.rs
@@ -929,6 +931,12 @@ assigns a passing quality value merely because a replication request exists. Hel
 negative, heterogeneous, unresolved, and budget-limited states remain typed; raw traces, human
 data, specimen data, and instrument effects never cross the federation boundary. This is an
 executable research handoff, not a passive receipt or an automatic scientific claim.
+P10 also exposes a replication-closure frontier (`plan_glioma_replication_closure_frontier`). It
+turns a typed independent-site result into a deterministic, budget/risk-constrained ranking of
+site extension, heterogeneity reconciliation, target-model acquisition, influential-study stress
+testing, negative-result confirmation, and methods review. Qualified and negative outcomes are
+holds with operator actions rather than automatic permission to spend or claims of efficacy; each
+selected route remains an institution-owned workflow with its own execution gate.
 P11 now adds a dependency-aware reproducibility replay campaign
 (`execute_glioma_replay_campaign`). It schedules declared program replays, compares exact artifact
 hashes, blocks downstream tasks after mismatch or unavailable outputs, and only emits a

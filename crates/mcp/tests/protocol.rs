@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 777;
+const TOOL_DEFINITION_COUNT: usize = 778;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -2924,6 +2924,41 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
         json!("blocked_by_replication")
     );
     assert!(replication_federated_transport["transport"]["campaign"].is_null());
+
+    let replication_closure_frontier = call(
+        &mut server,
+        "glioma_replication_closure_frontier",
+        json!({
+            "request": {
+                "replication": validation_replication_campaign["campaign"].clone(),
+                "candidates": [{
+                    "action_id": "confirm-negative",
+                    "target": "confirm_negative_result",
+                    "route": "glioma_validation_replication_campaign_execute",
+                    "model_system": "organoid",
+                    "rationale": "confirm only after the upstream independent-site gate is admitted",
+                    "expected_information_milli": 800,
+                    "reproducibility_milli": 900,
+                    "feasibility_milli": 900,
+                    "risk_milli": 100,
+                    "cost_units": 1,
+                    "requires_independent_site": true
+                }],
+                "budget_units": 2,
+                "max_actions": 1,
+                "max_risk_milli": 500,
+                "min_utility_milli": 0
+            }
+        }),
+    );
+    assert_eq!(
+        replication_closure_frontier["frontier"]["disposition"],
+        json!("blocked")
+    );
+    assert!(replication_closure_frontier["frontier"]["selected_order"]
+        .as_array()
+        .unwrap()
+        .is_empty());
 
     let information_design = call(
         &mut server,

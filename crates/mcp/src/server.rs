@@ -580,13 +580,14 @@ use bioprism_research::{
     plan_glioma_multimodal_portfolio, plan_glioma_multimodal_quality_remediation,
     plan_glioma_multimodal_quality_schedule, plan_glioma_power_reestimation,
     plan_glioma_protocol_compensation, plan_glioma_replication,
-    plan_glioma_replication_continuation, plan_glioma_robust_active_learning,
-    plan_glioma_robust_intervention_portfolio, plan_glioma_scientific_frontier,
-    plan_glioma_sequential_design, plan_glioma_validation_replication_gate, plan_glioma_workflow,
-    preflight_glioma_instrument, prioritize_glioma_evidence, prioritize_knowledge_frontier,
-    propagate_glioma_mechanism_graph, qualify_evidence, register_glioma_spatial_samples,
-    revise_glioma_beliefs, schedule_glioma_computation_placement, schedule_glioma_instrument_fleet,
-    select_glioma_actions, simulate_glioma_counterfactual, simulate_glioma_counterfactual_ensemble,
+    plan_glioma_replication_closure_frontier, plan_glioma_replication_continuation,
+    plan_glioma_robust_active_learning, plan_glioma_robust_intervention_portfolio,
+    plan_glioma_scientific_frontier, plan_glioma_sequential_design,
+    plan_glioma_validation_replication_gate, plan_glioma_workflow, preflight_glioma_instrument,
+    prioritize_glioma_evidence, prioritize_knowledge_frontier, propagate_glioma_mechanism_graph,
+    qualify_evidence, register_glioma_spatial_samples, revise_glioma_beliefs,
+    schedule_glioma_computation_placement, schedule_glioma_instrument_fleet, select_glioma_actions,
+    simulate_glioma_counterfactual, simulate_glioma_counterfactual_ensemble,
     simulate_glioma_mechanism_dynamics, simulate_glioma_protocol,
     simulate_glioma_protocol_scenario_ensemble, smooth_glioma_mechanism_states,
     surveil_glioma_evidence, surveil_glioma_multimodal_drift, synthesize_glioma_interpretation,
@@ -689,22 +690,23 @@ use bioprism_research::{
     QualityExecutionRequest, QualityRecoveryRequest, QualityRemediationRequest,
     QualityRootCauseRequest, QualityScheduleRequest, QualityTransportRequest, ReleaseExecutionMode,
     ReleaseGateRequest, ReliabilityCalibrationRequest, ReplayCampaign, ReplayCampaignRequest,
-    ReplicationContinuationRequest, ReplicationObservation, ReplicationPlanRequest,
-    ReplicationProtocolCompileRequest, ReplicationRequest, ReplicationStudy, ResearchObjectRequest,
-    RobustActiveLearningCampaignRequest, RobustActiveLearningCandidate,
-    RobustActiveLearningObservation, RobustActiveLearningRequest, RobustExperimentDesignRequest,
-    RobustInterventionCandidate, RobustInterventionRequest, RobustnessGuidedComputationRequest,
-    RobustnessRequest, ScientificFrontierExecutionRequest, ScientificFrontierRequest,
-    SensitivityObservation, SensitivityRequest, SequentialArmObservation,
-    SequentialCampaignRequest, SequentialDesignRequest, SpatialCell, SpatialCommunicationCell,
-    SpatialCommunicationRequest, SpatialNicheRequest, SpatialPropagationRequest,
-    SpatialRegistrationCell, SpatialRegistrationRequest, StateTransitionObservation,
-    StateTransitionRequest, StaticGliomaActionPlanner, StaticGliomaComputationPlanner,
-    StratifiedCausalRequest, StratifiedObservation, TemporalFusionRequest, TemporalObservation,
-    TemporalSpatialAlignmentRequest, TrajectoryObservation, TrajectoryRequest, TransportStudy,
-    TransportabilityRequest, TypedKnowledge, ValidationBatchAssessmentRequest,
-    ValidationCampaignRequest, ValidationReplicationCampaignRequest,
-    ValidationReplicationGateRequest, ValidationReplicationTransportRequest,
+    ReplicationClosureFrontierRequest, ReplicationContinuationRequest, ReplicationObservation,
+    ReplicationPlanRequest, ReplicationProtocolCompileRequest, ReplicationRequest,
+    ReplicationStudy, ResearchObjectRequest, RobustActiveLearningCampaignRequest,
+    RobustActiveLearningCandidate, RobustActiveLearningObservation, RobustActiveLearningRequest,
+    RobustExperimentDesignRequest, RobustInterventionCandidate, RobustInterventionRequest,
+    RobustnessGuidedComputationRequest, RobustnessRequest, ScientificFrontierExecutionRequest,
+    ScientificFrontierRequest, SensitivityObservation, SensitivityRequest,
+    SequentialArmObservation, SequentialCampaignRequest, SequentialDesignRequest, SpatialCell,
+    SpatialCommunicationCell, SpatialCommunicationRequest, SpatialNicheRequest,
+    SpatialPropagationRequest, SpatialRegistrationCell, SpatialRegistrationRequest,
+    StateTransitionObservation, StateTransitionRequest, StaticGliomaActionPlanner,
+    StaticGliomaComputationPlanner, StratifiedCausalRequest, StratifiedObservation,
+    TemporalFusionRequest, TemporalObservation, TemporalSpatialAlignmentRequest,
+    TrajectoryObservation, TrajectoryRequest, TransportStudy, TransportabilityRequest,
+    TypedKnowledge, ValidationBatchAssessmentRequest, ValidationCampaignRequest,
+    ValidationReplicationCampaignRequest, ValidationReplicationGateRequest,
+    ValidationReplicationTransportRequest,
 };
 use bioprism_routing::{
     lab::{run as run_routing_lab, LabSettings, Task},
@@ -2524,6 +2526,9 @@ impl Server {
             }
             "glioma_replication_federated_transport_execute" => {
                 self.glioma_replication_federated_transport_execute(&arguments)
+            }
+            "glioma_replication_closure_frontier" => {
+                self.glioma_replication_closure_frontier(&arguments)
             }
             "glioma_mechanism_validation_protocol_compile" => {
                 self.glioma_mechanism_validation_protocol_compile(&arguments)
@@ -11111,6 +11116,37 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma replication-federation transport: {error}"))
+    }
+
+    /// Rank the next bounded scientific closure actions after an independent-site replication
+    /// result. This is a planning controller: it never dispatches an assay, instrument,
+    /// federation export, or clinical decision.
+    fn glioma_replication_closure_frontier(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ReplicationClosureFrontierRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_replication_closure_frontier requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma replication-closure request: {error}"))?;
+        let frontier = plan_glioma_replication_closure_frontier(&request)
+            .map_err(|error| format!("glioma replication-closure frontier refused: {error}"))?;
+        serde_json::to_value(json!({
+            "frontier": frontier,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "physical_dispatch": false,
+            "next_routes": [
+                "glioma_validation_replication_campaign_execute",
+                "glioma_replication_federated_transport_execute",
+                "glioma_research_object_prepare"
+            ],
+            "guarantees": [
+                "qualified and negative replication outcomes remain explicit holds",
+                "candidate actions are ranked only after cost, risk, feasibility, and upstream-state gates",
+                "the frontier never invents observations or converts a research result into a clinical decision",
+                "selected routes remain institution-owned and require their own typed execution gates"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma replication-closure frontier: {error}"))
     }
 
     /// Compile the still-open mechanism validation decisions into a deterministic local P07
@@ -52797,6 +52833,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_validation_replication_gate",
                 "glioma_validation_replication_campaign_execute",
                 "glioma_replication_federated_transport_execute",
+                "glioma_replication_closure_frontier",
                 "glioma_mechanism_validation_protocol_compile",
                 "glioma_mechanism_validation_protocol_execute",
                 "glioma_information_design",
@@ -63484,6 +63521,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "ValidationReplicationTransportRequest1@1 containing a validated ValidationReplicationCampaignRun1@1, matching FederatedMechanismTransportRequest1@1, per-study ReplicationAggregateQuality1@1 summaries, typed aggregate follow-up actions, and bounded campaign budget/round/retry settings."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_replication_closure_frontier",
+        "description": "Rank the next bounded scientific actions after an independent-site glioma replication result. The controller scores site extension, heterogeneity reconciliation, target-model acquisition, influential-study stress testing, negative-result confirmation, and methods review under explicit information, reproducibility, feasibility, risk, cost, and upstream-state gates. Qualified and negative results remain holds; no assay, instrument, federation export, or clinical decision is dispatched.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ReplicationClosureFrontierRequest1@1 containing a validated ValidationReplicationCampaignRun1@1, typed ReplicationClosureCandidate1@1 actions, and bounded budget/action/risk/utility limits."}
             },
             "required": ["request"]
         }

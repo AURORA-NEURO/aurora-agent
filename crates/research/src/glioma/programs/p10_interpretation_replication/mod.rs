@@ -14,6 +14,7 @@ pub mod dynamic_policy;
 pub mod mediation;
 pub mod meta_analysis;
 pub mod operating_cycle;
+pub mod replication_closure_frontier;
 pub mod sensitivity;
 pub mod state_transition;
 pub mod synthesis;
@@ -86,6 +87,11 @@ pub use operating_cycle::{
     execute_glioma_interpretation_operating_cycle, GliomaInterpretationOperatingCycle,
     GliomaInterpretationOperatingCycleError, GliomaInterpretationOperatingCycleRequest,
     InterpretationOperatingCycleDisposition,
+};
+pub use replication_closure_frontier::{
+    plan_glioma_replication_closure_frontier, ReplicationClosureCandidate,
+    ReplicationClosureDisposition, ReplicationClosureFrontier, ReplicationClosureFrontierError,
+    ReplicationClosureFrontierRequest, ReplicationClosureScore, ReplicationClosureTarget,
 };
 pub use sensitivity::{
     analyze_causal_sensitivity, CausalSensitivityAnalysis, SensitivityDirection,
