@@ -457,7 +457,7 @@ portfolio plan and executable code; it does not promote a planned slot to implem
 | P06 Power-aware experiment design | experimentalist | experiment design | falsifiable allocation, power, blocking, dose-response, adaptive replicate allocation, sequential Bayesian success/futility stopping, local sequential campaign execution, uncertainty-aware dose-surface acquisition, mechanism-aware closed-loop campaign rounds, an end-to-end plan/execute/replan cycle, combination-synergy fitting, and null-result plan |
 | P07 Protocol simulation | lab operations lead | protocol simulation, adaptive workflow planning | critical-path scheduling, outcome-aware dependency scheduling, intent-to-stage-action compilation, bounded modality/model-system portfolio expansion, evidence-gated director admission, evidence-priority execution cycles, context-to-action execution, multimodal mechanism campaigns, evolution-aware clone campaigns, stage-gated autonomous program control, failed-frontier recovery with alternate dependency-safe missions, P02/P03-aware scientific frontier admission, utilization, deterministic next batches, and repair/abstain routing before physical effects |
 | P08 Instrument and robotics preflight | instrument operator | instrument preflight | robust control calibration, drift detection, information-per-cost endpoint-diverse campaign selection, multi-instrument dependency scheduling, schedule-bound fleet execution, signed interlocked planning, guarded execution, and fail-closed multi-run campaigns |
-| P09 Reproducible computation | computational scientist | computational execution | checkpointed/replayable computation, intent-to-DAG compilation, locality-aware worker placement, budgeted portfolio execution, robustness-debt-driven re-analysis, selective failed-frontier recovery, and omission-stress robustness suite |
+| P09 Reproducible computation | computational scientist | computational execution | checkpointed/replayable computation, intent-to-DAG compilation, locality-aware worker placement, budgeted portfolio execution, robustness-debt-driven re-analysis, selective failed-frontier recovery, omission-stress robustness suite, and computation-to-interpretation/replication routing |
 | P10 Causal interpretation and replication | methods reviewer | statistical interpretation, replication/robustness | uncertainty-aware endpoint, longitudinal, stratified causal, dynamic-policy, causal-contrast, meta-analytic, cross-site verdicts, guarded adaptive-frontier execution, and bounded resynthesis campaigns |
 | P11 Research-object release | reproducibility steward | research-object release | portable manifest with limitations and negative evidence, dependency-aware replay, accountable release gating, and operator handoff |
 | P12 Federated benchmarking | consortium administrator | federation benchmarking | aggregate-only cross-site benchmark consensus, influence-aware site portfolio planning, planner-to-campaign adaptive execution, robust pooling, heterogeneity, and site-influence analysis |
@@ -1068,6 +1068,15 @@ transfer cost, availability windows, critical-path timing, and utilization, and 
 replay-valid schema-compatible local cache artifacts. Completed, cached, budget-blocked, and
 worker-incompatible tasks remain explicit. The MCP route returns a pre-dispatch handoff with
 preflight required; it never executes code, moves payloads, or dispatches a worker.
+P09 now also exposes the computation interpretation frontier
+(`glioma_computation_interpretation_frontier_compile` and
+`glioma_computation_interpretation_frontier_execute`). Completed or cached computation tasks
+become typed interpretation candidates, negative tasks become replication/falsification work,
+and partial, failed, or skipped tasks become bounded recovery work. The bridge carries replay
+identity, baseline comparison, uncertainty, and negative-result evaluation obligations into the
+P07 autonomous mission controller, so computation output is never silently promoted to a
+biological conclusion. Empty or held frontiers remain explicit and the MCP route stays local,
+deterministic, and preclinical-only.
 P05 now also includes counterfactual mechanism simulation (`simulate_glioma_counterfactual`). It
 compares baseline and signed node perturbation fixed points over activating/inhibiting networks,
 rank-orders downstream changes, and exposes low-confidence edges and non-convergence as unresolved.

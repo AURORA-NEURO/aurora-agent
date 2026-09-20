@@ -476,6 +476,7 @@ pub fn implemented_feature_ids() -> Vec<&'static str> {
         crate::glioma::programs::p09_reproducible_computation::operating_cycle::FEATURE_ID,
         crate::glioma::programs::p09_reproducible_computation::placement::FEATURE_ID,
         crate::glioma::programs::p09_reproducible_computation::recovery_campaign::FEATURE_ID,
+        crate::glioma::programs::p09_reproducible_computation::interpretation_frontier::FEATURE_ID,
         crate::glioma::programs::p10_interpretation_replication::causal_adjustment::FEATURE_ID,
         crate::glioma::programs::p10_interpretation_replication::claim_adjudication::FEATURE_ID,
         crate::glioma::programs::p10_interpretation_replication::dynamic_policy::FEATURE_ID,

@@ -511,7 +511,8 @@ use bioprism_research::{
     build_research_object_manifest, calibrate_glioma_decision_value, calibrate_glioma_evidence,
     calibrate_glioma_mechanisms, calibrate_glioma_multimodal_quality_transport,
     calibrate_glioma_multimodal_reliability, certify_decision_omissions,
-    compile_decision_action_graph, compile_decision_context, compile_glioma_computation_workflow,
+    compile_decision_action_graph, compile_decision_context,
+    compile_glioma_computation_interpretation_frontier, compile_glioma_computation_workflow,
     compile_glioma_knowledge_actions, compile_glioma_knowledge_gaps,
     compile_glioma_mechanism_consensus, compile_glioma_mechanism_validation_protocol,
     compile_glioma_protocol_evidence_surface, compile_glioma_replication_protocol,
@@ -536,6 +537,7 @@ use bioprism_research::{
     execute_glioma_autonomous_research_mission,
     execute_glioma_calibrated_mechanism_campaign_dry_run, execute_glioma_causal_claim_adjudication,
     execute_glioma_computation, execute_glioma_computation_campaign,
+    execute_glioma_computation_interpretation_frontier,
     execute_glioma_computation_operating_cycle_dry_run, execute_glioma_computation_portfolio,
     execute_glioma_computation_recovery, execute_glioma_decision_branch_campaign,
     execute_glioma_decision_context_campaign, execute_glioma_decision_mission,
@@ -615,35 +617,36 @@ use bioprism_research::{
     ClonePerturbationPanelRequest, CloneProfile, ClosedLoopCampaignRequest,
     ClosureInterpretationRequest, CombinationObservation, CombinationSynergyRequest,
     ComputationCandidate, ComputationExecutionMode, ComputationExecutionRequest,
-    ComputationPlacementRequest, ComputationPortfolioExecutionRequest, ComputationPortfolioRequest,
-    ComputationRecoveryRequest, ConcordanceRequest, ConsensusRequest,
-    ContradictionAdjudicationRequest, ContradictionCutRequest, ContradictionEvidence,
-    ContrastDesignRequest, CounterfactualEnsembleRequest, CounterfactualIntervention,
-    CounterfactualModel, CounterfactualRequest, DecisionActionGraphRequest,
-    DecisionActionPlanRequest, DecisionAdmissionRequest, DecisionBranchCampaignRequest,
-    DecisionBranchPlannerRequest, DecisionContext, DecisionContextCampaignRequest,
-    DecisionContextRequest, DecisionLoopGovernorRequest, DecisionMissionBridgeRequest,
-    DecisionOmissionCertificateRequest, DecisionOperatingCycleRequest,
-    DecisionValueCalibrationRequest, DecisionValueRequest, DesignAction, DesignMechanism,
-    DoseResponseObservation, DoseResponseRequest, DriftSurveillanceRequest, DropoutStressRequest,
-    DryRunActiveLearningCampaignExecutor, DryRunAdaptiveAllocationCampaignExecutor,
-    DryRunAdaptiveMechanismPolicyExecutor, DryRunDecisionContextCampaignExecutor,
-    DryRunEvidenceAcquisitionExecutor, DryRunEvidenceRefreshCampaignExecutor,
-    DryRunExperimentOperatingCycleExecutor, DryRunFederatedBenchmarkCampaignExecutor,
-    DryRunFederatedMechanismTransportExecutor, DryRunGliomaActionExecutor,
-    DryRunGliomaComputationExecutor, DryRunGliomaExperimentFrontierExecutor,
-    DryRunGliomaProtocolExecutor, DryRunGliomaReplicationCampaignExecutor,
-    DryRunInstrumentExecutor, DryRunKnowledgeActionExecutor,
-    DryRunKnowledgeResolutionCampaignExecutor, DryRunMechanismDiscriminationCampaignExecutor,
-    DryRunMultiFidelityCampaignExecutor, DryRunMultimodalIngestionCampaignExecutor,
-    DryRunQualityScheduleExecutor, DryRunReplayCampaignExecutor,
-    DryRunRobustActiveLearningCampaignExecutor, DryRunSequentialCampaignExecutor,
-    DynamicPolicyCandidate, DynamicPolicyRequest, DynamicPolicyTrajectory,
-    EvidenceAcquisitionCampaignRequest, EvidenceAcquisitionCandidate, EvidenceAcquisitionRequest,
-    EvidenceCalibrationObservation, EvidenceCalibrationRequest, EvidenceExecutionMode,
-    EvidenceFusionRequest, EvidencePriorityRequest, EvidenceRecord, EvidenceRefreshCampaignRequest,
-    EvidenceRequest, EvidenceSurveillanceRequest, EvidenceTriangulationRequest, ExperimentArm,
-    ExperimentOperatingCycleRequest, ExperimentRequest, FederatedBenchmarkAdaptiveCampaignRequest,
+    ComputationInterpretationFrontierRequest, ComputationPlacementRequest,
+    ComputationPortfolioExecutionRequest, ComputationPortfolioRequest, ComputationRecoveryRequest,
+    ConcordanceRequest, ConsensusRequest, ContradictionAdjudicationRequest,
+    ContradictionCutRequest, ContradictionEvidence, ContrastDesignRequest,
+    CounterfactualEnsembleRequest, CounterfactualIntervention, CounterfactualModel,
+    CounterfactualRequest, DecisionActionGraphRequest, DecisionActionPlanRequest,
+    DecisionAdmissionRequest, DecisionBranchCampaignRequest, DecisionBranchPlannerRequest,
+    DecisionContext, DecisionContextCampaignRequest, DecisionContextRequest,
+    DecisionLoopGovernorRequest, DecisionMissionBridgeRequest, DecisionOmissionCertificateRequest,
+    DecisionOperatingCycleRequest, DecisionValueCalibrationRequest, DecisionValueRequest,
+    DesignAction, DesignMechanism, DoseResponseObservation, DoseResponseRequest,
+    DriftSurveillanceRequest, DropoutStressRequest, DryRunActiveLearningCampaignExecutor,
+    DryRunAdaptiveAllocationCampaignExecutor, DryRunAdaptiveMechanismPolicyExecutor,
+    DryRunDecisionContextCampaignExecutor, DryRunEvidenceAcquisitionExecutor,
+    DryRunEvidenceRefreshCampaignExecutor, DryRunExperimentOperatingCycleExecutor,
+    DryRunFederatedBenchmarkCampaignExecutor, DryRunFederatedMechanismTransportExecutor,
+    DryRunGliomaActionExecutor, DryRunGliomaComputationExecutor,
+    DryRunGliomaExperimentFrontierExecutor, DryRunGliomaProtocolExecutor,
+    DryRunGliomaReplicationCampaignExecutor, DryRunInstrumentExecutor,
+    DryRunKnowledgeActionExecutor, DryRunKnowledgeResolutionCampaignExecutor,
+    DryRunMechanismDiscriminationCampaignExecutor, DryRunMultiFidelityCampaignExecutor,
+    DryRunMultimodalIngestionCampaignExecutor, DryRunQualityScheduleExecutor,
+    DryRunReplayCampaignExecutor, DryRunRobustActiveLearningCampaignExecutor,
+    DryRunSequentialCampaignExecutor, DynamicPolicyCandidate, DynamicPolicyRequest,
+    DynamicPolicyTrajectory, EvidenceAcquisitionCampaignRequest, EvidenceAcquisitionCandidate,
+    EvidenceAcquisitionRequest, EvidenceCalibrationObservation, EvidenceCalibrationRequest,
+    EvidenceExecutionMode, EvidenceFusionRequest, EvidencePriorityRequest, EvidenceRecord,
+    EvidenceRefreshCampaignRequest, EvidenceRequest, EvidenceSurveillanceRequest,
+    EvidenceTriangulationRequest, ExperimentArm, ExperimentOperatingCycleRequest,
+    ExperimentRequest, FederatedBenchmarkAdaptiveCampaignRequest,
     FederatedBenchmarkCampaignRequest, FederatedBenchmarkExecutionMode,
     FederatedBenchmarkOperatingCycleRequest, FederatedBenchmarkRequest, FederatedBenchmarkSite,
     FederatedBenchmarkSitePlannerRequest, FederatedInterpretationRequest, FederatedMechanismSite,
@@ -2323,6 +2326,12 @@ impl Server {
             }
             "glioma_computation_operating_cycle" => {
                 self.glioma_computation_operating_cycle(&arguments)
+            }
+            "glioma_computation_interpretation_frontier_compile" => {
+                self.glioma_computation_interpretation_frontier_compile(&arguments)
+            }
+            "glioma_computation_interpretation_frontier_execute" => {
+                self.glioma_computation_interpretation_frontier_execute(&arguments)
             }
             "glioma_research_director_execute" => self.glioma_research_director_execute(&arguments),
             "glioma_program_scheduler_execute" => self.glioma_program_scheduler_execute(&arguments),
@@ -6986,6 +6995,75 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma computation operating cycle: {error}"))
+    }
+
+    /// Compile computation campaign outcomes into interpretation, replication, and recovery
+    /// actions without promoting any computation result to a biological conclusion.
+    fn glioma_computation_interpretation_frontier_compile(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: ComputationInterpretationFrontierRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_computation_interpretation_frontier_compile requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma computation interpretation frontier request: {error}")
+            })?;
+        let frontier =
+            compile_glioma_computation_interpretation_frontier(&request).map_err(|error| {
+                format!("glioma computation interpretation frontier refused: {error}")
+            })?;
+        serde_json::to_value(json!({
+            "frontier": frontier,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "completed and cached computations become typed interpretation candidates",
+                "negative computations become replication or falsification candidates",
+                "partial, failed, and skipped computations become bounded recovery candidates",
+                "replay, baseline, uncertainty, and negative-result evaluation obligations remain explicit",
+                "the route performs no raw-data movement, biological conclusion, or clinical decision"
+            ]
+        }))
+        .map_err(|error| {
+            format!("cannot encode glioma computation interpretation frontier: {error}")
+        })
+    }
+
+    /// Execute the computation-derived frontier through the same bounded autonomous mission
+    /// controller used by the rest of the research engine. The MCP executor is local-only.
+    fn glioma_computation_interpretation_frontier_execute(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: ComputationInterpretationFrontierRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_computation_interpretation_frontier_execute requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma computation interpretation frontier request: {error}")
+            })?;
+        let mut executor = DryRunGliomaActionExecutor;
+        let run = execute_glioma_computation_interpretation_frontier(&request, &mut executor)
+            .map_err(|error| {
+                format!("glioma computation interpretation frontier refused: {error}")
+            })?;
+        serde_json::to_value(json!({
+            "run": run,
+            "dispatch": "dry_run",
+            "simulation_only": true,
+            "guarantees": [
+                "frontier actions remain behind the bounded autonomous mission controller",
+                "all effects are local deterministic computation and artifact writes",
+                "blocked, negative, failed, partial, and budget-limited outcomes remain typed",
+                "interpretation promotion still requires replay, baseline, uncertainty, and negative-result review",
+                "the route performs no instrument execution, raw-data movement, or clinical decision"
+            ]
+        }))
+        .map_err(|error| {
+            format!("cannot encode glioma computation interpretation frontier run: {error}")
+        })
     }
 
     /// Synthesize independent preclinical interpretation families into a bounded research
@@ -52924,6 +53002,8 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_robustness_guided_computation_execute",
                 "glioma_computation_workflow_execute",
                 "glioma_computation_operating_cycle",
+                "glioma_computation_interpretation_frontier_compile",
+                "glioma_computation_interpretation_frontier_execute",
                 "glioma_research_director_execute",
                 "glioma_program_scheduler_execute",
                 "glioma_experiment_frontier_controller_execute",
@@ -62146,6 +62226,28 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "GliomaComputationOperatingCycleRequest1@1 containing GliomaComputationWorkflowRequest1@1, require_within_resources, and local_simulation or governed_local execution mode."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_computation_interpretation_frontier_compile",
+        "description": "Compile a completed preclinical glioma computation campaign into a typed interpretation, replication/falsification, and recovery frontier. Completed or cached tasks become interpretation candidates, negative tasks become replication/falsification work, and partial, failed, or skipped tasks become bounded recovery work. Replay identity, baseline comparison, uncertainty, and negative-result evaluation obligations remain explicit; MCP performs no raw-data movement or clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ComputationInterpretationFrontierRequest1@1 containing a validated GliomaComputationCampaign1@1, matching objective, modality, bounded action/mission policy, and optional resumption order."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_computation_interpretation_frontier_execute",
+        "description": "Execute the computation-derived interpretation, replication/falsification, and recovery frontier through the bounded autonomous preclinical glioma mission controller. All routed effects are local deterministic computation and artifact writes; blocked, negative, failed, partial, budget, replay, uncertainty, and no-progress states remain typed, and no computation output is promoted to a biological conclusion without downstream evaluation.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ComputationInterpretationFrontierRequest1@1 containing a validated GliomaComputationCampaign1@1, matching objective, modality, bounded action/mission policy, and optional resumption order."}
             },
             "required": ["request"]
         }

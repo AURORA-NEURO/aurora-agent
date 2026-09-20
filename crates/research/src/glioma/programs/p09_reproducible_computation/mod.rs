@@ -4,6 +4,7 @@ use crate::glioma::catalog::{glioma_program_catalog, GliomaProgramDescriptor, Gl
 
 pub mod campaign;
 pub mod execution;
+pub mod interpretation_frontier;
 pub mod operating_cycle;
 pub mod placement;
 pub mod planning;
@@ -37,6 +38,13 @@ pub use execution::{
     ComputationExecutionRequest, ComputationExecutionStopReason, ComputationOperation,
     ComputationTask, ComputationTaskDisposition, ComputationTaskResult,
     DryRunGliomaComputationExecutor, GliomaComputationExecutor,
+};
+
+pub use interpretation_frontier::{
+    compile_glioma_computation_interpretation_frontier,
+    execute_glioma_computation_interpretation_frontier, ComputationInterpretationFrontier,
+    ComputationInterpretationFrontierDisposition, ComputationInterpretationFrontierError,
+    ComputationInterpretationFrontierRequest, ComputationInterpretationFrontierRun,
 };
 
 pub use campaign::{
