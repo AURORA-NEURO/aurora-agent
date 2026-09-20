@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 753;
+const TOOL_DEFINITION_COUNT: usize = 754;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -1623,6 +1623,39 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
             .unwrap()
             .len(),
         2
+    );
+
+    let quality_root_cause = call(
+        &mut server,
+        "glioma_multimodal_quality_root_cause",
+        json!({
+            "request": {
+                "objective": "attribute a multimodal QC incident before reacquisition",
+                "incident_id": "incident-mcp-1",
+                "study_id": "root-cause-study",
+                "model_system": "organoid",
+                "required_modalities": ["genomics", "imaging"],
+                "signals": [
+                    {"signal_id":"batch-g","modality":"genomics","cause":"batch","scope":"batch","magnitude_milli":900,"reliability_milli":900,"replicate_count":3,"supports_cause":true,"observed":true},
+                    {"signal_id":"batch-i","modality":"imaging","cause":"batch","scope":"batch","magnitude_milli":900,"reliability_milli":900,"replicate_count":3,"supports_cause":true,"observed":true},
+                    {"signal_id":"instrument-i","modality":"imaging","cause":"instrument","scope":"batch","magnitude_milli":900,"reliability_milli":900,"replicate_count":3,"supports_cause":false,"observed":true}
+                ],
+                "min_signal_reliability_milli":700,
+                "min_support_milli":400,
+                "min_confidence_milli":600,
+                "min_margin_milli":150
+            }
+        }),
+    );
+    assert_eq!(quality_root_cause["dispatch"], json!("not_started"));
+    assert_eq!(quality_root_cause["simulation_only"], json!(true));
+    assert_eq!(
+        quality_root_cause["attribution"]["disposition"],
+        json!("ready")
+    );
+    assert_eq!(
+        quality_root_cause["attribution"]["primary_cause"],
+        json!("batch")
     );
 
     let harmonization = call(

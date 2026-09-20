@@ -506,20 +506,20 @@ use bioprism_research::{
     analyze_glioma_transportability, analyze_instrument_calibration,
     analyze_multimodal_concordance, analyze_multimodal_consensus, analyze_preclinical_outcomes,
     analyze_replication_meta_analysis, analyze_stratified_causal_adjustment,
-    assess_glioma_robustness, assess_replication, bridge_glioma_knowledge_actions,
-    build_research_object_manifest, calibrate_glioma_evidence, calibrate_glioma_mechanisms,
-    calibrate_glioma_multimodal_quality_transport, calibrate_glioma_multimodal_reliability,
-    certify_decision_omissions, compile_decision_action_graph, compile_decision_context,
-    compile_glioma_computation_workflow, compile_glioma_knowledge_actions,
-    compile_glioma_knowledge_gaps, compile_glioma_protocol_evidence_surface,
-    compile_mechanism_action_plan, compile_typed_knowledge, compose_knowledge_graph,
-    design_glioma_contrast_panel, design_glioma_robust_experiment, design_preclinical_experiment,
-    discriminate_mechanisms, dry_run_adaptive_instrument_executor,
-    dry_run_glioma_adaptive_frontier_executor, dry_run_glioma_research,
-    dry_run_instrument_executor_from_request, dry_run_robustness_guided_computation_executor,
-    evaluate_glioma_dynamic_policies, evaluate_glioma_release_gate,
-    execute_federated_benchmark_adaptive_campaign_dry_run, execute_federated_benchmark_campaign,
-    execute_federated_benchmark_operating_cycle_dry_run,
+    assess_glioma_robustness, assess_replication, attribute_glioma_multimodal_quality_root_cause,
+    bridge_glioma_knowledge_actions, build_research_object_manifest, calibrate_glioma_evidence,
+    calibrate_glioma_mechanisms, calibrate_glioma_multimodal_quality_transport,
+    calibrate_glioma_multimodal_reliability, certify_decision_omissions,
+    compile_decision_action_graph, compile_decision_context, compile_glioma_computation_workflow,
+    compile_glioma_knowledge_actions, compile_glioma_knowledge_gaps,
+    compile_glioma_protocol_evidence_surface, compile_mechanism_action_plan,
+    compile_typed_knowledge, compose_knowledge_graph, design_glioma_contrast_panel,
+    design_glioma_robust_experiment, design_preclinical_experiment, discriminate_mechanisms,
+    dry_run_adaptive_instrument_executor, dry_run_glioma_adaptive_frontier_executor,
+    dry_run_glioma_research, dry_run_instrument_executor_from_request,
+    dry_run_robustness_guided_computation_executor, evaluate_glioma_dynamic_policies,
+    evaluate_glioma_release_gate, execute_federated_benchmark_adaptive_campaign_dry_run,
+    execute_federated_benchmark_campaign, execute_federated_benchmark_operating_cycle_dry_run,
     execute_federated_mechanism_transport_campaign_dry_run, execute_glioma_action_portfolio,
     execute_glioma_active_learning_campaign, execute_glioma_adaptive_allocation_campaign,
     execute_glioma_adaptive_clone_campaign_dry_run,
@@ -667,21 +667,22 @@ use bioprism_research::{
     ProspectiveQualityRequest, ProtocolBranchOptimizationRequest, ProtocolCompensationRequest,
     ProtocolEvidenceFusionRequest, ProtocolEvidenceSurfaceRequest, ProtocolExecutionRequest,
     ProtocolSimulationRequest, ProtocolTransportGateRequest, QualityAdaptiveCampaignRequest,
-    QualityExecutionMode, QualityExecutionRequest, QualityScheduleRequest, QualityTransportRequest,
-    ReleaseExecutionMode, ReleaseGateRequest, ReliabilityCalibrationRequest, ReplayCampaign,
-    ReplayCampaignRequest, ReplicationRequest, ReplicationStudy, ResearchObjectRequest,
-    RobustActiveLearningCampaignRequest, RobustActiveLearningCandidate,
-    RobustActiveLearningObservation, RobustActiveLearningRequest, RobustExperimentDesignRequest,
-    RobustInterventionCandidate, RobustInterventionRequest, RobustnessGuidedComputationRequest,
-    RobustnessRequest, ScientificFrontierExecutionRequest, ScientificFrontierRequest,
-    SensitivityObservation, SensitivityRequest, SequentialArmObservation,
-    SequentialCampaignRequest, SequentialDesignRequest, SpatialCell, SpatialCommunicationCell,
-    SpatialCommunicationRequest, SpatialNicheRequest, SpatialPropagationRequest,
-    SpatialRegistrationCell, SpatialRegistrationRequest, StateTransitionObservation,
-    StateTransitionRequest, StaticGliomaActionPlanner, StaticGliomaComputationPlanner,
-    StratifiedCausalRequest, StratifiedObservation, TemporalFusionRequest, TemporalObservation,
-    TemporalSpatialAlignmentRequest, TrajectoryObservation, TrajectoryRequest, TransportStudy,
-    TransportabilityRequest, TypedKnowledge,
+    QualityExecutionMode, QualityExecutionRequest, QualityRootCauseRequest, QualityScheduleRequest,
+    QualityTransportRequest, ReleaseExecutionMode, ReleaseGateRequest,
+    ReliabilityCalibrationRequest, ReplayCampaign, ReplayCampaignRequest, ReplicationRequest,
+    ReplicationStudy, ResearchObjectRequest, RobustActiveLearningCampaignRequest,
+    RobustActiveLearningCandidate, RobustActiveLearningObservation, RobustActiveLearningRequest,
+    RobustExperimentDesignRequest, RobustInterventionCandidate, RobustInterventionRequest,
+    RobustnessGuidedComputationRequest, RobustnessRequest, ScientificFrontierExecutionRequest,
+    ScientificFrontierRequest, SensitivityObservation, SensitivityRequest,
+    SequentialArmObservation, SequentialCampaignRequest, SequentialDesignRequest, SpatialCell,
+    SpatialCommunicationCell, SpatialCommunicationRequest, SpatialNicheRequest,
+    SpatialPropagationRequest, SpatialRegistrationCell, SpatialRegistrationRequest,
+    StateTransitionObservation, StateTransitionRequest, StaticGliomaActionPlanner,
+    StaticGliomaComputationPlanner, StratifiedCausalRequest, StratifiedObservation,
+    TemporalFusionRequest, TemporalObservation, TemporalSpatialAlignmentRequest,
+    TrajectoryObservation, TrajectoryRequest, TransportStudy, TransportabilityRequest,
+    TypedKnowledge,
 };
 use bioprism_routing::{
     lab::{run as run_routing_lab, LabSettings, Task},
@@ -2378,6 +2379,9 @@ impl Server {
             }
             "glioma_multimodal_quality_transport" => {
                 self.glioma_multimodal_quality_transport(&arguments)
+            }
+            "glioma_multimodal_quality_root_cause" => {
+                self.glioma_multimodal_quality_root_cause(&arguments)
             }
             "glioma_multimodal_missingness" => self.glioma_multimodal_missingness(&arguments),
             "glioma_multimodal_reliability" => self.glioma_multimodal_reliability(&arguments),
@@ -8475,6 +8479,30 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma quality transport: {error}"))
+    }
+
+    /// Attribute a local QC incident to measurement-process causes and route remediation.
+    fn glioma_multimodal_quality_root_cause(&self, arguments: &Value) -> Result<Value, String> {
+        let request: QualityRootCauseRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_multimodal_quality_root_cause requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma quality root-cause request: {error}"))?;
+        let attribution = attribute_glioma_multimodal_quality_root_cause(&request)
+            .map_err(|error| format!("glioma quality root-cause attribution refused: {error}"))?;
+        serde_json::to_value(json!({
+            "attribution": attribution,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "next_routes": ["glioma_multimodal_quality_scheduler", "glioma_multimodal_quality_adaptive_campaign", "glioma_multimodal_quality_transport"],
+            "guarantees": [
+                "attribution is limited to declared measurement-process QC signals",
+                "supporting, contradicting, low-reliability, and missing modality evidence remain explicit",
+                "qualified cause is a remediation handoff, never a biological or clinical conclusion",
+                "route performs no assay, instrument, federation, raw-data, or clinical action"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma quality root-cause attribution: {error}"))
     }
 
     /// Cluster de-identified preclinical glioma sample lineages from multiple modality vectors.
@@ -51907,6 +51935,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_multimodal_quality_execute",
                 "glioma_multimodal_quality_adaptive_campaign",
                 "glioma_multimodal_quality_transport",
+                "glioma_multimodal_quality_root_cause",
                 "glioma_multimodal_consensus",
                 "glioma_multimodal_harmonize",
                 "glioma_multimodal_latent_factors",
@@ -61600,6 +61629,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "QualityTransportRequest1@1 with distinct source/target studies, model bindings, per-modality QC summary cells, calibration floors, gap/drift gates, and transfer confidence threshold."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_multimodal_quality_root_cause",
+        "description": "Attribute a local preclinical glioma multimodal QC incident to measurement-process causes using typed supporting, contradicting, reliability, and coverage signals. Ranks remediation actions for an adaptive quality campaign, blocks when required modality evidence is missing, and never produces a biological or clinical conclusion or moves raw data.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "QualityRootCauseRequest1@1 with study/model binding, canonical required modalities, bounded QC incident signals, reliability/support/confidence/margin gates, and explicit process-cause scope."}
             },
             "required": ["request"]
         }

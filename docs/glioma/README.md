@@ -357,6 +357,8 @@ crates/research/src/glioma/
                                              P03 closed-loop quality campaign that assimilates QC outcomes and replans bounded acquisition rounds
   p03_multimodal_ingestion_qc/quality_transport.rs
                                              P03 cross-study/model QC-policy transport calibration with target-local confirmation gates
+  p03_multimodal_ingestion_qc/quality_root_cause.rs
+                                             P03 measurement-process QC incident attribution with contradiction, missing-evidence, and remediation gates
   p03_multimodal_ingestion_qc/spatial_niche.rs
                                              P03 spatial neighbourhood graph, same-lineage niche components, and cross-lineage enrichment
   p03_multimodal_ingestion_qc/spatial_communication.rs
@@ -573,6 +575,11 @@ Cross-study QC-policy transport (`calibrate_glioma_multimodal_quality_transport`
 source and target study summaries per modality, scoring quality/coverage gaps, target alignment,
 and drift. Missing target calibration blocks transfer; weak alignment or drift makes it
 conditional, and only qualified modalities can be used as target-local confirmation candidates.
+QC incident root-cause attribution (`attribute_glioma_multimodal_quality_root_cause`) ranks
+instrument, batch, preparation, alignment, transport, connector, and unknown process causes from
+typed local signals. It preserves contradictory and low-reliability evidence, blocks attribution
+when required modalities are unobserved, and emits remediation actions for the adaptive campaign;
+it never treats a measurement-process cause as a biological or clinical conclusion.
 The feature transfers no raw data and never treats QC-policy portability as biological validity.
 P05 now also includes signed pathway activity inference (`analyze_glioma_pathway_activity`) that
 maps declared modality-specific molecular nodes to reliability-weighted pathway activity, compares

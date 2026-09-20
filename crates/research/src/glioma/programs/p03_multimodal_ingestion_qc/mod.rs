@@ -19,6 +19,7 @@ pub mod operating_cycle;
 pub mod prospective_quality;
 pub mod quality_adaptive_campaign;
 pub mod quality_execution;
+pub mod quality_root_cause;
 pub mod quality_scheduler;
 pub mod quality_transport;
 pub mod readiness_gate;
@@ -120,6 +121,12 @@ pub use quality_execution::{
     QualityExecutionFailure, QualityExecutionMode, QualityExecutionObservation,
     QualityExecutionRequest, QualityExecutionResult, QualityExecutionRun,
     QualityExecutionStopReason, QualityRunDisposition, QualityScheduleExecutor,
+};
+pub use quality_root_cause::{
+    attribute_glioma_multimodal_quality_root_cause, QualityIncidentSignal, QualityRootCause,
+    QualityRootCauseAttribution, QualityRootCauseAttributionResult,
+    QualityRootCauseCampaignDisposition, QualityRootCauseDisposition, QualityRootCauseError,
+    QualityRootCauseRequest, QualitySignalScope,
 };
 pub use quality_scheduler::{
     plan_glioma_multimodal_quality_schedule, QualityAcquisitionCandidate,
