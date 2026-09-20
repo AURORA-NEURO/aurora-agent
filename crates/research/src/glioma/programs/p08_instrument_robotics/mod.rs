@@ -11,6 +11,7 @@ pub mod fleet_execution;
 pub mod fleet_scheduler;
 pub mod operating_cycle;
 pub mod preflight;
+pub mod research_frontier;
 pub mod science_loop;
 
 pub use assay_adjudication::{
@@ -71,6 +72,12 @@ pub use operating_cycle::{
     InstrumentOperatingCycleError, InstrumentOperatingCycleRequest, InstrumentPreflightSummary,
 };
 
+pub use research_frontier::{
+    compile_glioma_instrument_research_frontier, execute_glioma_instrument_research_frontier,
+    InstrumentResearchFrontier, InstrumentResearchFrontierDisposition,
+    InstrumentResearchFrontierError, InstrumentResearchFrontierRequest,
+    InstrumentResearchFrontierRun,
+};
 pub use science_loop::{
     execute_glioma_instrument_science_loop, InstrumentScienceLoop,
     InstrumentScienceLoopDisposition, InstrumentScienceLoopError, InstrumentScienceLoopRequest,

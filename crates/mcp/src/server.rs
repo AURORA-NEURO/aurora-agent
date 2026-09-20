@@ -545,14 +545,15 @@ use bioprism_research::{
     execute_glioma_experiment_frontier_controller, execute_glioma_experiment_operating_cycle,
     execute_glioma_instrument_campaign, execute_glioma_instrument_fleet,
     execute_glioma_instrument_operating_cycle, execute_glioma_instrument_plan,
-    execute_glioma_instrument_science_loop, execute_glioma_intent_mission,
-    execute_glioma_interpretation_operating_cycle, execute_glioma_knowledge_action_dispatch,
-    execute_glioma_knowledge_resolution_campaign, execute_glioma_knowledge_selection_cycle,
-    execute_glioma_knowledge_synthesis_operating_cycle, execute_glioma_mechanism_autopilot,
-    execute_glioma_mechanism_discovery_engine, execute_glioma_mechanism_discrimination_campaign,
-    execute_glioma_mechanism_operating_cycle, execute_glioma_mechanism_validation_protocol,
-    execute_glioma_mission_recovery, execute_glioma_multi_fidelity_campaign,
-    execute_glioma_multimodal_ingestion_campaign, execute_glioma_multimodal_mechanism_campaign,
+    execute_glioma_instrument_research_frontier, execute_glioma_instrument_science_loop,
+    execute_glioma_intent_mission, execute_glioma_interpretation_operating_cycle,
+    execute_glioma_knowledge_action_dispatch, execute_glioma_knowledge_resolution_campaign,
+    execute_glioma_knowledge_selection_cycle, execute_glioma_knowledge_synthesis_operating_cycle,
+    execute_glioma_mechanism_autopilot, execute_glioma_mechanism_discovery_engine,
+    execute_glioma_mechanism_discrimination_campaign, execute_glioma_mechanism_operating_cycle,
+    execute_glioma_mechanism_validation_protocol, execute_glioma_mission_recovery,
+    execute_glioma_multi_fidelity_campaign, execute_glioma_multimodal_ingestion_campaign,
+    execute_glioma_multimodal_mechanism_campaign,
     execute_glioma_multimodal_mechanism_campaign_with_executor, execute_glioma_multimodal_mission,
     execute_glioma_multimodal_operating_cycle_dry_run,
     execute_glioma_multimodal_quality_adaptive_campaign,
@@ -664,12 +665,13 @@ use bioprism_research::{
     HarmonizationVector, InformationDesignRequest, InstrumentCampaignRequest,
     InstrumentExecutionMode, InstrumentExecutionRequest, InstrumentExecutionRun,
     InstrumentFleetExecutionRequest, InstrumentFleetScheduleRequest, InstrumentInterlockSnapshot,
-    InstrumentOperatingCycleRequest, InstrumentPreflightRequest, InstrumentScienceLoopRequest,
-    InterpretationSynthesisRequest, KnowledgeActionBridgeRequest, KnowledgeActionCompilerRequest,
-    KnowledgeActionDispatchRequest, KnowledgeActionPlan, KnowledgeActionSelectionCycle,
-    KnowledgeActionSelectionCycleRequest, KnowledgeActionTemplate, KnowledgeCompositionRequest,
-    KnowledgeFrontier, KnowledgeFrontierRequest, KnowledgeGapCompilerRequest, KnowledgeRelation,
-    KnowledgeRequest, KnowledgeResolutionCampaignRequest, KnowledgeSynthesisOperatingCycleRequest,
+    InstrumentOperatingCycleRequest, InstrumentPreflightRequest, InstrumentResearchFrontierRequest,
+    InstrumentScienceLoopRequest, InterpretationSynthesisRequest, KnowledgeActionBridgeRequest,
+    KnowledgeActionCompilerRequest, KnowledgeActionDispatchRequest, KnowledgeActionPlan,
+    KnowledgeActionSelectionCycle, KnowledgeActionSelectionCycleRequest, KnowledgeActionTemplate,
+    KnowledgeCompositionRequest, KnowledgeFrontier, KnowledgeFrontierRequest,
+    KnowledgeGapCompilerRequest, KnowledgeRelation, KnowledgeRequest,
+    KnowledgeResolutionCampaignRequest, KnowledgeSynthesisOperatingCycleRequest,
     LatentFactorRequest, LatentFactorVector, LigandReceptorPair, MechanismActionPlannerConfig,
     MechanismCalibration, MechanismCalibrationObservation, MechanismCalibrationRequest,
     MechanismCandidate, MechanismConsensusRequest, MechanismDiscrimination,
@@ -2595,6 +2597,9 @@ impl Server {
             }
             "glioma_instrument_science_loop_execute" => {
                 self.glioma_instrument_science_loop_execute(&arguments)
+            }
+            "glioma_instrument_research_frontier_execute" => {
+                self.glioma_instrument_research_frontier_execute(&arguments)
             }
             "glioma_experiment_design" => self.glioma_experiment_design(&arguments),
             "glioma_contrast_panel_design" => self.glioma_contrast_panel_design(&arguments),
@@ -12151,6 +12156,38 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma instrument science loop: {error}"))
+    }
+
+    /// Route adjudicated instrument outcomes into the autonomous research mission controller.
+    /// The MCP worker is deterministic and local-only; physical instrument effects remain behind
+    /// the institution-owned executor used by the upstream science loop.
+    fn glioma_instrument_research_frontier_execute(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: InstrumentResearchFrontierRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_instrument_research_frontier_execute requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma instrument research frontier request: {error}")
+            })?;
+        let mut executor = DryRunGliomaActionExecutor;
+        let run = execute_glioma_instrument_research_frontier(&request, &mut executor)
+            .map_err(|error| format!("glioma instrument research frontier refused: {error}"))?;
+        serde_json::to_value(json!({
+            "run": run,
+            "dispatch": "dry_run",
+            "simulation_only": true,
+            "guarantees": [
+                "qualified assay records route to computation, unresolved records to replication/QC, and negative records to falsification",
+                "the frontier is scored by information, QC, replicate support, uncertainty, cost, and scientific status",
+                "instrument completion is never promoted to evidence by the handoff",
+                "autonomous mission outcomes preserve negative, blocked, failed, budget, and no-progress states",
+                "the MCP route performs no hardware execution, clinical decision, or raw-data movement"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma instrument research frontier: {error}"))
     }
 
     fn glioma_experiment_design(&self, arguments: &Value) -> Result<Value, String> {
@@ -53045,6 +53082,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_instrument_operating_cycle",
                 "glioma_instrument_assay_adjudicate",
                 "glioma_instrument_science_loop_execute",
+                "glioma_instrument_research_frontier_execute",
                 "glioma_experiment_design",
                 "glioma_contrast_panel_design",
                 "glioma_analysis_run",
@@ -64033,6 +64071,17 @@ pub fn tool_definitions() -> Vec<Value> {
                 "observations": {"type": "array", "items": {"type": "object"}, "description": "AssayEvidenceObservation1@1 value-only local summaries keyed by executed action_id; missing summaries remain unresolved."}
             },
             "required": ["request", "observations"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_instrument_research_frontier_execute",
+        "description": "Compile adjudicated preclinical glioma instrument outcomes into a status-aware research frontier and execute it through the autonomous mission controller. Qualified assays route to computation, unresolved assays to replication/QC, and negative assays to falsification; information, QC, replicates, uncertainty, cost, and status are scored explicitly. MCP uses a synthetic worker and never performs hardware, clinical, or raw-data effects.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "InstrumentResearchFrontierRequest1@1 containing validated InstrumentScienceLoop1@1, mission identity, model/modality binding, bounded frontier and mission policy, and optional completed_action_order for resumption."}
+            },
+            "required": ["request"]
         }
     }));
     definitions.push(json!({

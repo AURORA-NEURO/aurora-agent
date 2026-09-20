@@ -302,6 +302,8 @@ crates/research/src/glioma/
                                              P08 information-per-cost, endpoint-diverse instrument portfolio selection with dependency-closed guarded execution
     p08_instrument_robotics/science_loop.rs
                                              P08 governed instrument-to-science loop with assay evidence adjudication and next research actions
+    p08_instrument_robotics/research_frontier.rs
+                                             P08 status-aware handoff from qualified, negative, and unresolved assay outcomes into executable computation, replication, and falsification missions
     p09_reproducible_computation/robustness.rs
                                              P09 leave-one-batch/row-out robustness battery
     p09_reproducible_computation/execution.rs
@@ -1014,6 +1016,13 @@ assigned task, executes dependency-safe work through the guarded gateway, and re
 instrument/time bindings. Schedule blocks, dependency blocks, negative results, partial effects,
 unresolved telemetry, failed runs, bounded retries, and emergency-stop state remain first-class;
 the MCP route stays synthetic and cannot dispatch hardware.
+The instrument research frontier (`compile_glioma_instrument_research_frontier` and
+`execute_glioma_instrument_research_frontier`) now closes the downstream autonomy gap. It scores
+adjudicated assay records by information, QC, replicate support, uncertainty, cost, and status;
+routes qualified results to computation, unresolved results to replication, and negative results
+to falsification; then executes the bounded candidates through the P07 mission controller. No
+hardware completion is promoted to evidence, and a frontier with no routable scientific action is
+held explicitly.
 P09 now also includes replayable computation execution (`execute_glioma_computation`). It schedules
 typed multimodal DAGs in stable topological order, reuses only replay-keyed local cache artifacts,
 enforces cost budgets, retries transient worker failures, and preserves negative, partial, failed,
