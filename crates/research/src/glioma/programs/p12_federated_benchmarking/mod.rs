@@ -7,6 +7,7 @@ pub mod campaign;
 pub mod consensus;
 pub mod mechanism_transport;
 pub mod operating_cycle;
+pub mod replication_transport;
 pub mod site_planner;
 pub mod transport_campaign;
 
@@ -58,6 +59,12 @@ pub use operating_cycle::{
     execute_federated_benchmark_operating_cycle_dry_run, FederatedBenchmarkExecutionMode,
     FederatedBenchmarkOperatingCycle, FederatedBenchmarkOperatingCycleDisposition,
     FederatedBenchmarkOperatingCycleError, FederatedBenchmarkOperatingCycleRequest,
+};
+
+pub use replication_transport::{
+    execute_validation_replication_transport, ValidationReplicationTransportDisposition,
+    ValidationReplicationTransportError, ValidationReplicationTransportRequest,
+    ValidationReplicationTransportRun,
 };
 
 pub const PROGRAM_ID: GliomaProgramId = GliomaProgramId::FederatedBenchmarking;

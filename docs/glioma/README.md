@@ -126,6 +126,8 @@ crates/research/src/glioma/
                                              P10 efficacy-gated handoff from local validation to independent-site replication planning and protocol preflight
   programs/p10_interpretation_replication/validation_replication_campaign.rs
                                              P10 guarded execution handoff into site replication, meta-analysis, transportability, and next-action control
+  programs/p12_federated_benchmarking/replication_transport.rs
+                                             P12 replication-to-federation bridge that admits only validated aggregate site summaries into mechanism transport
   programs/p07_protocol_simulation/mechanism_validation_execution.rs
                                              P07 compiled validation protocol execution through a bounded institution-local worker seam
   programs/p05_mechanism_exploration/operating_cycle.rs
@@ -919,6 +921,13 @@ selected portfolio into typed follow-up actions, runs the bounded campaign throu
 seam, and reports projected consensus separately from observed consensus. Qualified, negative,
 heterogeneous, partial, blocked, and no-admissible-plan outcomes remain explicit, so a favorable
 projection can never masquerade as a measured consortium result.
+The replication-to-federation bridge (`execute_validation_replication_transport`) closes the next
+workflow boundary. It accepts only a validated independent-site replication run, converts its
+non-origin study summaries into aggregate mechanism sites, and invokes the bounded P12 transport
+campaign. Held, blocked, negative, heterogeneous, unresolved, and budget-limited states remain
+typed; raw traces, human data, specimen data, and instrument effects never cross the federation
+boundary. This is an executable research handoff, not a passive receipt or an automatic scientific
+claim.
 P11 now adds a dependency-aware reproducibility replay campaign
 (`execute_glioma_replay_campaign`). It schedules declared program replays, compares exact artifact
 hashes, blocks downstream tasks after mismatch or unavailable outputs, and only emits a

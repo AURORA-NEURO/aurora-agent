@@ -140,6 +140,7 @@ fn main() {
                      glioma_validation_campaign_execute,\n\
                      glioma_validation_replication_gate,\n\
                      glioma_validation_replication_campaign_execute,\n\
+                     glioma_replication_federated_transport_execute,\n\
                      glioma_mechanism_validation_protocol_compile,\n\
                      glioma_mechanism_validation_protocol_execute,\n\
                      glioma_information_design, glioma_adaptive_panel, glioma_replication_plan, glioma_replication_continuation, glioma_replication_protocol_compile,\n\

@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 776;
+const TOOL_DEFINITION_COUNT: usize = 777;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -2874,6 +2874,55 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
         json!("hold_independent_sites")
     );
     assert!(validation_replication_campaign["campaign"]["campaign"].is_null());
+
+    let replication_federated_transport = call(
+        &mut server,
+        "glioma_replication_federated_transport_execute",
+        json!({
+            "request": {
+                "replication": validation_replication_campaign["campaign"].clone(),
+                "transport": {
+                    "objective": "replicate the validated invasion effect across independent organoid sites",
+                    "mechanism_id": "invasion",
+                    "target_model_system": "organoid",
+                    "target_signature": [1, 2],
+                    "min_sites": 2,
+                    "min_replicates_per_site": 1,
+                    "min_quality_milli": 500,
+                    "similarity_scale_milli": 1000,
+                    "effect_threshold_milli": 10,
+                    "min_signal_to_noise_milli": 1,
+                    "max_heterogeneity_milli": 900,
+                    "max_site_spread_milli": 1000,
+                    "max_leave_one_out_shift_milli": 1000,
+                    "require_target_model": true
+                },
+                "actions": [{
+                    "action_id": "aggregate-site-follow-up",
+                    "target_site_id": "site-c",
+                    "model_system": "organoid",
+                    "population_signature": [1, 2],
+                    "cost_units": 1,
+                    "expected_information_milli": 100,
+                    "expected_effect_milli": 100,
+                    "expected_heterogeneity_reduction_milli": 100,
+                    "feasibility_milli": 900,
+                    "risk_milli": 10,
+                    "requested_replicates": 1
+                }],
+                "budget_units": 1,
+                "max_rounds": 1,
+                "max_retries": 0,
+                "stop_on_qualified": false,
+                "stop_on_negative": false
+            }
+        }),
+    );
+    assert_eq!(
+        replication_federated_transport["transport"]["disposition"],
+        json!("blocked_by_replication")
+    );
+    assert!(replication_federated_transport["transport"]["campaign"].is_null());
 
     let information_design = call(
         &mut server,

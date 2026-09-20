@@ -633,7 +633,8 @@ pub use programs::p12_federated_benchmarking::{
     execute_federated_benchmark_operating_cycle,
     execute_federated_benchmark_operating_cycle_dry_run,
     execute_federated_mechanism_transport_campaign,
-    execute_federated_mechanism_transport_campaign_dry_run, plan_federated_benchmark_sites,
+    execute_federated_mechanism_transport_campaign_dry_run,
+    execute_validation_replication_transport, plan_federated_benchmark_sites,
     DryRunFederatedBenchmarkCampaignExecutor, DryRunFederatedMechanismTransportExecutor,
     FederatedBenchmarkAction, FederatedBenchmarkActionKind, FederatedBenchmarkAdaptiveCampaign,
     FederatedBenchmarkAdaptiveCampaignError, FederatedBenchmarkAdaptiveCampaignRequest,
@@ -657,6 +658,8 @@ pub use programs::p12_federated_benchmarking::{
     FederatedMechanismTransportDisposition, FederatedMechanismTransportError,
     FederatedMechanismTransportExecutionFailure, FederatedMechanismTransportExecutor,
     FederatedMechanismTransportRequest, FederatedModelCoverage,
+    ValidationReplicationTransportDisposition, ValidationReplicationTransportError,
+    ValidationReplicationTransportRequest, ValidationReplicationTransportRun,
 };
 pub use release::{build_research_object_manifest, ResearchObjectManifest, ResearchObjectRequest};
 pub use replication::{

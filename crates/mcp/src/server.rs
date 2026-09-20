@@ -563,8 +563,8 @@ use bioprism_research::{
     execute_glioma_research_director, execute_glioma_robust_active_learning_campaign,
     execute_glioma_robustness_guided_computation, execute_glioma_scientific_frontier,
     execute_glioma_sequential_campaign, execute_glioma_validation_campaign,
-    execute_glioma_validation_replication_campaign, explore_mechanisms,
-    filter_glioma_mechanism_states, forecast_glioma_multimodal_quality,
+    execute_glioma_validation_replication_campaign, execute_validation_replication_transport,
+    explore_mechanisms, filter_glioma_mechanism_states, forecast_glioma_multimodal_quality,
     fuse_glioma_protocol_evidence, gate_glioma_protocol_transport, generate_feature_catalog,
     glioma_program_catalog, govern_glioma_decision_loop, harmonize_glioma_multimodal_batches,
     harmonize_multimodal_inputs, optimize_glioma_decision_value, optimize_glioma_protocol_branches,
@@ -624,20 +624,21 @@ use bioprism_research::{
     DryRunAdaptiveAllocationCampaignExecutor, DryRunAdaptiveMechanismPolicyExecutor,
     DryRunDecisionContextCampaignExecutor, DryRunEvidenceAcquisitionExecutor,
     DryRunEvidenceRefreshCampaignExecutor, DryRunExperimentOperatingCycleExecutor,
-    DryRunFederatedBenchmarkCampaignExecutor, DryRunGliomaActionExecutor,
-    DryRunGliomaComputationExecutor, DryRunGliomaExperimentFrontierExecutor,
-    DryRunGliomaProtocolExecutor, DryRunGliomaReplicationCampaignExecutor,
-    DryRunInstrumentExecutor, DryRunKnowledgeActionExecutor,
-    DryRunKnowledgeResolutionCampaignExecutor, DryRunMechanismDiscriminationCampaignExecutor,
-    DryRunMultiFidelityCampaignExecutor, DryRunMultimodalIngestionCampaignExecutor,
-    DryRunQualityScheduleExecutor, DryRunReplayCampaignExecutor,
-    DryRunRobustActiveLearningCampaignExecutor, DryRunSequentialCampaignExecutor,
-    DynamicPolicyCandidate, DynamicPolicyRequest, DynamicPolicyTrajectory,
-    EvidenceAcquisitionCampaignRequest, EvidenceAcquisitionCandidate, EvidenceAcquisitionRequest,
-    EvidenceCalibrationObservation, EvidenceCalibrationRequest, EvidenceExecutionMode,
-    EvidenceFusionRequest, EvidencePriorityRequest, EvidenceRecord, EvidenceRefreshCampaignRequest,
-    EvidenceRequest, EvidenceSurveillanceRequest, EvidenceTriangulationRequest, ExperimentArm,
-    ExperimentOperatingCycleRequest, ExperimentRequest, FederatedBenchmarkAdaptiveCampaignRequest,
+    DryRunFederatedBenchmarkCampaignExecutor, DryRunFederatedMechanismTransportExecutor,
+    DryRunGliomaActionExecutor, DryRunGliomaComputationExecutor,
+    DryRunGliomaExperimentFrontierExecutor, DryRunGliomaProtocolExecutor,
+    DryRunGliomaReplicationCampaignExecutor, DryRunInstrumentExecutor,
+    DryRunKnowledgeActionExecutor, DryRunKnowledgeResolutionCampaignExecutor,
+    DryRunMechanismDiscriminationCampaignExecutor, DryRunMultiFidelityCampaignExecutor,
+    DryRunMultimodalIngestionCampaignExecutor, DryRunQualityScheduleExecutor,
+    DryRunReplayCampaignExecutor, DryRunRobustActiveLearningCampaignExecutor,
+    DryRunSequentialCampaignExecutor, DynamicPolicyCandidate, DynamicPolicyRequest,
+    DynamicPolicyTrajectory, EvidenceAcquisitionCampaignRequest, EvidenceAcquisitionCandidate,
+    EvidenceAcquisitionRequest, EvidenceCalibrationObservation, EvidenceCalibrationRequest,
+    EvidenceExecutionMode, EvidenceFusionRequest, EvidencePriorityRequest, EvidenceRecord,
+    EvidenceRefreshCampaignRequest, EvidenceRequest, EvidenceSurveillanceRequest,
+    EvidenceTriangulationRequest, ExperimentArm, ExperimentOperatingCycleRequest,
+    ExperimentRequest, FederatedBenchmarkAdaptiveCampaignRequest,
     FederatedBenchmarkCampaignRequest, FederatedBenchmarkExecutionMode,
     FederatedBenchmarkOperatingCycleRequest, FederatedBenchmarkRequest, FederatedBenchmarkSite,
     FederatedBenchmarkSitePlannerRequest, FederatedMechanismSite,
@@ -703,7 +704,7 @@ use bioprism_research::{
     TemporalSpatialAlignmentRequest, TrajectoryObservation, TrajectoryRequest, TransportStudy,
     TransportabilityRequest, TypedKnowledge, ValidationBatchAssessmentRequest,
     ValidationCampaignRequest, ValidationReplicationCampaignRequest,
-    ValidationReplicationGateRequest,
+    ValidationReplicationGateRequest, ValidationReplicationTransportRequest,
 };
 use bioprism_routing::{
     lab::{run as run_routing_lab, LabSettings, Task},
@@ -2520,6 +2521,9 @@ impl Server {
             }
             "glioma_validation_replication_campaign_execute" => {
                 self.glioma_validation_replication_campaign_execute(&arguments)
+            }
+            "glioma_replication_federated_transport_execute" => {
+                self.glioma_replication_federated_transport_execute(&arguments)
             }
             "glioma_mechanism_validation_protocol_compile" => {
                 self.glioma_mechanism_validation_protocol_compile(&arguments)
@@ -11070,6 +11074,43 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma validation-replication campaign: {error}"))
+    }
+
+    /// Continue an eligible independent-site replication result into the aggregate-only P12
+    /// mechanism transport campaign. MCP uses the deterministic federation worker; institution
+    /// gateways retain raw observations and all physical execution authority.
+    fn glioma_replication_federated_transport_execute(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: ValidationReplicationTransportRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_replication_federated_transport_execute requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma replication-federation transport request: {error}")
+            })?;
+        let mut executor = DryRunFederatedMechanismTransportExecutor;
+        let run = execute_validation_replication_transport(&request, &mut executor)
+            .map_err(|error| format!("glioma replication-federation transport refused: {error}"))?;
+        serde_json::to_value(json!({
+            "transport": run,
+            "execution_mode": "dry_run_aggregate_worker",
+            "physical_dispatch": false,
+            "simulation_only": true,
+            "next_routes": [
+                "glioma_replication_federated_transport_execute",
+                "glioma_federated_mechanism_transport_campaign_execute",
+                "glioma_research_object_prepare"
+            ],
+            "guarantees": [
+                "only validated non-origin aggregate mechanism summaries enter the federation campaign",
+                "blocked, held, negative, heterogeneous, unresolved, and budget-limited replication states remain explicit",
+                "raw traces, specimen data, human data, instrument effects, and direct identifiers remain local",
+                "the synthetic worker cannot become biological evidence or make a clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma replication-federation transport: {error}"))
     }
 
     /// Compile the still-open mechanism validation decisions into a deterministic local P07
@@ -52754,6 +52795,8 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_validation_batch_assess",
                 "glioma_validation_campaign_execute",
                 "glioma_validation_replication_gate",
+                "glioma_validation_replication_campaign_execute",
+                "glioma_replication_federated_transport_execute",
                 "glioma_mechanism_validation_protocol_compile",
                 "glioma_mechanism_validation_protocol_execute",
                 "glioma_information_design",
@@ -63430,6 +63473,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "ValidationReplicationCampaignRequest1@1 containing a validated ValidationReplicationGate1@1 and a GliomaReplicationCampaignRequest1@1 with institution-local initial studies and bounded campaign settings."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_replication_federated_transport_execute",
+        "description": "Continue an eligible independent-site glioma replication result into the P12 aggregate-only mechanism-transport campaign. The route converts only validated non-origin study summaries, executes bounded deterministic follow-up actions, and preserves blocked, held, negative, heterogeneous, unresolved, budget, and no-progress outcomes. Raw observations, human data, specimen data, instrument effects, and clinical decisions remain outside the federation boundary.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ValidationReplicationTransportRequest1@1 containing a validated ValidationReplicationCampaignRun1@1, matching FederatedMechanismTransportRequest1@1, typed aggregate follow-up actions, and bounded campaign budget/round/retry settings."}
             },
             "required": ["request"]
         }
