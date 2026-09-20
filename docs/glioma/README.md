@@ -66,6 +66,8 @@ crates/research/src/glioma/
                                              P04 evidence-returning branch execution with knowledge/context recompilation and frontier replanning
   programs/p05_mechanism_exploration/discrimination.rs
                                              P05 residual-likelihood mechanism discrimination and next-assay information gain
+  programs/p01_evidence_surveillance/contradiction_cut.rs
+                                             P01 weighted minimum-evidence cut for contradictory claims and replication routing
   programs/p05_mechanism_exploration/bayesian_update.rs
                                              P05 deterministic posterior update from typed local observations with coverage and contradiction gates
   programs/p05_mechanism_exploration/calibration.rs

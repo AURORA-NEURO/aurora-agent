@@ -555,14 +555,14 @@ use bioprism_research::{
     plan_glioma_adaptive_workflow, plan_glioma_clone_continuation,
     plan_glioma_clone_perturbation_panel, plan_glioma_closed_loop_campaign,
     plan_glioma_computation_portfolio, plan_glioma_decision_branches,
-    plan_glioma_evidence_acquisition, plan_glioma_information_design,
-    plan_glioma_multi_fidelity_optimization, plan_glioma_robust_active_learning,
-    plan_glioma_robust_intervention_portfolio, plan_glioma_scientific_frontier,
-    plan_glioma_sequential_design, plan_glioma_workflow, preflight_glioma_instrument,
-    prioritize_glioma_evidence, prioritize_knowledge_frontier, propagate_glioma_mechanism_graph,
-    qualify_evidence, register_glioma_spatial_samples, revise_glioma_beliefs,
-    schedule_glioma_computation_placement, schedule_glioma_instrument_fleet, select_glioma_actions,
-    simulate_glioma_counterfactual, simulate_glioma_counterfactual_ensemble,
+    plan_glioma_evidence_acquisition, plan_glioma_evidence_contradiction_cut,
+    plan_glioma_information_design, plan_glioma_multi_fidelity_optimization,
+    plan_glioma_robust_active_learning, plan_glioma_robust_intervention_portfolio,
+    plan_glioma_scientific_frontier, plan_glioma_sequential_design, plan_glioma_workflow,
+    preflight_glioma_instrument, prioritize_glioma_evidence, prioritize_knowledge_frontier,
+    propagate_glioma_mechanism_graph, qualify_evidence, register_glioma_spatial_samples,
+    revise_glioma_beliefs, schedule_glioma_computation_placement, schedule_glioma_instrument_fleet,
+    select_glioma_actions, simulate_glioma_counterfactual, simulate_glioma_counterfactual_ensemble,
     simulate_glioma_mechanism_dynamics, simulate_glioma_protocol, surveil_glioma_evidence,
     synthesize_glioma_interpretation, triangulate_glioma_evidence,
     update_glioma_mechanism_posterior, validate_feature_catalog, ActionPortfolioExecutionRequest,
@@ -584,27 +584,28 @@ use bioprism_research::{
     CombinationSynergyRequest, ComputationCandidate, ComputationExecutionMode,
     ComputationExecutionRequest, ComputationPlacementRequest, ComputationPortfolioExecutionRequest,
     ComputationPortfolioRequest, ComputationRecoveryRequest, ConcordanceRequest, ConsensusRequest,
-    ContrastDesignRequest, CounterfactualEnsembleRequest, CounterfactualIntervention,
-    CounterfactualModel, CounterfactualRequest, DecisionActionGraphRequest,
-    DecisionActionPlanRequest, DecisionBranchCampaignRequest, DecisionBranchPlannerRequest,
-    DecisionContext, DecisionContextCampaignRequest, DecisionContextRequest,
-    DecisionOperatingCycleRequest, DesignAction, DesignMechanism, DoseResponseObservation,
-    DoseResponseRequest, DryRunActiveLearningCampaignExecutor,
-    DryRunAdaptiveAllocationCampaignExecutor, DryRunAdaptiveMechanismPolicyExecutor,
-    DryRunDecisionContextCampaignExecutor, DryRunEvidenceAcquisitionExecutor,
-    DryRunEvidenceRefreshCampaignExecutor, DryRunExperimentOperatingCycleExecutor,
-    DryRunFederatedBenchmarkCampaignExecutor, DryRunGliomaActionExecutor,
-    DryRunGliomaComputationExecutor, DryRunGliomaExperimentFrontierExecutor,
-    DryRunGliomaProtocolExecutor, DryRunGliomaReplicationCampaignExecutor,
-    DryRunInstrumentExecutor, DryRunKnowledgeActionExecutor,
-    DryRunKnowledgeResolutionCampaignExecutor, DryRunMechanismDiscriminationCampaignExecutor,
-    DryRunMultiFidelityCampaignExecutor, DryRunMultimodalIngestionCampaignExecutor,
-    DryRunReplayCampaignExecutor, DryRunRobustActiveLearningCampaignExecutor,
-    DryRunSequentialCampaignExecutor, DynamicPolicyCandidate, DynamicPolicyRequest,
-    DynamicPolicyTrajectory, EvidenceAcquisitionCampaignRequest, EvidenceAcquisitionCandidate,
-    EvidenceAcquisitionRequest, EvidenceCalibrationObservation, EvidenceCalibrationRequest,
-    EvidenceExecutionMode, EvidencePriorityRequest, EvidenceRecord, EvidenceRefreshCampaignRequest,
-    EvidenceRequest, EvidenceSurveillanceRequest, EvidenceTriangulationRequest, ExperimentArm,
+    ContradictionCutRequest, ContradictionEvidence, ContrastDesignRequest,
+    CounterfactualEnsembleRequest, CounterfactualIntervention, CounterfactualModel,
+    CounterfactualRequest, DecisionActionGraphRequest, DecisionActionPlanRequest,
+    DecisionBranchCampaignRequest, DecisionBranchPlannerRequest, DecisionContext,
+    DecisionContextCampaignRequest, DecisionContextRequest, DecisionOperatingCycleRequest,
+    DesignAction, DesignMechanism, DoseResponseObservation, DoseResponseRequest,
+    DryRunActiveLearningCampaignExecutor, DryRunAdaptiveAllocationCampaignExecutor,
+    DryRunAdaptiveMechanismPolicyExecutor, DryRunDecisionContextCampaignExecutor,
+    DryRunEvidenceAcquisitionExecutor, DryRunEvidenceRefreshCampaignExecutor,
+    DryRunExperimentOperatingCycleExecutor, DryRunFederatedBenchmarkCampaignExecutor,
+    DryRunGliomaActionExecutor, DryRunGliomaComputationExecutor,
+    DryRunGliomaExperimentFrontierExecutor, DryRunGliomaProtocolExecutor,
+    DryRunGliomaReplicationCampaignExecutor, DryRunInstrumentExecutor,
+    DryRunKnowledgeActionExecutor, DryRunKnowledgeResolutionCampaignExecutor,
+    DryRunMechanismDiscriminationCampaignExecutor, DryRunMultiFidelityCampaignExecutor,
+    DryRunMultimodalIngestionCampaignExecutor, DryRunReplayCampaignExecutor,
+    DryRunRobustActiveLearningCampaignExecutor, DryRunSequentialCampaignExecutor,
+    DynamicPolicyCandidate, DynamicPolicyRequest, DynamicPolicyTrajectory,
+    EvidenceAcquisitionCampaignRequest, EvidenceAcquisitionCandidate, EvidenceAcquisitionRequest,
+    EvidenceCalibrationObservation, EvidenceCalibrationRequest, EvidenceExecutionMode,
+    EvidencePriorityRequest, EvidenceRecord, EvidenceRefreshCampaignRequest, EvidenceRequest,
+    EvidenceSurveillanceRequest, EvidenceTriangulationRequest, ExperimentArm,
     ExperimentOperatingCycleRequest, ExperimentRequest, FederatedBenchmarkAdaptiveCampaignRequest,
     FederatedBenchmarkCampaignRequest, FederatedBenchmarkExecutionMode,
     FederatedBenchmarkOperatingCycleRequest, FederatedBenchmarkRequest, FederatedBenchmarkSite,
@@ -2355,6 +2356,9 @@ impl Server {
             "glioma_evidence_operating_cycle" => self.glioma_evidence_operating_cycle(&arguments),
             "glioma_evidence_calibrate" => self.glioma_evidence_calibrate(&arguments),
             "glioma_evidence_triangulate" => self.glioma_evidence_triangulate(&arguments),
+            "glioma_evidence_contradiction_cut" => {
+                self.glioma_evidence_contradiction_cut(&arguments)
+            }
             "glioma_knowledge_compile" => self.glioma_knowledge_compile(&arguments),
             "glioma_knowledge_compose" => self.glioma_knowledge_compose(&arguments),
             "glioma_belief_revision" => self.glioma_belief_revision(&arguments),
@@ -8700,6 +8704,38 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma evidence triangulation: {error}"))
+    }
+
+    /// Plan a weighted minimum evidence cut over contradictory local records. This identifies
+    /// the smallest audit set that covers disagreement edges and routes uncovered claims to
+    /// independent replication without changing any source record.
+    fn glioma_evidence_contradiction_cut(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ContradictionCutRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_evidence_contradiction_cut requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma contradiction-cut request: {error}"))?;
+        let evidence: Vec<ContradictionEvidence> =
+            serde_json::from_value(arguments.get("evidence").cloned().ok_or_else(|| {
+                "glioma_evidence_contradiction_cut requires evidence".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma contradiction-cut evidence: {error}"))?;
+        let cut = plan_glioma_evidence_contradiction_cut(&request, &evidence)
+            .map_err(|error| format!("glioma evidence contradiction cut refused: {error}"))?;
+        serde_json::to_value(json!({
+            "cut": cut,
+            "dispatch": "not_started",
+            "next_route": "glioma_knowledge_compile",
+            "guarantees": [
+                "contradictory support/contradiction edges are covered by a deterministic weighted audit cut",
+                "budget-blocked and uncovered claims remain explicit instead of being promoted",
+                "independent replication is routed only when the caller requests it",
+                "the route does not fetch literature, edit evidence, move raw data, or make a clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma evidence contradiction cut: {error}"))
     }
 
     /// Compile caller-supplied local evidence into scoped, ranked preclinical glioma knowledge.
@@ -51184,6 +51220,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_evidence_operating_cycle",
                 "glioma_evidence_calibrate",
                 "glioma_evidence_triangulate",
+                "glioma_evidence_contradiction_cut",
                 "glioma_knowledge_compile",
                 "glioma_knowledge_compose",
                 "glioma_belief_revision",
@@ -60967,6 +61004,18 @@ pub fn tool_definitions() -> Vec<Value> {
                 "records": {"type": "array", "items": {"type": "object"}, "description": "Local EvidenceRecord1@1 values grouped by exact claim and scope; stale, negative, contradictory, unknown, and unmeasured records are retained."}
             },
             "required": ["request", "records"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_evidence_contradiction_cut",
+        "description": "Plan a weighted minimum-evidence cut over contradictory preclinical glioma records. The route finds a deterministic audit set covering disagreement edges, reports budget-blocked and independent-replication debt, and routes the surviving cut into typed knowledge compilation without editing evidence, fetching literature, moving raw data, or making a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ContradictionCutRequest1@1 with confidence floor, audit bound, budget, and independent-replication policy."},
+                "evidence": {"type": "array", "items": {"type": "object"}, "description": "ContradictionEvidence1@1 signed support/contradict records with source families, independence groups, confidence, and audit costs."}
+            },
+            "required": ["request", "evidence"]
         }
     }));
     definitions.push(json!({

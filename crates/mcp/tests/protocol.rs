@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 729;
+const TOOL_DEFINITION_COUNT: usize = 730;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -5604,6 +5604,23 @@ fn glioma_evidence_gate_holds_uncertain_claims_and_admits_qualified_work() {
                 {"evidence_id":"gate-e3","source_artifact":{"artifact_id":"gate-a3","content_hash":hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"source_kind":"replication","claim":"EGFR signaling increases organoid invasion","scope":"organoid:invasion","modality":"functional_perturbation","model_system":"organoid","state":"supported","relevance_milli":900,"quality_milli":900,"reproducibility_milli":900,"release_epoch":1}
             ]
         }),
+    );
+    let contradiction_cut = call(
+        &mut server,
+        "glioma_evidence_contradiction_cut",
+        json!({
+            "request": {"objective":"route contradictory invasion evidence","min_confidence_milli":100,"max_audits":4,"budget_units":3,"require_independent_replication":true},
+            "evidence": [
+                {"evidence_id":"cut-support","claim_id":"invasion-claim","polarity":"support","source_family":"assay","independence_group":"site-a","confidence_milli":800,"audit_cost_units":1},
+                {"evidence_id":"cut-contradict","claim_id":"invasion-claim","polarity":"contradict","source_family":"replication","independence_group":"site-b","confidence_milli":800,"audit_cost_units":1}
+            ]
+        }),
+    );
+    assert_eq!(contradiction_cut["dispatch"], json!("not_started"));
+    assert_eq!(contradiction_cut["cut"]["disposition"], json!("covered"));
+    assert_eq!(
+        contradiction_cut["cut"]["conflicts"][0]["covered_by_audit"],
+        json!(true)
     );
     let admitted = call(
         &mut server,

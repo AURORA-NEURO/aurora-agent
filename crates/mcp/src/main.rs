@@ -116,7 +116,7 @@ fn main() {
                      glioma_evidence_acquisition_campaign_execute,\n\
                      glioma_evidence_operating_cycle,\n\
                      glioma_evidence_calibrate,\n\
-                     glioma_evidence_triangulate,\n\
+                     glioma_evidence_triangulate, glioma_evidence_contradiction_cut,\n\
                      glioma_instrument_calibration,\n\
                      glioma_instrument_preflight, glioma_instrument_fleet_schedule,\n\
                      glioma_instrument_fleet_execute,\n\

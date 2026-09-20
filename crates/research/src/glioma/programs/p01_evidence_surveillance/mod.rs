@@ -6,6 +6,7 @@ pub mod acquisition;
 pub mod acquisition_campaign;
 pub mod calibration;
 pub mod campaign;
+pub mod contradiction_cut;
 pub mod operating_cycle;
 pub mod priority;
 pub mod surveillance;
@@ -28,6 +29,11 @@ pub use campaign::{
     EvidenceRefreshCampaign, EvidenceRefreshCampaignDisposition, EvidenceRefreshCampaignError,
     EvidenceRefreshCampaignExecutor, EvidenceRefreshCampaignRequest, EvidenceRefreshCampaignRound,
     EvidenceRefreshCampaignStopReason, EvidenceRefreshExecutionFailure,
+};
+pub use contradiction_cut::{
+    plan_glioma_evidence_contradiction_cut, ContradictionAuditSelection, ContradictionConflict,
+    ContradictionCut, ContradictionCutDisposition, ContradictionCutError, ContradictionCutRequest,
+    ContradictionEvidence, EvidencePolarity,
 };
 
 pub use acquisition::{
