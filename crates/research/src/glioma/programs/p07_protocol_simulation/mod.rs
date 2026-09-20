@@ -15,6 +15,7 @@ pub mod active_learning_campaign;
 pub mod adaptive_scheduler;
 pub mod autonomous_campaign;
 pub mod autonomous_engine;
+pub mod branch_optimizer;
 pub mod clone_campaign;
 pub mod clone_continuation;
 pub mod compensation;
@@ -91,6 +92,12 @@ pub use compensation::{
     plan_glioma_protocol_compensation, ProtocolCompensationCandidate,
     ProtocolCompensationDisposition, ProtocolCompensationError, ProtocolCompensationPlan,
     ProtocolCompensationRequest, ProtocolCompensationSelection,
+};
+
+pub use branch_optimizer::{
+    optimize_glioma_protocol_branches, ProtocolBranchCandidate, ProtocolBranchEvaluation,
+    ProtocolBranchOptimizationDisposition, ProtocolBranchOptimizationError,
+    ProtocolBranchOptimizationPlan, ProtocolBranchOptimizationRequest, ProtocolBranchWeights,
 };
 
 pub use director::{

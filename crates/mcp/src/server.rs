@@ -550,21 +550,22 @@ use bioprism_research::{
     execute_glioma_robustness_guided_computation, execute_glioma_scientific_frontier,
     execute_glioma_sequential_campaign, explore_mechanisms, generate_feature_catalog,
     glioma_program_catalog, harmonize_glioma_multimodal_batches, harmonize_multimodal_inputs,
-    plan_adaptive_glioma_dose_surface, plan_decision_actions, plan_federated_benchmark_sites,
-    plan_glioma_active_learning, plan_glioma_adaptive_information_campaign,
-    plan_glioma_adaptive_mechanism_policy, plan_glioma_adaptive_research_frontier,
-    plan_glioma_adaptive_workflow, plan_glioma_clone_continuation,
-    plan_glioma_clone_perturbation_panel, plan_glioma_closed_loop_campaign,
-    plan_glioma_computation_portfolio, plan_glioma_decision_branches,
-    plan_glioma_evidence_acquisition, plan_glioma_evidence_contradiction_cut,
-    plan_glioma_information_design, plan_glioma_multi_fidelity_optimization,
-    plan_glioma_power_reestimation, plan_glioma_protocol_compensation,
-    plan_glioma_robust_active_learning, plan_glioma_robust_intervention_portfolio,
-    plan_glioma_scientific_frontier, plan_glioma_sequential_design, plan_glioma_workflow,
-    preflight_glioma_instrument, prioritize_glioma_evidence, prioritize_knowledge_frontier,
-    propagate_glioma_mechanism_graph, qualify_evidence, register_glioma_spatial_samples,
-    revise_glioma_beliefs, schedule_glioma_computation_placement, schedule_glioma_instrument_fleet,
-    select_glioma_actions, simulate_glioma_counterfactual, simulate_glioma_counterfactual_ensemble,
+    optimize_glioma_protocol_branches, plan_adaptive_glioma_dose_surface, plan_decision_actions,
+    plan_federated_benchmark_sites, plan_glioma_active_learning,
+    plan_glioma_adaptive_information_campaign, plan_glioma_adaptive_mechanism_policy,
+    plan_glioma_adaptive_research_frontier, plan_glioma_adaptive_workflow,
+    plan_glioma_clone_continuation, plan_glioma_clone_perturbation_panel,
+    plan_glioma_closed_loop_campaign, plan_glioma_computation_portfolio,
+    plan_glioma_decision_branches, plan_glioma_evidence_acquisition,
+    plan_glioma_evidence_contradiction_cut, plan_glioma_information_design,
+    plan_glioma_multi_fidelity_optimization, plan_glioma_power_reestimation,
+    plan_glioma_protocol_compensation, plan_glioma_robust_active_learning,
+    plan_glioma_robust_intervention_portfolio, plan_glioma_scientific_frontier,
+    plan_glioma_sequential_design, plan_glioma_workflow, preflight_glioma_instrument,
+    prioritize_glioma_evidence, prioritize_knowledge_frontier, propagate_glioma_mechanism_graph,
+    qualify_evidence, register_glioma_spatial_samples, revise_glioma_beliefs,
+    schedule_glioma_computation_placement, schedule_glioma_instrument_fleet, select_glioma_actions,
+    simulate_glioma_counterfactual, simulate_glioma_counterfactual_ensemble,
     simulate_glioma_mechanism_dynamics, simulate_glioma_protocol, surveil_glioma_evidence,
     synthesize_glioma_interpretation, triangulate_glioma_evidence,
     update_glioma_mechanism_posterior, validate_feature_catalog, ActionPortfolioExecutionRequest,
@@ -648,9 +649,9 @@ use bioprism_research::{
     MultimodalMechanismCampaignRequest, MultimodalObservation, MultimodalReadinessRequest,
     MultimodalRequest, PathwayActivityDefinition, PathwayActivityObservation,
     PathwayActivityRequest, PowerArmObservation, PowerReestimationRequest,
-    ProtocolCompensationRequest, ProtocolExecutionRequest, ProtocolSimulationRequest,
-    ReleaseExecutionMode, ReleaseGateRequest, ReplayCampaign, ReplayCampaignRequest,
-    ReplicationRequest, ReplicationStudy, ResearchObjectRequest,
+    ProtocolBranchOptimizationRequest, ProtocolCompensationRequest, ProtocolExecutionRequest,
+    ProtocolSimulationRequest, ReleaseExecutionMode, ReleaseGateRequest, ReplayCampaign,
+    ReplayCampaignRequest, ReplicationRequest, ReplicationStudy, ResearchObjectRequest,
     RobustActiveLearningCampaignRequest, RobustActiveLearningCandidate,
     RobustActiveLearningObservation, RobustActiveLearningRequest, RobustInterventionCandidate,
     RobustInterventionRequest, RobustnessGuidedComputationRequest, RobustnessRequest,
@@ -2206,6 +2207,7 @@ impl Server {
             "glioma_research_dry_run" => self.glioma_research_dry_run(&arguments),
             "glioma_workflow_plan" => self.glioma_workflow_plan(&arguments),
             "glioma_protocol_simulate" => self.glioma_protocol_simulate(&arguments),
+            "glioma_protocol_branch_optimize" => self.glioma_protocol_branch_optimize(&arguments),
             "glioma_protocol_execute" => self.glioma_protocol_execute(&arguments),
             "glioma_protocol_compensation" => self.glioma_protocol_compensation(&arguments),
             "glioma_action_portfolio_execute" => self.glioma_action_portfolio_execute(&arguments),
@@ -5986,6 +5988,33 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma protocol simulation: {error}"))
+    }
+
+    /// Select the best typed protocol branch through deterministic beam search over the local
+    /// resource-constrained simulator. This route plans only and never dispatches a branch.
+    fn glioma_protocol_branch_optimize(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ProtocolBranchOptimizationRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_protocol_branch_optimize requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma protocol branch optimization request: {error}"))?;
+        let plan = optimize_glioma_protocol_branches(&request)
+            .map_err(|error| format!("glioma protocol branch optimization refused: {error}"))?;
+        serde_json::to_value(json!({
+            "plan": plan,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "next_route": "glioma_protocol_execute",
+            "guarantees": [
+                "each retained branch is evaluated by the typed resource, horizon, risk, and approval simulator",
+                "beam and budget pruning remain explicit as unresolved alternatives",
+                "branch replacements preserve the original model, output schema, and dependency topology",
+                "the route performs no assay, instrument, federation, or clinical action"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma protocol branch optimization: {error}"))
     }
 
     /// Execute a feasible protocol through the deterministic synthetic executor. Production
@@ -51241,6 +51270,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_research_dry_run",
                 "glioma_workflow_plan",
                 "glioma_protocol_simulate",
+                "glioma_protocol_branch_optimize",
                 "glioma_protocol_execute",
                 "glioma_protocol_compensation",
                 "glioma_action_portfolio_execute",
@@ -60130,6 +60160,17 @@ pub fn tool_definitions() -> Vec<Value> {
                     "type": "object",
                     "description": "Serialized ProtocolSimulationRequest1@1 containing typed tasks, local resource capacities, a bounded horizon/risk budget, and preclinical model binding."
                 }
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_protocol_branch_optimize",
+        "description": "Select a deterministic preclinical glioma protocol branch with bounded beam search. Each typed alternative is applied to the declared protocol and scored through the resource, horizon, risk, and instrument-approval simulator using information, feasibility, time, risk, and cost weights. Pruned or budget-ineligible alternatives remain explicit; this route plans only and performs no biological or instrument effect.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ProtocolBranchOptimizationRequest1@1 containing a base ProtocolSimulationRequest1@1, contract-preserving task alternatives, score weights, a budget, and beam/branch bounds."}
             },
             "required": ["request"]
         }
