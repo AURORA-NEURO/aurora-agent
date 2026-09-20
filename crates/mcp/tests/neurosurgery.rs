@@ -2853,7 +2853,9 @@ fn mcp_renders_real_glioma_context_without_invoking_a_provider() {
             && citation["record_id"] == json!("TCGA-GBM")
     }));
     assert_eq!(text.matches("<public_record>").count(), 2);
-    assert_eq!(value["omitted_citation_count"], json!(32));
+    // The immutable snapshot currently has 34 bounded matches: three fit the context citation
+    // budget and the renderer reports the remaining 31 explicitly.
+    assert_eq!(value["omitted_citation_count"], json!(31));
     assert!(value["context_digest"]
         .as_str()
         .is_some_and(|digest| digest.len() == 64));
