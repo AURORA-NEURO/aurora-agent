@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 734;
+const TOOL_DEFINITION_COUNT: usize = 735;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -15737,6 +15737,71 @@ fn glioma_protocol_branch_optimizer_is_reachable_and_simulation_bound() {
         result["plan"]["selected_candidate_order"],
         json!(["fast-moderate-information"])
     );
+}
+
+#[test]
+fn glioma_protocol_autonomous_controller_executes_a_selected_branch() {
+    let mut server = server();
+    let protocol = json!({
+        "objective": "autonomously run an organoid invasion protocol",
+        "model_system": "organoid",
+        "tasks": [
+            {"task_id":"prepare","label":"prepare organoids","resource_kind":"culture","resource_units":1,"duration_ticks":1,"depends_on":[],"model_system":"organoid","output_schema":"Setup1@1","risk_milli":100,"requires_instrument":false},
+            {"task_id":"assay","label":"run invasion assay","resource_kind":"imaging","resource_units":1,"duration_ticks":2,"depends_on":["prepare"],"model_system":"organoid","output_schema":"Assay1@1","risk_milli":200,"requires_instrument":false}
+        ],
+        "resources": [
+            {"resource_id":"culture","kind":"culture","capacity_units":1},
+            {"resource_id":"imaging","kind":"imaging","capacity_units":1}
+        ],
+        "max_ticks": 10,
+        "max_risk_milli": 500,
+        "allow_instrument_execution": false,
+        "approval_reference": null,
+        "randomization_seed": ContentHash::of_bytes(b"autonomous-protocol-mcp")
+    });
+    let result = call(
+        &mut server,
+        "glioma_protocol_autonomous_execute",
+        json!({
+            "request": {
+                "mission_id": "mission-autonomous-protocol-mcp",
+                "objective": "autonomously run an organoid invasion protocol",
+                "base_protocol": protocol,
+                "branch_candidates": [{
+                    "candidate_id":"fast-assay",
+                    "task":{"task_id":"assay","label":"fast assay","resource_kind":"imaging","resource_units":1,"duration_ticks":1,"depends_on":["prepare"],"model_system":"organoid","output_schema":"Assay1@1","risk_milli":200,"requires_instrument":false},
+                    "expected_information_milli":850,
+                    "evidence_prior_milli":800,
+                    "cost_units":2
+                }],
+                "compensation_candidates": [{
+                    "candidate_id":"assay-compensation",
+                    "replaces_task_id":"assay",
+                    "output_schema":"Assay1@1",
+                    "model_system":"organoid",
+                    "resource_kind":"imaging",
+                    "resource_units":1,
+                    "duration_ticks":1,
+                    "cost_units":1,
+                    "risk_milli":200,
+                    "expected_information_milli":800,
+                    "depends_on":["prepare"],
+                    "unlocks_task_order":["assay"]
+                }],
+                "budget_units":5,
+                "max_rounds":3,
+                "max_branches":8,
+                "beam_width":8,
+                "max_retries":0,
+                "require_artifacts":true,
+                "branch_weights":{"information_milli":400,"feasibility_milli":300,"time_milli":100,"risk_milli":100,"cost_milli":100}
+            }
+        }),
+    );
+    assert_eq!(result["dispatch"], json!("not_started"));
+    assert_eq!(result["simulation_only"], json!(true));
+    assert_eq!(result["run"]["disposition"], json!("completed"));
+    assert_eq!(result["run"]["rounds"].as_array().unwrap().len(), 1);
 }
 
 #[test]

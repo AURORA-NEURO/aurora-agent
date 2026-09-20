@@ -522,7 +522,8 @@ use bioprism_research::{
     execute_glioma_adaptive_interpretation_campaign_dry_run,
     execute_glioma_adaptive_mechanism_campaign, execute_glioma_autonomous_campaign,
     execute_glioma_autonomous_gap_cycle, execute_glioma_autonomous_program_cycle,
-    execute_glioma_autonomous_research_engine, execute_glioma_autonomous_research_mission,
+    execute_glioma_autonomous_protocol, execute_glioma_autonomous_research_engine,
+    execute_glioma_autonomous_research_mission,
     execute_glioma_calibrated_mechanism_campaign_dry_run, execute_glioma_causal_claim_adjudication,
     execute_glioma_computation, execute_glioma_computation_campaign,
     execute_glioma_computation_operating_cycle_dry_run, execute_glioma_computation_portfolio,
@@ -577,9 +578,10 @@ use bioprism_research::{
     AdaptiveInstrumentCampaignRequest, AdaptiveInterpretationCampaignRequest,
     AdaptiveMechanismCampaignRequest, AdaptiveMechanismPolicyRequest, AnalysisDataset,
     AnalysisRequest, AssayEvidenceObservation, AssayEvidenceRequest, AutonomousGapCycleRequest,
-    AutonomousProgramCycleRequest, BayesianMechanismHypothesis, BayesianMechanismUpdateRequest,
-    BeliefConflict, BeliefRevisionRequest, CalibratedMechanismCampaignRequest, CalibrationRequest,
-    CalibrationRun, CampaignAction, CampaignMechanism, CampaignObservation, CausalContrastRequest,
+    AutonomousProgramCycleRequest, AutonomousProtocolControllerRequest,
+    BayesianMechanismHypothesis, BayesianMechanismUpdateRequest, BeliefConflict,
+    BeliefRevisionRequest, CalibratedMechanismCampaignRequest, CalibrationRequest, CalibrationRun,
+    CampaignAction, CampaignMechanism, CampaignObservation, CausalContrastRequest,
     ClonalEvolutionGraph, ClonalEvolutionRequest, CloneContinuationCandidate,
     CloneContinuationRequest, ClonePanelObservation, ClonePanelOutcomeAnalysis,
     ClonePanelOutcomeRequest, ClonePerturbationCandidate, ClonePerturbationPanel,
@@ -2208,6 +2210,9 @@ impl Server {
             "glioma_workflow_plan" => self.glioma_workflow_plan(&arguments),
             "glioma_protocol_simulate" => self.glioma_protocol_simulate(&arguments),
             "glioma_protocol_branch_optimize" => self.glioma_protocol_branch_optimize(&arguments),
+            "glioma_protocol_autonomous_execute" => {
+                self.glioma_protocol_autonomous_execute(&arguments)
+            }
             "glioma_protocol_execute" => self.glioma_protocol_execute(&arguments),
             "glioma_protocol_compensation" => self.glioma_protocol_compensation(&arguments),
             "glioma_action_portfolio_execute" => self.glioma_action_portfolio_execute(&arguments),
@@ -6015,6 +6020,32 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma protocol branch optimization: {error}"))
+    }
+
+    /// Run a bounded protocol-level autonomous loop through the deterministic synthetic worker.
+    /// Production effects remain behind the caller-owned GliomaProtocolExecutor seam.
+    fn glioma_protocol_autonomous_execute(&self, arguments: &Value) -> Result<Value, String> {
+        let request: AutonomousProtocolControllerRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_protocol_autonomous_execute requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma autonomous protocol request: {error}"))?;
+        let mut executor = DryRunGliomaProtocolExecutor;
+        let run = execute_glioma_autonomous_protocol(&request, &mut executor)
+            .map_err(|error| format!("glioma autonomous protocol refused: {error}"))?;
+        serde_json::to_value(json!({
+            "run": run,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "next_route": "glioma_protocol_execute",
+            "guarantees": [
+                "branch planning, local execution, negative evidence, and compensation remain in one bounded typed loop",
+                "only an untried branch returned by the planner can be selected for execution",
+                "round, retry, beam, branch, and budget limits are explicit and fail closed",
+                "the MCP route performs no assay, instrument, federation, or clinical action"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma autonomous protocol run: {error}"))
     }
 
     /// Execute a feasible protocol through the deterministic synthetic executor. Production
@@ -51271,6 +51302,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_workflow_plan",
                 "glioma_protocol_simulate",
                 "glioma_protocol_branch_optimize",
+                "glioma_protocol_autonomous_execute",
                 "glioma_protocol_execute",
                 "glioma_protocol_compensation",
                 "glioma_action_portfolio_execute",
@@ -60171,6 +60203,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "ProtocolBranchOptimizationRequest1@1 containing a base ProtocolSimulationRequest1@1, contract-preserving task alternatives, score weights, a budget, and beam/branch bounds."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_protocol_autonomous_execute",
+        "description": "Run a bounded protocol-level autonomous preclinical glioma loop. The controller selects an untried branch with beam search, executes it through the local synthetic worker, preserves failed/negative/partial outcomes, and invokes typed compensation planning before considering another branch. Round, retry, budget, and branch bounds are explicit; this MCP route is simulation-only and performs no biological, instrument, federation, or clinical effect.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "AutonomousProtocolControllerRequest1@1 containing a protocol, contract-preserving branch and compensation candidates, budget/round bounds, retry/artifact policy, and branch score weights."}
             },
             "required": ["request"]
         }

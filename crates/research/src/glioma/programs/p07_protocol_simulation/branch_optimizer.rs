@@ -236,6 +236,48 @@ fn apply_state(
     protocol
 }
 
+/// Materialize one optimizer branch into a protocol request for a caller-owned executor.
+/// Selection is restricted to the candidate set supplied to the optimizer, so a controller cannot
+/// silently execute a branch that was not scored and returned by the planner.
+pub fn materialize_glioma_protocol_branch(
+    base: &ProtocolSimulationRequest,
+    candidates: &[ProtocolBranchCandidate],
+    selected_candidate_order: &[String],
+) -> Result<ProtocolSimulationRequest, ProtocolBranchOptimizationError> {
+    if !canonical(selected_candidate_order) {
+        return Err(ProtocolBranchOptimizationError::InvalidRequest(
+            "selected branch candidates must be canonical and unique".into(),
+        ));
+    }
+    let candidate_map = candidates
+        .iter()
+        .map(|candidate| (candidate.candidate_id.clone(), candidate))
+        .collect::<BTreeMap<_, _>>();
+    let mut protocol = base.clone();
+    let mut replacements = BTreeMap::new();
+    for candidate_id in selected_candidate_order {
+        let candidate = candidate_map.get(candidate_id).ok_or_else(|| {
+            ProtocolBranchOptimizationError::InvalidCandidate(format!(
+                "selected branch references unknown candidate {candidate_id}"
+            ))
+        })?;
+        if replacements
+            .insert(candidate.task.task_id.clone(), candidate.task.clone())
+            .is_some()
+        {
+            return Err(ProtocolBranchOptimizationError::InvalidCandidate(
+                "selected branch replaces the same task more than once".into(),
+            ));
+        }
+    }
+    for task in &mut protocol.tasks {
+        if let Some(replacement) = replacements.get(&task.task_id) {
+            *task = replacement.clone();
+        }
+    }
+    Ok(protocol)
+}
+
 fn score_simulation(
     simulation: &ProtocolSimulation,
     state: &BranchState<'_>,

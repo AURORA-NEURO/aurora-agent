@@ -15,6 +15,7 @@ pub mod active_learning_campaign;
 pub mod adaptive_scheduler;
 pub mod autonomous_campaign;
 pub mod autonomous_engine;
+pub mod autonomous_protocol;
 pub mod branch_optimizer;
 pub mod clone_campaign;
 pub mod clone_continuation;
@@ -66,6 +67,13 @@ pub use autonomous_engine::{
     GliomaAutonomousResearchEngineStopReason,
 };
 
+pub use autonomous_protocol::{
+    execute_glioma_autonomous_protocol, AutonomousProtocolControllerDisposition,
+    AutonomousProtocolControllerError, AutonomousProtocolControllerRequest,
+    AutonomousProtocolControllerRun, AutonomousProtocolControllerStopReason,
+    AutonomousProtocolRound,
+};
+
 pub use autonomous_campaign::{
     execute_glioma_autonomous_campaign, GliomaActionPlanner, GliomaAutonomousCampaign,
     GliomaAutonomousCampaignDisposition, GliomaAutonomousCampaignError,
@@ -95,9 +103,10 @@ pub use compensation::{
 };
 
 pub use branch_optimizer::{
-    optimize_glioma_protocol_branches, ProtocolBranchCandidate, ProtocolBranchEvaluation,
-    ProtocolBranchOptimizationDisposition, ProtocolBranchOptimizationError,
-    ProtocolBranchOptimizationPlan, ProtocolBranchOptimizationRequest, ProtocolBranchWeights,
+    materialize_glioma_protocol_branch, optimize_glioma_protocol_branches, ProtocolBranchCandidate,
+    ProtocolBranchEvaluation, ProtocolBranchOptimizationDisposition,
+    ProtocolBranchOptimizationError, ProtocolBranchOptimizationPlan,
+    ProtocolBranchOptimizationRequest, ProtocolBranchWeights,
 };
 
 pub use director::{

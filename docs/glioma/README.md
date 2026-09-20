@@ -191,6 +191,8 @@ crates/research/src/glioma/
                                              P07 contract-preserving recovery planning for failed, partial, and skipped protocol tasks
     p07_protocol_simulation/branch_optimizer.rs
                                              P07 deterministic beam search over information/feasibility/risk/time/cost protocol branches
+    p07_protocol_simulation/autonomous_protocol.rs
+                                             P07 bounded branch-select/execute/compensate autonomous protocol controller
     p07_protocol_simulation/action_execution.rs
                                              P07 dependency-safe action-portfolio execution
     p07_protocol_simulation/autonomous_campaign.rs
