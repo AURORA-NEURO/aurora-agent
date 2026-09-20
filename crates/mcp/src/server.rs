@@ -546,9 +546,9 @@ use bioprism_research::{
     execute_glioma_release_operating_cycle_dry_run, execute_glioma_replay_campaign,
     execute_glioma_replication_campaign, execute_glioma_research_autopilot,
     execute_glioma_research_director, execute_glioma_robust_active_learning_campaign,
-    execute_glioma_robustness_guided_computation, execute_glioma_sequential_campaign,
-    explore_mechanisms, generate_feature_catalog, glioma_program_catalog,
-    harmonize_glioma_multimodal_batches, harmonize_multimodal_inputs,
+    execute_glioma_robustness_guided_computation, execute_glioma_scientific_frontier,
+    execute_glioma_sequential_campaign, explore_mechanisms, generate_feature_catalog,
+    glioma_program_catalog, harmonize_glioma_multimodal_batches, harmonize_multimodal_inputs,
     plan_adaptive_glioma_dose_surface, plan_decision_actions, plan_federated_benchmark_sites,
     plan_glioma_active_learning, plan_glioma_adaptive_information_campaign,
     plan_glioma_adaptive_mechanism_policy, plan_glioma_adaptive_research_frontier,
@@ -649,15 +649,15 @@ use bioprism_research::{
     RobustActiveLearningCampaignRequest, RobustActiveLearningCandidate,
     RobustActiveLearningObservation, RobustActiveLearningRequest, RobustInterventionCandidate,
     RobustInterventionRequest, RobustnessGuidedComputationRequest, RobustnessRequest,
-    ScientificFrontierRequest, SensitivityObservation, SensitivityRequest,
-    SequentialArmObservation, SequentialCampaignRequest, SequentialDesignRequest, SpatialCell,
-    SpatialCommunicationCell, SpatialCommunicationRequest, SpatialNicheRequest,
-    SpatialPropagationRequest, SpatialRegistrationCell, SpatialRegistrationRequest,
-    StateTransitionObservation, StateTransitionRequest, StaticGliomaActionPlanner,
-    StaticGliomaComputationPlanner, StratifiedCausalRequest, StratifiedObservation,
-    TemporalFusionRequest, TemporalObservation, TemporalSpatialAlignmentRequest,
-    TrajectoryObservation, TrajectoryRequest, TransportStudy, TransportabilityRequest,
-    TypedKnowledge,
+    ScientificFrontierExecutionRequest, ScientificFrontierRequest, SensitivityObservation,
+    SensitivityRequest, SequentialArmObservation, SequentialCampaignRequest,
+    SequentialDesignRequest, SpatialCell, SpatialCommunicationCell, SpatialCommunicationRequest,
+    SpatialNicheRequest, SpatialPropagationRequest, SpatialRegistrationCell,
+    SpatialRegistrationRequest, StateTransitionObservation, StateTransitionRequest,
+    StaticGliomaActionPlanner, StaticGliomaComputationPlanner, StratifiedCausalRequest,
+    StratifiedObservation, TemporalFusionRequest, TemporalObservation,
+    TemporalSpatialAlignmentRequest, TrajectoryObservation, TrajectoryRequest, TransportStudy,
+    TransportabilityRequest, TypedKnowledge,
 };
 use bioprism_routing::{
     lab::{run as run_routing_lab, LabSettings, Task},
@@ -2340,6 +2340,9 @@ impl Server {
             "glioma_causal_sensitivity" => self.glioma_causal_sensitivity(&arguments),
             "glioma_research_select_actions" => self.glioma_research_select_actions(&arguments),
             "glioma_scientific_frontier" => self.glioma_scientific_frontier(&arguments),
+            "glioma_scientific_frontier_execute" => {
+                self.glioma_scientific_frontier_execute(&arguments)
+            }
             "glioma_program_catalog" => self.glioma_program_catalog(&arguments),
             "glioma_evidence_qualify" => self.glioma_evidence_qualify(&arguments),
             "glioma_evidence_surveillance" => self.glioma_evidence_surveillance(&arguments),
@@ -8390,6 +8393,41 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma scientific frontier: {error}"))
+    }
+
+    /// Execute only the admitted scientific-frontier batch through MCP's deterministic local
+    /// adapter. Held and blocked P02/P03 candidates never reach the executor.
+    fn glioma_scientific_frontier_execute(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ScientificFrontierExecutionRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_scientific_frontier_execute requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma scientific-frontier execution request: {error}")
+            })?;
+        let plan: bioprism_research::ScientificFrontierPlan = serde_json::from_value(
+            arguments
+                .get("plan")
+                .cloned()
+                .ok_or_else(|| "glioma_scientific_frontier_execute requires plan".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma scientific-frontier plan: {error}"))?;
+        let mut executor = DryRunGliomaActionExecutor;
+        let run = execute_glioma_scientific_frontier(&request, &plan, &mut executor)
+            .map_err(|error| format!("glioma scientific-frontier execution refused: {error}"))?;
+        serde_json::to_value(json!({
+            "run": run,
+            "dispatch": "completed_local_dry_run",
+            "simulation_only": true,
+            "next_route": "glioma_scientific_frontier",
+            "guarantees": [
+                "only the immutable frontier plan's admitted and selected actions are dispatched",
+                "held and blocked candidates are filtered before the local executor is called",
+                "the executor's returned selection must exactly reconcile with the frontier plan",
+                "MCP performs no instrument, federation, raw-data, network, or clinical effect"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma scientific-frontier execution: {error}"))
     }
 
     /// Return the folder-owned glioma program and feature catalog used by local orchestration.
@@ -51097,6 +51135,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_causal_sensitivity",
                 "glioma_research_select_actions",
                 "glioma_scientific_frontier",
+                "glioma_scientific_frontier_execute",
                 "glioma_program_catalog",
                 "glioma_evidence_qualify",
                 "glioma_evidence_surveillance",
@@ -60776,6 +60815,18 @@ pub fn tool_definitions() -> Vec<Value> {
                 "request": {"type": "object", "description": "ScientificFrontierRequest1@1 containing objective, TypedKnowledge1@1, KnowledgeFrontier1@1, MultimodalResearchReadiness1@1, typed GliomaActionCandidate1@1 records, completed action ids, and GliomaSelectionConfig1@1."}
             },
             "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_scientific_frontier_execute",
+        "description": "Execute only the admitted and selected batch from an immutable preclinical glioma scientific-frontier plan through MCP's deterministic local adapter. Held and blocked candidates are filtered before dispatch, the returned selector must reconcile with the frontier plan, and the run remains simulation-only with no instrument, federation, raw-data, network, or clinical effect.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ScientificFrontierExecutionRequest1@1 with objective/plan digest, the original candidate pool, completed actions, selection policy, retry bound, and artifact requirement."},
+                "plan": {"type": "object", "description": "ScientificFrontierPlan1@1 from glioma_scientific_frontier; its admission and selection are authoritative."}
+            },
+            "required": ["request", "plan"]
         }
     }));
     definitions.push(json!({

@@ -46,6 +46,8 @@ crates/research/src/glioma/
                                              P03 ingestion/QC, surface admission, and operator-handoff cycle
   programs/p07_protocol_simulation/scientific_frontier.rs
                                              P07 P02/P03-aware scientific frontier admission and next-batch selection
+  programs/p07_protocol_simulation/frontier_execution.rs
+                                             P07 admission-bound execution of only the scientifically runnable frontier batch
   programs/p04_decision_context/context_compiler.rs
                                              P04 evidence-gap to typed next-action compilation
   programs/p04_decision_context/action_graph.rs

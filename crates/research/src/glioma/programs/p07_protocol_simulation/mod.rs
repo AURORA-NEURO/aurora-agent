@@ -21,6 +21,7 @@ pub mod director;
 pub mod evidence_campaign;
 pub mod evidence_gate;
 pub mod execution;
+pub mod frontier_execution;
 pub mod intent_mission;
 pub mod mechanism_autopilot;
 pub mod mechanism_campaign;
@@ -183,6 +184,12 @@ pub use scientific_frontier::{
 pub use evidence_campaign::{
     execute_glioma_evidence_campaign, GliomaEvidenceCampaignDisposition,
     GliomaEvidenceCampaignError, GliomaEvidenceCampaignExecution, GliomaEvidenceCampaignRequest,
+};
+
+pub use frontier_execution::{
+    execute_glioma_scientific_frontier, ScientificFrontierExecution,
+    ScientificFrontierExecutionDisposition, ScientificFrontierExecutionError,
+    ScientificFrontierExecutionRequest,
 };
 
 pub use simulator::{
