@@ -11,6 +11,7 @@ pub mod causal_contrast;
 pub mod claim_adjudication;
 pub mod clone_outcomes;
 pub mod closure_interpretation;
+pub mod computation_evidence_gate;
 pub mod dynamic_policy;
 pub mod mediation;
 pub mod meta_analysis;
@@ -70,6 +71,12 @@ pub use clone_outcomes::{
     ClonePanelCellAnalysis, ClonePanelCellDisposition, ClonePanelMeasurementState,
     ClonePanelObservation, ClonePanelOutcomeAnalysis, ClonePanelOutcomeDisposition,
     ClonePanelOutcomeError, ClonePanelOutcomeRequest,
+};
+pub use computation_evidence_gate::{
+    execute_glioma_computation_interpretation_evidence_gate, ComputationInterpretationEvidenceGate,
+    ComputationInterpretationEvidenceGateDisposition, ComputationInterpretationEvidenceGateError,
+    ComputationInterpretationEvidenceGateRequest, ComputationInterpretationObservation,
+    ComputationInterpretationSynthesisPolicy,
 };
 pub use dynamic_policy::{
     evaluate_glioma_dynamic_policies, DynamicPolicyCandidate, DynamicPolicyContribution,

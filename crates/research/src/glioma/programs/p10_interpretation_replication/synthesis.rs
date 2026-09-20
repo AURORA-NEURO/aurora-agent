@@ -24,6 +24,7 @@ pub const MAX_UNCERTAINTY_MILLI: u64 = 1_000_000_000;
 pub enum InterpretationEvidenceFamily {
     CausalContrast,
     CausalAdjustment,
+    Computation,
     Mediation,
     Trajectory,
     StateTransition,

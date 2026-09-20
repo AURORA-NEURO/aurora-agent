@@ -537,6 +537,7 @@ use bioprism_research::{
     execute_glioma_autonomous_research_mission,
     execute_glioma_calibrated_mechanism_campaign_dry_run, execute_glioma_causal_claim_adjudication,
     execute_glioma_computation, execute_glioma_computation_campaign,
+    execute_glioma_computation_interpretation_evidence_gate,
     execute_glioma_computation_interpretation_frontier,
     execute_glioma_computation_operating_cycle_dry_run, execute_glioma_computation_portfolio,
     execute_glioma_computation_recovery, execute_glioma_decision_branch_campaign,
@@ -617,36 +618,36 @@ use bioprism_research::{
     ClonePerturbationPanelRequest, CloneProfile, ClosedLoopCampaignRequest,
     ClosureInterpretationRequest, CombinationObservation, CombinationSynergyRequest,
     ComputationCandidate, ComputationExecutionMode, ComputationExecutionRequest,
-    ComputationInterpretationFrontierRequest, ComputationPlacementRequest,
-    ComputationPortfolioExecutionRequest, ComputationPortfolioRequest, ComputationRecoveryRequest,
-    ConcordanceRequest, ConsensusRequest, ContradictionAdjudicationRequest,
-    ContradictionCutRequest, ContradictionEvidence, ContrastDesignRequest,
-    CounterfactualEnsembleRequest, CounterfactualIntervention, CounterfactualModel,
-    CounterfactualRequest, DecisionActionGraphRequest, DecisionActionPlanRequest,
-    DecisionAdmissionRequest, DecisionBranchCampaignRequest, DecisionBranchPlannerRequest,
-    DecisionContext, DecisionContextCampaignRequest, DecisionContextRequest,
-    DecisionLoopGovernorRequest, DecisionMissionBridgeRequest, DecisionOmissionCertificateRequest,
-    DecisionOperatingCycleRequest, DecisionValueCalibrationRequest, DecisionValueRequest,
-    DesignAction, DesignMechanism, DoseResponseObservation, DoseResponseRequest,
-    DriftSurveillanceRequest, DropoutStressRequest, DryRunActiveLearningCampaignExecutor,
-    DryRunAdaptiveAllocationCampaignExecutor, DryRunAdaptiveMechanismPolicyExecutor,
-    DryRunDecisionContextCampaignExecutor, DryRunEvidenceAcquisitionExecutor,
-    DryRunEvidenceRefreshCampaignExecutor, DryRunExperimentOperatingCycleExecutor,
-    DryRunFederatedBenchmarkCampaignExecutor, DryRunFederatedMechanismTransportExecutor,
-    DryRunGliomaActionExecutor, DryRunGliomaComputationExecutor,
-    DryRunGliomaExperimentFrontierExecutor, DryRunGliomaProtocolExecutor,
-    DryRunGliomaReplicationCampaignExecutor, DryRunInstrumentExecutor,
-    DryRunKnowledgeActionExecutor, DryRunKnowledgeResolutionCampaignExecutor,
-    DryRunMechanismDiscriminationCampaignExecutor, DryRunMultiFidelityCampaignExecutor,
-    DryRunMultimodalIngestionCampaignExecutor, DryRunQualityScheduleExecutor,
-    DryRunReplayCampaignExecutor, DryRunRobustActiveLearningCampaignExecutor,
-    DryRunSequentialCampaignExecutor, DynamicPolicyCandidate, DynamicPolicyRequest,
-    DynamicPolicyTrajectory, EvidenceAcquisitionCampaignRequest, EvidenceAcquisitionCandidate,
-    EvidenceAcquisitionRequest, EvidenceCalibrationObservation, EvidenceCalibrationRequest,
-    EvidenceExecutionMode, EvidenceFusionRequest, EvidencePriorityRequest, EvidenceRecord,
-    EvidenceRefreshCampaignRequest, EvidenceRequest, EvidenceSurveillanceRequest,
-    EvidenceTriangulationRequest, ExperimentArm, ExperimentOperatingCycleRequest,
-    ExperimentRequest, FederatedBenchmarkAdaptiveCampaignRequest,
+    ComputationInterpretationEvidenceGateRequest, ComputationInterpretationFrontierRequest,
+    ComputationPlacementRequest, ComputationPortfolioExecutionRequest, ComputationPortfolioRequest,
+    ComputationRecoveryRequest, ConcordanceRequest, ConsensusRequest,
+    ContradictionAdjudicationRequest, ContradictionCutRequest, ContradictionEvidence,
+    ContrastDesignRequest, CounterfactualEnsembleRequest, CounterfactualIntervention,
+    CounterfactualModel, CounterfactualRequest, DecisionActionGraphRequest,
+    DecisionActionPlanRequest, DecisionAdmissionRequest, DecisionBranchCampaignRequest,
+    DecisionBranchPlannerRequest, DecisionContext, DecisionContextCampaignRequest,
+    DecisionContextRequest, DecisionLoopGovernorRequest, DecisionMissionBridgeRequest,
+    DecisionOmissionCertificateRequest, DecisionOperatingCycleRequest,
+    DecisionValueCalibrationRequest, DecisionValueRequest, DesignAction, DesignMechanism,
+    DoseResponseObservation, DoseResponseRequest, DriftSurveillanceRequest, DropoutStressRequest,
+    DryRunActiveLearningCampaignExecutor, DryRunAdaptiveAllocationCampaignExecutor,
+    DryRunAdaptiveMechanismPolicyExecutor, DryRunDecisionContextCampaignExecutor,
+    DryRunEvidenceAcquisitionExecutor, DryRunEvidenceRefreshCampaignExecutor,
+    DryRunExperimentOperatingCycleExecutor, DryRunFederatedBenchmarkCampaignExecutor,
+    DryRunFederatedMechanismTransportExecutor, DryRunGliomaActionExecutor,
+    DryRunGliomaComputationExecutor, DryRunGliomaExperimentFrontierExecutor,
+    DryRunGliomaProtocolExecutor, DryRunGliomaReplicationCampaignExecutor,
+    DryRunInstrumentExecutor, DryRunKnowledgeActionExecutor,
+    DryRunKnowledgeResolutionCampaignExecutor, DryRunMechanismDiscriminationCampaignExecutor,
+    DryRunMultiFidelityCampaignExecutor, DryRunMultimodalIngestionCampaignExecutor,
+    DryRunQualityScheduleExecutor, DryRunReplayCampaignExecutor,
+    DryRunRobustActiveLearningCampaignExecutor, DryRunSequentialCampaignExecutor,
+    DynamicPolicyCandidate, DynamicPolicyRequest, DynamicPolicyTrajectory,
+    EvidenceAcquisitionCampaignRequest, EvidenceAcquisitionCandidate, EvidenceAcquisitionRequest,
+    EvidenceCalibrationObservation, EvidenceCalibrationRequest, EvidenceExecutionMode,
+    EvidenceFusionRequest, EvidencePriorityRequest, EvidenceRecord, EvidenceRefreshCampaignRequest,
+    EvidenceRequest, EvidenceSurveillanceRequest, EvidenceTriangulationRequest, ExperimentArm,
+    ExperimentOperatingCycleRequest, ExperimentRequest, FederatedBenchmarkAdaptiveCampaignRequest,
     FederatedBenchmarkCampaignRequest, FederatedBenchmarkExecutionMode,
     FederatedBenchmarkOperatingCycleRequest, FederatedBenchmarkRequest, FederatedBenchmarkSite,
     FederatedBenchmarkSitePlannerRequest, FederatedInterpretationRequest, FederatedMechanismSite,
@@ -2332,6 +2333,9 @@ impl Server {
             }
             "glioma_computation_interpretation_frontier_execute" => {
                 self.glioma_computation_interpretation_frontier_execute(&arguments)
+            }
+            "glioma_computation_interpretation_evidence_gate" => {
+                self.glioma_computation_interpretation_evidence_gate(&arguments)
             }
             "glioma_research_director_execute" => self.glioma_research_director_execute(&arguments),
             "glioma_program_scheduler_execute" => self.glioma_program_scheduler_execute(&arguments),
@@ -7063,6 +7067,40 @@ impl Server {
         }))
         .map_err(|error| {
             format!("cannot encode glioma computation interpretation frontier run: {error}")
+        })
+    }
+
+    /// Bind returned computation summaries to their routed actions and run the P10
+    /// cross-family interpretation gate in the deterministic local sandbox.
+    fn glioma_computation_interpretation_evidence_gate(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: ComputationInterpretationEvidenceGateRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_computation_interpretation_evidence_gate requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma computation interpretation evidence request: {error}")
+            })?;
+        let gate =
+            execute_glioma_computation_interpretation_evidence_gate(&request).map_err(|error| {
+                format!("glioma computation interpretation evidence refused: {error}")
+            })?;
+        serde_json::to_value(json!({
+            "gate": gate,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "only observations for completed or negative frontier actions can enter synthesis",
+                "computation evidence is separated from replication evidence by routed stage",
+                "missing observations, negative outcomes, replay drift, and uncertainty remain explicit",
+                "cross-family interpretation still requires quality, independent-group, and replication floors",
+                "the route performs no raw-data movement, instrument effect, or clinical decision"
+            ]
+        }))
+        .map_err(|error| {
+            format!("cannot encode glioma computation interpretation evidence gate: {error}")
         })
     }
 
@@ -53004,6 +53042,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_computation_operating_cycle",
                 "glioma_computation_interpretation_frontier_compile",
                 "glioma_computation_interpretation_frontier_execute",
+                "glioma_computation_interpretation_evidence_gate",
                 "glioma_research_director_execute",
                 "glioma_program_scheduler_execute",
                 "glioma_experiment_frontier_controller_execute",
@@ -62248,6 +62287,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "ComputationInterpretationFrontierRequest1@1 containing a validated GliomaComputationCampaign1@1, matching objective, modality, bounded action/mission policy, and optional resumption order."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_computation_interpretation_evidence_gate",
+        "description": "Bind returned preclinical glioma computation summaries to the routed P09 frontier and run the P10 cross-family interpretation gate. Observations for incomplete actions are rejected from synthesis; computation and replication evidence remain distinct; missing summaries, negative results, replay drift, uncertainty, quality, independent-group, and replication floors remain explicit. This route performs no raw-data movement, instrument effect, or clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ComputationInterpretationEvidenceGateRequest1@1 containing a validated computation frontier run, synthesis policy, local value-only observations, and complete-frontier policy."}
             },
             "required": ["request"]
         }

@@ -458,7 +458,7 @@ portfolio plan and executable code; it does not promote a planned slot to implem
 | P07 Protocol simulation | lab operations lead | protocol simulation, adaptive workflow planning | critical-path scheduling, outcome-aware dependency scheduling, intent-to-stage-action compilation, bounded modality/model-system portfolio expansion, evidence-gated director admission, evidence-priority execution cycles, context-to-action execution, multimodal mechanism campaigns, evolution-aware clone campaigns, stage-gated autonomous program control, failed-frontier recovery with alternate dependency-safe missions, P02/P03-aware scientific frontier admission, utilization, deterministic next batches, and repair/abstain routing before physical effects |
 | P08 Instrument and robotics preflight | instrument operator | instrument preflight | robust control calibration, drift detection, information-per-cost endpoint-diverse campaign selection, multi-instrument dependency scheduling, schedule-bound fleet execution, signed interlocked planning, guarded execution, and fail-closed multi-run campaigns |
 | P09 Reproducible computation | computational scientist | computational execution | checkpointed/replayable computation, intent-to-DAG compilation, locality-aware worker placement, budgeted portfolio execution, robustness-debt-driven re-analysis, selective failed-frontier recovery, omission-stress robustness suite, and computation-to-interpretation/replication routing |
-| P10 Causal interpretation and replication | methods reviewer | statistical interpretation, replication/robustness | uncertainty-aware endpoint, longitudinal, stratified causal, dynamic-policy, causal-contrast, meta-analytic, cross-site verdicts, guarded adaptive-frontier execution, and bounded resynthesis campaigns |
+| P10 Causal interpretation and replication | methods reviewer | statistical interpretation, replication/robustness | uncertainty-aware endpoint, longitudinal, stratified causal, dynamic-policy, causal-contrast, meta-analytic, cross-site verdicts, guarded adaptive-frontier execution, bounded resynthesis campaigns, and computation-evidence adjudication |
 | P11 Research-object release | reproducibility steward | research-object release | portable manifest with limitations and negative evidence, dependency-aware replay, accountable release gating, and operator handoff |
 | P12 Federated benchmarking | consortium administrator | federation benchmarking | aggregate-only cross-site benchmark consensus, influence-aware site portfolio planning, planner-to-campaign adaptive execution, robust pooling, heterogeneity, and site-influence analysis |
 
@@ -1077,6 +1077,13 @@ identity, baseline comparison, uncertainty, and negative-result evaluation oblig
 P07 autonomous mission controller, so computation output is never silently promoted to a
 biological conclusion. Empty or held frontiers remain explicit and the MCP route stays local,
 deterministic, and preclinical-only.
+P10 now also exposes computation interpretation evidence adjudication
+(`glioma_computation_interpretation_evidence_gate`). It binds value-only summaries to the exact
+P09 routed actions, refuses observations for actions that did not complete, keeps computation and
+replication evidence in separate synthesis families, and applies quality, independent-group,
+negative-result, uncertainty, and replication floors before producing an interpretation state.
+Missing summaries, replay drift, negative outcomes, and unresolved actions become explicit next
+actions instead of being collapsed into a confident claim.
 P05 now also includes counterfactual mechanism simulation (`simulate_glioma_counterfactual`). It
 compares baseline and signed node perturbation fixed points over activating/inhibiting networks,
 rank-orders downstream changes, and exposes low-confidence edges and non-convergence as unresolved.
