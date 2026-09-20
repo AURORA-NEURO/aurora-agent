@@ -18,6 +18,7 @@ pub mod multi_fidelity;
 pub mod multi_fidelity_campaign;
 pub mod operating_cycle;
 pub mod power_reestimation;
+pub mod replication_plan;
 pub mod robust_active_learning;
 pub mod robust_design;
 pub mod sequential_campaign;
@@ -117,6 +118,10 @@ pub use power_reestimation::{
     PowerReestimationRequest,
 };
 
+pub use replication_plan::{
+    plan_glioma_replication, ReplicationObservation, ReplicationPlan, ReplicationPlanDisposition,
+    ReplicationPlanError, ReplicationPlanRequest, ReplicationSiteAction, ReplicationSitePlan,
+};
 pub use robust_active_learning::{
     plan_glioma_robust_active_learning, RobustActiveLearningCandidate,
     RobustActiveLearningCandidateDisposition, RobustActiveLearningDisposition,

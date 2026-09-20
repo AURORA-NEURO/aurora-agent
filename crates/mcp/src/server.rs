@@ -574,7 +574,7 @@ use bioprism_research::{
     plan_glioma_evidence_contradiction_cut, plan_glioma_information_design,
     plan_glioma_multi_fidelity_optimization, plan_glioma_multimodal_portfolio,
     plan_glioma_multimodal_quality_remediation, plan_glioma_multimodal_quality_schedule,
-    plan_glioma_power_reestimation, plan_glioma_protocol_compensation,
+    plan_glioma_power_reestimation, plan_glioma_protocol_compensation, plan_glioma_replication,
     plan_glioma_robust_active_learning, plan_glioma_robust_intervention_portfolio,
     plan_glioma_scientific_frontier, plan_glioma_sequential_design, plan_glioma_workflow,
     preflight_glioma_instrument, prioritize_glioma_evidence, prioritize_knowledge_frontier,
@@ -679,20 +679,20 @@ use bioprism_research::{
     QualityExecutionMode, QualityExecutionRequest, QualityRecoveryRequest,
     QualityRemediationRequest, QualityRootCauseRequest, QualityScheduleRequest,
     QualityTransportRequest, ReleaseExecutionMode, ReleaseGateRequest,
-    ReliabilityCalibrationRequest, ReplayCampaign, ReplayCampaignRequest, ReplicationRequest,
-    ReplicationStudy, ResearchObjectRequest, RobustActiveLearningCampaignRequest,
-    RobustActiveLearningCandidate, RobustActiveLearningObservation, RobustActiveLearningRequest,
-    RobustExperimentDesignRequest, RobustInterventionCandidate, RobustInterventionRequest,
-    RobustnessGuidedComputationRequest, RobustnessRequest, ScientificFrontierExecutionRequest,
-    ScientificFrontierRequest, SensitivityObservation, SensitivityRequest,
-    SequentialArmObservation, SequentialCampaignRequest, SequentialDesignRequest, SpatialCell,
-    SpatialCommunicationCell, SpatialCommunicationRequest, SpatialNicheRequest,
-    SpatialPropagationRequest, SpatialRegistrationCell, SpatialRegistrationRequest,
-    StateTransitionObservation, StateTransitionRequest, StaticGliomaActionPlanner,
-    StaticGliomaComputationPlanner, StratifiedCausalRequest, StratifiedObservation,
-    TemporalFusionRequest, TemporalObservation, TemporalSpatialAlignmentRequest,
-    TrajectoryObservation, TrajectoryRequest, TransportStudy, TransportabilityRequest,
-    TypedKnowledge,
+    ReliabilityCalibrationRequest, ReplayCampaign, ReplayCampaignRequest, ReplicationObservation,
+    ReplicationPlanRequest, ReplicationRequest, ReplicationStudy, ResearchObjectRequest,
+    RobustActiveLearningCampaignRequest, RobustActiveLearningCandidate,
+    RobustActiveLearningObservation, RobustActiveLearningRequest, RobustExperimentDesignRequest,
+    RobustInterventionCandidate, RobustInterventionRequest, RobustnessGuidedComputationRequest,
+    RobustnessRequest, ScientificFrontierExecutionRequest, ScientificFrontierRequest,
+    SensitivityObservation, SensitivityRequest, SequentialArmObservation,
+    SequentialCampaignRequest, SequentialDesignRequest, SpatialCell, SpatialCommunicationCell,
+    SpatialCommunicationRequest, SpatialNicheRequest, SpatialPropagationRequest,
+    SpatialRegistrationCell, SpatialRegistrationRequest, StateTransitionObservation,
+    StateTransitionRequest, StaticGliomaActionPlanner, StaticGliomaComputationPlanner,
+    StratifiedCausalRequest, StratifiedObservation, TemporalFusionRequest, TemporalObservation,
+    TemporalSpatialAlignmentRequest, TrajectoryObservation, TrajectoryRequest, TransportStudy,
+    TransportabilityRequest, TypedKnowledge,
 };
 use bioprism_routing::{
     lab::{run as run_routing_lab, LabSettings, Task},
@@ -2498,6 +2498,7 @@ impl Server {
             }
             "glioma_information_design" => self.glioma_information_design(&arguments),
             "glioma_adaptive_panel" => self.glioma_adaptive_panel(&arguments),
+            "glioma_replication_plan" => self.glioma_replication_plan(&arguments),
             "glioma_robust_experiment_design" => self.glioma_robust_experiment_design(&arguments),
             "glioma_adaptive_information_campaign" => {
                 self.glioma_adaptive_information_campaign(&arguments)
@@ -10901,6 +10902,40 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma adaptive panel: {error}"))
+    }
+
+    /// Plan a multi-site replication topology from paired local arm summaries; this is design
+    /// only and never dispatches an assay or infers a clinical effect.
+    fn glioma_replication_plan(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ReplicationPlanRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_replication_plan requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma replication plan request: {error}"))?;
+        let observations: Vec<ReplicationObservation> = serde_json::from_value(
+            arguments
+                .get("observations")
+                .cloned()
+                .ok_or_else(|| "glioma_replication_plan requires observations".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma replication observations: {error}"))?;
+        let plan = plan_glioma_replication(&request, &observations)
+            .map_err(|error| format!("glioma replication plan refused: {error}"))?;
+        serde_json::to_value(json!({
+            "plan": plan,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "next_routes": ["glioma_protocol_simulate", "glioma_protocol_transport_gate", "glioma_power_reestimate"],
+            "guarantees": [
+                "site contrasts, pooled effect, heterogeneity, power proxy, and leave-one-site-out sensitivity remain explicit",
+                "replicate allocation is bounded by site diversity, cost, risk, budget, and total-replicate gates",
+                "heterogeneous and risk-blocked sites are never silently pooled or promoted",
+                "the route performs no assay, instrument, federation, raw-data, or clinical action"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma replication plan: {error}"))
     }
 
     /// Allocate a bounded glioma experiment batch against the lower tail of declared scenarios.
@@ -52347,6 +52382,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_robust_intervention_portfolio",
                 "glioma_information_design",
                 "glioma_adaptive_panel",
+                "glioma_replication_plan",
                 "glioma_robust_experiment_design",
                 "glioma_adaptive_information_campaign",
                 "glioma_active_learning",
@@ -62971,6 +63007,18 @@ pub fn tool_definitions() -> Vec<Value> {
                 "request": {"type": "object", "description": "AdaptivePanelRequest1@1 with mechanism priors, candidate panel actions, budget, selection, information, diversity, feasibility, risk, and cost bounds."}
             },
             "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_replication_plan",
+        "description": "Plan a multi-site preclinical glioma replication topology from paired local arm summaries. Reports pooled effect, site heterogeneity, a conservative power proxy, leave-one-site-out sensitivity, and bounded replicate allocation under cost, risk, site-diversity, and budget gates; it never executes an assay or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ReplicationPlanRequest1@1 with endpoint, paired arms, alpha/power targets, independent-site floors, replicate/budget limits, heterogeneity threshold, and risk ceiling."},
+                "observations": {"type": "array", "items": {"type": "object"}, "description": "ReplicationObservation1@1 local de-identified site/arm summaries with variance, replicate count, cost, risk, and artifact references."}
+            },
+            "required": ["request", "observations"]
         }
     }));
     definitions.push(json!({

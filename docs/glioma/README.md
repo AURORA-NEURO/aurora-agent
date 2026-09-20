@@ -108,6 +108,8 @@ crates/research/src/glioma/
                                              P05 source-weighted consensus across imaging, pathway, clonal, and computational evidence with conflict and leave-one-source-out sensitivity
   programs/p06_experiment_design/adaptive_panel.rs
                                              P06 mechanism-aware multi-assay panel selection with Gini information gain, correlation-group diversity, risk, feasibility, and budget gates
+  programs/p06_experiment_design/replication_plan.rs
+                                             P06 multi-site replication topology with pooled effects, heterogeneity, power proxy, leave-one-site-out sensitivity, and budget/risk allocation
   programs/p05_mechanism_exploration/operating_cycle.rs
                                              P05 mechanism-discrimination campaign to typed next-assay operating cycle
   programs/p05_mechanism_exploration/calibrated_campaign.rs

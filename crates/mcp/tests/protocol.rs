@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 765;
+const TOOL_DEFINITION_COUNT: usize = 766;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -2567,6 +2567,49 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
             .unwrap()
             .len(),
         2
+    );
+
+    let replication_plan = call(
+        &mut server,
+        "glioma_replication_plan",
+        json!({
+            "request": {
+                "objective": "replicate a glioma invasion effect across independent organoid sites",
+                "model_system": "organoid",
+                "endpoint": "invasion",
+                "control_arm_id": "control",
+                "treatment_arm_id": "treated",
+                "target_effect_milli": 100,
+                "alpha_total_milli": 50,
+                "power_target_milli": 700,
+                "min_sites": 2,
+                "max_sites": 4,
+                "min_replicates_per_site": 2,
+                "max_replicates_per_site": 20,
+                "budget_units": 100,
+                "max_total_replicates": 80,
+                "max_site_heterogeneity_milli": 200,
+                "risk_ceiling_milli": 500
+            },
+            "observations": [
+                {"site_id":"site-a","arm_id":"control","label":"site-a control","model_system":"organoid","mean_response_milli":100,"variance_milli2":100,"observations":2,"cost_units_per_replicate":1,"risk_milli":100,"artifact":{"artifact_id":"rep-a-control","content_hash":artifact_hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"site_id":"site-a","arm_id":"treated","label":"site-a treated","model_system":"organoid","mean_response_milli":220,"variance_milli2":100,"observations":2,"cost_units_per_replicate":1,"risk_milli":100,"artifact":{"artifact_id":"rep-a-treated","content_hash":artifact_hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"site_id":"site-b","arm_id":"control","label":"site-b control","model_system":"organoid","mean_response_milli":110,"variance_milli2":100,"observations":2,"cost_units_per_replicate":1,"risk_milli":100,"artifact":{"artifact_id":"rep-b-control","content_hash":artifact_hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"site_id":"site-b","arm_id":"treated","label":"site-b treated","model_system":"organoid","mean_response_milli":230,"variance_milli2":100,"observations":2,"cost_units_per_replicate":1,"risk_milli":100,"artifact":{"artifact_id":"rep-b-treated","content_hash":artifact_hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}}
+            ]
+        }),
+    );
+    assert_eq!(replication_plan["dispatch"], json!("not_started"));
+    assert_eq!(replication_plan["simulation_only"], json!(true));
+    assert_eq!(
+        replication_plan["plan"]["site_order"],
+        json!(["site-a", "site-b"])
+    );
+    assert!(
+        replication_plan["plan"]["pooled_effect_milli"]
+            .as_i64()
+            .unwrap()
+            >= 100
     );
 
     let adaptive_information_campaign = call(
