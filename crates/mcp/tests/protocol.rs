@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 744;
+const TOOL_DEFINITION_COUNT: usize = 745;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -1275,6 +1275,38 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
     assert_eq!(
         drift["surveillance"]["summaries"].as_array().unwrap().len(),
         2
+    );
+
+    let evidence_fusion = call(
+        &mut server,
+        "glioma_multimodal_evidence_fusion",
+        json!({
+            "request": {
+                "objective": "fuse multimodal invasion endpoint evidence",
+                "endpoint_id": "invasion",
+                "study_id": "mcp-fusion-study",
+                "model_system": "organoid",
+                "required_modalities": ["genomics", "imaging"],
+                "observations": [
+                    {"modality":"genomics","value_milli":500,"uncertainty_milli":20,"reliability_milli":900,"quality_milli":900,"replicate_count":3},
+                    {"modality":"imaging","value_milli":520,"uncertainty_milli":30,"reliability_milli":850,"quality_milli":900,"replicate_count":3}
+                ],
+                "min_modalities": 2,
+                "min_reliability_milli": 700,
+                "max_uncertainty_milli": 100,
+                "max_contradiction_milli": 300,
+                "min_fused_confidence_milli": 400
+            }
+        }),
+    );
+    assert_eq!(evidence_fusion["dispatch"], json!("not_started"));
+    assert_eq!(evidence_fusion["simulation_only"], json!(true));
+    assert_eq!(evidence_fusion["analysis"]["disposition"], json!("ready"));
+    assert!(
+        evidence_fusion["analysis"]["fused_value_milli"]
+            .as_i64()
+            .unwrap()
+            >= 500
     );
 
     let harmonization = call(

@@ -7,6 +7,7 @@ pub mod concordance;
 pub mod consensus;
 pub mod drift_surveillance;
 pub mod dropout_stress;
+pub mod evidence_fusion;
 pub mod graph_fusion;
 pub mod harmonization;
 pub mod latent_factors;
@@ -47,6 +48,10 @@ pub use dropout_stress::{
     analyze_glioma_multimodal_dropout_stress, DropoutModalitySignal, DropoutScenario,
     DropoutScenarioDisposition, DropoutScenarioResult, DropoutStressAnalysis,
     DropoutStressDisposition, DropoutStressError, DropoutStressRequest,
+};
+pub use evidence_fusion::{
+    analyze_glioma_multimodal_evidence_fusion, EndpointEvidence, EvidenceContribution,
+    EvidenceFusionAnalysis, EvidenceFusionDisposition, EvidenceFusionError, EvidenceFusionRequest,
 };
 pub use graph_fusion::{
     analyze_glioma_multimodal_graph_fusion, GraphFusionAnalysis, GraphFusionDisposition,

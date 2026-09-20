@@ -339,6 +339,8 @@ crates/research/src/glioma/
                                              P03 bounded reliability- and budget-aware endpoint modality portfolio selection with explicit coverage debt
   p03_multimodal_ingestion_qc/drift_surveillance.rs
                                              P03 continuous modality/metric QC drift surveillance with recalibration gates and ordered follow-up
+  p03_multimodal_ingestion_qc/evidence_fusion.rs
+                                             P03 reliability/uncertainty-weighted endpoint evidence fusion with contradiction and missing-modality gates
   p03_multimodal_ingestion_qc/spatial_niche.rs
                                              P03 spatial neighbourhood graph, same-lineage niche components, and cross-lineage enrichment
   p03_multimodal_ingestion_qc/spatial_communication.rs
