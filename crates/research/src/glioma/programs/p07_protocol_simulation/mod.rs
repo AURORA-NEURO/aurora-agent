@@ -38,6 +38,7 @@ pub mod program_cycle;
 pub mod program_scheduler;
 pub mod research_autopilot;
 pub mod robust_active_learning_campaign;
+pub mod scenario_ensemble;
 pub mod scientific_frontier;
 pub mod simulator;
 pub mod transport_gate;
@@ -223,6 +224,12 @@ pub use scientific_frontier::{
     plan_glioma_scientific_frontier, FrontierCandidateGate, FrontierCandidateStatus,
     ScientificFrontierDisposition, ScientificFrontierError, ScientificFrontierPlan,
     ScientificFrontierRequest,
+};
+
+pub use scenario_ensemble::{
+    simulate_glioma_protocol_scenario_ensemble, ProtocolScenario, ProtocolScenarioEnsemble,
+    ProtocolScenarioEnsembleDisposition, ProtocolScenarioEnsembleError,
+    ProtocolScenarioEnsembleRequest, ProtocolScenarioResult, ScenarioFailureClass,
 };
 
 pub use evidence_campaign::{

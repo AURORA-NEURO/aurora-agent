@@ -206,6 +206,8 @@ crates/research/src/glioma/
                                              P12 aggregate boundary, consensus, campaign, and governance handoff
   workflow.rs                               P07 adaptive campaign planner and guarded execution
     p07_protocol_simulation/simulator.rs    P07 deterministic resource-constrained scheduling
+    p07_protocol_simulation/scenario_ensemble.rs
+                                             P07 probability-weighted robustness simulation across timing, capacity, risk, and approval perturbations
     p07_protocol_simulation/execution.rs   P07 guarded local protocol execution with retries
     p07_protocol_simulation/compensation.rs
                                              P07 contract-preserving recovery planning for failed, partial, and skipped protocol tasks

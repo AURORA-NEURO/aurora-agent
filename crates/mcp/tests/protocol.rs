@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 766;
+const TOOL_DEFINITION_COUNT: usize = 767;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -534,6 +534,71 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
         protocol["simulation"]["schedule"].as_array().unwrap().len(),
         2
     );
+
+    let protocol_ensemble = call(
+        &mut server,
+        "glioma_protocol_scenario_ensemble",
+        json!({
+            "request": {
+                "objective": "stress a preclinical glioma assay schedule",
+                "model_system": "organoid",
+                "base_request": {
+                    "objective": "schedule a preclinical glioma assay",
+                    "model_system": "organoid",
+                    "tasks": [
+                        {
+                            "task_id": "prepare",
+                            "label": "prepare organoid controls",
+                            "resource_kind": "culture",
+                            "resource_units": 1,
+                            "duration_ticks": 2,
+                            "depends_on": [],
+                            "model_system": "organoid",
+                            "output_schema": "Setup1@1",
+                            "risk_milli": 10,
+                            "requires_instrument": false
+                        },
+                        {
+                            "task_id": "assay",
+                            "label": "run invasion assay",
+                            "resource_kind": "culture",
+                            "resource_units": 1,
+                            "duration_ticks": 3,
+                            "depends_on": ["prepare"],
+                            "model_system": "organoid",
+                            "output_schema": "Assay1@1",
+                            "risk_milli": 20,
+                            "requires_instrument": false
+                        }
+                    ],
+                    "resources": [{"resource_id": "culture", "kind": "culture", "capacity_units": 1}],
+                    "max_ticks": 20,
+                    "max_risk_milli": 100,
+                    "allow_instrument_execution": false,
+                    "approval_reference": null,
+                    "randomization_seed": artifact_hash
+                },
+                "scenarios": [
+                    {"scenario_id":"nominal","duration_scale_milli":1000,"capacity_scale_milli":1000,"risk_delta_milli":0,"probability_milli":700,"allow_instrument_execution":false,"approval_reference":null},
+                    {"scenario_id":"slow-biology","duration_scale_milli":5000,"capacity_scale_milli":1000,"risk_delta_milli":0,"probability_milli":300,"allow_instrument_execution":false,"approval_reference":null}
+                ],
+                "minimum_schedule_coverage_milli": 700,
+                "maximum_expected_makespan_ticks": 20,
+                "maximum_expected_risk_milli": 100
+            }
+        }),
+    );
+    assert_eq!(protocol_ensemble["dispatch"], json!("not_started"));
+    assert_eq!(protocol_ensemble["simulation_only"], json!(true));
+    assert_eq!(
+        protocol_ensemble["ensemble"]["disposition"],
+        json!("fragile")
+    );
+    assert!(protocol_ensemble["ensemble"]["bottleneck_task_order"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|task| task == "assay"));
 
     let protocol_execution = call(
         &mut server,

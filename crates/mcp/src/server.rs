@@ -581,7 +581,8 @@ use bioprism_research::{
     propagate_glioma_mechanism_graph, qualify_evidence, register_glioma_spatial_samples,
     revise_glioma_beliefs, schedule_glioma_computation_placement, schedule_glioma_instrument_fleet,
     select_glioma_actions, simulate_glioma_counterfactual, simulate_glioma_counterfactual_ensemble,
-    simulate_glioma_mechanism_dynamics, simulate_glioma_protocol, smooth_glioma_mechanism_states,
+    simulate_glioma_mechanism_dynamics, simulate_glioma_protocol,
+    simulate_glioma_protocol_scenario_ensemble, smooth_glioma_mechanism_states,
     surveil_glioma_evidence, surveil_glioma_multimodal_drift, synthesize_glioma_interpretation,
     triangulate_glioma_evidence, update_glioma_mechanism_posterior, validate_feature_catalog,
     verify_glioma_multimodal_quality_recovery, ActionPortfolioExecutionRequest,
@@ -675,10 +676,10 @@ use bioprism_research::{
     PathwayActivityRequest, PowerArmObservation, PowerReestimationRequest,
     ProspectiveQualityRequest, ProtocolBranchOptimizationRequest, ProtocolCompensationRequest,
     ProtocolEvidenceFusionRequest, ProtocolEvidenceSurfaceRequest, ProtocolExecutionRequest,
-    ProtocolSimulationRequest, ProtocolTransportGateRequest, QualityAdaptiveCampaignRequest,
-    QualityExecutionMode, QualityExecutionRequest, QualityRecoveryRequest,
-    QualityRemediationRequest, QualityRootCauseRequest, QualityScheduleRequest,
-    QualityTransportRequest, ReleaseExecutionMode, ReleaseGateRequest,
+    ProtocolScenarioEnsembleRequest, ProtocolSimulationRequest, ProtocolTransportGateRequest,
+    QualityAdaptiveCampaignRequest, QualityExecutionMode, QualityExecutionRequest,
+    QualityRecoveryRequest, QualityRemediationRequest, QualityRootCauseRequest,
+    QualityScheduleRequest, QualityTransportRequest, ReleaseExecutionMode, ReleaseGateRequest,
     ReliabilityCalibrationRequest, ReplayCampaign, ReplayCampaignRequest, ReplicationObservation,
     ReplicationPlanRequest, ReplicationRequest, ReplicationStudy, ResearchObjectRequest,
     RobustActiveLearningCampaignRequest, RobustActiveLearningCandidate,
@@ -2236,6 +2237,9 @@ impl Server {
             "glioma_research_dry_run" => self.glioma_research_dry_run(&arguments),
             "glioma_workflow_plan" => self.glioma_workflow_plan(&arguments),
             "glioma_protocol_simulate" => self.glioma_protocol_simulate(&arguments),
+            "glioma_protocol_scenario_ensemble" => {
+                self.glioma_protocol_scenario_ensemble(&arguments)
+            }
             "glioma_protocol_branch_optimize" => self.glioma_protocol_branch_optimize(&arguments),
             "glioma_protocol_autonomous_execute" => {
                 self.glioma_protocol_autonomous_execute(&arguments)
@@ -6075,6 +6079,34 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma protocol simulation: {error}"))
+    }
+
+    /// Stress a typed glioma protocol across bounded local resource and approval scenarios. This
+    /// is a simulation-only route: failed scenarios hold autonomous dispatch and never become
+    /// biological evidence or an instrument command.
+    fn glioma_protocol_scenario_ensemble(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ProtocolScenarioEnsembleRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_protocol_scenario_ensemble requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma protocol scenario ensemble request: {error}"))?;
+        let output = simulate_glioma_protocol_scenario_ensemble(&request)
+            .map_err(|error| format!("glioma protocol scenario ensemble refused: {error}"))?;
+        serde_json::to_value(json!({
+            "ensemble": output,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "next_routes": ["glioma_protocol_branch_optimize", "glioma_protocol_autonomous_execute"],
+            "guarantees": [
+                "each declared scenario is simulated with deterministic timing, capacity, risk, and approval perturbations",
+                "weighted and worst-case schedule coverage remain distinct from biological efficacy",
+                "failed scenarios and bottleneck tasks remain explicit negative evidence",
+                "the route performs no provider, instrument, specimen, raw-data, or clinical action"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma protocol scenario ensemble: {error}"))
     }
 
     /// Select the best typed protocol branch through deterministic beam search over the local
@@ -52228,6 +52260,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_research_dry_run",
                 "glioma_workflow_plan",
                 "glioma_protocol_simulate",
+                "glioma_protocol_scenario_ensemble",
                 "glioma_protocol_branch_optimize",
                 "glioma_protocol_autonomous_execute",
                 "glioma_protocol_evidence_surface",
@@ -61149,6 +61182,20 @@ pub fn tool_definitions() -> Vec<Value> {
                 "request": {
                     "type": "object",
                     "description": "Serialized ProtocolSimulationRequest1@1 containing typed tasks, local resource capacities, a bounded horizon/risk budget, and preclinical model binding."
+                }
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_protocol_scenario_ensemble",
+        "description": "Stress a typed preclinical glioma protocol across bounded timing, capacity, risk, and instrument-approval scenarios. Returns probability-weighted and worst-case schedule coverage, expected makespan/risk, failed scenarios, and bottleneck tasks; it never converts scheduling coverage into biological efficacy and never dispatches an instrument or provider.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {
+                    "type": "object",
+                    "description": "Serialized ProtocolScenarioEnsembleRequest1@1 containing a base ProtocolSimulationRequest1@1, probability-weighted ProtocolScenario1@1 perturbations, coverage, timing, and risk gates."
                 }
             },
             "required": ["request"]
