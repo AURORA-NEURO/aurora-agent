@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 754;
+const TOOL_DEFINITION_COUNT: usize = 755;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -1656,6 +1656,36 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
     assert_eq!(
         quality_root_cause["attribution"]["primary_cause"],
         json!("batch")
+    );
+
+    let quality_remediation = call(
+        &mut server,
+        "glioma_multimodal_quality_remediation",
+        json!({
+            "request": {
+                "objective": "recover a glioma multimodal QC incident",
+                "incident_id": "incident-mcp-1",
+                "study_id": "root-cause-study",
+                "model_system": "organoid",
+                "attributions": [{"cause":"batch","support_milli":800,"contradiction_milli":0,"net_score_milli":800,"confidence_milli":900,"signal_count":2,"modality_order":["genomics"],"disposition":"qualified","remediation_action":"re-harmonize batch controls"}],
+                "candidates": [{"action_id":"reharmonize-batch","cause":"batch","action_kind":"reharmonize_batch","modalities":["genomics"],"cost_units":3,"duration_units":2,"risk_milli":100,"expected_recovery_milli":800,"prerequisites":["qc-evidence"],"evidence_ids":["evidence-1"],"available":true,"requires_approval":false}],
+                "max_budget_units":10,
+                "max_duration_units":10,
+                "max_risk_milli":500,
+                "min_recovery_milli":700,
+                "require_approval_for_external":false
+            }
+        }),
+    );
+    assert_eq!(quality_remediation["dispatch"], json!("not_started"));
+    assert_eq!(quality_remediation["simulation_only"], json!(true));
+    assert_eq!(quality_remediation["plan"]["disposition"], json!("ready"));
+    assert_eq!(
+        quality_remediation["plan"]["selected_steps"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
     );
 
     let harmonization = call(
