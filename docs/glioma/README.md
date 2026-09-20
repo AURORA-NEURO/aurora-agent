@@ -367,6 +367,7 @@ crates/research/src/glioma/
     p06_experiment_design/robust_design.rs P06 maximin scenario-aware replicate allocation with diminishing utility and explicit risk/feasibility gates
     p06_experiment_design/blocked_randomization.rs P06 confounding-aware blocked randomization planner with nuisance-stratum balance, variance-aware information gain, and explicit capacity/risk gates
     p06_experiment_design/power_stress_surface.rs P06 prospective power-stress surface across effect, variance, attrition, risk, and budget worlds
+    p06_experiment_design/carryover_sequence.rs P06 directed carryover-aware assay sequence design with transition penalties and bounded information utility
     p06_experiment_design/adaptive_information_campaign.rs P06 closed-loop posterior updating and re-planning through a caller-owned assay executor
     p06_experiment_design/adaptive_allocation_campaign.rs P06 autonomous Beta-posterior replicate allocation with aggregate batch validation and posterior replanning
     p06_experiment_design/multi_fidelity.rs P06 cost-aware multi-fidelity surrogate optimization across screening, mechanistic, and validation models
@@ -1129,6 +1130,11 @@ arm across weighted effect, variance, attrition, risk, and budget worlds before 
 It returns integer replicate requirements, worst-case and weighted power proxies, underpowered
 scenarios, and explicit blocked arms so the autonomous engine can reject brittle designs before
 compilation. These are planning diagnostics, not validated biological or clinical claims.
+
+The carryover sequence planner (`plan_glioma_carryover_sequence`) treats assay ordering as a
+directed transition problem. It selects a bounded information-rich sequence while penalizing
+declared carryover from the prior action, risk, feasibility, repeat limits, and cost; it reports
+the exact transition penalties and any unfilled positions for researcher review.
 
 P06 also includes multi-fidelity optimization (`plan_glioma_multi_fidelity_optimization`). It
 calibrates paired designs across screening, mechanistic, and validation scales, combines transferred

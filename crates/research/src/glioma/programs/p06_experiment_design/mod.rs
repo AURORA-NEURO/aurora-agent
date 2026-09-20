@@ -10,6 +10,7 @@ pub mod adaptive_information_campaign;
 pub mod adaptive_panel;
 pub mod blocked_randomization;
 pub mod campaign;
+pub mod carryover_sequence;
 pub mod clonal_panel;
 pub mod contrast_design;
 pub mod dose_response;
@@ -81,6 +82,11 @@ pub use campaign::{
     ClosedLoopCampaign, ClosedLoopCampaignDisposition, ClosedLoopCampaignError,
     ClosedLoopCampaignExecution, ClosedLoopCampaignRequest, GliomaCampaignExecutor,
     EXECUTION_OUTPUT_SCHEMA,
+};
+pub use carryover_sequence::{
+    plan_glioma_carryover_sequence, CarryoverAction, CarryoverSequenceDesign,
+    CarryoverSequenceDisposition, CarryoverSequenceError, CarryoverSequenceRequest,
+    CarryoverSequenceStep,
 };
 pub use clonal_panel::{
     plan_glioma_clone_perturbation_panel, CloneBranchCoverage, ClonePerturbationCandidate,

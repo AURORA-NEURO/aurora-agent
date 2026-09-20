@@ -579,14 +579,15 @@ use bioprism_research::{
     plan_glioma_adaptive_information_campaign, plan_glioma_adaptive_mechanism_policy,
     plan_glioma_adaptive_panel, plan_glioma_adaptive_research_frontier,
     plan_glioma_adaptive_workflow, plan_glioma_blocked_randomization,
-    plan_glioma_clone_continuation, plan_glioma_clone_perturbation_panel,
-    plan_glioma_closed_loop_campaign, plan_glioma_computation_portfolio,
-    plan_glioma_decision_branches, plan_glioma_evidence_acquisition,
-    plan_glioma_evidence_contradiction_cut, plan_glioma_information_design,
-    plan_glioma_mechanism_validation, plan_glioma_multi_fidelity_optimization,
-    plan_glioma_multimodal_portfolio, plan_glioma_multimodal_quality_remediation,
-    plan_glioma_multimodal_quality_schedule, plan_glioma_power_reestimation,
-    plan_glioma_power_stress_surface, plan_glioma_protocol_compensation, plan_glioma_replication,
+    plan_glioma_carryover_sequence, plan_glioma_clone_continuation,
+    plan_glioma_clone_perturbation_panel, plan_glioma_closed_loop_campaign,
+    plan_glioma_computation_portfolio, plan_glioma_decision_branches,
+    plan_glioma_evidence_acquisition, plan_glioma_evidence_contradiction_cut,
+    plan_glioma_information_design, plan_glioma_mechanism_validation,
+    plan_glioma_multi_fidelity_optimization, plan_glioma_multimodal_portfolio,
+    plan_glioma_multimodal_quality_remediation, plan_glioma_multimodal_quality_schedule,
+    plan_glioma_power_reestimation, plan_glioma_power_stress_surface,
+    plan_glioma_protocol_compensation, plan_glioma_replication,
     plan_glioma_replication_closure_frontier, plan_glioma_replication_continuation,
     plan_glioma_robust_active_learning, plan_glioma_robust_intervention_portfolio,
     plan_glioma_scientific_frontier, plan_glioma_sequential_design,
@@ -613,7 +614,7 @@ use bioprism_research::{
     BayesianMechanismHypothesis, BayesianMechanismUpdateRequest, BeliefConflict,
     BeliefRevisionRequest, BlockedRandomizationRequest, CalibratedMechanismCampaignRequest,
     CalibrationRequest, CalibrationRun, CampaignAction, CampaignMechanism, CampaignObservation,
-    CausalContrastRequest, ClonalEvolutionGraph, ClonalEvolutionRequest,
+    CarryoverSequenceRequest, CausalContrastRequest, ClonalEvolutionGraph, ClonalEvolutionRequest,
     CloneContinuationCandidate, CloneContinuationRequest, ClonePanelObservation,
     ClonePanelOutcomeAnalysis, ClonePanelOutcomeRequest, ClonePerturbationCandidate,
     ClonePerturbationPanel, ClonePerturbationPanelRequest, CloneProfile, ClosedLoopCampaignRequest,
@@ -2398,6 +2399,7 @@ impl Server {
             "glioma_sequential_design" => self.glioma_sequential_design(&arguments),
             "glioma_power_reestimate" => self.glioma_power_reestimate(&arguments),
             "glioma_power_stress_surface" => self.glioma_power_stress_surface(&arguments),
+            "glioma_carryover_sequence_design" => self.glioma_carryover_sequence_design(&arguments),
             "glioma_closed_loop_campaign" => self.glioma_closed_loop_campaign(&arguments),
             "glioma_experiment_operating_cycle" => {
                 self.glioma_experiment_operating_cycle(&arguments)
@@ -8192,6 +8194,37 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma power stress surface: {error}"))
+    }
+
+    /// Choose a bounded assay order while penalizing declared transition carryover. The route
+    /// compiles a local design artifact only; it never schedules a plate or controls hardware.
+    fn glioma_carryover_sequence_design(&self, arguments: &Value) -> Result<Value, String> {
+        let request: CarryoverSequenceRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_carryover_sequence_design requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma carryover-sequence request: {error}"))?;
+        let design = plan_glioma_carryover_sequence(&request)
+            .map_err(|error| format!("glioma carryover sequence refused: {error}"))?;
+        serde_json::to_value(json!({
+            "design": design,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "next_routes": [
+                "glioma_power_stress_surface",
+                "glioma_protocol_simulate",
+                "glioma_instrument_preflight"
+            ],
+            "guarantees": [
+                "transition carryover is penalized as an explicit directed graph rather than hidden in execution",
+                "information, risk, feasibility, repeat, and budget gates remain visible at every sequence position",
+                "partial sequence realization and blocked actions remain negative or unresolved evidence",
+                "the route performs no assay, instrument, federation, raw-data, or clinical action"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma carryover sequence design: {error}"))
     }
 
     fn glioma_sequential_campaign_execute(&self, arguments: &Value) -> Result<Value, String> {
@@ -53196,6 +53229,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_sequential_design",
                 "glioma_power_reestimate",
                 "glioma_power_stress_surface",
+                "glioma_carryover_sequence_design",
                 "glioma_sequential_campaign_execute",
                 "glioma_closed_loop_campaign",
                 "glioma_experiment_operating_cycle",
@@ -62779,6 +62813,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "PowerStressSurfaceRequest1@1 containing weighted scenarios with effect/variance/attrition, candidate arms with cost/risk/capacity, quantile proxies, target power, and bounded budget/replicate gates."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_carryover_sequence_design",
+        "description": "Compile a carryover-aware assay sequence for a preclinical glioma workflow. Selects an information-rich order over a declared transition graph while penalizing carryover, risk, feasibility, repeat, and cost; partial sequence realization and blocked actions remain explicit. This route is planning-only and never schedules a plate, controls an instrument, moves raw data, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "CarryoverSequenceRequest1@1 containing candidate actions, complete transition/initial carryover matrices, sequence length, budget, repeat, risk, feasibility, and penalty gates."}
             },
             "required": ["request"]
         }
