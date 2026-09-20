@@ -575,12 +575,13 @@ use bioprism_research::{
     plan_glioma_multi_fidelity_optimization, plan_glioma_multimodal_portfolio,
     plan_glioma_multimodal_quality_remediation, plan_glioma_multimodal_quality_schedule,
     plan_glioma_power_reestimation, plan_glioma_protocol_compensation, plan_glioma_replication,
-    plan_glioma_robust_active_learning, plan_glioma_robust_intervention_portfolio,
-    plan_glioma_scientific_frontier, plan_glioma_sequential_design, plan_glioma_workflow,
-    preflight_glioma_instrument, prioritize_glioma_evidence, prioritize_knowledge_frontier,
-    propagate_glioma_mechanism_graph, qualify_evidence, register_glioma_spatial_samples,
-    revise_glioma_beliefs, schedule_glioma_computation_placement, schedule_glioma_instrument_fleet,
-    select_glioma_actions, simulate_glioma_counterfactual, simulate_glioma_counterfactual_ensemble,
+    plan_glioma_replication_continuation, plan_glioma_robust_active_learning,
+    plan_glioma_robust_intervention_portfolio, plan_glioma_scientific_frontier,
+    plan_glioma_sequential_design, plan_glioma_workflow, preflight_glioma_instrument,
+    prioritize_glioma_evidence, prioritize_knowledge_frontier, propagate_glioma_mechanism_graph,
+    qualify_evidence, register_glioma_spatial_samples, revise_glioma_beliefs,
+    schedule_glioma_computation_placement, schedule_glioma_instrument_fleet, select_glioma_actions,
+    simulate_glioma_counterfactual, simulate_glioma_counterfactual_ensemble,
     simulate_glioma_mechanism_dynamics, simulate_glioma_protocol,
     simulate_glioma_protocol_scenario_ensemble, smooth_glioma_mechanism_states,
     surveil_glioma_evidence, surveil_glioma_multimodal_drift, synthesize_glioma_interpretation,
@@ -680,8 +681,9 @@ use bioprism_research::{
     QualityAdaptiveCampaignRequest, QualityExecutionMode, QualityExecutionRequest,
     QualityRecoveryRequest, QualityRemediationRequest, QualityRootCauseRequest,
     QualityScheduleRequest, QualityTransportRequest, ReleaseExecutionMode, ReleaseGateRequest,
-    ReliabilityCalibrationRequest, ReplayCampaign, ReplayCampaignRequest, ReplicationObservation,
-    ReplicationPlanRequest, ReplicationRequest, ReplicationStudy, ResearchObjectRequest,
+    ReliabilityCalibrationRequest, ReplayCampaign, ReplayCampaignRequest,
+    ReplicationContinuationRequest, ReplicationObservation, ReplicationPlanRequest,
+    ReplicationRequest, ReplicationStudy, ResearchObjectRequest,
     RobustActiveLearningCampaignRequest, RobustActiveLearningCandidate,
     RobustActiveLearningObservation, RobustActiveLearningRequest, RobustExperimentDesignRequest,
     RobustInterventionCandidate, RobustInterventionRequest, RobustnessGuidedComputationRequest,
@@ -2503,6 +2505,7 @@ impl Server {
             "glioma_information_design" => self.glioma_information_design(&arguments),
             "glioma_adaptive_panel" => self.glioma_adaptive_panel(&arguments),
             "glioma_replication_plan" => self.glioma_replication_plan(&arguments),
+            "glioma_replication_continuation" => self.glioma_replication_continuation(&arguments),
             "glioma_robust_experiment_design" => self.glioma_robust_experiment_design(&arguments),
             "glioma_adaptive_information_campaign" => {
                 self.glioma_adaptive_information_campaign(&arguments)
@@ -10968,6 +10971,34 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma replication plan: {error}"))
+    }
+
+    /// Replan the next bounded replication wave from returned local observations. This route
+    /// preserves low-quality, heterogeneous, negative, risk-blocked, and budget-blocked states;
+    /// it never dispatches an assay or promotes a planning proxy into a clinical conclusion.
+    fn glioma_replication_continuation(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ReplicationContinuationRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_replication_continuation requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma replication continuation request: {error}"))?;
+        let plan = plan_glioma_replication_continuation(&request)
+            .map_err(|error| format!("glioma replication continuation refused: {error}"))?;
+        serde_json::to_value(json!({
+            "plan": plan,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "next_routes": ["glioma_protocol_scenario_ensemble", "glioma_protocol_autonomous_execute", "glioma_replication_campaign_execute"],
+            "guarantees": [
+                "each next-wave action is derived from validated local observations and the P06 topology planner",
+                "quality, round, power, effect-direction, heterogeneity, risk, and budget stopping gates remain explicit",
+                "negative or null replication evidence is preserved and can terminate additional spending",
+                "the route performs no assay, instrument, federation, raw-data, or clinical action"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma replication continuation: {error}"))
     }
 
     /// Allocate a bounded glioma experiment batch against the lower tail of declared scenarios.
@@ -52416,6 +52447,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_information_design",
                 "glioma_adaptive_panel",
                 "glioma_replication_plan",
+                "glioma_replication_continuation",
                 "glioma_robust_experiment_design",
                 "glioma_adaptive_information_campaign",
                 "glioma_active_learning",
@@ -63066,6 +63098,17 @@ pub fn tool_definitions() -> Vec<Value> {
                 "observations": {"type": "array", "items": {"type": "object"}, "description": "ReplicationObservation1@1 local de-identified site/arm summaries with variance, replicate count, cost, risk, and artifact references."}
             },
             "required": ["request", "observations"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_replication_continuation",
+        "description": "Replan the next bounded preclinical glioma replication wave from returned local observations. Reuses the validated multi-site topology planner and applies quality, round, effect-direction, negative-result, heterogeneity, risk, budget, and power gates; emits explicit site actions without dispatching an assay or making a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ReplicationContinuationRequest1@1 containing ReplicationPlanRequest1@1, round bounds, quality/stopping thresholds, observation rounds, and an optional validated previous topology plan."}
+            },
+            "required": ["request"]
         }
     }));
     definitions.push(json!({

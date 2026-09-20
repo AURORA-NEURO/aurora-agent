@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 767;
+const TOOL_DEFINITION_COUNT: usize = 768;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -2676,6 +2676,51 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
             .unwrap()
             >= 100
     );
+
+    let replication_continuation = call(
+        &mut server,
+        "glioma_replication_continuation",
+        json!({
+            "request": {
+                "plan_request": {
+                    "objective": "continue a glioma invasion replication wave",
+                    "model_system": "organoid",
+                    "endpoint": "invasion",
+                    "control_arm_id": "control",
+                    "treatment_arm_id": "treated",
+                    "target_effect_milli": 200,
+                    "alpha_total_milli": 50,
+                    "power_target_milli": 700,
+                    "min_sites": 2,
+                    "max_sites": 4,
+                    "min_replicates_per_site": 2,
+                    "max_replicates_per_site": 20,
+                    "budget_units": 100,
+                    "max_total_replicates": 80,
+                    "max_site_heterogeneity_milli": 200,
+                    "risk_ceiling_milli": 500
+                },
+                "current_round": 1,
+                "max_rounds": 4,
+                "minimum_quality_milli": 700,
+                "negative_effect_threshold_milli": 40,
+                "observations": [
+                    {"round":1,"quality_milli":900,"observation":{"site_id":"site-a","arm_id":"control","label":"site-a control","model_system":"organoid","mean_response_milli":100,"variance_milli2":100,"observations":2,"cost_units_per_replicate":1,"risk_milli":100,"artifact":{"artifact_id":"cont-a-control","content_hash":artifact_hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}}},
+                    {"round":1,"quality_milli":900,"observation":{"site_id":"site-a","arm_id":"treated","label":"site-a treated","model_system":"organoid","mean_response_milli":220,"variance_milli2":100,"observations":2,"cost_units_per_replicate":1,"risk_milli":100,"artifact":{"artifact_id":"cont-a-treated","content_hash":artifact_hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}}},
+                    {"round":1,"quality_milli":900,"observation":{"site_id":"site-b","arm_id":"control","label":"site-b control","model_system":"organoid","mean_response_milli":110,"variance_milli2":100,"observations":2,"cost_units_per_replicate":1,"risk_milli":100,"artifact":{"artifact_id":"cont-b-control","content_hash":artifact_hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}}},
+                    {"round":1,"quality_milli":900,"observation":{"site_id":"site-b","arm_id":"treated","label":"site-b treated","model_system":"organoid","mean_response_milli":230,"variance_milli2":100,"observations":2,"cost_units_per_replicate":1,"risk_milli":100,"artifact":{"artifact_id":"cont-b-treated","content_hash":artifact_hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}}}
+                ],
+                "previous_plan": null
+            }
+        }),
+    );
+    assert_eq!(replication_continuation["dispatch"], json!("not_started"));
+    assert_eq!(replication_continuation["simulation_only"], json!(true));
+    assert_eq!(
+        replication_continuation["plan"]["disposition"],
+        json!("continue")
+    );
+    assert_eq!(replication_continuation["plan"]["next_round"], json!(2));
 
     let adaptive_information_campaign = call(
         &mut server,
