@@ -341,6 +341,8 @@ crates/research/src/glioma/
                                              P03 continuous modality/metric QC drift surveillance with recalibration gates and ordered follow-up
   p03_multimodal_ingestion_qc/evidence_fusion.rs
                                              P03 reliability/uncertainty-weighted endpoint evidence fusion with contradiction and missing-modality gates
+  p03_multimodal_ingestion_qc/sensitivity.rs
+                                             P03 leave-one-modality-out and bounded perturbation endpoint fragility analysis with autonomous reacquisition routing
   p03_multimodal_ingestion_qc/spatial_niche.rs
                                              P03 spatial neighbourhood graph, same-lineage niche components, and cross-lineage enrichment
   p03_multimodal_ingestion_qc/spatial_communication.rs
@@ -514,6 +516,12 @@ retains modality-specific sample neighbours, fuses them with reliability-weighte
 runs bounded diffusion over observed edges. Modality dropout, sparse shared features, contradictory
 cross-modal scores, and the all-modalities release gate remain explicit negative evidence rather than
 being silently imputed or converted into a confident state.
+P03 now also includes multimodal endpoint sensitivity analysis
+(`analyze_glioma_multimodal_sensitivity`). It computes leave-one-modality-out influence and
+bounded low/high perturbation ranges, detects sign-changing endpoint decisions, and ranks
+reacquisition or orthogonal-replication actions for the autonomous research engine. A robust
+endpoint can advance to mechanism planning; a fragile or under-covered endpoint remains
+conditional or blocked, without imputation or assay dispatch.
 P05 now also includes signed pathway activity inference (`analyze_glioma_pathway_activity`) that
 maps declared modality-specific molecular nodes to reliability-weighted pathway activity, compares
 cross-modal direction, and ranks mechanism priorities. Missing nodes, low-confidence bottlenecks,

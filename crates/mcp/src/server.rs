@@ -497,11 +497,11 @@ use bioprism_research::{
     analyze_glioma_dose_response, analyze_glioma_latent_factors, analyze_glioma_mediation,
     analyze_glioma_multimodal_dropout_stress, analyze_glioma_multimodal_evidence_fusion,
     analyze_glioma_multimodal_graph_fusion, analyze_glioma_multimodal_missingness,
-    analyze_glioma_pathway_activity, analyze_glioma_spatial_communication,
-    analyze_glioma_spatial_niches, analyze_glioma_spatial_state_propagation,
-    analyze_glioma_state_transitions, analyze_glioma_temporal_multimodal_fusion,
-    analyze_glioma_temporal_spatial_alignment, analyze_glioma_trajectories,
-    analyze_glioma_transportability, analyze_instrument_calibration,
+    analyze_glioma_multimodal_sensitivity, analyze_glioma_pathway_activity,
+    analyze_glioma_spatial_communication, analyze_glioma_spatial_niches,
+    analyze_glioma_spatial_state_propagation, analyze_glioma_state_transitions,
+    analyze_glioma_temporal_multimodal_fusion, analyze_glioma_temporal_spatial_alignment,
+    analyze_glioma_trajectories, analyze_glioma_transportability, analyze_instrument_calibration,
     analyze_multimodal_concordance, analyze_multimodal_consensus, analyze_preclinical_outcomes,
     analyze_replication_meta_analysis, analyze_stratified_causal_adjustment,
     assess_glioma_robustness, assess_replication, bridge_glioma_knowledge_actions,
@@ -631,19 +631,19 @@ use bioprism_research::{
     GliomaInterpretationOperatingCycleRequest, GliomaMechanismAutopilotRequest,
     GliomaMechanismDiscoveryRequest, GliomaMissionRecoveryRequest, GliomaMissionRequest,
     GliomaMultimodalMissionRequest, GliomaMultimodalOperatingCycleRequest,
-    GliomaProgramSchedulerRequest, GliomaReleaseOperatingCycleRequest,
-    GliomaReplicationCampaignRequest, GliomaResearchAutopilotRequest,
-    GliomaResearchDirectorRequest, GliomaResearchIntent, GliomaWorkflowRequest, GraphFusionRequest,
-    GraphFusionVector, HarmonizationRequest, HarmonizationVector, InformationDesignRequest,
-    InstrumentCampaignRequest, InstrumentExecutionMode, InstrumentExecutionRequest,
-    InstrumentExecutionRun, InstrumentFleetExecutionRequest, InstrumentFleetScheduleRequest,
-    InstrumentInterlockSnapshot, InstrumentOperatingCycleRequest, InstrumentPreflightRequest,
-    InstrumentScienceLoopRequest, InterpretationSynthesisRequest, KnowledgeActionBridgeRequest,
-    KnowledgeActionCompilerRequest, KnowledgeActionDispatchRequest, KnowledgeActionPlan,
-    KnowledgeActionSelectionCycle, KnowledgeActionSelectionCycleRequest, KnowledgeActionTemplate,
-    KnowledgeCompositionRequest, KnowledgeFrontier, KnowledgeFrontierRequest,
-    KnowledgeGapCompilerRequest, KnowledgeRelation, KnowledgeRequest,
-    KnowledgeResolutionCampaignRequest, KnowledgeSynthesisOperatingCycleRequest,
+    GliomaMultimodalSensitivityRequest, GliomaProgramSchedulerRequest,
+    GliomaReleaseOperatingCycleRequest, GliomaReplicationCampaignRequest,
+    GliomaResearchAutopilotRequest, GliomaResearchDirectorRequest, GliomaResearchIntent,
+    GliomaWorkflowRequest, GraphFusionRequest, GraphFusionVector, HarmonizationRequest,
+    HarmonizationVector, InformationDesignRequest, InstrumentCampaignRequest,
+    InstrumentExecutionMode, InstrumentExecutionRequest, InstrumentExecutionRun,
+    InstrumentFleetExecutionRequest, InstrumentFleetScheduleRequest, InstrumentInterlockSnapshot,
+    InstrumentOperatingCycleRequest, InstrumentPreflightRequest, InstrumentScienceLoopRequest,
+    InterpretationSynthesisRequest, KnowledgeActionBridgeRequest, KnowledgeActionCompilerRequest,
+    KnowledgeActionDispatchRequest, KnowledgeActionPlan, KnowledgeActionSelectionCycle,
+    KnowledgeActionSelectionCycleRequest, KnowledgeActionTemplate, KnowledgeCompositionRequest,
+    KnowledgeFrontier, KnowledgeFrontierRequest, KnowledgeGapCompilerRequest, KnowledgeRelation,
+    KnowledgeRequest, KnowledgeResolutionCampaignRequest, KnowledgeSynthesisOperatingCycleRequest,
     LatentFactorRequest, LatentFactorVector, LigandReceptorPair, MechanismActionPlannerConfig,
     MechanismCalibration, MechanismCalibrationObservation, MechanismCalibrationRequest,
     MechanismCandidate, MechanismDiscrimination, MechanismDiscriminationCampaignRequest,
@@ -2351,6 +2351,7 @@ impl Server {
             "glioma_multimodal_evidence_fusion" => {
                 self.glioma_multimodal_evidence_fusion(&arguments)
             }
+            "glioma_multimodal_sensitivity" => self.glioma_multimodal_sensitivity(&arguments),
             "glioma_multimodal_missingness" => self.glioma_multimodal_missingness(&arguments),
             "glioma_multimodal_reliability" => self.glioma_multimodal_reliability(&arguments),
             "glioma_multimodal_portfolio" => self.glioma_multimodal_portfolio(&arguments),
@@ -8231,6 +8232,34 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma multimodal evidence fusion: {error}"))
+    }
+
+    /// Quantify endpoint fragility to modality removal and bounded measurement perturbations.
+    /// The result is a planning signal for autonomous preclinical workflows, never an assay
+    /// dispatch or a clinical conclusion.
+    fn glioma_multimodal_sensitivity(&self, arguments: &Value) -> Result<Value, String> {
+        let request: GliomaMultimodalSensitivityRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_multimodal_sensitivity requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma multimodal sensitivity request: {error}"))?;
+        let analysis = analyze_glioma_multimodal_sensitivity(&request)
+            .map_err(|error| format!("glioma multimodal sensitivity analysis refused: {error}"))?;
+        serde_json::to_value(json!({
+            "analysis": analysis,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "next_routes": ["glioma_multimodal_evidence_fusion", "glioma_multimodal_reliability", "glioma_mechanism_explore"],
+            "guarantees": [
+                "leave-one-modality-out influence and bounded perturbation ranges remain explicit",
+                "sign-changing or fragile endpoint evidence is routed to reacquisition or orthogonal replication",
+                "missing and ineligible modalities are never imputed into a scientific conclusion",
+                "route performs no assay, instrument, federation, or clinical action"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma multimodal sensitivity analysis: {error}"))
     }
 
     /// Cluster de-identified preclinical glioma sample lineages from multiple modality vectors.
@@ -51655,6 +51684,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_multimodal_portfolio",
                 "glioma_multimodal_drift",
                 "glioma_multimodal_evidence_fusion",
+                "glioma_multimodal_sensitivity",
                 "glioma_multimodal_consensus",
                 "glioma_multimodal_harmonize",
                 "glioma_multimodal_latent_factors",
@@ -61260,6 +61290,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "EvidenceFusionRequest1@1 with endpoint/model binding, modality estimates, reliability/quality/uncertainty gates, contradiction threshold, and fused-confidence floor."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_multimodal_sensitivity",
+        "description": "Quantify which local preclinical glioma modality measurements can change an endpoint decision. Performs deterministic leave-one-modality-out influence and bounded low/high perturbation analysis, returning fragile-modality ranking, sign-flip detection, robustness scores, and a reacquisition/replication action queue. It never imputes evidence, dispatches an assay, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "SensitivityRequest1@1 with endpoint/model binding, modality EndpointEvidence1@1 rows, reliability/uncertainty gates, perturbation bound, and robustness threshold."}
             },
             "required": ["request"]
         }

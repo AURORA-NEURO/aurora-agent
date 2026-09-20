@@ -16,6 +16,7 @@ pub mod modality_portfolio;
 pub mod operating_cycle;
 pub mod readiness_gate;
 pub mod reliability_calibration;
+pub mod sensitivity;
 pub mod spatial_communication;
 pub mod spatial_niche;
 pub mod spatial_propagation;
@@ -94,6 +95,10 @@ pub use reliability_calibration::{
     calibrate_glioma_multimodal_reliability, ReliabilityCalibration, ReliabilityCalibrationError,
     ReliabilityCalibrationRequest, ReliabilityDisposition, ReliabilityModalitySummary,
     ReliabilityObservation,
+};
+pub use sensitivity::{
+    analyze_glioma_multimodal_sensitivity, ModalitySensitivity, SensitivityAnalysis,
+    SensitivityDisposition, SensitivityError, SensitivityRequest,
 };
 pub use spatial_communication::{
     analyze_glioma_spatial_communication, LigandReceptorPair, SpatialCommunicationAnalysis,

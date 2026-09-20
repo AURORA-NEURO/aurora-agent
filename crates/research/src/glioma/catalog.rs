@@ -340,6 +340,7 @@ pub fn implemented_feature_ids() -> Vec<&'static str> {
         crate::glioma::programs::p03_multimodal_ingestion_qc::missingness_audit::FEATURE_ID,
         crate::glioma::programs::p03_multimodal_ingestion_qc::modality_portfolio::FEATURE_ID,
         crate::glioma::programs::p03_multimodal_ingestion_qc::reliability_calibration::FEATURE_ID,
+        crate::glioma::programs::p03_multimodal_ingestion_qc::sensitivity::FEATURE_ID,
         crate::glioma::programs::p03_multimodal_ingestion_qc::campaign::FEATURE_ID,
         crate::glioma::programs::p03_multimodal_ingestion_qc::consensus::FEATURE_ID,
         crate::glioma::programs::p03_multimodal_ingestion_qc::harmonization::FEATURE_ID,

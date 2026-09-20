@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 745;
+const TOOL_DEFINITION_COUNT: usize = 746;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -1308,6 +1308,40 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
             .unwrap()
             >= 500
     );
+
+    let sensitivity = call(
+        &mut server,
+        "glioma_multimodal_sensitivity",
+        json!({
+            "request": {
+                "objective": "rank endpoint fragility before mechanism planning",
+                "endpoint_id": "invasion",
+                "study_id": "mcp-sensitivity-study",
+                "model_system": "organoid",
+                "required_modalities": ["genomics", "imaging"],
+                "observations": [
+                    {"modality":"genomics","value_milli":500,"uncertainty_milli":20,"reliability_milli":900,"quality_milli":900,"replicate_count":3},
+                    {"modality":"imaging","value_milli":520,"uncertainty_milli":30,"reliability_milli":850,"quality_milli":900,"replicate_count":3}
+                ],
+                "min_modalities": 2,
+                "min_reliability_milli": 700,
+                "max_uncertainty_milli": 100,
+                "perturbation_milli": 100,
+                "max_perturbation_span_milli": 300,
+                "min_robustness_milli": 400
+            }
+        }),
+    );
+    assert_eq!(sensitivity["dispatch"], json!("not_started"));
+    assert_eq!(sensitivity["simulation_only"], json!(true));
+    assert_eq!(
+        sensitivity["analysis"]["eligible_modality_order"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+    assert!(sensitivity["analysis"]["baseline_value_milli"].is_number());
 
     let harmonization = call(
         &mut server,
