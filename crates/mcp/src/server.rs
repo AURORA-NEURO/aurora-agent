@@ -63290,11 +63290,11 @@ pub fn tool_definitions() -> Vec<Value> {
     }));
     definitions.push(json!({
         "name": "glioma_decision_mission_execute",
-        "description": "Execute a validated preclinical glioma P04 decision graph through the P07 autonomous mission controller. The bridge preserves context and graph digests, carries dependency-closed action candidates into adaptive rounds, and keeps partial, negative, failed, blocked, budget, and no-progress outcomes explicit. Partial graphs require explicit opt-in; MCP uses a deterministic synthetic worker and never performs instrument, clinical, or raw-data effects.",
+        "description": "Execute or resume a validated preclinical glioma P04 decision graph through the P07 autonomous mission controller. The bridge preserves context and graph digests, carries dependency-closed action candidates into adaptive rounds, and keeps partial, negative, failed, blocked, budget, and no-progress outcomes explicit. Partial graphs require explicit opt-in; MCP uses a deterministic synthetic worker and never performs instrument, clinical, or raw-data effects.",
         "inputSchema": {
             "type": "object",
             "properties": {
-                "request": {"type": "object", "description": "DecisionMissionBridgeRequest1@1 with DecisionContext1@1, DecisionActionGraph1@1, GliomaSelectionConfig1@1, mission gates, bounded rounds/retries, artifact policy, and allow_partial_graph."}
+                "request": {"type": "object", "description": "DecisionMissionBridgeRequest1@1 with DecisionContext1@1, DecisionActionGraph1@1, optional canonical completed_action_order for resumption, GliomaSelectionConfig1@1, mission gates, bounded rounds/retries, artifact policy, and allow_partial_graph."}
             },
             "required": ["request"]
         }

@@ -706,7 +706,7 @@ negative evidence, and budget blocks visible for the autonomous engine.
 The decision-mission bridge (`execute_glioma_decision_mission`) is the executable handoff from
 that P04 graph into the P07 science-aware mission controller. It carries the context and graph
 digests into adaptive rounds, preserves dependency closure and explicit partial-graph opt-in, and
-returns typed mission outcomes rather than a receipt-only acknowledgement. The MCP worker remains
+accepts a canonical completed-action frontier for deterministic resumption. It returns typed mission outcomes rather than a receipt-only acknowledgement. The MCP worker remains
 simulation-only; a production institution supplies the local executor that owns assays, analyses,
 or instrument gateways.
 P05 now also includes signed mechanism-network propagation (`propagate_glioma_mechanism_graph`)

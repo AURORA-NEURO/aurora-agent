@@ -26,6 +26,10 @@ pub struct DecisionMissionBridgeRequest {
     pub objective: String,
     pub context: DecisionContext,
     pub graph: DecisionActionGraph,
+    /// Canonical actions already completed by an earlier local run.  This makes the bridge
+    /// resumable without mutating the original context or graph digest.
+    #[serde(default)]
+    pub completed_action_order: Vec<String>,
     pub selection: GliomaSelectionConfig,
     pub gates: GliomaMissionGates,
     pub max_rounds: u16,
@@ -145,6 +149,11 @@ fn validate_request(
         || request.selection.budget_units == 0
         || request.selection.max_actions == 0
         || request.max_rounds == 0
+        || !canonical(&request.completed_action_order)
+        || request
+            .completed_action_order
+            .iter()
+            .any(|id| id.trim().is_empty() || request.graph.node_order.binary_search(id).is_err())
     {
         return Err(DecisionMissionBridgeError::InvalidRequest(
             "mission identity, objective, positive budget/action limits, and rounds are required"
@@ -208,7 +217,7 @@ pub fn execute_glioma_decision_mission<E: GliomaActionExecutor>(
         mission_id: request.mission_id.clone(),
         objective: request.objective.clone(),
         candidates,
-        completed_action_order: Vec::new(),
+        completed_action_order: request.completed_action_order.clone(),
         selection: request.selection.clone(),
         gates: request.gates.clone(),
         max_rounds: request.max_rounds,
