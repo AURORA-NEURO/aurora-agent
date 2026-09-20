@@ -110,6 +110,8 @@ crates/research/src/glioma/
                                              P06 uncertainty-aware adaptive combination dose-surface acquisition planning
   programs/p06_experiment_design/sequential_design.rs
                                              P06 sequential Bayesian interim stopping and bounded next-round allocation with success/futility gates
+  programs/p06_experiment_design/power_reestimation.rs
+                                             P06 variance-aware adaptive power re-estimation with interim alpha spending and explicit boundaries
   programs/p06_experiment_design/sequential_campaign.rs
                                              P06 autonomous sequential campaign execution with local aggregate batches and posterior replanning
   programs/p06_experiment_design/frontier_controller.rs

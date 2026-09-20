@@ -107,6 +107,7 @@ fn main() {
                      glioma_adaptive_allocation,\n\
                      glioma_adaptive_allocation_campaign_execute,\n\
                      glioma_sequential_design,\n\
+                     glioma_power_reestimate,\n\
                      glioma_sequential_campaign_execute,\n\
                      glioma_closed_loop_campaign,\n\
                      glioma_experiment_operating_cycle,\n\

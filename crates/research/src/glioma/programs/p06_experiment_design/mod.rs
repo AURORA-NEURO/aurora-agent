@@ -16,6 +16,7 @@ pub mod information_design;
 pub mod multi_fidelity;
 pub mod multi_fidelity_campaign;
 pub mod operating_cycle;
+pub mod power_reestimation;
 pub mod robust_active_learning;
 pub mod sequential_campaign;
 pub mod sequential_design;
@@ -102,6 +103,11 @@ pub use operating_cycle::{
     execute_glioma_experiment_operating_cycle, DryRunExperimentOperatingCycleExecutor,
     ExperimentOperatingCycle, ExperimentOperatingCycleDisposition, ExperimentOperatingCycleError,
     ExperimentOperatingCycleRequest,
+};
+pub use power_reestimation::{
+    plan_glioma_power_reestimation, PowerArmDecision, PowerArmObservation, PowerDecisionKind,
+    PowerReestimationDisposition, PowerReestimationError, PowerReestimationPlan,
+    PowerReestimationRequest,
 };
 
 pub use robust_active_learning::{

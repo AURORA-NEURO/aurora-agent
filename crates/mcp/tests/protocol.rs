@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 731;
+const TOOL_DEFINITION_COUNT: usize = 732;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -2837,6 +2837,51 @@ fn glioma_sequential_design_exposes_stopping_and_negative_evidence() {
         .is_some_and(|evidence| evidence
             .iter()
             .any(|item| item.as_str().is_some_and(|item| item.contains("weak")))));
+}
+
+#[test]
+fn glioma_power_reestimate_exposes_interim_boundaries_and_next_batch() {
+    let mut server = server();
+    let artifact_hash = "0".repeat(64);
+    let plan = call(
+        &mut server,
+        "glioma_power_reestimate",
+        json!({
+            "request": {
+                "objective": "re-estimate invasion assay power",
+                "model_system": "organoid",
+                "endpoint": "invasion_fraction",
+                "control_arm_id": "control",
+                "target_effect_milli": 100,
+                "alpha_total_milli": 50,
+                "power_target_milli": 700,
+                "current_look": 1,
+                "max_looks": 4,
+                "min_replicates_per_arm": 4,
+                "max_replicates_per_arm": 24,
+                "max_new_replicates_per_arm": 8,
+                "budget_units": 100,
+                "risk_ceiling_milli": 300
+            },
+            "arms": [
+                {"arm_id":"control","label":"vehicle","artifact":{"artifact_id":"power-control","content_hash":artifact_hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"model_system":"organoid","mean_response_milli":200,"variance_milli2":100,"observations":6,"risk_milli":50,"cost_units":2},
+                {"arm_id":"perturbation","label":"egfr perturbation","artifact":{"artifact_id":"power-perturbation","content_hash":artifact_hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"model_system":"organoid","mean_response_milli":310,"variance_milli2":100,"observations":6,"risk_milli":100,"cost_units":2}
+            ]
+        }),
+    );
+    assert_eq!(plan["dispatch"], json!("not_started"));
+    assert_eq!(plan["simulation_only"], json!(true));
+    assert_eq!(plan["plan"]["disposition"], json!("continue"));
+    assert!(plan["plan"]["alpha_spent_milli"].as_u64().unwrap() < 50);
+    assert_eq!(plan["plan"]["selected_order"], json!(["perturbation"]));
+    assert!(plan["plan"]["decisions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|decision| {
+            decision["arm_id"] == json!("perturbation")
+                && decision["planned_replicates"].as_u64().unwrap() > 0
+        }));
 }
 
 #[test]

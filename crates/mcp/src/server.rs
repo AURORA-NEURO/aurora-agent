@@ -558,12 +558,13 @@ use bioprism_research::{
     plan_glioma_computation_portfolio, plan_glioma_decision_branches,
     plan_glioma_evidence_acquisition, plan_glioma_evidence_contradiction_cut,
     plan_glioma_information_design, plan_glioma_multi_fidelity_optimization,
-    plan_glioma_robust_active_learning, plan_glioma_robust_intervention_portfolio,
-    plan_glioma_scientific_frontier, plan_glioma_sequential_design, plan_glioma_workflow,
-    preflight_glioma_instrument, prioritize_glioma_evidence, prioritize_knowledge_frontier,
-    propagate_glioma_mechanism_graph, qualify_evidence, register_glioma_spatial_samples,
-    revise_glioma_beliefs, schedule_glioma_computation_placement, schedule_glioma_instrument_fleet,
-    select_glioma_actions, simulate_glioma_counterfactual, simulate_glioma_counterfactual_ensemble,
+    plan_glioma_power_reestimation, plan_glioma_robust_active_learning,
+    plan_glioma_robust_intervention_portfolio, plan_glioma_scientific_frontier,
+    plan_glioma_sequential_design, plan_glioma_workflow, preflight_glioma_instrument,
+    prioritize_glioma_evidence, prioritize_knowledge_frontier, propagate_glioma_mechanism_graph,
+    qualify_evidence, register_glioma_spatial_samples, revise_glioma_beliefs,
+    schedule_glioma_computation_placement, schedule_glioma_instrument_fleet, select_glioma_actions,
+    simulate_glioma_counterfactual, simulate_glioma_counterfactual_ensemble,
     simulate_glioma_mechanism_dynamics, simulate_glioma_protocol, surveil_glioma_evidence,
     synthesize_glioma_interpretation, triangulate_glioma_evidence,
     update_glioma_mechanism_posterior, validate_feature_catalog, ActionPortfolioExecutionRequest,
@@ -646,10 +647,10 @@ use bioprism_research::{
     MultiFidelityOptimizationRequest, MultimodalExecutionMode, MultimodalIngestionCampaignRequest,
     MultimodalMechanismCampaignRequest, MultimodalObservation, MultimodalReadinessRequest,
     MultimodalRequest, PathwayActivityDefinition, PathwayActivityObservation,
-    PathwayActivityRequest, ProtocolExecutionRequest, ProtocolSimulationRequest,
-    ReleaseExecutionMode, ReleaseGateRequest, ReplayCampaign, ReplayCampaignRequest,
-    ReplicationRequest, ReplicationStudy, ResearchObjectRequest,
-    RobustActiveLearningCampaignRequest, RobustActiveLearningCandidate,
+    PathwayActivityRequest, PowerArmObservation, PowerReestimationRequest,
+    ProtocolExecutionRequest, ProtocolSimulationRequest, ReleaseExecutionMode, ReleaseGateRequest,
+    ReplayCampaign, ReplayCampaignRequest, ReplicationRequest, ReplicationStudy,
+    ResearchObjectRequest, RobustActiveLearningCampaignRequest, RobustActiveLearningCandidate,
     RobustActiveLearningObservation, RobustActiveLearningRequest, RobustInterventionCandidate,
     RobustInterventionRequest, RobustnessGuidedComputationRequest, RobustnessRequest,
     ScientificFrontierExecutionRequest, ScientificFrontierRequest, SensitivityObservation,
@@ -2315,6 +2316,7 @@ impl Server {
             "glioma_dose_response" => self.glioma_dose_response(&arguments),
             "glioma_adaptive_allocation" => self.glioma_adaptive_allocation(&arguments),
             "glioma_sequential_design" => self.glioma_sequential_design(&arguments),
+            "glioma_power_reestimate" => self.glioma_power_reestimate(&arguments),
             "glioma_closed_loop_campaign" => self.glioma_closed_loop_campaign(&arguments),
             "glioma_experiment_operating_cycle" => {
                 self.glioma_experiment_operating_cycle(&arguments)
@@ -7661,6 +7663,39 @@ impl Server {
     /// sandbox. Each accepted aggregate batch updates the arm posterior before the next plan;
     /// a governed institution can replace the executor behind this route without granting MCP
     /// direct hardware or clinical authority.
+    /// Re-estimate replicate requirements and interim boundaries for a local preclinical glioma
+    /// assay. This is a planning artifact: it never dispatches a protocol or instrument.
+    fn glioma_power_reestimate(&self, arguments: &Value) -> Result<Value, String> {
+        let request: PowerReestimationRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_power_reestimate requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma power-re-estimation request: {error}"))?;
+        let arms: Vec<PowerArmObservation> = serde_json::from_value(
+            arguments
+                .get("arms")
+                .cloned()
+                .ok_or_else(|| "glioma_power_reestimate requires arms".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma power-re-estimation arms: {error}"))?;
+        let plan = plan_glioma_power_reestimation(&request, &arms)
+            .map_err(|error| format!("glioma power re-estimation refused: {error}"))?;
+        serde_json::to_value(json!({
+            "plan": plan,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "interim alpha spending, variance-aware replicate re-estimation, efficacy, futility, risk, and budget decisions use deterministic integer arithmetic",
+                "underpowered, negative, and budget-blocked arms remain explicit and are never promoted to execution",
+                "the selected order is a bounded next replicate plan for institution-local preclinical work",
+                "the route performs no assay, instrument execution, federation export, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma power re-estimation plan: {error}"))
+    }
+
     fn glioma_sequential_campaign_execute(&self, arguments: &Value) -> Result<Value, String> {
         let request: SequentialCampaignRequest =
             serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
@@ -51225,6 +51260,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_adaptive_allocation",
                 "glioma_adaptive_allocation_campaign_execute",
                 "glioma_sequential_design",
+                "glioma_power_reestimate",
                 "glioma_sequential_campaign_execute",
                 "glioma_closed_loop_campaign",
                 "glioma_experiment_operating_cycle",
@@ -60626,6 +60662,18 @@ pub fn tool_definitions() -> Vec<Value> {
                 "request": {"type": "object", "description": "SequentialCampaignRequest1@1 containing SequentialDesignRequest1@1, local SequentialArmObservation1@1 arms, and bounded retry count."}
             },
             "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_power_reestimate",
+        "description": "Re-estimate the next preclinical glioma replicate batch with deterministic quadratic interim alpha spending, variance-aware sample-size bounds, efficacy and futility boundaries, risk ceilings, and budget selection. The plan retains underpowered, negative, and blocked arms and never treats a planning boundary as observed biology; no assay, instrument, federation, or clinical action occurs.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "PowerReestimationRequest1@1 with model system, endpoint, control arm, target effect, one-sided alpha/power, interim look, replicate ceilings, risk ceiling, and budget."},
+                "arms": {"type": "array", "items": {"type": "object"}, "description": "Local PowerArmObservation1@1 means, variances, replicate counts, model bindings, risk, cost, and de-identified artifact references."}
+            },
+            "required": ["request", "arms"]
         }
     }));
     definitions.push(json!({
