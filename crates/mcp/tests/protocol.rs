@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 768;
+const TOOL_DEFINITION_COUNT: usize = 769;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -2721,6 +2721,41 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
         json!("continue")
     );
     assert_eq!(replication_continuation["plan"]["next_round"], json!(2));
+
+    let replication_protocol_compile = call(
+        &mut server,
+        "glioma_replication_protocol_compile",
+        json!({
+            "request": {
+                "continuation": replication_continuation["plan"].clone(),
+                "resources": [
+                    {"resource_id":"culture","kind":"culture","capacity_units":1},
+                    {"resource_id":"compute","kind":"compute","capacity_units":1}
+                ],
+                "max_ticks": 200,
+                "max_risk_milli": 1000,
+                "allow_instrument_execution": false,
+                "approval_reference": null,
+                "randomization_seed": artifact_hash,
+                "ticks_per_replicate": 2,
+                "include_quality_task": true
+            }
+        }),
+    );
+    assert_eq!(
+        replication_protocol_compile["dispatch"],
+        json!("not_started")
+    );
+    assert_eq!(replication_protocol_compile["simulation_only"], json!(true));
+    assert_eq!(
+        replication_protocol_compile["compilation"]["disposition"],
+        json!("compiled")
+    );
+    assert!(replication_protocol_compile["compilation"]["task_order"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|task| task.as_str().unwrap().ends_with(":qc")));
 
     let adaptive_information_campaign = call(
         &mut server,

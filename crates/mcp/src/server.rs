@@ -513,14 +513,15 @@ use bioprism_research::{
     certify_decision_omissions, compile_decision_action_graph, compile_decision_context,
     compile_glioma_computation_workflow, compile_glioma_knowledge_actions,
     compile_glioma_knowledge_gaps, compile_glioma_mechanism_consensus,
-    compile_glioma_protocol_evidence_surface, compile_mechanism_action_plan,
-    compile_typed_knowledge, compose_knowledge_graph, design_glioma_contrast_panel,
-    design_glioma_robust_experiment, design_preclinical_experiment, discriminate_mechanisms,
-    dry_run_adaptive_instrument_executor, dry_run_glioma_adaptive_frontier_executor,
-    dry_run_glioma_research, dry_run_instrument_executor_from_request,
-    dry_run_robustness_guided_computation_executor, evaluate_glioma_dynamic_policies,
-    evaluate_glioma_release_gate, execute_federated_benchmark_adaptive_campaign_dry_run,
-    execute_federated_benchmark_campaign, execute_federated_benchmark_operating_cycle_dry_run,
+    compile_glioma_protocol_evidence_surface, compile_glioma_replication_protocol,
+    compile_mechanism_action_plan, compile_typed_knowledge, compose_knowledge_graph,
+    design_glioma_contrast_panel, design_glioma_robust_experiment, design_preclinical_experiment,
+    discriminate_mechanisms, dry_run_adaptive_instrument_executor,
+    dry_run_glioma_adaptive_frontier_executor, dry_run_glioma_research,
+    dry_run_instrument_executor_from_request, dry_run_robustness_guided_computation_executor,
+    evaluate_glioma_dynamic_policies, evaluate_glioma_release_gate,
+    execute_federated_benchmark_adaptive_campaign_dry_run, execute_federated_benchmark_campaign,
+    execute_federated_benchmark_operating_cycle_dry_run,
     execute_federated_mechanism_transport_campaign_dry_run, execute_glioma_action_portfolio,
     execute_glioma_active_learning_campaign, execute_glioma_adaptive_allocation_campaign,
     execute_glioma_adaptive_clone_campaign_dry_run,
@@ -683,7 +684,7 @@ use bioprism_research::{
     QualityScheduleRequest, QualityTransportRequest, ReleaseExecutionMode, ReleaseGateRequest,
     ReliabilityCalibrationRequest, ReplayCampaign, ReplayCampaignRequest,
     ReplicationContinuationRequest, ReplicationObservation, ReplicationPlanRequest,
-    ReplicationRequest, ReplicationStudy, ResearchObjectRequest,
+    ReplicationProtocolCompileRequest, ReplicationRequest, ReplicationStudy, ResearchObjectRequest,
     RobustActiveLearningCampaignRequest, RobustActiveLearningCandidate,
     RobustActiveLearningObservation, RobustActiveLearningRequest, RobustExperimentDesignRequest,
     RobustInterventionCandidate, RobustInterventionRequest, RobustnessGuidedComputationRequest,
@@ -2506,6 +2507,9 @@ impl Server {
             "glioma_adaptive_panel" => self.glioma_adaptive_panel(&arguments),
             "glioma_replication_plan" => self.glioma_replication_plan(&arguments),
             "glioma_replication_continuation" => self.glioma_replication_continuation(&arguments),
+            "glioma_replication_protocol_compile" => {
+                self.glioma_replication_protocol_compile(&arguments)
+            }
             "glioma_robust_experiment_design" => self.glioma_robust_experiment_design(&arguments),
             "glioma_adaptive_information_campaign" => {
                 self.glioma_adaptive_information_campaign(&arguments)
@@ -10999,6 +11003,34 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma replication continuation: {error}"))
+    }
+
+    /// Compile a continuation decision into a typed local protocol and run its deterministic
+    /// preflight. The returned protocol is an artifact for a caller-owned executor, never a
+    /// hardware command or a biological conclusion.
+    fn glioma_replication_protocol_compile(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ReplicationProtocolCompileRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_replication_protocol_compile requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma replication protocol compile request: {error}")
+            })?;
+        let compilation = compile_glioma_replication_protocol(&request)
+            .map_err(|error| format!("glioma replication protocol compilation refused: {error}"))?;
+        serde_json::to_value(json!({
+            "compilation": compilation,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "next_routes": ["glioma_protocol_scenario_ensemble", "glioma_protocol_autonomous_execute"],
+            "guarantees": [
+                "continuation site actions compile into deterministic setup, arm, and optional QC tasks",
+                "the generated request is preflighted against local resources, horizon, risk, and approval gates",
+                "held or failed sites remain explicit and are never silently turned into protocol work",
+                "the route performs no provider, instrument, federation, raw-data, or clinical action"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma replication protocol compilation: {error}"))
     }
 
     /// Allocate a bounded glioma experiment batch against the lower tail of declared scenarios.
@@ -52448,6 +52480,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_adaptive_panel",
                 "glioma_replication_plan",
                 "glioma_replication_continuation",
+                "glioma_replication_protocol_compile",
                 "glioma_robust_experiment_design",
                 "glioma_adaptive_information_campaign",
                 "glioma_active_learning",
@@ -63107,6 +63140,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "ReplicationContinuationRequest1@1 containing ReplicationPlanRequest1@1, round bounds, quality/stopping thresholds, observation rounds, and an optional validated previous topology plan."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_replication_protocol_compile",
+        "description": "Compile a validated preclinical glioma replication continuation into deterministic site setup, control, treatment, and optional QC tasks, then run a local protocol preflight against resources, horizon, risk, and approval gates. Held or failed decisions remain explicit; this route never dispatches hardware or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ReplicationProtocolCompileRequest1@1 containing a validated ReplicationContinuationPlan1@1, local ProtocolResource1@1 entries, horizon/risk/approval bounds, deterministic seed, and per-replicate duration."}
             },
             "required": ["request"]
         }

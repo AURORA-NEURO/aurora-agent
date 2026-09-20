@@ -20,6 +20,7 @@ pub mod operating_cycle;
 pub mod power_reestimation;
 pub mod replication_continuation;
 pub mod replication_plan;
+pub mod replication_protocol;
 pub mod robust_active_learning;
 pub mod robust_design;
 pub mod sequential_campaign;
@@ -129,6 +130,11 @@ pub use replication_continuation::{
     ReplicationContinuationDisposition, ReplicationContinuationError,
     ReplicationContinuationObservation, ReplicationContinuationPlan,
     ReplicationContinuationRequest, ReplicationContinuationSiteAction,
+};
+pub use replication_protocol::{
+    compile_glioma_replication_protocol, ReplicationProtocolCompilation,
+    ReplicationProtocolCompilationDisposition, ReplicationProtocolCompilationError,
+    ReplicationProtocolCompileRequest,
 };
 pub use robust_active_learning::{
     plan_glioma_robust_active_learning, RobustActiveLearningCandidate,
