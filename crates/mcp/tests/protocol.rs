@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 771;
+const TOOL_DEFINITION_COUNT: usize = 772;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -2631,6 +2631,33 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
             .unwrap()
             .iter()
             .any(|arm| arm == "egfr-arm")
+    );
+
+    let mechanism_validation_execution = call(
+        &mut server,
+        "glioma_mechanism_validation_protocol_execute",
+        json!({
+            "request": {
+                "compilation": mechanism_validation_protocol["compilation"].clone(),
+                "max_retries": 1,
+                "require_artifacts": true
+            }
+        }),
+    );
+    assert_eq!(
+        mechanism_validation_execution["execution_mode"],
+        json!("dry_run_local_worker")
+    );
+    assert_eq!(
+        mechanism_validation_execution["execution"]["disposition"],
+        json!("completed")
+    );
+    assert!(
+        mechanism_validation_execution["execution"]["execution"]["task_results"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|task| task["artifact"].is_object())
     );
 
     let information_design = call(

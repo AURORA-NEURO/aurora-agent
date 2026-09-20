@@ -549,8 +549,9 @@ use bioprism_research::{
     execute_glioma_knowledge_selection_cycle, execute_glioma_knowledge_synthesis_operating_cycle,
     execute_glioma_mechanism_autopilot, execute_glioma_mechanism_discovery_engine,
     execute_glioma_mechanism_discrimination_campaign, execute_glioma_mechanism_operating_cycle,
-    execute_glioma_mission_recovery, execute_glioma_multi_fidelity_campaign,
-    execute_glioma_multimodal_ingestion_campaign, execute_glioma_multimodal_mechanism_campaign,
+    execute_glioma_mechanism_validation_protocol, execute_glioma_mission_recovery,
+    execute_glioma_multi_fidelity_campaign, execute_glioma_multimodal_ingestion_campaign,
+    execute_glioma_multimodal_mechanism_campaign,
     execute_glioma_multimodal_mechanism_campaign_with_executor, execute_glioma_multimodal_mission,
     execute_glioma_multimodal_operating_cycle_dry_run,
     execute_glioma_multimodal_quality_adaptive_campaign,
@@ -670,21 +671,21 @@ use bioprism_research::{
     MechanismDynamicsNode, MechanismDynamicsRequest, MechanismFeatureObservation,
     MechanismGraphEdge, MechanismGraphNode, MechanismGraphRequest, MechanismHypothesis,
     MechanismOperatingCycleRequest, MechanismRequest, MechanismStateFilterRequest,
-    MechanismStateSmootherRequest, MechanismValidationPlanRequest,
-    MechanismValidationProtocolCompileRequest, MediationObservation, MediationRequest,
-    MetaAnalysisRequest, MissingnessAuditRequest, ModalityPortfolioRequest, ModalityVector,
-    MultiFidelityCampaignRequest, MultiFidelityOptimizationRequest, MultimodalDecisionGateRequest,
-    MultimodalExecutionMode, MultimodalIngestionCampaignRequest,
-    MultimodalMechanismCampaignRequest, MultimodalObservation, MultimodalReadinessRequest,
-    MultimodalRequest, PathwayActivityDefinition, PathwayActivityObservation,
-    PathwayActivityRequest, PowerArmObservation, PowerReestimationRequest,
-    ProspectiveQualityRequest, ProtocolBranchOptimizationRequest, ProtocolCompensationRequest,
-    ProtocolEvidenceFusionRequest, ProtocolEvidenceSurfaceRequest, ProtocolExecutionRequest,
-    ProtocolScenarioEnsembleRequest, ProtocolSimulationRequest, ProtocolTransportGateRequest,
-    QualityAdaptiveCampaignRequest, QualityExecutionMode, QualityExecutionRequest,
-    QualityRecoveryRequest, QualityRemediationRequest, QualityRootCauseRequest,
-    QualityScheduleRequest, QualityTransportRequest, ReleaseExecutionMode, ReleaseGateRequest,
-    ReliabilityCalibrationRequest, ReplayCampaign, ReplayCampaignRequest,
+    MechanismStateSmootherRequest, MechanismValidationExecutionRequest,
+    MechanismValidationPlanRequest, MechanismValidationProtocolCompileRequest,
+    MediationObservation, MediationRequest, MetaAnalysisRequest, MissingnessAuditRequest,
+    ModalityPortfolioRequest, ModalityVector, MultiFidelityCampaignRequest,
+    MultiFidelityOptimizationRequest, MultimodalDecisionGateRequest, MultimodalExecutionMode,
+    MultimodalIngestionCampaignRequest, MultimodalMechanismCampaignRequest, MultimodalObservation,
+    MultimodalReadinessRequest, MultimodalRequest, PathwayActivityDefinition,
+    PathwayActivityObservation, PathwayActivityRequest, PowerArmObservation,
+    PowerReestimationRequest, ProspectiveQualityRequest, ProtocolBranchOptimizationRequest,
+    ProtocolCompensationRequest, ProtocolEvidenceFusionRequest, ProtocolEvidenceSurfaceRequest,
+    ProtocolExecutionRequest, ProtocolScenarioEnsembleRequest, ProtocolSimulationRequest,
+    ProtocolTransportGateRequest, QualityAdaptiveCampaignRequest, QualityExecutionMode,
+    QualityExecutionRequest, QualityRecoveryRequest, QualityRemediationRequest,
+    QualityRootCauseRequest, QualityScheduleRequest, QualityTransportRequest, ReleaseExecutionMode,
+    ReleaseGateRequest, ReliabilityCalibrationRequest, ReplayCampaign, ReplayCampaignRequest,
     ReplicationContinuationRequest, ReplicationObservation, ReplicationPlanRequest,
     ReplicationProtocolCompileRequest, ReplicationRequest, ReplicationStudy, ResearchObjectRequest,
     RobustActiveLearningCampaignRequest, RobustActiveLearningCandidate,
@@ -2508,6 +2509,9 @@ impl Server {
             "glioma_mechanism_validation_plan" => self.glioma_mechanism_validation_plan(&arguments),
             "glioma_mechanism_validation_protocol_compile" => {
                 self.glioma_mechanism_validation_protocol_compile(&arguments)
+            }
+            "glioma_mechanism_validation_protocol_execute" => {
+                self.glioma_mechanism_validation_protocol_execute(&arguments)
             }
             "glioma_information_design" => self.glioma_information_design(&arguments),
             "glioma_adaptive_panel" => self.glioma_adaptive_panel(&arguments),
@@ -10949,6 +10953,44 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma mechanism validation protocol: {error}"))
+    }
+
+    /// Execute a compiled mechanism-validation protocol through the deterministic local worker.
+    /// Real institution-owned effects remain behind the Rust executor seam; this MCP route only
+    /// performs a synthetic run and returns typed artifacts for workflow integration tests.
+    fn glioma_mechanism_validation_protocol_execute(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: MechanismValidationExecutionRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_mechanism_validation_protocol_execute requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma mechanism-validation execution request: {error}")
+            })?;
+        let mut executor = DryRunGliomaProtocolExecutor;
+        let execution = execute_glioma_mechanism_validation_protocol(&request, &mut executor)
+            .map_err(|error| format!("glioma mechanism validation execution refused: {error}"))?;
+        serde_json::to_value(json!({
+            "execution": execution,
+            "execution_mode": "dry_run_local_worker",
+            "physical_dispatch": false,
+            "simulation_only": true,
+            "next_routes": [
+                "glioma_mechanism_validation_plan",
+                "glioma_mechanism_validation_protocol_compile",
+                "glioma_protocol_execute"
+            ],
+            "guarantees": [
+                "held or unresolved validation compilations are blocked before task execution",
+                "compiled protocols are re-simulated and dependency-checked before each run",
+                "partial, failed, skipped, and negative task outcomes remain explicit",
+                "the synthetic worker creates local artifacts only and cannot touch instruments or specimens",
+                "measured observations must be attached by an institution-owned workflow before scientific re-planning"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma mechanism validation execution: {error}"))
     }
 
     /// Select a bounded local glioma assay batch by expected reduction in mechanism uncertainty.
@@ -52553,6 +52595,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_robust_intervention_portfolio",
                 "glioma_mechanism_validation_plan",
                 "glioma_mechanism_validation_protocol_compile",
+                "glioma_mechanism_validation_protocol_execute",
                 "glioma_information_design",
                 "glioma_adaptive_panel",
                 "glioma_replication_plan",
@@ -63194,6 +63237,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "MechanismValidationProtocolCompileRequest1@1 containing a validated MechanismValidationPlan1@1, typed validation arms, ProtocolResource1@1 entries, horizon/risk bounds, deterministic seed, approval, and per-replicate duration."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_mechanism_validation_protocol_execute",
+        "description": "Execute a compiled preclinical glioma mechanism-validation protocol through the deterministic local synthetic worker. Held or unresolved compilations are blocked, feasible protocols are re-simulated and dependency-checked, and completed, partial, failed, skipped, and negative task outcomes remain explicit. This MCP route creates local synthetic artifacts only and never touches specimens, instruments, federation, or clinical decisions.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "MechanismValidationExecutionRequest1@1 containing a compiled MechanismValidationProtocolCompilation1@1, bounded retries, and artifact requirements."}
             },
             "required": ["request"]
         }

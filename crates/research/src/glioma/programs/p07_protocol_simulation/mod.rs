@@ -30,6 +30,7 @@ pub mod intent_mission;
 pub mod mechanism_autopilot;
 pub mod mechanism_campaign;
 pub mod mechanism_discovery_engine;
+pub mod mechanism_validation_execution;
 pub mod mission;
 pub mod mission_recovery;
 pub mod multimodal_mission;
@@ -130,6 +131,12 @@ pub use execution::{
     ProtocolExecution, ProtocolExecutionDisposition, ProtocolExecutionError,
     ProtocolExecutionFailure, ProtocolExecutionRequest, ProtocolExecutionStopReason,
     ProtocolTaskDisposition, ProtocolTaskResult, OUTPUT_SCHEMA as PROTOCOL_EXECUTION_OUTPUT_SCHEMA,
+};
+
+pub use mechanism_validation_execution::{
+    execute_glioma_mechanism_validation_protocol, MechanismValidationExecution,
+    MechanismValidationExecutionDisposition, MechanismValidationExecutionError,
+    MechanismValidationExecutionRequest,
 };
 
 pub use evidence_surface::{
