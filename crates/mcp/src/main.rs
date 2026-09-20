@@ -126,7 +126,7 @@ fn main() {
                      glioma_multimodal_quality_root_cause,\n\
                      glioma_multimodal_quality_remediation,\n\
                      glioma_multimodal_quality_recovery,\n\
-                     glioma_mechanism_discriminate, glioma_mechanism_bayesian_update, glioma_mechanism_calibrate,\n\
+                     glioma_mechanism_discriminate, glioma_mechanism_bayesian_update, glioma_mechanism_state_filter, glioma_mechanism_calibrate,\n\
                      glioma_mechanism_dynamics,\n\
                      glioma_mechanism_action_plan,\n\
                      glioma_adaptive_mechanism_policy, glioma_adaptive_mechanism_campaign_execute, glioma_calibrated_mechanism_campaign_execute,\n\

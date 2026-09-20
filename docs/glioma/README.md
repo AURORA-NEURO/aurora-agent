@@ -100,6 +100,8 @@ crates/research/src/glioma/
                                              P05 marker-aware preclinical clonal-evolution graph inference with explicit ambiguity
   programs/p05_mechanism_exploration/mechanism_dynamics.rs
                                              P05 signed delayed-feedback mechanism dynamics with intervention ranking, stability, oscillation, divergence, and sensitivity analysis
+  programs/p05_mechanism_exploration/state_filter.rs
+                                             P05 longitudinal finite-state mechanism filtering with transition priors, multimodal residuals, coverage uncertainty, and change points
   programs/p05_mechanism_exploration/operating_cycle.rs
                                              P05 mechanism-discrimination campaign to typed next-assay operating cycle
   programs/p05_mechanism_exploration/calibrated_campaign.rs
@@ -852,6 +854,11 @@ report to adaptive policy selection. It discounts expected effects by model-spec
 trust, gives an explicit exploration bonus to actions that can repair calibration debt, and blocks
 qualification when held-out coverage or Brier/calibration thresholds fail. Each returned local
 observation triggers a fresh policy/trust recomputation; the dry-run route remains synthetic-only.
+The longitudinal state filter (`filter_glioma_mechanism_states`) complements those static and
+forward models with a transition-aware posterior over ordered local timepoints. It combines
+multimodal residual compatibility with process and measurement uncertainty, reports coverage and
+entropy proxies, preserves feature-level negative evidence, and marks dominant-state changes as
+change points for the next discriminating assay or counterfactual plan.
 
 P06 now also exposes a multi-factor contrast-panel compiler
 (`design_glioma_contrast_panel`). It expands declared preclinical factors into balanced factorial

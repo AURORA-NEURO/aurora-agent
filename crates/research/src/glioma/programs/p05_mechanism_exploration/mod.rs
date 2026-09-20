@@ -17,6 +17,7 @@ pub mod mechanism_dynamics;
 pub mod operating_cycle;
 pub mod pathway_activity;
 pub mod robust_portfolio;
+pub mod state_filter;
 
 pub use action_planner::{
     compile_mechanism_action_plan, GliomaMechanismActionPlanner, MechanismActionPlan,
@@ -105,6 +106,11 @@ pub use robust_portfolio::{
     plan_glioma_robust_intervention_portfolio, PortfolioDirection, RobustInterventionCandidate,
     RobustInterventionPortfolio, RobustInterventionRequest, RobustInterventionScore,
     RobustPortfolioDisposition, RobustPortfolioError,
+};
+pub use state_filter::{
+    filter_glioma_mechanism_states, MechanismStateFilterDisposition, MechanismStateFilterError,
+    MechanismStateFilterRequest, MechanismStateFilterResult, MechanismStateModel,
+    MechanismStateObservation, MechanismStatePosterior,
 };
 
 pub const PROGRAM_ID: GliomaProgramId = GliomaProgramId::MechanismExploration;

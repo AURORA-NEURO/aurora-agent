@@ -559,10 +559,11 @@ use bioprism_research::{
     execute_glioma_replication_campaign, execute_glioma_research_autopilot,
     execute_glioma_research_director, execute_glioma_robust_active_learning_campaign,
     execute_glioma_robustness_guided_computation, execute_glioma_scientific_frontier,
-    execute_glioma_sequential_campaign, explore_mechanisms, forecast_glioma_multimodal_quality,
-    fuse_glioma_protocol_evidence, gate_glioma_protocol_transport, generate_feature_catalog,
-    glioma_program_catalog, govern_glioma_decision_loop, harmonize_glioma_multimodal_batches,
-    harmonize_multimodal_inputs, optimize_glioma_decision_value, optimize_glioma_protocol_branches,
+    execute_glioma_sequential_campaign, explore_mechanisms, filter_glioma_mechanism_states,
+    forecast_glioma_multimodal_quality, fuse_glioma_protocol_evidence,
+    gate_glioma_protocol_transport, generate_feature_catalog, glioma_program_catalog,
+    govern_glioma_decision_loop, harmonize_glioma_multimodal_batches, harmonize_multimodal_inputs,
+    optimize_glioma_decision_value, optimize_glioma_protocol_branches,
     plan_adaptive_glioma_dose_surface, plan_decision_actions, plan_federated_benchmark_sites,
     plan_glioma_active_learning, plan_glioma_adaptive_information_campaign,
     plan_glioma_adaptive_mechanism_policy, plan_glioma_adaptive_research_frontier,
@@ -663,10 +664,11 @@ use bioprism_research::{
     MechanismDiscriminationRequest, MechanismDiscriminatorAction, MechanismDynamicsEdge,
     MechanismDynamicsIntervention, MechanismDynamicsNode, MechanismDynamicsRequest,
     MechanismFeatureObservation, MechanismGraphEdge, MechanismGraphNode, MechanismGraphRequest,
-    MechanismHypothesis, MechanismOperatingCycleRequest, MechanismRequest, MediationObservation,
-    MediationRequest, MetaAnalysisRequest, MissingnessAuditRequest, ModalityPortfolioRequest,
-    ModalityVector, MultiFidelityCampaignRequest, MultiFidelityOptimizationRequest,
-    MultimodalDecisionGateRequest, MultimodalExecutionMode, MultimodalIngestionCampaignRequest,
+    MechanismHypothesis, MechanismOperatingCycleRequest, MechanismRequest,
+    MechanismStateFilterRequest, MediationObservation, MediationRequest, MetaAnalysisRequest,
+    MissingnessAuditRequest, ModalityPortfolioRequest, ModalityVector,
+    MultiFidelityCampaignRequest, MultiFidelityOptimizationRequest, MultimodalDecisionGateRequest,
+    MultimodalExecutionMode, MultimodalIngestionCampaignRequest,
     MultimodalMechanismCampaignRequest, MultimodalObservation, MultimodalReadinessRequest,
     MultimodalRequest, PathwayActivityDefinition, PathwayActivityObservation,
     PathwayActivityRequest, PowerArmObservation, PowerReestimationRequest,
@@ -2469,6 +2471,7 @@ impl Server {
             "glioma_mechanism_dynamics" => self.glioma_mechanism_dynamics(&arguments),
             "glioma_mechanism_discriminate" => self.glioma_mechanism_discriminate(&arguments),
             "glioma_mechanism_bayesian_update" => self.glioma_mechanism_bayesian_update(&arguments),
+            "glioma_mechanism_state_filter" => self.glioma_mechanism_state_filter(&arguments),
             "glioma_mechanism_calibrate" => self.glioma_mechanism_calibrate(&arguments),
             "glioma_mechanism_action_plan" => self.glioma_mechanism_action_plan(&arguments),
             "glioma_adaptive_mechanism_policy" => self.glioma_adaptive_mechanism_policy(&arguments),
@@ -10362,6 +10365,33 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma Bayesian mechanism update: {error}"))
+    }
+
+    /// Filter a transition-aware longitudinal mechanism posterior from local preclinical
+    /// observations; this is inference only and never dispatches an assay.
+    fn glioma_mechanism_state_filter(&self, arguments: &Value) -> Result<Value, String> {
+        let request: MechanismStateFilterRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_mechanism_state_filter requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma mechanism state filter request: {error}"))?;
+        let filter = filter_glioma_mechanism_states(&request)
+            .map_err(|error| format!("glioma mechanism state filter refused: {error}"))?;
+        serde_json::to_value(json!({
+            "filter": filter,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "next_routes": ["glioma_mechanism_discriminate", "glioma_mechanism_dynamics", "glioma_mechanism_action_plan"],
+            "guarantees": [
+                "transition priors and local residual compatibility remain deterministic and integer-normalized",
+                "measurement/process uncertainty, coverage gaps, feature-level negative evidence, and change points remain explicit",
+                "filtered posteriors remain planning state and are never emitted as clinical or biological conclusions",
+                "route performs no assay, instrument, federation, raw-data, or clinical action"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma mechanism state filter: {error}"))
     }
 
     /// Calibrate mechanism probabilities against future local observations using deterministic
@@ -52189,6 +52219,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_mechanism_explore",
                 "glioma_mechanism_discriminate",
                 "glioma_mechanism_bayesian_update",
+                "glioma_mechanism_state_filter",
                 "glioma_mechanism_calibrate",
                 "glioma_mechanism_action_plan",
                 "glioma_adaptive_mechanism_policy",
@@ -62573,6 +62604,17 @@ pub fn tool_definitions() -> Vec<Value> {
                 "observations": {"type": "array", "items": {"type": "object"}, "description": "MechanismFeatureObservation1@1 local preclinical feature observations with artifact references."}
             },
             "required": ["request", "hypotheses", "observations"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_mechanism_state_filter",
+        "description": "Filter a longitudinal preclinical glioma mechanism state posterior from local observations and transition priors. Combines multimodal residual compatibility with process and measurement uncertainty, reports coverage and entropy, preserves negative features, and detects change points without executing an assay or making a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "MechanismStateFilterRequest1@1 with model system, transition-complete mechanism state models, ordered local observations, artifact references, and coverage/entropy gates."}
+            },
+            "required": ["request"]
         }
     }));
     definitions.push(json!({
