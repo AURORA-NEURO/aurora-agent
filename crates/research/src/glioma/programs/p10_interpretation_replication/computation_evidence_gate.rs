@@ -350,6 +350,17 @@ pub fn execute_glioma_computation_interpretation_evidence_gate(
             ));
             continue;
         }
+        if negative.contains(&observation.action_id)
+            && matches!(
+                observation.direction,
+                InterpretationEvidenceDirection::Positive
+            )
+        {
+            return Err(ComputationInterpretationEvidenceGateError::InvalidRequest(
+                "a computation action classified negative cannot be relabeled as positive evidence"
+                    .into(),
+            ));
+        }
         if matches!(
             observation.direction,
             InterpretationEvidenceDirection::Negative | InterpretationEvidenceDirection::Null
