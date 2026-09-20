@@ -578,14 +578,15 @@ use bioprism_research::{
     plan_federated_benchmark_sites, plan_glioma_active_learning,
     plan_glioma_adaptive_information_campaign, plan_glioma_adaptive_mechanism_policy,
     plan_glioma_adaptive_panel, plan_glioma_adaptive_research_frontier,
-    plan_glioma_adaptive_workflow, plan_glioma_clone_continuation,
-    plan_glioma_clone_perturbation_panel, plan_glioma_closed_loop_campaign,
-    plan_glioma_computation_portfolio, plan_glioma_decision_branches,
-    plan_glioma_evidence_acquisition, plan_glioma_evidence_contradiction_cut,
-    plan_glioma_information_design, plan_glioma_mechanism_validation,
-    plan_glioma_multi_fidelity_optimization, plan_glioma_multimodal_portfolio,
-    plan_glioma_multimodal_quality_remediation, plan_glioma_multimodal_quality_schedule,
-    plan_glioma_power_reestimation, plan_glioma_protocol_compensation, plan_glioma_replication,
+    plan_glioma_adaptive_workflow, plan_glioma_blocked_randomization,
+    plan_glioma_clone_continuation, plan_glioma_clone_perturbation_panel,
+    plan_glioma_closed_loop_campaign, plan_glioma_computation_portfolio,
+    plan_glioma_decision_branches, plan_glioma_evidence_acquisition,
+    plan_glioma_evidence_contradiction_cut, plan_glioma_information_design,
+    plan_glioma_mechanism_validation, plan_glioma_multi_fidelity_optimization,
+    plan_glioma_multimodal_portfolio, plan_glioma_multimodal_quality_remediation,
+    plan_glioma_multimodal_quality_schedule, plan_glioma_power_reestimation,
+    plan_glioma_protocol_compensation, plan_glioma_replication,
     plan_glioma_replication_closure_frontier, plan_glioma_replication_continuation,
     plan_glioma_robust_active_learning, plan_glioma_robust_intervention_portfolio,
     plan_glioma_scientific_frontier, plan_glioma_sequential_design,
@@ -610,12 +611,12 @@ use bioprism_research::{
     AssayEvidenceObservation, AssayEvidenceRequest, AutonomousGapCycleRequest,
     AutonomousProgramCycleRequest, AutonomousProtocolControllerRequest,
     BayesianMechanismHypothesis, BayesianMechanismUpdateRequest, BeliefConflict,
-    BeliefRevisionRequest, CalibratedMechanismCampaignRequest, CalibrationRequest, CalibrationRun,
-    CampaignAction, CampaignMechanism, CampaignObservation, CausalContrastRequest,
-    ClonalEvolutionGraph, ClonalEvolutionRequest, CloneContinuationCandidate,
-    CloneContinuationRequest, ClonePanelObservation, ClonePanelOutcomeAnalysis,
-    ClonePanelOutcomeRequest, ClonePerturbationCandidate, ClonePerturbationPanel,
-    ClonePerturbationPanelRequest, CloneProfile, ClosedLoopCampaignRequest,
+    BeliefRevisionRequest, BlockedRandomizationRequest, CalibratedMechanismCampaignRequest,
+    CalibrationRequest, CalibrationRun, CampaignAction, CampaignMechanism, CampaignObservation,
+    CausalContrastRequest, ClonalEvolutionGraph, ClonalEvolutionRequest,
+    CloneContinuationCandidate, CloneContinuationRequest, ClonePanelObservation,
+    ClonePanelOutcomeAnalysis, ClonePanelOutcomeRequest, ClonePerturbationCandidate,
+    ClonePerturbationPanel, ClonePerturbationPanelRequest, CloneProfile, ClosedLoopCampaignRequest,
     ClosureInterpretationRequest, CombinationObservation, CombinationSynergyRequest,
     ComputationCandidate, ComputationExecutionMode, ComputationExecutionRequest,
     ComputationInterpretationEvidenceGateRequest, ComputationInterpretationFrontierRequest,
@@ -2576,6 +2577,9 @@ impl Server {
                 self.glioma_replication_protocol_compile(&arguments)
             }
             "glioma_robust_experiment_design" => self.glioma_robust_experiment_design(&arguments),
+            "glioma_blocked_randomization_design" => {
+                self.glioma_blocked_randomization_design(&arguments)
+            }
             "glioma_adaptive_information_campaign" => {
                 self.glioma_adaptive_information_campaign(&arguments)
             }
@@ -11737,6 +11741,36 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma robust experiment design: {error}"))
+    }
+
+    /// Compile a confounding-aware blocked randomization matrix for a preclinical glioma study.
+    /// The planner balances declared nuisance strata and spends residual capacity on the highest
+    /// variance-aware information gain; it never randomizes specimens or dispatches a protocol.
+    fn glioma_blocked_randomization_design(&self, arguments: &Value) -> Result<Value, String> {
+        let request: BlockedRandomizationRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_blocked_randomization_design requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma blocked-randomization request: {error}"))?;
+        let design = plan_glioma_blocked_randomization(&request)
+            .map_err(|error| format!("glioma blocked randomization refused: {error}"))?;
+        serde_json::to_value(json!({
+            "design": design,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "next_routes": [
+                "glioma_protocol_simulate",
+                "glioma_power_reestimate",
+                "glioma_replication_plan"
+            ],
+            "guarantees": [
+                "declared nuisance strata are balanced explicitly rather than hidden in a post-hoc adjustment",
+                "integer allocation uses variance-aware marginal information gain per unit cost",
+                "risk, feasibility, capacity, budget, and excluded-arm evidence remain visible",
+                "the route performs no assay, instrument, federation, raw-data, or clinical action"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma blocked randomization design: {error}"))
     }
 
     /// Replan a local adaptive glioma assay campaign from categorical outcomes already returned
@@ -53245,6 +53279,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_replication_continuation",
                 "glioma_replication_protocol_compile",
                 "glioma_robust_experiment_design",
+                "glioma_blocked_randomization_design",
                 "glioma_adaptive_information_campaign",
                 "glioma_active_learning",
                 "glioma_active_learning_campaign_execute",
@@ -64080,6 +64115,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "AdaptivePanelRequest1@1 with mechanism priors, candidate panel actions, budget, selection, information, diversity, feasibility, risk, and cost bounds."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_blocked_randomization_design",
+        "description": "Compile a confounding-aware blocked randomization matrix for a preclinical glioma experiment. Balances declared nuisance strata, allocates residual capacity with integer variance-aware information gain per cost, and preserves risk-, feasibility-, capacity-, and budget-blocked arms. This route is planning-only and never randomizes specimens, dispatches instruments, moves raw data, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "BlockedRandomizationRequest1@1 containing model system, weighted nuisance blocks with capacity/variance, candidate arms with expected effect/cost/risk/feasibility, and bounded budget/replicate gates."}
             },
             "required": ["request"]
         }

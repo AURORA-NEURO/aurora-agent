@@ -365,6 +365,7 @@ crates/research/src/glioma/
     p06_experiment_design/campaign.rs       P06 mechanism-aware closed-loop assay campaign controller and executor seam
     p06_experiment_design/information_design.rs P06 integer Bayesian assay selection by expected mechanism-information reduction
     p06_experiment_design/robust_design.rs P06 maximin scenario-aware replicate allocation with diminishing utility and explicit risk/feasibility gates
+    p06_experiment_design/blocked_randomization.rs P06 confounding-aware blocked randomization planner with nuisance-stratum balance, variance-aware information gain, and explicit capacity/risk gates
     p06_experiment_design/adaptive_information_campaign.rs P06 closed-loop posterior updating and re-planning through a caller-owned assay executor
     p06_experiment_design/adaptive_allocation_campaign.rs P06 autonomous Beta-posterior replicate allocation with aggregate batch validation and posterior replanning
     p06_experiment_design/multi_fidelity.rs P06 cost-aware multi-fidelity surrogate optimization across screening, mechanistic, and validation models
@@ -1115,6 +1116,12 @@ interventions. It estimates mediator, total, direct, and indirect effects with i
 propagates measurement uncertainty into signal-to-noise, and runs leave-one-unit-out influence
 bounds. Underpowered arms, zero mediator variance, null effects, and fragile decompositions remain
 explicit rather than being promoted into mechanistic or clinical conclusions.
+
+P06 also includes blocked randomization design (`plan_glioma_blocked_randomization`). It turns
+declared nuisance strata into a deterministic allocation matrix, keeps arm counts balanced within
+each block, and spends residual capacity using integer variance-aware information gain per unit
+cost. Risk- and feasibility-blocked arms, capacity shortfalls, and imbalance uncertainty remain
+visible; the planner never randomizes specimens or dispatches a protocol.
 
 P06 also includes multi-fidelity optimization (`plan_glioma_multi_fidelity_optimization`). It
 calibrates paired designs across screening, mechanistic, and validation scales, combines transferred
