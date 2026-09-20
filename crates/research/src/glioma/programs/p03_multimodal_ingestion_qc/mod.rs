@@ -19,6 +19,7 @@ pub mod operating_cycle;
 pub mod prospective_quality;
 pub mod quality_adaptive_campaign;
 pub mod quality_execution;
+pub mod quality_recovery;
 pub mod quality_remediation;
 pub mod quality_root_cause;
 pub mod quality_scheduler;
@@ -122,6 +123,12 @@ pub use quality_execution::{
     QualityExecutionFailure, QualityExecutionMode, QualityExecutionObservation,
     QualityExecutionRequest, QualityExecutionResult, QualityExecutionRun,
     QualityExecutionStopReason, QualityRunDisposition, QualityScheduleExecutor,
+};
+pub use quality_recovery::{
+    verify_glioma_multimodal_quality_recovery, QualityRecoveryCampaignDisposition,
+    QualityRecoveryError, QualityRecoveryModalityDisposition, QualityRecoveryModalityResult,
+    QualityRecoveryObservation, QualityRecoveryPhase, QualityRecoveryRequest,
+    QualityRecoveryResult,
 };
 pub use quality_remediation::{
     plan_glioma_multimodal_quality_remediation, QualityRemediationActionKind,

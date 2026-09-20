@@ -579,7 +579,8 @@ use bioprism_research::{
     select_glioma_actions, simulate_glioma_counterfactual, simulate_glioma_counterfactual_ensemble,
     simulate_glioma_mechanism_dynamics, simulate_glioma_protocol, surveil_glioma_evidence,
     surveil_glioma_multimodal_drift, synthesize_glioma_interpretation, triangulate_glioma_evidence,
-    update_glioma_mechanism_posterior, validate_feature_catalog, ActionPortfolioExecutionRequest,
+    update_glioma_mechanism_posterior, validate_feature_catalog,
+    verify_glioma_multimodal_quality_recovery, ActionPortfolioExecutionRequest,
     ActiveLearningCampaignRequest, ActiveLearningCandidate, ActiveLearningObservation,
     ActiveLearningRequest, AdaptiveAllocationCampaignRequest, AdaptiveAllocationRequest,
     AdaptiveArmObservation, AdaptiveCloneCampaignRequest, AdaptiveDecisionBranchCampaignRequest,
@@ -667,22 +668,23 @@ use bioprism_research::{
     ProspectiveQualityRequest, ProtocolBranchOptimizationRequest, ProtocolCompensationRequest,
     ProtocolEvidenceFusionRequest, ProtocolEvidenceSurfaceRequest, ProtocolExecutionRequest,
     ProtocolSimulationRequest, ProtocolTransportGateRequest, QualityAdaptiveCampaignRequest,
-    QualityExecutionMode, QualityExecutionRequest, QualityRemediationRequest,
-    QualityRootCauseRequest, QualityScheduleRequest, QualityTransportRequest, ReleaseExecutionMode,
-    ReleaseGateRequest, ReliabilityCalibrationRequest, ReplayCampaign, ReplayCampaignRequest,
-    ReplicationRequest, ReplicationStudy, ResearchObjectRequest,
-    RobustActiveLearningCampaignRequest, RobustActiveLearningCandidate,
-    RobustActiveLearningObservation, RobustActiveLearningRequest, RobustExperimentDesignRequest,
-    RobustInterventionCandidate, RobustInterventionRequest, RobustnessGuidedComputationRequest,
-    RobustnessRequest, ScientificFrontierExecutionRequest, ScientificFrontierRequest,
-    SensitivityObservation, SensitivityRequest, SequentialArmObservation,
-    SequentialCampaignRequest, SequentialDesignRequest, SpatialCell, SpatialCommunicationCell,
-    SpatialCommunicationRequest, SpatialNicheRequest, SpatialPropagationRequest,
-    SpatialRegistrationCell, SpatialRegistrationRequest, StateTransitionObservation,
-    StateTransitionRequest, StaticGliomaActionPlanner, StaticGliomaComputationPlanner,
-    StratifiedCausalRequest, StratifiedObservation, TemporalFusionRequest, TemporalObservation,
-    TemporalSpatialAlignmentRequest, TrajectoryObservation, TrajectoryRequest, TransportStudy,
-    TransportabilityRequest, TypedKnowledge,
+    QualityExecutionMode, QualityExecutionRequest, QualityRecoveryRequest,
+    QualityRemediationRequest, QualityRootCauseRequest, QualityScheduleRequest,
+    QualityTransportRequest, ReleaseExecutionMode, ReleaseGateRequest,
+    ReliabilityCalibrationRequest, ReplayCampaign, ReplayCampaignRequest, ReplicationRequest,
+    ReplicationStudy, ResearchObjectRequest, RobustActiveLearningCampaignRequest,
+    RobustActiveLearningCandidate, RobustActiveLearningObservation, RobustActiveLearningRequest,
+    RobustExperimentDesignRequest, RobustInterventionCandidate, RobustInterventionRequest,
+    RobustnessGuidedComputationRequest, RobustnessRequest, ScientificFrontierExecutionRequest,
+    ScientificFrontierRequest, SensitivityObservation, SensitivityRequest,
+    SequentialArmObservation, SequentialCampaignRequest, SequentialDesignRequest, SpatialCell,
+    SpatialCommunicationCell, SpatialCommunicationRequest, SpatialNicheRequest,
+    SpatialPropagationRequest, SpatialRegistrationCell, SpatialRegistrationRequest,
+    StateTransitionObservation, StateTransitionRequest, StaticGliomaActionPlanner,
+    StaticGliomaComputationPlanner, StratifiedCausalRequest, StratifiedObservation,
+    TemporalFusionRequest, TemporalObservation, TemporalSpatialAlignmentRequest,
+    TrajectoryObservation, TrajectoryRequest, TransportStudy, TransportabilityRequest,
+    TypedKnowledge,
 };
 use bioprism_routing::{
     lab::{run as run_routing_lab, LabSettings, Task},
@@ -2385,6 +2387,9 @@ impl Server {
             }
             "glioma_multimodal_quality_remediation" => {
                 self.glioma_multimodal_quality_remediation(&arguments)
+            }
+            "glioma_multimodal_quality_recovery" => {
+                self.glioma_multimodal_quality_recovery(&arguments)
             }
             "glioma_multimodal_missingness" => self.glioma_multimodal_missingness(&arguments),
             "glioma_multimodal_reliability" => self.glioma_multimodal_reliability(&arguments),
@@ -8530,6 +8535,30 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma quality remediation plan: {error}"))
+    }
+
+    /// Verify paired baseline and post-remediation local QC recovery.
+    fn glioma_multimodal_quality_recovery(&self, arguments: &Value) -> Result<Value, String> {
+        let request: QualityRecoveryRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_multimodal_quality_recovery requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma quality recovery request: {error}"))?;
+        let recovery = verify_glioma_multimodal_quality_recovery(&request)
+            .map_err(|error| format!("glioma quality recovery verification refused: {error}"))?;
+        serde_json::to_value(json!({
+            "recovery": recovery,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "next_routes": ["glioma_multimodal_quality_adaptive_campaign", "glioma_multimodal_readiness", "glioma_multimodal_quality_scheduler"],
+            "guarantees": [
+                "paired baseline and post-remediation evidence is conservatively aggregated without imputation",
+                "quality floors, reliability, sample coverage, improvement, and drift gates remain explicit",
+                "failed or blocked modalities cannot be admitted to downstream analysis by this route",
+                "route performs no assay, instrument, federation, raw-data, or clinical action"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma quality recovery verification: {error}"))
     }
 
     /// Cluster de-identified preclinical glioma sample lineages from multiple modality vectors.
@@ -51964,6 +51993,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_multimodal_quality_transport",
                 "glioma_multimodal_quality_root_cause",
                 "glioma_multimodal_quality_remediation",
+                "glioma_multimodal_quality_recovery",
                 "glioma_multimodal_consensus",
                 "glioma_multimodal_harmonize",
                 "glioma_multimodal_latent_factors",
@@ -61679,6 +61709,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "QualityRemediationRequest1@1 with attributed process causes, typed remediation candidates, evidence/prerequisite bindings, resource budgets, risk/recovery floors, and approval policy."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_multimodal_quality_recovery",
+        "description": "Verify paired baseline and post-remediation preclinical glioma multimodal QC recovery. Uses conservative medians and explicit quality, coverage, alignment, drift, reliability, sample, and improvement gates to route modalities to proceed, iterate, escalate, or remain blocked; MCP never executes assays or makes biological or clinical decisions.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "QualityRecoveryRequest1@1 with remediation binding, canonical required modalities, paired local observations, reliability/sample floors, target QC floors, drift ceiling, and improvement gate."}
             },
             "required": ["request"]
         }

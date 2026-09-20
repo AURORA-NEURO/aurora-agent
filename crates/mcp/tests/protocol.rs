@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 755;
+const TOOL_DEFINITION_COUNT: usize = 756;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -1686,6 +1686,42 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
             .unwrap()
             .len(),
         1
+    );
+
+    let quality_recovery = call(
+        &mut server,
+        "glioma_multimodal_quality_recovery",
+        json!({
+            "request": {
+                "objective": "verify QC recovery before glioma analysis admission",
+                "incident_id": "incident-mcp-1",
+                "study_id": "root-cause-study",
+                "model_system": "organoid",
+                "remediation_action_id": "reharmonize-batch",
+                "required_modalities": ["genomics"],
+                "observations": [
+                    {"observation_id":"baseline-g","modality":"genomics","phase":"baseline","quality_milli":600,"coverage_milli":650,"alignment_milli":700,"drift_milli":300,"reliability_milli":900,"sample_count":4},
+                    {"observation_id":"post-g","modality":"genomics","phase":"post_remediation","quality_milli":900,"coverage_milli":900,"alignment_milli":900,"drift_milli":50,"reliability_milli":900,"sample_count":4}
+                ],
+                "min_samples_per_phase":2,
+                "min_reliability_milli":700,
+                "min_quality_milli":800,
+                "min_coverage_milli":800,
+                "min_alignment_milli":800,
+                "max_drift_milli":100,
+                "min_improvement_milli":50
+            }
+        }),
+    );
+    assert_eq!(quality_recovery["dispatch"], json!("not_started"));
+    assert_eq!(quality_recovery["simulation_only"], json!(true));
+    assert_eq!(
+        quality_recovery["recovery"]["disposition"],
+        json!("recovered")
+    );
+    assert_eq!(
+        quality_recovery["recovery"]["proceed_modalities"],
+        json!(["genomics"])
     );
 
     let harmonization = call(

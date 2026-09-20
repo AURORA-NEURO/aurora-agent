@@ -361,6 +361,8 @@ crates/research/src/glioma/
                                              P03 measurement-process QC incident attribution with contradiction, missing-evidence, and remediation gates
   p03_multimodal_ingestion_qc/quality_remediation.rs
                                              P03 budgeted approval-aware remediation planning from QC causes to local recovery actions
+  p03_multimodal_ingestion_qc/quality_recovery.rs
+                                             P03 paired baseline/post-remediation recovery verification with proceed, iterate, and escalate gates
   p03_multimodal_ingestion_qc/spatial_niche.rs
                                              P03 spatial neighbourhood graph, same-lineage niche components, and cross-lineage enrichment
   p03_multimodal_ingestion_qc/spatial_communication.rs
@@ -587,6 +589,11 @@ competing process causes into deterministic, budgeted action sequences. It ranks
 re-preparation, alignment, transport, connector quarantine, instrument inspection, and orthogonal
 QC actions by expected recovery versus cost, duration, and risk; approval requirements, unavailable
 capabilities, resource bounds, and rejected actions remain explicit for the execution campaign.
+Paired recovery verification (`verify_glioma_multimodal_quality_recovery`) closes the loop by
+conservatively aggregating baseline and post-remediation QC observations, requiring target floors,
+reliability, sample coverage, and multi-metric improvement, then routing each modality to proceed,
+iterate, escalate, or remain blocked. Missing paired evidence and failed floors prevent downstream
+analysis admission rather than being converted into a confident scientific conclusion.
 The feature transfers no raw data and never treats QC-policy portability as biological validity.
 P05 now also includes signed pathway activity inference (`analyze_glioma_pathway_activity`) that
 maps declared modality-specific molecular nodes to reliability-weighted pathway activity, compares
