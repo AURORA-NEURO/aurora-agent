@@ -568,7 +568,8 @@ use bioprism_research::{
     explore_mechanisms, filter_glioma_mechanism_states, forecast_glioma_multimodal_quality,
     fuse_glioma_protocol_evidence, gate_glioma_protocol_transport, generate_feature_catalog,
     glioma_program_catalog, govern_glioma_decision_loop, harmonize_glioma_multimodal_batches,
-    harmonize_multimodal_inputs, optimize_glioma_decision_value, optimize_glioma_protocol_branches,
+    harmonize_multimodal_inputs, interpret_glioma_replication_closure,
+    optimize_glioma_decision_value, optimize_glioma_protocol_branches,
     plan_adaptive_glioma_dose_surface, plan_decision_actions, plan_federated_benchmark_sites,
     plan_glioma_active_learning, plan_glioma_adaptive_information_campaign,
     plan_glioma_adaptive_mechanism_policy, plan_glioma_adaptive_panel,
@@ -610,10 +611,11 @@ use bioprism_research::{
     ClonalEvolutionGraph, ClonalEvolutionRequest, CloneContinuationCandidate,
     CloneContinuationRequest, ClonePanelObservation, ClonePanelOutcomeAnalysis,
     ClonePanelOutcomeRequest, ClonePerturbationCandidate, ClonePerturbationPanel,
-    ClonePerturbationPanelRequest, CloneProfile, ClosedLoopCampaignRequest, CombinationObservation,
-    CombinationSynergyRequest, ComputationCandidate, ComputationExecutionMode,
-    ComputationExecutionRequest, ComputationPlacementRequest, ComputationPortfolioExecutionRequest,
-    ComputationPortfolioRequest, ComputationRecoveryRequest, ConcordanceRequest, ConsensusRequest,
+    ClonePerturbationPanelRequest, CloneProfile, ClosedLoopCampaignRequest,
+    ClosureInterpretationRequest, CombinationObservation, CombinationSynergyRequest,
+    ComputationCandidate, ComputationExecutionMode, ComputationExecutionRequest,
+    ComputationPlacementRequest, ComputationPortfolioExecutionRequest, ComputationPortfolioRequest,
+    ComputationRecoveryRequest, ConcordanceRequest, ConsensusRequest,
     ContradictionAdjudicationRequest, ContradictionCutRequest, ContradictionEvidence,
     ContrastDesignRequest, CounterfactualEnsembleRequest, CounterfactualIntervention,
     CounterfactualModel, CounterfactualRequest, DecisionActionGraphRequest,
@@ -2537,6 +2539,9 @@ impl Server {
             }
             "glioma_replication_closure_campaign_execute" => {
                 self.glioma_replication_closure_campaign_execute(&arguments)
+            }
+            "glioma_replication_closure_interpret" => {
+                self.glioma_replication_closure_interpret(&arguments)
             }
             "glioma_mechanism_validation_protocol_compile" => {
                 self.glioma_mechanism_validation_protocol_compile(&arguments)
@@ -11228,6 +11233,38 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma replication-closure campaign: {error}"))
+    }
+
+    /// Add observed closure-campaign replication summaries to the cross-family P10 interpreter.
+    /// The route is analysis-only: unresolved and negative campaign states stay unresolved or
+    /// negative, and no clinical, physical, federation, or publication action is dispatched.
+    fn glioma_replication_closure_interpret(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ClosureInterpretationRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_replication_closure_interpret requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma closure-interpretation request: {error}"))?;
+        let interpretation = interpret_glioma_replication_closure(&request)
+            .map_err(|error| format!("glioma closure interpretation refused: {error}"))?;
+        serde_json::to_value(json!({
+            "interpretation": interpretation,
+            "execution_mode": "local_analysis",
+            "physical_dispatch": false,
+            "simulation_only": false,
+            "next_routes": [
+                "glioma_replication_closure_frontier",
+                "glioma_replication_closure_campaign_execute",
+                "glioma_research_object_prepare",
+                "glioma_release_operating_cycle"
+            ],
+            "guarantees": [
+                "only observed executable closure campaigns become replication-family evidence",
+                "held, unresolved, negative, partial, and contradictory evidence remains explicit",
+                "the synthesis is bounded by declared model, objective, uncertainty, and replication-family gates",
+                "the route never makes a clinical decision or moves raw protected data"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma closure interpretation: {error}"))
     }
 
     /// Compile the still-open mechanism validation decisions into a deterministic local P07
@@ -52917,6 +52954,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_replication_closure_frontier",
                 "glioma_replication_closure_execute",
                 "glioma_replication_closure_campaign_execute",
+                "glioma_replication_closure_interpret",
                 "glioma_mechanism_validation_protocol_compile",
                 "glioma_mechanism_validation_protocol_execute",
                 "glioma_information_design",
@@ -63637,6 +63675,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "ReplicationClosureCampaignRequest1@1 containing a matching objective/model system, validated closure execution frontiers, global budget, round/stop policy, and replay identity."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_replication_closure_interpret",
+        "description": "Convert observed glioma replication-closure campaign summaries into the cross-family P10 interpretation engine. Only executable campaign rounds become replication-family evidence; held, negative, partial, unresolved, and contradictory states remain explicit, with uncertainty and leave-one-out synthesis gates. This route performs local analysis only and never makes a clinical decision or moves raw protected data.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ClosureInterpretationRequest1@1 containing a validated ReplicationClosureCampaignRun1@1 and matching InterpretationSynthesisRequest1@1."}
             },
             "required": ["request"]
         }

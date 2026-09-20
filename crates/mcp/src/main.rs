@@ -144,6 +144,7 @@ fn main() {
                      glioma_replication_closure_frontier,\n\
                      glioma_replication_closure_execute,\n\
                      glioma_replication_closure_campaign_execute,\n\
+                     glioma_replication_closure_interpret,\n\
                      glioma_mechanism_validation_protocol_compile,\n\
                      glioma_mechanism_validation_protocol_execute,\n\
                      glioma_information_design, glioma_adaptive_panel, glioma_replication_plan, glioma_replication_continuation, glioma_replication_protocol_compile,\n\

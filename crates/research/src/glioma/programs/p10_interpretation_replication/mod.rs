@@ -10,6 +10,7 @@ pub mod causal_adjustment;
 pub mod causal_contrast;
 pub mod claim_adjudication;
 pub mod clone_outcomes;
+pub mod closure_interpretation;
 pub mod dynamic_policy;
 pub mod mediation;
 pub mod meta_analysis;
@@ -81,6 +82,10 @@ pub use mediation::{
     MediationObservation, MediationRequest,
 };
 
+pub use closure_interpretation::{
+    interpret_glioma_replication_closure, ClosureInterpretationDisposition,
+    ClosureInterpretationError, ClosureInterpretationRequest, ClosureInterpretationRun,
+};
 pub use meta_analysis::{
     analyze_replication_meta_analysis, MetaAnalysisDisposition, MetaAnalysisError,
     MetaAnalysisRequest, MetaStudyContribution, ReplicationMetaAnalysis,

@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 780;
+const TOOL_DEFINITION_COUNT: usize = 781;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -3054,6 +3054,55 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
     assert_eq!(
         replication_closure_campaign["campaign"]["stop_reason"],
         json!("held_by_frontier")
+    );
+
+    let closure_interpretation = call(
+        &mut server,
+        "glioma_replication_closure_interpret",
+        json!({
+            "request": {
+                "campaign": replication_closure_campaign["campaign"].clone(),
+                "minimum_campaign_evidence": 0,
+                "synthesis": {
+                    "objective": validation_replication_campaign["campaign"]["objective"].clone(),
+                    "hypothesis": "the invasion mechanism is reproducible across the declared model boundary",
+                    "model_system": "organoid",
+                    "min_evidence": 1,
+                    "min_independent_groups": 1,
+                    "min_families": 1,
+                    "min_quality_milli": 1,
+                    "effect_threshold_milli": 10,
+                    "max_disagreement_milli": 1000,
+                    "max_leave_one_out_shift_milli": 1000,
+                    "require_replication_family": true,
+                    "replay_identity": replay_identity,
+                    "evidence": [{
+                        "evidence_id": "mcp-causal-seed",
+                        "family": "causal_contrast",
+                        "independent_group": "mcp-study",
+                        "model_system": "organoid",
+                        "direction": "positive",
+                        "effect_milli": 100,
+                        "uncertainty_milli": 20,
+                        "quality_milli": 800,
+                        "sample_count": 3,
+                        "artifact": {
+                            "artifact_id": "mcp-causal-artifact",
+                            "content_hash": artifact_hash,
+                            "content_type": "application/vnd.aurora.glioma.analysis+json",
+                            "local_only": true,
+                            "contains_human_data": false,
+                            "contains_direct_identifiers": false
+                        },
+                        "negative_evidence": []
+                    }]
+                }
+            }
+        }),
+    );
+    assert_eq!(
+        closure_interpretation["interpretation"]["disposition"],
+        json!("partial")
     );
 
     let information_design = call(

@@ -134,6 +134,8 @@ crates/research/src/glioma/
                                              P10 selected closure-frontier execution through a bounded replication campaign worker seam
   programs/p10_interpretation_replication/replication_closure_campaign.rs
                                              P10 multi-round closure campaign with global budget, terminal stops, and replayable progress
+  programs/p10_interpretation_replication/closure_interpretation.rs
+                                             P10 closure-campaign replication summaries into cross-family uncertainty-aware interpretation
   programs/p07_protocol_simulation/mechanism_validation_execution.rs
                                              P07 compiled validation protocol execution through a bounded institution-local worker seam
   programs/p05_mechanism_exploration/operating_cycle.rs
@@ -953,6 +955,13 @@ a global budget before dispatch, rejects objective/model drift and duplicate act
 held and partial rounds, and stops on qualified, negative, unresolved, blocked, or exhausted
 states. This is workflow execution over typed scientific decisions, not a receipt-only transport
 layer; every round still requires the same local executor and preclinical boundary.
+The closure interpretation bridge (`interpret_glioma_replication_closure`) converts only observed
+campaign rounds into the existing replication evidence family, then reruns cross-family synthesis
+with replication-required, quality, disagreement, and leave-one-out gates. Held frontiers produce
+no evidence; negative, partial, unresolved, and contradictory rounds remain visible in the output
+and drive the next scientific action. This gives the autonomous engine a usable conclusion surface
+without allowing a workflow receipt, synthetic artifact, or clinical inference to masquerade as
+research evidence.
 P11 now adds a dependency-aware reproducibility replay campaign
 (`execute_glioma_replay_campaign`). It schedules declared program replays, compares exact artifact
 hashes, blocks downstream tasks after mismatch or unavailable outputs, and only emits a
