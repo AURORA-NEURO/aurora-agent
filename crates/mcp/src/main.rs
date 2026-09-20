@@ -208,6 +208,7 @@ fn main() {
                      glioma_clone_continuation,\n\
                      glioma_adaptive_clone_campaign_execute,\n\
                      glioma_federated_benchmark_consensus,\n\
+                     glioma_federated_interpretation,\n\
                      glioma_federated_benchmark_site_plan,\n\
                      glioma_federated_mechanism_transport,\n\
                      glioma_federated_mechanism_transport_campaign_execute,\n\

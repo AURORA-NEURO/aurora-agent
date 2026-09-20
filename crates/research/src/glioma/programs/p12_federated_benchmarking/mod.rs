@@ -5,6 +5,7 @@ use crate::glioma::catalog::{glioma_program_catalog, GliomaProgramDescriptor, Gl
 pub mod adaptive_campaign;
 pub mod campaign;
 pub mod consensus;
+pub mod federated_interpretation;
 pub mod mechanism_transport;
 pub mod operating_cycle;
 pub mod replication_transport;
@@ -30,6 +31,10 @@ pub use consensus::{
     analyze_federated_benchmark, FederatedBenchmarkConsensus, FederatedBenchmarkContribution,
     FederatedBenchmarkDisposition, FederatedBenchmarkError, FederatedBenchmarkRequest,
     FederatedBenchmarkSite, FederatedBenchmarkSiteDisposition,
+};
+pub use federated_interpretation::{
+    interpret_glioma_federated_closure, FederatedInterpretationDisposition,
+    FederatedInterpretationError, FederatedInterpretationRequest, FederatedInterpretationRun,
 };
 
 pub use mechanism_transport::{

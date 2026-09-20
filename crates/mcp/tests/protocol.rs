@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 781;
+const TOOL_DEFINITION_COUNT: usize = 782;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -3103,6 +3103,60 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
     assert_eq!(
         closure_interpretation["interpretation"]["disposition"],
         json!("partial")
+    );
+
+    let federated_interpretation = call(
+        &mut server,
+        "glioma_federated_interpretation",
+        json!({
+            "request": {
+                "interpretation": closure_interpretation["interpretation"].clone(),
+                "benchmark": {
+                    "objective": validation_replication_campaign["campaign"]["objective"].clone(),
+                    "capability_id": "glioma:invasion",
+                    "benchmark_world": "glioma-world-v1",
+                    "metric_name": "holdout_effect",
+                    "model_system": "organoid",
+                    "minimum_sites": 1,
+                    "minimum_replicates_per_site": 1,
+                    "effect_threshold_milli": 1,
+                    "max_i2_milli": 1000,
+                    "min_signal_to_noise_milli": 1,
+                    "max_site_spread_milli": 1000,
+                    "max_leave_one_out_shift_milli": 1000
+                },
+                "sites": [{
+                    "site_id": "mcp-site-a",
+                    "study_id": "mcp-study-a",
+                    "capability_id": "glioma:invasion",
+                    "benchmark_world": "glioma-world-v1",
+                    "metric_name": "holdout_effect",
+                    "model_system": "organoid",
+                    "artifact": {
+                        "artifact_id": "mcp-federated-artifact",
+                        "content_hash": artifact_hash,
+                        "content_type": "application/vnd.aurora.glioma.federated-benchmark+json",
+                        "local_only": true,
+                        "contains_human_data": false,
+                        "contains_direct_identifiers": false
+                    },
+                    "baseline_score_milli": 500,
+                    "candidate_score_milli": 650,
+                    "uncertainty_milli": 100,
+                    "replicate_count": 2
+                }],
+                "require_qualified_interpretation": false,
+                "require_qualified_consensus": true
+            }
+        }),
+    );
+    assert_eq!(
+        federated_interpretation["interpretation"]["disposition"],
+        json!("partial")
+    );
+    assert_eq!(
+        federated_interpretation["interpretation"]["alignment"],
+        json!(false)
     );
 
     let information_design = call(

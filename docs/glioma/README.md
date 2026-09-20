@@ -136,6 +136,8 @@ crates/research/src/glioma/
                                              P10 multi-round closure campaign with global budget, terminal stops, and replayable progress
   programs/p10_interpretation_replication/closure_interpretation.rs
                                              P10 closure-campaign replication summaries into cross-family uncertainty-aware interpretation
+  programs/p12_federated_benchmarking/federated_interpretation.rs
+                                             P12 aggregate-only consortium consensus aligned with local closure interpretation
   programs/p07_protocol_simulation/mechanism_validation_execution.rs
                                              P07 compiled validation protocol execution through a bounded institution-local worker seam
   programs/p05_mechanism_exploration/operating_cycle.rs
@@ -962,6 +964,11 @@ no evidence; negative, partial, unresolved, and contradictory rounds remain visi
 and drive the next scientific action. This gives the autonomous engine a usable conclusion surface
 without allowing a workflow receipt, synthetic artifact, or clinical inference to masquerade as
 research evidence.
+The federated interpretation gate (`interpret_glioma_federated_closure`) joins that local P10
+conclusion with independent aggregate benchmark consensus. Qualification requires alignment;
+heterogeneous, negative, underpowered, and model-discordant consortium outcomes remain explicit
+next-work. Raw traces stay institution-local, making this a scientific generalization gate rather
+than an export or receipt mechanism.
 P11 now adds a dependency-aware reproducibility replay campaign
 (`execute_glioma_replay_campaign`). It schedules declared program replays, compares exact artifact
 hashes, blocks downstream tasks after mismatch or unavailable outputs, and only emits a

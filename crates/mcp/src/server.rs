@@ -568,20 +568,20 @@ use bioprism_research::{
     explore_mechanisms, filter_glioma_mechanism_states, forecast_glioma_multimodal_quality,
     fuse_glioma_protocol_evidence, gate_glioma_protocol_transport, generate_feature_catalog,
     glioma_program_catalog, govern_glioma_decision_loop, harmonize_glioma_multimodal_batches,
-    harmonize_multimodal_inputs, interpret_glioma_replication_closure,
-    optimize_glioma_decision_value, optimize_glioma_protocol_branches,
-    plan_adaptive_glioma_dose_surface, plan_decision_actions, plan_federated_benchmark_sites,
-    plan_glioma_active_learning, plan_glioma_adaptive_information_campaign,
-    plan_glioma_adaptive_mechanism_policy, plan_glioma_adaptive_panel,
-    plan_glioma_adaptive_research_frontier, plan_glioma_adaptive_workflow,
-    plan_glioma_clone_continuation, plan_glioma_clone_perturbation_panel,
-    plan_glioma_closed_loop_campaign, plan_glioma_computation_portfolio,
-    plan_glioma_decision_branches, plan_glioma_evidence_acquisition,
-    plan_glioma_evidence_contradiction_cut, plan_glioma_information_design,
-    plan_glioma_mechanism_validation, plan_glioma_multi_fidelity_optimization,
-    plan_glioma_multimodal_portfolio, plan_glioma_multimodal_quality_remediation,
-    plan_glioma_multimodal_quality_schedule, plan_glioma_power_reestimation,
-    plan_glioma_protocol_compensation, plan_glioma_replication,
+    harmonize_multimodal_inputs, interpret_glioma_federated_closure,
+    interpret_glioma_replication_closure, optimize_glioma_decision_value,
+    optimize_glioma_protocol_branches, plan_adaptive_glioma_dose_surface, plan_decision_actions,
+    plan_federated_benchmark_sites, plan_glioma_active_learning,
+    plan_glioma_adaptive_information_campaign, plan_glioma_adaptive_mechanism_policy,
+    plan_glioma_adaptive_panel, plan_glioma_adaptive_research_frontier,
+    plan_glioma_adaptive_workflow, plan_glioma_clone_continuation,
+    plan_glioma_clone_perturbation_panel, plan_glioma_closed_loop_campaign,
+    plan_glioma_computation_portfolio, plan_glioma_decision_branches,
+    plan_glioma_evidence_acquisition, plan_glioma_evidence_contradiction_cut,
+    plan_glioma_information_design, plan_glioma_mechanism_validation,
+    plan_glioma_multi_fidelity_optimization, plan_glioma_multimodal_portfolio,
+    plan_glioma_multimodal_quality_remediation, plan_glioma_multimodal_quality_schedule,
+    plan_glioma_power_reestimation, plan_glioma_protocol_compensation, plan_glioma_replication,
     plan_glioma_replication_closure_frontier, plan_glioma_replication_continuation,
     plan_glioma_robust_active_learning, plan_glioma_robust_intervention_portfolio,
     plan_glioma_scientific_frontier, plan_glioma_sequential_design,
@@ -645,7 +645,7 @@ use bioprism_research::{
     ExperimentRequest, FederatedBenchmarkAdaptiveCampaignRequest,
     FederatedBenchmarkCampaignRequest, FederatedBenchmarkExecutionMode,
     FederatedBenchmarkOperatingCycleRequest, FederatedBenchmarkRequest, FederatedBenchmarkSite,
-    FederatedBenchmarkSitePlannerRequest, FederatedMechanismSite,
+    FederatedBenchmarkSitePlannerRequest, FederatedInterpretationRequest, FederatedMechanismSite,
     FederatedMechanismTransportCampaignRequest, FederatedMechanismTransportRequest,
     FidelityCandidate, FidelityObservation, GliomaActionCandidate,
     GliomaAdaptiveWorkflowSchedulerRequest, GliomaAutonomousCampaignRequest,
@@ -2619,6 +2619,7 @@ impl Server {
             "glioma_federated_benchmark_consensus" => {
                 self.glioma_federated_benchmark_consensus(&arguments)
             }
+            "glioma_federated_interpretation" => self.glioma_federated_interpretation(&arguments),
             "glioma_federated_benchmark_site_plan" => {
                 self.glioma_federated_benchmark_site_plan(&arguments)
             }
@@ -12443,6 +12444,40 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma federated benchmark consensus: {error}"))
+    }
+
+    /// Join a local P10 closure interpretation with aggregate-only P12 consortium consensus.
+    /// Alignment is required for qualification; heterogeneity, negative evidence, and model
+    /// disagreement remain explicit and no raw data or physical effect crosses MCP.
+    fn glioma_federated_interpretation(&self, arguments: &Value) -> Result<Value, String> {
+        let request: FederatedInterpretationRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_federated_interpretation requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma federated interpretation request: {error}"))?;
+        let output = interpret_glioma_federated_closure(&request)
+            .map_err(|error| format!("glioma federated interpretation refused: {error}"))?;
+        serde_json::to_value(json!({
+            "interpretation": output,
+            "dispatch": "not_started",
+            "simulation_only": false,
+            "physical_dispatch": false,
+            "next_routes": [
+                "glioma_federated_benchmark_site_plan",
+                "glioma_federated_benchmark_campaign_execute",
+                "glioma_replication_closure_frontier",
+                "glioma_research_object_prepare"
+            ],
+            "guarantees": [
+                "only aggregate benchmark summaries and a validated local interpretation enter the gate",
+                "qualification requires both local interpretation and cross-site consensus alignment",
+                "heterogeneous, negative, underpowered, and unresolved outcomes remain explicit",
+                "the route never moves raw observations, executes an instrument, or makes a clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma federated interpretation: {error}"))
     }
 
     /// Plan an aggregate-only consortium expansion without dispatching a site or moving raw data.
@@ -52991,6 +53026,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_multimodal_mission_execute",
                 "glioma_multi_fidelity_campaign_execute",
                 "glioma_federated_benchmark_consensus",
+                "glioma_federated_interpretation",
                 "glioma_federated_benchmark_site_plan",
                 "glioma_federated_mechanism_transport",
                 "glioma_federated_mechanism_transport_campaign_execute",
@@ -64092,6 +64128,17 @@ pub fn tool_definitions() -> Vec<Value> {
                 "sites": {"type": "array", "items": {"type": "object"}, "description": "FederatedBenchmarkSite1@1 aggregate-only site scores with local artifact references; raw observations remain local."}
             },
             "required": ["request", "sites"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_federated_interpretation",
+        "description": "Join a validated local glioma closure interpretation with aggregate-only multi-site benchmark consensus. Qualification requires alignment between the local cross-family interpretation and the independent consortium result; heterogeneous, negative, underpowered, contradictory, and unresolved outcomes remain explicit. This route performs analysis only and never moves raw data, executes instruments, or makes clinical decisions.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "FederatedInterpretationRequest1@1 containing ClosureInterpretationRun1@1, matching FederatedBenchmarkRequest1@1, aggregate FederatedBenchmarkSite1@1 entries, and explicit qualification gates."}
+            },
+            "required": ["request"]
         }
     }));
     definitions.push(json!({
