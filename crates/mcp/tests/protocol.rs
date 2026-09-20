@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 741;
+const TOOL_DEFINITION_COUNT: usize = 742;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -1170,6 +1170,45 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
     assert_eq!(
         missingness["audit"]["pairs"][0]["disposition"],
         json!("missing_required")
+    );
+
+    let reliability = call(
+        &mut server,
+        "glioma_multimodal_reliability",
+        json!({
+            "request": {
+                "objective": "calibrate modality reliability before mechanism analysis",
+                "study_id": "mcp-reliability-study",
+                "model_system": "organoid",
+                "sample_ids": ["sample-a", "sample-b"],
+                "required_modalities": ["genomics", "imaging"],
+                "observations": [
+                    {"sample_id":"sample-a","modality":"genomics","replicate_index":0,"value_milli":100,"quality_milli":900},
+                    {"sample_id":"sample-a","modality":"genomics","replicate_index":1,"value_milli":101,"quality_milli":900},
+                    {"sample_id":"sample-a","modality":"imaging","replicate_index":0,"value_milli":100,"quality_milli":900},
+                    {"sample_id":"sample-a","modality":"imaging","replicate_index":1,"value_milli":101,"quality_milli":900},
+                    {"sample_id":"sample-b","modality":"genomics","replicate_index":0,"value_milli":100,"quality_milli":900},
+                    {"sample_id":"sample-b","modality":"genomics","replicate_index":1,"value_milli":101,"quality_milli":900},
+                    {"sample_id":"sample-b","modality":"imaging","replicate_index":0,"value_milli":100,"quality_milli":900},
+                    {"sample_id":"sample-b","modality":"imaging","replicate_index":1,"value_milli":101,"quality_milli":900}
+                ],
+                "min_replicates_per_sample": 2,
+                "max_replicates_per_sample": 4,
+                "min_quality_milli": 700,
+                "max_within_sample_mad_milli": 20,
+                "max_leave_one_out_shift_milli": 20,
+                "min_reliability_milli": 700
+            }
+        }),
+    );
+    assert_eq!(reliability["dispatch"], json!("not_started"));
+    assert_eq!(reliability["simulation_only"], json!(true));
+    assert_eq!(reliability["calibration"]["disposition"], json!("ready"));
+    assert!(
+        reliability["calibration"]["modality_summaries"][0]["reliability_milli"]
+            .as_u64()
+            .unwrap()
+            >= 700
     );
 
     let harmonization = call(

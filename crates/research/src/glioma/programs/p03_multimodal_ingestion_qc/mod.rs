@@ -12,6 +12,7 @@ pub mod latent_factors;
 pub mod missingness_audit;
 pub mod operating_cycle;
 pub mod readiness_gate;
+pub mod reliability_calibration;
 pub mod spatial_communication;
 pub mod spatial_niche;
 pub mod spatial_propagation;
@@ -72,6 +73,11 @@ pub use readiness_gate::{
     execute_glioma_multimodal_readiness_gate, MultimodalReadinessError, MultimodalReadinessRequest,
     MultimodalResearchReadiness, MultimodalResearchReadinessDisposition, MultimodalResearchSurface,
     MultimodalSurfaceDecision, MultimodalSurfaceReadiness,
+};
+pub use reliability_calibration::{
+    calibrate_glioma_multimodal_reliability, ReliabilityCalibration, ReliabilityCalibrationError,
+    ReliabilityCalibrationRequest, ReliabilityDisposition, ReliabilityModalitySummary,
+    ReliabilityObservation,
 };
 pub use spatial_communication::{
     analyze_glioma_spatial_communication, LigandReceptorPair, SpatialCommunicationAnalysis,
