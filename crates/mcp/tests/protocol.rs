@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 775;
+const TOOL_DEFINITION_COUNT: usize = 776;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -2833,6 +2833,47 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
         json!(true)
     );
     assert!(validation_replication_gate["gate"]["replication_plan"].is_null());
+
+    let validation_replication_campaign = call(
+        &mut server,
+        "glioma_validation_replication_campaign_execute",
+        json!({
+            "request": {
+                "gate": validation_replication_gate["gate"].clone(),
+                "replication": {
+                    "objective": "replicate the validated invasion effect across independent organoid sites",
+                    "model_system": "organoid",
+                    "target_model_system": "organoid",
+                    "target_signature": [1, 2],
+                    "min_sites": 2,
+                    "min_replicates_per_site": 1,
+                    "min_studies": 2,
+                    "min_replicates_per_study": 1,
+                    "effect_threshold_milli": 10,
+                    "max_heterogeneity_milli": 500,
+                    "max_i2_milli": 900,
+                    "min_signal_to_noise_milli": 1,
+                    "max_leave_one_out_shift_milli": 500,
+                    "min_quality_milli": 500,
+                    "distance_scale_milli": 1000,
+                    "max_transport_gap_milli": 500,
+                    "max_transport_heterogeneity_milli": 500,
+                    "budget_units": 10,
+                    "max_rounds": 1,
+                    "max_actions_per_round": 1,
+                    "max_retries": 0,
+                    "initial_studies": [],
+                    "initial_transport_studies": [],
+                    "replay_identity": artifact_hash
+                }
+            }
+        }),
+    );
+    assert_eq!(
+        validation_replication_campaign["campaign"]["disposition"],
+        json!("hold_independent_sites")
+    );
+    assert!(validation_replication_campaign["campaign"]["campaign"].is_null());
 
     let information_design = call(
         &mut server,

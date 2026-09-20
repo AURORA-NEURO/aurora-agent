@@ -562,7 +562,8 @@ use bioprism_research::{
     execute_glioma_replication_campaign, execute_glioma_research_autopilot,
     execute_glioma_research_director, execute_glioma_robust_active_learning_campaign,
     execute_glioma_robustness_guided_computation, execute_glioma_scientific_frontier,
-    execute_glioma_sequential_campaign, execute_glioma_validation_campaign, explore_mechanisms,
+    execute_glioma_sequential_campaign, execute_glioma_validation_campaign,
+    execute_glioma_validation_replication_campaign, explore_mechanisms,
     filter_glioma_mechanism_states, forecast_glioma_multimodal_quality,
     fuse_glioma_protocol_evidence, gate_glioma_protocol_transport, generate_feature_catalog,
     glioma_program_catalog, govern_glioma_decision_loop, harmonize_glioma_multimodal_batches,
@@ -701,7 +702,8 @@ use bioprism_research::{
     StratifiedCausalRequest, StratifiedObservation, TemporalFusionRequest, TemporalObservation,
     TemporalSpatialAlignmentRequest, TrajectoryObservation, TrajectoryRequest, TransportStudy,
     TransportabilityRequest, TypedKnowledge, ValidationBatchAssessmentRequest,
-    ValidationCampaignRequest, ValidationReplicationGateRequest,
+    ValidationCampaignRequest, ValidationReplicationCampaignRequest,
+    ValidationReplicationGateRequest,
 };
 use bioprism_routing::{
     lab::{run as run_routing_lab, LabSettings, Task},
@@ -2515,6 +2517,9 @@ impl Server {
             }
             "glioma_validation_replication_gate" => {
                 self.glioma_validation_replication_gate(&arguments)
+            }
+            "glioma_validation_replication_campaign_execute" => {
+                self.glioma_validation_replication_campaign_execute(&arguments)
             }
             "glioma_mechanism_validation_protocol_compile" => {
                 self.glioma_mechanism_validation_protocol_compile(&arguments)
@@ -11028,6 +11033,45 @@ impl Server {
         .map_err(|error| format!("cannot encode glioma validation-replication gate: {error}"))
     }
 
+    /// Execute the guarded P10 multi-site replication/interpretation campaign after validation
+    /// admission. MCP uses the deterministic synthetic worker; institution-owned executors remain
+    /// the only path to local compute, instruments, or biological effects.
+    fn glioma_validation_replication_campaign_execute(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: ValidationReplicationCampaignRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_validation_replication_campaign_execute requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma validation-replication campaign request: {error}")
+            })?;
+        let mut executor = DryRunGliomaReplicationCampaignExecutor::default();
+        let run = execute_glioma_validation_replication_campaign(&request, &mut executor)
+            .map_err(|error| format!("glioma validation-replication campaign refused: {error}"))?;
+        serde_json::to_value(json!({
+            "campaign": run,
+            "execution_mode": "dry_run_local_worker",
+            "physical_dispatch": false,
+            "simulation_only": true,
+            "next_routes": [
+                "glioma_validation_replication_campaign_execute",
+                "glioma_replication_meta_analyze",
+                "glioma_federated_mechanism_transport",
+                "glioma_research_object_prepare"
+            ],
+            "guarantees": [
+                "only an efficacy-qualified validation gate with non-origin sites can invoke the P10 campaign",
+                "site-level replication, meta-analysis, transportability, negative results, and bounded next actions remain typed",
+                "the dry-run worker never promotes synthetic observations to biological evidence",
+                "failed, partial, heterogeneous, underpowered, blocked, and negative states remain explicit",
+                "the route never dispatches an instrument, moves raw data, exports federation payloads, or makes a clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma validation-replication campaign: {error}"))
+    }
+
     /// Compile the still-open mechanism validation decisions into a deterministic local P07
     /// protocol and preflight it against caller-declared culture/compute resources. This route
     /// never executes an assay, instrument, federation, or clinical decision.
@@ -11091,6 +11135,7 @@ impl Server {
                 "glioma_validation_batch_assess",
                 "glioma_validation_campaign_execute",
                 "glioma_validation_replication_gate",
+                "glioma_validation_replication_campaign_execute",
                 "glioma_mechanism_validation_protocol_compile",
                 "glioma_protocol_execute"
             ],
@@ -63374,6 +63419,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "ValidationReplicationGateRequest1@1 containing a validated ValidationCampaignRun1@1, originating site id, independent-site ReplicationContinuationObservation1@1 entries, topology/quality/round bounds, local protocol resources, and deterministic preflight settings."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_validation_replication_campaign_execute",
+        "description": "Execute the guarded P10 preclinical glioma replication/interpretation campaign after validation admission. The route requires a typed efficacy-qualified local validation gate and non-origin sites, then runs the bounded site assessment, meta-analysis, transportability, and next-action controller through MCP's simulation-only worker. Failed, partial, heterogeneous, underpowered, negative, and blocked outcomes remain explicit; no physical, raw-data, federated, or clinical action is dispatched.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ValidationReplicationCampaignRequest1@1 containing a validated ValidationReplicationGate1@1 and a GliomaReplicationCampaignRequest1@1 with institution-local initial studies and bounded campaign settings."}
             },
             "required": ["request"]
         }

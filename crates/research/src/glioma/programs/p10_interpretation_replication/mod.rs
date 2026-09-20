@@ -19,6 +19,7 @@ pub mod state_transition;
 pub mod synthesis;
 pub mod trajectory;
 pub mod transportability;
+pub mod validation_replication_campaign;
 pub mod validation_replication_gate;
 
 pub use adaptive_campaign::{
@@ -114,6 +115,11 @@ pub use transportability::{
     analyze_glioma_transportability, TransportStudy, TransportStudyContribution,
     TransportabilityAnalysis, TransportabilityDisposition, TransportabilityError,
     TransportabilityRequest,
+};
+pub use validation_replication_campaign::{
+    execute_glioma_validation_replication_campaign, ValidationReplicationCampaignDisposition,
+    ValidationReplicationCampaignError, ValidationReplicationCampaignRequest,
+    ValidationReplicationCampaignRun,
 };
 pub use validation_replication_gate::{
     plan_glioma_validation_replication_gate, ValidationReplicationGate,

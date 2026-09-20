@@ -124,6 +124,8 @@ crates/research/src/glioma/
                                              P05→P06→P07 closed-loop validation campaign with observation-driven replanning
   programs/p10_interpretation_replication/validation_replication_gate.rs
                                              P10 efficacy-gated handoff from local validation to independent-site replication planning and protocol preflight
+  programs/p10_interpretation_replication/validation_replication_campaign.rs
+                                             P10 guarded execution handoff into site replication, meta-analysis, transportability, and next-action control
   programs/p07_protocol_simulation/mechanism_validation_execution.rs
                                              P07 compiled validation protocol execution through a bounded institution-local worker seam
   programs/p05_mechanism_exploration/operating_cycle.rs
