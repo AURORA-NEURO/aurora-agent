@@ -495,11 +495,12 @@ use bioprism_research::{
     analyze_glioma_causal_contrast, analyze_glioma_clonal_evolution,
     analyze_glioma_clone_panel_outcomes, analyze_glioma_combination_synergy,
     analyze_glioma_dose_response, analyze_glioma_latent_factors, analyze_glioma_mediation,
-    analyze_glioma_multimodal_graph_fusion, analyze_glioma_pathway_activity,
-    analyze_glioma_spatial_communication, analyze_glioma_spatial_niches,
-    analyze_glioma_spatial_state_propagation, analyze_glioma_state_transitions,
-    analyze_glioma_temporal_multimodal_fusion, analyze_glioma_temporal_spatial_alignment,
-    analyze_glioma_trajectories, analyze_glioma_transportability, analyze_instrument_calibration,
+    analyze_glioma_multimodal_dropout_stress, analyze_glioma_multimodal_graph_fusion,
+    analyze_glioma_pathway_activity, analyze_glioma_spatial_communication,
+    analyze_glioma_spatial_niches, analyze_glioma_spatial_state_propagation,
+    analyze_glioma_state_transitions, analyze_glioma_temporal_multimodal_fusion,
+    analyze_glioma_temporal_spatial_alignment, analyze_glioma_trajectories,
+    analyze_glioma_transportability, analyze_instrument_calibration,
     analyze_multimodal_concordance, analyze_multimodal_consensus, analyze_preclinical_outcomes,
     analyze_replication_meta_analysis, analyze_stratified_causal_adjustment,
     assess_glioma_robustness, assess_replication, bridge_glioma_knowledge_actions,
@@ -597,7 +598,7 @@ use bioprism_research::{
     DecisionBranchCampaignRequest, DecisionBranchPlannerRequest, DecisionContext,
     DecisionContextCampaignRequest, DecisionContextRequest, DecisionOmissionCertificateRequest,
     DecisionOperatingCycleRequest, DesignAction, DesignMechanism, DoseResponseObservation,
-    DoseResponseRequest, DryRunActiveLearningCampaignExecutor,
+    DoseResponseRequest, DropoutStressRequest, DryRunActiveLearningCampaignExecutor,
     DryRunAdaptiveAllocationCampaignExecutor, DryRunAdaptiveMechanismPolicyExecutor,
     DryRunDecisionContextCampaignExecutor, DryRunEvidenceAcquisitionExecutor,
     DryRunEvidenceRefreshCampaignExecutor, DryRunExperimentOperatingCycleExecutor,
@@ -2341,6 +2342,7 @@ impl Server {
             "glioma_combination_synergy" => self.glioma_combination_synergy(&arguments),
             "glioma_adaptive_dose_surface" => self.glioma_adaptive_dose_surface(&arguments),
             "glioma_multimodal_concordance" => self.glioma_multimodal_concordance(&arguments),
+            "glioma_multimodal_dropout_stress" => self.glioma_multimodal_dropout_stress(&arguments),
             "glioma_multimodal_consensus" => self.glioma_multimodal_consensus(&arguments),
             "glioma_multimodal_harmonize" => self.glioma_multimodal_harmonize(&arguments),
             "glioma_multimodal_latent_factors" => self.glioma_multimodal_latent_factors(&arguments),
@@ -8059,6 +8061,33 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma multimodal concordance: {error}"))
+    }
+
+    /// Stress a local preclinical glioma endpoint under declared modality dropout. This is a
+    /// no-imputation analysis: required missing modalities remain unresolved and every degraded
+    /// or contradictory scenario is routed to an explicit acquisition or review action.
+    fn glioma_multimodal_dropout_stress(&self, arguments: &Value) -> Result<Value, String> {
+        let request: DropoutStressRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_multimodal_dropout_stress requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma multimodal dropout-stress request: {error}"))?;
+        let analysis = analyze_glioma_multimodal_dropout_stress(&request)
+            .map_err(|error| format!("glioma multimodal dropout stress refused: {error}"))?;
+        serde_json::to_value(json!({
+            "analysis": analysis,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "next_routes": ["glioma_multimodal_qc", "glioma_robust_experiment_design"],
+            "guarantees": [
+                "missing modalities are never imputed",
+                "quality-gated dropout, stability, sign reversal, negative evidence, and acquisition actions remain explicit",
+                "route performs no assay, instrument, federation, or clinical action"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma multimodal dropout stress: {error}"))
     }
 
     /// Cluster de-identified preclinical glioma sample lineages from multiple modality vectors.
@@ -51477,6 +51506,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_combination_synergy",
                 "glioma_adaptive_dose_surface",
                 "glioma_multimodal_concordance",
+                "glioma_multimodal_dropout_stress",
                 "glioma_multimodal_consensus",
                 "glioma_multimodal_harmonize",
                 "glioma_multimodal_latent_factors",
@@ -61018,6 +61048,17 @@ pub fn tool_definitions() -> Vec<Value> {
                 }
             },
             "required": ["request", "vectors"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_multimodal_dropout_stress",
+        "description": "Stress a local preclinical glioma endpoint across declared modality-dropout scenarios using quality- and feature-weighted aggregates. Required missing modalities remain unresolved rather than imputed; sign reversals, stability loss, negative evidence, uncertainty, and deterministic acquisition order are explicit. The route is simulation-only and never dispatches an assay, moves raw data, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "DropoutStressRequest1@1 with glioma model binding, quality/stability/shift gates, modality signals, and weighted dropout scenarios."}
+            },
+            "required": ["request"]
         }
     }));
     definitions.push(json!({

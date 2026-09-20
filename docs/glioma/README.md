@@ -329,6 +329,8 @@ crates/research/src/glioma/
                                              P03 robust complete-case multimodal latent-state factorization with convergence and reconstruction gates
   p03_multimodal_ingestion_qc/graph_fusion.rs
                                              P03 reliability-weighted multimodal sample graph fusion with dropout, contradiction, and bounded diffusion gates
+  p03_multimodal_ingestion_qc/dropout_stress.rs
+                                             P03 modality-dropout stress analysis with no-imputation stability, contradiction, and acquisition routing
   p03_multimodal_ingestion_qc/spatial_niche.rs
                                              P03 spatial neighbourhood graph, same-lineage niche components, and cross-lineage enrichment
   p03_multimodal_ingestion_qc/spatial_communication.rs

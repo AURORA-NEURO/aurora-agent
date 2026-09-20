@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 739;
+const TOOL_DEFINITION_COUNT: usize = 740;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -1089,6 +1089,48 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
     assert_eq!(
         concordance["concordance"]["disposition"],
         json!("qualified")
+    );
+
+    let dropout_stress = call(
+        &mut server,
+        "glioma_multimodal_dropout_stress",
+        json!({
+            "request": {
+                "objective": "stress invasion endpoint under missing modalities",
+                "endpoint_id": "invasion",
+                "study_id": "mcp-dropout-study",
+                "model_system": "organoid",
+                "signals": [
+                    {"modality":"imaging","signal_milli":500,"quality_milli":900,"feature_count":100,"required_for_endpoint":false},
+                    {"modality":"spatial","signal_milli":520,"quality_milli":900,"feature_count":80,"required_for_endpoint":true}
+                ],
+                "scenarios": [
+                    {"scenario_id":"complete","missing_modality_order":[],"weight_milli":500},
+                    {"scenario_id":"spatial-missing","missing_modality_order":["spatial"],"weight_milli":500}
+                ],
+                "min_quality_milli": 700,
+                "max_allowed_shift_milli": 150,
+                "min_stability_milli": 700
+            }
+        }),
+    );
+    assert_eq!(dropout_stress["dispatch"], json!("not_started"));
+    assert_eq!(dropout_stress["simulation_only"], json!(true));
+    assert_eq!(
+        dropout_stress["analysis"]["disposition"],
+        json!("unresolved")
+    );
+    assert_eq!(
+        dropout_stress["analysis"]["acquisition_order"],
+        json!(["spatial"])
+    );
+    assert_eq!(
+        dropout_stress["analysis"]["scenarios"][0]["disposition"],
+        json!("stable")
+    );
+    assert_eq!(
+        dropout_stress["analysis"]["scenarios"][1]["disposition"],
+        json!("unresolved")
     );
 
     let harmonization = call(

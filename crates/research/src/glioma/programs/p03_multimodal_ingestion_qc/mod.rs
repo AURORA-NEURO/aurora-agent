@@ -5,6 +5,7 @@ use crate::glioma::catalog::{glioma_program_catalog, GliomaProgramDescriptor, Gl
 pub mod campaign;
 pub mod concordance;
 pub mod consensus;
+pub mod dropout_stress;
 pub mod graph_fusion;
 pub mod harmonization;
 pub mod latent_factors;
@@ -33,6 +34,11 @@ pub use concordance::{
 pub use consensus::{
     analyze_multimodal_consensus, ConsensusAssignment, ConsensusCluster, ConsensusDisposition,
     ConsensusError, ConsensusRequest, MultimodalConsensus,
+};
+pub use dropout_stress::{
+    analyze_glioma_multimodal_dropout_stress, DropoutModalitySignal, DropoutScenario,
+    DropoutScenarioDisposition, DropoutScenarioResult, DropoutStressAnalysis,
+    DropoutStressDisposition, DropoutStressError, DropoutStressRequest,
 };
 pub use graph_fusion::{
     analyze_glioma_multimodal_graph_fusion, GraphFusionAnalysis, GraphFusionDisposition,
