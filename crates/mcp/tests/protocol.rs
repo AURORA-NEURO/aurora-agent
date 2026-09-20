@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 782;
+const TOOL_DEFINITION_COUNT: usize = 783;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -7824,6 +7824,35 @@ fn glioma_knowledge_composition_exposes_supported_paths_and_bottlenecks() {
         graph["graph"]["parallel_waves"].as_array().unwrap().len(),
         2
     );
+    let mission = call(
+        &mut server,
+        "glioma_decision_mission_execute",
+        json!({
+            "request": {
+                "mission_id": "decision-mission",
+                "objective": "compose invasion mechanism evidence",
+                "context": context["context"].clone(),
+                "graph": graph["graph"].clone(),
+                "selection": {"budget_units": 100, "max_actions": 1, "approval_granted": false, "allow_instrument_execution": false, "allow_federation": false},
+                "gates": {
+                    "required_stages": ["mechanism_exploration"],
+                    "min_completed_actions": 1,
+                    "min_information_gain_milli": 100,
+                    "max_uncertainty_milli": 10000,
+                    "min_model_systems": 1,
+                    "min_modalities": 1
+                },
+                "max_rounds": 2,
+                "max_retries": 1,
+                "require_artifacts": true,
+                "stop_on_negative": false,
+                "allow_partial_graph": false
+            }
+        }),
+    );
+    assert_eq!(mission["dispatch"], json!("dry_run"));
+    assert_eq!(mission["run"]["disposition"], json!("executed"));
+    assert_eq!(mission["run"]["mission"]["disposition"], json!("qualified"));
     let omission = call(
         &mut server,
         "glioma_decision_omission_certificate",

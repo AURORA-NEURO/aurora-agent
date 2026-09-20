@@ -11,6 +11,7 @@ pub mod campaign;
 pub mod context_compiler;
 pub mod decision_cycle;
 pub mod decision_loop_governor;
+pub mod mission_bridge;
 pub mod omission_certificate;
 pub mod value_calibration;
 pub mod value_optimizer;
@@ -69,6 +70,10 @@ pub use decision_loop_governor::{
     govern_glioma_decision_loop, DecisionLoopGovernorDisposition, DecisionLoopGovernorError,
     DecisionLoopGovernorRequest, DecisionLoopGovernorResult, DecisionLoopRound,
     DecisionLoopRoundAssessment, DecisionLoopRoundDisposition, DecisionLoopStopReason,
+};
+pub use mission_bridge::{
+    execute_glioma_decision_mission, DecisionMissionBridgeDisposition, DecisionMissionBridgeError,
+    DecisionMissionBridgeRequest, DecisionMissionBridgeRun,
 };
 pub use omission_certificate::{
     certify_decision_omissions, DecisionCoverageState, DecisionOmissionCertificate,

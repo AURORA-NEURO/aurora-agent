@@ -538,21 +538,21 @@ use bioprism_research::{
     execute_glioma_computation, execute_glioma_computation_campaign,
     execute_glioma_computation_operating_cycle_dry_run, execute_glioma_computation_portfolio,
     execute_glioma_computation_recovery, execute_glioma_decision_branch_campaign,
-    execute_glioma_decision_context_campaign, execute_glioma_decision_operating_cycle,
-    execute_glioma_evidence_acquisition_campaign, execute_glioma_evidence_campaign,
-    execute_glioma_evidence_gated_research, execute_glioma_evidence_operating_cycle_dry_run,
-    execute_glioma_evidence_refresh_campaign, execute_glioma_experiment_frontier_controller,
-    execute_glioma_experiment_operating_cycle, execute_glioma_instrument_campaign,
-    execute_glioma_instrument_fleet, execute_glioma_instrument_operating_cycle,
-    execute_glioma_instrument_plan, execute_glioma_instrument_science_loop,
-    execute_glioma_intent_mission, execute_glioma_interpretation_operating_cycle,
-    execute_glioma_knowledge_action_dispatch, execute_glioma_knowledge_resolution_campaign,
-    execute_glioma_knowledge_selection_cycle, execute_glioma_knowledge_synthesis_operating_cycle,
-    execute_glioma_mechanism_autopilot, execute_glioma_mechanism_discovery_engine,
-    execute_glioma_mechanism_discrimination_campaign, execute_glioma_mechanism_operating_cycle,
-    execute_glioma_mechanism_validation_protocol, execute_glioma_mission_recovery,
-    execute_glioma_multi_fidelity_campaign, execute_glioma_multimodal_ingestion_campaign,
-    execute_glioma_multimodal_mechanism_campaign,
+    execute_glioma_decision_context_campaign, execute_glioma_decision_mission,
+    execute_glioma_decision_operating_cycle, execute_glioma_evidence_acquisition_campaign,
+    execute_glioma_evidence_campaign, execute_glioma_evidence_gated_research,
+    execute_glioma_evidence_operating_cycle_dry_run, execute_glioma_evidence_refresh_campaign,
+    execute_glioma_experiment_frontier_controller, execute_glioma_experiment_operating_cycle,
+    execute_glioma_instrument_campaign, execute_glioma_instrument_fleet,
+    execute_glioma_instrument_operating_cycle, execute_glioma_instrument_plan,
+    execute_glioma_instrument_science_loop, execute_glioma_intent_mission,
+    execute_glioma_interpretation_operating_cycle, execute_glioma_knowledge_action_dispatch,
+    execute_glioma_knowledge_resolution_campaign, execute_glioma_knowledge_selection_cycle,
+    execute_glioma_knowledge_synthesis_operating_cycle, execute_glioma_mechanism_autopilot,
+    execute_glioma_mechanism_discovery_engine, execute_glioma_mechanism_discrimination_campaign,
+    execute_glioma_mechanism_operating_cycle, execute_glioma_mechanism_validation_protocol,
+    execute_glioma_mission_recovery, execute_glioma_multi_fidelity_campaign,
+    execute_glioma_multimodal_ingestion_campaign, execute_glioma_multimodal_mechanism_campaign,
     execute_glioma_multimodal_mechanism_campaign_with_executor, execute_glioma_multimodal_mission,
     execute_glioma_multimodal_operating_cycle_dry_run,
     execute_glioma_multimodal_quality_adaptive_campaign,
@@ -621,28 +621,28 @@ use bioprism_research::{
     CounterfactualModel, CounterfactualRequest, DecisionActionGraphRequest,
     DecisionActionPlanRequest, DecisionAdmissionRequest, DecisionBranchCampaignRequest,
     DecisionBranchPlannerRequest, DecisionContext, DecisionContextCampaignRequest,
-    DecisionContextRequest, DecisionLoopGovernorRequest, DecisionOmissionCertificateRequest,
-    DecisionOperatingCycleRequest, DecisionValueCalibrationRequest, DecisionValueRequest,
-    DesignAction, DesignMechanism, DoseResponseObservation, DoseResponseRequest,
-    DriftSurveillanceRequest, DropoutStressRequest, DryRunActiveLearningCampaignExecutor,
-    DryRunAdaptiveAllocationCampaignExecutor, DryRunAdaptiveMechanismPolicyExecutor,
-    DryRunDecisionContextCampaignExecutor, DryRunEvidenceAcquisitionExecutor,
-    DryRunEvidenceRefreshCampaignExecutor, DryRunExperimentOperatingCycleExecutor,
-    DryRunFederatedBenchmarkCampaignExecutor, DryRunFederatedMechanismTransportExecutor,
-    DryRunGliomaActionExecutor, DryRunGliomaComputationExecutor,
-    DryRunGliomaExperimentFrontierExecutor, DryRunGliomaProtocolExecutor,
-    DryRunGliomaReplicationCampaignExecutor, DryRunInstrumentExecutor,
-    DryRunKnowledgeActionExecutor, DryRunKnowledgeResolutionCampaignExecutor,
-    DryRunMechanismDiscriminationCampaignExecutor, DryRunMultiFidelityCampaignExecutor,
-    DryRunMultimodalIngestionCampaignExecutor, DryRunQualityScheduleExecutor,
-    DryRunReplayCampaignExecutor, DryRunRobustActiveLearningCampaignExecutor,
-    DryRunSequentialCampaignExecutor, DynamicPolicyCandidate, DynamicPolicyRequest,
-    DynamicPolicyTrajectory, EvidenceAcquisitionCampaignRequest, EvidenceAcquisitionCandidate,
-    EvidenceAcquisitionRequest, EvidenceCalibrationObservation, EvidenceCalibrationRequest,
-    EvidenceExecutionMode, EvidenceFusionRequest, EvidencePriorityRequest, EvidenceRecord,
-    EvidenceRefreshCampaignRequest, EvidenceRequest, EvidenceSurveillanceRequest,
-    EvidenceTriangulationRequest, ExperimentArm, ExperimentOperatingCycleRequest,
-    ExperimentRequest, FederatedBenchmarkAdaptiveCampaignRequest,
+    DecisionContextRequest, DecisionLoopGovernorRequest, DecisionMissionBridgeRequest,
+    DecisionOmissionCertificateRequest, DecisionOperatingCycleRequest,
+    DecisionValueCalibrationRequest, DecisionValueRequest, DesignAction, DesignMechanism,
+    DoseResponseObservation, DoseResponseRequest, DriftSurveillanceRequest, DropoutStressRequest,
+    DryRunActiveLearningCampaignExecutor, DryRunAdaptiveAllocationCampaignExecutor,
+    DryRunAdaptiveMechanismPolicyExecutor, DryRunDecisionContextCampaignExecutor,
+    DryRunEvidenceAcquisitionExecutor, DryRunEvidenceRefreshCampaignExecutor,
+    DryRunExperimentOperatingCycleExecutor, DryRunFederatedBenchmarkCampaignExecutor,
+    DryRunFederatedMechanismTransportExecutor, DryRunGliomaActionExecutor,
+    DryRunGliomaComputationExecutor, DryRunGliomaExperimentFrontierExecutor,
+    DryRunGliomaProtocolExecutor, DryRunGliomaReplicationCampaignExecutor,
+    DryRunInstrumentExecutor, DryRunKnowledgeActionExecutor,
+    DryRunKnowledgeResolutionCampaignExecutor, DryRunMechanismDiscriminationCampaignExecutor,
+    DryRunMultiFidelityCampaignExecutor, DryRunMultimodalIngestionCampaignExecutor,
+    DryRunQualityScheduleExecutor, DryRunReplayCampaignExecutor,
+    DryRunRobustActiveLearningCampaignExecutor, DryRunSequentialCampaignExecutor,
+    DynamicPolicyCandidate, DynamicPolicyRequest, DynamicPolicyTrajectory,
+    EvidenceAcquisitionCampaignRequest, EvidenceAcquisitionCandidate, EvidenceAcquisitionRequest,
+    EvidenceCalibrationObservation, EvidenceCalibrationRequest, EvidenceExecutionMode,
+    EvidenceFusionRequest, EvidencePriorityRequest, EvidenceRecord, EvidenceRefreshCampaignRequest,
+    EvidenceRequest, EvidenceSurveillanceRequest, EvidenceTriangulationRequest, ExperimentArm,
+    ExperimentOperatingCycleRequest, ExperimentRequest, FederatedBenchmarkAdaptiveCampaignRequest,
     FederatedBenchmarkCampaignRequest, FederatedBenchmarkExecutionMode,
     FederatedBenchmarkOperatingCycleRequest, FederatedBenchmarkRequest, FederatedBenchmarkSite,
     FederatedBenchmarkSitePlannerRequest, FederatedInterpretationRequest, FederatedMechanismSite,
@@ -2483,6 +2483,7 @@ impl Server {
             }
             "glioma_decision_loop_governor" => self.glioma_decision_loop_governor(&arguments),
             "glioma_decision_action_graph" => self.glioma_decision_action_graph(&arguments),
+            "glioma_decision_mission_execute" => self.glioma_decision_mission_execute(&arguments),
             "glioma_decision_omission_certificate" => {
                 self.glioma_decision_omission_certificate(&arguments)
             }
@@ -10183,6 +10184,35 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma decision-action graph: {error}"))
+    }
+
+    /// Execute a validated P04 decision graph through the P07 autonomous mission controller.
+    /// MCP uses the deterministic local worker; institution deployments provide the executor
+    /// that owns assay, computation, or instrument effects.
+    fn glioma_decision_mission_execute(&self, arguments: &Value) -> Result<Value, String> {
+        let request: DecisionMissionBridgeRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_decision_mission_execute requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma decision mission request: {error}"))?;
+        let mut executor = DryRunGliomaActionExecutor;
+        let run = execute_glioma_decision_mission(&request, &mut executor)
+            .map_err(|error| format!("glioma decision mission refused: {error}"))?;
+        serde_json::to_value(json!({
+            "run": run,
+            "dispatch": "dry_run",
+            "simulation_only": true,
+            "guarantees": [
+                "P04 context and dependency-closed graph digests remain bound into the P07 mission",
+                "autonomous rounds replan only from typed local action outcomes",
+                "partial graphs require explicit caller opt-in and unresolved action debt remains visible",
+                "negative, failed, blocked, budget, and no-progress outcomes stop honestly",
+                "the MCP route performs no instrument execution, clinical decision, or raw-data movement"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma decision mission: {error}"))
     }
 
     /// Certify claim, modality, model-system, and dependency closure without treating a planned
@@ -52954,6 +52984,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_adaptive_decision_controller",
                 "glioma_decision_loop_governor",
                 "glioma_decision_action_graph",
+                "glioma_decision_mission_execute",
                 "glioma_decision_omission_certificate",
                 "glioma_decision_branch_plan",
                 "glioma_decision_action_plan",
@@ -63255,6 +63286,17 @@ pub fn tool_definitions() -> Vec<Value> {
                 "composition": {"type": "object", "description": "KnowledgeComposition1@1 from glioma_knowledge_compose."}
             },
             "required": ["request", "context", "composition"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_decision_mission_execute",
+        "description": "Execute a validated preclinical glioma P04 decision graph through the P07 autonomous mission controller. The bridge preserves context and graph digests, carries dependency-closed action candidates into adaptive rounds, and keeps partial, negative, failed, blocked, budget, and no-progress outcomes explicit. Partial graphs require explicit opt-in; MCP uses a deterministic synthetic worker and never performs instrument, clinical, or raw-data effects.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "DecisionMissionBridgeRequest1@1 with DecisionContext1@1, DecisionActionGraph1@1, GliomaSelectionConfig1@1, mission gates, bounded rounds/retries, artifact policy, and allow_partial_graph."}
+            },
+            "required": ["request"]
         }
     }));
     definitions.push(json!({

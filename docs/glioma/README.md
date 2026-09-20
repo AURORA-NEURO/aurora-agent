@@ -703,6 +703,12 @@ The decision-action graph (`compile_decision_action_graph`) joins that context w
 claim paths. It adds explicit prerequisite edges, computes deterministic topological order and
 parallel waves, reports critical-path and total cost, and keeps missing claims, unresolved paths,
 negative evidence, and budget blocks visible for the autonomous engine.
+The decision-mission bridge (`execute_glioma_decision_mission`) is the executable handoff from
+that P04 graph into the P07 science-aware mission controller. It carries the context and graph
+digests into adaptive rounds, preserves dependency closure and explicit partial-graph opt-in, and
+returns typed mission outcomes rather than a receipt-only acknowledgement. The MCP worker remains
+simulation-only; a production institution supplies the local executor that owns assays, analyses,
+or instrument gateways.
 P05 now also includes signed mechanism-network propagation (`propagate_glioma_mechanism_graph`)
 that combines direct support/contradiction with activating or inhibiting evidence edges using
 bounded damped fixed-point diffusion. Low-confidence edges, disconnected nodes, contradiction,
