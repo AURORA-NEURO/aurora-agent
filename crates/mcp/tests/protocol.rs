@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 747;
+const TOOL_DEFINITION_COUNT: usize = 748;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -1376,6 +1376,39 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
             .as_u64()
             .unwrap()
             >= 500
+    );
+
+    let contradiction = call(
+        &mut server,
+        "glioma_multimodal_contradiction_adjudication",
+        json!({
+            "request": {
+                "objective": "adjudicate invasion contradictions before mechanism planning",
+                "endpoint_id": "invasion",
+                "study_id": "mcp-contradiction-study",
+                "model_system": "organoid",
+                "required_modalities": ["genomics", "imaging"],
+                "observations": [
+                    {"modality":"genomics","value_milli":700,"uncertainty_milli":20,"reliability_milli":900,"quality_milli":900,"replicate_count":3},
+                    {"modality":"imaging","value_milli":-500,"uncertainty_milli":20,"reliability_milli":900,"quality_milli":900,"replicate_count":3}
+                ],
+                "min_modalities": 2,
+                "min_reliability_milli": 700,
+                "max_uncertainty_milli": 100,
+                "max_pair_difference_milli": 150,
+                "min_trust_margin_milli": 200
+            }
+        }),
+    );
+    assert_eq!(contradiction["dispatch"], json!("not_started"));
+    assert_eq!(contradiction["simulation_only"], json!(true));
+    assert_eq!(
+        contradiction["adjudication"]["disposition"],
+        json!("unresolved")
+    );
+    assert_eq!(
+        contradiction["adjudication"]["pairs"][0]["kind"],
+        json!("sign_reversal")
     );
 
     let harmonization = call(

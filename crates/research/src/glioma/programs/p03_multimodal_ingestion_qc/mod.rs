@@ -5,6 +5,7 @@ use crate::glioma::catalog::{glioma_program_catalog, GliomaProgramDescriptor, Gl
 pub mod campaign;
 pub mod concordance;
 pub mod consensus;
+pub mod contradiction_adjudication;
 pub mod decision_gate;
 pub mod drift_surveillance;
 pub mod dropout_stress;
@@ -41,6 +42,11 @@ pub use concordance::{
 pub use consensus::{
     analyze_multimodal_consensus, ConsensusAssignment, ConsensusCluster, ConsensusDisposition,
     ConsensusError, ConsensusRequest, MultimodalConsensus,
+};
+pub use contradiction_adjudication::{
+    adjudicate_glioma_multimodal_contradictions, ContradictionAdjudication,
+    ContradictionAdjudicationDisposition, ContradictionAdjudicationError,
+    ContradictionAdjudicationRequest, ContradictionKind, ModalityPairAdjudication,
 };
 pub use decision_gate::{
     analyze_glioma_multimodal_decision_gate, DecisionDirection, DecisionGateModalityObservation,

@@ -345,6 +345,8 @@ crates/research/src/glioma/
                                              P03 leave-one-modality-out and bounded perturbation endpoint fragility analysis with autonomous reacquisition routing
   p03_multimodal_ingestion_qc/decision_gate.rs
                                              P03 uncertainty-aware endpoint threshold gate with explicit autonomous research handoff and negative-result routing
+  p03_multimodal_ingestion_qc/contradiction_adjudication.rs
+                                             P03 pairwise multimodal contradiction adjudication with trust asymmetry, rival-evidence retention, and orthogonal-resolution routing
   p03_multimodal_ingestion_qc/spatial_niche.rs
                                              P03 spatial neighbourhood graph, same-lineage niche components, and cross-lineage enrichment
   p03_multimodal_ingestion_qc/spatial_communication.rs
@@ -530,6 +532,12 @@ interval, compares that interval with an investigator-declared preclinical resea
 and routes supported, negative, indeterminate, and blocked states to the next autonomous stage.
 Contradictory modalities, wide intervals, low confidence, and missing required evidence remain
 explicit handoff conditions; the gate is never a diagnostic, treatment, or clinical decision.
+P03 now also includes multimodal contradiction adjudication
+(`adjudicate_glioma_multimodal_contradictions`). It classifies pairwise agreement, sign reversal,
+magnitude conflict, quality asymmetry, and unresolved gates; ranks measurement trust without
+deleting rival evidence; and emits deterministic reacquisition or orthogonal-assay actions for
+the autonomous engine. Contradictory preclinical measurements remain research uncertainty rather
+than becoming a confident biological or clinical conclusion.
 P05 now also includes signed pathway activity inference (`analyze_glioma_pathway_activity`) that
 maps declared modality-specific molecular nodes to reliability-weighted pathway activity, compares
 cross-modal direction, and ranks mechanism priorities. Missing nodes, low-confidence bottlenecks,

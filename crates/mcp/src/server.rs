@@ -490,11 +490,12 @@ use bioprism_repair::{
     DeclaredItem as RepairDeclaredItem, PlanOptions as RepairPlanOptions, RepairPlan,
 };
 use bioprism_research::{
-    adjudicate_glioma_assay_evidence, allocate_glioma_assays, analyze_causal_sensitivity,
-    analyze_federated_benchmark, analyze_federated_mechanism_transport,
-    analyze_glioma_causal_contrast, analyze_glioma_clonal_evolution,
-    analyze_glioma_clone_panel_outcomes, analyze_glioma_combination_synergy,
-    analyze_glioma_dose_response, analyze_glioma_latent_factors, analyze_glioma_mediation,
+    adjudicate_glioma_assay_evidence, adjudicate_glioma_multimodal_contradictions,
+    allocate_glioma_assays, analyze_causal_sensitivity, analyze_federated_benchmark,
+    analyze_federated_mechanism_transport, analyze_glioma_causal_contrast,
+    analyze_glioma_clonal_evolution, analyze_glioma_clone_panel_outcomes,
+    analyze_glioma_combination_synergy, analyze_glioma_dose_response,
+    analyze_glioma_latent_factors, analyze_glioma_mediation,
     analyze_glioma_multimodal_decision_gate, analyze_glioma_multimodal_dropout_stress,
     analyze_glioma_multimodal_evidence_fusion, analyze_glioma_multimodal_graph_fusion,
     analyze_glioma_multimodal_missingness, analyze_glioma_multimodal_sensitivity,
@@ -594,30 +595,31 @@ use bioprism_research::{
     CombinationSynergyRequest, ComputationCandidate, ComputationExecutionMode,
     ComputationExecutionRequest, ComputationPlacementRequest, ComputationPortfolioExecutionRequest,
     ComputationPortfolioRequest, ComputationRecoveryRequest, ConcordanceRequest, ConsensusRequest,
-    ContradictionCutRequest, ContradictionEvidence, ContrastDesignRequest,
-    CounterfactualEnsembleRequest, CounterfactualIntervention, CounterfactualModel,
-    CounterfactualRequest, DecisionActionGraphRequest, DecisionActionPlanRequest,
-    DecisionBranchCampaignRequest, DecisionBranchPlannerRequest, DecisionContext,
-    DecisionContextCampaignRequest, DecisionContextRequest, DecisionOmissionCertificateRequest,
-    DecisionOperatingCycleRequest, DesignAction, DesignMechanism, DoseResponseObservation,
-    DoseResponseRequest, DriftSurveillanceRequest, DropoutStressRequest,
-    DryRunActiveLearningCampaignExecutor, DryRunAdaptiveAllocationCampaignExecutor,
-    DryRunAdaptiveMechanismPolicyExecutor, DryRunDecisionContextCampaignExecutor,
-    DryRunEvidenceAcquisitionExecutor, DryRunEvidenceRefreshCampaignExecutor,
-    DryRunExperimentOperatingCycleExecutor, DryRunFederatedBenchmarkCampaignExecutor,
-    DryRunGliomaActionExecutor, DryRunGliomaComputationExecutor,
-    DryRunGliomaExperimentFrontierExecutor, DryRunGliomaProtocolExecutor,
-    DryRunGliomaReplicationCampaignExecutor, DryRunInstrumentExecutor,
-    DryRunKnowledgeActionExecutor, DryRunKnowledgeResolutionCampaignExecutor,
-    DryRunMechanismDiscriminationCampaignExecutor, DryRunMultiFidelityCampaignExecutor,
-    DryRunMultimodalIngestionCampaignExecutor, DryRunReplayCampaignExecutor,
-    DryRunRobustActiveLearningCampaignExecutor, DryRunSequentialCampaignExecutor,
-    DynamicPolicyCandidate, DynamicPolicyRequest, DynamicPolicyTrajectory,
-    EvidenceAcquisitionCampaignRequest, EvidenceAcquisitionCandidate, EvidenceAcquisitionRequest,
-    EvidenceCalibrationObservation, EvidenceCalibrationRequest, EvidenceExecutionMode,
-    EvidenceFusionRequest, EvidencePriorityRequest, EvidenceRecord, EvidenceRefreshCampaignRequest,
-    EvidenceRequest, EvidenceSurveillanceRequest, EvidenceTriangulationRequest, ExperimentArm,
-    ExperimentOperatingCycleRequest, ExperimentRequest, FederatedBenchmarkAdaptiveCampaignRequest,
+    ContradictionAdjudicationRequest, ContradictionCutRequest, ContradictionEvidence,
+    ContrastDesignRequest, CounterfactualEnsembleRequest, CounterfactualIntervention,
+    CounterfactualModel, CounterfactualRequest, DecisionActionGraphRequest,
+    DecisionActionPlanRequest, DecisionBranchCampaignRequest, DecisionBranchPlannerRequest,
+    DecisionContext, DecisionContextCampaignRequest, DecisionContextRequest,
+    DecisionOmissionCertificateRequest, DecisionOperatingCycleRequest, DesignAction,
+    DesignMechanism, DoseResponseObservation, DoseResponseRequest, DriftSurveillanceRequest,
+    DropoutStressRequest, DryRunActiveLearningCampaignExecutor,
+    DryRunAdaptiveAllocationCampaignExecutor, DryRunAdaptiveMechanismPolicyExecutor,
+    DryRunDecisionContextCampaignExecutor, DryRunEvidenceAcquisitionExecutor,
+    DryRunEvidenceRefreshCampaignExecutor, DryRunExperimentOperatingCycleExecutor,
+    DryRunFederatedBenchmarkCampaignExecutor, DryRunGliomaActionExecutor,
+    DryRunGliomaComputationExecutor, DryRunGliomaExperimentFrontierExecutor,
+    DryRunGliomaProtocolExecutor, DryRunGliomaReplicationCampaignExecutor,
+    DryRunInstrumentExecutor, DryRunKnowledgeActionExecutor,
+    DryRunKnowledgeResolutionCampaignExecutor, DryRunMechanismDiscriminationCampaignExecutor,
+    DryRunMultiFidelityCampaignExecutor, DryRunMultimodalIngestionCampaignExecutor,
+    DryRunReplayCampaignExecutor, DryRunRobustActiveLearningCampaignExecutor,
+    DryRunSequentialCampaignExecutor, DynamicPolicyCandidate, DynamicPolicyRequest,
+    DynamicPolicyTrajectory, EvidenceAcquisitionCampaignRequest, EvidenceAcquisitionCandidate,
+    EvidenceAcquisitionRequest, EvidenceCalibrationObservation, EvidenceCalibrationRequest,
+    EvidenceExecutionMode, EvidenceFusionRequest, EvidencePriorityRequest, EvidenceRecord,
+    EvidenceRefreshCampaignRequest, EvidenceRequest, EvidenceSurveillanceRequest,
+    EvidenceTriangulationRequest, ExperimentArm, ExperimentOperatingCycleRequest,
+    ExperimentRequest, FederatedBenchmarkAdaptiveCampaignRequest,
     FederatedBenchmarkCampaignRequest, FederatedBenchmarkExecutionMode,
     FederatedBenchmarkOperatingCycleRequest, FederatedBenchmarkRequest, FederatedBenchmarkSite,
     FederatedBenchmarkSitePlannerRequest, FederatedMechanismSite,
@@ -2354,6 +2356,9 @@ impl Server {
             }
             "glioma_multimodal_sensitivity" => self.glioma_multimodal_sensitivity(&arguments),
             "glioma_multimodal_decision_gate" => self.glioma_multimodal_decision_gate(&arguments),
+            "glioma_multimodal_contradiction_adjudication" => {
+                self.glioma_multimodal_contradiction_adjudication(&arguments)
+            }
             "glioma_multimodal_missingness" => self.glioma_multimodal_missingness(&arguments),
             "glioma_multimodal_reliability" => self.glioma_multimodal_reliability(&arguments),
             "glioma_multimodal_portfolio" => self.glioma_multimodal_portfolio(&arguments),
@@ -8289,6 +8294,36 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma multimodal decision gate: {error}"))
+    }
+
+    /// Classify pairwise multimodal disagreement and return a deterministic preclinical
+    /// resolution queue without deleting rival measurements.
+    fn glioma_multimodal_contradiction_adjudication(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: ContradictionAdjudicationRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_multimodal_contradiction_adjudication requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma multimodal contradiction request: {error}"))?;
+        let adjudication =
+            adjudicate_glioma_multimodal_contradictions(&request).map_err(|error| {
+                format!("glioma multimodal contradiction adjudication refused: {error}")
+            })?;
+        serde_json::to_value(json!({
+            "adjudication": adjudication,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "next_routes": ["glioma_multimodal_sensitivity", "glioma_multimodal_decision_gate", "glioma_experiment_design"],
+            "guarantees": [
+                "sign reversals, magnitude conflicts, quality asymmetries, and unresolved gates remain explicit",
+                "rival modality evidence is retained while trust-ranked resolution actions are emitted",
+                "resolution recommendations are preclinical research planning signals, never clinical decisions",
+                "route performs no assay, instrument, federation, or clinical action"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma multimodal contradiction adjudication: {error}"))
     }
 
     /// Cluster de-identified preclinical glioma sample lineages from multiple modality vectors.
@@ -51715,6 +51750,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_multimodal_evidence_fusion",
                 "glioma_multimodal_sensitivity",
                 "glioma_multimodal_decision_gate",
+                "glioma_multimodal_contradiction_adjudication",
                 "glioma_multimodal_consensus",
                 "glioma_multimodal_harmonize",
                 "glioma_multimodal_latent_factors",
@@ -61342,6 +61378,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "MultimodalDecisionGateRequest1@1 with endpoint/model binding, EndpointEvidence1@1 rows, threshold direction, reliability/uncertainty gates, interval width, margin, and confidence floors."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_multimodal_contradiction_adjudication",
+        "description": "Classify pairwise local preclinical glioma modality disagreement as agreement, sign reversal, magnitude conflict, quality asymmetry, or unresolved; retain rival evidence, rank declared measurement trust, and emit deterministic reacquisition or orthogonal-resolution actions. It never dispatches an assay or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ContradictionAdjudicationRequest1@1 with endpoint/model binding, EndpointEvidence1@1 rows, reliability/uncertainty gates, pair-difference threshold, and trust-margin threshold."}
             },
             "required": ["request"]
         }
