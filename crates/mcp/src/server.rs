@@ -560,15 +560,15 @@ use bioprism_research::{
     execute_glioma_program_scheduler_dry_run, execute_glioma_protocol,
     execute_glioma_release_operating_cycle_dry_run, execute_glioma_replay_campaign,
     execute_glioma_replication_campaign, execute_glioma_replication_closure,
-    execute_glioma_research_autopilot, execute_glioma_research_director,
-    execute_glioma_robust_active_learning_campaign, execute_glioma_robustness_guided_computation,
-    execute_glioma_scientific_frontier, execute_glioma_sequential_campaign,
-    execute_glioma_validation_campaign, execute_glioma_validation_replication_campaign,
-    execute_validation_replication_transport, explore_mechanisms, filter_glioma_mechanism_states,
-    forecast_glioma_multimodal_quality, fuse_glioma_protocol_evidence,
-    gate_glioma_protocol_transport, generate_feature_catalog, glioma_program_catalog,
-    govern_glioma_decision_loop, harmonize_glioma_multimodal_batches, harmonize_multimodal_inputs,
-    optimize_glioma_decision_value, optimize_glioma_protocol_branches,
+    execute_glioma_replication_closure_campaign, execute_glioma_research_autopilot,
+    execute_glioma_research_director, execute_glioma_robust_active_learning_campaign,
+    execute_glioma_robustness_guided_computation, execute_glioma_scientific_frontier,
+    execute_glioma_sequential_campaign, execute_glioma_validation_campaign,
+    execute_glioma_validation_replication_campaign, execute_validation_replication_transport,
+    explore_mechanisms, filter_glioma_mechanism_states, forecast_glioma_multimodal_quality,
+    fuse_glioma_protocol_evidence, gate_glioma_protocol_transport, generate_feature_catalog,
+    glioma_program_catalog, govern_glioma_decision_loop, harmonize_glioma_multimodal_batches,
+    harmonize_multimodal_inputs, optimize_glioma_decision_value, optimize_glioma_protocol_branches,
     plan_adaptive_glioma_dose_surface, plan_decision_actions, plan_federated_benchmark_sites,
     plan_glioma_active_learning, plan_glioma_adaptive_information_campaign,
     plan_glioma_adaptive_mechanism_policy, plan_glioma_adaptive_panel,
@@ -691,23 +691,24 @@ use bioprism_research::{
     QualityExecutionRequest, QualityRecoveryRequest, QualityRemediationRequest,
     QualityRootCauseRequest, QualityScheduleRequest, QualityTransportRequest, ReleaseExecutionMode,
     ReleaseGateRequest, ReliabilityCalibrationRequest, ReplayCampaign, ReplayCampaignRequest,
-    ReplicationClosureExecutionRequest, ReplicationClosureFrontierRequest,
-    ReplicationContinuationRequest, ReplicationObservation, ReplicationPlanRequest,
-    ReplicationProtocolCompileRequest, ReplicationRequest, ReplicationStudy, ResearchObjectRequest,
-    RobustActiveLearningCampaignRequest, RobustActiveLearningCandidate,
-    RobustActiveLearningObservation, RobustActiveLearningRequest, RobustExperimentDesignRequest,
-    RobustInterventionCandidate, RobustInterventionRequest, RobustnessGuidedComputationRequest,
-    RobustnessRequest, ScientificFrontierExecutionRequest, ScientificFrontierRequest,
-    SensitivityObservation, SensitivityRequest, SequentialArmObservation,
-    SequentialCampaignRequest, SequentialDesignRequest, SpatialCell, SpatialCommunicationCell,
-    SpatialCommunicationRequest, SpatialNicheRequest, SpatialPropagationRequest,
-    SpatialRegistrationCell, SpatialRegistrationRequest, StateTransitionObservation,
-    StateTransitionRequest, StaticGliomaActionPlanner, StaticGliomaComputationPlanner,
-    StratifiedCausalRequest, StratifiedObservation, TemporalFusionRequest, TemporalObservation,
-    TemporalSpatialAlignmentRequest, TrajectoryObservation, TrajectoryRequest, TransportStudy,
-    TransportabilityRequest, TypedKnowledge, ValidationBatchAssessmentRequest,
-    ValidationCampaignRequest, ValidationReplicationCampaignRequest,
-    ValidationReplicationGateRequest, ValidationReplicationTransportRequest,
+    ReplicationClosureCampaignRequest, ReplicationClosureExecutionRequest,
+    ReplicationClosureFrontierRequest, ReplicationContinuationRequest, ReplicationObservation,
+    ReplicationPlanRequest, ReplicationProtocolCompileRequest, ReplicationRequest,
+    ReplicationStudy, ResearchObjectRequest, RobustActiveLearningCampaignRequest,
+    RobustActiveLearningCandidate, RobustActiveLearningObservation, RobustActiveLearningRequest,
+    RobustExperimentDesignRequest, RobustInterventionCandidate, RobustInterventionRequest,
+    RobustnessGuidedComputationRequest, RobustnessRequest, ScientificFrontierExecutionRequest,
+    ScientificFrontierRequest, SensitivityObservation, SensitivityRequest,
+    SequentialArmObservation, SequentialCampaignRequest, SequentialDesignRequest, SpatialCell,
+    SpatialCommunicationCell, SpatialCommunicationRequest, SpatialNicheRequest,
+    SpatialPropagationRequest, SpatialRegistrationCell, SpatialRegistrationRequest,
+    StateTransitionObservation, StateTransitionRequest, StaticGliomaActionPlanner,
+    StaticGliomaComputationPlanner, StratifiedCausalRequest, StratifiedObservation,
+    TemporalFusionRequest, TemporalObservation, TemporalSpatialAlignmentRequest,
+    TrajectoryObservation, TrajectoryRequest, TransportStudy, TransportabilityRequest,
+    TypedKnowledge, ValidationBatchAssessmentRequest, ValidationCampaignRequest,
+    ValidationReplicationCampaignRequest, ValidationReplicationGateRequest,
+    ValidationReplicationTransportRequest,
 };
 use bioprism_routing::{
     lab::{run as run_routing_lab, LabSettings, Task},
@@ -2533,6 +2534,9 @@ impl Server {
             }
             "glioma_replication_closure_execute" => {
                 self.glioma_replication_closure_execute(&arguments)
+            }
+            "glioma_replication_closure_campaign_execute" => {
+                self.glioma_replication_closure_campaign_execute(&arguments)
             }
             "glioma_mechanism_validation_protocol_compile" => {
                 self.glioma_mechanism_validation_protocol_compile(&arguments)
@@ -11186,6 +11190,44 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma replication-closure execution: {error}"))
+    }
+
+    /// Execute a bounded sequence of closure frontiers through the guarded P10 execution seam.
+    /// Each frontier is caller-declared, but the campaign owns global budget reservation,
+    /// duplicate-action protection, terminal stopping, and replayable round accounting.
+    fn glioma_replication_closure_campaign_execute(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: ReplicationClosureCampaignRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_replication_closure_campaign_execute requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma replication-closure campaign request: {error}")
+            })?;
+        let mut executor = DryRunGliomaReplicationCampaignExecutor::default();
+        let run = execute_glioma_replication_closure_campaign(&request, &mut executor)
+            .map_err(|error| format!("glioma replication-closure campaign refused: {error}"))?;
+        serde_json::to_value(json!({
+            "campaign": run,
+            "execution_mode": "dry_run_local_worker",
+            "physical_dispatch": false,
+            "simulation_only": true,
+            "next_routes": [
+                "glioma_replication_closure_frontier",
+                "glioma_replication_closure_execute",
+                "glioma_replication_federated_transport_execute",
+                "glioma_research_object_prepare"
+            ],
+            "guarantees": [
+                "each round is admitted through the guarded closure executor",
+                "global budget, duplicate actions, terminal stops, held frontiers, and unresolved evidence remain explicit",
+                "the dry-run worker cannot touch specimens, instruments, protected raw data, federation, or clinical decisions",
+                "round and campaign digests support deterministic replay and independent review"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma replication-closure campaign: {error}"))
     }
 
     /// Compile the still-open mechanism validation decisions into a deterministic local P07
@@ -52874,6 +52916,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_replication_federated_transport_execute",
                 "glioma_replication_closure_frontier",
                 "glioma_replication_closure_execute",
+                "glioma_replication_closure_campaign_execute",
                 "glioma_mechanism_validation_protocol_compile",
                 "glioma_mechanism_validation_protocol_execute",
                 "glioma_information_design",
@@ -63583,6 +63626,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "ReplicationClosureExecutionRequest1@1 containing a validated ReplicationClosureFrontier1@1 and a matching bounded GliomaReplicationCampaignRequest1@1."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_replication_closure_campaign_execute",
+        "description": "Execute a bounded multi-round sequence of preclinical glioma replication-closure frontiers. Every round passes through the guarded closure executor; global budget reservation, duplicate-action protection, qualification/negative/unresolved stops, held frontiers, and partial progress remain explicit. The deterministic MCP worker is simulation-only and cannot touch specimens, instruments, protected raw data, federation, or clinical decisions.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ReplicationClosureCampaignRequest1@1 containing a matching objective/model system, validated closure execution frontiers, global budget, round/stop policy, and replay identity."}
             },
             "required": ["request"]
         }

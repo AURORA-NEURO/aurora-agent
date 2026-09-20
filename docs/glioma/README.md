@@ -132,6 +132,8 @@ crates/research/src/glioma/
                                              P10 ranked scientific closure frontier after independent-site replication with explicit negative and qualified holds
   programs/p10_interpretation_replication/replication_closure_execution.rs
                                              P10 selected closure-frontier execution through a bounded replication campaign worker seam
+  programs/p10_interpretation_replication/replication_closure_campaign.rs
+                                             P10 multi-round closure campaign with global budget, terminal stops, and replayable progress
   programs/p07_protocol_simulation/mechanism_validation_execution.rs
                                              P07 compiled validation protocol execution through a bounded institution-local worker seam
   programs/p05_mechanism_exploration/operating_cycle.rs
@@ -945,6 +947,12 @@ It validates objective/model parity, preserves frontier and campaign content dig
 typed qualified, negative, partial, unresolved, or blocked outcomes. A held or unrunnable frontier
 never reaches the executor; the MCP worker is deterministic and simulation-only, while institution
 gateways retain all physical, protected-data, federation, and release authority.
+The multi-round closure campaign (`execute_glioma_replication_closure_campaign`) composes a
+caller-declared sequence of those guarded frontiers into one autonomous research loop. It reserves
+a global budget before dispatch, rejects objective/model drift and duplicate actions, preserves
+held and partial rounds, and stops on qualified, negative, unresolved, blocked, or exhausted
+states. This is workflow execution over typed scientific decisions, not a receipt-only transport
+layer; every round still requires the same local executor and preclinical boundary.
 P11 now adds a dependency-aware reproducibility replay campaign
 (`execute_glioma_replay_campaign`). It schedules declared program replays, compares exact artifact
 hashes, blocks downstream tasks after mismatch or unavailable outputs, and only emits a
