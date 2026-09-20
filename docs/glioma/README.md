@@ -58,6 +58,8 @@ crates/research/src/glioma/
                                              P04 outcome-calibrated value forecasts with shrinkage, confidence, conflict, and negative-result handling
   programs/p04_decision_context/adaptive_controller.rs
                                              P04 calibrated exploitation/exploration controller with dependency-safe adaptive portfolio selection
+  programs/p04_decision_context/decision_loop_governor.rs
+                                             P04 sequential stopping and continuation policy from progress, failure, contradiction, negative-result, and budget signals
   programs/p04_decision_context/action_graph.rs
                                              P04 claim-path to dependency-closed action DAG and parallel waves
   programs/p04_decision_context/omission_certificate.rs
@@ -483,6 +485,11 @@ forecast conflicts, searches dependency-closed combinations with a deterministic
 budget-blocked, deferred, negative, and uncertain actions visible before admission. This is the
 P04 learning-to-action seam used by the autonomous research loop; it still produces planning
 utility only and cannot dispatch an assay or instrument by itself.
+The loop governor (`govern_glioma_decision_loop`) controls continuation after local rounds. It
+combines information gain and uncertainty reduction into a bounded net-progress score, penalizes
+failures, contradictions, and negative outcomes, and stops for budget exhaustion, repeated
+no-progress, failure limits, incomplete closure, or human review. A qualified round is sent to
+independent validation rather than being treated as a clinical or biological conclusion.
 P07 now also has an
 adaptive campaign planner (`plan_glioma_workflow`) and a guarded full-program executor that
 chooses deterministic next batches, closes over dependencies, and routes unresolved evidence,

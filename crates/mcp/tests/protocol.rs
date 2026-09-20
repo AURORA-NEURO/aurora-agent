@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 760;
+const TOOL_DEFINITION_COUNT: usize = 761;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -3412,6 +3412,33 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
             .len(),
         2
     );
+
+    let decision_loop = call(
+        &mut server,
+        "glioma_decision_loop_governor",
+        json!({
+            "request": {
+                "objective": "govern a bounded glioma research loop",
+                "rounds": [
+                    {"round_index":1,"action_order":["action-01"],"cost_units":3,"observed_information_gain_milli":800,"uncertainty_reduction_milli":400,"failure_count":0,"negative_count":0,"contradiction_count":0,"completed":true,"evidence_complete":true,"human_review_available":false}
+                ],
+                "budget_units":12,
+                "max_rounds":4,
+                "min_progress_milli":500,
+                "min_gain_milli":250,
+                "max_failures":3,
+                "require_negative_visibility":true,
+                "allow_continue_on_partial":false
+            }
+        }),
+    );
+    assert_eq!(decision_loop["dispatch"], json!("not_started"));
+    assert_eq!(decision_loop["simulation_only"], json!(true));
+    assert_eq!(
+        decision_loop["governance"]["stop_reason"],
+        json!("qualified")
+    );
+    assert_eq!(decision_loop["governance"]["next_round"], Value::Null);
 
     let decision_action_plan = call(
         &mut server,

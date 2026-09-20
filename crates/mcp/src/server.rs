@@ -561,8 +561,8 @@ use bioprism_research::{
     execute_glioma_robustness_guided_computation, execute_glioma_scientific_frontier,
     execute_glioma_sequential_campaign, explore_mechanisms, forecast_glioma_multimodal_quality,
     fuse_glioma_protocol_evidence, gate_glioma_protocol_transport, generate_feature_catalog,
-    glioma_program_catalog, harmonize_glioma_multimodal_batches, harmonize_multimodal_inputs,
-    optimize_glioma_decision_value, optimize_glioma_protocol_branches,
+    glioma_program_catalog, govern_glioma_decision_loop, harmonize_glioma_multimodal_batches,
+    harmonize_multimodal_inputs, optimize_glioma_decision_value, optimize_glioma_protocol_branches,
     plan_adaptive_glioma_dose_surface, plan_decision_actions, plan_federated_benchmark_sites,
     plan_glioma_active_learning, plan_glioma_adaptive_information_campaign,
     plan_glioma_adaptive_mechanism_policy, plan_glioma_adaptive_research_frontier,
@@ -609,27 +609,27 @@ use bioprism_research::{
     CounterfactualModel, CounterfactualRequest, DecisionActionGraphRequest,
     DecisionActionPlanRequest, DecisionAdmissionRequest, DecisionBranchCampaignRequest,
     DecisionBranchPlannerRequest, DecisionContext, DecisionContextCampaignRequest,
-    DecisionContextRequest, DecisionOmissionCertificateRequest, DecisionOperatingCycleRequest,
-    DecisionValueCalibrationRequest, DecisionValueRequest, DesignAction, DesignMechanism,
-    DoseResponseObservation, DoseResponseRequest, DriftSurveillanceRequest, DropoutStressRequest,
-    DryRunActiveLearningCampaignExecutor, DryRunAdaptiveAllocationCampaignExecutor,
-    DryRunAdaptiveMechanismPolicyExecutor, DryRunDecisionContextCampaignExecutor,
-    DryRunEvidenceAcquisitionExecutor, DryRunEvidenceRefreshCampaignExecutor,
-    DryRunExperimentOperatingCycleExecutor, DryRunFederatedBenchmarkCampaignExecutor,
-    DryRunGliomaActionExecutor, DryRunGliomaComputationExecutor,
-    DryRunGliomaExperimentFrontierExecutor, DryRunGliomaProtocolExecutor,
-    DryRunGliomaReplicationCampaignExecutor, DryRunInstrumentExecutor,
-    DryRunKnowledgeActionExecutor, DryRunKnowledgeResolutionCampaignExecutor,
-    DryRunMechanismDiscriminationCampaignExecutor, DryRunMultiFidelityCampaignExecutor,
-    DryRunMultimodalIngestionCampaignExecutor, DryRunQualityScheduleExecutor,
-    DryRunReplayCampaignExecutor, DryRunRobustActiveLearningCampaignExecutor,
-    DryRunSequentialCampaignExecutor, DynamicPolicyCandidate, DynamicPolicyRequest,
-    DynamicPolicyTrajectory, EvidenceAcquisitionCampaignRequest, EvidenceAcquisitionCandidate,
-    EvidenceAcquisitionRequest, EvidenceCalibrationObservation, EvidenceCalibrationRequest,
-    EvidenceExecutionMode, EvidenceFusionRequest, EvidencePriorityRequest, EvidenceRecord,
-    EvidenceRefreshCampaignRequest, EvidenceRequest, EvidenceSurveillanceRequest,
-    EvidenceTriangulationRequest, ExperimentArm, ExperimentOperatingCycleRequest,
-    ExperimentRequest, FederatedBenchmarkAdaptiveCampaignRequest,
+    DecisionContextRequest, DecisionLoopGovernorRequest, DecisionOmissionCertificateRequest,
+    DecisionOperatingCycleRequest, DecisionValueCalibrationRequest, DecisionValueRequest,
+    DesignAction, DesignMechanism, DoseResponseObservation, DoseResponseRequest,
+    DriftSurveillanceRequest, DropoutStressRequest, DryRunActiveLearningCampaignExecutor,
+    DryRunAdaptiveAllocationCampaignExecutor, DryRunAdaptiveMechanismPolicyExecutor,
+    DryRunDecisionContextCampaignExecutor, DryRunEvidenceAcquisitionExecutor,
+    DryRunEvidenceRefreshCampaignExecutor, DryRunExperimentOperatingCycleExecutor,
+    DryRunFederatedBenchmarkCampaignExecutor, DryRunGliomaActionExecutor,
+    DryRunGliomaComputationExecutor, DryRunGliomaExperimentFrontierExecutor,
+    DryRunGliomaProtocolExecutor, DryRunGliomaReplicationCampaignExecutor,
+    DryRunInstrumentExecutor, DryRunKnowledgeActionExecutor,
+    DryRunKnowledgeResolutionCampaignExecutor, DryRunMechanismDiscriminationCampaignExecutor,
+    DryRunMultiFidelityCampaignExecutor, DryRunMultimodalIngestionCampaignExecutor,
+    DryRunQualityScheduleExecutor, DryRunReplayCampaignExecutor,
+    DryRunRobustActiveLearningCampaignExecutor, DryRunSequentialCampaignExecutor,
+    DynamicPolicyCandidate, DynamicPolicyRequest, DynamicPolicyTrajectory,
+    EvidenceAcquisitionCampaignRequest, EvidenceAcquisitionCandidate, EvidenceAcquisitionRequest,
+    EvidenceCalibrationObservation, EvidenceCalibrationRequest, EvidenceExecutionMode,
+    EvidenceFusionRequest, EvidencePriorityRequest, EvidenceRecord, EvidenceRefreshCampaignRequest,
+    EvidenceRequest, EvidenceSurveillanceRequest, EvidenceTriangulationRequest, ExperimentArm,
+    ExperimentOperatingCycleRequest, ExperimentRequest, FederatedBenchmarkAdaptiveCampaignRequest,
     FederatedBenchmarkCampaignRequest, FederatedBenchmarkExecutionMode,
     FederatedBenchmarkOperatingCycleRequest, FederatedBenchmarkRequest, FederatedBenchmarkSite,
     FederatedBenchmarkSitePlannerRequest, FederatedMechanismSite,
@@ -2457,6 +2457,7 @@ impl Server {
             "glioma_adaptive_decision_controller" => {
                 self.glioma_adaptive_decision_controller(&arguments)
             }
+            "glioma_decision_loop_governor" => self.glioma_decision_loop_governor(&arguments),
             "glioma_decision_action_graph" => self.glioma_decision_action_graph(&arguments),
             "glioma_decision_omission_certificate" => {
                 self.glioma_decision_omission_certificate(&arguments)
@@ -10022,6 +10023,32 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma adaptive decision controller: {error}"))
+    }
+
+    /// Govern whether a bounded autonomous decision loop may continue after local rounds.
+    fn glioma_decision_loop_governor(&self, arguments: &Value) -> Result<Value, String> {
+        let request: DecisionLoopGovernorRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_decision_loop_governor requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma decision loop request: {error}"))?;
+        let governance = govern_glioma_decision_loop(&request)
+            .map_err(|error| format!("glioma decision loop governance refused: {error}"))?;
+        serde_json::to_value(json!({
+            "governance": governance,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "next_routes": ["glioma_adaptive_decision_controller", "glioma_decision_admission_gate", "glioma_decision_action_graph"],
+            "guarantees": [
+                "information gain and uncertainty reduction are scored separately from failures, contradictions, and negative outcomes",
+                "budget, repeated no-progress, failure limits, incomplete closure, and review requirements can stop continuation",
+                "negative results and uncertainty remain visible even when a round is productive",
+                "route governs continuation only and performs no assay, instrument, federation, raw-data, or clinical action"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma decision loop governance: {error}"))
     }
 
     /// Compile composed knowledge paths into dependency-closed, parallelizable decision actions.
@@ -52153,6 +52180,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_decision_value_optimizer",
                 "glioma_decision_value_calibrator",
                 "glioma_adaptive_decision_controller",
+                "glioma_decision_loop_governor",
                 "glioma_decision_action_graph",
                 "glioma_decision_omission_certificate",
                 "glioma_decision_branch_plan",
@@ -62395,6 +62423,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "AdaptiveDecisionControllerRequest1@1 with nested calibration request, bounded portfolio search, dependency closure, exploration weight, and utility floor."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_decision_loop_governor",
+        "description": "Govern continuation of an autonomous preclinical glioma research loop after local rounds. Scores information gain and uncertainty reduction, penalizes failures, contradictions, and negative results, and stops for budget, no-progress, failure-limit, incomplete-closure, or review conditions without executing any action.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "DecisionLoopGovernorRequest1@1 with ordered round outcomes, progress thresholds, budget/failure limits, negative-result policy, and partial-round policy."}
             },
             "required": ["request"]
         }
