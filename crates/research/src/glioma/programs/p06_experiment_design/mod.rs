@@ -29,6 +29,7 @@ pub mod sequential_campaign;
 pub mod sequential_design;
 pub mod synergy;
 pub mod validation_batch_assessment;
+pub mod validation_campaign;
 
 pub use active_learning::{
     plan_glioma_active_learning, ActiveLearningCandidate, ActiveLearningCandidateDisposition,
@@ -137,6 +138,11 @@ pub use validation_batch_assessment::{
     assess_glioma_validation_batch, ValidationBatchAssessment,
     ValidationBatchAssessmentDisposition, ValidationBatchAssessmentError,
     ValidationBatchAssessmentRequest,
+};
+pub use validation_campaign::{
+    execute_glioma_validation_campaign, ValidationCampaignDisposition, ValidationCampaignError,
+    ValidationCampaignRequest, ValidationCampaignRound, ValidationCampaignRun,
+    ValidationCampaignStopReason,
 };
 
 pub use replication_plan::{

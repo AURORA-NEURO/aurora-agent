@@ -120,6 +120,8 @@ crates/research/src/glioma/
                                              P06 validation decisions to deterministic P07 local protocol preflight compiler
   programs/p06_experiment_design/validation_batch_assessment.rs
                                              P06 measured validation batch pooling and next-look power/stopping reassessment
+  programs/p06_experiment_design/validation_campaign.rs
+                                             P05→P06→P07 closed-loop validation campaign with observation-driven replanning
   programs/p07_protocol_simulation/mechanism_validation_execution.rs
                                              P07 compiled validation protocol execution through a bounded institution-local worker seam
   programs/p05_mechanism_exploration/operating_cycle.rs

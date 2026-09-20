@@ -562,11 +562,11 @@ use bioprism_research::{
     execute_glioma_replication_campaign, execute_glioma_research_autopilot,
     execute_glioma_research_director, execute_glioma_robust_active_learning_campaign,
     execute_glioma_robustness_guided_computation, execute_glioma_scientific_frontier,
-    execute_glioma_sequential_campaign, explore_mechanisms, filter_glioma_mechanism_states,
-    forecast_glioma_multimodal_quality, fuse_glioma_protocol_evidence,
-    gate_glioma_protocol_transport, generate_feature_catalog, glioma_program_catalog,
-    govern_glioma_decision_loop, harmonize_glioma_multimodal_batches, harmonize_multimodal_inputs,
-    optimize_glioma_decision_value, optimize_glioma_protocol_branches,
+    execute_glioma_sequential_campaign, execute_glioma_validation_campaign, explore_mechanisms,
+    filter_glioma_mechanism_states, forecast_glioma_multimodal_quality,
+    fuse_glioma_protocol_evidence, gate_glioma_protocol_transport, generate_feature_catalog,
+    glioma_program_catalog, govern_glioma_decision_loop, harmonize_glioma_multimodal_batches,
+    harmonize_multimodal_inputs, optimize_glioma_decision_value, optimize_glioma_protocol_branches,
     plan_adaptive_glioma_dose_surface, plan_decision_actions, plan_federated_benchmark_sites,
     plan_glioma_active_learning, plan_glioma_adaptive_information_campaign,
     plan_glioma_adaptive_mechanism_policy, plan_glioma_adaptive_panel,
@@ -701,6 +701,7 @@ use bioprism_research::{
     StratifiedCausalRequest, StratifiedObservation, TemporalFusionRequest, TemporalObservation,
     TemporalSpatialAlignmentRequest, TrajectoryObservation, TrajectoryRequest, TransportStudy,
     TransportabilityRequest, TypedKnowledge, ValidationBatchAssessmentRequest,
+    ValidationCampaignRequest,
 };
 use bioprism_routing::{
     lab::{run as run_routing_lab, LabSettings, Task},
@@ -2509,6 +2510,9 @@ impl Server {
             }
             "glioma_mechanism_validation_plan" => self.glioma_mechanism_validation_plan(&arguments),
             "glioma_validation_batch_assess" => self.glioma_validation_batch_assess(&arguments),
+            "glioma_validation_campaign_execute" => {
+                self.glioma_validation_campaign_execute(&arguments)
+            }
             "glioma_mechanism_validation_protocol_compile" => {
                 self.glioma_mechanism_validation_protocol_compile(&arguments)
             }
@@ -10953,6 +10957,38 @@ impl Server {
         .map_err(|error| format!("cannot encode glioma validation batch assessment: {error}"))
     }
 
+    /// Run the bounded P05-to-P07 validation loop with the deterministic local protocol worker.
+    /// Measured batches are caller-supplied and remain distinct from synthetic task artifacts.
+    fn glioma_validation_campaign_execute(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ValidationCampaignRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_validation_campaign_execute requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma validation campaign request: {error}"))?;
+        let mut executor = DryRunGliomaProtocolExecutor;
+        let run = execute_glioma_validation_campaign(&request, &mut executor)
+            .map_err(|error| format!("glioma validation campaign refused: {error}"))?;
+        serde_json::to_value(json!({
+            "campaign": run,
+            "execution_mode": "dry_run_local_worker",
+            "physical_dispatch": false,
+            "simulation_only": true,
+            "next_routes": [
+                "glioma_validation_campaign_execute",
+                "glioma_mechanism_validation_protocol_compile",
+                "glioma_replication_plan"
+            ],
+            "guarantees": [
+                "each round replans from the prior typed validation state before compiling a protocol",
+                "synthetic task artifacts never become measured biological observations",
+                "only caller-supplied measured summaries can advance an interim look",
+                "stopping, risk, budget, underpowered, incomplete, and unresolved outcomes remain explicit",
+                "the dry-run worker cannot touch specimens, instruments, federation, or clinical decisions"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma validation campaign: {error}"))
+    }
+
     /// Compile the still-open mechanism validation decisions into a deterministic local P07
     /// protocol and preflight it against caller-declared culture/compute resources. This route
     /// never executes an assay, instrument, federation, or clinical decision.
@@ -11014,6 +11050,7 @@ impl Server {
             "next_routes": [
                 "glioma_mechanism_validation_plan",
                 "glioma_validation_batch_assess",
+                "glioma_validation_campaign_execute",
                 "glioma_mechanism_validation_protocol_compile",
                 "glioma_protocol_execute"
             ],
@@ -63272,6 +63309,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "ValidationBatchAssessmentRequest1@1 containing PowerReestimationRequest1@1, MechanismValidationExecution1@1, prior arm summaries, new measured arm summaries, look advancement, and completeness policy."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_validation_campaign_execute",
+        "description": "Run a bounded closed-loop preclinical glioma validation campaign through the local synthetic protocol worker. Each round re-plans the robust mechanism validation, compiles and preflights only still-open arms, executes the protocol, and optionally consumes caller-supplied measured summaries to advance the next power look. Synthetic task artifacts never become biological observations, and no physical, federated, or clinical action is dispatched.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ValidationCampaignRequest1@1 containing a MechanismValidationPlanRequest1@1, local protocol resources, execution bounds, round/retry limits, and optional measured observation batches."}
             },
             "required": ["request"]
         }
