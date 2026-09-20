@@ -401,6 +401,7 @@ pub fn implemented_feature_ids() -> Vec<&'static str> {
         crate::glioma::programs::p06_experiment_design::adaptive_allocation::FEATURE_ID,
         crate::glioma::programs::p06_experiment_design::blocked_randomization::FEATURE_ID,
         crate::glioma::programs::p06_experiment_design::power_reestimation::FEATURE_ID,
+        crate::glioma::programs::p06_experiment_design::power_stress_surface::FEATURE_ID,
         crate::glioma::programs::p06_experiment_design::robust_design::FEATURE_ID,
         crate::glioma::programs::p06_experiment_design::adaptive_allocation_campaign::FEATURE_ID,
         crate::glioma::programs::p06_experiment_design::campaign::FEATURE_ID,

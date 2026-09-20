@@ -366,6 +366,7 @@ crates/research/src/glioma/
     p06_experiment_design/information_design.rs P06 integer Bayesian assay selection by expected mechanism-information reduction
     p06_experiment_design/robust_design.rs P06 maximin scenario-aware replicate allocation with diminishing utility and explicit risk/feasibility gates
     p06_experiment_design/blocked_randomization.rs P06 confounding-aware blocked randomization planner with nuisance-stratum balance, variance-aware information gain, and explicit capacity/risk gates
+    p06_experiment_design/power_stress_surface.rs P06 prospective power-stress surface across effect, variance, attrition, risk, and budget worlds
     p06_experiment_design/adaptive_information_campaign.rs P06 closed-loop posterior updating and re-planning through a caller-owned assay executor
     p06_experiment_design/adaptive_allocation_campaign.rs P06 autonomous Beta-posterior replicate allocation with aggregate batch validation and posterior replanning
     p06_experiment_design/multi_fidelity.rs P06 cost-aware multi-fidelity surrogate optimization across screening, mechanistic, and validation models
@@ -1122,6 +1123,12 @@ declared nuisance strata into a deterministic allocation matrix, keeps arm count
 each block, and spends residual capacity using integer variance-aware information gain per unit
 cost. Risk- and feasibility-blocked arms, capacity shortfalls, and imbalance uncertainty remain
 visible; the planner never randomizes specimens or dispatches a protocol.
+
+The prospective power-stress surface (`plan_glioma_power_stress_surface`) evaluates each candidate
+arm across weighted effect, variance, attrition, risk, and budget worlds before protocol admission.
+It returns integer replicate requirements, worst-case and weighted power proxies, underpowered
+scenarios, and explicit blocked arms so the autonomous engine can reject brittle designs before
+compilation. These are planning diagnostics, not validated biological or clinical claims.
 
 P06 also includes multi-fidelity optimization (`plan_glioma_multi_fidelity_optimization`). It
 calibrates paired designs across screening, mechanistic, and validation scales, combines transferred

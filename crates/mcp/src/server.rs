@@ -586,7 +586,7 @@ use bioprism_research::{
     plan_glioma_mechanism_validation, plan_glioma_multi_fidelity_optimization,
     plan_glioma_multimodal_portfolio, plan_glioma_multimodal_quality_remediation,
     plan_glioma_multimodal_quality_schedule, plan_glioma_power_reestimation,
-    plan_glioma_protocol_compensation, plan_glioma_replication,
+    plan_glioma_power_stress_surface, plan_glioma_protocol_compensation, plan_glioma_replication,
     plan_glioma_replication_closure_frontier, plan_glioma_replication_continuation,
     plan_glioma_robust_active_learning, plan_glioma_robust_intervention_portfolio,
     plan_glioma_scientific_frontier, plan_glioma_sequential_design,
@@ -694,13 +694,14 @@ use bioprism_research::{
     MultimodalIngestionCampaignRequest, MultimodalMechanismCampaignRequest, MultimodalObservation,
     MultimodalReadinessRequest, MultimodalRequest, PathwayActivityDefinition,
     PathwayActivityObservation, PathwayActivityRequest, PowerArmObservation,
-    PowerReestimationRequest, ProspectiveQualityRequest, ProtocolBranchOptimizationRequest,
-    ProtocolCompensationRequest, ProtocolEvidenceFusionRequest, ProtocolEvidenceSurfaceRequest,
-    ProtocolExecutionRequest, ProtocolScenarioEnsembleRequest, ProtocolSimulationRequest,
-    ProtocolTransportGateRequest, QualityAdaptiveCampaignRequest, QualityExecutionMode,
-    QualityExecutionRequest, QualityRecoveryRequest, QualityRemediationRequest,
-    QualityRootCauseRequest, QualityScheduleRequest, QualityTransportRequest, ReleaseExecutionMode,
-    ReleaseGateRequest, ReliabilityCalibrationRequest, ReplayCampaign, ReplayCampaignRequest,
+    PowerReestimationRequest, PowerStressSurfaceRequest, ProspectiveQualityRequest,
+    ProtocolBranchOptimizationRequest, ProtocolCompensationRequest, ProtocolEvidenceFusionRequest,
+    ProtocolEvidenceSurfaceRequest, ProtocolExecutionRequest, ProtocolScenarioEnsembleRequest,
+    ProtocolSimulationRequest, ProtocolTransportGateRequest, QualityAdaptiveCampaignRequest,
+    QualityExecutionMode, QualityExecutionRequest, QualityRecoveryRequest,
+    QualityRemediationRequest, QualityRootCauseRequest, QualityScheduleRequest,
+    QualityTransportRequest, ReleaseExecutionMode, ReleaseGateRequest,
+    ReliabilityCalibrationRequest, ReplayCampaign, ReplayCampaignRequest,
     ReplicationClosureCampaignRequest, ReplicationClosureExecutionRequest,
     ReplicationClosureFrontierRequest, ReplicationContinuationRequest, ReplicationObservation,
     ReplicationPlanRequest, ReplicationProtocolCompileRequest, ReplicationRequest,
@@ -2396,6 +2397,7 @@ impl Server {
             "glioma_adaptive_allocation" => self.glioma_adaptive_allocation(&arguments),
             "glioma_sequential_design" => self.glioma_sequential_design(&arguments),
             "glioma_power_reestimate" => self.glioma_power_reestimate(&arguments),
+            "glioma_power_stress_surface" => self.glioma_power_stress_surface(&arguments),
             "glioma_closed_loop_campaign" => self.glioma_closed_loop_campaign(&arguments),
             "glioma_experiment_operating_cycle" => {
                 self.glioma_experiment_operating_cycle(&arguments)
@@ -8159,6 +8161,37 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma power re-estimation plan: {error}"))
+    }
+
+    /// Stress-test a prospective glioma design over declared effect, variance, attrition, risk,
+    /// and budget worlds. This is a planning/evaluation endpoint; it never executes an assay.
+    fn glioma_power_stress_surface(&self, arguments: &Value) -> Result<Value, String> {
+        let request: PowerStressSurfaceRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_power_stress_surface requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma power-stress request: {error}"))?;
+        let surface = plan_glioma_power_stress_surface(&request)
+            .map_err(|error| format!("glioma power stress surface refused: {error}"))?;
+        serde_json::to_value(json!({
+            "surface": surface,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "next_routes": [
+                "glioma_blocked_randomization_design",
+                "glioma_robust_experiment_design",
+                "glioma_power_reestimate"
+            ],
+            "guarantees": [
+                "integer replicate requirements are evaluated across every declared effect, variance, and attrition scenario",
+                "worst-case and weighted power proxies remain separate from validated observations",
+                "risk, budget, arm-capacity, underpower, and negative evidence remain explicit",
+                "the route performs no assay, instrument, federation, raw-data, or clinical action"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma power stress surface: {error}"))
     }
 
     fn glioma_sequential_campaign_execute(&self, arguments: &Value) -> Result<Value, String> {
@@ -53162,6 +53195,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_adaptive_allocation_campaign_execute",
                 "glioma_sequential_design",
                 "glioma_power_reestimate",
+                "glioma_power_stress_surface",
                 "glioma_sequential_campaign_execute",
                 "glioma_closed_loop_campaign",
                 "glioma_experiment_operating_cycle",
@@ -62736,6 +62770,17 @@ pub fn tool_definitions() -> Vec<Value> {
                 "arms": {"type": "array", "items": {"type": "object"}, "description": "Local PowerArmObservation1@1 means, variances, replicate counts, model bindings, risk, cost, and de-identified artifact references."}
             },
             "required": ["request", "arms"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_power_stress_surface",
+        "description": "Stress-test a prospective preclinical glioma design across declared effect, variance, attrition, risk, and budget worlds. Computes integer replicate requirements, worst-case and weighted power proxies, and explicit underpowered or blocked outcomes; it never treats the proxy as a validated claim, dispatches an assay, moves raw data, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "PowerStressSurfaceRequest1@1 containing weighted scenarios with effect/variance/attrition, candidate arms with cost/risk/capacity, quantile proxies, target power, and bounded budget/replicate gates."}
+            },
+            "required": ["request"]
         }
     }));
     definitions.push(json!({

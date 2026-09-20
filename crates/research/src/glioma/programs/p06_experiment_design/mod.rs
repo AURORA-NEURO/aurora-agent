@@ -21,6 +21,7 @@ pub mod multi_fidelity;
 pub mod multi_fidelity_campaign;
 pub mod operating_cycle;
 pub mod power_reestimation;
+pub mod power_stress_surface;
 pub mod replication_continuation;
 pub mod replication_plan;
 pub mod replication_protocol;
@@ -139,6 +140,11 @@ pub use power_reestimation::{
     plan_glioma_power_reestimation, PowerArmDecision, PowerArmObservation, PowerDecisionKind,
     PowerReestimationDisposition, PowerReestimationError, PowerReestimationPlan,
     PowerReestimationRequest,
+};
+pub use power_stress_surface::{
+    plan_glioma_power_stress_surface, PowerStressArm, PowerStressArmResult, PowerStressDisposition,
+    PowerStressError, PowerStressScenario, PowerStressScenarioResult, PowerStressSurface,
+    PowerStressSurfaceRequest,
 };
 pub use validation_batch_assessment::{
     assess_glioma_validation_batch, ValidationBatchAssessment,
