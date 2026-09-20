@@ -7,6 +7,7 @@ pub mod adaptive_allocation;
 pub mod adaptive_allocation_campaign;
 pub mod adaptive_dose_surface;
 pub mod adaptive_information_campaign;
+pub mod adaptive_panel;
 pub mod campaign;
 pub mod clonal_panel;
 pub mod contrast_design;
@@ -53,6 +54,11 @@ pub use adaptive_information_campaign::{
     AdaptiveInformationCampaignRequest, AdaptiveInformationCampaignRound,
     AdaptiveInformationCampaignTermination, AdaptiveInformationExecutionFailure,
     AdaptiveInformationObservation, AdaptiveMechanismPosterior, GliomaInformationDesignExecutor,
+};
+pub use adaptive_panel::{
+    plan_glioma_adaptive_panel, AdaptivePanelActionKind, AdaptivePanelDesign,
+    AdaptivePanelDisposition, AdaptivePanelError, AdaptivePanelRequest, AdaptivePanelSelection,
+    PanelAction, PanelMechanism, PanelOutcome,
 };
 pub use campaign::{
     execute_glioma_closed_loop_campaign, plan_glioma_closed_loop_campaign, CampaignAction,

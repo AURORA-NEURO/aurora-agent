@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 764;
+const TOOL_DEFINITION_COUNT: usize = 765;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -2520,6 +2520,49 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
     );
     assert_eq!(
         information_design["design"]["scores"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+
+    let adaptive_panel = call(
+        &mut server,
+        "glioma_adaptive_panel",
+        json!({
+            "request": {
+                "objective": "compile a complementary glioma mechanism assay panel",
+                "model_system": "organoid",
+                "mechanisms": [
+                    {"mechanism_id":"egfr","prior_milli":500},
+                    {"mechanism_id":"matrix","prior_milli":500}
+                ],
+                "actions": [
+                    {"action_id":"imaging-panel","feature_id":"invasion-image","label":"invasion imaging","independence_group":"imaging","outcomes":[
+                        {"outcome_id":"low","probability_milli_by_mechanism":{"egfr":900,"matrix":100}},
+                        {"outcome_id":"high","probability_milli_by_mechanism":{"egfr":100,"matrix":900}}
+                    ],"feasibility_milli":900,"risk_milli":100,"cost_units":1,"max_replicates":1},
+                    {"action_id":"pathway-panel","feature_id":"pathway-score","label":"pathway activity","independence_group":"pathway","outcomes":[
+                        {"outcome_id":"low","probability_milli_by_mechanism":{"egfr":800,"matrix":200}},
+                        {"outcome_id":"high","probability_milli_by_mechanism":{"egfr":200,"matrix":800}}
+                    ],"feasibility_milli":900,"risk_milli":100,"cost_units":1,"max_replicates":1}
+                ],
+                "budget_units":2,
+                "max_selected_actions":2,
+                "min_information_gain_milli":10,
+                "min_feasibility_milli":700,
+                "risk_ceiling_milli":500,
+                "diversity_weight_milli":100,
+                "risk_penalty_milli":100,
+                "cost_penalty_milli":10
+            }
+        }),
+    );
+    assert_eq!(adaptive_panel["dispatch"], json!("not_started"));
+    assert_eq!(adaptive_panel["simulation_only"], json!(true));
+    assert_eq!(adaptive_panel["panel"]["disposition"], json!("qualified"));
+    assert_eq!(
+        adaptive_panel["panel"]["selected_order"]
             .as_array()
             .unwrap()
             .len(),

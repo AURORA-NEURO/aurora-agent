@@ -106,6 +106,8 @@ crates/research/src/glioma/
                                              P05 fixed-interval forward-backward smoothing with retrospective transition support, coverage, entropy, and negative features
   programs/p05_mechanism_exploration/consensus.rs
                                              P05 source-weighted consensus across imaging, pathway, clonal, and computational evidence with conflict and leave-one-source-out sensitivity
+  programs/p06_experiment_design/adaptive_panel.rs
+                                             P06 mechanism-aware multi-assay panel selection with Gini information gain, correlation-group diversity, risk, feasibility, and budget gates
   programs/p05_mechanism_exploration/operating_cycle.rs
                                              P05 mechanism-discrimination campaign to typed next-assay operating cycle
   programs/p05_mechanism_exploration/calibrated_campaign.rs

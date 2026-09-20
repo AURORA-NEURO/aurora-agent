@@ -135,7 +135,7 @@ fn main() {
                      glioma_mechanism_counterfactual,\n\
                      glioma_mechanism_ensemble_counterfactual,\n\
                      glioma_robust_intervention_portfolio,\n\
-                     glioma_information_design,\n\
+                     glioma_information_design, glioma_adaptive_panel,\n\
                      glioma_robust_experiment_design,\n\
                      glioma_adaptive_information_campaign,\n\
                      glioma_active_learning,\n\

@@ -566,21 +566,21 @@ use bioprism_research::{
     optimize_glioma_decision_value, optimize_glioma_protocol_branches,
     plan_adaptive_glioma_dose_surface, plan_decision_actions, plan_federated_benchmark_sites,
     plan_glioma_active_learning, plan_glioma_adaptive_information_campaign,
-    plan_glioma_adaptive_mechanism_policy, plan_glioma_adaptive_research_frontier,
-    plan_glioma_adaptive_workflow, plan_glioma_clone_continuation,
-    plan_glioma_clone_perturbation_panel, plan_glioma_closed_loop_campaign,
-    plan_glioma_computation_portfolio, plan_glioma_decision_branches,
-    plan_glioma_evidence_acquisition, plan_glioma_evidence_contradiction_cut,
-    plan_glioma_information_design, plan_glioma_multi_fidelity_optimization,
-    plan_glioma_multimodal_portfolio, plan_glioma_multimodal_quality_remediation,
-    plan_glioma_multimodal_quality_schedule, plan_glioma_power_reestimation,
-    plan_glioma_protocol_compensation, plan_glioma_robust_active_learning,
-    plan_glioma_robust_intervention_portfolio, plan_glioma_scientific_frontier,
-    plan_glioma_sequential_design, plan_glioma_workflow, preflight_glioma_instrument,
-    prioritize_glioma_evidence, prioritize_knowledge_frontier, propagate_glioma_mechanism_graph,
-    qualify_evidence, register_glioma_spatial_samples, revise_glioma_beliefs,
-    schedule_glioma_computation_placement, schedule_glioma_instrument_fleet, select_glioma_actions,
-    simulate_glioma_counterfactual, simulate_glioma_counterfactual_ensemble,
+    plan_glioma_adaptive_mechanism_policy, plan_glioma_adaptive_panel,
+    plan_glioma_adaptive_research_frontier, plan_glioma_adaptive_workflow,
+    plan_glioma_clone_continuation, plan_glioma_clone_perturbation_panel,
+    plan_glioma_closed_loop_campaign, plan_glioma_computation_portfolio,
+    plan_glioma_decision_branches, plan_glioma_evidence_acquisition,
+    plan_glioma_evidence_contradiction_cut, plan_glioma_information_design,
+    plan_glioma_multi_fidelity_optimization, plan_glioma_multimodal_portfolio,
+    plan_glioma_multimodal_quality_remediation, plan_glioma_multimodal_quality_schedule,
+    plan_glioma_power_reestimation, plan_glioma_protocol_compensation,
+    plan_glioma_robust_active_learning, plan_glioma_robust_intervention_portfolio,
+    plan_glioma_scientific_frontier, plan_glioma_sequential_design, plan_glioma_workflow,
+    preflight_glioma_instrument, prioritize_glioma_evidence, prioritize_knowledge_frontier,
+    propagate_glioma_mechanism_graph, qualify_evidence, register_glioma_spatial_samples,
+    revise_glioma_beliefs, schedule_glioma_computation_placement, schedule_glioma_instrument_fleet,
+    select_glioma_actions, simulate_glioma_counterfactual, simulate_glioma_counterfactual_ensemble,
     simulate_glioma_mechanism_dynamics, simulate_glioma_protocol, smooth_glioma_mechanism_states,
     surveil_glioma_evidence, surveil_glioma_multimodal_drift, synthesize_glioma_interpretation,
     triangulate_glioma_evidence, update_glioma_mechanism_posterior, validate_feature_catalog,
@@ -592,19 +592,19 @@ use bioprism_research::{
     AdaptiveFrontierExecutionRequest, AdaptiveFrontierRequest, AdaptiveInformationCampaignRequest,
     AdaptiveInformationObservation, AdaptiveInstrumentCampaignRequest,
     AdaptiveInterpretationCampaignRequest, AdaptiveMechanismCampaignRequest,
-    AdaptiveMechanismPolicyRequest, AnalysisDataset, AnalysisRequest, AssayEvidenceObservation,
-    AssayEvidenceRequest, AutonomousGapCycleRequest, AutonomousProgramCycleRequest,
-    AutonomousProtocolControllerRequest, BayesianMechanismHypothesis,
-    BayesianMechanismUpdateRequest, BeliefConflict, BeliefRevisionRequest,
-    CalibratedMechanismCampaignRequest, CalibrationRequest, CalibrationRun, CampaignAction,
-    CampaignMechanism, CampaignObservation, CausalContrastRequest, ClonalEvolutionGraph,
-    ClonalEvolutionRequest, CloneContinuationCandidate, CloneContinuationRequest,
-    ClonePanelObservation, ClonePanelOutcomeAnalysis, ClonePanelOutcomeRequest,
-    ClonePerturbationCandidate, ClonePerturbationPanel, ClonePerturbationPanelRequest,
-    CloneProfile, ClosedLoopCampaignRequest, CombinationObservation, CombinationSynergyRequest,
-    ComputationCandidate, ComputationExecutionMode, ComputationExecutionRequest,
-    ComputationPlacementRequest, ComputationPortfolioExecutionRequest, ComputationPortfolioRequest,
-    ComputationRecoveryRequest, ConcordanceRequest, ConsensusRequest,
+    AdaptiveMechanismPolicyRequest, AdaptivePanelRequest, AnalysisDataset, AnalysisRequest,
+    AssayEvidenceObservation, AssayEvidenceRequest, AutonomousGapCycleRequest,
+    AutonomousProgramCycleRequest, AutonomousProtocolControllerRequest,
+    BayesianMechanismHypothesis, BayesianMechanismUpdateRequest, BeliefConflict,
+    BeliefRevisionRequest, CalibratedMechanismCampaignRequest, CalibrationRequest, CalibrationRun,
+    CampaignAction, CampaignMechanism, CampaignObservation, CausalContrastRequest,
+    ClonalEvolutionGraph, ClonalEvolutionRequest, CloneContinuationCandidate,
+    CloneContinuationRequest, ClonePanelObservation, ClonePanelOutcomeAnalysis,
+    ClonePanelOutcomeRequest, ClonePerturbationCandidate, ClonePerturbationPanel,
+    ClonePerturbationPanelRequest, CloneProfile, ClosedLoopCampaignRequest, CombinationObservation,
+    CombinationSynergyRequest, ComputationCandidate, ComputationExecutionMode,
+    ComputationExecutionRequest, ComputationPlacementRequest, ComputationPortfolioExecutionRequest,
+    ComputationPortfolioRequest, ComputationRecoveryRequest, ConcordanceRequest, ConsensusRequest,
     ContradictionAdjudicationRequest, ContradictionCutRequest, ContradictionEvidence,
     ContrastDesignRequest, CounterfactualEnsembleRequest, CounterfactualIntervention,
     CounterfactualModel, CounterfactualRequest, DecisionActionGraphRequest,
@@ -2497,6 +2497,7 @@ impl Server {
                 self.glioma_robust_intervention_portfolio(&arguments)
             }
             "glioma_information_design" => self.glioma_information_design(&arguments),
+            "glioma_adaptive_panel" => self.glioma_adaptive_panel(&arguments),
             "glioma_robust_experiment_design" => self.glioma_robust_experiment_design(&arguments),
             "glioma_adaptive_information_campaign" => {
                 self.glioma_adaptive_information_campaign(&arguments)
@@ -10873,6 +10874,33 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma information design: {error}"))
+    }
+
+    /// Compile a multi-assay glioma panel with information, diversity, safety, feasibility, and
+    /// budget gates. Candidate outcome distributions are planning declarations only.
+    fn glioma_adaptive_panel(&self, arguments: &Value) -> Result<Value, String> {
+        let request: AdaptivePanelRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_adaptive_panel requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma adaptive panel request: {error}"))?;
+        let panel = plan_glioma_adaptive_panel(&request)
+            .map_err(|error| format!("glioma adaptive panel refused: {error}"))?;
+        serde_json::to_value(json!({
+            "panel": panel,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "next_routes": ["glioma_protocol_simulate", "glioma_protocol_transport_gate", "glioma_adaptive_information_campaign"],
+            "guarantees": [
+                "panel selection uses deterministic expected Gini information gain over declared outcome distributions",
+                "correlated independence groups receive explicit diversity treatment rather than silent double-counting",
+                "risk, feasibility, cost, budget, deferred actions, and blocked actions remain visible",
+                "planned outcomes remain distinct from observations and the route never executes an assay, instrument, federation, or clinical action"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma adaptive panel: {error}"))
     }
 
     /// Allocate a bounded glioma experiment batch against the lower tail of declared scenarios.
@@ -52318,6 +52346,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_mechanism_ensemble_counterfactual",
                 "glioma_robust_intervention_portfolio",
                 "glioma_information_design",
+                "glioma_adaptive_panel",
                 "glioma_robust_experiment_design",
                 "glioma_adaptive_information_campaign",
                 "glioma_active_learning",
@@ -62929,6 +62958,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "RobustExperimentDesignRequest1@1 containing weighted scenarios, candidate assay utility curves, model system, budget, replicate/throughput bounds, feasibility/risk ceilings, and a lower-tail utility floor."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_adaptive_panel",
+        "description": "Compile a multi-assay preclinical glioma panel with deterministic expected Gini information gain, independence-group diversity, risk, feasibility, cost, and budget gates. Planned outcome distributions remain distinct from observations; deferred and blocked assays are explicit and the route never executes biology or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "AdaptivePanelRequest1@1 with mechanism priors, candidate panel actions, budget, selection, information, diversity, feasibility, risk, and cost bounds."}
             },
             "required": ["request"]
         }
