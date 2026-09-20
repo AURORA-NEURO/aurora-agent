@@ -17,6 +17,7 @@ pub mod autonomous_campaign;
 pub mod autonomous_engine;
 pub mod clone_campaign;
 pub mod clone_continuation;
+pub mod compensation;
 pub mod director;
 pub mod evidence_campaign;
 pub mod evidence_gate;
@@ -84,6 +85,12 @@ pub use clone_campaign::{
     AdaptiveCloneCampaignExecutor, AdaptiveCloneCampaignRequest, AdaptiveCloneCampaignRound,
     AdaptiveCloneCampaignStopReason, AdaptiveCloneExecutionFailure,
     DryRunAdaptiveCloneCampaignExecutor,
+};
+
+pub use compensation::{
+    plan_glioma_protocol_compensation, ProtocolCompensationCandidate,
+    ProtocolCompensationDisposition, ProtocolCompensationError, ProtocolCompensationPlan,
+    ProtocolCompensationRequest, ProtocolCompensationSelection,
 };
 
 pub use director::{

@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 732;
+const TOOL_DEFINITION_COUNT: usize = 733;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -15632,6 +15632,64 @@ fn domain_acquisition_catalogue_covers_every_declared_domain_in_two_planes() {
     );
     assert_eq!(refused["__isError"], json!(true));
     assert!(refused["error"].as_str().unwrap().contains("max_domains"));
+}
+
+#[test]
+fn glioma_protocol_compensation_is_reachable_and_planning_only() {
+    let mut server = server();
+    let seed = ContentHash::of_bytes(b"compensation-mcp");
+    let protocol = json!({
+        "objective": "execute a preclinical glioma assay in a sandbox",
+        "model_system": "organoid",
+        "tasks": [
+            {"task_id":"prepare","label":"prepare organoid controls","resource_kind":"culture","resource_units":1,"duration_ticks":2,"depends_on":[],"model_system":"organoid","output_schema":"Setup1@1","risk_milli":10,"requires_instrument":false},
+            {"task_id":"assay","label":"run invasion assay","resource_kind":"culture","resource_units":1,"duration_ticks":3,"depends_on":["prepare"],"model_system":"organoid","output_schema":"Assay1@1","risk_milli":20,"requires_instrument":false}
+        ],
+        "resources": [{"resource_id":"culture","kind":"culture","capacity_units":1}],
+        "max_ticks": 20,
+        "max_risk_milli": 100,
+        "allow_instrument_execution": false,
+        "approval_reference": null,
+        "randomization_seed": seed
+    });
+    let execution = call(
+        &mut server,
+        "glioma_protocol_execute",
+        json!({"request": {"protocol": protocol.clone(), "max_retries": 1, "require_artifacts": true}}),
+    );
+    assert_eq!(execution["execution"]["disposition"], json!("completed"));
+
+    let compensation = call(
+        &mut server,
+        "glioma_protocol_compensation",
+        json!({
+            "request": {
+                "objective": "execute a preclinical glioma assay in a sandbox",
+                "protocol": protocol,
+                "execution": execution["execution"].clone(),
+                "candidates": [{
+                    "candidate_id": "assay-retry-local",
+                    "replaces_task_id": "assay",
+                    "output_schema": "Assay1@1",
+                    "model_system": "organoid",
+                    "resource_kind": "culture",
+                    "resource_units": 1,
+                    "duration_ticks": 3,
+                    "cost_units": 2,
+                    "risk_milli": 20,
+                    "expected_information_milli": 900,
+                    "depends_on": ["prepare"],
+                    "unlocks_task_order": ["assay"]
+                }],
+                "budget_units": 5,
+                "max_selected": 1
+            }
+        }),
+    );
+    assert_eq!(compensation["dispatch"], json!("not_started"));
+    assert_eq!(compensation["simulation_only"], json!(true));
+    assert_eq!(compensation["plan"]["disposition"], json!("qualified"));
+    assert_eq!(compensation["plan"]["blocked_task_order"], json!([]));
 }
 
 #[test]

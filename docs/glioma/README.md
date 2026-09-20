@@ -187,6 +187,8 @@ crates/research/src/glioma/
   workflow.rs                               P07 adaptive campaign planner and guarded execution
     p07_protocol_simulation/simulator.rs    P07 deterministic resource-constrained scheduling
     p07_protocol_simulation/execution.rs   P07 guarded local protocol execution with retries
+    p07_protocol_simulation/compensation.rs
+                                             P07 contract-preserving recovery planning for failed, partial, and skipped protocol tasks
     p07_protocol_simulation/action_execution.rs
                                              P07 dependency-safe action-portfolio execution
     p07_protocol_simulation/autonomous_campaign.rs

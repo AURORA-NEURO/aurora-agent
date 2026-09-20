@@ -558,13 +558,13 @@ use bioprism_research::{
     plan_glioma_computation_portfolio, plan_glioma_decision_branches,
     plan_glioma_evidence_acquisition, plan_glioma_evidence_contradiction_cut,
     plan_glioma_information_design, plan_glioma_multi_fidelity_optimization,
-    plan_glioma_power_reestimation, plan_glioma_robust_active_learning,
-    plan_glioma_robust_intervention_portfolio, plan_glioma_scientific_frontier,
-    plan_glioma_sequential_design, plan_glioma_workflow, preflight_glioma_instrument,
-    prioritize_glioma_evidence, prioritize_knowledge_frontier, propagate_glioma_mechanism_graph,
-    qualify_evidence, register_glioma_spatial_samples, revise_glioma_beliefs,
-    schedule_glioma_computation_placement, schedule_glioma_instrument_fleet, select_glioma_actions,
-    simulate_glioma_counterfactual, simulate_glioma_counterfactual_ensemble,
+    plan_glioma_power_reestimation, plan_glioma_protocol_compensation,
+    plan_glioma_robust_active_learning, plan_glioma_robust_intervention_portfolio,
+    plan_glioma_scientific_frontier, plan_glioma_sequential_design, plan_glioma_workflow,
+    preflight_glioma_instrument, prioritize_glioma_evidence, prioritize_knowledge_frontier,
+    propagate_glioma_mechanism_graph, qualify_evidence, register_glioma_spatial_samples,
+    revise_glioma_beliefs, schedule_glioma_computation_placement, schedule_glioma_instrument_fleet,
+    select_glioma_actions, simulate_glioma_counterfactual, simulate_glioma_counterfactual_ensemble,
     simulate_glioma_mechanism_dynamics, simulate_glioma_protocol, surveil_glioma_evidence,
     synthesize_glioma_interpretation, triangulate_glioma_evidence,
     update_glioma_mechanism_posterior, validate_feature_catalog, ActionPortfolioExecutionRequest,
@@ -648,9 +648,10 @@ use bioprism_research::{
     MultimodalMechanismCampaignRequest, MultimodalObservation, MultimodalReadinessRequest,
     MultimodalRequest, PathwayActivityDefinition, PathwayActivityObservation,
     PathwayActivityRequest, PowerArmObservation, PowerReestimationRequest,
-    ProtocolExecutionRequest, ProtocolSimulationRequest, ReleaseExecutionMode, ReleaseGateRequest,
-    ReplayCampaign, ReplayCampaignRequest, ReplicationRequest, ReplicationStudy,
-    ResearchObjectRequest, RobustActiveLearningCampaignRequest, RobustActiveLearningCandidate,
+    ProtocolCompensationRequest, ProtocolExecutionRequest, ProtocolSimulationRequest,
+    ReleaseExecutionMode, ReleaseGateRequest, ReplayCampaign, ReplayCampaignRequest,
+    ReplicationRequest, ReplicationStudy, ResearchObjectRequest,
+    RobustActiveLearningCampaignRequest, RobustActiveLearningCandidate,
     RobustActiveLearningObservation, RobustActiveLearningRequest, RobustInterventionCandidate,
     RobustInterventionRequest, RobustnessGuidedComputationRequest, RobustnessRequest,
     ScientificFrontierExecutionRequest, ScientificFrontierRequest, SensitivityObservation,
@@ -2206,6 +2207,7 @@ impl Server {
             "glioma_workflow_plan" => self.glioma_workflow_plan(&arguments),
             "glioma_protocol_simulate" => self.glioma_protocol_simulate(&arguments),
             "glioma_protocol_execute" => self.glioma_protocol_execute(&arguments),
+            "glioma_protocol_compensation" => self.glioma_protocol_compensation(&arguments),
             "glioma_action_portfolio_execute" => self.glioma_action_portfolio_execute(&arguments),
             "glioma_autonomous_campaign_execute" => {
                 self.glioma_autonomous_campaign_execute(&arguments)
@@ -6011,6 +6013,34 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma protocol execution: {error}"))
+    }
+
+    /// Compile a bounded recovery portfolio for failed, partial, or skipped protocol tasks.
+    /// Candidates must preserve the original typed task contract and completed/negative evidence;
+    /// this route never retries, dispatches, or fabricates an assay result.
+    fn glioma_protocol_compensation(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ProtocolCompensationRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_protocol_compensation requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma protocol compensation request: {error}"))?;
+        let plan = plan_glioma_protocol_compensation(&request)
+            .map_err(|error| format!("glioma protocol compensation refused: {error}"))?;
+        serde_json::to_value(json!({
+            "plan": plan,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "next_route": "glioma_protocol_execute",
+            "guarantees": [
+                "failed, partial, and skipped tasks remain explicit in the blocked frontier",
+                "replacement candidates must match output schema, model, resource, and dependency contracts",
+                "completed and negative evidence are preserved; no skipped task is promoted",
+                "the route performs no assay, instrument, federation, or clinical action"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma protocol compensation: {error}"))
     }
 
     /// Execute the beam-selected action portfolio through the deterministic synthetic executor.
@@ -51212,6 +51242,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_workflow_plan",
                 "glioma_protocol_simulate",
                 "glioma_protocol_execute",
+                "glioma_protocol_compensation",
                 "glioma_action_portfolio_execute",
                 "glioma_autonomous_campaign_execute",
                 "glioma_research_autopilot_execute",
@@ -60110,6 +60141,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "ProtocolExecutionRequest1@1 containing a ProtocolSimulationRequest1@1, bounded retries, and artifact requirement."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_protocol_compensation",
+        "description": "Compile a deterministic, contract-preserving recovery portfolio after a local preclinical glioma protocol returns failed, partial, or skipped tasks. Candidates are accepted only when they match the original output schema, model system, resource contract, and preserved dependencies; completed and negative evidence remain explicit. The route is planning-only, performs no retry or instrument effect, and returns a next-route hint for caller-owned execution.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ProtocolCompensationRequest1@1 containing a ProtocolSimulationRequest1@1, a validated ProtocolExecution1@1, bounded typed replacement candidates, a cost budget, and a selection limit."}
             },
             "required": ["request"]
         }
