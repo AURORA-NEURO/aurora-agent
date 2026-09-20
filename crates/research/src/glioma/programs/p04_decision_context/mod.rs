@@ -10,6 +10,7 @@ pub mod campaign;
 pub mod context_compiler;
 pub mod decision_cycle;
 pub mod omission_certificate;
+pub mod value_optimizer;
 
 pub use action_bridge::{
     plan_decision_actions, DecisionActionPlan, DecisionActionPlanDisposition,
@@ -60,6 +61,11 @@ pub use omission_certificate::{
     certify_decision_omissions, DecisionCoverageState, DecisionOmissionCertificate,
     DecisionOmissionCertificateError, DecisionOmissionCertificateRequest,
     DecisionOmissionDisposition, DecisionOmissionEntry,
+};
+pub use value_optimizer::{
+    optimize_glioma_decision_value, DecisionValueCampaignDisposition, DecisionValueCandidate,
+    DecisionValueCandidateScore, DecisionValueDisposition, DecisionValueError,
+    DecisionValuePortfolio, DecisionValueRequest, DecisionValueResult, DecisionValueWeights,
 };
 
 use crate::glioma::catalog::{glioma_program_catalog, GliomaProgramDescriptor, GliomaProgramId};

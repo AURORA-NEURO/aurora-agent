@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 757;
+const TOOL_DEFINITION_COUNT: usize = 758;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -3304,6 +3304,41 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
     assert_eq!(
         decision_admission["admission"]["admitted_order"],
         json!(["compute-glioma-state"])
+    );
+
+    let decision_value = call(
+        &mut server,
+        "glioma_decision_value_optimizer",
+        json!({
+            "request": {
+                "objective": "choose the next glioma research portfolio by expected information value",
+                "candidates": [
+                    {"action_id":"a-genomics","claim_id":"claim-invasion","modality":"genomics","model_system":"organoid","depends_on":[],"cost_units":3,"information_gain_milli":800,"uncertainty_reduction_milli":700,"contradiction_resolution_milli":600,"reproducibility_milli":900,"failure_probability_milli":50,"diversity_group":"genomics","available":true},
+                    {"action_id":"b-imaging","claim_id":"claim-invasion","modality":"imaging","model_system":"organoid","depends_on":[],"cost_units":3,"information_gain_milli":800,"uncertainty_reduction_milli":700,"contradiction_resolution_milli":600,"reproducibility_milli":900,"failure_probability_milli":50,"diversity_group":"imaging","available":true},
+                    {"action_id":"c-expensive","claim_id":"claim-invasion","modality":"proteomics","model_system":"organoid","depends_on":[],"cost_units":8,"information_gain_milli":900,"uncertainty_reduction_milli":800,"contradiction_resolution_milli":700,"reproducibility_milli":900,"failure_probability_milli":50,"diversity_group":"proteomics","available":true}
+                ],
+                "budget_units":6,
+                "max_actions":2,
+                "beam_width":8,
+                "max_alternatives":3,
+                "require_dependency_closure":true,
+                "min_candidate_utility_milli":100,
+                "weights":{"information_gain":30,"uncertainty_reduction":25,"contradiction_resolution":20,"reproducibility":15,"diversity":10,"failure_penalty":10}
+            }
+        }),
+    );
+    assert_eq!(decision_value["dispatch"], json!("not_started"));
+    assert_eq!(decision_value["simulation_only"], json!(true));
+    assert_eq!(
+        decision_value["optimization"]["disposition"],
+        json!("partial")
+    );
+    assert_eq!(
+        decision_value["optimization"]["selected_order"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
     );
 
     let decision_action_plan = call(
