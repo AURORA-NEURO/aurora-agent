@@ -56,6 +56,8 @@ crates/research/src/glioma/
                                              P04 bounded value-of-information portfolio beam search with uncertainty, contradiction, and diversity utility
   programs/p04_decision_context/value_calibration.rs
                                              P04 outcome-calibrated value forecasts with shrinkage, confidence, conflict, and negative-result handling
+  programs/p04_decision_context/adaptive_controller.rs
+                                             P04 calibrated exploitation/exploration controller with dependency-safe adaptive portfolio selection
   programs/p04_decision_context/action_graph.rs
                                              P04 claim-path to dependency-closed action DAG and parallel waves
   programs/p04_decision_context/omission_certificate.rs
@@ -475,6 +477,12 @@ of completed local runs. It applies bounded shrinkage to prior utility, reports 
 error and confidence, marks prior-only or conflicted candidates as uncertain, and preserves failed
 outcomes for review before a learned ranking is sent back to the optimizer. Calibration never
 mutates historical observations and never upgrades a planning score into biological evidence.
+The adaptive controller (`execute_glioma_adaptive_decision_controller`) consumes that calibration
+directly. It gives prior-only candidates a bounded exploration bonus, applies explicit penalties to
+forecast conflicts, searches dependency-closed combinations with a deterministic beam, and keeps
+budget-blocked, deferred, negative, and uncertain actions visible before admission. This is the
+P04 learning-to-action seam used by the autonomous research loop; it still produces planning
+utility only and cannot dispatch an assay or instrument by itself.
 P07 now also has an
 adaptive campaign planner (`plan_glioma_workflow`) and a guarded full-program executor that
 chooses deterministic next batches, closes over dependencies, and routes unresolved evidence,

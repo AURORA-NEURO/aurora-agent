@@ -524,7 +524,8 @@ use bioprism_research::{
     execute_federated_mechanism_transport_campaign_dry_run, execute_glioma_action_portfolio,
     execute_glioma_active_learning_campaign, execute_glioma_adaptive_allocation_campaign,
     execute_glioma_adaptive_clone_campaign_dry_run,
-    execute_glioma_adaptive_decision_branch_campaign_dry_run, execute_glioma_adaptive_frontier,
+    execute_glioma_adaptive_decision_branch_campaign_dry_run,
+    execute_glioma_adaptive_decision_controller, execute_glioma_adaptive_frontier,
     execute_glioma_adaptive_instrument_campaign,
     execute_glioma_adaptive_interpretation_campaign_dry_run,
     execute_glioma_adaptive_mechanism_campaign, execute_glioma_autonomous_campaign,
@@ -586,22 +587,23 @@ use bioprism_research::{
     ActiveLearningCampaignRequest, ActiveLearningCandidate, ActiveLearningObservation,
     ActiveLearningRequest, AdaptiveAllocationCampaignRequest, AdaptiveAllocationRequest,
     AdaptiveArmObservation, AdaptiveCloneCampaignRequest, AdaptiveDecisionBranchCampaignRequest,
-    AdaptiveDoseSurfaceRequest, AdaptiveFrontierExecutionRequest, AdaptiveFrontierRequest,
-    AdaptiveInformationCampaignRequest, AdaptiveInformationObservation,
-    AdaptiveInstrumentCampaignRequest, AdaptiveInterpretationCampaignRequest,
-    AdaptiveMechanismCampaignRequest, AdaptiveMechanismPolicyRequest, AnalysisDataset,
-    AnalysisRequest, AssayEvidenceObservation, AssayEvidenceRequest, AutonomousGapCycleRequest,
-    AutonomousProgramCycleRequest, AutonomousProtocolControllerRequest,
-    BayesianMechanismHypothesis, BayesianMechanismUpdateRequest, BeliefConflict,
-    BeliefRevisionRequest, CalibratedMechanismCampaignRequest, CalibrationRequest, CalibrationRun,
-    CampaignAction, CampaignMechanism, CampaignObservation, CausalContrastRequest,
-    ClonalEvolutionGraph, ClonalEvolutionRequest, CloneContinuationCandidate,
-    CloneContinuationRequest, ClonePanelObservation, ClonePanelOutcomeAnalysis,
-    ClonePanelOutcomeRequest, ClonePerturbationCandidate, ClonePerturbationPanel,
-    ClonePerturbationPanelRequest, CloneProfile, ClosedLoopCampaignRequest, CombinationObservation,
-    CombinationSynergyRequest, ComputationCandidate, ComputationExecutionMode,
-    ComputationExecutionRequest, ComputationPlacementRequest, ComputationPortfolioExecutionRequest,
-    ComputationPortfolioRequest, ComputationRecoveryRequest, ConcordanceRequest, ConsensusRequest,
+    AdaptiveDecisionControllerRequest, AdaptiveDoseSurfaceRequest,
+    AdaptiveFrontierExecutionRequest, AdaptiveFrontierRequest, AdaptiveInformationCampaignRequest,
+    AdaptiveInformationObservation, AdaptiveInstrumentCampaignRequest,
+    AdaptiveInterpretationCampaignRequest, AdaptiveMechanismCampaignRequest,
+    AdaptiveMechanismPolicyRequest, AnalysisDataset, AnalysisRequest, AssayEvidenceObservation,
+    AssayEvidenceRequest, AutonomousGapCycleRequest, AutonomousProgramCycleRequest,
+    AutonomousProtocolControllerRequest, BayesianMechanismHypothesis,
+    BayesianMechanismUpdateRequest, BeliefConflict, BeliefRevisionRequest,
+    CalibratedMechanismCampaignRequest, CalibrationRequest, CalibrationRun, CampaignAction,
+    CampaignMechanism, CampaignObservation, CausalContrastRequest, ClonalEvolutionGraph,
+    ClonalEvolutionRequest, CloneContinuationCandidate, CloneContinuationRequest,
+    ClonePanelObservation, ClonePanelOutcomeAnalysis, ClonePanelOutcomeRequest,
+    ClonePerturbationCandidate, ClonePerturbationPanel, ClonePerturbationPanelRequest,
+    CloneProfile, ClosedLoopCampaignRequest, CombinationObservation, CombinationSynergyRequest,
+    ComputationCandidate, ComputationExecutionMode, ComputationExecutionRequest,
+    ComputationPlacementRequest, ComputationPortfolioExecutionRequest, ComputationPortfolioRequest,
+    ComputationRecoveryRequest, ConcordanceRequest, ConsensusRequest,
     ContradictionAdjudicationRequest, ContradictionCutRequest, ContradictionEvidence,
     ContrastDesignRequest, CounterfactualEnsembleRequest, CounterfactualIntervention,
     CounterfactualModel, CounterfactualRequest, DecisionActionGraphRequest,
@@ -2452,6 +2454,9 @@ impl Server {
             "glioma_decision_admission_gate" => self.glioma_decision_admission_gate(&arguments),
             "glioma_decision_value_optimizer" => self.glioma_decision_value_optimizer(&arguments),
             "glioma_decision_value_calibrator" => self.glioma_decision_value_calibrator(&arguments),
+            "glioma_adaptive_decision_controller" => {
+                self.glioma_adaptive_decision_controller(&arguments)
+            }
             "glioma_decision_action_graph" => self.glioma_decision_action_graph(&arguments),
             "glioma_decision_omission_certificate" => {
                 self.glioma_decision_omission_certificate(&arguments)
@@ -9993,6 +9998,30 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma decision value calibration: {error}"))
+    }
+
+    /// Select an adaptive exploration/exploitation portfolio from calibrated local outcomes.
+    fn glioma_adaptive_decision_controller(&self, arguments: &Value) -> Result<Value, String> {
+        let request: AdaptiveDecisionControllerRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_adaptive_decision_controller requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma adaptive controller request: {error}"))?;
+        let control = execute_glioma_adaptive_decision_controller(&request)
+            .map_err(|error| format!("glioma adaptive decision controller refused: {error}"))?;
+        serde_json::to_value(json!({
+            "control": control,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "next_routes": ["glioma_decision_admission_gate", "glioma_decision_action_graph", "glioma_decision_action_plan"],
+            "guarantees": [
+                "learned utility, bounded exploration, conflict penalties, dependency closure, and budget remain explicit",
+                "prior-only candidates can be explored only within the declared exploration bound",
+                "blocked, deferred, negative, conflicted, and uncertain actions remain visible for researcher review",
+                "route selects a planning portfolio only and performs no assay, instrument, federation, raw-data, or clinical action"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma adaptive decision controller: {error}"))
     }
 
     /// Compile composed knowledge paths into dependency-closed, parallelizable decision actions.
@@ -52123,6 +52152,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_decision_admission_gate",
                 "glioma_decision_value_optimizer",
                 "glioma_decision_value_calibrator",
+                "glioma_adaptive_decision_controller",
                 "glioma_decision_action_graph",
                 "glioma_decision_omission_certificate",
                 "glioma_decision_branch_plan",
@@ -62354,6 +62384,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "DecisionValueCalibrationRequest1@1 with typed candidates, immutable local outcomes, utility weights, shrinkage, confidence, conflict, and ranking bounds."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_adaptive_decision_controller",
+        "description": "Select an adaptive preclinical glioma research portfolio from calibrated local outcomes. Combines learned utility with bounded exploration of prior-only candidates, penalizes forecast conflicts, enforces dependency and budget closure, and preserves deferred or blocked actions without executing any effect.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "AdaptiveDecisionControllerRequest1@1 with nested calibration request, bounded portfolio search, dependency closure, exploration weight, and utility floor."}
             },
             "required": ["request"]
         }
