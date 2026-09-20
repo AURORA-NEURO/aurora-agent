@@ -193,8 +193,9 @@ pub use programs::p03_multimodal_ingestion_qc::{
     TemporalTransitionDirection,
 };
 pub use programs::p04_decision_context::{
-    admit_glioma_decision_actions, certify_decision_omissions, compile_decision_action_graph,
-    compile_decision_context, execute_glioma_adaptive_decision_branch_campaign,
+    admit_glioma_decision_actions, calibrate_glioma_decision_value, certify_decision_omissions,
+    compile_decision_action_graph, compile_decision_context,
+    execute_glioma_adaptive_decision_branch_campaign,
     execute_glioma_adaptive_decision_branch_campaign_dry_run,
     execute_glioma_decision_branch_campaign, execute_glioma_decision_context_campaign,
     execute_glioma_decision_operating_cycle, optimize_glioma_decision_value, plan_decision_actions,
@@ -220,9 +221,12 @@ pub use programs::p04_decision_context::{
     DecisionOmissionDisposition, DecisionOmissionEntry, DecisionOperatingCycle,
     DecisionOperatingCycleDisposition, DecisionOperatingCycleError, DecisionOperatingCycleRequest,
     DecisionScenario, DecisionScenarioOutcome, DecisionScenarioScore,
-    DecisionValueCampaignDisposition, DecisionValueCandidate, DecisionValueCandidateScore,
-    DecisionValueDisposition, DecisionValueError, DecisionValuePortfolio, DecisionValueRequest,
-    DecisionValueResult, DecisionValueWeights, DryRunDecisionContextCampaignExecutor,
+    DecisionValueCalibrationCampaignDisposition, DecisionValueCalibrationDisposition,
+    DecisionValueCalibrationError, DecisionValueCalibrationRecord, DecisionValueCalibrationRequest,
+    DecisionValueCalibrationResult, DecisionValueCampaignDisposition, DecisionValueCandidate,
+    DecisionValueCandidateScore, DecisionValueDisposition, DecisionValueError,
+    DecisionValueObservation, DecisionValuePortfolio, DecisionValueRequest, DecisionValueResult,
+    DecisionValueWeights, DryRunDecisionContextCampaignExecutor,
 };
 pub use programs::p05_mechanism_exploration::{
     analyze_glioma_clonal_evolution, analyze_glioma_pathway_activity, calibrate_glioma_mechanisms,

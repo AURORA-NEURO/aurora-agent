@@ -132,7 +132,10 @@ fn canonical<T: Ord>(values: &[T]) -> bool {
     values.windows(2).all(|pair| pair[0] < pair[1])
 }
 
-fn weighted_utility(candidate: &DecisionValueCandidate, weights: &DecisionValueWeights) -> i32 {
+pub(crate) fn weighted_utility(
+    candidate: &DecisionValueCandidate,
+    weights: &DecisionValueWeights,
+) -> i32 {
     let positive = i64::from(candidate.information_gain_milli)
         .saturating_mul(i64::from(weights.information_gain))
         .saturating_add(

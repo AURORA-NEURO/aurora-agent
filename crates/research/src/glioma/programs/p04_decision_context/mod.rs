@@ -10,6 +10,7 @@ pub mod campaign;
 pub mod context_compiler;
 pub mod decision_cycle;
 pub mod omission_certificate;
+pub mod value_calibration;
 pub mod value_optimizer;
 
 pub use action_bridge::{
@@ -61,6 +62,12 @@ pub use omission_certificate::{
     certify_decision_omissions, DecisionCoverageState, DecisionOmissionCertificate,
     DecisionOmissionCertificateError, DecisionOmissionCertificateRequest,
     DecisionOmissionDisposition, DecisionOmissionEntry,
+};
+pub use value_calibration::{
+    calibrate_glioma_decision_value, DecisionValueCalibrationCampaignDisposition,
+    DecisionValueCalibrationDisposition, DecisionValueCalibrationError,
+    DecisionValueCalibrationRecord, DecisionValueCalibrationRequest,
+    DecisionValueCalibrationResult, DecisionValueObservation,
 };
 pub use value_optimizer::{
     optimize_glioma_decision_value, DecisionValueCampaignDisposition, DecisionValueCandidate,

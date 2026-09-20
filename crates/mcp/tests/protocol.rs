@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 758;
+const TOOL_DEFINITION_COUNT: usize = 759;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -3335,6 +3335,39 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
     );
     assert_eq!(
         decision_value["optimization"]["selected_order"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+
+    let decision_value_calibration = call(
+        &mut server,
+        "glioma_decision_value_calibrator",
+        json!({
+            "request": {
+                "objective": "calibrate the next glioma research portfolio from local outcomes",
+                "candidates": [
+                    {"action_id":"a-genomics","claim_id":"claim-invasion","modality":"genomics","model_system":"organoid","depends_on":[],"cost_units":3,"information_gain_milli":800,"uncertainty_reduction_milli":700,"contradiction_resolution_milli":600,"reproducibility_milli":900,"failure_probability_milli":50,"diversity_group":"genomics","available":true},
+                    {"action_id":"b-imaging","claim_id":"claim-invasion","modality":"imaging","model_system":"organoid","depends_on":[],"cost_units":3,"information_gain_milli":800,"uncertainty_reduction_milli":700,"contradiction_resolution_milli":600,"reproducibility_milli":900,"failure_probability_milli":50,"diversity_group":"imaging","available":true}
+                ],
+                "observations": [{"action_id":"a-genomics","run_id":"run-001","predicted_utility_milli":700,"observed_information_gain_milli":900,"observed_uncertainty_reduction_milli":800,"observed_contradiction_resolution_milli":700,"observed_reproducibility_milli":900,"failed":false,"sample_weight":2}],
+                "weights":{"information_gain":30,"uncertainty_reduction":25,"contradiction_resolution":20,"reproducibility":15,"diversity":10,"failure_penalty":10},
+                "shrinkage_weight":10,
+                "min_confidence_milli":100,
+                "conflict_error_milli":3000,
+                "max_results":2
+            }
+        }),
+    );
+    assert_eq!(decision_value_calibration["dispatch"], json!("not_started"));
+    assert_eq!(decision_value_calibration["simulation_only"], json!(true));
+    assert_eq!(
+        decision_value_calibration["calibration"]["disposition"],
+        json!("ready")
+    );
+    assert_eq!(
+        decision_value_calibration["calibration"]["ranking_order"]
             .as_array()
             .unwrap()
             .len(),

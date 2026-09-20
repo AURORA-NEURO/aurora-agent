@@ -507,19 +507,20 @@ use bioprism_research::{
     analyze_multimodal_concordance, analyze_multimodal_consensus, analyze_preclinical_outcomes,
     analyze_replication_meta_analysis, analyze_stratified_causal_adjustment,
     assess_glioma_robustness, assess_replication, attribute_glioma_multimodal_quality_root_cause,
-    bridge_glioma_knowledge_actions, build_research_object_manifest, calibrate_glioma_evidence,
-    calibrate_glioma_mechanisms, calibrate_glioma_multimodal_quality_transport,
-    calibrate_glioma_multimodal_reliability, certify_decision_omissions,
-    compile_decision_action_graph, compile_decision_context, compile_glioma_computation_workflow,
-    compile_glioma_knowledge_actions, compile_glioma_knowledge_gaps,
-    compile_glioma_protocol_evidence_surface, compile_mechanism_action_plan,
-    compile_typed_knowledge, compose_knowledge_graph, design_glioma_contrast_panel,
-    design_glioma_robust_experiment, design_preclinical_experiment, discriminate_mechanisms,
-    dry_run_adaptive_instrument_executor, dry_run_glioma_adaptive_frontier_executor,
-    dry_run_glioma_research, dry_run_instrument_executor_from_request,
-    dry_run_robustness_guided_computation_executor, evaluate_glioma_dynamic_policies,
-    evaluate_glioma_release_gate, execute_federated_benchmark_adaptive_campaign_dry_run,
-    execute_federated_benchmark_campaign, execute_federated_benchmark_operating_cycle_dry_run,
+    bridge_glioma_knowledge_actions, build_research_object_manifest,
+    calibrate_glioma_decision_value, calibrate_glioma_evidence, calibrate_glioma_mechanisms,
+    calibrate_glioma_multimodal_quality_transport, calibrate_glioma_multimodal_reliability,
+    certify_decision_omissions, compile_decision_action_graph, compile_decision_context,
+    compile_glioma_computation_workflow, compile_glioma_knowledge_actions,
+    compile_glioma_knowledge_gaps, compile_glioma_protocol_evidence_surface,
+    compile_mechanism_action_plan, compile_typed_knowledge, compose_knowledge_graph,
+    design_glioma_contrast_panel, design_glioma_robust_experiment, design_preclinical_experiment,
+    discriminate_mechanisms, dry_run_adaptive_instrument_executor,
+    dry_run_glioma_adaptive_frontier_executor, dry_run_glioma_research,
+    dry_run_instrument_executor_from_request, dry_run_robustness_guided_computation_executor,
+    evaluate_glioma_dynamic_policies, evaluate_glioma_release_gate,
+    execute_federated_benchmark_adaptive_campaign_dry_run, execute_federated_benchmark_campaign,
+    execute_federated_benchmark_operating_cycle_dry_run,
     execute_federated_mechanism_transport_campaign_dry_run, execute_glioma_action_portfolio,
     execute_glioma_active_learning_campaign, execute_glioma_adaptive_allocation_campaign,
     execute_glioma_adaptive_clone_campaign_dry_run,
@@ -607,8 +608,8 @@ use bioprism_research::{
     DecisionActionPlanRequest, DecisionAdmissionRequest, DecisionBranchCampaignRequest,
     DecisionBranchPlannerRequest, DecisionContext, DecisionContextCampaignRequest,
     DecisionContextRequest, DecisionOmissionCertificateRequest, DecisionOperatingCycleRequest,
-    DecisionValueRequest, DesignAction, DesignMechanism, DoseResponseObservation,
-    DoseResponseRequest, DriftSurveillanceRequest, DropoutStressRequest,
+    DecisionValueCalibrationRequest, DecisionValueRequest, DesignAction, DesignMechanism,
+    DoseResponseObservation, DoseResponseRequest, DriftSurveillanceRequest, DropoutStressRequest,
     DryRunActiveLearningCampaignExecutor, DryRunAdaptiveAllocationCampaignExecutor,
     DryRunAdaptiveMechanismPolicyExecutor, DryRunDecisionContextCampaignExecutor,
     DryRunEvidenceAcquisitionExecutor, DryRunEvidenceRefreshCampaignExecutor,
@@ -2450,6 +2451,7 @@ impl Server {
             "glioma_decision_context" => self.glioma_decision_context(&arguments),
             "glioma_decision_admission_gate" => self.glioma_decision_admission_gate(&arguments),
             "glioma_decision_value_optimizer" => self.glioma_decision_value_optimizer(&arguments),
+            "glioma_decision_value_calibrator" => self.glioma_decision_value_calibrator(&arguments),
             "glioma_decision_action_graph" => self.glioma_decision_action_graph(&arguments),
             "glioma_decision_omission_certificate" => {
                 self.glioma_decision_omission_certificate(&arguments)
@@ -9964,6 +9966,33 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma decision value optimization: {error}"))
+    }
+
+    /// Calibrate bounded decision value forecasts from typed local outcomes without mutating
+    /// historical observations or dispatching a new research action.
+    fn glioma_decision_value_calibrator(&self, arguments: &Value) -> Result<Value, String> {
+        let request: DecisionValueCalibrationRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_decision_value_calibrator requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma decision value calibration request: {error}"))?;
+        let calibration = calibrate_glioma_decision_value(&request)
+            .map_err(|error| format!("glioma decision value calibration refused: {error}"))?;
+        serde_json::to_value(json!({
+            "calibration": calibration,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "next_routes": ["glioma_decision_value_optimizer", "glioma_decision_admission_gate", "glioma_decision_action_graph"],
+            "guarantees": [
+                "historical observations remain immutable and every failed outcome remains visible",
+                "prior utility is shrunk toward typed local outcomes with explicit forecast error and confidence",
+                "prior-only, conflicted, and unreliable candidates remain marked before learned scores reach portfolio selection",
+                "route produces planning calibration only and performs no assay, instrument, federation, raw-data, or clinical action"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma decision value calibration: {error}"))
     }
 
     /// Compile composed knowledge paths into dependency-closed, parallelizable decision actions.
@@ -52093,6 +52122,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_decision_context",
                 "glioma_decision_admission_gate",
                 "glioma_decision_value_optimizer",
+                "glioma_decision_value_calibrator",
                 "glioma_decision_action_graph",
                 "glioma_decision_omission_certificate",
                 "glioma_decision_branch_plan",
@@ -62313,6 +62343,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "DecisionValueRequest1@1 with typed action candidates, ordered dependencies, budget/action/beam/alternative bounds, utility floors, and weighted value terms."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_decision_value_calibrator",
+        "description": "Calibrate preclinical glioma value-of-information forecasts from typed outcomes of completed local research runs. Applies bounded shrinkage, reports forecast error and confidence, preserves failed and conflicted outcomes, and returns a deterministic ranking for the optimizer without executing any action.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "DecisionValueCalibrationRequest1@1 with typed candidates, immutable local outcomes, utility weights, shrinkage, confidence, conflict, and ranking bounds."}
             },
             "required": ["request"]
         }

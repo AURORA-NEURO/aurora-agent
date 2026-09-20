@@ -54,6 +54,8 @@ crates/research/src/glioma/
                                              P04 evidence, freshness, contradiction, effect, dependency, approval, preflight, and budget admission gate
   programs/p04_decision_context/value_optimizer.rs
                                              P04 bounded value-of-information portfolio beam search with uncertainty, contradiction, and diversity utility
+  programs/p04_decision_context/value_calibration.rs
+                                             P04 outcome-calibrated value forecasts with shrinkage, confidence, conflict, and negative-result handling
   programs/p04_decision_context/action_graph.rs
                                              P04 claim-path to dependency-closed action DAG and parallel waves
   programs/p04_decision_context/omission_certificate.rs
@@ -468,6 +470,11 @@ actions instead of taking a greedy single row. It scores information gain, uncer
 contradiction resolution, reproducibility, failure risk, and modality/model/diversity-group
 coverage, returning a selected portfolio plus deterministic alternatives and blocked/deferred
 reasons for the researcher or admission gate.
+The value calibration surface (`calibrate_glioma_decision_value`) learns only from typed outcomes
+of completed local runs. It applies bounded shrinkage to prior utility, reports weighted forecast
+error and confidence, marks prior-only or conflicted candidates as uncertain, and preserves failed
+outcomes for review before a learned ranking is sent back to the optimizer. Calibration never
+mutates historical observations and never upgrades a planning score into biological evidence.
 P07 now also has an
 adaptive campaign planner (`plan_glioma_workflow`) and a guarded full-program executor that
 chooses deterministic next batches, closes over dependencies, and routes unresolved evidence,
