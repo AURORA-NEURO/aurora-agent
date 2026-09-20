@@ -23,6 +23,7 @@ pub mod compensation;
 pub mod director;
 pub mod evidence_campaign;
 pub mod evidence_gate;
+pub mod evidence_surface;
 pub mod execution;
 pub mod frontier_execution;
 pub mod intent_mission;
@@ -126,6 +127,12 @@ pub use execution::{
     ProtocolExecution, ProtocolExecutionDisposition, ProtocolExecutionError,
     ProtocolExecutionFailure, ProtocolExecutionRequest, ProtocolExecutionStopReason,
     ProtocolTaskDisposition, ProtocolTaskResult, OUTPUT_SCHEMA as PROTOCOL_EXECUTION_OUTPUT_SCHEMA,
+};
+
+pub use evidence_surface::{
+    compile_glioma_protocol_evidence_surface, ProtocolEvidenceCell, ProtocolEvidenceDisposition,
+    ProtocolEvidenceSurface, ProtocolEvidenceSurfaceDisposition, ProtocolEvidenceSurfaceError,
+    ProtocolEvidenceSurfaceRequest, ProtocolMeasurement,
 };
 
 pub use mechanism_campaign::{

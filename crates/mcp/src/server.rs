@@ -506,14 +506,14 @@ use bioprism_research::{
     build_research_object_manifest, calibrate_glioma_evidence, calibrate_glioma_mechanisms,
     certify_decision_omissions, compile_decision_action_graph, compile_decision_context,
     compile_glioma_computation_workflow, compile_glioma_knowledge_actions,
-    compile_glioma_knowledge_gaps, compile_mechanism_action_plan, compile_typed_knowledge,
-    compose_knowledge_graph, design_glioma_contrast_panel, design_preclinical_experiment,
-    discriminate_mechanisms, dry_run_adaptive_instrument_executor,
-    dry_run_glioma_adaptive_frontier_executor, dry_run_glioma_research,
-    dry_run_instrument_executor_from_request, dry_run_robustness_guided_computation_executor,
-    evaluate_glioma_dynamic_policies, evaluate_glioma_release_gate,
-    execute_federated_benchmark_adaptive_campaign_dry_run, execute_federated_benchmark_campaign,
-    execute_federated_benchmark_operating_cycle_dry_run,
+    compile_glioma_knowledge_gaps, compile_glioma_protocol_evidence_surface,
+    compile_mechanism_action_plan, compile_typed_knowledge, compose_knowledge_graph,
+    design_glioma_contrast_panel, design_preclinical_experiment, discriminate_mechanisms,
+    dry_run_adaptive_instrument_executor, dry_run_glioma_adaptive_frontier_executor,
+    dry_run_glioma_research, dry_run_instrument_executor_from_request,
+    dry_run_robustness_guided_computation_executor, evaluate_glioma_dynamic_policies,
+    evaluate_glioma_release_gate, execute_federated_benchmark_adaptive_campaign_dry_run,
+    execute_federated_benchmark_campaign, execute_federated_benchmark_operating_cycle_dry_run,
     execute_federated_mechanism_transport_campaign_dry_run, execute_glioma_action_portfolio,
     execute_glioma_active_learning_campaign, execute_glioma_adaptive_allocation_campaign,
     execute_glioma_adaptive_clone_campaign_dry_run,
@@ -651,10 +651,10 @@ use bioprism_research::{
     MultimodalMechanismCampaignRequest, MultimodalObservation, MultimodalReadinessRequest,
     MultimodalRequest, PathwayActivityDefinition, PathwayActivityObservation,
     PathwayActivityRequest, PowerArmObservation, PowerReestimationRequest,
-    ProtocolBranchOptimizationRequest, ProtocolCompensationRequest, ProtocolExecutionRequest,
-    ProtocolSimulationRequest, ReleaseExecutionMode, ReleaseGateRequest, ReplayCampaign,
-    ReplayCampaignRequest, ReplicationRequest, ReplicationStudy, ResearchObjectRequest,
-    RobustActiveLearningCampaignRequest, RobustActiveLearningCandidate,
+    ProtocolBranchOptimizationRequest, ProtocolCompensationRequest, ProtocolEvidenceSurfaceRequest,
+    ProtocolExecutionRequest, ProtocolSimulationRequest, ReleaseExecutionMode, ReleaseGateRequest,
+    ReplayCampaign, ReplayCampaignRequest, ReplicationRequest, ReplicationStudy,
+    ResearchObjectRequest, RobustActiveLearningCampaignRequest, RobustActiveLearningCandidate,
     RobustActiveLearningObservation, RobustActiveLearningRequest, RobustInterventionCandidate,
     RobustInterventionRequest, RobustnessGuidedComputationRequest, RobustnessRequest,
     ScientificFrontierExecutionRequest, ScientificFrontierRequest, SensitivityObservation,
@@ -2213,6 +2213,7 @@ impl Server {
             "glioma_protocol_autonomous_execute" => {
                 self.glioma_protocol_autonomous_execute(&arguments)
             }
+            "glioma_protocol_evidence_surface" => self.glioma_protocol_evidence_surface(&arguments),
             "glioma_protocol_execute" => self.glioma_protocol_execute(&arguments),
             "glioma_protocol_compensation" => self.glioma_protocol_compensation(&arguments),
             "glioma_action_portfolio_execute" => self.glioma_action_portfolio_execute(&arguments),
@@ -6046,6 +6047,32 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma autonomous protocol run: {error}"))
+    }
+
+    /// Compile quality- and uncertainty-aware endpoint evidence from a local protocol result.
+    /// This is a scientific handoff only; it does not infer a clinical conclusion or dispatch work.
+    fn glioma_protocol_evidence_surface(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ProtocolEvidenceSurfaceRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_protocol_evidence_surface requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma protocol evidence surface request: {error}"))?;
+        let surface = compile_glioma_protocol_evidence_surface(&request)
+            .map_err(|error| format!("glioma protocol evidence surface refused: {error}"))?;
+        serde_json::to_value(json!({
+            "surface": surface,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "next_routes": ["glioma_mechanism_explore", "glioma_analysis_run"],
+            "guarantees": [
+                "robust endpoint summaries retain quality, uncertainty, replicate, negative, and contradictory states",
+                "missing, failed, skipped, or partial task outputs cannot be promoted to qualified evidence",
+                "the route performs no assay, instrument, federation, or clinical action"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma protocol evidence surface: {error}"))
     }
 
     /// Execute a feasible protocol through the deterministic synthetic executor. Production
@@ -51303,6 +51330,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_protocol_simulate",
                 "glioma_protocol_branch_optimize",
                 "glioma_protocol_autonomous_execute",
+                "glioma_protocol_evidence_surface",
                 "glioma_protocol_execute",
                 "glioma_protocol_compensation",
                 "glioma_action_portfolio_execute",
@@ -60214,6 +60242,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "AutonomousProtocolControllerRequest1@1 containing a protocol, contract-preserving branch and compensation candidates, budget/round bounds, retry/artifact policy, and branch score weights."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_protocol_evidence_surface",
+        "description": "Compile a typed preclinical glioma evidence surface from a validated local protocol execution and endpoint measurements. Uses robust medians, replicate/quality/uncertainty gates, explicit negative and contradictory states, and downstream next actions; missing or failed task outputs cannot be promoted. This route is analysis-only and performs no biological, instrument, federation, or clinical effect.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ProtocolEvidenceSurfaceRequest1@1 containing a ProtocolSimulationRequest1@1, validated ProtocolExecution1@1, endpoint measurements, replicate/quality/uncertainty thresholds, and contradiction threshold."}
             },
             "required": ["request"]
         }

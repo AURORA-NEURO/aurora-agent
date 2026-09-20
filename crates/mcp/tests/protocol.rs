@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 735;
+const TOOL_DEFINITION_COUNT: usize = 736;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -15802,6 +15802,54 @@ fn glioma_protocol_autonomous_controller_executes_a_selected_branch() {
     assert_eq!(result["simulation_only"], json!(true));
     assert_eq!(result["run"]["disposition"], json!("completed"));
     assert_eq!(result["run"]["rounds"].as_array().unwrap().len(), 1);
+}
+
+#[test]
+fn glioma_protocol_evidence_surface_compiles_quality_gated_endpoint() {
+    let mut server = server();
+    let protocol = json!({
+        "objective": "compile organoid invasion evidence",
+        "model_system": "organoid",
+        "tasks": [{"task_id":"assay","label":"run invasion assay","resource_kind":"imaging","resource_units":1,"duration_ticks":2,"depends_on":[],"model_system":"organoid","output_schema":"Assay1@1","risk_milli":100,"requires_instrument":false}],
+        "resources": [{"resource_id":"imaging","kind":"imaging","capacity_units":1}],
+        "max_ticks": 10,
+        "max_risk_milli": 500,
+        "allow_instrument_execution": false,
+        "approval_reference": null,
+        "randomization_seed": ContentHash::of_bytes(b"evidence-surface-mcp")
+    });
+    let execution = call(
+        &mut server,
+        "glioma_protocol_execute",
+        json!({"request":{"protocol":protocol.clone(),"max_retries":0,"require_artifacts":true}}),
+    );
+    assert_eq!(execution["execution"]["disposition"], json!("completed"));
+    let result = call(
+        &mut server,
+        "glioma_protocol_evidence_surface",
+        json!({
+            "request": {
+                "objective": "compile organoid invasion evidence",
+                "protocol": protocol,
+                "execution": execution["execution"].clone(),
+                "measurements": [
+                    {"measurement_id":"m1","task_id":"assay","output_schema":"Assay1@1","endpoint_id":"invasion","modality":"imaging","value_milli":400,"uncertainty_milli":50,"quality_milli":900,"replicate_index":1},
+                    {"measurement_id":"m2","task_id":"assay","output_schema":"Assay1@1","endpoint_id":"invasion","modality":"imaging","value_milli":420,"uncertainty_milli":50,"quality_milli":900,"replicate_index":2}
+                ],
+                "min_replicates":2,
+                "min_quality_milli":700,
+                "max_uncertainty_milli":200,
+                "contradiction_threshold_milli":100
+            }
+        }),
+    );
+    assert_eq!(result["dispatch"], json!("not_started"));
+    assert_eq!(result["simulation_only"], json!(true));
+    assert_eq!(result["surface"]["disposition"], json!("qualified"));
+    assert_eq!(
+        result["surface"]["qualified_endpoint_order"],
+        json!(["invasion"])
+    );
 }
 
 #[test]
