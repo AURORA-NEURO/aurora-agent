@@ -310,6 +310,7 @@ crates/research/src/glioma/
     p06_experiment_design/synergy.rs         P06 Bliss combination-response analysis
     p06_experiment_design/campaign.rs       P06 mechanism-aware closed-loop assay campaign controller and executor seam
     p06_experiment_design/information_design.rs P06 integer Bayesian assay selection by expected mechanism-information reduction
+    p06_experiment_design/robust_design.rs P06 maximin scenario-aware replicate allocation with diminishing utility and explicit risk/feasibility gates
     p06_experiment_design/adaptive_information_campaign.rs P06 closed-loop posterior updating and re-planning through a caller-owned assay executor
     p06_experiment_design/adaptive_allocation_campaign.rs P06 autonomous Beta-posterior replicate allocation with aggregate batch validation and posterior replanning
     p06_experiment_design/multi_fidelity.rs P06 cost-aware multi-fidelity surrogate optimization across screening, mechanistic, and validation models

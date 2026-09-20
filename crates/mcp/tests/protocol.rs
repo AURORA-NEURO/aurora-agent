@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 738;
+const TOOL_DEFINITION_COUNT: usize = 739;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -16002,6 +16002,40 @@ fn glioma_protocol_transport_gate_releases_supported_target_model_endpoint() {
     assert_eq!(result["simulation_only"], json!(true));
     assert_eq!(result["gate"]["disposition"], json!("ready"));
     assert_eq!(result["gate"]["ready_endpoint_order"], json!(["invasion"]));
+}
+
+#[test]
+fn glioma_robust_experiment_design_allocates_lower_tail_batch() {
+    let mut server = server();
+    let result = call(
+        &mut server,
+        "glioma_robust_experiment_design",
+        json!({
+            "request": {
+                "objective": "robustly distinguish invasion mechanisms",
+                "model_system": "organoid",
+                "scenarios": [
+                    {"scenario_id":"mechanism-a","label":"mechanism A","weight_milli":500},
+                    {"scenario_id":"mechanism-b","label":"mechanism B","weight_milli":500}
+                ],
+                "candidates": [
+                    {"arm_id":"strong","label":"strong assay","feature_id":"assay-strong","cost_units_per_replicate":2,"risk_milli":200,"feasibility_milli":900,"max_replicates":3,"utility_milli_by_scenario":{"mechanism-a":[700,350,175],"mechanism-b":[600,300,150]}},
+                    {"arm_id":"weak","label":"weak assay","feature_id":"assay-weak","cost_units_per_replicate":2,"risk_milli":200,"feasibility_milli":900,"max_replicates":3,"utility_milli_by_scenario":{"mechanism-a":[100,50,25],"mechanism-b":[50,25,12]}}
+                ],
+                "budget_units":8,
+                "max_selected_arms":1,
+                "min_replicates_per_selected_arm":2,
+                "max_total_replicates":3,
+                "min_feasibility_milli":700,
+                "risk_ceiling_milli":500,
+                "min_robust_utility_milli":400
+            }
+        }),
+    );
+    assert_eq!(result["dispatch"], json!("not_started"));
+    assert_eq!(result["simulation_only"], json!(true));
+    assert_eq!(result["design"]["selected_order"], json!(["strong"]));
+    assert_eq!(result["design"]["disposition"], json!("partial"));
 }
 
 #[test]

@@ -18,6 +18,7 @@ pub mod multi_fidelity_campaign;
 pub mod operating_cycle;
 pub mod power_reestimation;
 pub mod robust_active_learning;
+pub mod robust_design;
 pub mod sequential_campaign;
 pub mod sequential_design;
 pub mod synergy;
@@ -115,6 +116,11 @@ pub use robust_active_learning::{
     RobustActiveLearningCandidateDisposition, RobustActiveLearningDisposition,
     RobustActiveLearningError, RobustActiveLearningModel, RobustActiveLearningObservation,
     RobustActiveLearningPlan, RobustActiveLearningRequest, RobustActiveLearningScore,
+};
+pub use robust_design::{
+    design_glioma_robust_experiment, RobustCandidateAllocation, RobustDesignActionKind,
+    RobustDesignCandidate, RobustDesignScenario, RobustExperimentDesign,
+    RobustExperimentDesignDisposition, RobustExperimentDesignError, RobustExperimentDesignRequest,
 };
 pub use sequential_campaign::{
     execute_glioma_sequential_campaign, DryRunSequentialCampaignExecutor,

@@ -508,12 +508,13 @@ use bioprism_research::{
     compile_glioma_computation_workflow, compile_glioma_knowledge_actions,
     compile_glioma_knowledge_gaps, compile_glioma_protocol_evidence_surface,
     compile_mechanism_action_plan, compile_typed_knowledge, compose_knowledge_graph,
-    design_glioma_contrast_panel, design_preclinical_experiment, discriminate_mechanisms,
-    dry_run_adaptive_instrument_executor, dry_run_glioma_adaptive_frontier_executor,
-    dry_run_glioma_research, dry_run_instrument_executor_from_request,
-    dry_run_robustness_guided_computation_executor, evaluate_glioma_dynamic_policies,
-    evaluate_glioma_release_gate, execute_federated_benchmark_adaptive_campaign_dry_run,
-    execute_federated_benchmark_campaign, execute_federated_benchmark_operating_cycle_dry_run,
+    design_glioma_contrast_panel, design_glioma_robust_experiment, design_preclinical_experiment,
+    discriminate_mechanisms, dry_run_adaptive_instrument_executor,
+    dry_run_glioma_adaptive_frontier_executor, dry_run_glioma_research,
+    dry_run_instrument_executor_from_request, dry_run_robustness_guided_computation_executor,
+    evaluate_glioma_dynamic_policies, evaluate_glioma_release_gate,
+    execute_federated_benchmark_adaptive_campaign_dry_run, execute_federated_benchmark_campaign,
+    execute_federated_benchmark_operating_cycle_dry_run,
     execute_federated_mechanism_transport_campaign_dry_run, execute_glioma_action_portfolio,
     execute_glioma_active_learning_campaign, execute_glioma_adaptive_allocation_campaign,
     execute_glioma_adaptive_clone_campaign_dry_run,
@@ -657,15 +658,15 @@ use bioprism_research::{
     ProtocolTransportGateRequest, ReleaseExecutionMode, ReleaseGateRequest, ReplayCampaign,
     ReplayCampaignRequest, ReplicationRequest, ReplicationStudy, ResearchObjectRequest,
     RobustActiveLearningCampaignRequest, RobustActiveLearningCandidate,
-    RobustActiveLearningObservation, RobustActiveLearningRequest, RobustInterventionCandidate,
-    RobustInterventionRequest, RobustnessGuidedComputationRequest, RobustnessRequest,
-    ScientificFrontierExecutionRequest, ScientificFrontierRequest, SensitivityObservation,
-    SensitivityRequest, SequentialArmObservation, SequentialCampaignRequest,
-    SequentialDesignRequest, SpatialCell, SpatialCommunicationCell, SpatialCommunicationRequest,
-    SpatialNicheRequest, SpatialPropagationRequest, SpatialRegistrationCell,
-    SpatialRegistrationRequest, StateTransitionObservation, StateTransitionRequest,
-    StaticGliomaActionPlanner, StaticGliomaComputationPlanner, StratifiedCausalRequest,
-    StratifiedObservation, TemporalFusionRequest, TemporalObservation,
+    RobustActiveLearningObservation, RobustActiveLearningRequest, RobustExperimentDesignRequest,
+    RobustInterventionCandidate, RobustInterventionRequest, RobustnessGuidedComputationRequest,
+    RobustnessRequest, ScientificFrontierExecutionRequest, ScientificFrontierRequest,
+    SensitivityObservation, SensitivityRequest, SequentialArmObservation,
+    SequentialCampaignRequest, SequentialDesignRequest, SpatialCell, SpatialCommunicationCell,
+    SpatialCommunicationRequest, SpatialNicheRequest, SpatialPropagationRequest,
+    SpatialRegistrationCell, SpatialRegistrationRequest, StateTransitionObservation,
+    StateTransitionRequest, StaticGliomaActionPlanner, StaticGliomaComputationPlanner,
+    StratifiedCausalRequest, StratifiedObservation, TemporalFusionRequest, TemporalObservation,
     TemporalSpatialAlignmentRequest, TrajectoryObservation, TrajectoryRequest, TransportStudy,
     TransportabilityRequest, TypedKnowledge,
 };
@@ -2425,6 +2426,7 @@ impl Server {
                 self.glioma_robust_intervention_portfolio(&arguments)
             }
             "glioma_information_design" => self.glioma_information_design(&arguments),
+            "glioma_robust_experiment_design" => self.glioma_robust_experiment_design(&arguments),
             "glioma_adaptive_information_campaign" => {
                 self.glioma_adaptive_information_campaign(&arguments)
             }
@@ -10121,6 +10123,33 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma information design: {error}"))
+    }
+
+    /// Allocate a bounded glioma experiment batch against the lower tail of declared scenarios.
+    /// This is a design product only; it never dispatches an assay or instrument.
+    fn glioma_robust_experiment_design(&self, arguments: &Value) -> Result<Value, String> {
+        let request: RobustExperimentDesignRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_robust_experiment_design requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma robust experiment design request: {error}"))?;
+        let design = design_glioma_robust_experiment(&request)
+            .map_err(|error| format!("glioma robust experiment design refused: {error}"))?;
+        serde_json::to_value(json!({
+            "design": design,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "next_routes": ["glioma_protocol_simulate", "glioma_protocol_transport_gate"],
+            "guarantees": [
+                "allocation maximizes declared lower-tail scenario utility with integer diminishing marginal gains",
+                "budget, throughput, risk, feasibility, and minimum robust-information gates remain explicit",
+                "scenario uncertainty and weak candidates remain visible rather than being converted into confident claims",
+                "the route performs no assay, instrument, federation, or clinical action"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma robust experiment design: {error}"))
     }
 
     /// Replan a local adaptive glioma assay campaign from categorical outcomes already returned
@@ -51514,6 +51543,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_mechanism_ensemble_counterfactual",
                 "glioma_robust_intervention_portfolio",
                 "glioma_information_design",
+                "glioma_robust_experiment_design",
                 "glioma_adaptive_information_campaign",
                 "glioma_active_learning",
                 "glioma_active_learning_campaign_execute",
@@ -61839,6 +61869,17 @@ pub fn tool_definitions() -> Vec<Value> {
                 "actions": {"type": "array", "items": {"type": "object"}, "description": "DesignAction1@1 candidate assays with per-mechanism discrete outcome probabilities, feasibility, risk, cost, and replicate bounds."}
             },
             "required": ["request", "mechanisms", "actions"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_robust_experiment_design",
+        "description": "Design a bounded preclinical glioma experiment batch against the lower tail of declared mechanism/scenario worlds. Allocates integer replicates using diminishing marginal utility while enforcing budget, throughput, risk, feasibility, and minimum robust-information gates; preserves weak, blocked, unresolved, and deferred candidates. This route is planning-only and performs no assay, instrument, federation, or clinical action.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "RobustExperimentDesignRequest1@1 containing weighted scenarios, candidate assay utility curves, model system, budget, replicate/throughput bounds, feasibility/risk ceilings, and a lower-tail utility floor."}
+            },
+            "required": ["request"]
         }
     }));
     definitions.push(json!({
