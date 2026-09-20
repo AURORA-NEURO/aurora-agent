@@ -534,12 +534,12 @@ use bioprism_research::{
     execute_glioma_instrument_fleet, execute_glioma_instrument_operating_cycle,
     execute_glioma_instrument_plan, execute_glioma_instrument_science_loop,
     execute_glioma_intent_mission, execute_glioma_interpretation_operating_cycle,
-    execute_glioma_knowledge_resolution_campaign, execute_glioma_knowledge_selection_cycle,
-    execute_glioma_knowledge_synthesis_operating_cycle, execute_glioma_mechanism_autopilot,
-    execute_glioma_mechanism_discovery_engine, execute_glioma_mechanism_discrimination_campaign,
-    execute_glioma_mechanism_operating_cycle, execute_glioma_mission_recovery,
-    execute_glioma_multi_fidelity_campaign, execute_glioma_multimodal_ingestion_campaign,
-    execute_glioma_multimodal_mechanism_campaign,
+    execute_glioma_knowledge_action_dispatch, execute_glioma_knowledge_resolution_campaign,
+    execute_glioma_knowledge_selection_cycle, execute_glioma_knowledge_synthesis_operating_cycle,
+    execute_glioma_mechanism_autopilot, execute_glioma_mechanism_discovery_engine,
+    execute_glioma_mechanism_discrimination_campaign, execute_glioma_mechanism_operating_cycle,
+    execute_glioma_mission_recovery, execute_glioma_multi_fidelity_campaign,
+    execute_glioma_multimodal_ingestion_campaign, execute_glioma_multimodal_mechanism_campaign,
     execute_glioma_multimodal_mechanism_campaign_with_executor, execute_glioma_multimodal_mission,
     execute_glioma_multimodal_operating_cycle_dry_run, execute_glioma_multimodal_readiness_gate,
     execute_glioma_program_scheduler_dry_run, execute_glioma_protocol,
@@ -595,15 +595,15 @@ use bioprism_research::{
     DryRunFederatedBenchmarkCampaignExecutor, DryRunGliomaActionExecutor,
     DryRunGliomaComputationExecutor, DryRunGliomaExperimentFrontierExecutor,
     DryRunGliomaProtocolExecutor, DryRunGliomaReplicationCampaignExecutor,
-    DryRunInstrumentExecutor, DryRunKnowledgeResolutionCampaignExecutor,
-    DryRunMechanismDiscriminationCampaignExecutor, DryRunMultiFidelityCampaignExecutor,
-    DryRunMultimodalIngestionCampaignExecutor, DryRunReplayCampaignExecutor,
-    DryRunRobustActiveLearningCampaignExecutor, DryRunSequentialCampaignExecutor,
-    DynamicPolicyCandidate, DynamicPolicyRequest, DynamicPolicyTrajectory,
-    EvidenceAcquisitionCampaignRequest, EvidenceAcquisitionCandidate, EvidenceAcquisitionRequest,
-    EvidenceCalibrationObservation, EvidenceCalibrationRequest, EvidenceExecutionMode,
-    EvidencePriorityRequest, EvidenceRecord, EvidenceRefreshCampaignRequest, EvidenceRequest,
-    EvidenceSurveillanceRequest, EvidenceTriangulationRequest, ExperimentArm,
+    DryRunInstrumentExecutor, DryRunKnowledgeActionExecutor,
+    DryRunKnowledgeResolutionCampaignExecutor, DryRunMechanismDiscriminationCampaignExecutor,
+    DryRunMultiFidelityCampaignExecutor, DryRunMultimodalIngestionCampaignExecutor,
+    DryRunReplayCampaignExecutor, DryRunRobustActiveLearningCampaignExecutor,
+    DryRunSequentialCampaignExecutor, DynamicPolicyCandidate, DynamicPolicyRequest,
+    DynamicPolicyTrajectory, EvidenceAcquisitionCampaignRequest, EvidenceAcquisitionCandidate,
+    EvidenceAcquisitionRequest, EvidenceCalibrationObservation, EvidenceCalibrationRequest,
+    EvidenceExecutionMode, EvidencePriorityRequest, EvidenceRecord, EvidenceRefreshCampaignRequest,
+    EvidenceRequest, EvidenceSurveillanceRequest, EvidenceTriangulationRequest, ExperimentArm,
     ExperimentOperatingCycleRequest, ExperimentRequest, FederatedBenchmarkAdaptiveCampaignRequest,
     FederatedBenchmarkCampaignRequest, FederatedBenchmarkExecutionMode,
     FederatedBenchmarkOperatingCycleRequest, FederatedBenchmarkRequest, FederatedBenchmarkSite,
@@ -627,9 +627,10 @@ use bioprism_research::{
     InstrumentExecutionRun, InstrumentFleetExecutionRequest, InstrumentFleetScheduleRequest,
     InstrumentInterlockSnapshot, InstrumentOperatingCycleRequest, InstrumentPreflightRequest,
     InstrumentScienceLoopRequest, InterpretationSynthesisRequest, KnowledgeActionBridgeRequest,
-    KnowledgeActionCompilerRequest, KnowledgeActionPlan, KnowledgeActionSelectionCycleRequest,
-    KnowledgeActionTemplate, KnowledgeCompositionRequest, KnowledgeFrontier,
-    KnowledgeFrontierRequest, KnowledgeGapCompilerRequest, KnowledgeRelation, KnowledgeRequest,
+    KnowledgeActionCompilerRequest, KnowledgeActionDispatchRequest, KnowledgeActionPlan,
+    KnowledgeActionSelectionCycle, KnowledgeActionSelectionCycleRequest, KnowledgeActionTemplate,
+    KnowledgeCompositionRequest, KnowledgeFrontier, KnowledgeFrontierRequest,
+    KnowledgeGapCompilerRequest, KnowledgeRelation, KnowledgeRequest,
     KnowledgeResolutionCampaignRequest, KnowledgeSynthesisOperatingCycleRequest,
     LatentFactorRequest, LatentFactorVector, LigandReceptorPair, MechanismActionPlannerConfig,
     MechanismCalibration, MechanismCalibrationObservation, MechanismCalibrationRequest,
@@ -2358,6 +2359,7 @@ impl Server {
             "glioma_knowledge_action_compile" => self.glioma_knowledge_action_compile(&arguments),
             "glioma_knowledge_action_bridge" => self.glioma_knowledge_action_bridge(&arguments),
             "glioma_knowledge_selection_cycle" => self.glioma_knowledge_selection_cycle(&arguments),
+            "glioma_knowledge_action_dispatch" => self.glioma_knowledge_action_dispatch(&arguments),
             "glioma_autonomous_gap_cycle" => self.glioma_autonomous_gap_cycle(&arguments),
             "glioma_knowledge_synthesis_operating_cycle" => {
                 self.glioma_knowledge_synthesis_operating_cycle(&arguments)
@@ -8961,6 +8963,48 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma knowledge selection-cycle: {error}"))
+    }
+
+    /// Execute exactly the selected P02 knowledge-action batch through MCP's deterministic local
+    /// adapter. Returned evidence is synthetic, explicitly simulation-only, and recompiled into
+    /// a next frontier; institution-local callers provide the production executor through Rust.
+    fn glioma_knowledge_action_dispatch(&self, arguments: &Value) -> Result<Value, String> {
+        let request: KnowledgeActionDispatchRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_knowledge_action_dispatch requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma knowledge-action dispatch request: {error}"))?;
+        let plan: KnowledgeActionPlan = serde_json::from_value(
+            arguments
+                .get("plan")
+                .cloned()
+                .ok_or_else(|| "glioma_knowledge_action_dispatch requires plan".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma knowledge-action plan: {error}"))?;
+        let selection: KnowledgeActionSelectionCycle =
+            serde_json::from_value(arguments.get("selection").cloned().ok_or_else(|| {
+                "glioma_knowledge_action_dispatch requires selection".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma knowledge selection-cycle: {error}"))?;
+        let mut executor = DryRunKnowledgeActionExecutor;
+        let run =
+            execute_glioma_knowledge_action_dispatch(&request, &plan, &selection, &mut executor)
+                .map_err(|error| format!("glioma knowledge-action dispatch refused: {error}"))?;
+        serde_json::to_value(json!({
+            "run": run,
+            "dispatch": "completed_local_dry_run",
+            "simulation_only": true,
+            "next_route": "glioma_knowledge_action_compile",
+            "guarantees": [
+                "only actions selected by the immutable P02 selection-cycle digest are executed",
+                "returned records are bound to the selected claim and scope before recompilation",
+                "negative, contradictory, unknown, and budget-blocked outcomes remain explicit",
+                "MCP performs no network, instrument, federation, raw-data, or clinical effect"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma knowledge-action dispatch: {error}"))
     }
 
     /// Run the bounded P02-to-P01 autonomous research cycle with MCP's deterministic local
@@ -51070,6 +51114,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_knowledge_action_compile",
                 "glioma_knowledge_action_bridge",
                 "glioma_knowledge_selection_cycle",
+                "glioma_knowledge_action_dispatch",
                 "glioma_autonomous_gap_cycle",
                 "glioma_knowledge_synthesis_operating_cycle",
                 "glioma_decision_context",
@@ -60932,6 +60977,19 @@ pub fn tool_definitions() -> Vec<Value> {
                 "plan": {"type": "object", "description": "KnowledgeActionPlan1@1 from glioma_knowledge_action_compile."}
             },
             "required": ["request", "plan"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_knowledge_action_dispatch",
+        "description": "Execute exactly the selected P02 preclinical glioma knowledge-action batch through MCP's deterministic local adapter, with bounded retries and budget accounting. Returned evidence is claim/scope bound, negative and uncertain states remain explicit, and typed knowledge/frontier state is recompiled for the next autonomous cycle. MCP remains simulation-only: no network, instrument, federation, raw-data, or clinical effect is available.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "KnowledgeActionDispatchRequest1@1 with matching objective/plan/selection digests, knowledge and frontier requests, local seed records, budget, retry bound, and negative-stop policy."},
+                "plan": {"type": "object", "description": "KnowledgeActionPlan1@1 from glioma_knowledge_action_compile."},
+                "selection": {"type": "object", "description": "KnowledgeActionSelectionCycle1@1 from glioma_knowledge_selection_cycle; only its selected source order is executable."}
+            },
+            "required": ["request", "plan", "selection"]
         }
     }));
     definitions.push(json!({

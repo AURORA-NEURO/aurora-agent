@@ -7,6 +7,7 @@ pub mod belief_revision;
 pub mod campaign;
 pub mod claim_frontier;
 pub mod composition;
+pub mod dispatch;
 pub mod gap_compiler;
 pub mod knowledge_graph;
 pub mod operating_cycle;
@@ -37,6 +38,13 @@ pub use action_bridge::{
 pub use selection_cycle::{
     execute_glioma_knowledge_selection_cycle, KnowledgeActionSelectionCycle,
     KnowledgeActionSelectionCycleError, KnowledgeActionSelectionCycleRequest,
+};
+
+pub use dispatch::{
+    execute_glioma_knowledge_action_dispatch, DryRunKnowledgeActionExecutor,
+    KnowledgeActionDispatchDisposition, KnowledgeActionDispatchError,
+    KnowledgeActionDispatchRequest, KnowledgeActionDispatchResult, KnowledgeActionDispatchRun,
+    KnowledgeActionExecutionFailure, KnowledgeActionExecutor, KnowledgeActionResultDisposition,
 };
 
 pub use campaign::{
