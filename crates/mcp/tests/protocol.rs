@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 746;
+const TOOL_DEFINITION_COUNT: usize = 747;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -1342,6 +1342,41 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
         2
     );
     assert!(sensitivity["analysis"]["baseline_value_milli"].is_number());
+
+    let decision_gate = call(
+        &mut server,
+        "glioma_multimodal_decision_gate",
+        json!({
+            "request": {
+                "objective": "gate invasion endpoint before mechanism planning",
+                "endpoint_id": "invasion",
+                "study_id": "mcp-decision-gate-study",
+                "model_system": "organoid",
+                "required_modalities": ["genomics", "imaging"],
+                "observations": [
+                    {"modality":"genomics","value_milli":800,"uncertainty_milli":10,"reliability_milli":900,"quality_milli":900,"replicate_count":3},
+                    {"modality":"imaging","value_milli":820,"uncertainty_milli":10,"reliability_milli":900,"quality_milli":900,"replicate_count":3}
+                ],
+                "direction": "higher_supports",
+                "threshold_milli": 600,
+                "min_modalities": 2,
+                "min_reliability_milli": 700,
+                "max_uncertainty_milli": 100,
+                "max_interval_width_milli": 250,
+                "min_margin_milli": 20,
+                "min_confidence_milli": 500
+            }
+        }),
+    );
+    assert_eq!(decision_gate["dispatch"], json!("not_started"));
+    assert_eq!(decision_gate["simulation_only"], json!(true));
+    assert_eq!(decision_gate["analysis"]["disposition"], json!("supports"));
+    assert!(
+        decision_gate["analysis"]["confidence_milli"]
+            .as_u64()
+            .unwrap()
+            >= 500
+    );
 
     let harmonization = call(
         &mut server,

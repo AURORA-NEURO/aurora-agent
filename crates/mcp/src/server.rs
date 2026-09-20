@@ -495,13 +495,14 @@ use bioprism_research::{
     analyze_glioma_causal_contrast, analyze_glioma_clonal_evolution,
     analyze_glioma_clone_panel_outcomes, analyze_glioma_combination_synergy,
     analyze_glioma_dose_response, analyze_glioma_latent_factors, analyze_glioma_mediation,
-    analyze_glioma_multimodal_dropout_stress, analyze_glioma_multimodal_evidence_fusion,
-    analyze_glioma_multimodal_graph_fusion, analyze_glioma_multimodal_missingness,
-    analyze_glioma_multimodal_sensitivity, analyze_glioma_pathway_activity,
-    analyze_glioma_spatial_communication, analyze_glioma_spatial_niches,
-    analyze_glioma_spatial_state_propagation, analyze_glioma_state_transitions,
-    analyze_glioma_temporal_multimodal_fusion, analyze_glioma_temporal_spatial_alignment,
-    analyze_glioma_trajectories, analyze_glioma_transportability, analyze_instrument_calibration,
+    analyze_glioma_multimodal_decision_gate, analyze_glioma_multimodal_dropout_stress,
+    analyze_glioma_multimodal_evidence_fusion, analyze_glioma_multimodal_graph_fusion,
+    analyze_glioma_multimodal_missingness, analyze_glioma_multimodal_sensitivity,
+    analyze_glioma_pathway_activity, analyze_glioma_spatial_communication,
+    analyze_glioma_spatial_niches, analyze_glioma_spatial_state_propagation,
+    analyze_glioma_state_transitions, analyze_glioma_temporal_multimodal_fusion,
+    analyze_glioma_temporal_spatial_alignment, analyze_glioma_trajectories,
+    analyze_glioma_transportability, analyze_instrument_calibration,
     analyze_multimodal_concordance, analyze_multimodal_consensus, analyze_preclinical_outcomes,
     analyze_replication_meta_analysis, analyze_stratified_causal_adjustment,
     assess_glioma_robustness, assess_replication, bridge_glioma_knowledge_actions,
@@ -653,7 +654,7 @@ use bioprism_research::{
     MechanismHypothesis, MechanismOperatingCycleRequest, MechanismRequest, MediationObservation,
     MediationRequest, MetaAnalysisRequest, MissingnessAuditRequest, ModalityPortfolioRequest,
     ModalityVector, MultiFidelityCampaignRequest, MultiFidelityOptimizationRequest,
-    MultimodalExecutionMode, MultimodalIngestionCampaignRequest,
+    MultimodalDecisionGateRequest, MultimodalExecutionMode, MultimodalIngestionCampaignRequest,
     MultimodalMechanismCampaignRequest, MultimodalObservation, MultimodalReadinessRequest,
     MultimodalRequest, PathwayActivityDefinition, PathwayActivityObservation,
     PathwayActivityRequest, PowerArmObservation, PowerReestimationRequest,
@@ -2352,6 +2353,7 @@ impl Server {
                 self.glioma_multimodal_evidence_fusion(&arguments)
             }
             "glioma_multimodal_sensitivity" => self.glioma_multimodal_sensitivity(&arguments),
+            "glioma_multimodal_decision_gate" => self.glioma_multimodal_decision_gate(&arguments),
             "glioma_multimodal_missingness" => self.glioma_multimodal_missingness(&arguments),
             "glioma_multimodal_reliability" => self.glioma_multimodal_reliability(&arguments),
             "glioma_multimodal_portfolio" => self.glioma_multimodal_portfolio(&arguments),
@@ -8260,6 +8262,33 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma multimodal sensitivity analysis: {error}"))
+    }
+
+    /// Evaluate a multimodal preclinical endpoint against a declared research threshold while
+    /// preserving interval, confidence, contradiction, and missingness gates.
+    fn glioma_multimodal_decision_gate(&self, arguments: &Value) -> Result<Value, String> {
+        let request: MultimodalDecisionGateRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_multimodal_decision_gate requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma multimodal decision-gate request: {error}"))?;
+        let analysis = analyze_glioma_multimodal_decision_gate(&request)
+            .map_err(|error| format!("glioma multimodal decision gate refused: {error}"))?;
+        serde_json::to_value(json!({
+            "analysis": analysis,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "next_routes": ["glioma_multimodal_sensitivity", "glioma_mechanism_explore", "glioma_experiment_design"],
+            "guarantees": [
+                "threshold decisions are computed only from eligible local preclinical evidence and bounded intervals",
+                "negative, contradictory, low-confidence, wide-interval, and missing states remain explicit",
+                "a supported endpoint is a research-planning handoff and never a clinical conclusion",
+                "route performs no assay, instrument, federation, or clinical action"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma multimodal decision gate: {error}"))
     }
 
     /// Cluster de-identified preclinical glioma sample lineages from multiple modality vectors.
@@ -51685,6 +51714,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_multimodal_drift",
                 "glioma_multimodal_evidence_fusion",
                 "glioma_multimodal_sensitivity",
+                "glioma_multimodal_decision_gate",
                 "glioma_multimodal_consensus",
                 "glioma_multimodal_harmonize",
                 "glioma_multimodal_latent_factors",
@@ -61301,6 +61331,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "SensitivityRequest1@1 with endpoint/model binding, modality EndpointEvidence1@1 rows, reliability/uncertainty gates, perturbation bound, and robustness threshold."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_multimodal_decision_gate",
+        "description": "Evaluate a reliability-weighted local preclinical glioma endpoint interval against an investigator-declared research threshold. Returns supported, negative, indeterminate, or blocked disposition, modality disagreement, confidence and interval gates, and the next autonomous research handoff. It never makes a diagnosis, treatment, triage, or clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "MultimodalDecisionGateRequest1@1 with endpoint/model binding, EndpointEvidence1@1 rows, threshold direction, reliability/uncertainty gates, interval width, margin, and confidence floors."}
             },
             "required": ["request"]
         }

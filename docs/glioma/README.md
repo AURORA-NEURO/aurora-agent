@@ -343,6 +343,8 @@ crates/research/src/glioma/
                                              P03 reliability/uncertainty-weighted endpoint evidence fusion with contradiction and missing-modality gates
   p03_multimodal_ingestion_qc/sensitivity.rs
                                              P03 leave-one-modality-out and bounded perturbation endpoint fragility analysis with autonomous reacquisition routing
+  p03_multimodal_ingestion_qc/decision_gate.rs
+                                             P03 uncertainty-aware endpoint threshold gate with explicit autonomous research handoff and negative-result routing
   p03_multimodal_ingestion_qc/spatial_niche.rs
                                              P03 spatial neighbourhood graph, same-lineage niche components, and cross-lineage enrichment
   p03_multimodal_ingestion_qc/spatial_communication.rs
@@ -522,6 +524,12 @@ bounded low/high perturbation ranges, detects sign-changing endpoint decisions, 
 reacquisition or orthogonal-replication actions for the autonomous research engine. A robust
 endpoint can advance to mechanism planning; a fragile or under-covered endpoint remains
 conditional or blocked, without imputation or assay dispatch.
+P03 also includes an uncertainty-aware multimodal decision gate
+(`analyze_glioma_multimodal_decision_gate`). It estimates a reliability-weighted endpoint
+interval, compares that interval with an investigator-declared preclinical research threshold,
+and routes supported, negative, indeterminate, and blocked states to the next autonomous stage.
+Contradictory modalities, wide intervals, low confidence, and missing required evidence remain
+explicit handoff conditions; the gate is never a diagnostic, treatment, or clinical decision.
 P05 now also includes signed pathway activity inference (`analyze_glioma_pathway_activity`) that
 maps declared modality-specific molecular nodes to reliability-weighted pathway activity, compares
 cross-modal direction, and ranks mechanism priorities. Missing nodes, low-confidence bottlenecks,
