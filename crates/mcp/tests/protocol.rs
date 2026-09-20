@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 748;
+const TOOL_DEFINITION_COUNT: usize = 749;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -1409,6 +1409,44 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
     assert_eq!(
         contradiction["adjudication"]["pairs"][0]["kind"],
         json!("sign_reversal")
+    );
+
+    let quality_forecast = call(
+        &mut server,
+        "glioma_multimodal_quality_forecast",
+        json!({
+            "request": {
+                "objective": "forecast QC failure before autonomous acquisition",
+                "study_id": "mcp-quality-forecast-study",
+                "model_system": "organoid",
+                "epoch_order": ["epoch-0", "epoch-1", "epoch-2"],
+                "required_modalities": ["genomics", "imaging"],
+                "observations": [
+                    {"epoch_id":"epoch-0","epoch_index":0,"modality":"genomics","observed":true,"quality_milli":950,"expected_feature_count":100,"observed_feature_count":100},
+                    {"epoch_id":"epoch-1","epoch_index":1,"modality":"genomics","observed":true,"quality_milli":850,"expected_feature_count":100,"observed_feature_count":100},
+                    {"epoch_id":"epoch-2","epoch_index":2,"modality":"genomics","observed":true,"quality_milli":750,"expected_feature_count":100,"observed_feature_count":100},
+                    {"epoch_id":"epoch-0","epoch_index":0,"modality":"imaging","observed":true,"quality_milli":900,"expected_feature_count":100,"observed_feature_count":100},
+                    {"epoch_id":"epoch-1","epoch_index":1,"modality":"imaging","observed":true,"quality_milli":900,"expected_feature_count":100,"observed_feature_count":100},
+                    {"epoch_id":"epoch-2","epoch_index":2,"modality":"imaging","observed":true,"quality_milli":900,"expected_feature_count":100,"observed_feature_count":100}
+                ],
+                "history_epochs": 3,
+                "forecast_horizon": 2,
+                "min_history_points": 2,
+                "quality_floor_milli": 700,
+                "max_negative_slope_milli_per_epoch": 100,
+                "minimum_forecast_quality_milli": 700
+            }
+        }),
+    );
+    assert_eq!(quality_forecast["dispatch"], json!("not_started"));
+    assert_eq!(quality_forecast["simulation_only"], json!(true));
+    assert_eq!(
+        quality_forecast["forecast"]["disposition"],
+        json!("at_risk")
+    );
+    assert_eq!(
+        quality_forecast["forecast"]["forecast_order"][0],
+        json!("genomics")
     );
 
     let harmonization = call(

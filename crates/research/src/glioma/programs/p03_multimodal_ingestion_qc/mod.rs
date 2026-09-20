@@ -16,6 +16,7 @@ pub mod latent_factors;
 pub mod missingness_audit;
 pub mod modality_portfolio;
 pub mod operating_cycle;
+pub mod prospective_quality;
 pub mod readiness_gate;
 pub mod reliability_calibration;
 pub mod sensitivity;
@@ -97,6 +98,11 @@ pub use operating_cycle::{
     GliomaMultimodalOperatingCycle, GliomaMultimodalOperatingCycleDisposition,
     GliomaMultimodalOperatingCycleError, GliomaMultimodalOperatingCycleRequest,
     MultimodalExecutionMode,
+};
+pub use prospective_quality::{
+    forecast_glioma_multimodal_quality, ModalityQualityForecast, ProspectiveQualityError,
+    ProspectiveQualityForecast, ProspectiveQualityRequest, QualityForecastDisposition,
+    QualityForecastObservation,
 };
 pub use readiness_gate::{
     execute_glioma_multimodal_readiness_gate, MultimodalReadinessError, MultimodalReadinessRequest,

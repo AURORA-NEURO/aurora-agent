@@ -554,9 +554,9 @@ use bioprism_research::{
     execute_glioma_replication_campaign, execute_glioma_research_autopilot,
     execute_glioma_research_director, execute_glioma_robust_active_learning_campaign,
     execute_glioma_robustness_guided_computation, execute_glioma_scientific_frontier,
-    execute_glioma_sequential_campaign, explore_mechanisms, fuse_glioma_protocol_evidence,
-    gate_glioma_protocol_transport, generate_feature_catalog, glioma_program_catalog,
-    harmonize_glioma_multimodal_batches, harmonize_multimodal_inputs,
+    execute_glioma_sequential_campaign, explore_mechanisms, forecast_glioma_multimodal_quality,
+    fuse_glioma_protocol_evidence, gate_glioma_protocol_transport, generate_feature_catalog,
+    glioma_program_catalog, harmonize_glioma_multimodal_batches, harmonize_multimodal_inputs,
     optimize_glioma_protocol_branches, plan_adaptive_glioma_dose_surface, plan_decision_actions,
     plan_federated_benchmark_sites, plan_glioma_active_learning,
     plan_glioma_adaptive_information_campaign, plan_glioma_adaptive_mechanism_policy,
@@ -660,23 +660,23 @@ use bioprism_research::{
     MultimodalMechanismCampaignRequest, MultimodalObservation, MultimodalReadinessRequest,
     MultimodalRequest, PathwayActivityDefinition, PathwayActivityObservation,
     PathwayActivityRequest, PowerArmObservation, PowerReestimationRequest,
-    ProtocolBranchOptimizationRequest, ProtocolCompensationRequest, ProtocolEvidenceFusionRequest,
-    ProtocolEvidenceSurfaceRequest, ProtocolExecutionRequest, ProtocolSimulationRequest,
-    ProtocolTransportGateRequest, ReleaseExecutionMode, ReleaseGateRequest,
-    ReliabilityCalibrationRequest, ReplayCampaign, ReplayCampaignRequest, ReplicationRequest,
-    ReplicationStudy, ResearchObjectRequest, RobustActiveLearningCampaignRequest,
-    RobustActiveLearningCandidate, RobustActiveLearningObservation, RobustActiveLearningRequest,
-    RobustExperimentDesignRequest, RobustInterventionCandidate, RobustInterventionRequest,
-    RobustnessGuidedComputationRequest, RobustnessRequest, ScientificFrontierExecutionRequest,
-    ScientificFrontierRequest, SensitivityObservation, SensitivityRequest,
-    SequentialArmObservation, SequentialCampaignRequest, SequentialDesignRequest, SpatialCell,
-    SpatialCommunicationCell, SpatialCommunicationRequest, SpatialNicheRequest,
-    SpatialPropagationRequest, SpatialRegistrationCell, SpatialRegistrationRequest,
-    StateTransitionObservation, StateTransitionRequest, StaticGliomaActionPlanner,
-    StaticGliomaComputationPlanner, StratifiedCausalRequest, StratifiedObservation,
-    TemporalFusionRequest, TemporalObservation, TemporalSpatialAlignmentRequest,
-    TrajectoryObservation, TrajectoryRequest, TransportStudy, TransportabilityRequest,
-    TypedKnowledge,
+    ProspectiveQualityRequest, ProtocolBranchOptimizationRequest, ProtocolCompensationRequest,
+    ProtocolEvidenceFusionRequest, ProtocolEvidenceSurfaceRequest, ProtocolExecutionRequest,
+    ProtocolSimulationRequest, ProtocolTransportGateRequest, ReleaseExecutionMode,
+    ReleaseGateRequest, ReliabilityCalibrationRequest, ReplayCampaign, ReplayCampaignRequest,
+    ReplicationRequest, ReplicationStudy, ResearchObjectRequest,
+    RobustActiveLearningCampaignRequest, RobustActiveLearningCandidate,
+    RobustActiveLearningObservation, RobustActiveLearningRequest, RobustExperimentDesignRequest,
+    RobustInterventionCandidate, RobustInterventionRequest, RobustnessGuidedComputationRequest,
+    RobustnessRequest, ScientificFrontierExecutionRequest, ScientificFrontierRequest,
+    SensitivityObservation, SensitivityRequest, SequentialArmObservation,
+    SequentialCampaignRequest, SequentialDesignRequest, SpatialCell, SpatialCommunicationCell,
+    SpatialCommunicationRequest, SpatialNicheRequest, SpatialPropagationRequest,
+    SpatialRegistrationCell, SpatialRegistrationRequest, StateTransitionObservation,
+    StateTransitionRequest, StaticGliomaActionPlanner, StaticGliomaComputationPlanner,
+    StratifiedCausalRequest, StratifiedObservation, TemporalFusionRequest, TemporalObservation,
+    TemporalSpatialAlignmentRequest, TrajectoryObservation, TrajectoryRequest, TransportStudy,
+    TransportabilityRequest, TypedKnowledge,
 };
 use bioprism_routing::{
     lab::{run as run_routing_lab, LabSettings, Task},
@@ -2358,6 +2358,9 @@ impl Server {
             "glioma_multimodal_decision_gate" => self.glioma_multimodal_decision_gate(&arguments),
             "glioma_multimodal_contradiction_adjudication" => {
                 self.glioma_multimodal_contradiction_adjudication(&arguments)
+            }
+            "glioma_multimodal_quality_forecast" => {
+                self.glioma_multimodal_quality_forecast(&arguments)
             }
             "glioma_multimodal_missingness" => self.glioma_multimodal_missingness(&arguments),
             "glioma_multimodal_reliability" => self.glioma_multimodal_reliability(&arguments),
@@ -8324,6 +8327,30 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma multimodal contradiction adjudication: {error}"))
+    }
+
+    /// Forecast the next local preclinical modality-quality state before autonomous acquisition.
+    fn glioma_multimodal_quality_forecast(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ProspectiveQualityRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_multimodal_quality_forecast requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma prospective quality request: {error}"))?;
+        let forecast = forecast_glioma_multimodal_quality(&request)
+            .map_err(|error| format!("glioma prospective quality forecast refused: {error}"))?;
+        serde_json::to_value(json!({
+            "forecast": forecast,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "next_routes": ["glioma_multimodal_reliability", "glioma_multimodal_drift", "glioma_multimodal_ingestion_campaign"],
+            "guarantees": [
+                "future quality risk is forecast only from ordered local QC metadata",
+                "missing history and quality failure remain explicit blocked or at-risk states",
+                "preflight and reacquisition actions never invent measurements or predict biology",
+                "route performs no assay, instrument, federation, or clinical action"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma prospective quality forecast: {error}"))
     }
 
     /// Cluster de-identified preclinical glioma sample lineages from multiple modality vectors.
@@ -51751,6 +51778,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_multimodal_sensitivity",
                 "glioma_multimodal_decision_gate",
                 "glioma_multimodal_contradiction_adjudication",
+                "glioma_multimodal_quality_forecast",
                 "glioma_multimodal_consensus",
                 "glioma_multimodal_harmonize",
                 "glioma_multimodal_latent_factors",
@@ -61389,6 +61417,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "ContradictionAdjudicationRequest1@1 with endpoint/model binding, EndpointEvidence1@1 rows, reliability/uncertainty gates, pair-difference threshold, and trust-margin threshold."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_multimodal_quality_forecast",
+        "description": "Forecast the next quality state of required local preclinical glioma modalities from ordered QC metadata. Returns robust quality trends, predicted horizon quality, missing-history risk, and preventive preflight/reacquisition order before autonomous endpoint scheduling; it never predicts biology or invents an assay result.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ProspectiveQualityRequest1@1 with ordered epochs, modality QC cells, history/horizon bounds, quality floor, negative-slope gate, and minimum forecast quality."}
             },
             "required": ["request"]
         }
