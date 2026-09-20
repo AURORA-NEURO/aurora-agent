@@ -508,17 +508,18 @@ use bioprism_research::{
     analyze_replication_meta_analysis, analyze_stratified_causal_adjustment,
     assess_glioma_robustness, assess_replication, bridge_glioma_knowledge_actions,
     build_research_object_manifest, calibrate_glioma_evidence, calibrate_glioma_mechanisms,
-    calibrate_glioma_multimodal_reliability, certify_decision_omissions,
-    compile_decision_action_graph, compile_decision_context, compile_glioma_computation_workflow,
-    compile_glioma_knowledge_actions, compile_glioma_knowledge_gaps,
-    compile_glioma_protocol_evidence_surface, compile_mechanism_action_plan,
-    compile_typed_knowledge, compose_knowledge_graph, design_glioma_contrast_panel,
-    design_glioma_robust_experiment, design_preclinical_experiment, discriminate_mechanisms,
-    dry_run_adaptive_instrument_executor, dry_run_glioma_adaptive_frontier_executor,
-    dry_run_glioma_research, dry_run_instrument_executor_from_request,
-    dry_run_robustness_guided_computation_executor, evaluate_glioma_dynamic_policies,
-    evaluate_glioma_release_gate, execute_federated_benchmark_adaptive_campaign_dry_run,
-    execute_federated_benchmark_campaign, execute_federated_benchmark_operating_cycle_dry_run,
+    calibrate_glioma_multimodal_quality_transport, calibrate_glioma_multimodal_reliability,
+    certify_decision_omissions, compile_decision_action_graph, compile_decision_context,
+    compile_glioma_computation_workflow, compile_glioma_knowledge_actions,
+    compile_glioma_knowledge_gaps, compile_glioma_protocol_evidence_surface,
+    compile_mechanism_action_plan, compile_typed_knowledge, compose_knowledge_graph,
+    design_glioma_contrast_panel, design_glioma_robust_experiment, design_preclinical_experiment,
+    discriminate_mechanisms, dry_run_adaptive_instrument_executor,
+    dry_run_glioma_adaptive_frontier_executor, dry_run_glioma_research,
+    dry_run_instrument_executor_from_request, dry_run_robustness_guided_computation_executor,
+    evaluate_glioma_dynamic_policies, evaluate_glioma_release_gate,
+    execute_federated_benchmark_adaptive_campaign_dry_run, execute_federated_benchmark_campaign,
+    execute_federated_benchmark_operating_cycle_dry_run,
     execute_federated_mechanism_transport_campaign_dry_run, execute_glioma_action_portfolio,
     execute_glioma_active_learning_campaign, execute_glioma_adaptive_allocation_campaign,
     execute_glioma_adaptive_clone_campaign_dry_run,
@@ -666,9 +667,9 @@ use bioprism_research::{
     ProspectiveQualityRequest, ProtocolBranchOptimizationRequest, ProtocolCompensationRequest,
     ProtocolEvidenceFusionRequest, ProtocolEvidenceSurfaceRequest, ProtocolExecutionRequest,
     ProtocolSimulationRequest, ProtocolTransportGateRequest, QualityAdaptiveCampaignRequest,
-    QualityExecutionMode, QualityExecutionRequest, QualityScheduleRequest, ReleaseExecutionMode,
-    ReleaseGateRequest, ReliabilityCalibrationRequest, ReplayCampaign, ReplayCampaignRequest,
-    ReplicationRequest, ReplicationStudy, ResearchObjectRequest,
+    QualityExecutionMode, QualityExecutionRequest, QualityScheduleRequest, QualityTransportRequest,
+    ReleaseExecutionMode, ReleaseGateRequest, ReliabilityCalibrationRequest, ReplayCampaign,
+    ReplayCampaignRequest, ReplicationRequest, ReplicationStudy, ResearchObjectRequest,
     RobustActiveLearningCampaignRequest, RobustActiveLearningCandidate,
     RobustActiveLearningObservation, RobustActiveLearningRequest, RobustExperimentDesignRequest,
     RobustInterventionCandidate, RobustInterventionRequest, RobustnessGuidedComputationRequest,
@@ -2374,6 +2375,9 @@ impl Server {
             }
             "glioma_multimodal_quality_adaptive_campaign" => {
                 self.glioma_multimodal_quality_adaptive_campaign(&arguments)
+            }
+            "glioma_multimodal_quality_transport" => {
+                self.glioma_multimodal_quality_transport(&arguments)
             }
             "glioma_multimodal_missingness" => self.glioma_multimodal_missingness(&arguments),
             "glioma_multimodal_reliability" => self.glioma_multimodal_reliability(&arguments),
@@ -8447,6 +8451,30 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma adaptive quality campaign: {error}"))
+    }
+
+    /// Calibrate quality-policy transport between two local preclinical glioma studies.
+    fn glioma_multimodal_quality_transport(&self, arguments: &Value) -> Result<Value, String> {
+        let request: QualityTransportRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_multimodal_quality_transport requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma quality transport request: {error}"))?;
+        let calibration = calibrate_glioma_multimodal_quality_transport(&request)
+            .map_err(|error| format!("glioma quality transport refused: {error}"))?;
+        serde_json::to_value(json!({
+            "calibration": calibration,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "next_routes": ["glioma_multimodal_quality_forecast", "glioma_multimodal_quality_scheduler", "glioma_multimodal_quality_adaptive_campaign"],
+            "guarantees": [
+                "source and target QC summaries remain bound to their declared study and model systems",
+                "missing target cells, weak alignment, quality gaps, and drift block or condition policy transport",
+                "qualified output is a target-local confirmation candidate and never biological or clinical validity",
+                "route performs no raw-data movement, assay, instrument, federation, or clinical action"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma quality transport: {error}"))
     }
 
     /// Cluster de-identified preclinical glioma sample lineages from multiple modality vectors.
@@ -51878,6 +51906,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_multimodal_quality_scheduler",
                 "glioma_multimodal_quality_execute",
                 "glioma_multimodal_quality_adaptive_campaign",
+                "glioma_multimodal_quality_transport",
                 "glioma_multimodal_consensus",
                 "glioma_multimodal_harmonize",
                 "glioma_multimodal_latent_factors",
@@ -61560,6 +61589,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "QualityAdaptiveCampaignRequest1@1 with study/model, ordered epochs, forecast-risk candidates, active approval, budget/horizon, quality/retry gates, and bounded round count."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_multimodal_quality_transport",
+        "description": "Calibrate cross-study and cross-model transport of local preclinical glioma QC policy from bounded de-identified summaries. Scores quality/coverage gaps, target alignment, and drift; missing target calibration blocks transfer and weak comparability conditions it. The route never moves raw data or makes a biological or clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "QualityTransportRequest1@1 with distinct source/target studies, model bindings, per-modality QC summary cells, calibration floors, gap/drift gates, and transfer confidence threshold."}
             },
             "required": ["request"]
         }

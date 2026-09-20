@@ -20,6 +20,7 @@ pub mod prospective_quality;
 pub mod quality_adaptive_campaign;
 pub mod quality_execution;
 pub mod quality_scheduler;
+pub mod quality_transport;
 pub mod readiness_gate;
 pub mod reliability_calibration;
 pub mod sensitivity;
@@ -124,6 +125,11 @@ pub use quality_scheduler::{
     plan_glioma_multimodal_quality_schedule, QualityAcquisitionCandidate,
     QualityScheduleAlternative, QualityScheduleDisposition, QualityScheduleError,
     QualityScheduleItem, QualitySchedulePlan, QualityScheduleRequest,
+};
+pub use quality_transport::{
+    calibrate_glioma_multimodal_quality_transport, QualityTransportCalibration,
+    QualityTransportCell, QualityTransportDisposition, QualityTransportError,
+    QualityTransportModalityDisposition, QualityTransportModalitySummary, QualityTransportRequest,
 };
 pub use readiness_gate::{
     execute_glioma_multimodal_readiness_gate, MultimodalReadinessError, MultimodalReadinessRequest,

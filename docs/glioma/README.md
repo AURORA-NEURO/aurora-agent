@@ -355,6 +355,8 @@ crates/research/src/glioma/
                                              P03 approval-bound execution of the selected quality schedule with retries and quality-floor gates
   p03_multimodal_ingestion_qc/quality_adaptive_campaign.rs
                                              P03 closed-loop quality campaign that assimilates QC outcomes and replans bounded acquisition rounds
+  p03_multimodal_ingestion_qc/quality_transport.rs
+                                             P03 cross-study/model QC-policy transport calibration with target-local confirmation gates
   p03_multimodal_ingestion_qc/spatial_niche.rs
                                              P03 spatial neighbourhood graph, same-lineage niche components, and cross-lineage enrichment
   p03_multimodal_ingestion_qc/spatial_communication.rs
@@ -567,6 +569,11 @@ without becoming an unconstrained self-modifying agent: each round has a bounded
 approval window, only typed QC observations update risk, satisfied modalities are removed from the
 pending frontier, and required failures or budget exhaustion stop the campaign with explicit
 negative evidence. This is the P03 handoff into readiness and endpoint analysis.
+Cross-study QC-policy transport (`calibrate_glioma_multimodal_quality_transport`) compares
+source and target study summaries per modality, scoring quality/coverage gaps, target alignment,
+and drift. Missing target calibration blocks transfer; weak alignment or drift makes it
+conditional, and only qualified modalities can be used as target-local confirmation candidates.
+The feature transfers no raw data and never treats QC-policy portability as biological validity.
 P05 now also includes signed pathway activity inference (`analyze_glioma_pathway_activity`) that
 maps declared modality-specific molecular nodes to reliability-weighted pathway activity, compares
 cross-modal direction, and ranks mechanism priorities. Missing nodes, low-confidence bottlenecks,

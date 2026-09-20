@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 752;
+const TOOL_DEFINITION_COUNT: usize = 753;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -1571,6 +1571,54 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
     );
     assert_eq!(
         quality_adaptive_campaign["campaign"]["rounds"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+
+    let quality_transport = call(
+        &mut server,
+        "glioma_multimodal_quality_transport",
+        json!({
+            "request": {
+                "objective": "calibrate QC policy transport between local glioma studies",
+                "source_study_id": "source-study",
+                "target_study_id": "target-study",
+                "source_model_system": "organoid",
+                "target_model_system": "organoid",
+                "required_modalities": ["genomics", "imaging"],
+                "source_cells": [
+                    {"cell_id":"source-g1","study_id":"source-study","cohort_id":"cohort-1","model_system":"organoid","modality":"genomics","quality_milli":900,"coverage_milli":900,"alignment_milli":950,"drift_milli":20,"sample_count":10},
+                    {"cell_id":"source-g2","study_id":"source-study","cohort_id":"cohort-2","model_system":"organoid","modality":"genomics","quality_milli":900,"coverage_milli":900,"alignment_milli":950,"drift_milli":20,"sample_count":10},
+                    {"cell_id":"source-i1","study_id":"source-study","cohort_id":"cohort-1","model_system":"organoid","modality":"imaging","quality_milli":850,"coverage_milli":900,"alignment_milli":950,"drift_milli":20,"sample_count":10},
+                    {"cell_id":"source-i2","study_id":"source-study","cohort_id":"cohort-2","model_system":"organoid","modality":"imaging","quality_milli":850,"coverage_milli":900,"alignment_milli":950,"drift_milli":20,"sample_count":10}
+                ],
+                "target_cells": [
+                    {"cell_id":"target-g1","study_id":"target-study","cohort_id":"cohort-1","model_system":"organoid","modality":"genomics","quality_milli":880,"coverage_milli":900,"alignment_milli":950,"drift_milli":20,"sample_count":10},
+                    {"cell_id":"target-g2","study_id":"target-study","cohort_id":"cohort-2","model_system":"organoid","modality":"genomics","quality_milli":880,"coverage_milli":900,"alignment_milli":950,"drift_milli":20,"sample_count":10},
+                    {"cell_id":"target-i1","study_id":"target-study","cohort_id":"cohort-1","model_system":"organoid","modality":"imaging","quality_milli":830,"coverage_milli":900,"alignment_milli":950,"drift_milli":20,"sample_count":10},
+                    {"cell_id":"target-i2","study_id":"target-study","cohort_id":"cohort-2","model_system":"organoid","modality":"imaging","quality_milli":830,"coverage_milli":900,"alignment_milli":950,"drift_milli":20,"sample_count":10}
+                ],
+                "min_cells_per_modality": 2,
+                "min_quality_milli": 700,
+                "min_coverage_milli": 700,
+                "min_alignment_milli": 800,
+                "max_quality_gap_milli": 100,
+                "max_coverage_gap_milli": 150,
+                "max_drift_milli": 100,
+                "min_transfer_confidence_milli": 700
+            }
+        }),
+    );
+    assert_eq!(quality_transport["dispatch"], json!("not_started"));
+    assert_eq!(quality_transport["simulation_only"], json!(true));
+    assert_eq!(
+        quality_transport["calibration"]["disposition"],
+        json!("qualified")
+    );
+    assert_eq!(
+        quality_transport["calibration"]["transfer_order"]
             .as_array()
             .unwrap()
             .len(),
