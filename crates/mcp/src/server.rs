@@ -513,12 +513,12 @@ use bioprism_research::{
     calibrate_glioma_multimodal_reliability, certify_decision_omissions,
     compile_decision_action_graph, compile_decision_context,
     compile_glioma_computation_interpretation_frontier, compile_glioma_computation_workflow,
-    compile_glioma_knowledge_actions, compile_glioma_knowledge_gaps,
-    compile_glioma_mechanism_consensus, compile_glioma_mechanism_validation_protocol,
-    compile_glioma_protocol_evidence_surface, compile_glioma_replication_protocol,
-    compile_mechanism_action_plan, compile_typed_knowledge, compose_knowledge_graph,
-    design_glioma_contrast_panel, design_glioma_robust_experiment, design_preclinical_experiment,
-    discriminate_mechanisms, dry_run_adaptive_instrument_executor,
+    compile_glioma_knowledge_actions, compile_glioma_knowledge_consistency,
+    compile_glioma_knowledge_gaps, compile_glioma_mechanism_consensus,
+    compile_glioma_mechanism_validation_protocol, compile_glioma_protocol_evidence_surface,
+    compile_glioma_replication_protocol, compile_mechanism_action_plan, compile_typed_knowledge,
+    compose_knowledge_graph, design_glioma_contrast_panel, design_glioma_robust_experiment,
+    design_preclinical_experiment, discriminate_mechanisms, dry_run_adaptive_instrument_executor,
     dry_run_glioma_adaptive_frontier_executor, dry_run_glioma_research,
     dry_run_instrument_executor_from_request, dry_run_robustness_guided_computation_executor,
     evaluate_glioma_dynamic_policies, evaluate_glioma_release_gate,
@@ -674,8 +674,8 @@ use bioprism_research::{
     InstrumentScienceLoopRequest, InterpretationSynthesisRequest, KnowledgeActionBridgeRequest,
     KnowledgeActionCompilerRequest, KnowledgeActionDispatchRequest, KnowledgeActionPlan,
     KnowledgeActionSelectionCycle, KnowledgeActionSelectionCycleRequest, KnowledgeActionTemplate,
-    KnowledgeCompositionRequest, KnowledgeFrontier, KnowledgeFrontierRequest,
-    KnowledgeGapCompilerRequest, KnowledgeRelation, KnowledgeRequest,
+    KnowledgeCompositionRequest, KnowledgeConsistencyRequest, KnowledgeFrontier,
+    KnowledgeFrontierRequest, KnowledgeGapCompilerRequest, KnowledgeRelation, KnowledgeRequest,
     KnowledgeResolutionCampaignRequest, KnowledgeSynthesisOperatingCycleRequest,
     LatentFactorRequest, LatentFactorVector, LigandReceptorPair, MechanismActionPlannerConfig,
     MechanismCalibration, MechanismCalibrationObservation, MechanismCalibrationRequest,
@@ -2480,6 +2480,7 @@ impl Server {
             }
             "glioma_knowledge_compile" => self.glioma_knowledge_compile(&arguments),
             "glioma_knowledge_compose" => self.glioma_knowledge_compose(&arguments),
+            "glioma_knowledge_consistency" => self.glioma_knowledge_consistency(&arguments),
             "glioma_belief_revision" => self.glioma_belief_revision(&arguments),
             "glioma_knowledge_frontier" => self.glioma_knowledge_frontier(&arguments),
             "glioma_knowledge_gap_compile" => self.glioma_knowledge_gap_compile(&arguments),
@@ -9782,6 +9783,33 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma knowledge composition: {error}"))
+    }
+
+    /// Compute a bounded support/contradiction closure over typed knowledge before downstream
+    /// action compilation. Lower-scoring rivals remain visible as contested rather than deleted.
+    fn glioma_knowledge_consistency(&self, arguments: &Value) -> Result<Value, String> {
+        let request: KnowledgeConsistencyRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_knowledge_consistency requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma knowledge-consistency request: {error}"))?;
+        let closure = compile_glioma_knowledge_consistency(&request)
+            .map_err(|error| format!("glioma knowledge consistency refused: {error}"))?;
+        serde_json::to_value(json!({
+            "closure": closure,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "support and contradiction edges are explicit and bounded",
+                "selected claims retain score provenance while contested rivals remain visible",
+                "negative claims are excluded from the action-ready closure without deletion",
+                "unresolved claims emit evidence-acquisition actions for the next P01/P02 cycle",
+                "the route infers no causality, moves no raw data, and makes no clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma knowledge consistency closure: {error}"))
     }
 
     /// Revise an explicit preclinical claim-conflict graph into a bounded consistent portfolio.
@@ -53155,6 +53183,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_evidence_contradiction_cut",
                 "glioma_knowledge_compile",
                 "glioma_knowledge_compose",
+                "glioma_knowledge_consistency",
                 "glioma_belief_revision",
                 "glioma_knowledge_frontier",
                 "glioma_knowledge_gap_compile",
@@ -63325,6 +63354,17 @@ pub fn tool_definitions() -> Vec<Value> {
                 "relations": {"type": "array", "items": {"type": "object"}, "description": "KnowledgeRelation1@1 records with explicit supports, requires, or contradicts direction between claim ids."}
             },
             "required": ["request", "knowledge", "relations"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_knowledge_consistency",
+        "description": "Compute a bounded contradiction-aware consistency closure over typed preclinical glioma knowledge before downstream action compilation. Support and prerequisite edges increase usable score, contradiction edges impose explicit penalties, selected claims retain score provenance, contested rivals remain visible, negative claims are excluded without deletion, and unresolved claims emit evidence-acquisition actions. The route infers no causality, moves no raw data, and makes no clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "KnowledgeConsistencyRequest1@1 containing a validated TypedKnowledge1@1, explicit KnowledgeRelation1@1 records, support/conflict thresholds, and relation-strength bound."}
+            },
+            "required": ["request"]
         }
     }));
     definitions.push(json!({
