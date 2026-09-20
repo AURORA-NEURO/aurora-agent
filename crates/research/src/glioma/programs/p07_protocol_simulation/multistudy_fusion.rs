@@ -72,6 +72,7 @@ pub struct ProtocolFusionCell {
 #[serde(rename_all = "snake_case")]
 pub enum ProtocolEvidenceFusionDisposition {
     Qualified,
+    Negative,
     Partial,
     Heterogeneous,
     Contradictory,
@@ -467,23 +468,30 @@ pub fn fuse_glioma_protocol_evidence(
     let disposition = if !contradictory.is_empty() {
         ProtocolEvidenceFusionDisposition::Contradictory
     } else if !qualified.is_empty()
+        && negative.is_empty()
         && partial.is_empty()
         && heterogeneous.is_empty()
         && unresolved.is_empty()
     {
         ProtocolEvidenceFusionDisposition::Qualified
-    } else if !qualified.is_empty()
-        || !negative.is_empty()
-        || !partial.is_empty()
-        || !heterogeneous.is_empty()
+    } else if !negative.is_empty()
+        && qualified.is_empty()
+        && partial.is_empty()
+        && heterogeneous.is_empty()
+        && unresolved.is_empty()
     {
-        if !heterogeneous.is_empty() {
-            ProtocolEvidenceFusionDisposition::Heterogeneous
-        } else {
-            ProtocolEvidenceFusionDisposition::Partial
-        }
-    } else {
+        ProtocolEvidenceFusionDisposition::Negative
+    } else if !heterogeneous.is_empty() {
+        ProtocolEvidenceFusionDisposition::Heterogeneous
+    } else if qualified.is_empty()
+        && negative.is_empty()
+        && partial.is_empty()
+        && heterogeneous.is_empty()
+        && unresolved.is_empty()
+    {
         ProtocolEvidenceFusionDisposition::Unresolved
+    } else {
+        ProtocolEvidenceFusionDisposition::Partial
     };
     let mut fusion = ProtocolEvidenceFusion {
         feature_id: FEATURE_ID.into(),
@@ -627,5 +635,39 @@ mod tests {
             .negative_evidence
             .iter()
             .any(|item| item.contains("contradiction")));
+    }
+
+    #[test]
+    fn fusion_preserves_replicated_negative_program_result() {
+        let mut first = surface("a", GliomaModelSystem::Organoid, 0);
+        let mut second = surface("b", GliomaModelSystem::MouseModel, 0);
+        for current in [&mut first, &mut second] {
+            current.cells[0].disposition = ProtocolEvidenceDisposition::Negative;
+            current.qualified_endpoint_order.clear();
+            current.negative_endpoint_order = vec!["invasion".into()];
+            current.digest =
+                ContentHash::of_value(&super::super::evidence_surface::digest_input(current))
+                    .unwrap();
+        }
+        let fusion = fuse_glioma_protocol_evidence(&request(vec![
+            ProtocolEvidenceStudySurface {
+                study_id: "study-a".into(),
+                site_id: "site-a".into(),
+                model_system: GliomaModelSystem::Organoid,
+                surface: first,
+            },
+            ProtocolEvidenceStudySurface {
+                study_id: "study-b".into(),
+                site_id: "site-b".into(),
+                model_system: GliomaModelSystem::MouseModel,
+                surface: second,
+            },
+        ]))
+        .unwrap();
+        assert_eq!(
+            fusion.disposition,
+            ProtocolEvidenceFusionDisposition::Negative
+        );
+        assert_eq!(fusion.negative_endpoint_order, vec!["invasion"]);
     }
 }
