@@ -116,6 +116,8 @@ crates/research/src/glioma/
                                              P06-to-P07 compiler for site setup, arm, QC, and deterministic protocol preflight
   programs/p06_experiment_design/mechanism_validation.rs
                                              P05 robust intervention portfolio to P06 power-aware sequential validation compiler
+  programs/p06_experiment_design/mechanism_validation_protocol.rs
+                                             P06 validation decisions to deterministic P07 local protocol preflight compiler
   programs/p05_mechanism_exploration/operating_cycle.rs
                                              P05 mechanism-discrimination campaign to typed next-assay operating cycle
   programs/p05_mechanism_exploration/calibrated_campaign.rs

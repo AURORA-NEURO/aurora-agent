@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 770;
+const TOOL_DEFINITION_COUNT: usize = 771;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -2583,6 +2583,55 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
         json!("qualified")
     );
     assert!(mechanism_validation_plan["validation"]["power_plan"].is_object());
+
+    let mechanism_validation_protocol = call(
+        &mut server,
+        "glioma_mechanism_validation_protocol_compile",
+        json!({
+            "request": {
+                "validation": mechanism_validation_plan["validation"].clone(),
+                "arms": [
+                    {"arm_id":"control","candidate_id":null,"label":"vehicle control","target_node_id":"invasion","protocol_id":"invasion-v1","role":"control","artifact":{"artifact_id":"validation-control-arm","content_hash":artifact_hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                    {"arm_id":"egfr-arm","candidate_id":"inhibit-egfr","label":"EGFR perturbation","target_node_id":"invasion","protocol_id":"invasion-v1","role":"intervention","artifact":{"artifact_id":"validation-egfr-arm","content_hash":artifact_hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}}
+                ],
+                "resources": [
+                    {"resource_id":"culture","kind":"culture","capacity_units":1},
+                    {"resource_id":"compute","kind":"compute","capacity_units":1}
+                ],
+                "max_ticks": 200,
+                "max_risk_milli": 1000,
+                "allow_instrument_execution": false,
+                "approval_reference": null,
+                "randomization_seed": artifact_hash,
+                "ticks_per_replicate": 2,
+                "include_quality_task": true
+            }
+        }),
+    );
+    assert_eq!(
+        mechanism_validation_protocol["dispatch"],
+        json!("not_started")
+    );
+    assert_eq!(
+        mechanism_validation_protocol["compilation"]["disposition"],
+        json!("compiled")
+    );
+    assert_eq!(
+        mechanism_validation_protocol["compilation"]["preflight"]["disposition"],
+        json!("feasible")
+    );
+    assert!(mechanism_validation_protocol["compilation"]["task_order"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|task| task.as_str().is_some_and(|task| task.ends_with(":qc"))));
+    assert!(
+        mechanism_validation_protocol["compilation"]["withheld_arm_order"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|arm| arm == "egfr-arm")
+    );
 
     let information_design = call(
         &mut server,

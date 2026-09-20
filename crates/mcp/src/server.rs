@@ -513,10 +513,10 @@ use bioprism_research::{
     certify_decision_omissions, compile_decision_action_graph, compile_decision_context,
     compile_glioma_computation_workflow, compile_glioma_knowledge_actions,
     compile_glioma_knowledge_gaps, compile_glioma_mechanism_consensus,
-    compile_glioma_protocol_evidence_surface, compile_glioma_replication_protocol,
-    compile_mechanism_action_plan, compile_typed_knowledge, compose_knowledge_graph,
-    design_glioma_contrast_panel, design_glioma_robust_experiment, design_preclinical_experiment,
-    discriminate_mechanisms, dry_run_adaptive_instrument_executor,
+    compile_glioma_mechanism_validation_protocol, compile_glioma_protocol_evidence_surface,
+    compile_glioma_replication_protocol, compile_mechanism_action_plan, compile_typed_knowledge,
+    compose_knowledge_graph, design_glioma_contrast_panel, design_glioma_robust_experiment,
+    design_preclinical_experiment, discriminate_mechanisms, dry_run_adaptive_instrument_executor,
     dry_run_glioma_adaptive_frontier_executor, dry_run_glioma_research,
     dry_run_instrument_executor_from_request, dry_run_robustness_guided_computation_executor,
     evaluate_glioma_dynamic_policies, evaluate_glioma_release_gate,
@@ -670,10 +670,11 @@ use bioprism_research::{
     MechanismDynamicsNode, MechanismDynamicsRequest, MechanismFeatureObservation,
     MechanismGraphEdge, MechanismGraphNode, MechanismGraphRequest, MechanismHypothesis,
     MechanismOperatingCycleRequest, MechanismRequest, MechanismStateFilterRequest,
-    MechanismStateSmootherRequest, MechanismValidationPlanRequest, MediationObservation,
-    MediationRequest, MetaAnalysisRequest, MissingnessAuditRequest, ModalityPortfolioRequest,
-    ModalityVector, MultiFidelityCampaignRequest, MultiFidelityOptimizationRequest,
-    MultimodalDecisionGateRequest, MultimodalExecutionMode, MultimodalIngestionCampaignRequest,
+    MechanismStateSmootherRequest, MechanismValidationPlanRequest,
+    MechanismValidationProtocolCompileRequest, MediationObservation, MediationRequest,
+    MetaAnalysisRequest, MissingnessAuditRequest, ModalityPortfolioRequest, ModalityVector,
+    MultiFidelityCampaignRequest, MultiFidelityOptimizationRequest, MultimodalDecisionGateRequest,
+    MultimodalExecutionMode, MultimodalIngestionCampaignRequest,
     MultimodalMechanismCampaignRequest, MultimodalObservation, MultimodalReadinessRequest,
     MultimodalRequest, PathwayActivityDefinition, PathwayActivityObservation,
     PathwayActivityRequest, PowerArmObservation, PowerReestimationRequest,
@@ -2505,6 +2506,9 @@ impl Server {
                 self.glioma_robust_intervention_portfolio(&arguments)
             }
             "glioma_mechanism_validation_plan" => self.glioma_mechanism_validation_plan(&arguments),
+            "glioma_mechanism_validation_protocol_compile" => {
+                self.glioma_mechanism_validation_protocol_compile(&arguments)
+            }
             "glioma_information_design" => self.glioma_information_design(&arguments),
             "glioma_adaptive_panel" => self.glioma_adaptive_panel(&arguments),
             "glioma_replication_plan" => self.glioma_replication_plan(&arguments),
@@ -10909,6 +10913,42 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma mechanism validation plan: {error}"))
+    }
+
+    /// Compile the still-open mechanism validation decisions into a deterministic local P07
+    /// protocol and preflight it against caller-declared culture/compute resources. This route
+    /// never executes an assay, instrument, federation, or clinical decision.
+    fn glioma_mechanism_validation_protocol_compile(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: MechanismValidationProtocolCompileRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_mechanism_validation_protocol_compile requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma mechanism-validation protocol request: {error}")
+            })?;
+        let output = compile_glioma_mechanism_validation_protocol(&request)
+            .map_err(|error| format!("glioma mechanism validation protocol refused: {error}"))?;
+        serde_json::to_value(json!({
+            "compilation": output,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "next_routes": [
+                "glioma_protocol_autonomous_execute",
+                "glioma_instrument_preflight",
+                "glioma_replication_plan"
+            ],
+            "guarantees": [
+                "only continue and underpowered validation arms are materialized as protocol tasks",
+                "efficacy, futility, risk, and budget stops remain withheld with typed evidence",
+                "protocol scheduling and preflight are deterministic and resource-bounded",
+                "the caller-owned executor remains responsible for approvals, interlocks, and every physical effect",
+                "the route never performs a clinical decision or moves raw protected data"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma mechanism validation protocol: {error}"))
     }
 
     /// Select a bounded local glioma assay batch by expected reduction in mechanism uncertainty.
@@ -52512,6 +52552,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_mechanism_ensemble_counterfactual",
                 "glioma_robust_intervention_portfolio",
                 "glioma_mechanism_validation_plan",
+                "glioma_mechanism_validation_protocol_compile",
                 "glioma_information_design",
                 "glioma_adaptive_panel",
                 "glioma_replication_plan",
@@ -63142,6 +63183,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "MechanismValidationPlanRequest1@1 containing a P05 RobustInterventionPortfolio1@1, P06 PowerReestimationRequest1@1, typed validation arms, and local aggregate observations."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_mechanism_validation_protocol_compile",
+        "description": "Compile open preclinical glioma mechanism-validation decisions into a deterministic local P07 protocol and preflight it against declared culture or compute resources. Continue and underpowered arms become typed setup, assay, and QC tasks; efficacy, futility, risk, and budget stops remain withheld, and no physical, federated, or clinical action is dispatched.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "MechanismValidationProtocolCompileRequest1@1 containing a validated MechanismValidationPlan1@1, typed validation arms, ProtocolResource1@1 entries, horizon/risk bounds, deterministic seed, approval, and per-replicate duration."}
             },
             "required": ["request"]
         }
