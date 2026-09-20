@@ -392,6 +392,7 @@ pub fn implemented_feature_ids() -> Vec<&'static str> {
         crate::glioma::programs::p05_mechanism_exploration::adaptive_policy::FEATURE_ID,
         crate::glioma::programs::p05_mechanism_exploration::clonal_evolution::FEATURE_ID,
         crate::glioma::programs::p05_mechanism_exploration::state_filter::FEATURE_ID,
+        crate::glioma::programs::p05_mechanism_exploration::state_smoother::FEATURE_ID,
         crate::glioma::programs::p05_mechanism_exploration::operating_cycle::FEATURE_ID,
         crate::glioma::programs::p06_experiment_design::adaptive_allocation::FEATURE_ID,
         crate::glioma::programs::p06_experiment_design::power_reestimation::FEATURE_ID,

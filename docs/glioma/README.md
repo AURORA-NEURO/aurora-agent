@@ -102,6 +102,8 @@ crates/research/src/glioma/
                                              P05 signed delayed-feedback mechanism dynamics with intervention ranking, stability, oscillation, divergence, and sensitivity analysis
   programs/p05_mechanism_exploration/state_filter.rs
                                              P05 longitudinal finite-state mechanism filtering with transition priors, multimodal residuals, coverage uncertainty, and change points
+  programs/p05_mechanism_exploration/state_smoother.rs
+                                             P05 fixed-interval forward-backward smoothing with retrospective transition support, coverage, entropy, and negative features
   programs/p05_mechanism_exploration/operating_cycle.rs
                                              P05 mechanism-discrimination campaign to typed next-assay operating cycle
   programs/p05_mechanism_exploration/calibrated_campaign.rs

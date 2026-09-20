@@ -18,6 +18,7 @@ pub mod operating_cycle;
 pub mod pathway_activity;
 pub mod robust_portfolio;
 pub mod state_filter;
+pub mod state_smoother;
 
 pub use action_planner::{
     compile_mechanism_action_plan, GliomaMechanismActionPlanner, MechanismActionPlan,
@@ -111,6 +112,11 @@ pub use state_filter::{
     filter_glioma_mechanism_states, MechanismStateFilterDisposition, MechanismStateFilterError,
     MechanismStateFilterRequest, MechanismStateFilterResult, MechanismStateModel,
     MechanismStateObservation, MechanismStatePosterior,
+};
+pub use state_smoother::{
+    smooth_glioma_mechanism_states, MechanismStateSmoothPosterior,
+    MechanismStateSmootherDisposition, MechanismStateSmootherError, MechanismStateSmootherRequest,
+    MechanismStateSmootherResult, MechanismStateTransitionSupport,
 };
 
 pub const PROGRAM_ID: GliomaProgramId = GliomaProgramId::MechanismExploration;

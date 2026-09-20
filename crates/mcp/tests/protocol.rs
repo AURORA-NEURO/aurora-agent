@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 762;
+const TOOL_DEFINITION_COUNT: usize = 763;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -2211,6 +2211,46 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
     assert_eq!(
         mechanism_state_filter["filter"]["dominant_mechanism_order"][0],
         json!("growth")
+    );
+
+    let mechanism_state_smoother = call(
+        &mut server,
+        "glioma_mechanism_state_smoother",
+        json!({
+            "request": {
+                "objective": "retrospectively smooth longitudinal glioma invasion mechanisms",
+                "model_system": "organoid",
+                "mechanisms": [
+                    {"mechanism_id":"growth","statement":"growth state drives invasion","prior_milli":500,"transition_milli_by_state":{"growth":900,"stress":100},"predictions_milli":{"invasion-score":800},"process_uncertainty_milli":100},
+                    {"mechanism_id":"stress","statement":"stress state drives invasion","prior_milli":500,"transition_milli_by_state":{"growth":100,"stress":900},"predictions_milli":{"invasion-score":200},"process_uncertainty_milli":100}
+                ],
+                "observations": [
+                    {"timepoint":1,"feature_id":"invasion-score","modality":"imaging","observed_milli":790,"measurement_uncertainty_milli":100,"artifact":{"artifact_id":"smooth-observation-1","content_hash":artifact_hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                    {"timepoint":2,"feature_id":"invasion-score","modality":"imaging","observed_milli":210,"measurement_uncertainty_milli":100,"artifact":{"artifact_id":"smooth-observation-2","content_hash":artifact_hash,"content_type":"application/json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}}
+                ],
+                "min_coverage_milli":800,
+                "max_entropy_milli":950,
+                "min_transition_support_milli":0
+            }
+        }),
+    );
+    assert_eq!(mechanism_state_smoother["dispatch"], json!("not_started"));
+    assert_eq!(mechanism_state_smoother["simulation_only"], json!(true));
+    assert_eq!(
+        mechanism_state_smoother["smoother"]["posteriors"][0]["posterior_milli_by_mechanism"]
+            .as_object()
+            .unwrap()
+            .values()
+            .map(|value| value.as_u64().unwrap())
+            .sum::<u64>(),
+        1_000
+    );
+    assert_eq!(
+        mechanism_state_smoother["smoother"]["transition_support"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
     );
 
     let mechanism_action_plan = call(

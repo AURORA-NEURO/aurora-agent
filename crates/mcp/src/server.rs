@@ -581,9 +581,9 @@ use bioprism_research::{
     qualify_evidence, register_glioma_spatial_samples, revise_glioma_beliefs,
     schedule_glioma_computation_placement, schedule_glioma_instrument_fleet, select_glioma_actions,
     simulate_glioma_counterfactual, simulate_glioma_counterfactual_ensemble,
-    simulate_glioma_mechanism_dynamics, simulate_glioma_protocol, surveil_glioma_evidence,
-    surveil_glioma_multimodal_drift, synthesize_glioma_interpretation, triangulate_glioma_evidence,
-    update_glioma_mechanism_posterior, validate_feature_catalog,
+    simulate_glioma_mechanism_dynamics, simulate_glioma_protocol, smooth_glioma_mechanism_states,
+    surveil_glioma_evidence, surveil_glioma_multimodal_drift, synthesize_glioma_interpretation,
+    triangulate_glioma_evidence, update_glioma_mechanism_posterior, validate_feature_catalog,
     verify_glioma_multimodal_quality_recovery, ActionPortfolioExecutionRequest,
     ActiveLearningCampaignRequest, ActiveLearningCandidate, ActiveLearningObservation,
     ActiveLearningRequest, AdaptiveAllocationCampaignRequest, AdaptiveAllocationRequest,
@@ -665,10 +665,10 @@ use bioprism_research::{
     MechanismDynamicsIntervention, MechanismDynamicsNode, MechanismDynamicsRequest,
     MechanismFeatureObservation, MechanismGraphEdge, MechanismGraphNode, MechanismGraphRequest,
     MechanismHypothesis, MechanismOperatingCycleRequest, MechanismRequest,
-    MechanismStateFilterRequest, MediationObservation, MediationRequest, MetaAnalysisRequest,
-    MissingnessAuditRequest, ModalityPortfolioRequest, ModalityVector,
-    MultiFidelityCampaignRequest, MultiFidelityOptimizationRequest, MultimodalDecisionGateRequest,
-    MultimodalExecutionMode, MultimodalIngestionCampaignRequest,
+    MechanismStateFilterRequest, MechanismStateSmootherRequest, MediationObservation,
+    MediationRequest, MetaAnalysisRequest, MissingnessAuditRequest, ModalityPortfolioRequest,
+    ModalityVector, MultiFidelityCampaignRequest, MultiFidelityOptimizationRequest,
+    MultimodalDecisionGateRequest, MultimodalExecutionMode, MultimodalIngestionCampaignRequest,
     MultimodalMechanismCampaignRequest, MultimodalObservation, MultimodalReadinessRequest,
     MultimodalRequest, PathwayActivityDefinition, PathwayActivityObservation,
     PathwayActivityRequest, PowerArmObservation, PowerReestimationRequest,
@@ -2472,6 +2472,7 @@ impl Server {
             "glioma_mechanism_discriminate" => self.glioma_mechanism_discriminate(&arguments),
             "glioma_mechanism_bayesian_update" => self.glioma_mechanism_bayesian_update(&arguments),
             "glioma_mechanism_state_filter" => self.glioma_mechanism_state_filter(&arguments),
+            "glioma_mechanism_state_smoother" => self.glioma_mechanism_state_smoother(&arguments),
             "glioma_mechanism_calibrate" => self.glioma_mechanism_calibrate(&arguments),
             "glioma_mechanism_action_plan" => self.glioma_mechanism_action_plan(&arguments),
             "glioma_adaptive_mechanism_policy" => self.glioma_adaptive_mechanism_policy(&arguments),
@@ -10392,6 +10393,39 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma mechanism state filter: {error}"))
+    }
+
+    /// Smooth a completed longitudinal mechanism trajectory with future evidence; this is
+    /// retrospective inference only and never dispatches an assay or emits a clinical decision.
+    fn glioma_mechanism_state_smoother(&self, arguments: &Value) -> Result<Value, String> {
+        let request: MechanismStateSmootherRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_mechanism_state_smoother requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma mechanism state smoother request: {error}"))?;
+        let smoother = smooth_glioma_mechanism_states(&request)
+            .map_err(|error| format!("glioma mechanism state smoother refused: {error}"))?;
+        serde_json::to_value(json!({
+            "smoother": smoother,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "next_routes": [
+                "glioma_mechanism_state_filter",
+                "glioma_mechanism_discriminate",
+                "glioma_mechanism_dynamics",
+                "glioma_mechanism_action_plan"
+            ],
+            "guarantees": [
+                "forward-backward smoothing is deterministic and integer-normalized",
+                "future evidence can revise earlier latent-state support without rewriting observations",
+                "transition support, coverage gaps, entropy, negative features, and change points remain explicit",
+                "smoothed mechanism states remain planning evidence and are never emitted as clinical or biological conclusions",
+                "the route performs no assay, instrument, federation, raw-data, or clinical action"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma mechanism state smoother: {error}"))
     }
 
     /// Calibrate mechanism probabilities against future local observations using deterministic
@@ -52220,6 +52254,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_mechanism_discriminate",
                 "glioma_mechanism_bayesian_update",
                 "glioma_mechanism_state_filter",
+                "glioma_mechanism_state_smoother",
                 "glioma_mechanism_calibrate",
                 "glioma_mechanism_action_plan",
                 "glioma_adaptive_mechanism_policy",
@@ -62613,6 +62648,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "MechanismStateFilterRequest1@1 with model system, transition-complete mechanism state models, ordered local observations, artifact references, and coverage/entropy gates."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_mechanism_state_smoother",
+        "description": "Smooth a completed longitudinal preclinical glioma mechanism trajectory with a deterministic forward-backward pass. Future observations can revise earlier latent-state support while coverage, entropy, transition support, negative features, and change points remain explicit; the route never executes an assay or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "MechanismStateSmootherRequest1@1 with model system, transition-complete mechanism models, ordered local observations, artifact references, and coverage/entropy/transition gates."}
             },
             "required": ["request"]
         }
