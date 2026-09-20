@@ -62,9 +62,9 @@ pub use operating_cycle::{
 };
 
 pub use replication_transport::{
-    execute_validation_replication_transport, ValidationReplicationTransportDisposition,
-    ValidationReplicationTransportError, ValidationReplicationTransportRequest,
-    ValidationReplicationTransportRun,
+    execute_validation_replication_transport, ReplicationAggregateQuality,
+    ValidationReplicationTransportDisposition, ValidationReplicationTransportError,
+    ValidationReplicationTransportRequest, ValidationReplicationTransportRun,
 };
 
 pub const PROGRAM_ID: GliomaProgramId = GliomaProgramId::FederatedBenchmarking;

@@ -32,12 +32,22 @@ pub const OUTPUT_SCHEMA: &str = "GliomaReplicationFederationTransport1@1";
 pub struct ValidationReplicationTransportRequest {
     pub replication: ValidationReplicationCampaignRun,
     pub transport: FederatedMechanismTransportRequest,
+    pub aggregate_quality: Vec<ReplicationAggregateQuality>,
     pub actions: Vec<FederatedMechanismTransportAction>,
     pub budget_units: u64,
     pub max_rounds: u16,
     pub max_retries: u8,
     pub stop_on_qualified: bool,
     pub stop_on_negative: bool,
+}
+
+/// Institution-local QC summary required when a P10 replication study is promoted to an
+/// aggregate federation site. The raw QC trace remains local; only this bounded score crosses
+/// the bridge.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReplicationAggregateQuality {
+    pub study_id: String,
+    pub quality_milli: u16,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -118,6 +128,7 @@ fn digest_input(output: &ValidationReplicationTransportRun) -> serde_json::Value
 fn source_sites(
     replication: &ValidationReplicationCampaignRun,
     transport: &FederatedMechanismTransportRequest,
+    aggregate_quality: &[ReplicationAggregateQuality],
 ) -> Result<Vec<FederatedMechanismSite>, ValidationReplicationTransportError> {
     let campaign = replication.campaign.as_ref().ok_or_else(|| {
         ValidationReplicationTransportError::InvalidRequest(
@@ -125,6 +136,10 @@ fn source_sites(
         )
     })?;
     let mut studies = BTreeSet::new();
+    let quality_by_study = aggregate_quality
+        .iter()
+        .map(|entry| (entry.study_id.as_str(), entry.quality_milli))
+        .collect::<std::collections::BTreeMap<_, _>>();
     let mut sites = Vec::new();
     for study in &campaign.studies {
         if study.site_id == replication.origin_site_id
@@ -138,6 +153,15 @@ fn source_sites(
                 "replication studies must be non-origin, unique, local-only, and non-human aggregates".into(),
             ));
         }
+        let quality_milli = quality_by_study
+            .get(study.study_id.as_str())
+            .copied()
+            .ok_or_else(|| {
+                ValidationReplicationTransportError::InvalidRequest(format!(
+                    "missing aggregate QC score for replication study {}",
+                    study.study_id
+                ))
+            })?;
         sites.push(FederatedMechanismSite {
             site_id: study.site_id.clone(),
             study_id: study.study_id.clone(),
@@ -145,7 +169,7 @@ fn source_sites(
             model_system: study.model_system,
             effect_milli: study.effect_milli,
             uncertainty_milli: study.uncertainty_milli,
-            quality_milli: transport.min_quality_milli,
+            quality_milli,
             replicate_count: study.replicate_count,
             population_signature: transport.target_signature.clone(),
             artifact: study.artifact.clone(),
@@ -253,6 +277,17 @@ fn validate_request(
                 .into(),
         ));
     }
+    let mut quality_ids = BTreeSet::new();
+    if request.aggregate_quality.iter().any(|entry| {
+        entry.study_id.trim().is_empty()
+            || entry.quality_milli > 1_000
+            || !quality_ids.insert(entry.study_id.clone())
+    }) {
+        return Err(ValidationReplicationTransportError::InvalidRequest(
+            "aggregate QC scores must have unique study identities and bounded quality values"
+                .into(),
+        ));
+    }
     Ok(())
 }
 
@@ -326,7 +361,11 @@ pub fn execute_validation_replication_transport<E: FederatedMechanismTransportEx
             "resolve the independent-site replication disposition before federation transport",
         );
     }
-    let sites = source_sites(&request.replication, &request.transport)?;
+    let sites = source_sites(
+        &request.replication,
+        &request.transport,
+        &request.aggregate_quality,
+    )?;
     if sites.len() < request.transport.min_sites {
         negative_evidence.push(format!(
             "aggregate-sites:{}<{}",
@@ -498,6 +537,7 @@ mod tests {
                 max_leave_one_out_shift_milli: 1_000,
                 require_target_model: true,
             },
+            aggregate_quality: Vec::new(),
             actions: vec![FederatedMechanismTransportAction {
                 action_id: "site-follow-up".into(),
                 target_site_id: Some("site-b".into()),

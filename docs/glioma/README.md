@@ -924,10 +924,11 @@ projection can never masquerade as a measured consortium result.
 The replication-to-federation bridge (`execute_validation_replication_transport`) closes the next
 workflow boundary. It accepts only a validated independent-site replication run, converts its
 non-origin study summaries into aggregate mechanism sites, and invokes the bounded P12 transport
-campaign. Held, blocked, negative, heterogeneous, unresolved, and budget-limited states remain
-typed; raw traces, human data, specimen data, and instrument effects never cross the federation
-boundary. This is an executable research handoff, not a passive receipt or an automatic scientific
-claim.
+campaign. Each promoted study must carry an explicit bounded aggregate QC score; the bridge never
+assigns a passing quality value merely because a replication request exists. Held, blocked,
+negative, heterogeneous, unresolved, and budget-limited states remain typed; raw traces, human
+data, specimen data, and instrument effects never cross the federation boundary. This is an
+executable research handoff, not a passive receipt or an automatic scientific claim.
 P11 now adds a dependency-aware reproducibility replay campaign
 (`execute_glioma_replay_campaign`). It schedules declared program replays, compares exact artifact
 hashes, blocks downstream tasks after mismatch or unavailable outputs, and only emits a

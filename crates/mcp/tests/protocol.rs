@@ -2897,6 +2897,7 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
                     "max_leave_one_out_shift_milli": 1000,
                     "require_target_model": true
                 },
+                "aggregate_quality": [],
                 "actions": [{
                     "action_id": "aggregate-site-follow-up",
                     "target_site_id": "site-c",

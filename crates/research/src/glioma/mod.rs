@@ -657,7 +657,7 @@ pub use programs::p12_federated_benchmarking::{
     FederatedMechanismTransportCampaignRound, FederatedMechanismTransportCampaignStopReason,
     FederatedMechanismTransportDisposition, FederatedMechanismTransportError,
     FederatedMechanismTransportExecutionFailure, FederatedMechanismTransportExecutor,
-    FederatedMechanismTransportRequest, FederatedModelCoverage,
+    FederatedMechanismTransportRequest, FederatedModelCoverage, ReplicationAggregateQuality,
     ValidationReplicationTransportDisposition, ValidationReplicationTransportError,
     ValidationReplicationTransportRequest, ValidationReplicationTransportRun,
 };
