@@ -10,6 +10,7 @@ pub mod graph_fusion;
 pub mod harmonization;
 pub mod latent_factors;
 pub mod missingness_audit;
+pub mod modality_portfolio;
 pub mod operating_cycle;
 pub mod readiness_gate;
 pub mod reliability_calibration;
@@ -62,6 +63,11 @@ pub use missingness_audit::{
     MissingnessAuditError, MissingnessAuditRequest, MissingnessModalitySummary,
     MissingnessObservation, MissingnessPairSummary, MissingnessPattern,
     MissingnessPatternDisposition, MissingnessState,
+};
+pub use modality_portfolio::{
+    plan_glioma_multimodal_portfolio, ModalityCapability, ModalityPortfolioAlternative,
+    ModalityPortfolioDisposition, ModalityPortfolioError, ModalityPortfolioPlan,
+    ModalityPortfolioRequest,
 };
 pub use operating_cycle::{
     execute_glioma_multimodal_operating_cycle, execute_glioma_multimodal_operating_cycle_dry_run,

@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 742;
+const TOOL_DEFINITION_COUNT: usize = 743;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -1209,6 +1209,37 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
             .as_u64()
             .unwrap()
             >= 700
+    );
+
+    let portfolio = call(
+        &mut server,
+        "glioma_multimodal_portfolio",
+        json!({
+            "request": {
+                "objective": "select an invasion-mechanism multimodal portfolio",
+                "endpoint_id": "invasion",
+                "model_system": "organoid",
+                "required_dimension_order": ["function", "spatial", "state"],
+                "capabilities": [
+                    {"modality":"genomics","dimension_order":["state"],"reliability_milli":900,"cost_units":2,"throughput_units":800,"required_for_endpoint":true},
+                    {"modality":"imaging","dimension_order":["spatial","state"],"reliability_milli":850,"cost_units":3,"throughput_units":700,"required_for_endpoint":false},
+                    {"modality":"functional_perturbation","dimension_order":["function"],"reliability_milli":800,"cost_units":4,"throughput_units":500,"required_for_endpoint":false}
+                ],
+                "max_selected_modalities": 3,
+                "budget_units": 9,
+                "min_dimension_coverage_milli": 1000,
+                "min_reliability_milli": 800,
+                "min_redundancy_milli": 0,
+                "max_alternatives": 4
+            }
+        }),
+    );
+    assert_eq!(portfolio["dispatch"], json!("not_started"));
+    assert_eq!(portfolio["simulation_only"], json!(true));
+    assert_eq!(portfolio["plan"]["disposition"], json!("ready"));
+    assert_eq!(
+        portfolio["plan"]["selected_dimension_coverage_milli"],
+        json!(1000)
     );
 
     let harmonization = call(

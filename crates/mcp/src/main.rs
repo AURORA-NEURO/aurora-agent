@@ -69,6 +69,7 @@ fn main() {
                      glioma_multimodal_dropout_stress,\n\
                      glioma_multimodal_missingness,\n\
                      glioma_multimodal_reliability,\n\
+                     glioma_multimodal_portfolio,\n\
                      glioma_scientific_frontier_execute,\n\
                      glioma_decision_omission_certificate, glioma_decision_branch_plan, glioma_decision_branch_campaign_execute, glioma_adaptive_decision_branch_campaign_execute, glioma_decision_action_plan, glioma_knowledge_frontier, glioma_knowledge_gap_compile, glioma_knowledge_action_compile, glioma_knowledge_action_bridge, glioma_knowledge_selection_cycle, glioma_knowledge_action_dispatch, glioma_autonomous_gap_cycle, glioma_knowledge_synthesis_operating_cycle,\n\
                      glioma_multimodal_consensus, glioma_replication_meta_analyze, glioma_replication_campaign_execute,\n\
@@ -93,6 +94,7 @@ fn main() {
                      glioma_multimodal_dropout_stress,\n\
                      glioma_multimodal_missingness,\n\
                      glioma_multimodal_reliability,\n\
+                     glioma_multimodal_portfolio,\n\
                      glioma_mechanism_discriminate, glioma_mechanism_bayesian_update, glioma_mechanism_calibrate,\n\
                      glioma_mechanism_dynamics,\n\
                      glioma_mechanism_action_plan,\n\

@@ -562,14 +562,14 @@ use bioprism_research::{
     plan_glioma_closed_loop_campaign, plan_glioma_computation_portfolio,
     plan_glioma_decision_branches, plan_glioma_evidence_acquisition,
     plan_glioma_evidence_contradiction_cut, plan_glioma_information_design,
-    plan_glioma_multi_fidelity_optimization, plan_glioma_power_reestimation,
-    plan_glioma_protocol_compensation, plan_glioma_robust_active_learning,
-    plan_glioma_robust_intervention_portfolio, plan_glioma_scientific_frontier,
-    plan_glioma_sequential_design, plan_glioma_workflow, preflight_glioma_instrument,
-    prioritize_glioma_evidence, prioritize_knowledge_frontier, propagate_glioma_mechanism_graph,
-    qualify_evidence, register_glioma_spatial_samples, revise_glioma_beliefs,
-    schedule_glioma_computation_placement, schedule_glioma_instrument_fleet, select_glioma_actions,
-    simulate_glioma_counterfactual, simulate_glioma_counterfactual_ensemble,
+    plan_glioma_multi_fidelity_optimization, plan_glioma_multimodal_portfolio,
+    plan_glioma_power_reestimation, plan_glioma_protocol_compensation,
+    plan_glioma_robust_active_learning, plan_glioma_robust_intervention_portfolio,
+    plan_glioma_scientific_frontier, plan_glioma_sequential_design, plan_glioma_workflow,
+    preflight_glioma_instrument, prioritize_glioma_evidence, prioritize_knowledge_frontier,
+    propagate_glioma_mechanism_graph, qualify_evidence, register_glioma_spatial_samples,
+    revise_glioma_beliefs, schedule_glioma_computation_placement, schedule_glioma_instrument_fleet,
+    select_glioma_actions, simulate_glioma_counterfactual, simulate_glioma_counterfactual_ensemble,
     simulate_glioma_mechanism_dynamics, simulate_glioma_protocol, surveil_glioma_evidence,
     synthesize_glioma_interpretation, triangulate_glioma_evidence,
     update_glioma_mechanism_posterior, validate_feature_catalog, ActionPortfolioExecutionRequest,
@@ -649,28 +649,29 @@ use bioprism_research::{
     MechanismDynamicsIntervention, MechanismDynamicsNode, MechanismDynamicsRequest,
     MechanismFeatureObservation, MechanismGraphEdge, MechanismGraphNode, MechanismGraphRequest,
     MechanismHypothesis, MechanismOperatingCycleRequest, MechanismRequest, MediationObservation,
-    MediationRequest, MetaAnalysisRequest, MissingnessAuditRequest, ModalityVector,
-    MultiFidelityCampaignRequest, MultiFidelityOptimizationRequest, MultimodalExecutionMode,
-    MultimodalIngestionCampaignRequest, MultimodalMechanismCampaignRequest, MultimodalObservation,
-    MultimodalReadinessRequest, MultimodalRequest, PathwayActivityDefinition,
-    PathwayActivityObservation, PathwayActivityRequest, PowerArmObservation,
-    PowerReestimationRequest, ProtocolBranchOptimizationRequest, ProtocolCompensationRequest,
-    ProtocolEvidenceFusionRequest, ProtocolEvidenceSurfaceRequest, ProtocolExecutionRequest,
-    ProtocolSimulationRequest, ProtocolTransportGateRequest, ReleaseExecutionMode,
-    ReleaseGateRequest, ReliabilityCalibrationRequest, ReplayCampaign, ReplayCampaignRequest,
-    ReplicationRequest, ReplicationStudy, ResearchObjectRequest,
-    RobustActiveLearningCampaignRequest, RobustActiveLearningCandidate,
-    RobustActiveLearningObservation, RobustActiveLearningRequest, RobustExperimentDesignRequest,
-    RobustInterventionCandidate, RobustInterventionRequest, RobustnessGuidedComputationRequest,
-    RobustnessRequest, ScientificFrontierExecutionRequest, ScientificFrontierRequest,
-    SensitivityObservation, SensitivityRequest, SequentialArmObservation,
-    SequentialCampaignRequest, SequentialDesignRequest, SpatialCell, SpatialCommunicationCell,
-    SpatialCommunicationRequest, SpatialNicheRequest, SpatialPropagationRequest,
-    SpatialRegistrationCell, SpatialRegistrationRequest, StateTransitionObservation,
-    StateTransitionRequest, StaticGliomaActionPlanner, StaticGliomaComputationPlanner,
-    StratifiedCausalRequest, StratifiedObservation, TemporalFusionRequest, TemporalObservation,
-    TemporalSpatialAlignmentRequest, TrajectoryObservation, TrajectoryRequest, TransportStudy,
-    TransportabilityRequest, TypedKnowledge,
+    MediationRequest, MetaAnalysisRequest, MissingnessAuditRequest, ModalityPortfolioRequest,
+    ModalityVector, MultiFidelityCampaignRequest, MultiFidelityOptimizationRequest,
+    MultimodalExecutionMode, MultimodalIngestionCampaignRequest,
+    MultimodalMechanismCampaignRequest, MultimodalObservation, MultimodalReadinessRequest,
+    MultimodalRequest, PathwayActivityDefinition, PathwayActivityObservation,
+    PathwayActivityRequest, PowerArmObservation, PowerReestimationRequest,
+    ProtocolBranchOptimizationRequest, ProtocolCompensationRequest, ProtocolEvidenceFusionRequest,
+    ProtocolEvidenceSurfaceRequest, ProtocolExecutionRequest, ProtocolSimulationRequest,
+    ProtocolTransportGateRequest, ReleaseExecutionMode, ReleaseGateRequest,
+    ReliabilityCalibrationRequest, ReplayCampaign, ReplayCampaignRequest, ReplicationRequest,
+    ReplicationStudy, ResearchObjectRequest, RobustActiveLearningCampaignRequest,
+    RobustActiveLearningCandidate, RobustActiveLearningObservation, RobustActiveLearningRequest,
+    RobustExperimentDesignRequest, RobustInterventionCandidate, RobustInterventionRequest,
+    RobustnessGuidedComputationRequest, RobustnessRequest, ScientificFrontierExecutionRequest,
+    ScientificFrontierRequest, SensitivityObservation, SensitivityRequest,
+    SequentialArmObservation, SequentialCampaignRequest, SequentialDesignRequest, SpatialCell,
+    SpatialCommunicationCell, SpatialCommunicationRequest, SpatialNicheRequest,
+    SpatialPropagationRequest, SpatialRegistrationCell, SpatialRegistrationRequest,
+    StateTransitionObservation, StateTransitionRequest, StaticGliomaActionPlanner,
+    StaticGliomaComputationPlanner, StratifiedCausalRequest, StratifiedObservation,
+    TemporalFusionRequest, TemporalObservation, TemporalSpatialAlignmentRequest,
+    TrajectoryObservation, TrajectoryRequest, TransportStudy, TransportabilityRequest,
+    TypedKnowledge,
 };
 use bioprism_routing::{
     lab::{run as run_routing_lab, LabSettings, Task},
@@ -2346,6 +2347,7 @@ impl Server {
             "glioma_multimodal_dropout_stress" => self.glioma_multimodal_dropout_stress(&arguments),
             "glioma_multimodal_missingness" => self.glioma_multimodal_missingness(&arguments),
             "glioma_multimodal_reliability" => self.glioma_multimodal_reliability(&arguments),
+            "glioma_multimodal_portfolio" => self.glioma_multimodal_portfolio(&arguments),
             "glioma_multimodal_consensus" => self.glioma_multimodal_consensus(&arguments),
             "glioma_multimodal_harmonize" => self.glioma_multimodal_harmonize(&arguments),
             "glioma_multimodal_latent_factors" => self.glioma_multimodal_latent_factors(&arguments),
@@ -8145,6 +8147,32 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma multimodal reliability calibration: {error}"))
+    }
+
+    /// Select the smallest reliability- and budget-aware local preclinical glioma modality
+    /// portfolio that covers the endpoint's declared evidence dimensions.
+    fn glioma_multimodal_portfolio(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ModalityPortfolioRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_multimodal_portfolio requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma multimodal portfolio request: {error}"))?;
+        let plan = plan_glioma_multimodal_portfolio(&request)
+            .map_err(|error| format!("glioma multimodal portfolio planner refused: {error}"))?;
+        serde_json::to_value(json!({
+            "plan": plan,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "next_routes": ["glioma_multimodal_missingness", "glioma_multimodal_reliability", "glioma_robust_experiment_design"],
+            "guarantees": [
+                "portfolio selection is bounded by declared endpoint dimensions, reliability, redundancy, throughput, and budget gates",
+                "uncovered dimensions and infeasible alternatives remain explicit instead of being silently dropped",
+                "route performs no assay, instrument, federation, or clinical action"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma multimodal portfolio plan: {error}"))
     }
 
     /// Cluster de-identified preclinical glioma sample lineages from multiple modality vectors.
@@ -51566,6 +51594,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_multimodal_dropout_stress",
                 "glioma_multimodal_missingness",
                 "glioma_multimodal_reliability",
+                "glioma_multimodal_portfolio",
                 "glioma_multimodal_consensus",
                 "glioma_multimodal_harmonize",
                 "glioma_multimodal_latent_factors",
@@ -61138,6 +61167,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "ReliabilityCalibrationRequest1@1 with explicit sample/modality bindings, replicate observations, quality floor, spread/instability gates, and reliability threshold."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_multimodal_portfolio",
+        "description": "Select the smallest reliability- and budget-aware local preclinical glioma modality portfolio that covers declared endpoint evidence dimensions. Uses bounded beam search over coverage, reliability, redundancy, throughput, cost, and required-modality constraints; returns alternatives and explicit uncovered dimensions without dispatching an assay or making a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ModalityPortfolioRequest1@1 with endpoint dimensions, modality capabilities, cost/throughput/reliability, required modalities, and selection gates."}
             },
             "required": ["request"]
         }
