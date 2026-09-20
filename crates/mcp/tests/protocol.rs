@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 749;
+const TOOL_DEFINITION_COUNT: usize = 750;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -1447,6 +1447,39 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
     assert_eq!(
         quality_forecast["forecast"]["forecast_order"][0],
         json!("genomics")
+    );
+
+    let quality_schedule = call(
+        &mut server,
+        "glioma_multimodal_quality_scheduler",
+        json!({
+            "request": {
+                "objective": "schedule preventive QC reacquisition before endpoint fusion",
+                "study_id": "mcp-quality-schedule-study",
+                "model_system": "organoid",
+                "epoch_order": ["epoch-0", "epoch-1", "epoch-2"],
+                "candidates": [
+                    {"modality":"genomics","forecast_quality_milli":600,"quality_risk_milli":700,"scientific_value_milli":800,"cost_units":4,"duration_units":1,"deadline_epoch_index":0,"required":true,"fallback_modality":null},
+                    {"modality":"imaging","forecast_quality_milli":900,"quality_risk_milli":300,"scientific_value_milli":700,"cost_units":2,"duration_units":1,"deadline_epoch_index":1,"required":false,"fallback_modality":null},
+                    {"modality":"proteomics","forecast_quality_milli":850,"quality_risk_milli":200,"scientific_value_milli":500,"cost_units":9,"duration_units":1,"deadline_epoch_index":2,"required":false,"fallback_modality":null}
+                ],
+                "budget_units": 10,
+                "horizon_units": 3,
+                "min_forecast_quality_milli": 700,
+                "max_selected": 3,
+                "max_alternatives": 2
+            }
+        }),
+    );
+    assert_eq!(quality_schedule["dispatch"], json!("not_started"));
+    assert_eq!(quality_schedule["simulation_only"], json!(true));
+    assert_eq!(
+        quality_schedule["plan"]["selected_order"][0],
+        json!("genomics")
+    );
+    assert_eq!(
+        quality_schedule["plan"]["disposition"],
+        json!("conditional")
     );
 
     let harmonization = call(

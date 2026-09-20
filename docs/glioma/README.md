@@ -349,6 +349,8 @@ crates/research/src/glioma/
                                              P03 pairwise multimodal contradiction adjudication with trust asymmetry, rival-evidence retention, and orthogonal-resolution routing
   p03_multimodal_ingestion_qc/prospective_quality.rs
                                              P03 prospective modality-quality forecasting with preventive preflight and reacquisition scheduling
+  p03_multimodal_ingestion_qc/quality_scheduler.rs
+                                             P03 budget-, duration-, deadline-, and forecast-risk-aware modality acquisition scheduling
   p03_multimodal_ingestion_qc/spatial_niche.rs
                                              P03 spatial neighbourhood graph, same-lineage niche components, and cross-lineage enrichment
   p03_multimodal_ingestion_qc/spatial_communication.rs
@@ -545,6 +547,11 @@ P03 now also includes prospective multimodal quality forecasting
 epochs, forecasts the next acquisition horizon, and ranks modality preflight/reacquisition risk
 before an autonomous endpoint workflow is scheduled. Missing history remains blocked, quality
 failure remains explicit, and the forecast never predicts biology or invents an assay result.
+The quality-risk-aware scheduler (`plan_glioma_multimodal_quality_schedule`) turns that forecast
+into a bounded, deterministic acquisition order under local budget, duration, deadline, and
+required-modality constraints. It emits alternatives, uncovered-required gates, explicit risk
+reduction, and approval actions while remaining simulation-only; it does not dispatch an assay or
+silently substitute a missing modality.
 P05 now also includes signed pathway activity inference (`analyze_glioma_pathway_activity`) that
 maps declared modality-specific molecular nodes to reliability-weighted pathway activity, compares
 cross-modal direction, and ranks mechanism priorities. Missing nodes, low-confidence bottlenecks,

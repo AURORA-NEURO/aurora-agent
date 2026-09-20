@@ -566,13 +566,14 @@ use bioprism_research::{
     plan_glioma_decision_branches, plan_glioma_evidence_acquisition,
     plan_glioma_evidence_contradiction_cut, plan_glioma_information_design,
     plan_glioma_multi_fidelity_optimization, plan_glioma_multimodal_portfolio,
-    plan_glioma_power_reestimation, plan_glioma_protocol_compensation,
-    plan_glioma_robust_active_learning, plan_glioma_robust_intervention_portfolio,
-    plan_glioma_scientific_frontier, plan_glioma_sequential_design, plan_glioma_workflow,
-    preflight_glioma_instrument, prioritize_glioma_evidence, prioritize_knowledge_frontier,
-    propagate_glioma_mechanism_graph, qualify_evidence, register_glioma_spatial_samples,
-    revise_glioma_beliefs, schedule_glioma_computation_placement, schedule_glioma_instrument_fleet,
-    select_glioma_actions, simulate_glioma_counterfactual, simulate_glioma_counterfactual_ensemble,
+    plan_glioma_multimodal_quality_schedule, plan_glioma_power_reestimation,
+    plan_glioma_protocol_compensation, plan_glioma_robust_active_learning,
+    plan_glioma_robust_intervention_portfolio, plan_glioma_scientific_frontier,
+    plan_glioma_sequential_design, plan_glioma_workflow, preflight_glioma_instrument,
+    prioritize_glioma_evidence, prioritize_knowledge_frontier, propagate_glioma_mechanism_graph,
+    qualify_evidence, register_glioma_spatial_samples, revise_glioma_beliefs,
+    schedule_glioma_computation_placement, schedule_glioma_instrument_fleet, select_glioma_actions,
+    simulate_glioma_counterfactual, simulate_glioma_counterfactual_ensemble,
     simulate_glioma_mechanism_dynamics, simulate_glioma_protocol, surveil_glioma_evidence,
     surveil_glioma_multimodal_drift, synthesize_glioma_interpretation, triangulate_glioma_evidence,
     update_glioma_mechanism_posterior, validate_feature_catalog, ActionPortfolioExecutionRequest,
@@ -662,9 +663,9 @@ use bioprism_research::{
     PathwayActivityRequest, PowerArmObservation, PowerReestimationRequest,
     ProspectiveQualityRequest, ProtocolBranchOptimizationRequest, ProtocolCompensationRequest,
     ProtocolEvidenceFusionRequest, ProtocolEvidenceSurfaceRequest, ProtocolExecutionRequest,
-    ProtocolSimulationRequest, ProtocolTransportGateRequest, ReleaseExecutionMode,
-    ReleaseGateRequest, ReliabilityCalibrationRequest, ReplayCampaign, ReplayCampaignRequest,
-    ReplicationRequest, ReplicationStudy, ResearchObjectRequest,
+    ProtocolSimulationRequest, ProtocolTransportGateRequest, QualityScheduleRequest,
+    ReleaseExecutionMode, ReleaseGateRequest, ReliabilityCalibrationRequest, ReplayCampaign,
+    ReplayCampaignRequest, ReplicationRequest, ReplicationStudy, ResearchObjectRequest,
     RobustActiveLearningCampaignRequest, RobustActiveLearningCandidate,
     RobustActiveLearningObservation, RobustActiveLearningRequest, RobustExperimentDesignRequest,
     RobustInterventionCandidate, RobustInterventionRequest, RobustnessGuidedComputationRequest,
@@ -2361,6 +2362,9 @@ impl Server {
             }
             "glioma_multimodal_quality_forecast" => {
                 self.glioma_multimodal_quality_forecast(&arguments)
+            }
+            "glioma_multimodal_quality_scheduler" => {
+                self.glioma_multimodal_quality_scheduler(&arguments)
             }
             "glioma_multimodal_missingness" => self.glioma_multimodal_missingness(&arguments),
             "glioma_multimodal_reliability" => self.glioma_multimodal_reliability(&arguments),
@@ -8351,6 +8355,30 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma prospective quality forecast: {error}"))
+    }
+
+    /// Turn prospective modality-quality risk into a bounded local acquisition schedule.
+    fn glioma_multimodal_quality_scheduler(&self, arguments: &Value) -> Result<Value, String> {
+        let request: QualityScheduleRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_multimodal_quality_scheduler requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma quality schedule request: {error}"))?;
+        let plan = plan_glioma_multimodal_quality_schedule(&request)
+            .map_err(|error| format!("glioma quality schedule refused: {error}"))?;
+        serde_json::to_value(json!({
+            "plan": plan,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "next_routes": ["glioma_multimodal_quality_forecast", "glioma_multimodal_ingestion_campaign", "glioma_multimodal_readiness"],
+            "guarantees": [
+                "schedule is deterministic and bounded by local budget, duration, deadline, and required-modality constraints",
+                "uncovered required modalities and forecast-risk conditions remain explicit",
+                "alternatives are returned for researcher approval without silently substituting assays",
+                "route performs no assay, instrument, federation, or clinical action"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma quality schedule: {error}"))
     }
 
     /// Cluster de-identified preclinical glioma sample lineages from multiple modality vectors.
@@ -51779,6 +51807,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_multimodal_decision_gate",
                 "glioma_multimodal_contradiction_adjudication",
                 "glioma_multimodal_quality_forecast",
+                "glioma_multimodal_quality_scheduler",
                 "glioma_multimodal_consensus",
                 "glioma_multimodal_harmonize",
                 "glioma_multimodal_latent_factors",
@@ -61428,6 +61457,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "ProspectiveQualityRequest1@1 with ordered epochs, modality QC cells, history/horizon bounds, quality floor, negative-slope gate, and minimum forecast quality."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_multimodal_quality_scheduler",
+        "description": "Turn prospective local preclinical glioma modality-quality risk into a deterministic acquisition schedule under budget, duration, deadline, and required-modality constraints. Returns selected and rejected modalities, alternatives, uncovered-required gates, explicit risk reduction, and approval actions; it is simulation-only and never dispatches an assay or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "QualityScheduleRequest1@1 with ordered epochs, forecast-risk candidates, cost/duration/deadline bounds, local budget, quality floor, and selection limits."}
             },
             "required": ["request"]
         }
