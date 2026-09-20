@@ -449,7 +449,7 @@ portfolio plan and executable code; it does not promote a planned slot to implem
 
 | Program | Product owner | Engine stages | Observable product result |
 | --- | --- | --- | --- |
-| P01 Evidence surveillance | evidence curator | evidence surveillance | snapshot deltas, recency/state/coverage action queues, dependency-closed evidence-acquisition portfolios, source calibration, cross-family claim triangulation, review/revalidation actions, autonomous intent-to-evidence execution cycles, and stale/unknown/contradictory coverage |
+| P01 Evidence surveillance | evidence curator | evidence surveillance | snapshot deltas, deterministic novelty radar, recency/state/coverage action queues, dependency-closed evidence-acquisition portfolios, source calibration, cross-family claim triangulation, review/revalidation actions, autonomous intent-to-evidence execution cycles, and stale/unknown/contradictory coverage |
 | P02 Evidence-to-typed-knowledge | knowledge engineer | evidence compilation | scoped claims, contradiction-aware maximal-consistency portfolios, ranked rival frontiers, typed frontier-to-acquisition candidate compilation, dependency-closed validation/replication action compilation, autonomous P02-to-P01 gap cycles, a complete knowledge-synthesis operating cycle, and competing explanations bound to source artifacts |
 | P03 Multimodal ingestion and QC | data steward | multimodal ingestion/QC | comparable cells, robust batch harmonization, feature-level concordance, consensus clusters, spatial niches, ligand-receptor communication, cross-sample registration, spatial-state diffusion, explicit defects, downstream research-surface admission, and an executable QC-to-handoff operating cycle |
 | P04 Question-to-decision context | principal investigator | intent normalization, context compilation | bounded decision context, dependency-closed action DAGs, scenario-aware Pareto workflow branches, branch execution with forecast-drift failover, evidence-returning adaptive replanning, full operating-cycle execution, selected action batches, and unresolved omissions |
@@ -567,6 +567,12 @@ independence overuse are blocked before dispatch; deferred work, missing coverag
 evidence, and the candidate frontier remain explicit. The planner is intentionally acquisition
 agnostic: a separate approved adapter must perform retrieval, assay setup, or replication, and no
 successful acquisition is claimed by the planning route.
+P01 now also exposes a deterministic novelty radar (`glioma_evidence_novelty_radar`). It compares
+normalized preclinical source metadata against a known claim/domain corpus, suppresses near
+duplicates, and scores novelty separately from freshness, quality, citation signal, and domain
+gaps. The result is an acquisition/review/deprioritization queue for P02 knowledge compilation;
+low-quality records, stale snapshots, and no-novel-evidence outcomes remain explicit, and the
+radar never treats novelty as validity, causality, or clinical evidence.
 The execution bridge (`execute_glioma_evidence_acquisition_campaign`) consumes only that
 content-addressed plan, orders prerequisites before dependants, retries transient adapter faults,
 and records completed, negative, partial, unknown, failed, budget-blocked, and dependency-blocked

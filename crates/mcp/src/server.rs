@@ -591,9 +591,9 @@ use bioprism_research::{
     plan_glioma_scientific_frontier, plan_glioma_sequential_design,
     plan_glioma_validation_replication_gate, plan_glioma_workflow, preflight_glioma_instrument,
     prioritize_glioma_evidence, prioritize_knowledge_frontier, propagate_glioma_mechanism_graph,
-    qualify_evidence, register_glioma_spatial_samples, revise_glioma_beliefs,
-    schedule_glioma_computation_placement, schedule_glioma_instrument_fleet, select_glioma_actions,
-    simulate_glioma_counterfactual, simulate_glioma_counterfactual_ensemble,
+    qualify_evidence, rank_glioma_evidence_novelty, register_glioma_spatial_samples,
+    revise_glioma_beliefs, schedule_glioma_computation_placement, schedule_glioma_instrument_fleet,
+    select_glioma_actions, simulate_glioma_counterfactual, simulate_glioma_counterfactual_ensemble,
     simulate_glioma_mechanism_dynamics, simulate_glioma_protocol,
     simulate_glioma_protocol_scenario_ensemble, smooth_glioma_mechanism_states,
     surveil_glioma_evidence, surveil_glioma_multimodal_drift, synthesize_glioma_interpretation,
@@ -645,9 +645,10 @@ use bioprism_research::{
     DynamicPolicyCandidate, DynamicPolicyRequest, DynamicPolicyTrajectory,
     EvidenceAcquisitionCampaignRequest, EvidenceAcquisitionCandidate, EvidenceAcquisitionRequest,
     EvidenceCalibrationObservation, EvidenceCalibrationRequest, EvidenceExecutionMode,
-    EvidenceFusionRequest, EvidencePriorityRequest, EvidenceRecord, EvidenceRefreshCampaignRequest,
-    EvidenceRequest, EvidenceSurveillanceRequest, EvidenceTriangulationRequest, ExperimentArm,
-    ExperimentOperatingCycleRequest, ExperimentRequest, FederatedBenchmarkAdaptiveCampaignRequest,
+    EvidenceFusionRequest, EvidenceNoveltyRadarRequest, EvidencePriorityRequest, EvidenceRecord,
+    EvidenceRefreshCampaignRequest, EvidenceRequest, EvidenceSurveillanceRequest,
+    EvidenceTriangulationRequest, ExperimentArm, ExperimentOperatingCycleRequest,
+    ExperimentRequest, FederatedBenchmarkAdaptiveCampaignRequest,
     FederatedBenchmarkCampaignRequest, FederatedBenchmarkExecutionMode,
     FederatedBenchmarkOperatingCycleRequest, FederatedBenchmarkRequest, FederatedBenchmarkSite,
     FederatedBenchmarkSitePlannerRequest, FederatedInterpretationRequest, FederatedMechanismSite,
@@ -2465,6 +2466,7 @@ impl Server {
             "glioma_program_catalog" => self.glioma_program_catalog(&arguments),
             "glioma_evidence_qualify" => self.glioma_evidence_qualify(&arguments),
             "glioma_evidence_surveillance" => self.glioma_evidence_surveillance(&arguments),
+            "glioma_evidence_novelty_radar" => self.glioma_evidence_novelty_radar(&arguments),
             "glioma_evidence_priority" => self.glioma_evidence_priority(&arguments),
             "glioma_evidence_acquisition_plan" => self.glioma_evidence_acquisition_plan(&arguments),
             "glioma_evidence_acquisition_campaign_execute" => {
@@ -9455,6 +9457,34 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma evidence surveillance: {error}"))
+    }
+
+    /// Rank a bounded local snapshot of preclinical glioma evidence by novelty, freshness,
+    /// quality, domain coverage, and near-duplicate suppression. This is a planning surface only;
+    /// source acquisition remains behind institution-owned adapters.
+    fn glioma_evidence_novelty_radar(&self, arguments: &Value) -> Result<Value, String> {
+        let request: EvidenceNoveltyRadarRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_evidence_novelty_radar requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma evidence novelty radar request: {error}"))?;
+        let radar = rank_glioma_evidence_novelty(&request)
+            .map_err(|error| format!("glioma evidence novelty radar refused: {error}"))?;
+        serde_json::to_value(json!({
+            "radar": radar,
+            "dispatch": "not_started",
+            "simulation_only": true,
+            "guarantees": [
+                "novelty is scored separately from quality, freshness, citation signal, and domain gaps",
+                "near-duplicate records cannot inflate the acquisition queue",
+                "low-quality, stale, and no-novel-evidence states remain explicit",
+                "only preclinical, local, de-identified source metadata is accepted",
+                "the route performs no external retrieval, raw-data movement, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma evidence novelty radar: {error}"))
     }
 
     /// Rank concrete refresh, resolution, measurement, revalidation, coverage, and replication
@@ -53115,6 +53145,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_program_catalog",
                 "glioma_evidence_qualify",
                 "glioma_evidence_surveillance",
+                "glioma_evidence_novelty_radar",
                 "glioma_evidence_priority",
                 "glioma_evidence_acquisition_plan",
                 "glioma_evidence_acquisition_campaign_execute",
@@ -63176,6 +63207,17 @@ pub fn tool_definitions() -> Vec<Value> {
                 "current": {"type": "array", "items": {"type": "object"}, "description": "Current local EvidenceRecord1@1 snapshot."}
             },
             "required": ["request", "previous", "current"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_evidence_novelty_radar",
+        "description": "Rank a bounded local snapshot of preclinical glioma evidence by novelty against a known term/domain corpus, freshness, quality, citation signal, domain gaps, and near-duplicate suppression. Emits deterministic acquire/review/deprioritize actions for P02 compilation and P01 acquisition while preserving low-quality, stale, and no-novel-evidence states. MCP performs no external retrieval, raw-data movement, or clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "EvidenceNoveltyRadarRequest1@1 with a bounded preclinical-only source snapshot, canonical term/domain/claim corpora, freshness window, quality and novelty floors, and action limit."}
+            },
+            "required": ["request"]
         }
     }));
     definitions.push(json!({

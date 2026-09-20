@@ -7,10 +7,17 @@ pub mod acquisition_campaign;
 pub mod calibration;
 pub mod campaign;
 pub mod contradiction_cut;
+pub mod novelty_radar;
 pub mod operating_cycle;
 pub mod priority;
 pub mod surveillance;
 pub mod triangulation;
+
+pub use novelty_radar::{
+    rank_glioma_evidence_novelty, EvidenceNoveltyAction, EvidenceNoveltyActionDisposition,
+    EvidenceNoveltyRadar, EvidenceNoveltyRadarDisposition, EvidenceNoveltyRadarError,
+    EvidenceNoveltyRadarRequest, EvidenceNoveltyRecord,
+};
 
 pub use triangulation::{
     triangulate_glioma_evidence, EvidenceTriangulation, EvidenceTriangulationDisposition,
