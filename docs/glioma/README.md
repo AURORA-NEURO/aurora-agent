@@ -351,6 +351,8 @@ crates/research/src/glioma/
                                              P03 prospective modality-quality forecasting with preventive preflight and reacquisition scheduling
   p03_multimodal_ingestion_qc/quality_scheduler.rs
                                              P03 budget-, duration-, deadline-, and forecast-risk-aware modality acquisition scheduling
+  p03_multimodal_ingestion_qc/quality_execution.rs
+                                             P03 approval-bound execution of the selected quality schedule with retries and quality-floor gates
   p03_multimodal_ingestion_qc/spatial_niche.rs
                                              P03 spatial neighbourhood graph, same-lineage niche components, and cross-lineage enrichment
   p03_multimodal_ingestion_qc/spatial_communication.rs
@@ -552,6 +554,12 @@ into a bounded, deterministic acquisition order under local budget, duration, de
 required-modality constraints. It emits alternatives, uncovered-required gates, explicit risk
 reduction, and approval actions while remaining simulation-only; it does not dispatch an assay or
 silently substitute a missing modality.
+The schedule-bound executor (`execute_glioma_multimodal_quality_schedule`) is the workflow bridge
+from planning to local action. It requires a content-bound, unrevoked study approval, executes
+only the selected modality order through an institution-owned executor seam, retries declared
+transient failures, preserves below-floor QC and blocked work, and refuses downstream continuation
+when required quality gates fail. MCP uses a deterministic dry-run executor; no hardware, raw
+payload, or clinical decision is produced by the route.
 P05 now also includes signed pathway activity inference (`analyze_glioma_pathway_activity`) that
 maps declared modality-specific molecular nodes to reliability-weighted pathway activity, compares
 cross-modal direction, and ranks mechanism priorities. Missing nodes, low-confidence bottlenecks,

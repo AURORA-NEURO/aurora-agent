@@ -17,6 +17,7 @@ pub mod missingness_audit;
 pub mod modality_portfolio;
 pub mod operating_cycle;
 pub mod prospective_quality;
+pub mod quality_execution;
 pub mod quality_scheduler;
 pub mod readiness_gate;
 pub mod reliability_calibration;
@@ -104,6 +105,13 @@ pub use prospective_quality::{
     forecast_glioma_multimodal_quality, ModalityQualityForecast, ProspectiveQualityError,
     ProspectiveQualityForecast, ProspectiveQualityRequest, QualityForecastDisposition,
     QualityForecastObservation,
+};
+pub use quality_execution::{
+    execute_glioma_multimodal_quality_schedule, DryRunQualityScheduleExecutor,
+    QualityExecutionApproval, QualityExecutionDisposition, QualityExecutionError,
+    QualityExecutionFailure, QualityExecutionMode, QualityExecutionObservation,
+    QualityExecutionRequest, QualityExecutionResult, QualityExecutionRun,
+    QualityExecutionStopReason, QualityRunDisposition, QualityScheduleExecutor,
 };
 pub use quality_scheduler::{
     plan_glioma_multimodal_quality_schedule, QualityAcquisitionCandidate,

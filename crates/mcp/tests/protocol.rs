@@ -350,7 +350,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 58;
-const TOOL_DEFINITION_COUNT: usize = 750;
+const TOOL_DEFINITION_COUNT: usize = 751;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -1480,6 +1480,51 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
     assert_eq!(
         quality_schedule["plan"]["disposition"],
         json!("conditional")
+    );
+
+    let approval_fields = json!({
+        "approval_id": "mcp-quality-approval",
+        "approver_id": "mcp-researcher",
+        "scope": "mcp-quality-schedule-study",
+        "issued_epoch": 10,
+        "expires_epoch": 20,
+        "revoked": false
+    });
+    let approval_digest = ContentHash::of_value(&approval_fields).unwrap();
+    let quality_execution = call(
+        &mut server,
+        "glioma_multimodal_quality_execute",
+        json!({
+            "request": {
+                "schedule": quality_schedule["plan"].clone(),
+                "approval": {
+                    "approval_id": "mcp-quality-approval",
+                    "approver_id": "mcp-researcher",
+                    "scope": "mcp-quality-schedule-study",
+                    "issued_epoch": 10,
+                    "expires_epoch": 20,
+                    "revoked": false,
+                    "approval_digest": approval_digest
+                },
+                "current_epoch": 12,
+                "max_retries": 1,
+                "stop_on_failure": true,
+                "stop_on_quality_floor": false,
+                "require_all_required": true,
+                "quality_acceptance_floor_milli": 700,
+                "execution_mode": "dry_run"
+            }
+        }),
+    );
+    assert_eq!(quality_execution["dispatch"], json!("not_started"));
+    assert_eq!(quality_execution["simulation_only"], json!(true));
+    assert_eq!(
+        quality_execution["execution"]["disposition"],
+        json!("blocked")
+    );
+    assert_eq!(
+        quality_execution["execution"]["completed_order"][0],
+        json!("genomics")
     );
 
     let harmonization = call(
