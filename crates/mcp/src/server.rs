@@ -493,22 +493,22 @@ use bioprism_research::{
     adjudicate_glioma_assay_evidence, adjudicate_glioma_multimodal_contradictions,
     admit_glioma_decision_actions, allocate_glioma_assays, analyze_causal_sensitivity,
     analyze_federated_benchmark, analyze_federated_benchmark_power,
-    analyze_federated_evidence_shifts, analyze_federated_mechanism_transport,
-    analyze_glioma_causal_contrast, analyze_glioma_clonal_evolution,
-    analyze_glioma_clone_panel_outcomes, analyze_glioma_combination_synergy,
-    analyze_glioma_computation_reproducibility, analyze_glioma_dose_response,
-    analyze_glioma_federated_instrument_consensus, analyze_glioma_instrument_batch_stability,
-    analyze_glioma_instrument_multichannel_concordance, analyze_glioma_latent_factors,
-    analyze_glioma_mechanism_identifiability, analyze_glioma_mechanism_intervention_value,
-    analyze_glioma_mechanism_invariance, analyze_glioma_mediation,
-    analyze_glioma_multimodal_decision_gate, analyze_glioma_multimodal_dropout_stress,
-    analyze_glioma_multimodal_evidence_fusion, analyze_glioma_multimodal_graph_fusion,
-    analyze_glioma_multimodal_missingness, analyze_glioma_multimodal_sensitivity,
-    analyze_glioma_pathway_activity, analyze_glioma_spatial_communication,
-    analyze_glioma_spatial_niches, analyze_glioma_spatial_state_propagation,
-    analyze_glioma_state_transitions, analyze_glioma_temporal_multimodal_fusion,
-    analyze_glioma_temporal_spatial_alignment, analyze_glioma_trajectories,
-    analyze_glioma_transportability, analyze_instrument_calibration,
+    analyze_federated_evidence_shifts, analyze_federated_knowledge,
+    analyze_federated_mechanism_transport, analyze_glioma_causal_contrast,
+    analyze_glioma_clonal_evolution, analyze_glioma_clone_panel_outcomes,
+    analyze_glioma_combination_synergy, analyze_glioma_computation_reproducibility,
+    analyze_glioma_dose_response, analyze_glioma_federated_instrument_consensus,
+    analyze_glioma_instrument_batch_stability, analyze_glioma_instrument_multichannel_concordance,
+    analyze_glioma_latent_factors, analyze_glioma_mechanism_identifiability,
+    analyze_glioma_mechanism_intervention_value, analyze_glioma_mechanism_invariance,
+    analyze_glioma_mediation, analyze_glioma_multimodal_decision_gate,
+    analyze_glioma_multimodal_dropout_stress, analyze_glioma_multimodal_evidence_fusion,
+    analyze_glioma_multimodal_graph_fusion, analyze_glioma_multimodal_missingness,
+    analyze_glioma_multimodal_sensitivity, analyze_glioma_pathway_activity,
+    analyze_glioma_spatial_communication, analyze_glioma_spatial_niches,
+    analyze_glioma_spatial_state_propagation, analyze_glioma_state_transitions,
+    analyze_glioma_temporal_multimodal_fusion, analyze_glioma_temporal_spatial_alignment,
+    analyze_glioma_trajectories, analyze_glioma_transportability, analyze_instrument_calibration,
     analyze_multimodal_concordance, analyze_multimodal_consensus, analyze_preclinical_outcomes,
     analyze_replication_meta_analysis, analyze_stratified_causal_adjustment,
     assess_glioma_robustness, assess_glioma_validation_batch, assess_replication,
@@ -662,10 +662,10 @@ use bioprism_research::{
     FederatedBenchmarkPowerRequest, FederatedBenchmarkRequest, FederatedBenchmarkSite,
     FederatedBenchmarkSitePlannerRequest, FederatedEvidenceShiftRequest,
     FederatedEvidenceShiftSite, FederatedInstrumentConsensusRequest, FederatedInstrumentSite,
-    FederatedInterpretationRequest, FederatedMechanismSite,
-    FederatedMechanismTransportCampaignRequest, FederatedMechanismTransportRequest,
-    FidelityCandidate, FidelityObservation, GliomaActionCandidate,
-    GliomaAdaptiveWorkflowSchedulerRequest, GliomaAutonomousCampaignRequest,
+    FederatedInterpretationRequest, FederatedKnowledgeRequest, FederatedKnowledgeSiteClaim,
+    FederatedMechanismSite, FederatedMechanismTransportCampaignRequest,
+    FederatedMechanismTransportRequest, FidelityCandidate, FidelityObservation,
+    GliomaActionCandidate, GliomaAdaptiveWorkflowSchedulerRequest, GliomaAutonomousCampaignRequest,
     GliomaAutonomousResearchEngineRequest, GliomaCausalClaimAdjudicationRequest,
     GliomaComputationCampaignRequest, GliomaComputationOperatingCycleRequest,
     GliomaComputationWorkflowRequest, GliomaEvidenceCampaignRequest,
@@ -2506,6 +2506,7 @@ impl Server {
             "glioma_knowledge_compose" => self.glioma_knowledge_compose(&arguments),
             "glioma_knowledge_consistency" => self.glioma_knowledge_consistency(&arguments),
             "glioma_knowledge_drift" => self.glioma_knowledge_drift(&arguments),
+            "glioma_federated_knowledge" => self.glioma_federated_knowledge(&arguments),
             "glioma_belief_revision" => self.glioma_belief_revision(&arguments),
             "glioma_knowledge_frontier" => self.glioma_knowledge_frontier(&arguments),
             "glioma_knowledge_gap_compile" => self.glioma_knowledge_gap_compile(&arguments),
@@ -10051,6 +10052,43 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma knowledge drift: {error}"))
+    }
+
+    /// Compare aggregate typed-knowledge summaries across institutions while preserving local
+    /// sources and contested claim states.
+    fn glioma_federated_knowledge(&self, arguments: &Value) -> Result<Value, String> {
+        let request: FederatedKnowledgeRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_federated_knowledge requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma federated-knowledge request: {error}"))?;
+        let sites: Vec<FederatedKnowledgeSiteClaim> = serde_json::from_value(
+            arguments
+                .get("sites")
+                .cloned()
+                .ok_or_else(|| "glioma_federated_knowledge requires sites".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma federated-knowledge site claims: {error}"))?;
+        let output = analyze_federated_knowledge(&request, &sites)
+            .map_err(|error| format!("glioma federated-knowledge analysis refused: {error}"))?;
+        serde_json::to_value(json!({
+            "knowledge": output,
+            "dispatch": "not_started",
+            "next_routes": [
+                "glioma_knowledge_consistency",
+                "glioma_knowledge_gap_compile",
+                "glioma_mechanism_autopilot_execute"
+            ],
+            "guarantees": [
+                "only aggregate typed claims, source counts, provenance boundaries, and privacy declarations cross this route",
+                "consensus-supported, consensus-contested, consensus-negative, site-specific, and unresolved states remain distinct",
+                "leave-one-site-out influence and disagreement gates prevent one institution from silently defining the consortium claim",
+                "the route performs no raw-data movement, retrieval, instrument action, causal inference, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma federated knowledge: {error}"))
     }
 
     /// Revise an explicit preclinical claim-conflict graph into a bounded consistent portfolio.
@@ -53776,6 +53814,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_knowledge_compose",
                 "glioma_knowledge_consistency",
                 "glioma_knowledge_drift",
+                "glioma_federated_knowledge",
                 "glioma_belief_revision",
                 "glioma_knowledge_frontier",
                 "glioma_knowledge_gap_compile",
@@ -64034,6 +64073,18 @@ pub fn tool_definitions() -> Vec<Value> {
                 "request": {"type": "object", "description": "KnowledgeDriftRequest1@1 containing objective-bound previous/current TypedKnowledge snapshots, confidence/priority gates, and action capacity."}
             },
             "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_federated_knowledge",
+        "description": "Compare aggregate typed-knowledge claim summaries across independent preclinical glioma sites. Computes disposition consensus, pooled support/contradiction/confidence, disagreement, leave-one-site-out influence, and bounded promotion/adjudication actions while preserving site-specific and unresolved states.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "FederatedKnowledgeRequest1@1 with site quorum, consensus/confidence gates, disagreement/influence ceilings, and action capacity."},
+                "sites": {"type": "array", "items": {"type": "object"}, "description": "FederatedKnowledgeSiteClaim1@1 aggregate-only typed claim summaries with statement/scope binding, source counts, privacy declarations, and artifact references."}
+            },
+            "required": ["request", "sites"]
         }
     }));
     definitions.push(json!({

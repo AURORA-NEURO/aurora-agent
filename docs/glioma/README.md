@@ -22,6 +22,8 @@ crates/research/src/glioma/
                                              P02 scoped claim graph and support/contradiction synthesis
   programs/p02_evidence_knowledge/knowledge_drift.rs
                                              P02 prospective typed-knowledge snapshot drift and bounded downstream replanning
+  programs/p02_evidence_knowledge/federated_knowledge.rs
+                                             P02 aggregate-only multi-site typed-claim consensus with disagreement and influence gates
   programs/p02_evidence_knowledge/composition.rs
                                              P02 explicit relation graph composition with path bottlenecks and contradiction gates
   programs/p02_evidence_knowledge/belief_revision.rs
@@ -759,6 +761,11 @@ weakening, contradiction, resolution, and stability, then emits priority-gated a
 consistency closure, gap compilation, or mechanism replanning. The transition is bound to both
 snapshot digests, preserves negative and unresolved states, and never treats confidence drift as
 causal or clinical evidence.
+Federated typed-knowledge consensus (`glioma_federated_knowledge`) now compares independent
+site summaries without exporting source text. It pools support, contradiction, confidence, and
+disposition mass, reports site-specific disagreement and leave-one-site-out influence, and emits
+bounded promotion, adjudication, or negative-result actions. A consensus summary is still a
+governed research state—not a causal conclusion—and raw data stays at the originating institution.
 P04 now includes decision-context compilation (`compile_decision_context`) that converts those
 gaps into typed A1 candidates for coverage closure, contradiction replication, negative-result
 falsification, evidence resolution, or mechanism validation; the existing action selector then

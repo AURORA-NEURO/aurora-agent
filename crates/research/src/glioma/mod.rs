@@ -73,7 +73,7 @@ pub use programs::p01_evidence_surveillance::{
     TriangulatedClaim, TriangulatedClaimVerdict,
 };
 pub use programs::p02_evidence_knowledge::{
-    bridge_glioma_knowledge_actions, compile_glioma_knowledge_actions,
+    analyze_federated_knowledge, bridge_glioma_knowledge_actions, compile_glioma_knowledge_actions,
     compile_glioma_knowledge_consistency, compile_glioma_knowledge_gaps, compile_typed_knowledge,
     compose_knowledge_graph, detect_glioma_knowledge_drift, execute_glioma_autonomous_gap_cycle,
     execute_glioma_knowledge_action_dispatch, execute_glioma_knowledge_resolution_campaign,
@@ -83,9 +83,11 @@ pub use programs::p02_evidence_knowledge::{
     BeliefConflict, BeliefRevision, BeliefRevisionDecision, BeliefRevisionDecisionKind,
     BeliefRevisionDisposition, BeliefRevisionError, BeliefRevisionRequest,
     BridgedKnowledgeCandidate, CompiledActionDisposition, CompiledResearchAction,
-    DryRunKnowledgeActionExecutor, DryRunKnowledgeResolutionCampaignExecutor, FrontierActionKind,
-    KnowledgeActionBridge, KnowledgeActionBridgeError, KnowledgeActionBridgeRequest,
-    KnowledgeActionCompilerError, KnowledgeActionCompilerRequest,
+    DryRunKnowledgeActionExecutor, DryRunKnowledgeResolutionCampaignExecutor, FederatedKnowledge,
+    FederatedKnowledgeAction, FederatedKnowledgeDisposition, FederatedKnowledgeError,
+    FederatedKnowledgeKind, FederatedKnowledgeRequest, FederatedKnowledgeSiteClaim,
+    FrontierActionKind, KnowledgeActionBridge, KnowledgeActionBridgeError,
+    KnowledgeActionBridgeRequest, KnowledgeActionCompilerError, KnowledgeActionCompilerRequest,
     KnowledgeActionDispatchDisposition, KnowledgeActionDispatchError,
     KnowledgeActionDispatchRequest, KnowledgeActionDispatchResult, KnowledgeActionDispatchRun,
     KnowledgeActionExecutionFailure, KnowledgeActionExecutor, KnowledgeActionPlan,
