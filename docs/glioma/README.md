@@ -26,6 +26,8 @@ crates/research/src/glioma/
                                              P01 prospective idempotent evidence stream snapshots with late-event handling, trend summaries, and negative frontiers
   programs/p01_evidence_surveillance/federated_acquisition_policy.rs
                                              P01 consortium-aware site assignment with independence, quorum, budget, privacy, and local-raw-data gates
+  programs/p01_evidence_surveillance/evidence_frontier_join.rs
+                                             P01 claim-scope frontier join routing support, negatives, contradictions, and sparse evidence to executable next actions
   programs/p02_evidence_knowledge/knowledge_graph.rs
                                              P02 scoped claim graph and support/contradiction synthesis
   programs/p02_evidence_knowledge/knowledge_drift.rs

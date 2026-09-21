@@ -583,7 +583,7 @@ use bioprism_research::{
     gate_glioma_protocol_transport, generate_feature_catalog, glioma_program_catalog,
     govern_glioma_decision_loop, harmonize_glioma_multimodal_batches, harmonize_multimodal_inputs,
     interpret_glioma_federated_closure, interpret_glioma_replication_closure,
-    monitor_prospective_knowledge, optimize_glioma_decision_value,
+    join_glioma_evidence_frontier, monitor_prospective_knowledge, optimize_glioma_decision_value,
     optimize_glioma_protocol_branches, plan_adaptive_glioma_dose_surface, plan_decision_actions,
     plan_federated_benchmark_sites, plan_federated_continual_agent,
     plan_federated_glioma_evidence_acquisition, plan_glioma_active_learning,
@@ -659,8 +659,8 @@ use bioprism_research::{
     DryRunSequentialCampaignExecutor, DynamicPolicyCandidate, DynamicPolicyRequest,
     DynamicPolicyTrajectory, EvidenceAcquisitionCampaignRequest, EvidenceAcquisitionCandidate,
     EvidenceAcquisitionRequest, EvidenceCalibrationObservation, EvidenceCalibrationRequest,
-    EvidenceClusterRequest, EvidenceExecutionMode, EvidenceFusionRequest,
-    EvidenceNoveltyRadarRequest, EvidencePriorityRequest, EvidenceRecord,
+    EvidenceClusterRequest, EvidenceExecutionMode, EvidenceFrontierJoinRequest,
+    EvidenceFusionRequest, EvidenceNoveltyRadarRequest, EvidencePriorityRequest, EvidenceRecord,
     EvidenceRefreshCampaignRequest, EvidenceRequest, EvidenceStreamRequest,
     EvidenceSurveillanceRequest, EvidenceTemporalShiftRequest, EvidenceTriangulationRequest,
     ExperimentArm, ExperimentOperatingCycleRequest, ExperimentRequest,
@@ -2506,6 +2506,7 @@ impl Server {
             "glioma_federated_evidence_acquisition_policy" => {
                 self.glioma_federated_evidence_acquisition_policy(&arguments)
             }
+            "glioma_evidence_frontier_join" => self.glioma_evidence_frontier_join(&arguments),
             "glioma_evidence_surveillance" => self.glioma_evidence_surveillance(&arguments),
             "glioma_evidence_novelty_radar" => self.glioma_evidence_novelty_radar(&arguments),
             "glioma_evidence_temporal_shift" => self.glioma_evidence_temporal_shift(&arguments),
@@ -9714,6 +9715,36 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode federated acquisition policy: {error}"))
+    }
+
+    /// Join local typed evidence into the next-action frontier for the autonomous glioma
+    /// research director. Support, negatives, contradictions, and sparse claims stay distinct.
+    fn glioma_evidence_frontier_join(&self, arguments: &Value) -> Result<Value, String> {
+        let request: EvidenceFrontierJoinRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_evidence_frontier_join requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid evidence frontier join request: {error}"))?;
+        let output = join_glioma_evidence_frontier(&request)
+            .map_err(|error| format!("evidence frontier join refused: {error}"))?;
+        serde_json::to_value(json!({
+            "frontier": output,
+            "next_routes": [
+                "glioma_knowledge_compile",
+                "glioma_federated_evidence_acquisition_policy",
+                "glioma_evidence_contradiction_cut",
+                "glioma_evidence_acquisition_plan"
+            ],
+            "guarantees": [
+                "exact artifact copies never increase independent support",
+                "supported, negative, contradicted, unresolved, and sparse claims route to distinct actions",
+                "every emitted action is traceable to local typed evidence and a deterministic frontier id",
+                "the route performs no retrieval, causal inference, raw-data movement, assay execution, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode evidence frontier join: {error}"))
     }
 
     /// Detect changes between local evidence snapshots and compile bounded review actions for a
@@ -54191,6 +54222,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_evidence_novelty_adjudication",
                 "glioma_evidence_stream_snapshot",
                 "glioma_federated_evidence_acquisition_policy",
+                "glioma_evidence_frontier_join",
                 "glioma_evidence_surveillance",
                 "glioma_evidence_novelty_radar",
                 "glioma_evidence_temporal_shift",
@@ -64339,6 +64371,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "FederatedAcquisitionPolicyRequest1@1 with evidence needs, site capability manifests, quorum/budget/privacy constraints, and local-raw-data policy."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_evidence_frontier_join",
+        "description": "Join local typed preclinical glioma evidence by claim scope, modality, and model, collapse exact artifact copies, and route each frontier claim to knowledge compilation, negative-result preservation, contradiction review, or independent acquisition. It provides the autonomous research director's evidence-to-action boundary without retrieval, causal inference, raw-data movement, assay execution, or clinical decisions.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "EvidenceFrontierJoinRequest1@1 with local EvidenceRecord1@1 values, quality/reproducibility floors, independent-source quorum, contradiction gate, and claim bound."}
             },
             "required": ["request"]
         }

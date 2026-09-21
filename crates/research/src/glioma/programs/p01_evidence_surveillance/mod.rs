@@ -8,6 +8,7 @@ pub mod calibration;
 pub mod campaign;
 pub mod contradiction_cut;
 pub mod evidence_cluster;
+pub mod evidence_frontier_join;
 pub mod evidence_stream;
 pub mod federated_acquisition_policy;
 pub mod federated_shift;
@@ -51,6 +52,11 @@ pub use contradiction_cut::{
 pub use evidence_cluster::{
     cluster_glioma_evidence, EvidenceCluster, EvidenceClusterDisposition, EvidenceClusterError,
     EvidenceClusterIndex, EvidenceClusterMember, EvidenceClusterRequest, EvidenceClusterVerdict,
+};
+pub use evidence_frontier_join::{
+    join_glioma_evidence_frontier, EvidenceFrontierAction, EvidenceFrontierClaim,
+    EvidenceFrontierJoin, EvidenceFrontierJoinError, EvidenceFrontierJoinRequest,
+    EvidenceFrontierVerdict,
 };
 pub use evidence_stream::{
     snapshot_glioma_evidence_stream, EvidenceStreamClaim, EvidenceStreamClaimTrend,
