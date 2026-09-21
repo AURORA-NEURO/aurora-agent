@@ -104,6 +104,8 @@ crates/research/src/glioma/
                                              P05 recency-weighted, contradiction-preserving mechanism evidence assimilation across study epochs
   programs/p05_mechanism_exploration/fidelity_bridge.rs
                                              P05 cross-model prediction/observation residual transportability and low-fidelity frontier ranking
+  programs/p05_mechanism_exploration/robustness_stress.rs
+                                             P05 bounded adversarial stress surface for rank reversal, omission fragility, and mechanism stability
   programs/p03_multimodal_ingestion_qc/operating_cycle.rs
                                              P03 ingestion/QC, surface admission, and operator-handoff cycle
   programs/p07_protocol_simulation/scientific_frontier.rs

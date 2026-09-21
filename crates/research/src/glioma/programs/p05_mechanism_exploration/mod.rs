@@ -23,6 +23,7 @@ pub mod mechanism_dynamics;
 pub mod operating_cycle;
 pub mod pathway_activity;
 pub mod robust_portfolio;
+pub mod robustness_stress;
 pub mod state_filter;
 pub mod state_smoother;
 
@@ -147,6 +148,12 @@ pub use robust_portfolio::{
     plan_glioma_robust_intervention_portfolio, PortfolioDirection, RobustInterventionCandidate,
     RobustInterventionPortfolio, RobustInterventionRequest, RobustInterventionScore,
     RobustPortfolioDisposition, RobustPortfolioError,
+};
+pub use robustness_stress::{
+    stress_glioma_mechanism_robustness, MechanismRobustnessRecord, MechanismRobustnessStress,
+    MechanismRobustnessStressDisposition, MechanismRobustnessStressError,
+    MechanismRobustnessStressRequest, MechanismStressAdjustment, MechanismStressCandidate,
+    MechanismStressScenario, MechanismStressScenarioScore,
 };
 pub use state_filter::{
     filter_glioma_mechanism_states, MechanismStateFilterDisposition, MechanismStateFilterError,

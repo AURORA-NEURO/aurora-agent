@@ -617,8 +617,9 @@ use bioprism_research::{
     schedule_glioma_instrument_fleet, select_glioma_actions, simulate_glioma_counterfactual,
     simulate_glioma_counterfactual_ensemble, simulate_glioma_mechanism_dynamics,
     simulate_glioma_protocol, simulate_glioma_protocol_scenario_ensemble,
-    smooth_glioma_mechanism_states, snapshot_glioma_evidence_stream, surveil_glioma_evidence,
-    surveil_glioma_multimodal_drift, synthesize_glioma_interpretation, triangulate_glioma_evidence,
+    smooth_glioma_mechanism_states, snapshot_glioma_evidence_stream,
+    stress_glioma_mechanism_robustness, surveil_glioma_evidence, surveil_glioma_multimodal_drift,
+    synthesize_glioma_interpretation, triangulate_glioma_evidence,
     update_glioma_mechanism_posterior, validate_feature_catalog,
     verify_glioma_multimodal_quality_recovery, AcquisitionFeedbackRequest,
     ActionPortfolioExecutionRequest, ActiveLearningCampaignRequest, ActiveLearningCandidate,
@@ -720,8 +721,8 @@ use bioprism_research::{
     MechanismFidelityBridgeRequest, MechanismGraphEdge, MechanismGraphNode, MechanismGraphRequest,
     MechanismHypothesis, MechanismIdentifiabilityRequest, MechanismInterventionCandidate,
     MechanismInterventionValueRequest, MechanismInvarianceContext, MechanismInvarianceRequest,
-    MechanismOperatingCycleRequest, MechanismRequest, MechanismSignature,
-    MechanismStateFilterRequest, MechanismStateSmootherRequest,
+    MechanismOperatingCycleRequest, MechanismRequest, MechanismRobustnessStressRequest,
+    MechanismSignature, MechanismStateFilterRequest, MechanismStateSmootherRequest,
     MechanismValidationExecutionRequest, MechanismValidationPlanRequest,
     MechanismValidationProtocolCompileRequest, MediationObservation, MediationRequest,
     MetaAnalysisRequest, MissingnessAuditRequest, ModalityPortfolioRequest, ModalityVector,
@@ -2629,6 +2630,9 @@ impl Server {
                 self.glioma_mechanism_evidence_assimilation(&arguments)
             }
             "glioma_mechanism_fidelity_bridge" => self.glioma_mechanism_fidelity_bridge(&arguments),
+            "glioma_mechanism_robustness_stress" => {
+                self.glioma_mechanism_robustness_stress(&arguments)
+            }
             "glioma_mechanism_state_filter" => self.glioma_mechanism_state_filter(&arguments),
             "glioma_mechanism_state_smoother" => self.glioma_mechanism_state_smoother(&arguments),
             "glioma_mechanism_consensus" => self.glioma_mechanism_consensus(&arguments),
@@ -12006,6 +12010,34 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma mechanism fidelity bridge: {error}"))
+    }
+
+    /// Stress mechanism ranking under bounded perturbations and explicit omission scenarios
+    /// before admitting the next autonomous research action.
+    fn glioma_mechanism_robustness_stress(&self, arguments: &Value) -> Result<Value, String> {
+        let request: MechanismRobustnessStressRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_mechanism_robustness_stress requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma mechanism robustness request: {error}"))?;
+        let stress = stress_glioma_mechanism_robustness(&request)
+            .map_err(|error| format!("glioma mechanism robustness stress refused: {error}"))?;
+        serde_json::to_value(json!({
+            "stress": stress,
+            "dispatch": "not_started",
+            "next_routes": [
+                "glioma_mechanism_discriminate",
+                "glioma_mechanism_action_plan",
+                "glioma_mechanism_operating_cycle"
+            ],
+            "guarantees": [
+                "bounded perturbation scenarios and weights are explicit and replayable",
+                "rank reversals, omission fragility, worst/best scores, and stability remain visible",
+                "fragile mechanisms are routed for more evidence rather than promoted automatically",
+                "the route performs no assay, instrument execution, raw-data movement, federation, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma mechanism robustness stress: {error}"))
     }
 
     /// Filter a transition-aware longitudinal mechanism posterior from local preclinical
@@ -54798,6 +54830,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_mechanism_bayesian_update",
                 "glioma_mechanism_evidence_assimilation",
                 "glioma_mechanism_fidelity_bridge",
+                "glioma_mechanism_robustness_stress",
                 "glioma_mechanism_state_filter",
                 "glioma_mechanism_state_smoother",
                 "glioma_mechanism_consensus",
@@ -65725,6 +65758,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "MechanismFidelityBridgeRequest1@1 with target model system, bounded prediction/observation rows, minimum model-system coverage, transport threshold, and local artifact references."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_mechanism_robustness_stress",
+        "description": "Evaluate preclinical glioma mechanism ranking stability under bounded perturbation and explicit omission scenarios. Reports rank reversals, worst/best/weighted scores, fragile mechanisms, uncertainty, and a deterministic stress frontier so brittle mechanisms are routed for more evidence before autonomous action.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "MechanismRobustnessStressRequest1@1 with baseline mechanism candidates, weighted bounded stress scenarios, omission sets, stability threshold, and resource bounds."}
             },
             "required": ["request"]
         }
