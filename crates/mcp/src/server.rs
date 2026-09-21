@@ -495,17 +495,17 @@ use bioprism_research::{
     analyze_federated_benchmark, analyze_federated_mechanism_transport,
     analyze_glioma_causal_contrast, analyze_glioma_clonal_evolution,
     analyze_glioma_clone_panel_outcomes, analyze_glioma_combination_synergy,
-    analyze_glioma_dose_response, analyze_glioma_instrument_batch_stability,
-    analyze_glioma_latent_factors, analyze_glioma_mechanism_identifiability,
-    analyze_glioma_mechanism_invariance, analyze_glioma_mediation,
-    analyze_glioma_multimodal_decision_gate, analyze_glioma_multimodal_dropout_stress,
-    analyze_glioma_multimodal_evidence_fusion, analyze_glioma_multimodal_graph_fusion,
-    analyze_glioma_multimodal_missingness, analyze_glioma_multimodal_sensitivity,
-    analyze_glioma_pathway_activity, analyze_glioma_spatial_communication,
-    analyze_glioma_spatial_niches, analyze_glioma_spatial_state_propagation,
-    analyze_glioma_state_transitions, analyze_glioma_temporal_multimodal_fusion,
-    analyze_glioma_temporal_spatial_alignment, analyze_glioma_trajectories,
-    analyze_glioma_transportability, analyze_instrument_calibration,
+    analyze_glioma_dose_response, analyze_glioma_federated_instrument_consensus,
+    analyze_glioma_instrument_batch_stability, analyze_glioma_latent_factors,
+    analyze_glioma_mechanism_identifiability, analyze_glioma_mechanism_invariance,
+    analyze_glioma_mediation, analyze_glioma_multimodal_decision_gate,
+    analyze_glioma_multimodal_dropout_stress, analyze_glioma_multimodal_evidence_fusion,
+    analyze_glioma_multimodal_graph_fusion, analyze_glioma_multimodal_missingness,
+    analyze_glioma_multimodal_sensitivity, analyze_glioma_pathway_activity,
+    analyze_glioma_spatial_communication, analyze_glioma_spatial_niches,
+    analyze_glioma_spatial_state_propagation, analyze_glioma_state_transitions,
+    analyze_glioma_temporal_multimodal_fusion, analyze_glioma_temporal_spatial_alignment,
+    analyze_glioma_trajectories, analyze_glioma_transportability, analyze_instrument_calibration,
     analyze_multimodal_concordance, analyze_multimodal_consensus, analyze_preclinical_outcomes,
     analyze_replication_meta_analysis, analyze_stratified_causal_adjustment,
     assess_glioma_robustness, assess_glioma_validation_batch, assess_replication,
@@ -655,7 +655,8 @@ use bioprism_research::{
     ExperimentRequest, FederatedBenchmarkAdaptiveCampaignRequest,
     FederatedBenchmarkCampaignRequest, FederatedBenchmarkExecutionMode,
     FederatedBenchmarkOperatingCycleRequest, FederatedBenchmarkRequest, FederatedBenchmarkSite,
-    FederatedBenchmarkSitePlannerRequest, FederatedInterpretationRequest, FederatedMechanismSite,
+    FederatedBenchmarkSitePlannerRequest, FederatedInstrumentConsensusRequest,
+    FederatedInstrumentSite, FederatedInterpretationRequest, FederatedMechanismSite,
     FederatedMechanismTransportCampaignRequest, FederatedMechanismTransportRequest,
     FidelityCandidate, FidelityObservation, GliomaActionCandidate,
     GliomaAdaptiveWorkflowSchedulerRequest, GliomaAutonomousCampaignRequest,
@@ -2613,6 +2614,9 @@ impl Server {
             "glioma_instrument_signal_extract" => self.glioma_instrument_signal_extract(&arguments),
             "glioma_instrument_batch_stability" => {
                 self.glioma_instrument_batch_stability(&arguments)
+            }
+            "glioma_federated_instrument_consensus" => {
+                self.glioma_federated_instrument_consensus(&arguments)
             }
             "glioma_instrument_preflight" => self.glioma_instrument_preflight(&arguments),
             "glioma_instrument_fleet_schedule" => self.glioma_instrument_fleet_schedule(&arguments),
@@ -12308,6 +12312,39 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma instrument batch stability: {error}"))
+    }
+
+    /// Compute aggregate-only cross-site endpoint consensus with privacy and heterogeneity gates.
+    /// Raw traces and instrument effects remain institution-local.
+    fn glioma_federated_instrument_consensus(&self, arguments: &Value) -> Result<Value, String> {
+        let request: FederatedInstrumentConsensusRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_federated_instrument_consensus requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid federated instrument consensus request: {error}"))?;
+        let sites: Vec<FederatedInstrumentSite> =
+            serde_json::from_value(arguments.get("sites").cloned().ok_or_else(|| {
+                "glioma_federated_instrument_consensus requires sites".to_string()
+            })?)
+            .map_err(|error| format!("invalid federated instrument sites: {error}"))?;
+        let output = analyze_glioma_federated_instrument_consensus(&request, &sites)
+            .map_err(|error| format!("federated instrument consensus refused: {error}"))?;
+        serde_json::to_value(json!({
+            "consensus": output,
+            "dispatch": "not_started",
+            "next_routes": [
+                "glioma_federated_benchmark_consensus",
+                "glioma_instrument_batch_stability",
+                "glioma_replication_federated_transport_execute"
+            ],
+            "guarantees": [
+                "only privacy-gated aggregate endpoint summaries participate",
+                "heterogeneity, leave-one-site-out sensitivity, and maximum site influence remain explicit",
+                "raw traces, samples, human data, and hardware effects never cross this route",
+                "the route performs no federation write, hardware, biological, or clinical action"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode federated instrument consensus: {error}"))
     }
 
     /// Compile an interlocked, authorization-bound instrument plan. The route never dispatches
@@ -53546,6 +53583,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_instrument_calibration",
                 "glioma_instrument_signal_extract",
                 "glioma_instrument_batch_stability",
+                "glioma_federated_instrument_consensus",
                 "glioma_instrument_preflight",
                 "glioma_instrument_fleet_schedule",
                 "glioma_instrument_fleet_execute",
@@ -64581,6 +64619,18 @@ pub fn tool_definitions() -> Vec<Value> {
                 "runs": {"type": "array", "items": {"type": "object"}, "description": "InstrumentSignalRun1@1 ordered local extraction summaries from the signal-extraction route."}
             },
             "required": ["request", "runs"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_federated_instrument_consensus",
+        "description": "Compute aggregate-only cross-site consensus for preclinical glioma instrument endpoints. Applies privacy counts, federation permission, endpoint coverage, inverse-uncertainty weighting, heterogeneity, leave-one-site-out sensitivity, and maximum site-influence gates; raw traces and hardware effects remain local and no clinical decision is made.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "FederatedInstrumentConsensusRequest1@1 with instrument-family binding, site/privacy floors, coverage, heterogeneity, influence, and leave-one-out gates."},
+                "sites": {"type": "array", "items": {"type": "object"}, "description": "FederatedInstrumentSite1@1 aggregate-only site summaries with permitted endpoint values."}
+            },
+            "required": ["request", "sites"]
         }
     }));
     definitions.push(json!({

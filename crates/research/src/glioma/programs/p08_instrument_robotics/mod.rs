@@ -8,6 +8,7 @@ pub mod batch_stability;
 pub mod calibration;
 pub mod campaign;
 pub mod execution;
+pub mod federated_consensus;
 pub mod fleet_execution;
 pub mod fleet_scheduler;
 pub mod operating_cycle;
@@ -25,6 +26,12 @@ pub use batch_stability::{
     analyze_glioma_instrument_batch_stability, BatchStabilityDisposition, BatchStabilityError,
     ChannelStability, ChannelStabilityDisposition, InstrumentBatchStability, InstrumentSignalRun,
     SignalBatchStabilityRequest,
+};
+pub use federated_consensus::{
+    analyze_glioma_federated_instrument_consensus, FederatedConsensusDisposition,
+    FederatedConsensusError, FederatedEndpointConsensus, FederatedEndpointDisposition,
+    FederatedEndpointValue, FederatedInstrumentConsensus, FederatedInstrumentConsensusRequest,
+    FederatedInstrumentSite,
 };
 
 pub use adaptive_campaign::{
