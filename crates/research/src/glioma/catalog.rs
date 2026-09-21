@@ -505,6 +505,7 @@ pub fn implemented_feature_ids() -> Vec<&'static str> {
         crate::glioma::programs::p08_instrument_robotics::adaptive_campaign::FEATURE_ID,
         crate::glioma::programs::p08_instrument_robotics::preflight::FEATURE_ID,
         crate::glioma::programs::p08_instrument_robotics::execution::FEATURE_ID,
+        crate::glioma::programs::p08_instrument_robotics::recovery::FEATURE_ID,
         crate::glioma::programs::p08_instrument_robotics::fleet_scheduler::FEATURE_ID,
         crate::glioma::programs::p08_instrument_robotics::campaign::FEATURE_ID,
         crate::glioma::programs::p08_instrument_robotics::assay_adjudication::FEATURE_ID,

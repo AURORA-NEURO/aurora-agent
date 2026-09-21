@@ -601,10 +601,11 @@ use bioprism_research::{
     plan_glioma_closed_loop_campaign, plan_glioma_computation_portfolio,
     plan_glioma_decision_branches, plan_glioma_evidence_acquisition,
     plan_glioma_evidence_contradiction_cut, plan_glioma_information_design,
-    plan_glioma_mechanism_validation, plan_glioma_multi_fidelity_optimization,
-    plan_glioma_multimodal_portfolio, plan_glioma_multimodal_quality_remediation,
-    plan_glioma_multimodal_quality_schedule, plan_glioma_power_reestimation,
-    plan_glioma_power_stress_surface, plan_glioma_protocol_compensation, plan_glioma_replication,
+    plan_glioma_instrument_recovery, plan_glioma_mechanism_validation,
+    plan_glioma_multi_fidelity_optimization, plan_glioma_multimodal_portfolio,
+    plan_glioma_multimodal_quality_remediation, plan_glioma_multimodal_quality_schedule,
+    plan_glioma_power_reestimation, plan_glioma_power_stress_surface,
+    plan_glioma_protocol_compensation, plan_glioma_replication,
     plan_glioma_replication_closure_frontier, plan_glioma_replication_continuation,
     plan_glioma_robust_active_learning, plan_glioma_robust_intervention_portfolio,
     plan_glioma_scientific_frontier, plan_glioma_sequential_design,
@@ -703,14 +704,15 @@ use bioprism_research::{
     InformationDesignRequest, InstrumentCampaignRequest, InstrumentExecutionMode,
     InstrumentExecutionRequest, InstrumentExecutionRun, InstrumentFleetExecutionRequest,
     InstrumentFleetScheduleRequest, InstrumentInterlockSnapshot, InstrumentOperatingCycleRequest,
-    InstrumentPreflightRequest, InstrumentResearchFrontierRequest, InstrumentScienceLoopRequest,
-    InstrumentSignalPoint, InstrumentSignalRun, InterpretationSynthesisRequest,
-    InvarianceMechanism, KnowledgeActionBridgeRequest, KnowledgeActionCompilerRequest,
-    KnowledgeActionDispatchRequest, KnowledgeActionOutcomeAssimilationRequest, KnowledgeActionPlan,
-    KnowledgeActionSelectionCycle, KnowledgeActionSelectionCycleRequest, KnowledgeActionTemplate,
-    KnowledgeClosureRequest, KnowledgeCompositionRequest, KnowledgeConsistencyRequest,
-    KnowledgeDriftRequest, KnowledgeFrontier, KnowledgeFrontierRequest,
-    KnowledgeGapCompilerRequest, KnowledgeProtocolRequest, KnowledgeRelation, KnowledgeRequest,
+    InstrumentPreflightRequest, InstrumentRecoveryRequest, InstrumentResearchFrontierRequest,
+    InstrumentScienceLoopRequest, InstrumentSignalPoint, InstrumentSignalRun,
+    InterpretationSynthesisRequest, InvarianceMechanism, KnowledgeActionBridgeRequest,
+    KnowledgeActionCompilerRequest, KnowledgeActionDispatchRequest,
+    KnowledgeActionOutcomeAssimilationRequest, KnowledgeActionPlan, KnowledgeActionSelectionCycle,
+    KnowledgeActionSelectionCycleRequest, KnowledgeActionTemplate, KnowledgeClosureRequest,
+    KnowledgeCompositionRequest, KnowledgeConsistencyRequest, KnowledgeDriftRequest,
+    KnowledgeFrontier, KnowledgeFrontierRequest, KnowledgeGapCompilerRequest,
+    KnowledgeProtocolRequest, KnowledgeRelation, KnowledgeRequest,
     KnowledgeResolutionCampaignRequest, KnowledgeSynthesisOperatingCycleRequest,
     LatentFactorRequest, LatentFactorVector, LigandReceptorPair, LocalWorkflowRequest,
     MechanismActionPlannerConfig, MechanismCalibration, MechanismCalibrationObservation,
@@ -2735,6 +2737,7 @@ impl Server {
             "glioma_instrument_fleet_schedule" => self.glioma_instrument_fleet_schedule(&arguments),
             "glioma_instrument_fleet_execute" => self.glioma_instrument_fleet_execute(&arguments),
             "glioma_instrument_execute" => self.glioma_instrument_execute(&arguments),
+            "glioma_instrument_recovery_plan" => self.glioma_instrument_recovery_plan(&arguments),
             "glioma_instrument_campaign_execute" => {
                 self.glioma_instrument_campaign_execute(&arguments)
             }
@@ -13729,6 +13732,32 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma instrument execution: {error}"))
+    }
+
+    /// Plan bounded recovery for a completed local instrument execution record. The recovery
+    /// planner never reconnects to hardware or turns an execution outcome into evidence.
+    fn glioma_instrument_recovery_plan(&self, arguments: &Value) -> Result<Value, String> {
+        let request: InstrumentRecoveryRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_instrument_recovery_plan requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma instrument recovery request: {error}"))?;
+        let plan = plan_glioma_instrument_recovery(&request)
+            .map_err(|error| format!("glioma instrument recovery refused: {error}"))?;
+        serde_json::to_value(json!({
+            "recovery": plan,
+            "dispatch": "not_started",
+            "next_routes": ["glioma_instrument_preflight", "glioma_instrument_execute"],
+            "guarantees": [
+                "partial, failed, blocked, unresolved, and negative run outcomes remain explicit",
+                "retries, resumes, recalibration, compensation, and human review are bounded and typed",
+                "negative results are never converted into automatic retries or successful evidence",
+                "the route performs no hardware connection, raw-data movement, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma instrument recovery: {error}"))
     }
 
     /// Execute a bounded sequence of admitted instrument runs through the deterministic local
@@ -54917,6 +54946,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_instrument_fleet_schedule",
                 "glioma_instrument_fleet_execute",
                 "glioma_instrument_execute",
+                "glioma_instrument_recovery_plan",
                 "glioma_instrument_campaign_execute",
                 "glioma_adaptive_instrument_campaign_execute",
                 "glioma_instrument_operating_cycle",
@@ -66426,6 +66456,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "InstrumentExecutionRequest1@1 containing an admitted InstrumentPreflightPlan1@1, matching InstrumentAction1@1 records, authorization, live interlocks, tick/budget bounds, retry bound, and artifact policy."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_instrument_recovery_plan",
+        "description": "Convert a validated local preclinical glioma instrument execution record into a deterministic recovery plan. Classifies resumable, retryable, recalibration, compensation, artifact-verification, abort, and human-review actions while preserving negative and unresolved outcomes. It never connects to hardware or creates scientific evidence.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "InstrumentRecoveryRequest1@1 containing a validated InstrumentExecutionRun1@1, objective binding, retry/recalibration policy, and partial-execution review policy."}
             },
             "required": ["request"]
         }

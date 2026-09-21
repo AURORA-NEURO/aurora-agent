@@ -130,7 +130,7 @@ silently bypass an earlier wave's omission, provenance, safety, or replay gate.
 - Downstream edges: P03 QC, P07 protocol state, P09 computation, and P11 research-object release.
 - Promotion gate: A3 physical execution requires signed preflight, interlocks, revocation checks,
   local-only raw data, and honest partial-execution compensation.
-- Current implementation: 15/32 slots. Next wave: failure recovery, queue-aware fleet routing,
+- Current implementation: 16/32 slots. Next wave: failure recovery, queue-aware fleet routing,
   and instrument-to-analysis provenance binding.
 
 ### P09 — `p09_reproducible_computation`

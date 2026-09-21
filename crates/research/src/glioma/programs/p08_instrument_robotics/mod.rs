@@ -14,6 +14,7 @@ pub mod fleet_scheduler;
 pub mod multichannel_concordance;
 pub mod operating_cycle;
 pub mod preflight;
+pub mod recovery;
 pub mod research_frontier;
 pub mod science_loop;
 pub mod signal_extraction;
@@ -52,6 +53,12 @@ pub use preflight::{
     InstrumentActionDisposition, InstrumentAuthorization, InstrumentInterlockSnapshot,
     InstrumentOperation, InstrumentParameter, InstrumentPreflightDisposition,
     InstrumentPreflightError, InstrumentPreflightPlan, InstrumentPreflightRequest,
+};
+
+pub use recovery::{
+    plan_glioma_instrument_recovery, InstrumentRecoveryAction, InstrumentRecoveryDecision,
+    InstrumentRecoveryDisposition, InstrumentRecoveryError, InstrumentRecoveryPlan,
+    InstrumentRecoveryPriority, InstrumentRecoveryRequest,
 };
 
 pub use execution::{
