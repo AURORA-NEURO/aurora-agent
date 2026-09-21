@@ -9,6 +9,7 @@ pub mod campaign;
 pub mod contradiction_cut;
 pub mod evidence_cluster;
 pub mod evidence_stream;
+pub mod federated_acquisition_policy;
 pub mod federated_shift;
 pub mod novelty_adjudication;
 pub mod novelty_radar;
@@ -73,6 +74,12 @@ pub use acquisition_campaign::{
     EvidenceAcquisitionCampaignError, EvidenceAcquisitionCampaignRequest,
     EvidenceAcquisitionCampaignStopReason, EvidenceAcquisitionExecutionFailure,
     EvidenceAcquisitionExecutor, EvidenceAcquisitionResult, EvidenceAcquisitionResultDisposition,
+};
+pub use federated_acquisition_policy::{
+    plan_federated_glioma_evidence_acquisition, FederatedAcquisitionAction,
+    FederatedAcquisitionDecision, FederatedAcquisitionKind, FederatedAcquisitionPolicyError,
+    FederatedAcquisitionPolicyRequest, FederatedAcquisitionSite,
+    FederatedEvidenceAcquisitionPolicy, FederatedEvidenceNeed, FederatedNeedDecision,
 };
 pub use federated_shift::{
     analyze_federated_evidence_shifts, FederatedEvidenceShift, FederatedEvidenceShiftAction,

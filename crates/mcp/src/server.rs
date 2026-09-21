@@ -585,7 +585,8 @@ use bioprism_research::{
     interpret_glioma_federated_closure, interpret_glioma_replication_closure,
     monitor_prospective_knowledge, optimize_glioma_decision_value,
     optimize_glioma_protocol_branches, plan_adaptive_glioma_dose_surface, plan_decision_actions,
-    plan_federated_benchmark_sites, plan_federated_continual_agent, plan_glioma_active_learning,
+    plan_federated_benchmark_sites, plan_federated_continual_agent,
+    plan_federated_glioma_evidence_acquisition, plan_glioma_active_learning,
     plan_glioma_adaptive_information_campaign, plan_glioma_adaptive_mechanism_policy,
     plan_glioma_adaptive_panel, plan_glioma_adaptive_research_frontier,
     plan_glioma_adaptive_workflow, plan_glioma_blocked_randomization,
@@ -663,13 +664,14 @@ use bioprism_research::{
     EvidenceRefreshCampaignRequest, EvidenceRequest, EvidenceStreamRequest,
     EvidenceSurveillanceRequest, EvidenceTemporalShiftRequest, EvidenceTriangulationRequest,
     ExperimentArm, ExperimentOperatingCycleRequest, ExperimentRequest,
-    FederatedBenchmarkAdaptiveCampaignRequest, FederatedBenchmarkCampaignRequest,
-    FederatedBenchmarkExecutionMode, FederatedBenchmarkOperatingCycleRequest,
-    FederatedBenchmarkPowerRequest, FederatedBenchmarkRequest, FederatedBenchmarkSite,
-    FederatedBenchmarkSitePlannerRequest, FederatedContinualAgentRequest,
-    FederatedContinualKnowledgeRequest, FederatedEvidenceShiftRequest, FederatedEvidenceShiftSite,
-    FederatedInstrumentConsensusRequest, FederatedInstrumentSite, FederatedInterpretationRequest,
-    FederatedKnowledgeRequest, FederatedKnowledgeSiteClaim, FederatedMechanismSite,
+    FederatedAcquisitionPolicyRequest, FederatedBenchmarkAdaptiveCampaignRequest,
+    FederatedBenchmarkCampaignRequest, FederatedBenchmarkExecutionMode,
+    FederatedBenchmarkOperatingCycleRequest, FederatedBenchmarkPowerRequest,
+    FederatedBenchmarkRequest, FederatedBenchmarkSite, FederatedBenchmarkSitePlannerRequest,
+    FederatedContinualAgentRequest, FederatedContinualKnowledgeRequest,
+    FederatedEvidenceShiftRequest, FederatedEvidenceShiftSite, FederatedInstrumentConsensusRequest,
+    FederatedInstrumentSite, FederatedInterpretationRequest, FederatedKnowledgeRequest,
+    FederatedKnowledgeSiteClaim, FederatedMechanismSite,
     FederatedMechanismTransportCampaignRequest, FederatedMechanismTransportRequest,
     FidelityCandidate, FidelityObservation, GliomaActionCandidate,
     GliomaAdaptiveWorkflowSchedulerRequest, GliomaAutonomousCampaignRequest,
@@ -2501,6 +2503,9 @@ impl Server {
                 self.glioma_evidence_novelty_adjudication(&arguments)
             }
             "glioma_evidence_stream_snapshot" => self.glioma_evidence_stream_snapshot(&arguments),
+            "glioma_federated_evidence_acquisition_policy" => {
+                self.glioma_federated_evidence_acquisition_policy(&arguments)
+            }
             "glioma_evidence_surveillance" => self.glioma_evidence_surveillance(&arguments),
             "glioma_evidence_novelty_radar" => self.glioma_evidence_novelty_radar(&arguments),
             "glioma_evidence_temporal_shift" => self.glioma_evidence_temporal_shift(&arguments),
@@ -9679,6 +9684,36 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma evidence stream snapshot: {error}"))
+    }
+
+    /// Compile a consortium-aware, site-local acquisition policy for unresolved preclinical
+    /// glioma evidence. The route emits bounded actions and never moves raw data or dispatches.
+    fn glioma_federated_evidence_acquisition_policy(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: FederatedAcquisitionPolicyRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_federated_evidence_acquisition_policy requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid federated acquisition policy request: {error}"))?;
+        let output = plan_federated_glioma_evidence_acquisition(&request)
+            .map_err(|error| format!("federated acquisition policy refused: {error}"))?;
+        serde_json::to_value(json!({
+            "policy": output,
+            "next_routes": [
+                "glioma_evidence_acquisition_plan",
+                "glioma_evidence_acquisition_campaign_execute",
+                "glioma_federated_continual_knowledge"
+            ],
+            "guarantees": [
+                "only eligible non-revoked sites with explicit modality/model support enter the policy",
+                "independent-site quorum, budget, privacy, and action-capacity constraints remain explicit",
+                "raw experimental data remains site-local and only bounded action metadata is returned",
+                "the route plans but does not contact sites, move data, run assays, or make a clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode federated acquisition policy: {error}"))
     }
 
     /// Detect changes between local evidence snapshots and compile bounded review actions for a
@@ -54155,6 +54190,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_evidence_cluster_index",
                 "glioma_evidence_novelty_adjudication",
                 "glioma_evidence_stream_snapshot",
+                "glioma_federated_evidence_acquisition_policy",
                 "glioma_evidence_surveillance",
                 "glioma_evidence_novelty_radar",
                 "glioma_evidence_temporal_shift",
@@ -64292,6 +64328,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "EvidenceStreamRequest1@1 with ordered value-only events, expected next epoch, event/claim bounds, quality floor, lag bound, and trend threshold."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_federated_evidence_acquisition_policy",
+        "description": "Compile a consortium-aware, site-local acquisition policy for unresolved preclinical glioma evidence. Assigns typed needs to eligible non-revoked sites using modality/model coverage, capability, independence groups, quorum, budget, privacy, and action-capacity gates. Returns selected, deferred, and blocked actions without moving raw data, contacting sites, executing assays, inferring causality, or making a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "FederatedAcquisitionPolicyRequest1@1 with evidence needs, site capability manifests, quorum/budget/privacy constraints, and local-raw-data policy."}
             },
             "required": ["request"]
         }
