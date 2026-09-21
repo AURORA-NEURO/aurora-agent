@@ -528,9 +528,9 @@ use bioprism_research::{
     compile_glioma_knowledge_closure, compile_glioma_knowledge_consistency,
     compile_glioma_knowledge_gaps, compile_glioma_mechanism_consensus,
     compile_glioma_mechanism_validation_protocol, compile_glioma_mechanism_workflow,
-    compile_glioma_multimodal_research_object, compile_glioma_protocol_evidence_surface,
-    compile_glioma_replication_protocol, compile_local_research_workflow,
-    compile_mechanism_action_plan, compile_multi_study_knowledge,
+    compile_glioma_multi_study_mechanism_workflow, compile_glioma_multimodal_research_object,
+    compile_glioma_protocol_evidence_surface, compile_glioma_replication_protocol,
+    compile_local_research_workflow, compile_mechanism_action_plan, compile_multi_study_knowledge,
     compile_multimodal_knowledge_workflow, compile_typed_knowledge, compose_knowledge_graph,
     design_glioma_contrast_panel, design_glioma_robust_experiment, design_preclinical_experiment,
     detect_glioma_evidence_temporal_shifts, detect_glioma_knowledge_drift, discriminate_mechanisms,
@@ -729,28 +729,28 @@ use bioprism_research::{
     MechanismGraphNode, MechanismGraphRequest, MechanismHypothesis,
     MechanismIdentifiabilityRequest, MechanismInterventionCandidate,
     MechanismInterventionValueRequest, MechanismInvarianceContext, MechanismInvarianceRequest,
-    MechanismOperatingCycleRequest, MechanismRequest, MechanismRobustnessStressRequest,
-    MechanismSignature, MechanismStateFilterRequest, MechanismStateSmootherRequest,
-    MechanismValidationExecutionRequest, MechanismValidationPlanRequest,
-    MechanismValidationProtocolCompileRequest, MechanismWorkflowRequest, MediationObservation,
-    MediationRequest, MetaAnalysisRequest, MissingnessAuditRequest, ModalityPortfolioRequest,
-    ModalityVector, MultiFidelityCampaignRequest, MultiFidelityControlRequest,
-    MultiFidelityOptimizationRequest, MultiStudyKnowledgeRequest, MultichannelConcordanceRequest,
-    MultichannelInput, MultimodalDecisionGateRequest, MultimodalExecutionMode,
-    MultimodalGapRouterRequest, MultimodalIngestionCampaignRequest,
-    MultimodalIngestionManifestRequest, MultimodalKnowledgeProtocolRequest,
-    MultimodalMechanismCampaignRequest, MultimodalObservation, MultimodalReadinessRequest,
-    MultimodalRequest, MultimodalResearchObjectRequest, MultimodalWorkflowRequest,
-    NoveltyAdjudicationRequest, PathwayActivityDefinition, PathwayActivityObservation,
-    PathwayActivityRequest, PowerArmObservation, PowerReestimationRequest,
-    PowerStressSurfaceRequest, ProspectiveBeliefCalibrationRequest, ProspectiveKnowledgeRequest,
-    ProspectiveQualityRequest, ProtocolBranchOptimizationRequest, ProtocolCompensationRequest,
-    ProtocolEvidenceFusionRequest, ProtocolEvidenceSurfaceRequest, ProtocolExecutionRequest,
-    ProtocolScenarioEnsembleRequest, ProtocolSimulationRequest, ProtocolTransportGateRequest,
-    QualityAdaptiveCampaignRequest, QualityExecutionMode, QualityExecutionRequest,
-    QualityRecoveryRequest, QualityRemediationRequest, QualityRootCauseRequest,
-    QualityScheduleRequest, QualityTransportRequest, ReleaseExecutionMode, ReleaseGateRequest,
-    ReliabilityCalibrationRequest, ReplayCampaign, ReplayCampaignRequest,
+    MechanismMultiStudyWorkflowRequest, MechanismOperatingCycleRequest, MechanismRequest,
+    MechanismRobustnessStressRequest, MechanismSignature, MechanismStateFilterRequest,
+    MechanismStateSmootherRequest, MechanismValidationExecutionRequest,
+    MechanismValidationPlanRequest, MechanismValidationProtocolCompileRequest,
+    MechanismWorkflowRequest, MediationObservation, MediationRequest, MetaAnalysisRequest,
+    MissingnessAuditRequest, ModalityPortfolioRequest, ModalityVector,
+    MultiFidelityCampaignRequest, MultiFidelityControlRequest, MultiFidelityOptimizationRequest,
+    MultiStudyKnowledgeRequest, MultichannelConcordanceRequest, MultichannelInput,
+    MultimodalDecisionGateRequest, MultimodalExecutionMode, MultimodalGapRouterRequest,
+    MultimodalIngestionCampaignRequest, MultimodalIngestionManifestRequest,
+    MultimodalKnowledgeProtocolRequest, MultimodalMechanismCampaignRequest, MultimodalObservation,
+    MultimodalReadinessRequest, MultimodalRequest, MultimodalResearchObjectRequest,
+    MultimodalWorkflowRequest, NoveltyAdjudicationRequest, PathwayActivityDefinition,
+    PathwayActivityObservation, PathwayActivityRequest, PowerArmObservation,
+    PowerReestimationRequest, PowerStressSurfaceRequest, ProspectiveBeliefCalibrationRequest,
+    ProspectiveKnowledgeRequest, ProspectiveQualityRequest, ProtocolBranchOptimizationRequest,
+    ProtocolCompensationRequest, ProtocolEvidenceFusionRequest, ProtocolEvidenceSurfaceRequest,
+    ProtocolExecutionRequest, ProtocolScenarioEnsembleRequest, ProtocolSimulationRequest,
+    ProtocolTransportGateRequest, QualityAdaptiveCampaignRequest, QualityExecutionMode,
+    QualityExecutionRequest, QualityRecoveryRequest, QualityRemediationRequest,
+    QualityRootCauseRequest, QualityScheduleRequest, QualityTransportRequest, ReleaseExecutionMode,
+    ReleaseGateRequest, ReliabilityCalibrationRequest, ReplayCampaign, ReplayCampaignRequest,
     ReplicationClosureCampaignRequest, ReplicationClosureExecutionRequest,
     ReplicationClosureFrontierRequest, ReplicationContinuationRequest, ReplicationObservation,
     ReplicationPlanRequest, ReplicationProtocolCompileRequest, ReplicationRequest,
@@ -2648,6 +2648,9 @@ impl Server {
             "glioma_mechanism_feedback_replan" => self.glioma_mechanism_feedback_replan(&arguments),
             "glioma_mechanism_workflow_compile" => {
                 self.glioma_mechanism_workflow_compile(&arguments)
+            }
+            "glioma_mechanism_multi_study_workflow_compile" => {
+                self.glioma_mechanism_multi_study_workflow_compile(&arguments)
             }
             "glioma_mechanism_fidelity_bridge" => self.glioma_mechanism_fidelity_bridge(&arguments),
             "glioma_mechanism_robustness_stress" => {
@@ -12189,6 +12192,37 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma mechanism workflow: {error}"))
+    }
+
+    /// Join site-local mechanism workflows into an aggregate-only multimodal, multi-study
+    /// portfolio. Lane executors and policy owners retain every raw-data and physical effect.
+    fn glioma_mechanism_multi_study_workflow_compile(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: MechanismMultiStudyWorkflowRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_mechanism_multi_study_workflow_compile requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma multi-study workflow request: {error}"))?;
+        let plan = compile_glioma_multi_study_mechanism_workflow(&request)
+            .map_err(|error| format!("glioma multi-study mechanism workflow refused: {error}"))?;
+        serde_json::to_value(json!({
+            "plan": plan,
+            "dispatch": "not_started",
+            "next_routes": [
+                "glioma_mechanism_workflow_compile",
+                "glioma_mechanism_operating_cycle",
+                "glioma_federated_benchmark"
+            ],
+            "guarantees": [
+                "study, site, model-system, modality, replication, and transport coverage remain explicit",
+                "only aggregate workflow metadata crosses the multi-study boundary; raw data stay local to lanes",
+                "lane-local prerequisites, cycles, budget, wave, and task limits are enforced before dispatch",
+                "the route performs no assay, instrument execution, raw-data movement, federation side effect, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma multi-study mechanism workflow: {error}"))
     }
 
     /// Bridge mechanism prediction/observation residuals across model systems and expose the
@@ -55164,6 +55198,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_mechanism_multi_fidelity_control",
                 "glioma_mechanism_feedback_replan",
                 "glioma_mechanism_workflow_compile",
+                "glioma_mechanism_multi_study_workflow_compile",
                 "glioma_mechanism_fidelity_bridge",
                 "glioma_mechanism_robustness_stress",
                 "glioma_mechanism_state_filter",
@@ -66152,6 +66187,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "MechanismWorkflowRequest1@1 with a validated feedback replan, complete typed action catalog, local artifacts, dependencies, execution routes, budget, wave/action limits, risk threshold, and approval policy."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_mechanism_multi_study_workflow_compile",
+        "description": "Join site-local preclinical glioma mechanism workflows into an aggregate-only multimodal, multi-study portfolio. Computes study/site/modality coverage, replication completeness, transport score, deterministic task topology and waves, and explicit blocked/deferred states while retaining local raw-data boundaries and avoiding clinical decisions.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "MechanismMultiStudyWorkflowRequest1@1 with validated local lanes, required modalities, study/site replication floors, transport threshold, budget, task/wave bounds, and federation mode."}
             },
             "required": ["request"]
         }

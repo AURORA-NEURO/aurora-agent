@@ -92,8 +92,8 @@ silently bypass an earlier wave's omission, provenance, safety, or replay gate.
   review, and P12 transport benchmarks.
 - Promotion gate: rival mechanisms remain visible, uncertainty is calibrated, interventions are
   preclinical research actions only, and counterfactual claims are not treated as observations.
-- Current implementation: 26/32 slots. Next wave: dependency-closed mechanism workflow
-  compilation and execution handoff.
+- Current implementation: 27/32 slots. Next wave: multimodal multi-study mechanism portfolio
+  compilation and cross-site execution handoff.
 
 ### P06 — `p06_experiment_design`
 

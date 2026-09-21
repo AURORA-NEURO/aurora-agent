@@ -24,6 +24,7 @@ pub mod invariance;
 pub mod mechanism_dynamics;
 pub mod mechanism_workflow;
 pub mod multi_fidelity_control;
+pub mod multi_study_workflow;
 pub mod operating_cycle;
 pub mod pathway_activity;
 pub mod robust_portfolio;
@@ -157,6 +158,12 @@ pub use multi_fidelity_control::{
     plan_glioma_mechanism_multi_fidelity_control, MultiFidelityControlActionScore,
     MultiFidelityControlCandidate, MultiFidelityControlDecision, MultiFidelityControlDisposition,
     MultiFidelityControlError, MultiFidelityControlPlan, MultiFidelityControlRequest,
+};
+pub use multi_study_workflow::{
+    compile_glioma_multi_study_mechanism_workflow, MechanismFederationMode,
+    MechanismMultiStudyActionGroup, MechanismMultiStudyTask, MechanismMultiStudyTaskStatus,
+    MechanismMultiStudyWorkflowDisposition, MechanismMultiStudyWorkflowError,
+    MechanismMultiStudyWorkflowPlan, MechanismMultiStudyWorkflowRequest, MechanismStudyLane,
 };
 pub use operating_cycle::{
     execute_glioma_mechanism_operating_cycle, MechanismOperatingCycle,
