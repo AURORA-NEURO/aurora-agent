@@ -19,6 +19,7 @@ pub mod multimodal_workbench;
 pub mod novelty_adjudication;
 pub mod novelty_radar;
 pub mod operating_cycle;
+pub mod outcome_reconciliation;
 pub mod priority;
 pub mod prospective_triage;
 pub mod researcher_workbench;
@@ -95,6 +96,12 @@ pub use novelty_adjudication::{
     adjudicate_glioma_evidence_novelty, NoveltyAdjudication, NoveltyAdjudicationDisposition,
     NoveltyAdjudicationError, NoveltyAdjudicationItem, NoveltyAdjudicationRecord,
     NoveltyAdjudicationRequest, NoveltyAdjudicationVerdict,
+};
+pub use outcome_reconciliation::{
+    reconcile_glioma_multisite_outcomes, MultiSiteOutcomeAction, MultiSiteOutcomeClaim,
+    MultiSiteOutcomeDisposition, MultiSiteOutcomeObservation, MultiSiteOutcomeOmission,
+    MultiSiteOutcomeReconciliation, MultiSiteOutcomeReconciliationError,
+    MultiSiteOutcomeReconciliationRequest, MultiSiteOutcomeSiteSummary, MultiSiteOutcomeVerdict,
 };
 
 pub use acquisition::{

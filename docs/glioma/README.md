@@ -32,6 +32,8 @@ crates/research/src/glioma/
                                              P01 cross-study multimodal evidence panels with coverage, disagreement, representative selection, and gap routing
   programs/p01_evidence_surveillance/verification_gate.rs
                                              P01 local evidence verification gate for support, source independence, coverage, freshness, contradictions, and negative review
+  programs/p01_evidence_surveillance/outcome_reconciliation.rs
+                                             P01 aggregate-only multi-site outcome reconciliation with quorum, modality/model coverage, heterogeneity, influence, and routing gates
   programs/p01_evidence_surveillance/federated_acquisition_policy.rs
                                              P01 consortium-aware site assignment with independence, quorum, budget, privacy, and local-raw-data gates
   programs/p01_evidence_surveillance/evidence_frontier_join.rs
@@ -728,6 +730,13 @@ before P02 knowledge compilation. It requires configurable support counts, indep
 families, multimodal/model coverage, quality/reproducibility floors, freshness, and explicit
 negative/contradiction policy. Failed gates produce typed blocking findings and remediation routes;
 they cannot be converted into confidence by the autonomous engine.
+The multi-site outcome reconciler (`glioma_multisite_outcome_reconciliation`) is the consortium
+boundary after local study execution. It accepts only typed aggregate site summaries, equalizes
+site influence, computes support/negative/contradiction fractions, heterogeneity, leave-one-site-
+out influence, quorum, and modality/model coverage, then routes consistent support, preserved
+negative results, contradictions, replication work, or missing coverage. Raw measurements remain
+site-local, and any eligible contradiction is routed for resolution instead of being diluted by
+majority support.
 P09 now includes a bounded robustness suite (`assess_glioma_robustness`) that
 recomputes the declared effect under leave-one-batch-out and optional leave-one-row-out omissions;
 unresolved subsets, fragile effects, and null results remain explicit. Provider-specific execution

@@ -618,7 +618,8 @@ use bioprism_research::{
     preflight_glioma_instrument, prioritize_glioma_evidence, prioritize_knowledge_frontier,
     promote_glioma_closed_loop_frontier, propagate_glioma_mechanism_graph, qualify_evidence,
     query_glioma_evidence_workbench, query_glioma_multimodal_researcher_workbench,
-    rank_glioma_evidence_novelty, reconcile_glioma_claim_evidence, register_glioma_spatial_samples,
+    rank_glioma_evidence_novelty, reconcile_glioma_claim_evidence,
+    reconcile_glioma_multisite_outcomes, register_glioma_spatial_samples,
     replan_glioma_mechanism_feedback, replay_glioma_decision_context, revise_glioma_beliefs,
     route_glioma_multimodal_evidence_gaps, schedule_glioma_computation_placement,
     schedule_glioma_frontier_campaign, schedule_glioma_instrument_fleet, select_glioma_actions,
@@ -740,22 +741,22 @@ use bioprism_research::{
     MechanismWorkflowRequest, MediationObservation, MediationRequest, MetaAnalysisRequest,
     MissingnessAuditRequest, ModalityPortfolioRequest, ModalityVector,
     MultiFidelityCampaignRequest, MultiFidelityControlRequest, MultiFidelityOptimizationRequest,
-    MultiStudyKnowledgeRequest, MultichannelConcordanceRequest, MultichannelInput,
-    MultimodalDecisionGateRequest, MultimodalExecutionMode, MultimodalGapRouterRequest,
-    MultimodalIngestionCampaignRequest, MultimodalIngestionManifestRequest,
-    MultimodalKnowledgeProtocolRequest, MultimodalMechanismCampaignRequest, MultimodalObservation,
-    MultimodalReadinessRequest, MultimodalRequest, MultimodalResearchObjectRequest,
-    MultimodalWorkbenchRequest, MultimodalWorkflowRequest, NoveltyAdjudicationRequest,
-    PathwayActivityDefinition, PathwayActivityObservation, PathwayActivityRequest,
-    PowerArmObservation, PowerReestimationRequest, PowerStressSurfaceRequest,
-    ProspectiveBeliefCalibrationRequest, ProspectiveKnowledgeRequest, ProspectiveQualityRequest,
-    ProtocolBranchOptimizationRequest, ProtocolCompensationRequest, ProtocolEvidenceFusionRequest,
-    ProtocolEvidenceSurfaceRequest, ProtocolExecutionRequest, ProtocolScenarioEnsembleRequest,
-    ProtocolSimulationRequest, ProtocolTransportGateRequest, QualityAdaptiveCampaignRequest,
-    QualityExecutionMode, QualityExecutionRequest, QualityRecoveryRequest,
-    QualityRemediationRequest, QualityRootCauseRequest, QualityScheduleRequest,
-    QualityTransportRequest, ReleaseExecutionMode, ReleaseGateRequest,
-    ReliabilityCalibrationRequest, ReplayCampaign, ReplayCampaignRequest,
+    MultiSiteOutcomeReconciliationRequest, MultiStudyKnowledgeRequest,
+    MultichannelConcordanceRequest, MultichannelInput, MultimodalDecisionGateRequest,
+    MultimodalExecutionMode, MultimodalGapRouterRequest, MultimodalIngestionCampaignRequest,
+    MultimodalIngestionManifestRequest, MultimodalKnowledgeProtocolRequest,
+    MultimodalMechanismCampaignRequest, MultimodalObservation, MultimodalReadinessRequest,
+    MultimodalRequest, MultimodalResearchObjectRequest, MultimodalWorkbenchRequest,
+    MultimodalWorkflowRequest, NoveltyAdjudicationRequest, PathwayActivityDefinition,
+    PathwayActivityObservation, PathwayActivityRequest, PowerArmObservation,
+    PowerReestimationRequest, PowerStressSurfaceRequest, ProspectiveBeliefCalibrationRequest,
+    ProspectiveKnowledgeRequest, ProspectiveQualityRequest, ProtocolBranchOptimizationRequest,
+    ProtocolCompensationRequest, ProtocolEvidenceFusionRequest, ProtocolEvidenceSurfaceRequest,
+    ProtocolExecutionRequest, ProtocolScenarioEnsembleRequest, ProtocolSimulationRequest,
+    ProtocolTransportGateRequest, QualityAdaptiveCampaignRequest, QualityExecutionMode,
+    QualityExecutionRequest, QualityRecoveryRequest, QualityRemediationRequest,
+    QualityRootCauseRequest, QualityScheduleRequest, QualityTransportRequest, ReleaseExecutionMode,
+    ReleaseGateRequest, ReliabilityCalibrationRequest, ReplayCampaign, ReplayCampaignRequest,
     ReplicationClosureCampaignRequest, ReplicationClosureExecutionRequest,
     ReplicationClosureFrontierRequest, ReplicationContinuationRequest, ReplicationObservation,
     ReplicationPlanRequest, ReplicationProtocolCompileRequest, ReplicationRequest,
@@ -2545,6 +2546,9 @@ impl Server {
             }
             "glioma_evidence_verification_gate" => {
                 self.glioma_evidence_verification_gate(&arguments)
+            }
+            "glioma_multisite_outcome_reconciliation" => {
+                self.glioma_multisite_outcome_reconciliation(&arguments)
             }
             "glioma_federated_evidence_acquisition_policy" => {
                 self.glioma_federated_evidence_acquisition_policy(&arguments)
@@ -9943,6 +9947,36 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma evidence verification report: {error}"))
+    }
+
+    /// Reconcile typed aggregate outcomes from independent preclinical glioma sites. Raw
+    /// measurements remain local; this surface returns only bounded summaries and explicit
+    /// support, negative, contradiction, heterogeneity, and coverage routes.
+    fn glioma_multisite_outcome_reconciliation(&self, arguments: &Value) -> Result<Value, String> {
+        let request: MultiSiteOutcomeReconciliationRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_multisite_outcome_reconciliation requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid multi-site outcome reconciliation request: {error}")
+            })?;
+        let reconciliation = reconcile_glioma_multisite_outcomes(&request)
+            .map_err(|error| format!("multi-site outcome reconciliation refused: {error}"))?;
+        serde_json::to_value(json!({
+            "reconciliation": reconciliation,
+            "next_routes": [
+                "glioma_knowledge_protocol_gateway",
+                "glioma_federated_evidence_acquisition_policy",
+                "plan_glioma_evidence_contradiction_cut",
+                "glioma_multimodal_evidence_gap_router"
+            ],
+            "guarantees": [
+                "only typed aggregate preclinical site outcomes cross the boundary; raw measurements remain local",
+                "site quorum, independent-site diversity, modality/model coverage, heterogeneity, and leave-one-site-out influence are explicit",
+                "negative, contradictory, heterogeneous, and underpowered outcomes remain visible and cannot be promoted as confident conclusions"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode multi-site outcome reconciliation: {error}"))
     }
 
     /// Compile a consortium-aware, site-local acquisition policy for unresolved preclinical
@@ -55332,6 +55366,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_evidence_researcher_workbench",
                 "glioma_multimodal_researcher_workbench",
                 "glioma_evidence_verification_gate",
+                "glioma_multisite_outcome_reconciliation",
                 "glioma_federated_evidence_acquisition_policy",
                 "glioma_evidence_frontier_join",
                 "glioma_multimodal_evidence_gap_router",
@@ -65555,6 +65590,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "EvidenceVerificationRequest1@1 with claim/scope terms, local EvidenceRecord1@1 values, quality/reproducibility/freshness floors, coverage/source quorum, and contradiction/negative policies."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_multisite_outcome_reconciliation",
+        "description": "Reconcile aggregate-only typed preclinical glioma outcomes across independent sites with explicit site quorum, independent-site diversity, modality/model coverage, heterogeneity, leave-one-site-out influence, and deterministic routing for support, negative, contradiction, replication, or coverage work. Raw measurements remain local and no clinical decision is made.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "MultiSiteOutcomeReconciliationRequest1@1 with aggregate site observations, claim/scope filters, required or minimum modality/model coverage, quorum and heterogeneity thresholds, freshness/quality floors, and bounded claim output."}
             },
             "required": ["request"]
         }
