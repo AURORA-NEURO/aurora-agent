@@ -518,15 +518,15 @@ use bioprism_research::{
     attribute_glioma_multimodal_quality_root_cause, bridge_glioma_knowledge_actions,
     build_research_object_manifest, calibrate_glioma_decision_value, calibrate_glioma_evidence,
     calibrate_glioma_mechanisms, calibrate_glioma_multimodal_quality_transport,
-    calibrate_glioma_multimodal_reliability, certify_decision_omissions, cluster_glioma_evidence,
-    compile_decision_action_graph, compile_decision_context,
-    compile_federated_glioma_execution_handoff, compile_glioma_computation_interpretation_frontier,
-    compile_glioma_computation_workflow, compile_glioma_knowledge_actions,
-    compile_glioma_knowledge_closure, compile_glioma_knowledge_consistency,
-    compile_glioma_knowledge_gaps, compile_glioma_mechanism_consensus,
-    compile_glioma_mechanism_validation_protocol, compile_glioma_protocol_evidence_surface,
-    compile_glioma_replication_protocol, compile_local_research_workflow,
-    compile_mechanism_action_plan, compile_multi_study_knowledge,
+    calibrate_glioma_multimodal_reliability, certify_decision_omissions,
+    close_glioma_claims_to_experiments, cluster_glioma_evidence, compile_decision_action_graph,
+    compile_decision_context, compile_federated_glioma_execution_handoff,
+    compile_glioma_computation_interpretation_frontier, compile_glioma_computation_workflow,
+    compile_glioma_knowledge_actions, compile_glioma_knowledge_closure,
+    compile_glioma_knowledge_consistency, compile_glioma_knowledge_gaps,
+    compile_glioma_mechanism_consensus, compile_glioma_mechanism_validation_protocol,
+    compile_glioma_protocol_evidence_surface, compile_glioma_replication_protocol,
+    compile_local_research_workflow, compile_mechanism_action_plan, compile_multi_study_knowledge,
     compile_multimodal_knowledge_workflow, compile_typed_knowledge, compose_knowledge_graph,
     design_glioma_contrast_panel, design_glioma_robust_experiment, design_preclinical_experiment,
     detect_glioma_evidence_temporal_shifts, detect_glioma_knowledge_drift, discriminate_mechanisms,
@@ -629,10 +629,11 @@ use bioprism_research::{
     BayesianMechanismHypothesis, BayesianMechanismUpdateRequest, BeliefConflict,
     BeliefRevisionRequest, BlockedRandomizationRequest, CalibratedMechanismCampaignRequest,
     CalibrationRequest, CalibrationRun, CampaignAction, CampaignMechanism, CampaignObservation,
-    CarryoverSequenceRequest, CausalContrastRequest, ClonalEvolutionGraph, ClonalEvolutionRequest,
-    CloneContinuationCandidate, CloneContinuationRequest, ClonePanelObservation,
-    ClonePanelOutcomeAnalysis, ClonePanelOutcomeRequest, ClonePerturbationCandidate,
-    ClonePerturbationPanel, ClonePerturbationPanelRequest, CloneProfile, ClosedLoopCampaignRequest,
+    CarryoverSequenceRequest, CausalContrastRequest, ClaimExperimentClosureRequest,
+    ClonalEvolutionGraph, ClonalEvolutionRequest, CloneContinuationCandidate,
+    CloneContinuationRequest, ClonePanelObservation, ClonePanelOutcomeAnalysis,
+    ClonePanelOutcomeRequest, ClonePerturbationCandidate, ClonePerturbationPanel,
+    ClonePerturbationPanelRequest, CloneProfile, ClosedLoopCampaignRequest,
     ClosureInterpretationRequest, CombinationObservation, CombinationSynergyRequest,
     ComputationCandidate, ComputationExecutionMode, ComputationExecutionRequest,
     ComputationInterpretationEvidenceGateRequest, ComputationInterpretationFrontierRequest,
@@ -2553,6 +2554,7 @@ impl Server {
             "glioma_knowledge_action_outcome_assimilation" => {
                 self.glioma_knowledge_action_outcome_assimilation(&arguments)
             }
+            "glioma_claim_experiment_closure" => self.glioma_claim_experiment_closure(&arguments),
             "glioma_multimodal_knowledge_workflow" => {
                 self.glioma_multimodal_knowledge_workflow(&arguments)
             }
@@ -10573,6 +10575,36 @@ impl Server {
         .map_err(|error| {
             format!("cannot encode glioma knowledge action outcome assimilation: {error}")
         })
+    }
+
+    /// Bind action outcomes and local evidence back to typed claims and report whether the
+    /// research question closed, remained partial, contradicted, negative, or blocked.
+    fn glioma_claim_experiment_closure(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ClaimExperimentClosureRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_claim_experiment_closure requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma claim-experiment closure request: {error}"))?;
+        let output = close_glioma_claims_to_experiments(&request)
+            .map_err(|error| format!("glioma claim-experiment closure refused: {error}"))?;
+        serde_json::to_value(json!({
+            "closure": output,
+            "next_routes": [
+                "glioma_knowledge_frontier",
+                "glioma_knowledge_gap_compile",
+                "glioma_knowledge_action_compile",
+                "glioma_knowledge_synthesis_operating_cycle"
+            ],
+            "guarantees": [
+                "completed, failed, uncertain, negative, and contradictory outcomes remain distinguishable",
+                "modality, model-system, and independent-artifact coverage are quantified before closure",
+                "missing evidence and orphan actions are explicit next-work signals",
+                "the route performs no retrieval, raw-data movement, instrument execution, causal inference, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma claim-experiment closure: {error}"))
     }
 
     /// Synchronize the local action DAG against study-level multimodal readiness and choose a
@@ -54411,6 +54443,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_multimodal_knowledge_workflow",
                 "glioma_workflow_recovery",
                 "glioma_knowledge_action_outcome_assimilation",
+                "glioma_claim_experiment_closure",
                 "glioma_research_workflow_admission",
                 "glioma_federated_knowledge",
                 "glioma_belief_revision",
@@ -64857,6 +64890,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "KnowledgeActionOutcomeAssimilationRequest1@1 with objective/plan/selection digests, prior and incoming action snapshots, evidence records, bounds, and failed-result retention policy."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_claim_experiment_closure",
+        "description": "Bind completed, failed, uncertain, negative, and contradictory action outcomes to typed preclinical glioma claims. Quantifies evidence support, contradiction, modality/model coverage, independent artifacts, omissions, and next frontier actions so the autonomous research engine can tell whether a study question actually closed. It never infers causality, moves raw data, executes instruments, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ClaimExperimentClosureRequest1@1 with TypedKnowledge1@1, ActionOutcomeSnapshot1@1 rows, local EvidenceRecord1@1 rows, coverage requirements, score threshold, and completion policy."}
             },
             "required": ["request"]
         }

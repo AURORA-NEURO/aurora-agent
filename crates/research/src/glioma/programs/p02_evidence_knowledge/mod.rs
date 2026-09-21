@@ -6,6 +6,7 @@ pub mod action_outcome_assimilation;
 pub mod autonomous_cycle;
 pub mod belief_revision;
 pub mod campaign;
+pub mod claim_experiment_closure;
 pub mod claim_frontier;
 pub mod closure;
 pub mod composition;
@@ -79,6 +80,11 @@ pub use action_outcome_assimilation::{
     ActionOutcomeAssimilationItem, ActionOutcomeSnapshot, KnowledgeActionOutcomeAssimilation,
     KnowledgeActionOutcomeAssimilationRequest, OutcomeAssimilationDecision,
     OutcomeAssimilationDisposition,
+};
+pub use claim_experiment_closure::{
+    close_glioma_claims_to_experiments, ClaimExperimentClosure, ClaimExperimentClosureDisposition,
+    ClaimExperimentClosureError, ClaimExperimentClosureRequest, ClaimExperimentDisposition,
+    ClaimExperimentResult,
 };
 pub use claim_frontier::{
     prioritize_knowledge_frontier, FrontierActionKind, KnowledgeFrontier,
