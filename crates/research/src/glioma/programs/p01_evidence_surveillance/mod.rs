@@ -14,6 +14,7 @@ pub mod evidence_knowledge_bridge;
 pub mod evidence_stream;
 pub mod federated_acquisition_policy;
 pub mod federated_execution_handoff;
+pub mod federated_outcome_transport;
 pub mod federated_shift;
 pub mod long_horizon_calibration;
 pub mod multimodal_gap_router;
@@ -87,6 +88,12 @@ pub use federated_execution_handoff::{
     compile_federated_glioma_execution_handoff, FederatedExecutionHandoff,
     FederatedExecutionHandoffError, FederatedExecutionHandoffReport,
     FederatedExecutionHandoffRequest, FederatedHandoffApproval, HandoffDisposition, HandoffEffect,
+};
+pub use federated_outcome_transport::{
+    compile_glioma_federated_outcome_transport, FederatedOutcomeBundle,
+    FederatedOutcomeBundleDecision, FederatedOutcomeBundleDecisionRecord,
+    FederatedOutcomeTransportDisposition, FederatedOutcomeTransportError,
+    FederatedOutcomeTransportReport, FederatedOutcomeTransportRequest,
 };
 pub use long_horizon_calibration::{
     calibrate_glioma_evidence_long_horizon, LongHorizonCalibrationAction,

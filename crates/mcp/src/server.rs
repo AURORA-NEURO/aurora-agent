@@ -526,13 +526,14 @@ use bioprism_research::{
     certify_decision_omissions, close_glioma_claims_to_experiments, cluster_glioma_evidence,
     compile_decision_action_graph, compile_decision_context,
     compile_federated_glioma_execution_handoff, compile_glioma_computation_interpretation_frontier,
-    compile_glioma_computation_workflow, compile_glioma_knowledge_actions,
-    compile_glioma_knowledge_closure, compile_glioma_knowledge_consistency,
-    compile_glioma_knowledge_gaps, compile_glioma_mechanism_consensus,
-    compile_glioma_mechanism_validation_protocol, compile_glioma_mechanism_workflow,
-    compile_glioma_multi_study_mechanism_workflow, compile_glioma_multimodal_research_object,
-    compile_glioma_protocol_evidence_surface, compile_glioma_replication_protocol,
-    compile_local_research_workflow, compile_mechanism_action_plan, compile_multi_study_knowledge,
+    compile_glioma_computation_workflow, compile_glioma_federated_outcome_transport,
+    compile_glioma_knowledge_actions, compile_glioma_knowledge_closure,
+    compile_glioma_knowledge_consistency, compile_glioma_knowledge_gaps,
+    compile_glioma_mechanism_consensus, compile_glioma_mechanism_validation_protocol,
+    compile_glioma_mechanism_workflow, compile_glioma_multi_study_mechanism_workflow,
+    compile_glioma_multimodal_research_object, compile_glioma_protocol_evidence_surface,
+    compile_glioma_replication_protocol, compile_local_research_workflow,
+    compile_mechanism_action_plan, compile_multi_study_knowledge,
     compile_multimodal_knowledge_workflow, compile_typed_knowledge, compose_knowledge_graph,
     control_glioma_mechanism_prospective_batch, design_glioma_contrast_panel,
     design_glioma_robust_experiment, design_preclinical_experiment,
@@ -696,16 +697,16 @@ use bioprism_research::{
     FederatedInstrumentConsensusRequest, FederatedInstrumentSite, FederatedInterpretationRequest,
     FederatedKnowledgeRequest, FederatedKnowledgeSiteClaim, FederatedMechanismSite,
     FederatedMechanismTransportCampaignRequest, FederatedMechanismTransportRequest,
-    FidelityCandidate, FidelityObservation, FrontierCampaignRequest, GliomaActionCandidate,
-    GliomaAdaptiveWorkflowSchedulerRequest, GliomaAutonomousCampaignRequest,
-    GliomaAutonomousResearchEngineRequest, GliomaCausalClaimAdjudicationRequest,
-    GliomaComputationCampaignRequest, GliomaComputationOperatingCycleRequest,
-    GliomaComputationWorkflowRequest, GliomaEvidenceCampaignRequest,
-    GliomaEvidenceGatedResearchRequest, GliomaEvidenceOperatingCycleRequest,
-    GliomaExperimentFrontierRequest, GliomaIntentMissionRequest,
-    GliomaInterpretationOperatingCycleRequest, GliomaMechanismAutopilotRequest,
-    GliomaMechanismDiscoveryRequest, GliomaMissionRecoveryRequest, GliomaMissionRequest,
-    GliomaMultimodalMissionRequest, GliomaMultimodalOperatingCycleRequest,
+    FederatedOutcomeTransportRequest, FidelityCandidate, FidelityObservation,
+    FrontierCampaignRequest, GliomaActionCandidate, GliomaAdaptiveWorkflowSchedulerRequest,
+    GliomaAutonomousCampaignRequest, GliomaAutonomousResearchEngineRequest,
+    GliomaCausalClaimAdjudicationRequest, GliomaComputationCampaignRequest,
+    GliomaComputationOperatingCycleRequest, GliomaComputationWorkflowRequest,
+    GliomaEvidenceCampaignRequest, GliomaEvidenceGatedResearchRequest,
+    GliomaEvidenceOperatingCycleRequest, GliomaExperimentFrontierRequest,
+    GliomaIntentMissionRequest, GliomaInterpretationOperatingCycleRequest,
+    GliomaMechanismAutopilotRequest, GliomaMechanismDiscoveryRequest, GliomaMissionRecoveryRequest,
+    GliomaMissionRequest, GliomaMultimodalMissionRequest, GliomaMultimodalOperatingCycleRequest,
     GliomaMultimodalSensitivityRequest, GliomaProgramSchedulerRequest,
     GliomaReleaseOperatingCycleRequest, GliomaReplicationCampaignRequest,
     GliomaResearchAutopilotRequest, GliomaResearchDirectorRequest, GliomaResearchIntent,
@@ -2555,6 +2556,9 @@ impl Server {
             "glioma_evidence_knowledge_bridge" => self.glioma_evidence_knowledge_bridge(&arguments),
             "glioma_long_horizon_evidence_calibration" => {
                 self.glioma_long_horizon_evidence_calibration(&arguments)
+            }
+            "glioma_federated_outcome_transport" => {
+                self.glioma_federated_outcome_transport(&arguments)
             }
             "glioma_federated_evidence_acquisition_policy" => {
                 self.glioma_federated_evidence_acquisition_policy(&arguments)
@@ -10040,6 +10044,35 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode long-horizon calibration analysis: {error}"))
+    }
+
+    /// Compile the aggregate-only federation boundary for independent preclinical glioma
+    /// outcomes. The result is a deterministic export plan; it does not copy raw measurements or
+    /// make a biological, clinical, or causal decision.
+    fn glioma_federated_outcome_transport(&self, arguments: &Value) -> Result<Value, String> {
+        let request: FederatedOutcomeTransportRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_federated_outcome_transport requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid federated outcome transport request: {error}"))?;
+        let report = compile_glioma_federated_outcome_transport(&request)
+            .map_err(|error| format!("federated outcome transport refused: {error}"))?;
+        serde_json::to_value(json!({
+            "transport": report,
+            "next_routes": [
+                "glioma_multisite_outcome_reconciliation",
+                "glioma_federated_evidence_acquisition_policy",
+                "glioma_evidence_prospective_triage",
+                "glioma_evidence_knowledge_bridge"
+            ],
+            "guarantees": [
+                "only aggregate, de-identified, content-addressed preclinical outcomes may cross the federation boundary",
+                "raw measurements, specimens, human data, direct identifiers, clinical decisions, and instrument commands remain local or are denied",
+                "site and independence quorum, claim/scope identity, freshness, quality, capability, revocation, and attestation checks are explicit",
+                "negative, contradictory, unknown, stale, deferred, and under-quorum outcomes remain visible and never become confident biological conclusions"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode federated outcome transport report: {error}"))
     }
 
     /// Compile a consortium-aware, site-local acquisition policy for unresolved preclinical
@@ -55432,6 +55465,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_multisite_outcome_reconciliation",
                 "glioma_evidence_knowledge_bridge",
                 "glioma_long_horizon_evidence_calibration",
+                "glioma_federated_outcome_transport",
                 "glioma_federated_evidence_acquisition_policy",
                 "glioma_evidence_frontier_join",
                 "glioma_multimodal_evidence_gap_router",
@@ -65688,6 +65722,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "LongHorizonCalibrationRequest1@1 with epoch-stamped local prediction/outcome observations, window/floor policy, calibration and drift thresholds, and independent-group requirements."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_federated_outcome_transport",
+        "description": "Compile a deterministic, aggregate-only federation export for independent preclinical glioma outcome summaries. Enforces consortium and claim/scope identity, purpose and capability version, attestation and revocation checks, freshness, quality, reproducibility, de-identification, raw-data locality, modality/model coverage, and site/independence quorum. Negative, contradictory, unknown, stale, and under-quorum outcomes remain explicit; no raw data moves and no biological or clinical decision is made.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "FederatedOutcomeTransportRequest1@1 with aggregate site bundles, consortium claim/scope contract, attestation hashes, capability/purpose policy, quality and freshness floors, quorum requirements, and revocation lists."}
             },
             "required": ["request"]
         }

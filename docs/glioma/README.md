@@ -38,6 +38,8 @@ crates/research/src/glioma/
                                              P01 verification-to-P02 typed-knowledge handoff with claim alignment, omission accounting, and promotion gates
   programs/p01_evidence_surveillance/long_horizon_calibration.rs
                                              P01 epoch-window calibration, reliability drift, independent-group coverage, and review/acquisition routing
+  programs/p01_evidence_surveillance/federated_outcome_transport.rs
+                                             P01 aggregate-only outcome export with attestation, revocation, freshness, locality, and independent-quorum gates
   programs/p01_evidence_surveillance/federated_acquisition_policy.rs
                                              P01 consortium-aware site assignment with independence, quorum, budget, privacy, and local-raw-data gates
   programs/p01_evidence_surveillance/evidence_frontier_join.rs
@@ -753,6 +755,12 @@ Brier error, reliability, independent-group coverage, and recent-versus-baseline
 window—including empty and underpowered windows. Degrading families route to recalibration review,
 volatile families remain visible, and missing windows route to bounded acquisition rather than
 being interpolated into a confident trend.
+The federated outcome transport (`glioma_federated_outcome_transport`) is the production boundary
+for moving consortium summaries after local execution. It checks claim/scope identity, purpose,
+capability version, content attestations, revocation, freshness, quality, reproducibility, raw-data
+locality, de-identification, and independent-site quorum. It exports only typed aggregate summaries;
+negative, contradictory, unknown, stale, and under-quorum outcomes remain explicit and route back to
+acquisition, triage, reconciliation, or verification rather than being promoted as biology.
 P09 now includes a bounded robustness suite (`assess_glioma_robustness`) that
 recomputes the declared effect under leave-one-batch-out and optional leave-one-row-out omissions;
 unresolved subsets, fragile effects, and null results remain explicit. Provider-specific execution
