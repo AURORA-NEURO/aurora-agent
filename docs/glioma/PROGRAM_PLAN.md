@@ -78,7 +78,7 @@ silently bypass an earlier wave's omission, provenance, safety, or replay gate.
   P08 instrument preflight.
 - Promotion gate: every action has typed prerequisites, value/risk budget, unresolved context,
   and a falsifiable stop condition.
-- Current implementation: 16/32 slots. Next wave: branch evidence assimilation across richer
+- Current implementation: 17/32 slots. Next wave: branch evidence assimilation across richer
   outcome types and decision-context replay across study epochs.
 
 ### P05 — `p05_mechanism_exploration`
