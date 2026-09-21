@@ -14,6 +14,7 @@ pub mod discrimination;
 pub mod discrimination_campaign;
 pub mod ensemble_counterfactual;
 pub mod evidence_assimilation;
+pub mod fidelity_bridge;
 pub mod graph_propagation;
 pub mod identifiability;
 pub mod intervention_value;
@@ -96,6 +97,11 @@ pub use evidence_assimilation::{
     MechanismEvidenceAssimilation, MechanismEvidenceAssimilationDisposition,
     MechanismEvidenceAssimilationError, MechanismEvidenceAssimilationRequest,
     MechanismEvidenceSnapshot,
+};
+pub use fidelity_bridge::{
+    bridge_glioma_mechanism_fidelity, MechanismFidelityBridge, MechanismFidelityBridgeDisposition,
+    MechanismFidelityBridgeError, MechanismFidelityBridgeRequest, MechanismFidelityObservation,
+    MechanismFidelityRecord, MechanismFidelityResidual,
 };
 pub use graph_propagation::{
     propagate_glioma_mechanism_graph, MechanismGraphDisposition, MechanismGraphEdge,

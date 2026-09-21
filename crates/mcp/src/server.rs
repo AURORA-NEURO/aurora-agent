@@ -516,9 +516,10 @@ use bioprism_research::{
     assess_glioma_robustness, assess_glioma_validation_batch, assess_replication,
     assimilate_glioma_acquisition_feedback, assimilate_glioma_knowledge_action_outcomes,
     assimilate_glioma_mechanism_evidence, attribute_glioma_multimodal_quality_root_cause,
-    bridge_glioma_knowledge_actions, build_glioma_multimodal_ingestion_manifest,
-    build_research_object_manifest, calibrate_glioma_beliefs_prospectively,
-    calibrate_glioma_decision_value, calibrate_glioma_evidence, calibrate_glioma_mechanisms,
+    bridge_glioma_knowledge_actions, bridge_glioma_mechanism_fidelity,
+    build_glioma_multimodal_ingestion_manifest, build_research_object_manifest,
+    calibrate_glioma_beliefs_prospectively, calibrate_glioma_decision_value,
+    calibrate_glioma_evidence, calibrate_glioma_mechanisms,
     calibrate_glioma_multimodal_quality_transport, calibrate_glioma_multimodal_reliability,
     certify_decision_omissions, close_glioma_claims_to_experiments, cluster_glioma_evidence,
     compile_decision_action_graph, compile_decision_context,
@@ -715,9 +716,9 @@ use bioprism_research::{
     MechanismDiscrimination, MechanismDiscriminationCampaignRequest,
     MechanismDiscriminationRequest, MechanismDiscriminatorAction, MechanismDynamicsEdge,
     MechanismDynamicsIntervention, MechanismDynamicsNode, MechanismDynamicsRequest,
-    MechanismEvidenceAssimilationRequest, MechanismFeatureObservation, MechanismGraphEdge,
-    MechanismGraphNode, MechanismGraphRequest, MechanismHypothesis,
-    MechanismIdentifiabilityRequest, MechanismInterventionCandidate,
+    MechanismEvidenceAssimilationRequest, MechanismFeatureObservation,
+    MechanismFidelityBridgeRequest, MechanismGraphEdge, MechanismGraphNode, MechanismGraphRequest,
+    MechanismHypothesis, MechanismIdentifiabilityRequest, MechanismInterventionCandidate,
     MechanismInterventionValueRequest, MechanismInvarianceContext, MechanismInvarianceRequest,
     MechanismOperatingCycleRequest, MechanismRequest, MechanismSignature,
     MechanismStateFilterRequest, MechanismStateSmootherRequest,
@@ -2627,6 +2628,7 @@ impl Server {
             "glioma_mechanism_evidence_assimilation" => {
                 self.glioma_mechanism_evidence_assimilation(&arguments)
             }
+            "glioma_mechanism_fidelity_bridge" => self.glioma_mechanism_fidelity_bridge(&arguments),
             "glioma_mechanism_state_filter" => self.glioma_mechanism_state_filter(&arguments),
             "glioma_mechanism_state_smoother" => self.glioma_mechanism_state_smoother(&arguments),
             "glioma_mechanism_consensus" => self.glioma_mechanism_consensus(&arguments),
@@ -11974,6 +11976,36 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma mechanism evidence assimilation: {error}"))
+    }
+
+    /// Bridge mechanism prediction/observation residuals across model systems and expose the
+    /// lowest-transport mechanisms for the next discriminating workflow.
+    fn glioma_mechanism_fidelity_bridge(&self, arguments: &Value) -> Result<Value, String> {
+        let request: MechanismFidelityBridgeRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_mechanism_fidelity_bridge requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma mechanism fidelity request: {error}"))?;
+        let bridge = bridge_glioma_mechanism_fidelity(&request)
+            .map_err(|error| format!("glioma mechanism fidelity bridge refused: {error}"))?;
+        serde_json::to_value(json!({
+            "bridge": bridge,
+            "dispatch": "not_started",
+            "next_routes": [
+                "glioma_mechanism_discriminate",
+                "glioma_mechanism_action_plan",
+                "glioma_mechanism_operating_cycle"
+            ],
+            "guarantees": [
+                "cross-model transport is computed from typed prediction/observation residuals",
+                "target-model gaps and low-transport mechanisms remain explicit negative or uncertain states",
+                "all artifacts remain local, de-identified, and content-addressed",
+                "the route performs no assay, instrument execution, raw-data movement, federation, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma mechanism fidelity bridge: {error}"))
     }
 
     /// Filter a transition-aware longitudinal mechanism posterior from local preclinical
@@ -54765,6 +54797,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_mechanism_intervention_value",
                 "glioma_mechanism_bayesian_update",
                 "glioma_mechanism_evidence_assimilation",
+                "glioma_mechanism_fidelity_bridge",
                 "glioma_mechanism_state_filter",
                 "glioma_mechanism_state_smoother",
                 "glioma_mechanism_consensus",
@@ -65681,6 +65714,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "MechanismEvidenceAssimilationRequest1@1 with ordered MechanismEvidenceSnapshot1@1 updates, recency decay, posterior thresholds, snapshot bound, and negative-result policy."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_mechanism_fidelity_bridge",
+        "description": "Compare typed mechanism predictions with local observations across preclinical model systems and rank cross-model transportability. Reports residual compatibility, target-system coverage, confidence, negative evidence, and a low-transport frontier for the next discriminating workflow without treating transportability as causality.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "MechanismFidelityBridgeRequest1@1 with target model system, bounded prediction/observation rows, minimum model-system coverage, transport threshold, and local artifact references."}
             },
             "required": ["request"]
         }
