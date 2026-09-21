@@ -12,6 +12,7 @@ pub mod dropout_stress;
 pub mod evidence_fusion;
 pub mod graph_fusion;
 pub mod harmonization;
+pub mod ingestion_manifest;
 pub mod latent_factors;
 pub mod missingness_audit;
 pub mod modality_portfolio;
@@ -83,6 +84,11 @@ pub use harmonization::{
     harmonize_glioma_multimodal_batches, BatchHarmonizationDiagnostic, HarmonizationDisposition,
     HarmonizationError, HarmonizationRequest, HarmonizationVector, HarmonizedFeature,
     HarmonizedVector, MultimodalHarmonization,
+};
+pub use ingestion_manifest::{
+    build_glioma_multimodal_ingestion_manifest, IngestionManifestDisposition,
+    IngestionManifestError, MultimodalIngestionItem, MultimodalIngestionManifest,
+    MultimodalIngestionManifestRequest,
 };
 pub use latent_factors::{
     analyze_glioma_latent_factors, LatentFactorAnalysis, LatentFactorComponent,

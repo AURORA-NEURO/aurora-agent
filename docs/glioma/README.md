@@ -96,6 +96,8 @@ crates/research/src/glioma/
                                              P02 typed-knowledge synthesis, conflict revision, frontier ranking, and P01 handoff cycle
   programs/p03_multimodal_ingestion_qc/readiness_gate.rs
                                              P03 executed ingestion/QC to downstream research-surface admission
+  programs/p03_multimodal_ingestion_qc/ingestion_manifest.rs
+                                             P03 local, schema/version, duplicate, and modality/model admission before harmonization
   programs/p03_multimodal_ingestion_qc/operating_cycle.rs
                                              P03 ingestion/QC, surface admission, and operator-handoff cycle
   programs/p07_protocol_simulation/scientific_frontier.rs

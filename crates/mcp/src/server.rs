@@ -516,8 +516,9 @@ use bioprism_research::{
     assess_glioma_robustness, assess_glioma_validation_batch, assess_replication,
     assimilate_glioma_acquisition_feedback, assimilate_glioma_knowledge_action_outcomes,
     attribute_glioma_multimodal_quality_root_cause, bridge_glioma_knowledge_actions,
-    build_research_object_manifest, calibrate_glioma_beliefs_prospectively,
-    calibrate_glioma_decision_value, calibrate_glioma_evidence, calibrate_glioma_mechanisms,
+    build_glioma_multimodal_ingestion_manifest, build_research_object_manifest,
+    calibrate_glioma_beliefs_prospectively, calibrate_glioma_decision_value,
+    calibrate_glioma_evidence, calibrate_glioma_mechanisms,
     calibrate_glioma_multimodal_quality_transport, calibrate_glioma_multimodal_reliability,
     certify_decision_omissions, close_glioma_claims_to_experiments, cluster_glioma_evidence,
     compile_decision_action_graph, compile_decision_context,
@@ -725,17 +726,18 @@ use bioprism_research::{
     MultiFidelityCampaignRequest, MultiFidelityOptimizationRequest, MultiStudyKnowledgeRequest,
     MultichannelConcordanceRequest, MultichannelInput, MultimodalDecisionGateRequest,
     MultimodalExecutionMode, MultimodalGapRouterRequest, MultimodalIngestionCampaignRequest,
-    MultimodalKnowledgeProtocolRequest, MultimodalMechanismCampaignRequest, MultimodalObservation,
-    MultimodalReadinessRequest, MultimodalRequest, MultimodalWorkflowRequest,
-    NoveltyAdjudicationRequest, PathwayActivityDefinition, PathwayActivityObservation,
-    PathwayActivityRequest, PowerArmObservation, PowerReestimationRequest,
-    PowerStressSurfaceRequest, ProspectiveBeliefCalibrationRequest, ProspectiveKnowledgeRequest,
-    ProspectiveQualityRequest, ProtocolBranchOptimizationRequest, ProtocolCompensationRequest,
-    ProtocolEvidenceFusionRequest, ProtocolEvidenceSurfaceRequest, ProtocolExecutionRequest,
-    ProtocolScenarioEnsembleRequest, ProtocolSimulationRequest, ProtocolTransportGateRequest,
-    QualityAdaptiveCampaignRequest, QualityExecutionMode, QualityExecutionRequest,
-    QualityRecoveryRequest, QualityRemediationRequest, QualityRootCauseRequest,
-    QualityScheduleRequest, QualityTransportRequest, ReleaseExecutionMode, ReleaseGateRequest,
+    MultimodalIngestionManifestRequest, MultimodalKnowledgeProtocolRequest,
+    MultimodalMechanismCampaignRequest, MultimodalObservation, MultimodalReadinessRequest,
+    MultimodalRequest, MultimodalWorkflowRequest, NoveltyAdjudicationRequest,
+    PathwayActivityDefinition, PathwayActivityObservation, PathwayActivityRequest,
+    PowerArmObservation, PowerReestimationRequest, PowerStressSurfaceRequest,
+    ProspectiveBeliefCalibrationRequest, ProspectiveKnowledgeRequest, ProspectiveQualityRequest,
+    ProtocolBranchOptimizationRequest, ProtocolCompensationRequest, ProtocolEvidenceFusionRequest,
+    ProtocolEvidenceSurfaceRequest, ProtocolExecutionRequest, ProtocolScenarioEnsembleRequest,
+    ProtocolSimulationRequest, ProtocolTransportGateRequest, QualityAdaptiveCampaignRequest,
+    QualityExecutionMode, QualityExecutionRequest, QualityRecoveryRequest,
+    QualityRemediationRequest, QualityRootCauseRequest, QualityScheduleRequest,
+    QualityTransportRequest, ReleaseExecutionMode, ReleaseGateRequest,
     ReliabilityCalibrationRequest, ReplayCampaign, ReplayCampaignRequest,
     ReplicationClosureCampaignRequest, ReplicationClosureExecutionRequest,
     ReplicationClosureFrontierRequest, ReplicationContinuationRequest, ReplicationObservation,
@@ -2573,6 +2575,9 @@ impl Server {
             }
             "glioma_multimodal_knowledge_protocol_gateway" => {
                 self.glioma_multimodal_knowledge_protocol_gateway(&arguments)
+            }
+            "glioma_multimodal_ingestion_manifest" => {
+                self.glioma_multimodal_ingestion_manifest(&arguments)
             }
             "glioma_multimodal_knowledge_workflow" => {
                 self.glioma_multimodal_knowledge_workflow(&arguments)
@@ -10794,6 +10799,32 @@ impl Server {
         .map_err(|error| {
             format!("cannot encode glioma multimodal knowledge protocol negotiation: {error}")
         })
+    }
+
+    /// Admit local, schema-versioned multimodal artifacts before harmonization or analysis.
+    fn glioma_multimodal_ingestion_manifest(&self, arguments: &Value) -> Result<Value, String> {
+        let request: MultimodalIngestionManifestRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_multimodal_ingestion_manifest requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma multimodal ingestion request: {error}"))?;
+        let output = build_glioma_multimodal_ingestion_manifest(&request)
+            .map_err(|error| format!("glioma multimodal ingestion admission refused: {error}"))?;
+        serde_json::to_value(json!({
+            "manifest": output,
+            "next_routes": [
+                "glioma_multimodal_qc",
+                "glioma_multimodal_knowledge_workflow",
+                "glioma_multimodal_operating_cycle"
+            ],
+            "guarantees": [
+                "local, de-identified, content-addressed artifacts are required",
+                "duplicate and schema-incompatible artifacts are quarantined",
+                "missing modality and model-system coverage is explicit before harmonization",
+                "the route performs no raw-data movement, execution, causal inference, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma multimodal ingestion manifest: {error}"))
     }
 
     /// Synchronize the local action DAG against study-level multimodal readiness and choose a
@@ -54639,6 +54670,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_frontier_campaign",
                 "glioma_knowledge_protocol_gateway",
                 "glioma_multimodal_knowledge_protocol_gateway",
+                "glioma_multimodal_ingestion_manifest",
                 "glioma_research_workflow_admission",
                 "glioma_federated_knowledge",
                 "glioma_belief_revision",
@@ -65162,6 +65194,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "MultimodalKnowledgeProtocolRequest1@1 with study IDs, required/available modalities, capabilities, policy, and local-data boundary."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_multimodal_ingestion_manifest",
+        "description": "Admit local, de-identified, content-addressed glioma multimodal artifacts into the QC pipeline before harmonization. Validates schema versions and dimensions, quarantines duplicate or incompatible artifacts, reports missing modality/model-system coverage, and deterministically selects ready, partial, or blocked disposition. It never moves raw data, executes instruments, infers causality, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "MultimodalIngestionManifestRequest1@1 with local artifact items, required modality/model-system coverage, expected schema version, incomplete-policy, and item bound."}
             },
             "required": ["request"]
         }

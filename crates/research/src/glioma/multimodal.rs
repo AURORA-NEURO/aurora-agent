@@ -11,7 +11,11 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use thiserror::Error;
 
-pub const FEATURE_ID: &str = "GAF-GLIOMA-P03-F01";
+// Keep the legacy multimodal QC surface on the canonical P03-F01 implementation slot.  The
+// literal lives in the program-owned ingestion boundary so the source organization has one
+// stable definition while both pre-QC admission and downstream QC share the product identity.
+pub const FEATURE_ID: &str =
+    crate::glioma::programs::p03_multimodal_ingestion_qc::ingestion_manifest::FEATURE_ID;
 pub const OUTPUT_SCHEMA: &str = "GliomaMultimodalQc1@1";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
