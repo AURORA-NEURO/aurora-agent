@@ -36,6 +36,8 @@ crates/research/src/glioma/
                                              P01 aggregate-only multi-site outcome reconciliation with quorum, modality/model coverage, heterogeneity, influence, and routing gates
   programs/p01_evidence_surveillance/evidence_knowledge_bridge.rs
                                              P01 verification-to-P02 typed-knowledge handoff with claim alignment, omission accounting, and promotion gates
+  programs/p01_evidence_surveillance/long_horizon_calibration.rs
+                                             P01 epoch-window calibration, reliability drift, independent-group coverage, and review/acquisition routing
   programs/p01_evidence_surveillance/federated_acquisition_policy.rs
                                              P01 consortium-aware site assignment with independence, quorum, budget, privacy, and local-raw-data gates
   programs/p01_evidence_surveillance/evidence_frontier_join.rs
@@ -745,6 +747,12 @@ content digests, aligns every claim's evidence identifiers, and emits claim-leve
 conditional, negative-preservation, contradiction, coverage, or hold decisions. Evidence that is
 stale, omitted, or absent from the verification surface remains an omission and cannot be promoted
 because a knowledge compiler happened to produce a claim for it.
+The long-horizon calibrator (`glioma_long_horizon_evidence_calibration`) extends source-family
+calibration into explicit retrospective epochs. It computes quality-weighted calibration error,
+Brier error, reliability, independent-group coverage, and recent-versus-baseline drift for every
+window—including empty and underpowered windows. Degrading families route to recalibration review,
+volatile families remain visible, and missing windows route to bounded acquisition rather than
+being interpolated into a confident trend.
 P09 now includes a bounded robustness suite (`assess_glioma_robustness`) that
 recomputes the declared effect under leave-one-batch-out and optional leave-one-row-out omissions;
 unresolved subsets, fragile effects, and null results remain explicit. Provider-specific execution

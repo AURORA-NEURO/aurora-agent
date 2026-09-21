@@ -15,6 +15,7 @@ pub mod evidence_stream;
 pub mod federated_acquisition_policy;
 pub mod federated_execution_handoff;
 pub mod federated_shift;
+pub mod long_horizon_calibration;
 pub mod multimodal_gap_router;
 pub mod multimodal_workbench;
 pub mod novelty_adjudication;
@@ -86,6 +87,13 @@ pub use federated_execution_handoff::{
     compile_federated_glioma_execution_handoff, FederatedExecutionHandoff,
     FederatedExecutionHandoffError, FederatedExecutionHandoffReport,
     FederatedExecutionHandoffRequest, FederatedHandoffApproval, HandoffDisposition, HandoffEffect,
+};
+pub use long_horizon_calibration::{
+    calibrate_glioma_evidence_long_horizon, LongHorizonCalibrationAction,
+    LongHorizonCalibrationAnalysis, LongHorizonCalibrationDisposition, LongHorizonCalibrationDrift,
+    LongHorizonCalibrationError, LongHorizonCalibrationFamily, LongHorizonCalibrationObservation,
+    LongHorizonCalibrationOmission, LongHorizonCalibrationRequest, LongHorizonCalibrationWindow,
+    LongHorizonWindowDisposition,
 };
 pub use multimodal_gap_router::{
     route_glioma_multimodal_evidence_gaps, MultimodalGapAction, MultimodalGapActionKind,

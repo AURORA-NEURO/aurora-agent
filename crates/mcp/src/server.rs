@@ -520,7 +520,8 @@ use bioprism_research::{
     bridge_glioma_evidence_to_knowledge, bridge_glioma_knowledge_actions,
     bridge_glioma_mechanism_fidelity, build_glioma_multimodal_ingestion_manifest,
     build_research_object_manifest, calibrate_glioma_beliefs_prospectively,
-    calibrate_glioma_decision_value, calibrate_glioma_evidence, calibrate_glioma_mechanisms,
+    calibrate_glioma_decision_value, calibrate_glioma_evidence,
+    calibrate_glioma_evidence_long_horizon, calibrate_glioma_mechanisms,
     calibrate_glioma_multimodal_quality_transport, calibrate_glioma_multimodal_reliability,
     certify_decision_omissions, close_glioma_claims_to_experiments, cluster_glioma_evidence,
     compile_decision_action_graph, compile_decision_context,
@@ -724,14 +725,14 @@ use bioprism_research::{
     KnowledgeProtocolRequest, KnowledgeRelation, KnowledgeRequest,
     KnowledgeResolutionCampaignRequest, KnowledgeSynthesisOperatingCycleRequest,
     LatentFactorRequest, LatentFactorVector, LigandReceptorPair, LocalWorkflowRequest,
-    MechanismActionPlannerConfig, MechanismCalibration, MechanismCalibrationObservation,
-    MechanismCalibrationRequest, MechanismCandidate, MechanismClosedLoopRequest,
-    MechanismConsensusRequest, MechanismDiscrimination, MechanismDiscriminationCampaignRequest,
-    MechanismDiscriminationRequest, MechanismDiscriminatorAction, MechanismDynamicsEdge,
-    MechanismDynamicsIntervention, MechanismDynamicsNode, MechanismDynamicsRequest,
-    MechanismEvidenceAssimilationRequest, MechanismFeatureObservation,
-    MechanismFeedbackReplanRequest, MechanismFidelityBridgeRequest, MechanismGraphEdge,
-    MechanismGraphNode, MechanismGraphRequest, MechanismHypothesis,
+    LongHorizonCalibrationRequest, MechanismActionPlannerConfig, MechanismCalibration,
+    MechanismCalibrationObservation, MechanismCalibrationRequest, MechanismCandidate,
+    MechanismClosedLoopRequest, MechanismConsensusRequest, MechanismDiscrimination,
+    MechanismDiscriminationCampaignRequest, MechanismDiscriminationRequest,
+    MechanismDiscriminatorAction, MechanismDynamicsEdge, MechanismDynamicsIntervention,
+    MechanismDynamicsNode, MechanismDynamicsRequest, MechanismEvidenceAssimilationRequest,
+    MechanismFeatureObservation, MechanismFeedbackReplanRequest, MechanismFidelityBridgeRequest,
+    MechanismGraphEdge, MechanismGraphNode, MechanismGraphRequest, MechanismHypothesis,
     MechanismIdentifiabilityRequest, MechanismInterventionCandidate,
     MechanismInterventionValueRequest, MechanismInvarianceContext, MechanismInvarianceRequest,
     MechanismMultiStudyWorkflowRequest, MechanismOperatingCycleRequest,
@@ -2552,6 +2553,9 @@ impl Server {
                 self.glioma_multisite_outcome_reconciliation(&arguments)
             }
             "glioma_evidence_knowledge_bridge" => self.glioma_evidence_knowledge_bridge(&arguments),
+            "glioma_long_horizon_evidence_calibration" => {
+                self.glioma_long_horizon_evidence_calibration(&arguments)
+            }
             "glioma_federated_evidence_acquisition_policy" => {
                 self.glioma_federated_evidence_acquisition_policy(&arguments)
             }
@@ -10009,6 +10013,33 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode evidence-knowledge bridge: {error}"))
+    }
+
+    /// Calibrate source-family evidence over explicit retrospective windows and route temporal
+    /// drift, volatility, or missing independent coverage into bounded surveillance work.
+    fn glioma_long_horizon_evidence_calibration(&self, arguments: &Value) -> Result<Value, String> {
+        let request: LongHorizonCalibrationRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_long_horizon_evidence_calibration requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid long-horizon calibration request: {error}"))?;
+        let analysis = calibrate_glioma_evidence_long_horizon(&request)
+            .map_err(|error| format!("long-horizon calibration refused: {error}"))?;
+        serde_json::to_value(json!({
+            "analysis": analysis,
+            "next_routes": [
+                "glioma_evidence_prospective_triage",
+                "glioma_federated_evidence_acquisition_policy",
+                "glioma_evidence_knowledge_bridge",
+                "glioma_evidence_verification_gate"
+            ],
+            "guarantees": [
+                "calibration uses only bounded local prediction/outcome summaries and explicit epochs",
+                "unknown, stale, negative, contradictory, underpowered, and volatile windows remain visible",
+                "source-family drift routes to recalibration or review and never becomes a biological or clinical conclusion"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode long-horizon calibration analysis: {error}"))
     }
 
     /// Compile a consortium-aware, site-local acquisition policy for unresolved preclinical
@@ -55400,6 +55431,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_evidence_verification_gate",
                 "glioma_multisite_outcome_reconciliation",
                 "glioma_evidence_knowledge_bridge",
+                "glioma_long_horizon_evidence_calibration",
                 "glioma_federated_evidence_acquisition_policy",
                 "glioma_evidence_frontier_join",
                 "glioma_multimodal_evidence_gap_router",
@@ -65645,6 +65677,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "EvidenceKnowledgeBridgeRequest1@1 with matching objective, EvidenceVerificationReport1@1, TypedKnowledge1@1, verified/conditional policy, and claim bound."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_long_horizon_evidence_calibration",
+        "description": "Calibrate preclinical glioma evidence source families across explicit retrospective windows. Measures quality-weighted support calibration, Brier error, reliability, independent-group coverage, and temporal drift; routes degradation, volatility, or missing windows to review or acquisition while preserving negative/unknown outcomes and never inferring a biological or clinical conclusion.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "LongHorizonCalibrationRequest1@1 with epoch-stamped local prediction/outcome observations, window/floor policy, calibration and drift thresholds, and independent-group requirements."}
             },
             "required": ["request"]
         }
