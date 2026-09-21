@@ -21,6 +21,7 @@ pub mod identifiability;
 pub mod intervention_value;
 pub mod invariance;
 pub mod mechanism_dynamics;
+pub mod multi_fidelity_control;
 pub mod operating_cycle;
 pub mod pathway_activity;
 pub mod robust_portfolio;
@@ -138,6 +139,11 @@ pub use mechanism_dynamics::{
     MechanismDynamicsError, MechanismDynamicsIntervention, MechanismDynamicsNode,
     MechanismDynamicsPlan, MechanismDynamicsRequest, MechanismDynamicsSensitivity,
     MechanismDynamicsState, MechanismDynamicsStep,
+};
+pub use multi_fidelity_control::{
+    plan_glioma_mechanism_multi_fidelity_control, MultiFidelityControlActionScore,
+    MultiFidelityControlCandidate, MultiFidelityControlDecision, MultiFidelityControlDisposition,
+    MultiFidelityControlError, MultiFidelityControlPlan, MultiFidelityControlRequest,
 };
 pub use operating_cycle::{
     execute_glioma_mechanism_operating_cycle, MechanismOperatingCycle,

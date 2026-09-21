@@ -602,10 +602,11 @@ use bioprism_research::{
     plan_glioma_decision_branches, plan_glioma_evidence_acquisition,
     plan_glioma_evidence_contradiction_cut, plan_glioma_information_design,
     plan_glioma_instrument_recovery, plan_glioma_mechanism_closed_loop,
-    plan_glioma_mechanism_validation, plan_glioma_multi_fidelity_optimization,
-    plan_glioma_multimodal_portfolio, plan_glioma_multimodal_quality_remediation,
-    plan_glioma_multimodal_quality_schedule, plan_glioma_power_reestimation,
-    plan_glioma_power_stress_surface, plan_glioma_protocol_compensation, plan_glioma_replication,
+    plan_glioma_mechanism_multi_fidelity_control, plan_glioma_mechanism_validation,
+    plan_glioma_multi_fidelity_optimization, plan_glioma_multimodal_portfolio,
+    plan_glioma_multimodal_quality_remediation, plan_glioma_multimodal_quality_schedule,
+    plan_glioma_power_reestimation, plan_glioma_power_stress_surface,
+    plan_glioma_protocol_compensation, plan_glioma_replication,
     plan_glioma_replication_closure_frontier, plan_glioma_replication_continuation,
     plan_glioma_research_object_migration, plan_glioma_robust_active_learning,
     plan_glioma_robust_intervention_portfolio, plan_glioma_scientific_frontier,
@@ -731,22 +732,22 @@ use bioprism_research::{
     MechanismValidationExecutionRequest, MechanismValidationPlanRequest,
     MechanismValidationProtocolCompileRequest, MediationObservation, MediationRequest,
     MetaAnalysisRequest, MissingnessAuditRequest, ModalityPortfolioRequest, ModalityVector,
-    MultiFidelityCampaignRequest, MultiFidelityOptimizationRequest, MultiStudyKnowledgeRequest,
-    MultichannelConcordanceRequest, MultichannelInput, MultimodalDecisionGateRequest,
-    MultimodalExecutionMode, MultimodalGapRouterRequest, MultimodalIngestionCampaignRequest,
-    MultimodalIngestionManifestRequest, MultimodalKnowledgeProtocolRequest,
-    MultimodalMechanismCampaignRequest, MultimodalObservation, MultimodalReadinessRequest,
-    MultimodalRequest, MultimodalResearchObjectRequest, MultimodalWorkflowRequest,
-    NoveltyAdjudicationRequest, PathwayActivityDefinition, PathwayActivityObservation,
-    PathwayActivityRequest, PowerArmObservation, PowerReestimationRequest,
-    PowerStressSurfaceRequest, ProspectiveBeliefCalibrationRequest, ProspectiveKnowledgeRequest,
-    ProspectiveQualityRequest, ProtocolBranchOptimizationRequest, ProtocolCompensationRequest,
-    ProtocolEvidenceFusionRequest, ProtocolEvidenceSurfaceRequest, ProtocolExecutionRequest,
-    ProtocolScenarioEnsembleRequest, ProtocolSimulationRequest, ProtocolTransportGateRequest,
-    QualityAdaptiveCampaignRequest, QualityExecutionMode, QualityExecutionRequest,
-    QualityRecoveryRequest, QualityRemediationRequest, QualityRootCauseRequest,
-    QualityScheduleRequest, QualityTransportRequest, ReleaseExecutionMode, ReleaseGateRequest,
-    ReliabilityCalibrationRequest, ReplayCampaign, ReplayCampaignRequest,
+    MultiFidelityCampaignRequest, MultiFidelityControlRequest, MultiFidelityOptimizationRequest,
+    MultiStudyKnowledgeRequest, MultichannelConcordanceRequest, MultichannelInput,
+    MultimodalDecisionGateRequest, MultimodalExecutionMode, MultimodalGapRouterRequest,
+    MultimodalIngestionCampaignRequest, MultimodalIngestionManifestRequest,
+    MultimodalKnowledgeProtocolRequest, MultimodalMechanismCampaignRequest, MultimodalObservation,
+    MultimodalReadinessRequest, MultimodalRequest, MultimodalResearchObjectRequest,
+    MultimodalWorkflowRequest, NoveltyAdjudicationRequest, PathwayActivityDefinition,
+    PathwayActivityObservation, PathwayActivityRequest, PowerArmObservation,
+    PowerReestimationRequest, PowerStressSurfaceRequest, ProspectiveBeliefCalibrationRequest,
+    ProspectiveKnowledgeRequest, ProspectiveQualityRequest, ProtocolBranchOptimizationRequest,
+    ProtocolCompensationRequest, ProtocolEvidenceFusionRequest, ProtocolEvidenceSurfaceRequest,
+    ProtocolExecutionRequest, ProtocolScenarioEnsembleRequest, ProtocolSimulationRequest,
+    ProtocolTransportGateRequest, QualityAdaptiveCampaignRequest, QualityExecutionMode,
+    QualityExecutionRequest, QualityRecoveryRequest, QualityRemediationRequest,
+    QualityRootCauseRequest, QualityScheduleRequest, QualityTransportRequest, ReleaseExecutionMode,
+    ReleaseGateRequest, ReliabilityCalibrationRequest, ReplayCampaign, ReplayCampaignRequest,
     ReplicationClosureCampaignRequest, ReplicationClosureExecutionRequest,
     ReplicationClosureFrontierRequest, ReplicationContinuationRequest, ReplicationObservation,
     ReplicationPlanRequest, ReplicationProtocolCompileRequest, ReplicationRequest,
@@ -2638,6 +2639,9 @@ impl Server {
                 self.glioma_mechanism_evidence_assimilation(&arguments)
             }
             "glioma_mechanism_closed_loop" => self.glioma_mechanism_closed_loop(&arguments),
+            "glioma_mechanism_multi_fidelity_control" => {
+                self.glioma_mechanism_multi_fidelity_control(&arguments)
+            }
             "glioma_mechanism_fidelity_bridge" => self.glioma_mechanism_fidelity_bridge(&arguments),
             "glioma_mechanism_robustness_stress" => {
                 self.glioma_mechanism_robustness_stress(&arguments)
@@ -12089,6 +12093,34 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma mechanism closed-loop plan: {error}"))
+    }
+
+    /// Select bounded model-system upgrades that reduce mechanism transport debt before
+    /// downstream experiment or protocol dispatch.
+    fn glioma_mechanism_multi_fidelity_control(&self, arguments: &Value) -> Result<Value, String> {
+        let request: MultiFidelityControlRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_mechanism_multi_fidelity_control requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma multi-fidelity control request: {error}"))?;
+        let plan = plan_glioma_mechanism_multi_fidelity_control(&request)
+            .map_err(|error| format!("glioma multi-fidelity control refused: {error}"))?;
+        serde_json::to_value(json!({
+            "plan": plan,
+            "dispatch": "not_started",
+            "next_routes": [
+                "glioma_mechanism_closed_loop",
+                "glioma_mechanism_action_plan",
+                "glioma_experiment_frontier_controller"
+            ],
+            "guarantees": [
+                "model-system escalation is strict, typed, bounded, and preclinical-only",
+                "transport debt, missing target coverage, contradiction, and approval requirements remain explicit",
+                "budget, risk, information-gain, and transport-gain gates run before downstream dispatch",
+                "the route performs no assay, instrument execution, raw-data movement, federation, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma multi-fidelity control plan: {error}"))
     }
 
     /// Bridge mechanism prediction/observation residuals across model systems and expose the
@@ -55061,6 +55093,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_mechanism_bayesian_update",
                 "glioma_mechanism_evidence_assimilation",
                 "glioma_mechanism_closed_loop",
+                "glioma_mechanism_multi_fidelity_control",
                 "glioma_mechanism_fidelity_bridge",
                 "glioma_mechanism_robustness_stress",
                 "glioma_mechanism_state_filter",
@@ -66016,6 +66049,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "MechanismClosedLoopRequest1@1 with an assimilated mechanism ledger, typed action candidates, budget, action-count, information-gain, and risk bounds."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_mechanism_multi_fidelity_control",
+        "description": "Select bounded preclinical glioma model-system escalations that reduce posterior uncertainty and cross-model transport debt. The controller joins assimilated evidence with a typed fidelity bridge, scores information/transport gain against cost, reproducibility, risk, and approval policy, and emits a content-addressed frontier without executing biology or making a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "MultiFidelityControlRequest1@1 with assimilated mechanism evidence, a fidelity bridge, strict model-system escalation candidates, budget, risk, information-gain, transport-gain, and approval gates."}
             },
             "required": ["request"]
         }
