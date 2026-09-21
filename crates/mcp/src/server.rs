@@ -527,9 +527,9 @@ use bioprism_research::{
     compile_glioma_computation_workflow, compile_glioma_knowledge_actions,
     compile_glioma_knowledge_closure, compile_glioma_knowledge_consistency,
     compile_glioma_knowledge_gaps, compile_glioma_mechanism_consensus,
-    compile_glioma_mechanism_validation_protocol, compile_glioma_protocol_evidence_surface,
-    compile_glioma_replication_protocol, compile_local_research_workflow,
-    compile_mechanism_action_plan, compile_multi_study_knowledge,
+    compile_glioma_mechanism_validation_protocol, compile_glioma_multimodal_research_object,
+    compile_glioma_protocol_evidence_surface, compile_glioma_replication_protocol,
+    compile_local_research_workflow, compile_mechanism_action_plan, compile_multi_study_knowledge,
     compile_multimodal_knowledge_workflow, compile_typed_knowledge, compose_knowledge_graph,
     design_glioma_contrast_panel, design_glioma_robust_experiment, design_preclinical_experiment,
     detect_glioma_evidence_temporal_shifts, detect_glioma_knowledge_drift, discriminate_mechanisms,
@@ -734,16 +734,16 @@ use bioprism_research::{
     MultimodalExecutionMode, MultimodalGapRouterRequest, MultimodalIngestionCampaignRequest,
     MultimodalIngestionManifestRequest, MultimodalKnowledgeProtocolRequest,
     MultimodalMechanismCampaignRequest, MultimodalObservation, MultimodalReadinessRequest,
-    MultimodalRequest, MultimodalWorkflowRequest, NoveltyAdjudicationRequest,
-    PathwayActivityDefinition, PathwayActivityObservation, PathwayActivityRequest,
-    PowerArmObservation, PowerReestimationRequest, PowerStressSurfaceRequest,
-    ProspectiveBeliefCalibrationRequest, ProspectiveKnowledgeRequest, ProspectiveQualityRequest,
-    ProtocolBranchOptimizationRequest, ProtocolCompensationRequest, ProtocolEvidenceFusionRequest,
-    ProtocolEvidenceSurfaceRequest, ProtocolExecutionRequest, ProtocolScenarioEnsembleRequest,
-    ProtocolSimulationRequest, ProtocolTransportGateRequest, QualityAdaptiveCampaignRequest,
-    QualityExecutionMode, QualityExecutionRequest, QualityRecoveryRequest,
-    QualityRemediationRequest, QualityRootCauseRequest, QualityScheduleRequest,
-    QualityTransportRequest, ReleaseExecutionMode, ReleaseGateRequest,
+    MultimodalRequest, MultimodalResearchObjectRequest, MultimodalWorkflowRequest,
+    NoveltyAdjudicationRequest, PathwayActivityDefinition, PathwayActivityObservation,
+    PathwayActivityRequest, PowerArmObservation, PowerReestimationRequest,
+    PowerStressSurfaceRequest, ProspectiveBeliefCalibrationRequest, ProspectiveKnowledgeRequest,
+    ProspectiveQualityRequest, ProtocolBranchOptimizationRequest, ProtocolCompensationRequest,
+    ProtocolEvidenceFusionRequest, ProtocolEvidenceSurfaceRequest, ProtocolExecutionRequest,
+    ProtocolScenarioEnsembleRequest, ProtocolSimulationRequest, ProtocolTransportGateRequest,
+    QualityAdaptiveCampaignRequest, QualityExecutionMode, QualityExecutionRequest,
+    QualityRecoveryRequest, QualityRemediationRequest, QualityRootCauseRequest,
+    QualityScheduleRequest, QualityTransportRequest, ReleaseExecutionMode, ReleaseGateRequest,
     ReliabilityCalibrationRequest, ReplayCampaign, ReplayCampaignRequest,
     ReplicationClosureCampaignRequest, ReplicationClosureExecutionRequest,
     ReplicationClosureFrontierRequest, ReplicationContinuationRequest, ReplicationObservation,
@@ -2807,6 +2807,9 @@ impl Server {
             }
             "glioma_release_operating_cycle" => self.glioma_release_operating_cycle(&arguments),
             "glioma_research_object_prepare" => self.glioma_research_object_prepare(&arguments),
+            "glioma_multimodal_research_object_prepare" => {
+                self.glioma_multimodal_research_object_prepare(&arguments)
+            }
             "domain_evidence_harmonization_coverage" => {
                 self.domain_evidence_harmonization_coverage(&arguments)
             }
@@ -14631,6 +14634,39 @@ impl Server {
             .map_err(|error| format!("glioma research-object preparation refused: {error}"))?;
         serde_json::to_value(output)
             .map_err(|error| format!("cannot encode glioma research-object manifest: {error}"))
+    }
+
+    /// Compile a modality-complete, provenance-closed research object before accountable signing.
+    fn glioma_multimodal_research_object_prepare(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: MultimodalResearchObjectRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_multimodal_research_object_prepare requires request".to_string()
+            })?)
+            .map_err(|error| {
+                format!("invalid glioma multimodal research-object request: {error}")
+            })?;
+        let bundle = compile_glioma_multimodal_research_object(&request).map_err(|error| {
+            format!("glioma multimodal research-object preparation refused: {error}")
+        })?;
+        serde_json::to_value(json!({
+            "bundle": bundle,
+            "dispatch": "not_started",
+            "next_routes": [
+                "glioma_replay_campaign_execute",
+                "glioma_research_object_release_gate",
+                "glioma_release_operating_cycle"
+            ],
+            "guarantees": [
+                "required modality coverage, semantic-loss budgets, provenance closure, and local-only constraints are explicit",
+                "cross-modal alignment requires shared provenance and remains blocked when unproven",
+                "negative evidence and omissions remain part of the release object",
+                "the route performs no upload, signing, raw-data movement, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma multimodal research-object bundle: {error}"))
     }
 
     /// Evaluate replay and review evidence before a preclinical research object enters signing.
@@ -55008,7 +55044,8 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_replay_campaign_execute",
                 "glioma_research_object_release_gate",
                 "glioma_release_operating_cycle",
-                "glioma_research_object_prepare"
+                "glioma_research_object_prepare",
+                "glioma_multimodal_research_object_prepare"
             ],
             "cli_entrypoints": [],
             "status": "available"
@@ -66850,6 +66887,17 @@ pub fn tool_definitions() -> Vec<Value> {
         "inputSchema": {
             "type": "object",
             "properties": {"request": {"type": "object", "description": "ResearchObjectRequest1@1."}},
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_multimodal_research_object_prepare",
+        "description": "Compile modality-specific local artifacts into a provenance-closed preclinical glioma research object. Enforces required modality coverage, semantic-loss budgets, upstream closure, local-only constraints, and shared-provenance cross-modal alignment before replay and accountable signing review; it never uploads, signs, moves raw data, or makes clinical decisions.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "MultimodalResearchObjectRequest1@1 containing ResearchObjectRequest1@1, bounded modality artifact inputs, required modalities, semantic-loss bound, alignment policy, and input limit."}
+            },
             "required": ["request"]
         }
     }));

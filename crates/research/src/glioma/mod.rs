@@ -782,15 +782,18 @@ pub use programs::p10_interpretation_replication::{
     ValidationReplicationGateRequest,
 };
 pub use programs::p11_research_object_release::{
-    evaluate_glioma_release_gate, execute_glioma_release_operating_cycle,
-    execute_glioma_release_operating_cycle_dry_run, execute_glioma_replay_campaign,
-    DryRunReplayCampaignExecutor, GliomaReleaseOperatingCycle,
+    compile_glioma_multimodal_research_object, evaluate_glioma_release_gate,
+    execute_glioma_release_operating_cycle, execute_glioma_release_operating_cycle_dry_run,
+    execute_glioma_replay_campaign, DryRunReplayCampaignExecutor, GliomaReleaseOperatingCycle,
     GliomaReleaseOperatingCycleDisposition, GliomaReleaseOperatingCycleError,
-    GliomaReleaseOperatingCycleRequest, ReleaseExecutionMode, ReleaseGateError,
-    ReleaseGateEvaluation, ReleaseGateRequest, ReleaseGateStatus, ReleaseReviewAttestation,
-    ReleaseReviewDecision, ReplayCampaign, ReplayCampaignDisposition, ReplayCampaignError,
-    ReplayCampaignExecutor, ReplayCampaignRequest, ReplayCampaignRound, ReplayCampaignStopReason,
-    ReplayExecutionFailure, ReplayObservation, ReplayObservationStatus, ReplayTask,
+    GliomaReleaseOperatingCycleRequest, MultimodalResearchObjectBundle,
+    MultimodalResearchObjectDisposition, MultimodalResearchObjectEntry,
+    MultimodalResearchObjectError, MultimodalResearchObjectInput, MultimodalResearchObjectRequest,
+    ReleaseExecutionMode, ReleaseGateError, ReleaseGateEvaluation, ReleaseGateRequest,
+    ReleaseGateStatus, ReleaseReviewAttestation, ReleaseReviewDecision, ReplayCampaign,
+    ReplayCampaignDisposition, ReplayCampaignError, ReplayCampaignExecutor, ReplayCampaignRequest,
+    ReplayCampaignRound, ReplayCampaignStopReason, ReplayExecutionFailure, ReplayObservation,
+    ReplayObservationStatus, ReplayTask,
 };
 pub use programs::p12_federated_benchmarking::{
     analyze_federated_benchmark, analyze_federated_benchmark_power,

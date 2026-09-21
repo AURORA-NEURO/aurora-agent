@@ -303,6 +303,8 @@ crates/research/src/glioma/
     p11_research_object_release/
     p11_research_object_release/release_gate.rs
                                              P11 replay-, provenance-, and review-aware release gate for accountable signing
+    p11_research_object_release/multimodal_bundle.rs
+                                             P11 modality-coverage, semantic-loss, provenance-closure, and cross-modal alignment compiler
     p11_research_object_release/operating_cycle.rs
                                              P11 manifest replay, release gating, and accountable operator handoff
     p12_federated_benchmarking/
