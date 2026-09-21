@@ -608,8 +608,9 @@ use bioprism_research::{
     select_glioma_actions, simulate_glioma_counterfactual, simulate_glioma_counterfactual_ensemble,
     simulate_glioma_mechanism_dynamics, simulate_glioma_protocol,
     simulate_glioma_protocol_scenario_ensemble, smooth_glioma_mechanism_states,
-    surveil_glioma_evidence, surveil_glioma_multimodal_drift, synthesize_glioma_interpretation,
-    triangulate_glioma_evidence, update_glioma_mechanism_posterior, validate_feature_catalog,
+    snapshot_glioma_evidence_stream, surveil_glioma_evidence, surveil_glioma_multimodal_drift,
+    synthesize_glioma_interpretation, triangulate_glioma_evidence,
+    update_glioma_mechanism_posterior, validate_feature_catalog,
     verify_glioma_multimodal_quality_recovery, ActionPortfolioExecutionRequest,
     ActiveLearningCampaignRequest, ActiveLearningCandidate, ActiveLearningObservation,
     ActiveLearningRequest, AdaptiveAllocationCampaignRequest, AdaptiveAllocationRequest,
@@ -659,16 +660,16 @@ use bioprism_research::{
     EvidenceAcquisitionRequest, EvidenceCalibrationObservation, EvidenceCalibrationRequest,
     EvidenceClusterRequest, EvidenceExecutionMode, EvidenceFusionRequest,
     EvidenceNoveltyRadarRequest, EvidencePriorityRequest, EvidenceRecord,
-    EvidenceRefreshCampaignRequest, EvidenceRequest, EvidenceSurveillanceRequest,
-    EvidenceTemporalShiftRequest, EvidenceTriangulationRequest, ExperimentArm,
-    ExperimentOperatingCycleRequest, ExperimentRequest, FederatedBenchmarkAdaptiveCampaignRequest,
-    FederatedBenchmarkCampaignRequest, FederatedBenchmarkExecutionMode,
-    FederatedBenchmarkOperatingCycleRequest, FederatedBenchmarkPowerRequest,
-    FederatedBenchmarkRequest, FederatedBenchmarkSite, FederatedBenchmarkSitePlannerRequest,
-    FederatedContinualAgentRequest, FederatedContinualKnowledgeRequest,
-    FederatedEvidenceShiftRequest, FederatedEvidenceShiftSite, FederatedInstrumentConsensusRequest,
-    FederatedInstrumentSite, FederatedInterpretationRequest, FederatedKnowledgeRequest,
-    FederatedKnowledgeSiteClaim, FederatedMechanismSite,
+    EvidenceRefreshCampaignRequest, EvidenceRequest, EvidenceStreamRequest,
+    EvidenceSurveillanceRequest, EvidenceTemporalShiftRequest, EvidenceTriangulationRequest,
+    ExperimentArm, ExperimentOperatingCycleRequest, ExperimentRequest,
+    FederatedBenchmarkAdaptiveCampaignRequest, FederatedBenchmarkCampaignRequest,
+    FederatedBenchmarkExecutionMode, FederatedBenchmarkOperatingCycleRequest,
+    FederatedBenchmarkPowerRequest, FederatedBenchmarkRequest, FederatedBenchmarkSite,
+    FederatedBenchmarkSitePlannerRequest, FederatedContinualAgentRequest,
+    FederatedContinualKnowledgeRequest, FederatedEvidenceShiftRequest, FederatedEvidenceShiftSite,
+    FederatedInstrumentConsensusRequest, FederatedInstrumentSite, FederatedInterpretationRequest,
+    FederatedKnowledgeRequest, FederatedKnowledgeSiteClaim, FederatedMechanismSite,
     FederatedMechanismTransportCampaignRequest, FederatedMechanismTransportRequest,
     FidelityCandidate, FidelityObservation, GliomaActionCandidate,
     GliomaAdaptiveWorkflowSchedulerRequest, GliomaAutonomousCampaignRequest,
@@ -2499,6 +2500,7 @@ impl Server {
             "glioma_evidence_novelty_adjudication" => {
                 self.glioma_evidence_novelty_adjudication(&arguments)
             }
+            "glioma_evidence_stream_snapshot" => self.glioma_evidence_stream_snapshot(&arguments),
             "glioma_evidence_surveillance" => self.glioma_evidence_surveillance(&arguments),
             "glioma_evidence_novelty_radar" => self.glioma_evidence_novelty_radar(&arguments),
             "glioma_evidence_temporal_shift" => self.glioma_evidence_temporal_shift(&arguments),
@@ -9648,6 +9650,35 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma novelty adjudication: {error}"))
+    }
+
+    /// Compile a bounded prospective evidence event window into idempotent claim trends and a
+    /// negative/contradiction frontier for P01 surveillance and P02 monitoring.
+    fn glioma_evidence_stream_snapshot(&self, arguments: &Value) -> Result<Value, String> {
+        let request: EvidenceStreamRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_evidence_stream_snapshot requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma evidence stream request: {error}"))?;
+        let output = snapshot_glioma_evidence_stream(&request)
+            .map_err(|error| format!("glioma evidence stream snapshot refused: {error}"))?;
+        serde_json::to_value(json!({
+            "snapshot": output,
+            "next_routes": [
+                "glioma_evidence_surveillance",
+                "glioma_prospective_knowledge_monitor",
+                "glioma_evidence_cluster_index"
+            ],
+            "guarantees": [
+                "duplicate events are idempotently identified and cannot inflate support",
+                "late events, rejected quality, negative results, contradictions, and unresolved claims remain visible",
+                "claim trends and coverage summaries are deterministic and content-addressed",
+                "the route performs no retrieval, raw-data movement, causal inference, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma evidence stream snapshot: {error}"))
     }
 
     /// Detect changes between local evidence snapshots and compile bounded review actions for a
@@ -54123,6 +54154,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_evidence_qualify",
                 "glioma_evidence_cluster_index",
                 "glioma_evidence_novelty_adjudication",
+                "glioma_evidence_stream_snapshot",
                 "glioma_evidence_surveillance",
                 "glioma_evidence_novelty_radar",
                 "glioma_evidence_temporal_shift",
@@ -64249,6 +64281,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "NoveltyAdjudicationRequest1@1 with baseline/candidate typed records, tokenized domain metadata, quality/novelty/contradiction floors, and item bound."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_evidence_stream_snapshot",
+        "description": "Compile a bounded prospective local glioma evidence event window into an idempotent snapshot with duplicate and late-event handling, claim-level support/negative/contradiction trends, modality/model coverage, and an explicit frontier for P02 monitoring. It never retrieves sources, moves raw data, infers causality, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "EvidenceStreamRequest1@1 with ordered value-only events, expected next epoch, event/claim bounds, quality floor, lag bound, and trend threshold."}
             },
             "required": ["request"]
         }
