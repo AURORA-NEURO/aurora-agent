@@ -16,6 +16,7 @@ pub mod knowledge_drift;
 pub mod knowledge_graph;
 pub mod operating_cycle;
 pub mod selection_cycle;
+pub mod study_alignment;
 
 pub use gap_compiler::{
     compile_glioma_knowledge_gaps, KnowledgeGapClaimMapping, KnowledgeGapCompilerError,
@@ -103,6 +104,11 @@ pub use operating_cycle::{
     execute_glioma_knowledge_synthesis_operating_cycle, KnowledgeSynthesisOperatingCycle,
     KnowledgeSynthesisOperatingCycleDisposition, KnowledgeSynthesisOperatingCycleError,
     KnowledgeSynthesisOperatingCycleRequest,
+};
+pub use study_alignment::{
+    compile_multi_study_knowledge, MultiStudyClaimDisposition, MultiStudyKnowledge,
+    MultiStudyKnowledgeDisposition, MultiStudyKnowledgeError, MultiStudyKnowledgeRequest,
+    MultiStudyKnowledgeRow, StudyClaimBinding, StudyClaimObservation, StudyKnowledgeSnapshot,
 };
 
 use crate::glioma::catalog::{glioma_program_catalog, GliomaProgramDescriptor, GliomaProgramId};

@@ -522,14 +522,15 @@ use bioprism_research::{
     compile_glioma_knowledge_consistency, compile_glioma_knowledge_gaps,
     compile_glioma_mechanism_consensus, compile_glioma_mechanism_validation_protocol,
     compile_glioma_protocol_evidence_surface, compile_glioma_replication_protocol,
-    compile_mechanism_action_plan, compile_typed_knowledge, compose_knowledge_graph,
-    design_glioma_contrast_panel, design_glioma_robust_experiment, design_preclinical_experiment,
-    detect_glioma_evidence_temporal_shifts, detect_glioma_knowledge_drift, discriminate_mechanisms,
-    dry_run_adaptive_instrument_executor, dry_run_glioma_adaptive_frontier_executor,
-    dry_run_glioma_research, dry_run_instrument_executor_from_request,
-    dry_run_robustness_guided_computation_executor, evaluate_glioma_dynamic_policies,
-    evaluate_glioma_release_gate, execute_federated_benchmark_adaptive_campaign_dry_run,
-    execute_federated_benchmark_campaign, execute_federated_benchmark_operating_cycle_dry_run,
+    compile_mechanism_action_plan, compile_multi_study_knowledge, compile_typed_knowledge,
+    compose_knowledge_graph, design_glioma_contrast_panel, design_glioma_robust_experiment,
+    design_preclinical_experiment, detect_glioma_evidence_temporal_shifts,
+    detect_glioma_knowledge_drift, discriminate_mechanisms, dry_run_adaptive_instrument_executor,
+    dry_run_glioma_adaptive_frontier_executor, dry_run_glioma_research,
+    dry_run_instrument_executor_from_request, dry_run_robustness_guided_computation_executor,
+    evaluate_glioma_dynamic_policies, evaluate_glioma_release_gate,
+    execute_federated_benchmark_adaptive_campaign_dry_run, execute_federated_benchmark_campaign,
+    execute_federated_benchmark_operating_cycle_dry_run,
     execute_federated_mechanism_transport_campaign_dry_run, execute_glioma_action_portfolio,
     execute_glioma_active_learning_campaign, execute_glioma_adaptive_allocation_campaign,
     execute_glioma_adaptive_clone_campaign_dry_run,
@@ -704,19 +705,19 @@ use bioprism_research::{
     MechanismValidationExecutionRequest, MechanismValidationPlanRequest,
     MechanismValidationProtocolCompileRequest, MediationObservation, MediationRequest,
     MetaAnalysisRequest, MissingnessAuditRequest, ModalityPortfolioRequest, ModalityVector,
-    MultiFidelityCampaignRequest, MultiFidelityOptimizationRequest, MultichannelConcordanceRequest,
-    MultichannelInput, MultimodalDecisionGateRequest, MultimodalExecutionMode,
-    MultimodalIngestionCampaignRequest, MultimodalMechanismCampaignRequest, MultimodalObservation,
-    MultimodalReadinessRequest, MultimodalRequest, PathwayActivityDefinition,
-    PathwayActivityObservation, PathwayActivityRequest, PowerArmObservation,
-    PowerReestimationRequest, PowerStressSurfaceRequest, ProspectiveQualityRequest,
-    ProtocolBranchOptimizationRequest, ProtocolCompensationRequest, ProtocolEvidenceFusionRequest,
-    ProtocolEvidenceSurfaceRequest, ProtocolExecutionRequest, ProtocolScenarioEnsembleRequest,
-    ProtocolSimulationRequest, ProtocolTransportGateRequest, QualityAdaptiveCampaignRequest,
-    QualityExecutionMode, QualityExecutionRequest, QualityRecoveryRequest,
-    QualityRemediationRequest, QualityRootCauseRequest, QualityScheduleRequest,
-    QualityTransportRequest, ReleaseExecutionMode, ReleaseGateRequest,
-    ReliabilityCalibrationRequest, ReplayCampaign, ReplayCampaignRequest,
+    MultiFidelityCampaignRequest, MultiFidelityOptimizationRequest, MultiStudyKnowledgeRequest,
+    MultichannelConcordanceRequest, MultichannelInput, MultimodalDecisionGateRequest,
+    MultimodalExecutionMode, MultimodalIngestionCampaignRequest,
+    MultimodalMechanismCampaignRequest, MultimodalObservation, MultimodalReadinessRequest,
+    MultimodalRequest, PathwayActivityDefinition, PathwayActivityObservation,
+    PathwayActivityRequest, PowerArmObservation, PowerReestimationRequest,
+    PowerStressSurfaceRequest, ProspectiveQualityRequest, ProtocolBranchOptimizationRequest,
+    ProtocolCompensationRequest, ProtocolEvidenceFusionRequest, ProtocolEvidenceSurfaceRequest,
+    ProtocolExecutionRequest, ProtocolScenarioEnsembleRequest, ProtocolSimulationRequest,
+    ProtocolTransportGateRequest, QualityAdaptiveCampaignRequest, QualityExecutionMode,
+    QualityExecutionRequest, QualityRecoveryRequest, QualityRemediationRequest,
+    QualityRootCauseRequest, QualityScheduleRequest, QualityTransportRequest, ReleaseExecutionMode,
+    ReleaseGateRequest, ReliabilityCalibrationRequest, ReplayCampaign, ReplayCampaignRequest,
     ReplicationClosureCampaignRequest, ReplicationClosureExecutionRequest,
     ReplicationClosureFrontierRequest, ReplicationContinuationRequest, ReplicationObservation,
     ReplicationPlanRequest, ReplicationProtocolCompileRequest, ReplicationRequest,
@@ -2507,6 +2508,7 @@ impl Server {
             "glioma_knowledge_consistency" => self.glioma_knowledge_consistency(&arguments),
             "glioma_knowledge_drift" => self.glioma_knowledge_drift(&arguments),
             "glioma_knowledge_closure" => self.glioma_knowledge_closure(&arguments),
+            "glioma_multi_study_knowledge" => self.glioma_multi_study_knowledge(&arguments),
             "glioma_federated_knowledge" => self.glioma_federated_knowledge(&arguments),
             "glioma_belief_revision" => self.glioma_belief_revision(&arguments),
             "glioma_knowledge_frontier" => self.glioma_knowledge_frontier(&arguments),
@@ -10084,6 +10086,37 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma knowledge closure: {error}"))
+    }
+
+    /// Align caller-declared equivalent typed claims across local studies. The route computes a
+    /// multi-study table and influence diagnostics; it never guesses equivalence from prose or
+    /// exports raw evidence.
+    fn glioma_multi_study_knowledge(&self, arguments: &Value) -> Result<Value, String> {
+        let request: MultiStudyKnowledgeRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_multi_study_knowledge requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma multi-study knowledge request: {error}"))?;
+        let output = compile_multi_study_knowledge(&request)
+            .map_err(|error| format!("glioma multi-study knowledge alignment refused: {error}"))?;
+        serde_json::to_value(json!({
+            "knowledge": output,
+            "dispatch": "not_started",
+            "next_routes": [
+                "glioma_knowledge_consistency",
+                "glioma_knowledge_closure",
+                "glioma_mechanism_autopilot_execute"
+            ],
+            "guarantees": [
+                "equivalence is caller-declared by canonical key and claim id, never inferred from text",
+                "study-level support, negative, contested, unresolved, modality, and model coverage remain addressable",
+                "pooled scores and leave-one-study-out influence expose dominant-study risk",
+                "the route performs no retrieval, raw-data movement, instrument action, causal inference, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma multi-study knowledge: {error}"))
     }
 
     /// Compare aggregate typed-knowledge summaries across institutions while preserving local
@@ -53847,6 +53880,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_knowledge_consistency",
                 "glioma_knowledge_drift",
                 "glioma_knowledge_closure",
+                "glioma_multi_study_knowledge",
                 "glioma_federated_knowledge",
                 "glioma_belief_revision",
                 "glioma_knowledge_frontier",
@@ -64127,6 +64161,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "KnowledgeClosureRequest1@1 with objective-bound TypedKnowledge1@1, local EvidenceRecord1@1 values, modality/model coverage floors, independent-artifact floor, support gate, and claim bound."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_multi_study_knowledge",
+        "description": "Align explicitly bound equivalent typed claims across preclinical glioma studies. Produces a deterministic multi-study knowledge table with pooled support/confidence, agreement, leave-one-study-out influence, modality/model coverage, negative and contested states, semantic-loss declarations, and downstream adjudication routes. It never infers equivalence from text, retrieves sources, moves raw data, executes instruments, infers causality, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "MultiStudyKnowledgeRequest1@1 with objective-bound StudyKnowledgeSnapshot1@1 values, explicit StudyClaimBinding1@1 keys, coverage floors, equivalence/agreement gates, and claim bound."}
             },
             "required": ["request"]
         }

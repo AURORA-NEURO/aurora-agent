@@ -26,6 +26,8 @@ crates/research/src/glioma/
                                              P02 aggregate-only multi-site typed-claim consensus with disagreement and influence gates
   programs/p02_evidence_knowledge/closure.rs
                                              P02 claim-to-evidence closure with modality/model/artifact coverage gates
+  programs/p02_evidence_knowledge/study_alignment.rs
+                                             P02 explicit multi-study claim alignment with pooled support and influence diagnostics
   programs/p02_evidence_knowledge/composition.rs
                                              P02 explicit relation graph composition with path bottlenecks and contradiction gates
   programs/p02_evidence_knowledge/belief_revision.rs
@@ -487,7 +489,7 @@ portfolio plan and executable code; it does not promote a planned slot to implem
 | Program | Product owner | Engine stages | Observable product result |
 | --- | --- | --- | --- |
 | P01 Evidence surveillance | evidence curator | evidence surveillance | snapshot deltas, deterministic novelty radar, recency/state/coverage action queues, dependency-closed evidence-acquisition portfolios, source calibration, cross-family claim triangulation, review/revalidation actions, autonomous intent-to-evidence execution cycles, and stale/unknown/contradictory coverage |
-| P02 Evidence-to-typed-knowledge | knowledge engineer | evidence compilation | scoped claims, contradiction-aware consistency closure, maximal-consistency portfolios, ranked rival frontiers, typed frontier-to-acquisition candidate compilation, dependency-closed validation/replication action compilation, autonomous P02-to-P01 gap cycles, a complete knowledge-synthesis operating cycle, and competing explanations bound to source artifacts |
+| P02 Evidence-to-typed-knowledge | knowledge engineer | evidence compilation | scoped claims, contradiction-aware consistency closure, explicit multi-study alignment and influence diagnostics, maximal-consistency portfolios, ranked rival frontiers, typed frontier-to-acquisition candidate compilation, dependency-closed validation/replication action compilation, autonomous P02-to-P01 gap cycles, a complete knowledge-synthesis operating cycle, and competing explanations bound to source artifacts |
 | P03 Multimodal ingestion and QC | data steward | multimodal ingestion/QC | comparable cells, robust batch harmonization, feature-level concordance, consensus clusters, spatial niches, ligand-receptor communication, cross-sample registration, spatial-state diffusion, explicit defects, downstream research-surface admission, and an executable QC-to-handoff operating cycle |
 | P04 Question-to-decision context | principal investigator | intent normalization, context compilation | bounded decision context, dependency-closed action DAGs, scenario-aware Pareto workflow branches, branch execution with forecast-drift failover, evidence-returning adaptive replanning, full operating-cycle execution, selected action batches, and unresolved omissions |
 | P05 Mechanism exploration | mechanism scientist | molecular landscape, mechanism exploration | residual-fit competing mechanisms, pairwise identifiability analysis with quality/risk/budget-gated feature selection, cross-model mechanistic invariance and transport-stable panel selection, calibrated trust-discounted posterior action selection, posterior-weighted next-assay information gain, signed mechanism-network propagation, delayed-feedback mechanism dynamics, model-averaged counterfactuals, robust lower-tail intervention portfolios, discriminating campaigns, and an end-to-end next-assay operating cycle |
@@ -763,6 +765,12 @@ weakening, contradiction, resolution, and stability, then emits priority-gated a
 consistency closure, gap compilation, or mechanism replanning. The transition is bound to both
 snapshot digests, preserves negative and unresolved states, and never treats confidence drift as
 causal or clinical evidence.
+Multi-study typed-knowledge alignment (`glioma_multi_study_knowledge`) creates a deterministic
+cross-study claim table from explicit study-owned bindings. It pools support and confidence,
+reports agreement and leave-one-study-out influence, exposes modality/model coverage debt, and
+preserves semantic-loss, negative, contested, unresolved, and unbound claims. Equivalence is
+never inferred from prose, so the table is safe to route into consistency closure and mechanism
+planning without allowing a dominant study to silently define the portfolio.
 Federated typed-knowledge consensus (`glioma_federated_knowledge`) now compares independent
 site summaries without exporting source text. It pools support, contradiction, confidence, and
 disposition mass, reports site-specific disagreement and leave-one-site-out influence, and emits
