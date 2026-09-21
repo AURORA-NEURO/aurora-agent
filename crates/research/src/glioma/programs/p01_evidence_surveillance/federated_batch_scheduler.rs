@@ -110,7 +110,7 @@ fn candidate_id(cycle_key: &str, action: &FederatedCycleAction) -> String {
     format!("{cycle_key}::{}", action.action_id)
 }
 
-fn digest_input(output: &FederatedBatchSchedule) -> serde_json::Value {
+pub(crate) fn digest_input(output: &FederatedBatchSchedule) -> serde_json::Value {
     serde_json::json!({
         "feature_id": output.feature_id,
         "output_schema": output.output_schema,

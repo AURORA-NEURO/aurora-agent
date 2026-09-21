@@ -7,6 +7,7 @@ pub mod acquisition_campaign;
 pub mod acquisition_feedback;
 pub mod calibration;
 pub mod campaign;
+pub mod continual_promotion;
 pub mod contradiction_cut;
 pub mod evidence_cluster;
 pub mod evidence_frontier_join;
@@ -61,6 +62,12 @@ pub use campaign::{
     EvidenceRefreshCampaign, EvidenceRefreshCampaignDisposition, EvidenceRefreshCampaignError,
     EvidenceRefreshCampaignExecutor, EvidenceRefreshCampaignRequest, EvidenceRefreshCampaignRound,
     EvidenceRefreshCampaignStopReason, EvidenceRefreshExecutionFailure,
+};
+pub use continual_promotion::{
+    evaluate_glioma_continual_promotion, ContinualOutcomeState, ContinualPromotionDecision,
+    ContinualPromotionError, ContinualPromotionObservation, ContinualPromotionReport,
+    ContinualPromotionRequest, ContinualPromotionStatus, ContinualPromotionWindow,
+    PromotionWindowDisposition,
 };
 pub use contradiction_cut::{
     plan_glioma_evidence_contradiction_cut, ContradictionAuditSelection, ContradictionConflict,

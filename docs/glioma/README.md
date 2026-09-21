@@ -44,6 +44,8 @@ crates/research/src/glioma/
                                              P01 ranked autonomous federation cycle from transport, calibration, reconciliation, omissions, and negative-result signals
   programs/p01_evidence_surveillance/federated_batch_scheduler.rs
                                              P01 prospective high-throughput cycle scheduler with fairness, route quotas, dependency prefixes, and explicit capacity omissions
+  programs/p01_evidence_surveillance/continual_promotion.rs
+                                             P01 continual promotion/rollback control over replayed cycle outcomes, temporal windows, drift, negatives, and contradictions
   programs/p01_evidence_surveillance/federated_acquisition_policy.rs
                                              P01 consortium-aware site assignment with independence, quorum, budget, privacy, and local-raw-data gates
   programs/p01_evidence_surveillance/evidence_frontier_join.rs
@@ -589,7 +591,7 @@ portfolio plan and executable code; it does not promote a planned slot to implem
 
 | Program | Product owner | Engine stages | Observable product result |
 | --- | --- | --- | --- |
-| P01 Evidence surveillance | evidence curator | evidence surveillance | snapshot deltas, deterministic novelty radar, recency/state/coverage action queues, dependency-closed evidence-acquisition portfolios, source calibration, cross-family claim triangulation, local and multimodal researcher evidence workbenches, evidence verification gates, researcher-capacity-aware prospective triage, aggregate-only federation transport, ranked autonomous federation cycles, review/revalidation actions, autonomous intent-to-evidence execution cycles, and stale/unknown/contradictory coverage |
+| P01 Evidence surveillance | evidence curator | evidence surveillance | snapshot deltas, deterministic novelty radar, recency/state/coverage action queues, dependency-closed evidence-acquisition portfolios, source calibration, cross-family claim triangulation, local and multimodal researcher evidence workbenches, evidence verification gates, researcher-capacity-aware prospective triage, aggregate-only federation transport, ranked autonomous federation cycles, high-throughput batch scheduling, continual promotion/rollback control, review/revalidation actions, autonomous intent-to-evidence execution cycles, and stale/unknown/contradictory coverage |
 | P02 Evidence-to-typed-knowledge | knowledge engineer | evidence compilation | scoped claims, contradiction-aware consistency closure, explicit multi-study alignment and influence diagnostics, prospective change-point monitoring with multiplicity control, robust aggregate-only federated continual consensus, autonomous evidence-to-action ranking with budget/dependency/autonomy gates, local dependency-wave workflow compilation with checkpoint/compensation planning, maximal-consistency portfolios, ranked rival frontiers, typed frontier-to-acquisition candidate compilation, dependency-closed validation/replication action compilation, autonomous P02-to-P01 gap cycles, a complete knowledge-synthesis operating cycle, and competing explanations bound to source artifacts |
 | P03 Multimodal ingestion and QC | data steward | multimodal ingestion/QC | comparable cells, robust batch harmonization, feature-level concordance, consensus clusters, spatial niches, ligand-receptor communication, cross-sample registration, spatial-state diffusion, explicit defects, downstream research-surface admission, and an executable QC-to-handoff operating cycle |
 | P04 Question-to-decision context | principal investigator | intent normalization, context compilation | bounded decision context, dependency-closed action DAGs, scenario-aware Pareto workflow branches, branch execution with forecast-drift failover, evidence-returning adaptive replanning, full operating-cycle execution, selected action batches, and unresolved omissions |
@@ -1480,3 +1482,8 @@ cycles, gives each eligible cycle a deterministic opportunity, enforces per-cycl
 quotas, admits only dependency-safe action prefixes, and records every deferred candidate. Capacity
 or throughput therefore never becomes a reason to hide scientific uncertainty or to execute a
 physical action without its downstream authorization.
+The continual promotion controller (`evaluate_glioma_continual_promotion`) closes the P01 loop over
+later outcome observations. It evaluates explicit temporal windows, requires replay and independent
+groups, compares recent performance with a baseline, and emits promote, continue, rollback, or hold
+with a route and rollback flag. Unknown, failed, negative, and contradictory outcomes are retained;
+insufficient windows cannot be promoted by absence of evidence.

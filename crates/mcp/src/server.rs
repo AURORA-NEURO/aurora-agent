@@ -540,9 +540,10 @@ use bioprism_research::{
     detect_glioma_evidence_temporal_shifts, detect_glioma_knowledge_drift, discriminate_mechanisms,
     dry_run_adaptive_instrument_executor, dry_run_glioma_adaptive_frontier_executor,
     dry_run_glioma_research, dry_run_instrument_executor_from_request,
-    dry_run_robustness_guided_computation_executor, evaluate_glioma_dynamic_policies,
-    evaluate_glioma_release_gate, execute_federated_benchmark_adaptive_campaign_dry_run,
-    execute_federated_benchmark_campaign, execute_federated_benchmark_operating_cycle_dry_run,
+    dry_run_robustness_guided_computation_executor, evaluate_glioma_continual_promotion,
+    evaluate_glioma_dynamic_policies, evaluate_glioma_release_gate,
+    execute_federated_benchmark_adaptive_campaign_dry_run, execute_federated_benchmark_campaign,
+    execute_federated_benchmark_operating_cycle_dry_run,
     execute_federated_mechanism_transport_campaign_dry_run, execute_glioma_action_portfolio,
     execute_glioma_active_learning_campaign, execute_glioma_adaptive_allocation_campaign,
     execute_glioma_adaptive_clone_campaign_dry_run,
@@ -657,14 +658,14 @@ use bioprism_research::{
     ComputationInterpretationFrontierRequest, ComputationLineageRequest,
     ComputationPlacementRequest, ComputationPortfolioExecutionRequest, ComputationPortfolioRequest,
     ComputationRecoveryRequest, ComputationReproducibilityRequest, ComputationReproducibilityRun,
-    ConcordanceRequest, ConsensusRequest, ContradictionAdjudicationRequest,
-    ContradictionCutRequest, ContradictionEvidence, ContrastDesignRequest,
-    CounterfactualEnsembleRequest, CounterfactualIntervention, CounterfactualModel,
-    CounterfactualRequest, DecisionActionGraphRequest, DecisionActionPlanRequest,
-    DecisionAdmissionRequest, DecisionBranchCampaignRequest, DecisionBranchEvidenceRequest,
-    DecisionBranchPlannerRequest, DecisionContext, DecisionContextCampaignRequest,
-    DecisionContextReplayRequest, DecisionContextRequest, DecisionLoopGovernorRequest,
-    DecisionMissionBridgeRequest, DecisionOmissionCertificateRequest,
+    ConcordanceRequest, ConsensusRequest, ContinualPromotionRequest,
+    ContradictionAdjudicationRequest, ContradictionCutRequest, ContradictionEvidence,
+    ContrastDesignRequest, CounterfactualEnsembleRequest, CounterfactualIntervention,
+    CounterfactualModel, CounterfactualRequest, DecisionActionGraphRequest,
+    DecisionActionPlanRequest, DecisionAdmissionRequest, DecisionBranchCampaignRequest,
+    DecisionBranchEvidenceRequest, DecisionBranchPlannerRequest, DecisionContext,
+    DecisionContextCampaignRequest, DecisionContextReplayRequest, DecisionContextRequest,
+    DecisionLoopGovernorRequest, DecisionMissionBridgeRequest, DecisionOmissionCertificateRequest,
     DecisionOperatingCycleRequest, DecisionValueCalibrationRequest, DecisionValueRequest,
     DependencyClosureRequest, DesignAction, DesignMechanism, DoseResponseObservation,
     DoseResponseRequest, DriftSurveillanceRequest, DropoutStressRequest,
@@ -2566,6 +2567,9 @@ impl Server {
                 self.glioma_federated_evidence_operating_cycle(&arguments)
             }
             "glioma_federated_batch_scheduler" => self.glioma_federated_batch_scheduler(&arguments),
+            "glioma_continual_promotion_control" => {
+                self.glioma_continual_promotion_control(&arguments)
+            }
             "glioma_federated_evidence_acquisition_policy" => {
                 self.glioma_federated_evidence_acquisition_policy(&arguments)
             }
@@ -10144,6 +10148,35 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode federated batch schedule: {error}"))
+    }
+
+    /// Evaluate later outcomes of a scheduled federation capability over explicit temporal
+    /// windows. Promotion, continuation, rollback, and hold are recommendations only; this
+    /// surface never changes a deployed capability or executes a physical action.
+    fn glioma_continual_promotion_control(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ContinualPromotionRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_continual_promotion_control requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid continual promotion request: {error}"))?;
+        let report = evaluate_glioma_continual_promotion(&request)
+            .map_err(|error| format!("continual promotion control refused: {error}"))?;
+        serde_json::to_value(json!({
+            "promotion": report,
+            "next_routes": [
+                "glioma_evidence_knowledge_bridge",
+                "glioma_federated_evidence_operating_cycle",
+                "glioma_federated_batch_scheduler",
+                "glioma_evidence_researcher_workbench"
+            ],
+            "guarantees": [
+                "promotion is bound to a validated batch schedule and explicit replayed outcome windows",
+                "quality, reproducibility, replay, independent-group, failure, contradiction, and regression thresholds are visible",
+                "negative, contradictory, failed, unknown, omitted, and underpowered observations cannot be silently promoted",
+                "promote/continue/rollback/hold is advisory and cannot execute assays, move raw data, or make a clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode continual promotion report: {error}"))
     }
 
     /// Compile a consortium-aware, site-local acquisition policy for unresolved preclinical
@@ -55539,6 +55572,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_federated_outcome_transport",
                 "glioma_federated_evidence_operating_cycle",
                 "glioma_federated_batch_scheduler",
+                "glioma_continual_promotion_control",
                 "glioma_federated_evidence_acquisition_policy",
                 "glioma_evidence_frontier_join",
                 "glioma_multimodal_evidence_gap_router",
@@ -65828,6 +65862,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "FederatedBatchSchedulerRequest1@1 with digest-bound FederatedEvidenceOperatingCycle1@1 values, schedule epoch, global action budget, per-cycle quota, and per-route quota."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_continual_promotion_control",
+        "description": "Evaluate replayed outcomes of a scheduled federated glioma capability over explicit temporal windows. Requires quality, reproducibility, replay, independent-group, failure, contradiction, and regression gates; emits promote, continue, rollback, or hold with a route and explicit omissions. Negative, contradictory, failed, unknown, and underpowered outcomes remain visible. Advisory control only: no capability mutation, assay execution, raw-data movement, causal inference, or clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ContinualPromotionRequest1@1 with capability id, explicit epoch windows and thresholds, validated FederatedBatchSchedule1@1, and replayed aggregate outcome observations."}
             },
             "required": ["request"]
         }
