@@ -318,6 +318,8 @@ crates/research/src/glioma/
                                              P08 bounded value-only endpoint extraction for local instrument traces before assay adjudication
     p08_instrument_robotics/batch_stability.rs
                                              P08 high-throughput reproducibility gate for extracted endpoints before autonomous promotion
+    p08_instrument_robotics/multichannel_concordance.rs
+                                             P08 bounded integer-lag multichannel alignment with fixed-point concordance and residual gates
     p08_instrument_robotics/federated_consensus.rs
                                              P08 aggregate-only federation of stable endpoints with heterogeneity and leave-site-out sensitivity
     p09_reproducible_computation/robustness.rs
@@ -1058,6 +1060,12 @@ value-only extraction summaries across repeated instrument runs and gates endpoi
 coverage, robust amplitude dispersion, noise, peak support, and first-to-last run drift. An
 unstable or under-covered channel remains negative evidence for recalibration, replication, or
 mechanism follow-up rather than being silently promoted by the autonomous engine.
+P08 now also exposes multichannel temporal concordance
+(`glioma_instrument_multichannel_concordance`). It searches a bounded integer lag against a
+declared reference channel, computes fixed-point Pearson correlation and median absolute residual,
+and preserves low-overlap, weak/inverse-correlation, low-quality, and high-residual channels as
+explicit blocked evidence. Only bounded local summaries continue to signal extraction, batch
+stability, and assay adjudication; the route never controls hardware or makes a clinical decision.
 P08 also exposes aggregate-only federated instrument consensus
 (`glioma_federated_instrument_consensus`). It inverse-uncertainty-weights permitted site summaries
 and gates promotion on privacy counts, endpoint coverage, heterogeneity, leave-one-site-out shift,

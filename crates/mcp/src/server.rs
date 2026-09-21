@@ -497,16 +497,17 @@ use bioprism_research::{
     analyze_glioma_clone_panel_outcomes, analyze_glioma_combination_synergy,
     analyze_glioma_computation_reproducibility, analyze_glioma_dose_response,
     analyze_glioma_federated_instrument_consensus, analyze_glioma_instrument_batch_stability,
-    analyze_glioma_latent_factors, analyze_glioma_mechanism_identifiability,
-    analyze_glioma_mechanism_intervention_value, analyze_glioma_mechanism_invariance,
-    analyze_glioma_mediation, analyze_glioma_multimodal_decision_gate,
-    analyze_glioma_multimodal_dropout_stress, analyze_glioma_multimodal_evidence_fusion,
-    analyze_glioma_multimodal_graph_fusion, analyze_glioma_multimodal_missingness,
-    analyze_glioma_multimodal_sensitivity, analyze_glioma_pathway_activity,
-    analyze_glioma_spatial_communication, analyze_glioma_spatial_niches,
-    analyze_glioma_spatial_state_propagation, analyze_glioma_state_transitions,
-    analyze_glioma_temporal_multimodal_fusion, analyze_glioma_temporal_spatial_alignment,
-    analyze_glioma_trajectories, analyze_glioma_transportability, analyze_instrument_calibration,
+    analyze_glioma_instrument_multichannel_concordance, analyze_glioma_latent_factors,
+    analyze_glioma_mechanism_identifiability, analyze_glioma_mechanism_intervention_value,
+    analyze_glioma_mechanism_invariance, analyze_glioma_mediation,
+    analyze_glioma_multimodal_decision_gate, analyze_glioma_multimodal_dropout_stress,
+    analyze_glioma_multimodal_evidence_fusion, analyze_glioma_multimodal_graph_fusion,
+    analyze_glioma_multimodal_missingness, analyze_glioma_multimodal_sensitivity,
+    analyze_glioma_pathway_activity, analyze_glioma_spatial_communication,
+    analyze_glioma_spatial_niches, analyze_glioma_spatial_state_propagation,
+    analyze_glioma_state_transitions, analyze_glioma_temporal_multimodal_fusion,
+    analyze_glioma_temporal_spatial_alignment, analyze_glioma_trajectories,
+    analyze_glioma_transportability, analyze_instrument_calibration,
     analyze_multimodal_concordance, analyze_multimodal_consensus, analyze_preclinical_outcomes,
     analyze_replication_meta_analysis, analyze_stratified_causal_adjustment,
     assess_glioma_robustness, assess_glioma_validation_batch, assess_replication,
@@ -699,18 +700,19 @@ use bioprism_research::{
     MechanismValidationExecutionRequest, MechanismValidationPlanRequest,
     MechanismValidationProtocolCompileRequest, MediationObservation, MediationRequest,
     MetaAnalysisRequest, MissingnessAuditRequest, ModalityPortfolioRequest, ModalityVector,
-    MultiFidelityCampaignRequest, MultiFidelityOptimizationRequest, MultimodalDecisionGateRequest,
-    MultimodalExecutionMode, MultimodalIngestionCampaignRequest,
-    MultimodalMechanismCampaignRequest, MultimodalObservation, MultimodalReadinessRequest,
-    MultimodalRequest, PathwayActivityDefinition, PathwayActivityObservation,
-    PathwayActivityRequest, PowerArmObservation, PowerReestimationRequest,
-    PowerStressSurfaceRequest, ProspectiveQualityRequest, ProtocolBranchOptimizationRequest,
-    ProtocolCompensationRequest, ProtocolEvidenceFusionRequest, ProtocolEvidenceSurfaceRequest,
-    ProtocolExecutionRequest, ProtocolScenarioEnsembleRequest, ProtocolSimulationRequest,
-    ProtocolTransportGateRequest, QualityAdaptiveCampaignRequest, QualityExecutionMode,
-    QualityExecutionRequest, QualityRecoveryRequest, QualityRemediationRequest,
-    QualityRootCauseRequest, QualityScheduleRequest, QualityTransportRequest, ReleaseExecutionMode,
-    ReleaseGateRequest, ReliabilityCalibrationRequest, ReplayCampaign, ReplayCampaignRequest,
+    MultiFidelityCampaignRequest, MultiFidelityOptimizationRequest, MultichannelConcordanceRequest,
+    MultichannelInput, MultimodalDecisionGateRequest, MultimodalExecutionMode,
+    MultimodalIngestionCampaignRequest, MultimodalMechanismCampaignRequest, MultimodalObservation,
+    MultimodalReadinessRequest, MultimodalRequest, PathwayActivityDefinition,
+    PathwayActivityObservation, PathwayActivityRequest, PowerArmObservation,
+    PowerReestimationRequest, PowerStressSurfaceRequest, ProspectiveQualityRequest,
+    ProtocolBranchOptimizationRequest, ProtocolCompensationRequest, ProtocolEvidenceFusionRequest,
+    ProtocolEvidenceSurfaceRequest, ProtocolExecutionRequest, ProtocolScenarioEnsembleRequest,
+    ProtocolSimulationRequest, ProtocolTransportGateRequest, QualityAdaptiveCampaignRequest,
+    QualityExecutionMode, QualityExecutionRequest, QualityRecoveryRequest,
+    QualityRemediationRequest, QualityRootCauseRequest, QualityScheduleRequest,
+    QualityTransportRequest, ReleaseExecutionMode, ReleaseGateRequest,
+    ReliabilityCalibrationRequest, ReplayCampaign, ReplayCampaignRequest,
     ReplicationClosureCampaignRequest, ReplicationClosureExecutionRequest,
     ReplicationClosureFrontierRequest, ReplicationContinuationRequest, ReplicationObservation,
     ReplicationPlanRequest, ReplicationProtocolCompileRequest, ReplicationRequest,
@@ -2622,6 +2624,9 @@ impl Server {
             "glioma_instrument_signal_extract" => self.glioma_instrument_signal_extract(&arguments),
             "glioma_instrument_batch_stability" => {
                 self.glioma_instrument_batch_stability(&arguments)
+            }
+            "glioma_instrument_multichannel_concordance" => {
+                self.glioma_instrument_multichannel_concordance(&arguments)
             }
             "glioma_federated_instrument_consensus" => {
                 self.glioma_federated_instrument_consensus(&arguments)
@@ -12390,6 +12395,42 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma instrument batch stability: {error}"))
+    }
+
+    /// Align local instrument channels by bounded integer lag and gate cross-channel concordance.
+    /// The route emits summaries only; it never dispatches hardware or promotes biology.
+    fn glioma_instrument_multichannel_concordance(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request: MultichannelConcordanceRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_instrument_multichannel_concordance requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid multichannel concordance request: {error}"))?;
+        let channels: Vec<MultichannelInput> =
+            serde_json::from_value(arguments.get("channels").cloned().ok_or_else(|| {
+                "glioma_instrument_multichannel_concordance requires channels".to_string()
+            })?)
+            .map_err(|error| format!("invalid multichannel concordance channels: {error}"))?;
+        let output = analyze_glioma_instrument_multichannel_concordance(&request, &channels)
+            .map_err(|error| format!("multichannel concordance refused: {error}"))?;
+        serde_json::to_value(json!({
+            "concordance": output,
+            "dispatch": "not_started",
+            "next_routes": [
+                "glioma_instrument_signal_extract",
+                "glioma_instrument_batch_stability",
+                "glioma_instrument_assay_adjudicate"
+            ],
+            "guarantees": [
+                "integer-lag search, fixed-point correlation, overlap, quality, and residual gates are deterministic",
+                "weak, inverse, undercovered, and high-residual channels remain blocked or unresolved",
+                "raw traces remain institution-local and only bounded concordance summaries cross this route",
+                "the route performs no hardware, biological, federation, or clinical action"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode multichannel concordance: {error}"))
     }
 
     /// Compute aggregate-only cross-site endpoint consensus with privacy and heterogeneity gates.
@@ -53663,6 +53704,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_instrument_calibration",
                 "glioma_instrument_signal_extract",
                 "glioma_instrument_batch_stability",
+                "glioma_instrument_multichannel_concordance",
                 "glioma_federated_instrument_consensus",
                 "glioma_instrument_preflight",
                 "glioma_instrument_fleet_schedule",
@@ -64723,6 +64765,18 @@ pub fn tool_definitions() -> Vec<Value> {
                 "runs": {"type": "array", "items": {"type": "object"}, "description": "InstrumentSignalRun1@1 ordered local extraction summaries from the signal-extraction route."}
             },
             "required": ["request", "runs"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_instrument_multichannel_concordance",
+        "description": "Align local preclinical glioma instrument channels with a bounded integer-lag search and gate fixed-point correlation, overlap, quality, and residual MAD before endpoint promotion. Preserves inverse, weak, undercovered, and high-residual channels; raw traces remain local and no hardware or clinical decision is performed.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "MultichannelConcordanceRequest1@1 with reference channel, lag, overlap, quality, correlation, and residual gates."},
+                "channels": {"type": "array", "items": {"type": "object"}, "description": "MultichannelInput1@1 local value/time points with locality and privacy declarations."}
+            },
+            "required": ["request", "channels"]
         }
     }));
     definitions.push(json!({

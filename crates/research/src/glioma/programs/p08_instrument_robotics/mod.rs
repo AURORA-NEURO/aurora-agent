@@ -11,6 +11,7 @@ pub mod execution;
 pub mod federated_consensus;
 pub mod fleet_execution;
 pub mod fleet_scheduler;
+pub mod multichannel_concordance;
 pub mod operating_cycle;
 pub mod preflight;
 pub mod research_frontier;
@@ -86,6 +87,12 @@ pub use operating_cycle::{
     InstrumentOperatingCycleError, InstrumentOperatingCycleRequest, InstrumentPreflightSummary,
 };
 
+pub use multichannel_concordance::{
+    analyze_glioma_instrument_multichannel_concordance, ChannelConcordance,
+    ChannelConcordanceDisposition, InstrumentMultichannelConcordance,
+    MultichannelConcordanceDisposition, MultichannelConcordanceError,
+    MultichannelConcordanceRequest, MultichannelInput, MultichannelPoint,
+};
 pub use research_frontier::{
     compile_glioma_instrument_research_frontier, execute_glioma_instrument_research_frontier,
     InstrumentResearchFrontier, InstrumentResearchFrontierDisposition,
