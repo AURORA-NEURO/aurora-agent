@@ -78,7 +78,7 @@ silently bypass an earlier wave's omission, provenance, safety, or replay gate.
   P08 instrument preflight.
 - Promotion gate: every action has typed prerequisites, value/risk budget, unresolved context,
   and a falsifiable stop condition.
-- Current implementation: 19/32 slots. Next wave: federated continual context promotion,
+- Current implementation: 20/32 slots. Next wave: federated continual context promotion,
   richer outcome assimilation, and decision-context replay across study epochs.
 
 ### P05 — `p05_mechanism_exploration`

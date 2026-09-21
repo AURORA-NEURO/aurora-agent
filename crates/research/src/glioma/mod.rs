@@ -316,9 +316,9 @@ pub use programs::p03_multimodal_ingestion_qc::{
 };
 pub use programs::p04_decision_context::{
     admit_glioma_decision_actions, aggregate_glioma_federated_decision_context,
-    assimilate_glioma_decision_branch_evidence, calibrate_glioma_decision_value,
-    certify_decision_omissions, compile_decision_action_graph, compile_decision_context,
-    execute_glioma_adaptive_decision_branch_campaign,
+    align_glioma_multi_study_context_artifacts, assimilate_glioma_decision_branch_evidence,
+    calibrate_glioma_decision_value, certify_decision_omissions, compile_decision_action_graph,
+    compile_decision_context, execute_glioma_adaptive_decision_branch_campaign,
     execute_glioma_adaptive_decision_branch_campaign_dry_run,
     execute_glioma_adaptive_decision_controller, execute_glioma_decision_branch_campaign,
     execute_glioma_decision_context_campaign, execute_glioma_decision_mission,
@@ -370,7 +370,9 @@ pub use programs::p04_decision_context::{
     DecisionValueWeights, DryRunDecisionContextCampaignExecutor, FederatedBranchDisposition,
     FederatedBranchOutcome, FederatedDecisionBranchObservation, FederatedDecisionBranchSummary,
     FederatedDecisionContextError, FederatedDecisionContextReport, FederatedDecisionContextRequest,
-    FederatedDecisionDisposition, FederatedDecisionSiteSummary,
+    FederatedDecisionDisposition, FederatedDecisionSiteSummary, MultiStudyActionDisposition,
+    MultiStudyContextDisposition, MultiStudyContextError, MultiStudyContextInput,
+    MultiStudyContextRequest, MultiStudyDecisionAction, MultiStudyDecisionContextArtifact,
 };
 pub use programs::p05_mechanism_exploration::{
     analyze_glioma_clonal_evolution, analyze_glioma_mechanism_identifiability,

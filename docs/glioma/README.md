@@ -124,6 +124,8 @@ crates/research/src/glioma/
                                              P04 epoch-aware decision-context replay with promotion, retirement, negative, and unresolved action partitions
   programs/p04_decision_context/decision_context_artifact.rs
                                              P04 portable typed decision-context artifact with consumer compatibility, action/effect metadata, semantic-loss, and replay guarantees
+  programs/p04_decision_context/multi_study_context_artifact.rs
+                                             P04 independent-study context alignment with quality/group quorum, typed conflicts, and namespaced negative/unknown partitions
   programs/p04_decision_context/federated_decision_context.rs
                                              P04 aggregate-only continual decision frontier with independent-site quorum, heterogeneity, influence, and negative-result gates
   programs/p04_decision_context/branch_evidence.rs
@@ -690,6 +692,11 @@ decision state for local agents, workbenches, Rust/Python/TypeScript SDKs, and M
 retains candidate dependencies, autonomy tiers, effects, deferred actions, omissions, negatives,
 uncertainty, consumer compatibility, and semantic-loss declarations, while keeping the source
 context content-addressed and the preclinical boundary explicit.
+The multi-study context artifact (`align_glioma_multi_study_context_artifacts`) aligns those
+portable contracts across independent studies without moving raw evidence. It filters denied or
+low-quality studies, requires independent-group support, retains typed action conflicts as
+unresolved, and namespaces each study's negative and unknown partitions before producing a
+deterministic shared frontier.
 P07 now also has an
 adaptive campaign planner (`plan_glioma_workflow`) and a guarded full-program executor that
 chooses deterministic next batches, closes over dependencies, and routes unresolved evidence,

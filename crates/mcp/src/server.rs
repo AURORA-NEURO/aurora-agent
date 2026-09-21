@@ -493,25 +493,25 @@ use bioprism_research::{
     adjudicate_glioma_assay_evidence, adjudicate_glioma_evidence_novelty,
     adjudicate_glioma_multimodal_contradictions, admit_glioma_decision_actions,
     admit_glioma_research_workflow, aggregate_glioma_federated_decision_context,
-    allocate_glioma_assays, analyze_causal_sensitivity, analyze_federated_benchmark,
-    analyze_federated_benchmark_power, analyze_federated_continual_knowledge,
-    analyze_federated_evidence_shifts, analyze_federated_knowledge,
-    analyze_federated_mechanism_transport, analyze_glioma_causal_contrast,
-    analyze_glioma_clonal_evolution, analyze_glioma_clone_panel_outcomes,
-    analyze_glioma_combination_synergy, analyze_glioma_computation_reproducibility,
-    analyze_glioma_dose_response, analyze_glioma_federated_instrument_consensus,
-    analyze_glioma_instrument_batch_stability, analyze_glioma_instrument_multichannel_concordance,
-    analyze_glioma_latent_factors, analyze_glioma_mechanism_identifiability,
-    analyze_glioma_mechanism_intervention_value, analyze_glioma_mechanism_invariance,
-    analyze_glioma_mediation, analyze_glioma_multimodal_decision_gate,
-    analyze_glioma_multimodal_dropout_stress, analyze_glioma_multimodal_evidence_fusion,
-    analyze_glioma_multimodal_graph_fusion, analyze_glioma_multimodal_missingness,
-    analyze_glioma_multimodal_sensitivity, analyze_glioma_pathway_activity,
-    analyze_glioma_research_object_dependency_closure, analyze_glioma_spatial_communication,
-    analyze_glioma_spatial_niches, analyze_glioma_spatial_state_propagation,
-    analyze_glioma_state_transitions, analyze_glioma_temporal_multimodal_fusion,
-    analyze_glioma_temporal_spatial_alignment, analyze_glioma_trajectories,
-    analyze_glioma_transportability, analyze_instrument_calibration,
+    align_glioma_multi_study_context_artifacts, allocate_glioma_assays, analyze_causal_sensitivity,
+    analyze_federated_benchmark, analyze_federated_benchmark_power,
+    analyze_federated_continual_knowledge, analyze_federated_evidence_shifts,
+    analyze_federated_knowledge, analyze_federated_mechanism_transport,
+    analyze_glioma_causal_contrast, analyze_glioma_clonal_evolution,
+    analyze_glioma_clone_panel_outcomes, analyze_glioma_combination_synergy,
+    analyze_glioma_computation_reproducibility, analyze_glioma_dose_response,
+    analyze_glioma_federated_instrument_consensus, analyze_glioma_instrument_batch_stability,
+    analyze_glioma_instrument_multichannel_concordance, analyze_glioma_latent_factors,
+    analyze_glioma_mechanism_identifiability, analyze_glioma_mechanism_intervention_value,
+    analyze_glioma_mechanism_invariance, analyze_glioma_mediation,
+    analyze_glioma_multimodal_decision_gate, analyze_glioma_multimodal_dropout_stress,
+    analyze_glioma_multimodal_evidence_fusion, analyze_glioma_multimodal_graph_fusion,
+    analyze_glioma_multimodal_missingness, analyze_glioma_multimodal_sensitivity,
+    analyze_glioma_pathway_activity, analyze_glioma_research_object_dependency_closure,
+    analyze_glioma_spatial_communication, analyze_glioma_spatial_niches,
+    analyze_glioma_spatial_state_propagation, analyze_glioma_state_transitions,
+    analyze_glioma_temporal_multimodal_fusion, analyze_glioma_temporal_spatial_alignment,
+    analyze_glioma_trajectories, analyze_glioma_transportability, analyze_instrument_calibration,
     analyze_multimodal_concordance, analyze_multimodal_consensus, analyze_preclinical_outcomes,
     analyze_replication_meta_analysis, analyze_stratified_causal_adjustment,
     assess_glioma_robustness, assess_glioma_validation_batch, assess_replication,
@@ -750,7 +750,7 @@ use bioprism_research::{
     MechanismWorkflowRequest, MediationObservation, MediationRequest, MetaAnalysisRequest,
     MissingnessAuditRequest, ModalityPortfolioRequest, ModalityVector,
     MultiFidelityCampaignRequest, MultiFidelityControlRequest, MultiFidelityOptimizationRequest,
-    MultiSiteOutcomeReconciliationRequest, MultiStudyKnowledgeRequest,
+    MultiSiteOutcomeReconciliationRequest, MultiStudyContextRequest, MultiStudyKnowledgeRequest,
     MultichannelConcordanceRequest, MultichannelInput, MultimodalDecisionGateRequest,
     MultimodalExecutionMode, MultimodalGapRouterRequest, MultimodalIngestionCampaignRequest,
     MultimodalIngestionManifestRequest, MultimodalKnowledgeProtocolRequest,
@@ -2657,6 +2657,9 @@ impl Server {
             }
             "glioma_decision_context" => self.glioma_decision_context(&arguments),
             "glioma_decision_context_artifact" => self.glioma_decision_context_artifact(&arguments),
+            "glioma_multi_study_context_artifact" => {
+                self.glioma_multi_study_context_artifact(&arguments)
+            }
             "glioma_federated_decision_context" => {
                 self.glioma_federated_decision_context(&arguments)
             }
@@ -11793,6 +11796,35 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma decision-context artifact: {error}"))
+    }
+
+    /// Align compatible local context artifacts from independent preclinical studies into a
+    /// typed support/conflict frontier. Only action contracts and namespaced negative/unknown
+    /// partitions are combined; raw evidence and execution authority remain local.
+    fn glioma_multi_study_context_artifact(&self, arguments: &Value) -> Result<Value, String> {
+        let request: MultiStudyContextRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_multi_study_context_artifact requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma multi-study context request: {error}"))?;
+        let artifact = align_glioma_multi_study_context_artifacts(&request)
+            .map_err(|error| format!("glioma multi-study context alignment refused: {error}"))?;
+        serde_json::to_value(json!({
+            "artifact": artifact,
+            "dispatch": "not_started",
+            "next_routes": [
+                "glioma_decision_admission_gate",
+                "glioma_decision_action_graph",
+                "glioma_federated_decision_context"
+            ],
+            "guarantees": [
+                "independent-study support, group quorum, quality, and typed action conflicts are explicit",
+                "denied or low-quality studies are omitted with reasons and cannot silently contribute support",
+                "negative and unknown partitions are namespaced by study and retained in the output",
+                "the route exchanges no raw evidence, executes no assay or instrument, and makes no clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma multi-study context artifact: {error}"))
     }
 
     /// Aggregate site-local branch plans into a robust continual decision frontier. MCP receives
@@ -55695,6 +55727,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_knowledge_synthesis_operating_cycle",
                 "glioma_decision_context",
                 "glioma_decision_context_artifact",
+                "glioma_multi_study_context_artifact",
                 "glioma_federated_decision_context",
                 "glioma_decision_context_replay",
                 "glioma_decision_branch_evidence",
@@ -66524,6 +66557,17 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "DecisionContextArtifactRequest1@1 with objective/study/epoch, consumer compatibility declaration, and DecisionContext1@1."}
+            },
+            "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_multi_study_context_artifact",
+        "description": "Align validated local glioma decision-context artifacts from independent preclinical studies into a deterministic typed support/conflict frontier. Applies study quality and policy filters, independent-group quorum, action support thresholds, and typed signature conflict gates while retaining omitted-study reasons plus namespaced negative and unknown evidence. It exchanges no raw data and executes no research or clinical action.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "MultiStudyContextRequest1@1 with objective/epoch, study and group quorum, quality/support thresholds, compatibility contract, and DecisionContextArtifact1@1 inputs."}
             },
             "required": ["request"]
         }

@@ -413,6 +413,7 @@ pub fn implemented_feature_ids() -> Vec<&'static str> {
         crate::glioma::programs::p04_decision_context::context_replay::FEATURE_ID,
         crate::glioma::programs::p04_decision_context::decision_context_artifact::FEATURE_ID,
         crate::glioma::programs::p04_decision_context::federated_decision_context::FEATURE_ID,
+        crate::glioma::programs::p04_decision_context::multi_study_context_artifact::FEATURE_ID,
         crate::glioma::programs::p04_decision_context::branch_evidence::FEATURE_ID,
         crate::glioma::programs::p04_decision_context::admission_gate::FEATURE_ID,
         crate::glioma::programs::p04_decision_context::value_optimizer::FEATURE_ID,
