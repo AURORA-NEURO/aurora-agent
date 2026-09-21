@@ -595,7 +595,8 @@ use bioprism_research::{
     gate_glioma_protocol_transport, generate_feature_catalog, glioma_program_catalog,
     govern_glioma_decision_loop, harmonize_glioma_multimodal_batches, harmonize_multimodal_inputs,
     interpret_glioma_federated_closure, interpret_glioma_replication_closure,
-    join_glioma_computation_lineage, join_glioma_evidence_frontier, monitor_prospective_knowledge,
+    join_glioma_computation_lineage, join_glioma_evidence_frontier,
+    materialize_glioma_decision_context_artifact, monitor_prospective_knowledge,
     negotiate_glioma_knowledge_protocol, negotiate_glioma_multimodal_knowledge_protocol,
     optimize_glioma_decision_value, optimize_glioma_protocol_branches,
     plan_adaptive_glioma_dose_surface, plan_decision_actions, plan_federated_benchmark_sites,
@@ -665,40 +666,40 @@ use bioprism_research::{
     CounterfactualModel, CounterfactualRequest, DecisionActionGraphRequest,
     DecisionActionPlanRequest, DecisionAdmissionRequest, DecisionBranchCampaignRequest,
     DecisionBranchEvidenceRequest, DecisionBranchPlannerRequest, DecisionContext,
-    DecisionContextCampaignRequest, DecisionContextReplayRequest, DecisionContextRequest,
-    DecisionLoopGovernorRequest, DecisionMissionBridgeRequest, DecisionOmissionCertificateRequest,
-    DecisionOperatingCycleRequest, DecisionValueCalibrationRequest, DecisionValueRequest,
-    DependencyClosureRequest, DesignAction, DesignMechanism, DoseResponseObservation,
-    DoseResponseRequest, DriftSurveillanceRequest, DropoutStressRequest,
-    DryRunActiveLearningCampaignExecutor, DryRunAdaptiveAllocationCampaignExecutor,
-    DryRunAdaptiveMechanismPolicyExecutor, DryRunDecisionContextCampaignExecutor,
-    DryRunEvidenceAcquisitionExecutor, DryRunEvidenceRefreshCampaignExecutor,
-    DryRunExperimentOperatingCycleExecutor, DryRunFederatedBenchmarkCampaignExecutor,
-    DryRunFederatedMechanismTransportExecutor, DryRunGliomaActionExecutor,
-    DryRunGliomaComputationExecutor, DryRunGliomaExperimentFrontierExecutor,
-    DryRunGliomaProtocolExecutor, DryRunGliomaReplicationCampaignExecutor,
-    DryRunInstrumentExecutor, DryRunKnowledgeActionExecutor,
-    DryRunKnowledgeResolutionCampaignExecutor, DryRunMechanismDiscriminationCampaignExecutor,
-    DryRunMultiFidelityCampaignExecutor, DryRunMultimodalIngestionCampaignExecutor,
-    DryRunQualityScheduleExecutor, DryRunReplayCampaignExecutor,
-    DryRunRobustActiveLearningCampaignExecutor, DryRunSequentialCampaignExecutor,
-    DynamicPolicyCandidate, DynamicPolicyRequest, DynamicPolicyTrajectory,
-    EvidenceAcquisitionCampaignRequest, EvidenceAcquisitionCandidate, EvidenceAcquisitionRequest,
-    EvidenceCalibrationObservation, EvidenceCalibrationRequest, EvidenceClusterRequest,
-    EvidenceExecutionMode, EvidenceFrontierJoinRequest, EvidenceFusionRequest,
-    EvidenceKnowledgeBridgeRequest, EvidenceNoveltyRadarRequest, EvidencePriorityRequest,
-    EvidenceProspectiveTriageRequest, EvidenceRecord, EvidenceRefreshCampaignRequest,
-    EvidenceRequest, EvidenceStreamRequest, EvidenceSurveillanceRequest,
-    EvidenceTemporalShiftRequest, EvidenceTriangulationRequest, EvidenceVerificationRequest,
-    EvidenceWorkbenchRequest, ExperimentArm, ExperimentOperatingCycleRequest, ExperimentRequest,
-    FederatedAcquisitionPolicyRequest, FederatedBatchSchedulerRequest,
-    FederatedBenchmarkAdaptiveCampaignRequest, FederatedBenchmarkCampaignRequest,
-    FederatedBenchmarkExecutionMode, FederatedBenchmarkOperatingCycleRequest,
-    FederatedBenchmarkPowerRequest, FederatedBenchmarkRequest, FederatedBenchmarkSite,
-    FederatedBenchmarkSitePlannerRequest, FederatedContinualAgentRequest,
-    FederatedContinualKnowledgeRequest, FederatedDecisionContextRequest,
-    FederatedEvidenceOperatingCycleRequest, FederatedEvidenceShiftRequest,
-    FederatedEvidenceShiftSite, FederatedExecutionHandoffRequest,
+    DecisionContextArtifactRequest, DecisionContextCampaignRequest, DecisionContextReplayRequest,
+    DecisionContextRequest, DecisionLoopGovernorRequest, DecisionMissionBridgeRequest,
+    DecisionOmissionCertificateRequest, DecisionOperatingCycleRequest,
+    DecisionValueCalibrationRequest, DecisionValueRequest, DependencyClosureRequest, DesignAction,
+    DesignMechanism, DoseResponseObservation, DoseResponseRequest, DriftSurveillanceRequest,
+    DropoutStressRequest, DryRunActiveLearningCampaignExecutor,
+    DryRunAdaptiveAllocationCampaignExecutor, DryRunAdaptiveMechanismPolicyExecutor,
+    DryRunDecisionContextCampaignExecutor, DryRunEvidenceAcquisitionExecutor,
+    DryRunEvidenceRefreshCampaignExecutor, DryRunExperimentOperatingCycleExecutor,
+    DryRunFederatedBenchmarkCampaignExecutor, DryRunFederatedMechanismTransportExecutor,
+    DryRunGliomaActionExecutor, DryRunGliomaComputationExecutor,
+    DryRunGliomaExperimentFrontierExecutor, DryRunGliomaProtocolExecutor,
+    DryRunGliomaReplicationCampaignExecutor, DryRunInstrumentExecutor,
+    DryRunKnowledgeActionExecutor, DryRunKnowledgeResolutionCampaignExecutor,
+    DryRunMechanismDiscriminationCampaignExecutor, DryRunMultiFidelityCampaignExecutor,
+    DryRunMultimodalIngestionCampaignExecutor, DryRunQualityScheduleExecutor,
+    DryRunReplayCampaignExecutor, DryRunRobustActiveLearningCampaignExecutor,
+    DryRunSequentialCampaignExecutor, DynamicPolicyCandidate, DynamicPolicyRequest,
+    DynamicPolicyTrajectory, EvidenceAcquisitionCampaignRequest, EvidenceAcquisitionCandidate,
+    EvidenceAcquisitionRequest, EvidenceCalibrationObservation, EvidenceCalibrationRequest,
+    EvidenceClusterRequest, EvidenceExecutionMode, EvidenceFrontierJoinRequest,
+    EvidenceFusionRequest, EvidenceKnowledgeBridgeRequest, EvidenceNoveltyRadarRequest,
+    EvidencePriorityRequest, EvidenceProspectiveTriageRequest, EvidenceRecord,
+    EvidenceRefreshCampaignRequest, EvidenceRequest, EvidenceStreamRequest,
+    EvidenceSurveillanceRequest, EvidenceTemporalShiftRequest, EvidenceTriangulationRequest,
+    EvidenceVerificationRequest, EvidenceWorkbenchRequest, ExperimentArm,
+    ExperimentOperatingCycleRequest, ExperimentRequest, FederatedAcquisitionPolicyRequest,
+    FederatedBatchSchedulerRequest, FederatedBenchmarkAdaptiveCampaignRequest,
+    FederatedBenchmarkCampaignRequest, FederatedBenchmarkExecutionMode,
+    FederatedBenchmarkOperatingCycleRequest, FederatedBenchmarkPowerRequest,
+    FederatedBenchmarkRequest, FederatedBenchmarkSite, FederatedBenchmarkSitePlannerRequest,
+    FederatedContinualAgentRequest, FederatedContinualKnowledgeRequest,
+    FederatedDecisionContextRequest, FederatedEvidenceOperatingCycleRequest,
+    FederatedEvidenceShiftRequest, FederatedEvidenceShiftSite, FederatedExecutionHandoffRequest,
     FederatedInstrumentConsensusRequest, FederatedInstrumentSite, FederatedInterpretationRequest,
     FederatedKnowledgeRequest, FederatedKnowledgeSiteClaim, FederatedMechanismSite,
     FederatedMechanismTransportCampaignRequest, FederatedMechanismTransportRequest,
@@ -2655,6 +2656,7 @@ impl Server {
                 self.glioma_knowledge_synthesis_operating_cycle(&arguments)
             }
             "glioma_decision_context" => self.glioma_decision_context(&arguments),
+            "glioma_decision_context_artifact" => self.glioma_decision_context_artifact(&arguments),
             "glioma_federated_decision_context" => {
                 self.glioma_federated_decision_context(&arguments)
             }
@@ -11759,6 +11761,38 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma decision context: {error}"))
+    }
+
+    /// Materialize a local P04 context into the portable typed artifact consumed by agents,
+    /// workbenches, SDKs, and MCP clients. The artifact contains metadata and action contracts
+    /// only; raw evidence remains in the institution-local store.
+    fn glioma_decision_context_artifact(&self, arguments: &Value) -> Result<Value, String> {
+        let request: DecisionContextArtifactRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_decision_context_artifact requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma decision-context artifact request: {error}"))?;
+        let artifact = materialize_glioma_decision_context_artifact(&request).map_err(|error| {
+            format!("glioma decision-context artifact materialization refused: {error}")
+        })?;
+        serde_json::to_value(json!({
+            "artifact": artifact,
+            "dispatch": "not_started",
+            "next_routes": [
+                "glioma_decision_admission_gate",
+                "glioma_decision_action_graph",
+                "glioma_decision_operating_cycle"
+            ],
+            "guarantees": [
+                "the artifact preserves typed actions, dependencies, autonomy tiers, effects, omissions, negatives, and uncertainty",
+                "consumer compatibility and semantic-loss declarations are explicit and preclinical-only",
+                "source context and artifact content are content-addressed for byte-stable replay",
+                "the route performs no retrieval, assay, instrument execution, raw-data movement, or clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma decision-context artifact: {error}"))
     }
 
     /// Aggregate site-local branch plans into a robust continual decision frontier. MCP receives
@@ -55660,6 +55694,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_autonomous_gap_cycle",
                 "glioma_knowledge_synthesis_operating_cycle",
                 "glioma_decision_context",
+                "glioma_decision_context_artifact",
                 "glioma_federated_decision_context",
                 "glioma_decision_context_replay",
                 "glioma_decision_branch_evidence",
@@ -66480,6 +66515,17 @@ pub fn tool_definitions() -> Vec<Value> {
                 "knowledge": {"type": "object", "description": "TypedKnowledge1@1 from glioma_knowledge_compile."}
             },
             "required": ["request", "knowledge"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_decision_context_artifact",
+        "description": "Materialize a validated local glioma decision context into a portable typed artifact for agents, workbenches, SDKs, and MCP clients. The artifact preserves action dependencies, autonomy/effect metadata, omissions, negatives, uncertainty, consumer compatibility, and semantic-loss declarations with a stable digest. It never moves raw data or executes an action.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "DecisionContextArtifactRequest1@1 with objective/study/epoch, consumer compatibility declaration, and DecisionContext1@1."}
+            },
+            "required": ["request"]
         }
     }));
     definitions.push(json!({

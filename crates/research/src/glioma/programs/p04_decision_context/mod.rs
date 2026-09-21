@@ -11,6 +11,7 @@ pub mod branch_planner;
 pub mod campaign;
 pub mod context_compiler;
 pub mod context_replay;
+pub mod decision_context_artifact;
 pub mod decision_cycle;
 pub mod decision_loop_governor;
 pub mod federated_decision_context;
@@ -76,6 +77,11 @@ pub use context_replay::{
     DecisionContextActionOutcomeStatus, DecisionContextEpoch, DecisionContextReplay,
     DecisionContextReplayDisposition, DecisionContextReplayError, DecisionContextReplayRequest,
     DecisionContextReplayTransition,
+};
+pub use decision_context_artifact::{
+    materialize_glioma_decision_context_artifact, DecisionContextArtifact,
+    DecisionContextArtifactAction, DecisionContextArtifactCompatibility,
+    DecisionContextArtifactConsumer, DecisionContextArtifactError, DecisionContextArtifactRequest,
 };
 pub use decision_cycle::{
     execute_glioma_decision_operating_cycle, DecisionOperatingCycle,
